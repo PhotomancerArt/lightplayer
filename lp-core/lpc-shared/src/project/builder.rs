@@ -113,7 +113,7 @@ impl ProjectBuilder {
         ShaderBuilder {
             _texture_path: texture_path.clone(),
             glsl_source: String::from(
-                "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float phase; vec4 render(vec2 pos) { return vec4(phase, 0.0, 0.0, 1.0); }",
+                "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float phase; vec4 render_2d(vec2 pos) { return vec4(phase, 0.0, 0.0, 1.0); }",
             ),
             render_order: 0,
             visual_bus: String::from("visual.out"),
@@ -312,9 +312,10 @@ impl ShaderBuilder {
             source: AssetSlot::path(source_file),
             render_order: RenderOrderSlot::new(RenderOrder(self.render_order)),
             bindings: bus_output_binding_defs(&self.visual_bus),
-            float_mode: ValueSlot::default(),
+            float_mode: OptionSlot::none(),
             param_defs: MapSlot::default(),
             consumed_slots: default_visual_consumed_slots(),
+            space: EnumSlot::default(),
         };
 
         let json = authored_node_json(&slot_shape_registry(), &NodeDef::Shader(config));
@@ -420,6 +421,10 @@ impl FixtureBuilder {
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::Off),
             mapping: EnumSlot::new(self.mapping),
+            patch: EnumSlot::default(),
+            strip_order_meaningful: ValueSlot::new(true),
+            wire_reversed: ValueSlot::new(false),
+            consume: EnumSlot::default(),
             color_order: ValueSlot::new(self.color_order),
             transform: Affine2dSlot::new(affine2d_from_matrix(self.transform)),
             brightness: self.brightness.map_or_else(OptionSlot::none, |brightness| {

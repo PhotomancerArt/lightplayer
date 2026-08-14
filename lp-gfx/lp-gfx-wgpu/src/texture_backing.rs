@@ -157,7 +157,6 @@ pub(crate) fn texels_to_f32(format: TextureStorageFormat, texels: &[u8]) -> Vec<
 /// Quantize backing floats to logical unorm16 texel bytes with the CPU
 /// path's exact packing rule: `trunc(v · 65536)` saturated to `[0, 65535]`
 /// (1.0 maps to 65535; non-finite lanes map to 0, matching the spike).
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn f32_to_texels(format: TextureStorageFormat, pixels: &[f32]) -> Vec<u8> {
     let logical = format.channel_count();
     let backing = gpu_channels(format);

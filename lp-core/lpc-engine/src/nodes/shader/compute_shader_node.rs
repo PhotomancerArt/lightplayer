@@ -11,8 +11,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    AssetLocation, ComputeShaderDef, FloatMode, NodeId, NodeRuntimeStatus, Revision,
-    ShaderHeaderGenError, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
+    AssetLocation, ComputeShaderDef, NodeId, NodeRuntimeStatus, Revision, ShaderHeaderGenError,
+    SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
     generate_compute_shader_header,
 };
 use lpc_registry::AssetText;
@@ -29,8 +29,7 @@ use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
 use super::shader_node::{
     TimeProductCache, format_compile_stats, input_resolve_warning, note_input_resolve_failures,
-    read_authored_value, resolve_or_default_input, set_slot_if_changed,
-    sync_shader_slot_def_from_authored,
+    resolve_or_default_input, sync_float_mode_pin, sync_shader_slot_def_from_authored,
 };
 
 /// Runtime node for `kind = "shader/compute"` artifacts.
@@ -268,10 +267,7 @@ impl ComputeShaderNode {
 
     fn sync_def_from_view(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let mut compile_changed = false;
-        compile_changed |= set_slot_if_changed(
-            &mut self.def.float_mode,
-            read_authored_value::<FloatMode>(ctx, "float_mode")?,
-        );
+        compile_changed |= sync_float_mode_pin(ctx, &mut self.def.float_mode)?;
 
         let consumed_keys: Vec<String> = self.def.consumed_slots.entries.keys().cloned().collect();
         for key in consumed_keys {
@@ -626,14 +622,17 @@ mod tests {
         );
     }
 
-    /// A bound input whose binding cannot resolve (here: a bus channel with
-    /// no provider) must not degrade silently to the authored default — the
-    /// node keeps producing on the default AND reports a warning status.
-    /// This is the "broken `bus:time` freezes the shader with zero
-    /// diagnostics" family; see
-    /// docs/defects/2026-08-03-wasm-shader-instances-share-vmctx.md.
+    /// A value input bound to a channel **nothing writes**, with its own
+    /// declared default, is the panel-knob idiom at rest: the channel lists
+    /// (so the panel derives a control for it) and the uniform takes the
+    /// authored default until someone touches it — `modules.md` R6's
+    /// "invitation, not an error". The node stays quiet.
+    ///
+    /// This used to be the one `Warn`, which put a permanent badge on every
+    /// gallery example that shipped a knob while the panel's own control read
+    /// "default" for the same condition. See `unwritten_channel_at_rest`.
     #[test]
-    fn unresolvable_bound_input_reports_warning_status() {
+    fn unwritten_channel_on_a_defaulted_input_stays_quiet() {
         let (mut engine, registry, node_id) = build_compute_engine();
         let frame = lpc_model::Revision::new(1);
         bind_time_input_to_bus(&mut engine, node_id, frame);
@@ -641,19 +640,13 @@ mod tests {
         let phase = resolve_phase_twice(&mut engine, &registry, node_id);
         // Still producing: the authored default (time = 0.25) feeds the shader.
         assert_eq!(phase, LpValue::F32(1.25));
-
-        let status = node_runtime_status(&engine, node_id)
-            .expect("broken bound input must surface a runtime status");
-        let NodeRuntimeStatus::Warn(message) = status else {
-            panic!("expected Warn (node still runs on defaults), got {status:?}");
-        };
-        assert!(message.contains("\"time\""), "names the input: {message}");
-        assert!(
-            message.contains("no bus provider"),
-            "carries the resolve error: {message}"
+        assert_eq!(
+            node_runtime_status(&engine, node_id),
+            None,
+            "an untouched knob is the designed state, not a warning"
         );
 
-        // Recovery: once a provider exists the warning clears.
+        // And a writer arriving is still the ordinary case: the value follows.
         engine
             .add_binding(
                 BindingDraft {
@@ -669,6 +662,51 @@ mod tests {
         let phase = resolve_phase_twice(&mut engine, &registry, node_id);
         assert_eq!(phase, LpValue::F32(3.0));
         assert_eq!(node_runtime_status(&engine, node_id), None);
+    }
+
+    /// Quieting the unwritten channel is keyed to that one failure shape: a
+    /// binding that is broken in any *other* way still reports, here a source
+    /// pointing at a produced slot the node does not have. This is what keeps
+    /// the "broken binding freezes the shader with zero diagnostics" family
+    /// covered — together with the ambiguous-writer test below and the
+    /// kind-mismatch path (a channel whose writer carries a shape the uniform
+    /// cannot hold; see `shader_timebase_tests`).
+    #[test]
+    fn a_dangling_input_binding_still_reports_warning_status() {
+        let (mut engine, registry, node_id) = build_compute_engine();
+        let frame = lpc_model::Revision::new(1);
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: node_id,
+                        slot: SlotPath::parse("nonesuch").expect("slot path"),
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: node_id,
+                        slot: SlotPath::parse("time").expect("time path"),
+                    },
+                    priority: BindingPriority::authored(),
+                    kind: Kind::Color,
+                    owner: node_id,
+                },
+                frame,
+            )
+            .expect("bind time input to a slot that does not exist");
+
+        let phase = resolve_phase_twice(&mut engine, &registry, node_id);
+        assert_eq!(phase, LpValue::F32(1.25), "authored default still feeds");
+
+        let status = node_runtime_status(&engine, node_id)
+            .expect("a broken binding must surface a runtime status");
+        let NodeRuntimeStatus::Warn(message) = status else {
+            panic!("expected Warn (node still runs on defaults), got {status:?}");
+        };
+        assert!(message.contains("\"time\""), "names the input: {message}");
+        assert!(
+            !message.contains("no bus provider"),
+            "a dangling target is not the at-rest shape: {message}"
+        );
     }
 
     /// Two providers at equal top priority are ambiguous
@@ -841,6 +879,7 @@ void tick() {{
                 max: lpc_model::OptionSlot::none(),
                 step: lpc_model::OptionSlot::none(),
                 mapping: lpc_model::OptionSlot::none(),
+                len: lpc_model::OptionSlot::none(),
                 label: ValueSlot::default(),
                 description: ValueSlot::default(),
                 unit: lpc_model::OptionSlot::none(),
@@ -857,7 +896,7 @@ void tick() {{
         ComputeShaderDef {
             source: AssetSlot::path("emitters.glsl"),
             bindings: BindingDefs::default(),
-            float_mode: lpc_model::ValueSlot::default(),
+            float_mode: lpc_model::OptionSlot::none(),
             consumed_slots: MapSlot::new(consumed),
             produced_slots: MapSlot::new(produced),
         }

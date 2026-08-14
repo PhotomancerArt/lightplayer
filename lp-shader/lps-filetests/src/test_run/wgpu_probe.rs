@@ -3,7 +3,7 @@
 //!
 //! The probe forks at the GLSL source exactly like the product GPU path
 //! (ADR `docs/adr/2026-07-09-gpu-path-forks-at-glsl.md`): the authored test
-//! source is appended with a generated `vec4 render(vec2 pos)` that calls
+//! source is appended with a generated `vec4 render_2d(vec2 pos)` that calls
 //! the directive's function and encodes the result scalars into `width =
 //! ceil(scalars/4)` pixels, selected by `int(pos.x)`. lp-gfx-wgpu assembles
 //! the lpfn prelude + prototypes + fragment `main` and translates through
@@ -200,24 +200,37 @@ impl WgpuProbeInstance {
         let call_args: Vec<String> = args.iter().map(glsl_literal).collect::<Result<_, _>>()?;
         let call_expr = format!("{name}({})", call_args.join(", "));
 
-        // The generated wrapper is the assembly entry (`vec4 render(vec2)`);
-        // if the authored source defines `render` itself, rename it (and the
-        // call) out of the way.
-        let (authored, call_expr) = if self.sig.functions.iter().any(|f| f.name == "render") {
-            let renamed = rename_word(&self.source, "render", "__authored_render");
-            let call = if name == "render" {
-                format!("__authored_render({})", call_args.join(", "))
-            } else {
-                call_expr
-            };
-            (renamed, call)
-        } else {
-            (self.source.as_ref().clone(), call_expr)
+        // `render` is no longer an entry point anywhere (dimensionality plan
+        // D19) — the engine refuses it with a rename, so a filetest defining
+        // it must be refused here too rather than quietly probed.
+        if self.sig.functions.iter().any(|f| f.name == "render") {
+            return Err(String::from(
+                "wgpu probe: `render` is no longer a shader entry point: rename it to \
+                 `render_2d` (or `render_1d` for a 1D shader)",
+            ));
+        }
+
+        // The generated wrapper is the assembly entry
+        // (`vec4 render_2d(vec2)`); if the authored source defines an entry
+        // itself, rename it (and the call) out of the way.
+        let (authored, call_expr) = {
+            let mut authored = self.source.as_ref().clone();
+            let mut call_expr = call_expr;
+            for entry in ["render_2d", "render_1d"] {
+                if self.sig.functions.iter().any(|f| f.name == entry) {
+                    let renamed = format!("__authored_{entry}");
+                    authored = rename_word(&authored, entry, &renamed);
+                    if name == entry {
+                        call_expr = format!("{renamed}({})", call_args.join(", "));
+                    }
+                }
+            }
+            (authored, call_expr)
         };
 
         let width = plan.len().div_ceil(4).max(1) as u32;
         let mut wrapper = String::new();
-        wrapper.push_str("\nvec4 render(vec2 __pos) {\n");
+        wrapper.push_str("\nvec4 render_2d(vec2 __pos) {\n");
         if matches!(gfn.return_type, LpsType::Void) {
             wrapper.push_str(&format!("    {call_expr};\n"));
         } else {
@@ -506,6 +519,8 @@ fn glsl_literal(v: &LpsValueF32) -> Result<String, String> {
             format!("{ctor}({})", join(inner))
         }
         LpsValueF32::Texture2D(_) => return Err("texture argument".to_string()),
+        // Buffers never appear as filetest directive literals.
+        LpsValueF32::Buffer(_) => return Err("buffer argument".to_string()),
     })
 }
 
@@ -579,8 +594,8 @@ fn zero_value(ty: &LpsType) -> Result<LpsValueF32, String> {
     })
 }
 
-/// Word-boundary identifier rename (used to move an authored `render`
-/// definition out of the generated wrapper's way).
+/// Word-boundary identifier rename (used to move an authored `render_2d`/
+/// `render_1d` definition out of the generated wrapper's way).
 fn rename_word(src: &str, from: &str, to: &str) -> String {
     let bytes = src.as_bytes();
     let mut out = String::with_capacity(src.len());
@@ -651,11 +666,11 @@ mod tests {
     fn rename_word_respects_boundaries() {
         assert_eq!(
             rename_word(
-                "vec4 render(vec2 p) { rendered(); render(); }",
-                "render",
+                "vec4 render_2d(vec2 p) { rendered_2d(); render_2d(); }",
+                "render_2d",
                 "__r"
             ),
-            "vec4 __r(vec2 p) { rendered(); __r(); }"
+            "vec4 __r(vec2 p) { rendered_2d(); __r(); }"
         );
     }
 

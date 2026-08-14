@@ -1,8 +1,8 @@
 # lpc-mapping
 
-The 2D LED fixture mapping domain: the authored mapping **document** schema
-and the single deterministic **resolver** shared by the engine, the device,
-and Studio.
+The LED fixture mapping domain: the authored mapping **document** schema, the
+per-fixture **patch** document, and the single deterministic **resolver**
+shared by the engine, the device, and Studio.
 
 A mapping document (`fixture.map2d.json`) is a format-versioned JSON asset,
 opaque to the slot system, holding parametric objects whose order **is** the
@@ -80,6 +80,40 @@ not a runtime source of truth. CLI form:
 ```sh
 cargo run -p lpc-mapping --example svg_to_map2d -- path/to/mapping.svg > fixture.map2d.json
 ```
+
+## The patch document
+
+Mapping says where a lamp *is*; **patching** says which physical jack the
+strand ended up in. A fixture is mapped once and re-patched on every install,
+so the patch is its own document (`fixture.patch.json`) beside the mapping —
+clearing a patch never disturbs a lamp position.
+
+```json
+{
+  "format": 1,
+  "entries": [
+    { "range": { "start": 0,  "count": 22 }, "at": { "channel": 0 } },
+    { "range": { "start": 22, "count": 22 }, "at": { "channel": 34 },
+      "reversed": true }
+  ]
+}
+```
+
+`range` is fixture-relative — lamp indices in the wiring order above — and
+`at.channel` is the lamp offset on the output's wire. Omitting `count` means
+"to the end of the fixture", so a patched tail survives the fixture growing.
+`reversed` lays a run down end-first (the strand fed from its far end); it is
+a placement bit, unrelated to a fixture's own `wire_reversed` sampling.
+
+Patches are **sparse**: `resolve_patch` anchors the entries and reflows every
+unclaimed lamp after the highest anchored end, in fixture order. So no patch,
+an empty patch, and a patch that anchors nothing all resolve to what auto-flow
+would have produced — clearing restores the default rather than going dark, and
+partial patching is the ordinary case. Two entries of one fixture claiming the
+same lamp, or the same wire channel, are a document error (two *different*
+fixtures colliding on one output is a runtime condition the engine degrades and
+reports). `at.output` and a rotation `offset` are reserved in the schema and
+refused by this build rather than silently ignored.
 
 ## Boundary
 

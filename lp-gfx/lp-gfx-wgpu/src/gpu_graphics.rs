@@ -93,6 +93,27 @@ impl GpuGraphics {
         )
     }
 
+    /// One-shot async whole-texture readback for the browser GPU tier —
+    /// the poster-capture path (see `read_back`'s module docs for the
+    /// policy split). The copy is submitted before this returns; the
+    /// returned future owns refcounted handles only, so the caller drops
+    /// its borrows of `self` and the texture before awaiting.
+    #[cfg(target_arch = "wasm32")]
+    pub fn read_back_texture_async(
+        &self,
+        texture: &TextureHandle,
+    ) -> Result<impl core::future::Future<Output = Result<TextureData, GfxError>> + 'static, GfxError>
+    {
+        Ok(crate::read_back::read_back_texture_async(
+            &self.shared.device,
+            &self.shared.queue,
+            gpu_texture(texture)?,
+            texture.width(),
+            texture.height(),
+            texture.format(),
+        ))
+    }
+
     /// Present a render product to a wgpu surface (zero readback).
     ///
     /// The GPU-tier card path: the product texture is blitted to the
@@ -156,7 +177,15 @@ impl GpuGraphics {
             .shared
             .device
             .push_error_scope(wgpu::ErrorFilter::Validation);
-        let result = crate::render::GpuShader::new(self.shared.clone(), source, textures);
+        // Probe sources are wrapped by the harness with a generated
+        // `render_2d` entry (see `lps-filetests` `wgpu_probe`), so the probe
+        // path always assembles the 2D unit.
+        let result = crate::render::GpuShader::new(
+            self.shared.clone(),
+            source,
+            textures,
+            lp_shader::ShaderEntrySpace::TwoD,
+        );
         let scope_err = pollster::block_on(scope.pop());
         match (result, scope_err) {
             (_, Some(e)) => Err(GfxError::Compile(format!("wgpu validation: {e}"))),
@@ -219,6 +248,7 @@ impl LpGraphics for GpuGraphics {
             self.shared.clone(),
             source,
             &options.textures,
+            options.space,
         )?))
     }
 
@@ -474,7 +504,7 @@ mod tests {
         };
         let options =
             ShaderCompileOptions::new(ShaderSemantics::Q32, lp_shader::ShaderFrontend::Naga);
-        match graphics.compile_shader("vec4 render(vec2 pos) { return vec4(0.0); }", &options) {
+        match graphics.compile_shader("vec4 render_2d(vec2 pos) { return vec4(0.0); }", &options) {
             Err(GfxError::Backend(message)) => {
                 assert!(message.contains("Q32"), "message names the tier: {message}");
             }
@@ -539,7 +569,7 @@ void tick() {
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform vec2 outputSize;\n\
-                 vec4 render(vec2 pos) { return vec4(pos / outputSize, 0.25, 1.0); }\n",
+                 vec4 render_2d(vec2 pos) { return vec4(pos / outputSize, 0.25, 1.0); }\n",
                 &options,
             )
             .expect("compiles");
@@ -555,12 +585,12 @@ void tick() {
             .chunks_exact(2)
             .map(|b| u16::from_le_bytes([b[0], b[1]]))
             .collect();
-        // Pixel (0,0): render(vec2(0,0)) → (0, 0, 0.25, 1.0).
+        // Pixel (0,0): render_2d(vec2(0,0)) → (0, 0, 0.25, 1.0).
         assert_eq!(channels[0], 0);
         assert_eq!(channels[1], 0);
         assert_eq!(channels[2], 16384, "0.25 → Q16.16 fraction");
         assert_eq!(channels[3], 65535, "1.0 saturates");
-        // Pixel (2,1): render(vec2(2,1)) → (0.5, 0.25, …).
+        // Pixel (2,1): render_2d(vec2(2,1)) → (0.5, 0.25, …).
         let px = (4 + 2) * 4;
         assert_eq!(channels[px], 32768);
         assert_eq!(channels[px + 1], 16384);
@@ -577,7 +607,7 @@ void tick() {
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform float time;\n\
-                 vec4 render(vec2 pos) { return vec4(time); }\n",
+                 vec4 render_2d(vec2 pos) { return vec4(time); }\n",
                 &options,
             )
             .expect("compiles");
@@ -679,7 +709,7 @@ void tick() {
         let mut shader = graphics
             .compile_shader(
                 "uniform sampler2D inputColor;\n\
-                 vec4 render(vec2 pos) { return texelFetch(inputColor, ivec2(int(pos.x), 0), 0); }\n",
+                 vec4 render_2d(vec2 pos) { return texelFetch(inputColor, ivec2(int(pos.x), 0), 0); }\n",
                 &options,
             )
             .expect("compiles");
@@ -721,7 +751,7 @@ void tick() {
             ),
         );
         let source = "uniform sampler2D t;\n\
-                      vec4 render(vec2 pos) { return texture(t, pos); }\n";
+                      vec4 render_2d(vec2 pos) { return texture(t, pos); }\n";
         let mut shader = graphics.compile_shader(source, &options).expect("compiles");
         let mut target = graphics.create_render_target(1, 1).expect("target");
 
@@ -800,7 +830,7 @@ void tick() {
             ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
         match graphics.compile_shader(
             "uniform sampler2D mystery;\n\
-             vec4 render(vec2 pos) { return vec4(0.0); }\n",
+             vec4 render_2d(vec2 pos) { return vec4(0.0); }\n",
             &options,
         ) {
             Err(GfxError::Compile(message)) => {
@@ -822,7 +852,7 @@ void tick() {
                 lps_shared::TextureWrap::ClampToEdge,
             ),
         );
-        match graphics.compile_shader("vec4 render(vec2 pos) { return vec4(0.0); }", &options) {
+        match graphics.compile_shader("vec4 render_2d(vec2 pos) { return vec4(0.0); }", &options) {
             Err(GfxError::Compile(message)) => {
                 assert!(message.contains("ghost"), "{message}");
             }
@@ -857,7 +887,7 @@ void tick() {
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform vec2 outputSize;\n\
-                 vec4 render(vec2 pos) { return vec4(pos / outputSize, 0.25, 1.0); }\n",
+                 vec4 render_2d(vec2 pos) { return vec4(pos / outputSize, 0.25, 1.0); }\n",
                 &options,
             )
             .expect("compiles");
@@ -895,6 +925,88 @@ void tick() {
         assert_eq!(sampled[9], 16384);
     }
 
+    /// The GPU tier's 1D path end to end: the assembly splices
+    /// `render_1d(floor(gl_FragCoord.x))` and the strip fills like the CPU
+    /// tier's single-row walk. `outputSize` stays a `vec2` — `(N, 1)`.
+    #[test]
+    fn one_d_shader_renders_a_strip() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga)
+                .with_space(lp_shader::ShaderEntrySpace::OneD);
+        let mut shader = graphics
+            .compile_shader(
+                "layout(binding = 0) uniform vec2 outputSize;\n\
+                 vec4 render_1d(float pos) { return vec4(pos / outputSize.x, 0.5, 0.25, 1.0); }\n",
+                &options,
+            )
+            .expect("compiles");
+        let mut target = graphics.create_render_target(4, 1).expect("target");
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![(String::from("outputSize"), LpsValueF32::Vec2([4.0, 1.0]))],
+        };
+        shader.render(&mut target, &uniforms).expect("renders");
+
+        let data = graphics.read_back(&target).expect("read back");
+        let codes: Vec<u16> = data
+            .bytes()
+            .chunks_exact(2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        // `floor(gl_FragCoord.x)` gives 0/1/2/3, divided by 4.
+        assert_eq!(&codes[0..4], &[0, 32768, 16384, 65535]);
+        assert_eq!(codes[4], 16384);
+        assert_eq!(codes[8], 32768);
+        assert_eq!(codes[12], 49152);
+    }
+
+    /// The 1-lane sample path: points arrive tightly packed (`[t0, t1, …]`)
+    /// and the pass feeds them through a scalar vertex attribute. The buffer
+    /// is still pair-sized, so the tail is slack.
+    #[test]
+    fn one_d_sample_rgba16_reads_tightly_packed_points() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga)
+                .with_space(lp_shader::ShaderEntrySpace::OneD);
+        let mut shader = graphics
+            .compile_shader(
+                "layout(binding = 0) uniform vec2 outputSize;\n\
+                 vec4 render_1d(float pos) { return vec4(pos / outputSize.x, 0.5, 0.25, 1.0); }\n",
+                &options,
+            )
+            .expect("compiles");
+        let mut points = graphics.create_sample_points(3).expect("points");
+        graphics
+            .write_sample_points(
+                &mut points,
+                // 0.0, 2.5, 4.0 packed one word per point; the rest is slack.
+                &[0, (2 << 16) + 32768, 4 << 16, 0, 0, 0],
+            )
+            .expect("write points");
+        let mut out = graphics.create_sample_out(3).expect("out");
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![(String::from("outputSize"), LpsValueF32::Vec2([4.0, 1.0]))],
+        };
+        shader
+            .sample_rgba16(&mut points, &mut out, &uniforms)
+            .expect("samples");
+        let sampled = graphics.read_sample_out(&out).expect("read out");
+        assert_eq!(&sampled[0..4], &[0, 32768, 16384, 65535]);
+        // 2.5 / 4 = 0.625.
+        assert_eq!(sampled[4], 40960);
+        // 4.0 / 4 = 1.0 saturates.
+        assert_eq!(sampled[8], 65535);
+    }
+
     #[test]
     fn sample_rgba16_count_mismatch_is_an_error() {
         let Some(graphics) = test_graphics() else {
@@ -904,7 +1016,7 @@ void tick() {
         let options =
             ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
         let mut shader = graphics
-            .compile_shader("vec4 render(vec2 pos) { return vec4(0.5); }", &options)
+            .compile_shader("vec4 render_2d(vec2 pos) { return vec4(0.5); }", &options)
             .expect("compiles");
         let mut points = graphics.create_sample_points(2).expect("points");
         let mut out = graphics.create_sample_out(3).expect("out");
@@ -928,7 +1040,7 @@ void tick() {
             ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
         let mut shader = graphics
             .compile_shader(
-                "vec4 render(vec2 pos) { return vec4(pos.x / 16.0, 0.0, 0.0, 1.0); }",
+                "vec4 render_2d(vec2 pos) { return vec4(pos.x / 16.0, 0.0, 0.0, 1.0); }",
                 &options,
             )
             .expect("compiles");

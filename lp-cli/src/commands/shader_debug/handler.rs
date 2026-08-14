@@ -1,6 +1,7 @@
 //! Handler for `shader-debug`.
 
 use anyhow::{Context, Result};
+use lp_shader::ShaderEntrySpace;
 use lp_shader::synth::{SynthError, synthesise_render_texture};
 use lpir::{CompilerConfig, FloatMode, LpirModule, validate_module};
 use lps_frontend::LpsModuleSig;
@@ -127,9 +128,14 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
 }
 
 /// Append `__render_texture_<format>` for each requested format. Best-effort:
-/// missing or wrong-arity `render` is a non-fatal info message so the tool
+/// a missing or wrong-arity entry is a non-fatal info message so the tool
 /// stays useful for inputs that aren't full pixel shaders (e.g. LPIR
 /// snippets, helper-only files).
+///
+/// The entry is discovered by name rather than declared, because this tool
+/// is handed a bare source with no shader node behind it: whichever of
+/// `render_2d` / `render_1d` the input defines decides the space it is
+/// synthesised for.
 fn apply_render_texture_synth(
     ir: &mut LpirModule,
     sig: &mut LpsModuleSig,
@@ -140,22 +146,30 @@ fn apply_render_texture_synth(
         return;
     }
 
-    let Some(render_idx) = sig.functions.iter().position(|f| f.name == "render") else {
+    let entry = [ShaderEntrySpace::TwoD, ShaderEntrySpace::OneD]
+        .into_iter()
+        .find_map(|space| {
+            sig.functions
+                .iter()
+                .position(|f| f.name == space.entry_name())
+                .map(|index| (space, index))
+        });
+    let Some((space, render_idx)) = entry else {
         eprintln!(
-            "info: --render-texture skipped (no `render` function in this input; \
-             pass --render-texture none to silence)"
+            "info: --render-texture skipped (no `render_2d` / `render_1d` function in this \
+             input; pass --render-texture none to silence)"
         );
         return;
     };
 
     for &format in formats {
-        match synthesise_render_texture(ir, sig, render_idx, format, float_mode) {
+        match synthesise_render_texture(ir, sig, render_idx, format, float_mode, space) {
             Ok(name) => eprintln!("info: synthesised {name}"),
             Err(SynthError::RenderFunctionMissing) => eprintln!(
-                "info: --render-texture {format:?} skipped (render arity does not match channel count)",
+                "info: --render-texture {format:?} skipped (entry arity does not match channel count)",
             ),
             Err(SynthError::InvalidRenderFnIndex) => eprintln!(
-                "info: --render-texture {format:?} skipped (internal: render index invalidated)",
+                "info: --render-texture {format:?} skipped (internal: entry index invalidated)",
             ),
         }
     }

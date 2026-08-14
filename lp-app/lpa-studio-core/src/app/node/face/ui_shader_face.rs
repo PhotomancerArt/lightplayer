@@ -1,6 +1,6 @@
 //! The shader card's permanent face.
 
-use crate::{UiAgentView, UiAssetEditor, UiPanelControl, UiProducedProduct};
+use crate::{UiAgentView, UiAssetEditor, UiPanelControl, UiProducedProduct, UiSpaceSection};
 
 /// Permanent face for a shader node card.
 ///
@@ -21,4 +21,11 @@ pub struct UiShaderFace {
     /// The code drawer's inline GLSL editor. `None` until the def's source
     /// asset resolves to an editable artifact.
     pub code_drawer: Option<UiAssetEditor>,
+    /// The producer half of the two-sided space model (D13): what this
+    /// shader declares it renders in, and how it answers the other
+    /// dimension. Mirrors [`crate::UiFixtureFace::space`] by construction —
+    /// same DTO, other side. `None` when the `space` slot row is absent
+    /// (hand-built fixtures, pre-slot projections), in which case the card
+    /// renders no section and the rows stay in the advanced drawer.
+    pub space: Option<UiSpaceSection>,
 }

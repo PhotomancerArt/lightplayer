@@ -40,7 +40,7 @@ fn snapshot_overlay_can_bootstrap_project_files() {
     let mut fs = LpFsMemory::new();
     // The container manifest is not a node artifact, so it rides beside the
     // snapshot-derived files rather than through the overlay.
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 6\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 10\n}\n")
         .unwrap();
     let fs = fs;
     let mut registry = ProjectRegistry::new();

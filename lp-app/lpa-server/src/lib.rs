@@ -23,7 +23,9 @@ pub mod server;
 
 pub use device_identity::{DEVICE_IDENTITY_PATH, read_device_uid};
 pub use error::ServerError;
-pub use lpc_engine::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
+pub use lpc_engine::products::visual::{
+    ConsumerPolicy, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSpace,
+};
 pub use lpc_engine::{
     ButtonService, LpGraphics, LpShader, RadioService, ShaderCompileOptions, ShaderFrontend,
 };

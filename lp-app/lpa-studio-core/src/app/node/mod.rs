@@ -38,11 +38,14 @@ mod ui_slot_unit;
 mod ui_slot_value;
 
 pub use face::{
-    UiClockFace, UiClockTransport, UiFixtureFace, UiFixturePower, UiLedBudget, UiModuleFace,
-    UiNodeFace, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiPanelControl,
-    UiPanelControlState, UiPanelControlView, UiPanelEmit, UiPanelGroup, UiPanelTarget,
-    UiPanelWidget, UiPanelWire, UiPanelWireRole, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace,
-    UiShaderFace, UiTimebaseState, UiWireStatus, phasor_rate_display,
+    UiClockFace, UiClockTransport, UiExportsGroup, UiFixtureFace, UiFixturePatch, UiFixturePower,
+    UiLedBudget, UiModuleExport, UiModuleFace, UiNodeFace, UiOutputBoardFacts, UiOutputFace,
+    UiOutputPin, UiOutputPortRow, UiPanelControl, UiPanelControlState, UiPanelControlView,
+    UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiPanelWire, UiPanelWireRole,
+    UiPatchBay, UiPatchCell, UiPatchPort, UiPhasorReading, UiPlaylistEntry, UiPlaylistFace,
+    UiShaderFace, UiShapePresets, UiSpaceBoolRow, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice,
+    UiSpaceMismatch, UiSpaceModifiers, UiSpaceSection, UiSpaceSide, UiTimebaseState,
+    UiWireDirectionRow, UiWireStatus, phasor_rate_display,
 };
 pub use ui_asset_editor::UiAssetEditor;
 pub use ui_binding_authoring::{UiBindingAuthoring, UiBindingAuthoringDirection, UiChannelChoice};
@@ -55,8 +58,10 @@ pub use ui_node_section::UiNodeSection;
 pub use ui_node_tab::{UiNodeTab, UiNodeTabBody};
 pub use ui_node_view::UiNodeView;
 pub use ui_produced_product::{
-    UiControlProductPreview, UiControlSampleFormat, UiProducedProduct, UiProductKind,
-    UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState,
+    UiCellProjection, UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat,
+    UiProducedProduct, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
+    UiProductSpaceView, UiProductTrackingState, UiProjectionOrigin, UiProjectionShape,
+    UiVisualProductSpace, UiVisualSpace,
 };
 pub use ui_produced_value::UiProducedValue;
 pub use ui_shader_uniform::UiShaderUniform;

@@ -870,7 +870,7 @@ mod tests {
         .expect("shader def")
         .write_json(&shapes)
         .expect("canonical shader body");
-        let glsl = b"vec4 render(vec2 pos) { return vec4(1.0); }".to_vec();
+        let glsl = b"vec4 render_2d(vec2 pos) { return vec4(1.0); }".to_vec();
 
         create(
             &fs,
@@ -1668,7 +1668,7 @@ mod tests {
         crate::test::fixtures::write_file(
             &mut fs,
             "/shader.glsl",
-            "vec4 render(vec2 pos) { return vec4(1.0); }",
+            "vec4 render_2d(vec2 pos) { return vec4(1.0); }",
         );
         let registry = load_registry(&fs, shapes);
         (fs, registry)
@@ -1701,7 +1701,7 @@ mod tests {
         crate::test::fixtures::write_file(
             &mut fs,
             "/shared.glsl",
-            "vec4 render(vec2 pos) { return vec4(0.5); }",
+            "vec4 render_2d(vec2 pos) { return vec4(0.5); }",
         );
         let registry = load_registry(&fs, shapes);
         (fs, registry)
@@ -1756,7 +1756,7 @@ mod tests {
         crate::test::fixtures::write_file(
             &mut fs,
             "/blast.glsl",
-            "vec4 render(vec2 pos) { return vec4(0.0); }",
+            "vec4 render_2d(vec2 pos) { return vec4(0.0); }",
         );
         let registry = load_registry(&fs, shapes);
         (fs, registry)

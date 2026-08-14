@@ -37,6 +37,10 @@ const MIGRATIONS: &[Migration] = &[
         name: "0002_profile_and_sessions",
         sql: include_str!("../migrations/0002_profile_and_sessions.sql"),
     },
+    Migration {
+        name: "0003_access_and_archive",
+        sql: include_str!("../migrations/0003_access_and_archive.sql"),
+    },
 ];
 
 /// Bring a database up to the current schema and report the version it
@@ -172,7 +176,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(run_migrations(&mut conn).unwrap(), latest_version());
-        assert_eq!(schema_version(&conn).unwrap(), 2);
 
         let (email, given_name, provider): (String, Option<String>, String) = conn
             .query_row(
@@ -194,6 +197,61 @@ mod tests {
             .unwrap();
         assert_eq!(created_at, 0.0, "the migration's default");
         assert_eq!(user_agent, None);
+    }
+
+    /// The upgrade path 0003 exists for: a database written by the v2 API
+    /// carries `visibility` values and `member` roles, and comes out the
+    /// other side speaking the access vocabulary — same rows, renamed
+    /// column, translated values, nothing archived.
+    #[test]
+    fn migrating_from_0002_to_0003_translates_visibility_and_roles() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        assert_eq!(apply(&mut conn, &MIGRATIONS[..2]).unwrap(), 2);
+        conn.execute(
+            "INSERT INTO users (uid, google_sub, email, display_name, created_at)\n\
+             VALUES ('usrx', 'g-1', 'x@example.com', 'X', 1.0)",
+            [],
+        )
+        .unwrap();
+        for (uid, visibility) in [("prjopen", "link"), ("prjshut", "private")] {
+            conn.execute(
+                "INSERT INTO projects (uid, owner_uid, visibility, slug, created_at)\n\
+                 VALUES (?1, 'usrx', ?2, 'dome', 1.0)",
+                [uid, visibility],
+            )
+            .unwrap();
+        }
+        for (email, role) in [("x@example.com", "owner"), ("y@example.com", "member")] {
+            conn.execute(
+                "INSERT INTO members (project_uid, email, user_uid, role, added_at)\n\
+                 VALUES ('prjopen', ?1, NULL, ?2, 1.0)",
+                [email, role],
+            )
+            .unwrap();
+        }
+
+        assert_eq!(run_migrations(&mut conn).unwrap(), latest_version());
+
+        let access = |uid: &str| -> (String, Option<f64>) {
+            conn.query_row(
+                "SELECT access, archived_at FROM projects WHERE uid = ?1",
+                [uid],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(access("prjopen"), ("view".to_string(), None));
+        assert_eq!(access("prjshut"), ("none".to_string(), None));
+
+        let mut roles: Vec<String> = conn
+            .prepare("SELECT role FROM members ORDER BY email")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        roles.sort();
+        assert_eq!(roles, vec!["editor".to_string(), "owner".to_string()]);
     }
 
     #[test]

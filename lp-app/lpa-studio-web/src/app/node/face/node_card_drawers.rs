@@ -12,21 +12,26 @@
 //! of component props.
 //!
 //! Drawers used today: shader = `code` (the existing [`AssetEditor`]) +
-//! `advanced`; fixture/playlist = `advanced` only. The advanced drawer
-//! hosts today's generic slot-row sections unchanged — with ONE exception:
-//! the **Debug** section is lifted out and rendered permanently above the
-//! drawers. D8 tier (c) requires debug territory to be visible even when
-//! idle, and a section behind a closed lid is not visible.
+//! `dimensionality` (the producer-side space section — G1b ruling 1 moved
+//! it here from below settings, between `code` and `advanced`) +
+//! `advanced`; fixture/playlist = `advanced` only (the fixture face keeps
+//! its own below-settings space drawer, ruled good as shipped). The
+//! advanced drawer hosts today's generic slot-row sections unchanged —
+//! with ONE exception: the **Debug** section is lifted out and rendered
+//! permanently above the drawers. D8 tier (c) requires debug territory to
+//! be visible even when idle, and a section behind a closed lid is not
+//! visible.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
     NodeCardDrawer, NodeUiOp, UiAction, UiAssetEditor as UiAssetEditorData, UiNodeSection,
-    UiPendingEdit,
+    UiPendingEdit, UiSpaceSection,
 };
 
 use crate::app::node::{AssetEditor, NodeDirtyTint, NodeSection};
 use crate::base::Platform;
 
+use super::space_section::{SPACE_SECTION_LABEL, SpaceSection, space_section_summary};
 use super::{NodeCardSection, node_ui_action};
 
 #[component]
@@ -39,11 +44,22 @@ pub fn NodeCardDrawers(
     /// drawer entirely (fixture/playlist faces).
     #[props(default = None)]
     code: Option<UiAssetEditorData>,
+    /// The shader face's producer-side space section for the
+    /// `dimensionality` drawer, between `code` and `advanced` (G1b ruling
+    /// 1); `None` omits the drawer (every non-shader face — the fixture's
+    /// consumer section stays on its own face, ruled good as shipped).
+    #[props(default = None)]
+    space: Option<UiSpaceSection>,
     /// Sections for the `advanced` drawer — today's generic slot-row view.
     sections: Vec<UiNodeSection>,
     /// Whether the code drawer is expanded (core-owned state).
     #[props(default = false)]
     code_open: bool,
+    /// Whether the dimensionality drawer is expanded (core-owned state,
+    /// `NodeCardUiState::space_open`). A D1 mismatch forces the drawer
+    /// open regardless.
+    #[props(default = false)]
+    space_open: bool,
     /// Whether the advanced drawer is expanded (core-owned state).
     #[props(default = false)]
     advanced_open: bool,
@@ -65,8 +81,16 @@ pub fn NodeCardDrawers(
     let has_advanced = !drawer_sections.is_empty();
     let code_summary = code.as_ref().map(|editor| editor.source.clone());
     let code_node = node.clone();
+    let space_node = node.clone();
     let section_node = Some(node.clone());
     let advanced_node = node;
+    // The dimensionality drawer opens on its core-owned bit — and is FORCED
+    // open by a D1 mismatch (an error folded away is an error hidden).
+    let space_summary = space.as_ref().map(space_section_summary);
+    let space_forced = space
+        .as_ref()
+        .is_some_and(|section| section.mismatch.is_some());
+    let space_effective_open = space_open || space_forced;
 
     rsx! {
         if let Some(editor) = code {
@@ -81,6 +105,20 @@ pub fn NodeCardDrawers(
                     !code_open,
                 ),
                 AssetEditor { editor, on_action, platform }
+            }
+        }
+        if let Some(section) = space {
+            NodeCardSection {
+                label: SPACE_SECTION_LABEL,
+                summary: space_summary,
+                open: Some(space_effective_open),
+                on_toggle: move |()| dispatch_drawer(
+                    on_action,
+                    &space_node,
+                    NodeCardDrawer::Space,
+                    !space_effective_open,
+                ),
+                SpaceSection { section, on_action }
             }
         }
         for section in debug_sections {

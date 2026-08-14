@@ -39,6 +39,16 @@ where
         LpType::Mat2x2 => read_matrix::<_, 2>(value).map(LpValue::Mat2x2),
         LpType::Mat3x3 => read_matrix::<_, 3>(value).map(LpValue::Mat3x3),
         LpType::Mat4x4 => read_matrix::<_, 4>(value).map(LpValue::Mat4x4),
+        // Bare base64 of the packed little-endian words: the shape carries
+        // `elem`/`len`, so the payload needs no self-description, and the
+        // bit-level form round-trips exactly (no float↔decimal step).
+        LpType::Buffer { elem, len } => {
+            let byte_len = (*len as usize) * elem.word_stride() as usize * 4;
+            let bytes = value.base64_bytes(byte_len)?;
+            let buffer = crate::LpBuffer::from_le_bytes(*elem, &bytes)
+                .expect("length checked by base64_bytes");
+            Ok(LpValue::Buffer(buffer))
+        }
         LpType::Array(item_ty, len) => read_lp_array(value, item_ty, Some(*len)),
         LpType::List(item_ty) => read_lp_array(value, item_ty, None),
         LpType::Struct { name, fields } => read_lp_struct(value, name.clone(), fields),
@@ -86,6 +96,14 @@ where
             write_lp_array(value, item_ty, items)
         }
         (LpType::List(item_ty), LpValue::Array(items)) => write_lp_array(value, item_ty, items),
+        // Unlike Array above, a buffer is always exactly its declared size:
+        // "one flat word run" is the whole point, so a shorter value is a
+        // shape mismatch, not a sparse tail.
+        (LpType::Buffer { elem, len }, LpValue::Buffer(buffer))
+            if buffer.elem == *elem && buffer.len() == *len =>
+        {
+            value.base64_string(&buffer.to_le_bytes())
+        }
         (LpType::Struct { fields, .. }, LpValue::Struct { fields: values, .. }) => {
             write_lp_struct(value, fields, values)
         }
@@ -153,7 +171,12 @@ where
         LpValue::Product(ProductRef::Visual(product)) => write_visual_product(value, product),
         LpValue::Product(ProductRef::Control(product)) => write_control_product(value, product),
         LpValue::Product(ProductRef::Time(product)) => write_time_product(value, product),
-        LpValue::IVec2(_)
+        // A buffer's bare-base64 form is only decodable when the SHAPE
+        // supplies elem/len; an untyped read would see a plain string. So
+        // buffers refuse the untyped surface alongside the other variants
+        // whose untyped form would not round-trip.
+        LpValue::Buffer(_)
+        | LpValue::IVec2(_)
         | LpValue::IVec3(_)
         | LpValue::IVec4(_)
         | LpValue::UVec2(_)
@@ -903,6 +926,63 @@ mod tests {
 
         let json = write_json_value(&ty, &value);
         assert_eq!(read_json_value(ty, &json), value);
+    }
+
+    /// Buffers round-trip as bare base64 of the packed LE words —
+    /// bit-exactly, including NaN and -0.0, which the numeric JSON forms
+    /// cannot promise.
+    #[test]
+    fn slot_value_codec_round_trips_buffers_bit_exactly() {
+        let ty = LpType::Buffer {
+            elem: crate::BufferElem::F32,
+            len: 3,
+        };
+        let buffer = crate::LpBuffer::from_words(
+            crate::BufferElem::F32,
+            vec![
+                f32::to_bits(1.5),
+                f32::to_bits(-0.0),
+                f32::to_bits(f32::NAN),
+            ],
+        )
+        .expect("buffer");
+        let value = LpValue::Buffer(buffer);
+
+        let json = write_json_value(&ty, &value);
+        assert!(json.starts_with('"') && json.ends_with('"'), "{json}");
+        let reread = read_json_value(ty.clone(), &json);
+        assert_eq!(reread, value);
+        // Canonical-writer determinism: rewriting the reread value
+        // reproduces the exact bytes.
+        assert_eq!(write_json_value(&ty, &reread), json);
+    }
+
+    #[test]
+    fn slot_value_codec_rejects_wrong_length_buffer_payload() {
+        let ty = LpType::Buffer {
+            elem: crate::BufferElem::Vec2,
+            len: 2,
+        };
+        // 4 bytes of payload where the shape demands 16.
+        let err = {
+            let registry = crate::SlotShapeRegistry::default();
+            let mut reader =
+                SlotReader::new(JsonSyntaxSource::new("\"AAAAAA==\"").unwrap(), &registry);
+            read_lp_value(&ty, reader.value()).unwrap_err()
+        };
+        assert!(err.message().contains("expected 16"), "{err:?}");
+    }
+
+    #[test]
+    fn slot_value_codec_rejects_buffer_value_shape_mismatch() {
+        let ty = LpType::Buffer {
+            elem: crate::BufferElem::F32,
+            len: 4,
+        };
+        let short = LpValue::Buffer(crate::LpBuffer::zeroed(crate::BufferElem::F32, 3));
+        let mut out = Vec::new();
+        let mut writer = SlotWriter::new(&mut out);
+        assert!(write_lp_value(writer.value(), &ty, &short).is_err());
     }
 
     fn read_json_value(ty: LpType, json: &str) -> LpValue {

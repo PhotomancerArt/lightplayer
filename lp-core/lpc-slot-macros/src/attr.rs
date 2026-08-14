@@ -51,6 +51,7 @@ pub(crate) enum FieldMergeAttr {
     Latest,
     Error,
     ByKey,
+    Fragments,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -441,6 +442,7 @@ pub(crate) fn field_semantics_tokens(
         FieldMergeAttr::Latest => quote::quote! { ::lpc_model::SlotMerge::Latest },
         FieldMergeAttr::Error => quote::quote! { ::lpc_model::SlotMerge::Error },
         FieldMergeAttr::ByKey => quote::quote! { ::lpc_model::SlotMerge::ByKey },
+        FieldMergeAttr::Fragments => quote::quote! { ::lpc_model::SlotMerge::Fragments },
     };
     quote::quote! {
         ::lpc_model::SlotSemantics::new(#direction_tokens, #merge_tokens)
@@ -555,9 +557,10 @@ fn parse_merge(value: &LitStr) -> Result<FieldMergeAttr> {
         "latest" => Ok(FieldMergeAttr::Latest),
         "error" => Ok(FieldMergeAttr::Error),
         "by_key" => Ok(FieldMergeAttr::ByKey),
+        "fragments" => Ok(FieldMergeAttr::Fragments),
         _ => Err(syn::Error::new_spanned(
             value,
-            "unsupported slot merge policy; expected \"latest\", \"error\", or \"by_key\"",
+            "unsupported slot merge policy; expected \"latest\", \"error\", \"by_key\", or \"fragments\"",
         )),
     }
 }

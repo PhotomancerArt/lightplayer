@@ -556,6 +556,42 @@ where
         }
     }
 
+    /// A bare base64 string decoding to exactly `expected_len` bytes.
+    ///
+    /// The length lives in the SHAPE (a buffer's `elem`/`len`), which is
+    /// what distinguishes this from [`Self::binary_base64_tuple`], where
+    /// the payload must carry its own length.
+    pub fn base64_bytes(self, expected_len: usize) -> Result<Vec<u8>, SyntaxError> {
+        let Some(event) = self.reader.next_event()? else {
+            return Err(self
+                .reader
+                .error("expected base64 string, found end of input"));
+        };
+        let encoded = match event {
+            SyntaxEvent::StringChunk { text, is_last, .. } => {
+                if is_last {
+                    text
+                } else {
+                    let mut value = text;
+                    value.push_str(&self.reader.finish_string_chunks()?);
+                    value
+                }
+            }
+            event => return Err(self.reader.error_at(event.span(), "expected base64 string")),
+        };
+        let mut bytes = Vec::with_capacity(expected_len);
+        base64::engine::general_purpose::STANDARD
+            .decode_vec(encoded.as_bytes(), &mut bytes)
+            .map_err(|_| self.reader.error("invalid base64 payload"))?;
+        if bytes.len() != expected_len {
+            return Err(self.reader.error(format!(
+                "base64 payload decoded to {} bytes, expected {expected_len}",
+                bytes.len()
+            )));
+        }
+        Ok(bytes)
+    }
+
     pub fn binary_base64_tuple(self) -> Result<Vec<u8>, SyntaxError> {
         let mut array = self.array()?;
         let Some(length_item) = array.next_item()? else {

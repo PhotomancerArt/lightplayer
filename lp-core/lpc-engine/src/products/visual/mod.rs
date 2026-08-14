@@ -1,14 +1,16 @@
 //! Visual-product handle and minimal sample request/result shapes.
 
-mod coordinates;
+pub mod coordinates;
 mod render_texture_request;
 mod sample_request;
 mod sample_result;
+mod space;
 mod texture_product;
 
 pub use coordinates::{
-    normalized_f32_to_q16, normalized_q16_to_pixel_q16, pixel_q16_to_normalized_q16,
-    texel_center_to_uv_q16, texture_uv_q16_to_texel,
+    RADIAL_CORNER_REACH, angular, centre_scanline, extrude, mirror, normalized_f32_to_q16,
+    normalized_q16_to_pixel_q16, pixel_q16_to_normalized_q16, project_2d_to_1d, radial,
+    shape_coord, texel_center_to_uv_q16, texture_uv_q16_to_texel,
 };
 pub use lpc_model::VisualProduct;
 pub use render_texture_request::RenderTextureRequest;
@@ -16,6 +18,10 @@ pub use sample_request::{
     TextureSampleBatch, TextureUvSamplePoint, VisualSampleBufferRequest, VisualSampleTarget,
 };
 pub use sample_result::{VisualSample, VisualSampleBatchResult};
+pub use space::{
+    CellProjection, ConsumerPolicy, ProductSpaceInfo, ProjectionOrigin, ProjectionShape,
+    VisualSpace, resolve_1d_to_2d, resolve_1d_to_2d_with_origin,
+};
 pub use texture_product::{TextureRenderProduct, TextureRenderProductError};
 #[cfg(test)]
 mod tests {

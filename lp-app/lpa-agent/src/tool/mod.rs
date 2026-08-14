@@ -1,15 +1,21 @@
-//! The `iterate` + `upsert_param` tools and the host seam they dispatch
-//! through.
+//! The `iterate` + `upsert_param` + `declare_space` tools and the host
+//! seam they dispatch through.
 
+pub mod declare_space_tool;
 pub mod iterate_host;
 pub mod iterate_tool;
 pub mod params_section;
 pub mod tool_phase;
 pub mod upsert_param_tool;
 
+pub use declare_space_tool::{
+    DECLARE_SPACE_TOOL_NAME, DeclareSpaceInput, declare_space_tool_def, entry_point,
+    run_declare_space,
+};
 pub use iterate_host::{
-    AgentHost, BindingInfo, EngineStatusKind, EngineVerdict, FixtureSummary, HostError, HostFuture,
-    ParamDefRecord, ParamUpsert, ShaderContext,
+    AgentHost, BindingInfo, DeclaredSpace, EngineStatusKind, EngineVerdict, FixtureSummary,
+    HostError, HostFuture, ParamDefRecord, ParamUpsert, ProjectionShapeTag, ShaderContext,
+    SpaceDeclaration,
 };
 pub use iterate_tool::{
     ENGINE_VERDICT_BUDGET_MS, ITERATE_TOOL_NAME, IterateInput, IterateOutcome, MAX_SOURCE_BYTES,

@@ -56,6 +56,74 @@ pub struct UiModuleFace {
     /// project's root module that owns it, and an embedded module carries
     /// `None` rather than repeating its host's switch.
     pub auto_save: Option<bool>,
+    /// This module's own **export designation** row, for its detail popup
+    /// (spike 2·i). `None` when designation is not a question for this card
+    /// — the root module (an export must never point at the root), a
+    /// non-library project, or a `Show`/`Rig` project.
+    ///
+    /// A `Some` whose [`UiModuleExport::disabled_reason`] is set still
+    /// renders: the row explains why the box cannot be ticked rather than
+    /// vanishing, the add-node picker's disabled-row precedent.
+    pub export: Option<UiModuleExport>,
+}
+
+/// How the ROOT card's **child column** splits (module authoring unit, R-A).
+///
+/// P3 put the project's exports on the root card as a rail of names. G1's
+/// ruling replaced it: the exports are the child CARDS themselves, so the
+/// column below the root card groups them under an `exports` header and
+/// leaves everything else under `rig` — the D17 word for the scaffolding
+/// that stays home. Nothing about the root card's own face changed; this
+/// rides [`crate::UiNodeView::exports`], because the thing being grouped is
+/// the workspace column, not the face.
+///
+/// `None` (or an empty [`Self::keys`]) means the column renders exactly as
+/// it always did — a project that exports nothing stays visually plain
+/// (spike 2·ii).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UiExportsGroup {
+    /// The child cards that ARE the project's exports, keyed by
+    /// [`crate::UiNodeChild::detail`] (the child's address path) so the
+    /// renderer partitions by identity, not by display name. Child order,
+    /// not manifest order: the column stays the column.
+    pub keys: Vec<String>,
+    /// Every lint finding across all exports, in report order — the
+    /// aggregate preamble under the `exports` header. Per-export findings
+    /// still ride each child's own [`UiModuleExport::findings`], which is
+    /// what tints its card chip.
+    pub findings: Vec<lpc_model::ExportFinding>,
+}
+
+impl UiExportsGroup {
+    /// The worst severity anywhere in the group, or `None` when every
+    /// export reads clean.
+    pub fn worst(&self) -> Option<lpc_model::ExportSeverity> {
+        self.findings.iter().map(|finding| finding.severity).max()
+    }
+}
+
+/// One module's export-designation state, as its detail popup presents it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiModuleExport {
+    /// The export folder name the toggle would add or remove — the module's
+    /// own folder (`fire` for `/fire/module.json`). Empty when the module
+    /// has no folder of its own, which is also a `disabled_reason`.
+    pub folder: String,
+    /// The project the export would ship from — the checkbox copy names it
+    /// ("Export from yona-noise"), because the designation is manifest
+    /// data even though the gesture lives on the module.
+    pub project: String,
+    /// Whether the manifest currently lists [`Self::folder`].
+    pub designated: bool,
+    /// `None` = the checkbox is live. `Some(reason)` = a disabled row whose
+    /// sentence says why.
+    pub disabled_reason: Option<String>,
+    /// Ticking this box would make a `General` project a `Pattern` project
+    /// (vision D14's upgrade gesture) — the popup says so plainly.
+    pub upgrades_to_pattern: bool,
+    /// Lint findings scoped to this export, in report order. Empty unless
+    /// the module is actually designated — nothing is checked until it is.
+    pub findings: Vec<lpc_model::ExportFinding>,
 }
 
 impl UiModuleFace {
@@ -69,6 +137,7 @@ impl UiModuleFace {
             wiring_open: false,
             provenance: None,
             auto_save: None,
+            export: None,
         }
     }
 }

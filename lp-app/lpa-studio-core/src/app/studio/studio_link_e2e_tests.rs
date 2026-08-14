@@ -1571,7 +1571,7 @@ fn a_sim_inherits_the_board_identity_of_the_project_it_runs() {
             .map(|(name, body)| {
                 let body = match (*name, target) {
                     ("project.json", Some(target)) => {
-                        format!("{{\n  \"format\": 6,\n  \"target\": \"{target}\"\n}}\n")
+                        format!("{{\n  \"format\": 10,\n  \"target\": \"{target}\"\n}}\n")
                     }
                     _ => body.to_string(),
                 };
@@ -1644,7 +1644,7 @@ fn a_sim_inherits_the_board_identity_of_the_project_it_runs() {
 /// the way in (D4, the test above), and the wizard never heard.
 ///
 /// The repro end to end: open the wizard, click Open in sim on a project
-/// card (`HomeOp::OpenPackage` — the op `#/sim/<slug>` rides), then go
+/// card (`HomeOp::OpenPackage` — the op `/p/<slug>-<uid>` rides), then go
 /// back to the gallery and look at what the wizard is asking for.
 #[test]
 fn an_open_in_sim_stands_the_sims_board_picker_down() {
@@ -1660,7 +1660,7 @@ fn an_open_in_sim_stands_the_sims_board_picker_down() {
             .map(|(name, body)| {
                 let body = match (*name, target) {
                     ("project.json", Some(target)) => {
-                        format!("{{\n  \"format\": 6,\n  \"target\": \"{target}\"\n}}\n")
+                        format!("{{\n  \"format\": 10,\n  \"target\": \"{target}\"\n}}\n")
                     }
                     _ => body.to_string(),
                 };
@@ -1769,7 +1769,7 @@ fn an_open_in_sim_that_re_attaches_stands_the_picker_down_too() {
         .map(|(name, body)| {
             let body = match *name {
                 "project.json" => {
-                    "{\n  \"format\": 6,\n  \"target\": \"seeed/xiao-esp32-c6\"\n}\n".to_string()
+                    "{\n  \"format\": 10,\n  \"target\": \"seeed/xiao-esp32-c6\"\n}\n".to_string()
                 }
                 _ => body.to_string(),
             };
@@ -2513,11 +2513,11 @@ fn device_route_attaches_the_existing_session_by_uid() {
     );
 }
 
-/// M5/D37 (`#/sim/<key>` reuse-vs-open): re-opening the project the sim
+/// M5/D37 (`/p/<slug>-<uid>` reuse-vs-open): re-opening the project the sim
 /// ALREADY runs re-attaches the lens to the running session — the acked
 /// overlay edit survives — instead of pushing the head again (which would
 /// reset it). D19's head push stays for everything else; the emitted view
-/// binds the sim lens with the loaded project's key (the URL's evidence).
+/// binds the sim lens with the loaded project's uid (the URL's evidence).
 #[test]
 fn open_package_reattaches_when_the_sim_already_runs_it() {
     use super::studio_edit_e2e_tests::clock_transport_block;
@@ -2547,18 +2547,18 @@ fn open_package_reattaches_when_the_sim_already_runs_it() {
     )))
     .expect("lens detach succeeds");
 
-    let (sign_uid, sign_slug) = {
+    let sign_uid = {
         let pool = studio.runtime_pool_for_test();
-        let loaded = pool
-            .sim_session()
+        pool.sim_session()
             .expect("sim session survives detach")
             .sim_loaded_project()
-            .expect("the sim remembers its loaded project");
-        (loaded.uid.clone(), loaded.name.clone())
+            .expect("the sim remembers its loaded project")
+            .uid
+            .clone()
     };
 
-    // the `#/sim/<key>` navigation (and the project-card click that rides
-    // it): the same key the sim already runs
+    // the `/p/<slug>-<uid>` navigation (and the project-card click that
+    // rides it): the same project the sim already runs
     drive(studio.dispatch(UiAction::from_op(
         ControllerId::new(HOME_NODE_ID),
         HomeOp::OpenPackage {
@@ -2582,9 +2582,9 @@ fn open_package_reattaches_when_the_sim_already_runs_it() {
     assert_eq!(
         view.lens,
         Some(UiLensRuntime::Sim {
-            project_key: Some(sign_slug),
+            project_uid: Some(sign_uid),
         }),
-        "the view binds the sim lens with the loaded project's key"
+        "the view binds the sim lens with the loaded project's uid"
     );
 }
 
@@ -3359,7 +3359,7 @@ fn backing_up_a_device_publishes_a_zip_of_its_files() {
                 // (D-A), which would leave the device unidentified here.
                 (
                     "project.json".to_string(),
-                    br#"{"format":6,"name":"sign"}"#.to_vec(),
+                    br#"{"format":10,"name":"sign"}"#.to_vec(),
                 ),
                 (
                     "module.json".to_string(),
@@ -4803,4 +4803,155 @@ fn drive<F: Future>(future: F) -> F::Output {
         }
     }
     panic!("link e2e future did not complete within the poll budget");
+}
+
+/// The DEVICE tier of the patched-wire promise: what lands on a card's ▶ tab
+/// for a project whose output merges TWO fixtures has to draw every lamp on
+/// the wire, at its own place, in its own colour.
+///
+/// `examples/peach-2d` is the shape that broke: the body is patched as two
+/// runs (channels 0–21, then 22–43 reversed onto 34–55) with the leaf plugged
+/// into the hole between them (22–33). Ask ONE producer for the whole
+/// output's geometry — as the display path did before the fragment rebase —
+/// and you get the body's 44 lamps reading the WIRE's first 44 channels: the
+/// body's far half painted with the leaf's green, and no leaf drawn at all.
+/// That is precisely what a viewer reported seeing on the simulator's card,
+/// and the engine-side rows (`lpc-engine/tests/output_patch_reflow.rs`) said
+/// nothing about it because they stop at the probe.
+///
+/// So this row runs the whole pipeline the card actually uses: a real host
+/// `LpServer` behind the real `M!` serial framing, reached through the link,
+/// pulled by the real feed, folded by `CardFeedState`, read off the DTO the
+/// ▶ tab renders.
+#[test]
+fn a_patched_two_fixture_card_draws_every_lamp_in_its_own_colour() {
+    let (mut studio, card_key, _device) = studio_feeding_a_loaded_peach();
+
+    run_card_feeds(&mut studio);
+
+    let card = device_card(&studio, &card_key);
+    let frame = card
+        .frame_preview
+        .as_ref()
+        .expect("the board published a frame");
+    let Some(lpc_model::ControlDisplayLayout::Layout2d(layout)) = frame.display_layout.as_deref()
+    else {
+        panic!("the card has no geometry to draw the published frame with");
+    };
+
+    // Every wire channel drawn exactly once. The one-producer answer has 44
+    // lamps here, and the 12 it is missing are the leaf.
+    let mut slots: Vec<u32> = layout
+        .lamps
+        .iter()
+        .map(|lamp| lamp.sample_start / 3)
+        .collect();
+    slots.sort_unstable();
+    assert_eq!(
+        slots,
+        (0..56).collect::<Vec<u32>>(),
+        "the card's layout covers the whole 56-channel wire, one lamp per channel"
+    );
+
+    // Each lamp reads ITS OWN samples: the body's flesh is pink everywhere it
+    // sits on the wire, and the leaf — the run patched into the middle of the
+    // body's — is green. A layout carrying a producer's own offsets instead
+    // of the wire's fails on the reversed tail (34–55) as well as the leaf.
+    let colour = |slot: u32| -> [u16; 3] {
+        let lamp = layout
+            .lamps
+            .iter()
+            .find(|lamp| lamp.sample_start == slot * 3)
+            .expect("a lamp for every channel");
+        let base = lamp.sample_start as usize * 2;
+        core::array::from_fn(|channel| {
+            let at = base + channel * 2;
+            u16::from_le_bytes([frame.bytes[at], frame.bytes[at + 1]])
+        })
+    };
+    for slot in (0..22).chain(34..56) {
+        let [red, green, _] = colour(slot);
+        assert!(
+            red > green,
+            "channel {slot} is the peach's flesh and must read pink, not the leaf's green"
+        );
+    }
+    for slot in 22..34 {
+        let [red, green, _] = colour(slot);
+        assert!(green > red, "channel {slot} is a leaf and must read green");
+    }
+
+    // The lamps are where the fixtures put them, not stacked on one another:
+    // the leaf band sits above the body in the shared canvas both maps
+    // declare, which is what makes "the leaf is nowhere" visible.
+    let mid_y = |slots: &mut dyn Iterator<Item = u32>| -> f32 {
+        let ys: Vec<f32> = slots
+            .map(|slot| {
+                layout
+                    .lamps
+                    .iter()
+                    .find(|lamp| lamp.sample_start == slot * 3)
+                    .expect("a lamp for every channel")
+                    .center[1]
+            })
+            .collect();
+        ys.iter().sum::<f32>() / ys.len() as f32
+    };
+    let leaf_y = mid_y(&mut (22..34));
+    let body_y = mid_y(&mut (0..22).chain(34..56));
+    assert!(
+        leaf_y < body_y,
+        "the leaves draw above the fruit ({leaf_y} vs {body_y}) — a layout that \
+         normalized each fixture to its own bounds would pile them together"
+    );
+}
+
+/// A fake board booted with `examples/peach-2d` loaded and running, its
+/// card's ▶ tab selected — the patched-wire fixture.
+fn studio_feeding_a_loaded_peach() -> (StudioController, String, FakeEsp32Device) {
+    let (store, host) = library();
+    let example =
+        crate::app::home::embedded_example("examples/peach-2d").expect("the peach is embedded");
+    let summary = store
+        .install_package("Peach", &example.files(), PackageProvenance::Created, 1.0)
+        .expect("the peach installs");
+    let library_files = store
+        .open(summary.uid)
+        .expect("the installed package opens")
+        .read_all_files()
+        .expect("its files read back");
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(library_files)
+            .with_loaded_project()
+            .with_identity(FakeDeviceIdentity::new(
+                "devaaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let endpoint_id = LinkEndpointId::new("fake-device-0");
+    let provider =
+        FakeProvider::new().with_device_endpoint(endpoint_id.clone(), "Fake ESP32", script);
+    let device = provider.device(&endpoint_id).expect("device registered");
+    let mut registry = LinkProviderRegistry::new();
+    registry.insert(provider);
+    let mut studio = StudioController::with_link_registry_for_test(|| 1.0, registry);
+    studio.attach_library(host);
+    connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
+
+    let card_key = {
+        let view = studio.view();
+        view.home
+            .as_ref()
+            .expect("gallery showing")
+            .devices
+            .iter()
+            .find(|card| !card.sim)
+            .expect("the connected device card")
+            .identity_key()
+            .to_string()
+    };
+    select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Play);
+    (studio, card_key, device)
 }

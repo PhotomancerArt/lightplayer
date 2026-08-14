@@ -21,7 +21,6 @@ use lpc_model::{AsLpPath, LpValue};
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
-use crate::app::project::control_display_layout_fallback::synthesized_map2d_layout;
 use crate::app::studio::studio_edit_e2e_tests::{
     InProcessServerIo, card_matching, drive, editor_dirty, project_action, project_editor,
 };
@@ -311,9 +310,24 @@ fn agent_collapse_preserves_the_composer_draft_end_to_end() {
     assert_eq!(
         shader.card_ui,
         NodeCardUiState::default(),
-        "a fresh card starts expanded with no mirrored draft"
+        "a fresh card starts with no mirrored draft"
+    );
+    assert!(
+        shader.card_ui.agent_collapsed,
+        "a fresh card starts with the agent section collapsed (G1 R-F)"
     );
     let node = shader.header.path.clone();
+
+    // Expand it first — the flip alone, from the collapsed rest state.
+    for op in NodeUiOp::toggle_agent_section(&node, true, "") {
+        handle.tx.send(node_ui_command(op));
+    }
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("expand emits a snapshot");
+    assert!(
+        !node_by_kind(&snapshot, "Shader").card_ui.agent_collapsed,
+        "expanding from the collapsed default opens the section"
+    );
 
     // Collapse with a half-typed draft on hand: mirror rides first, then
     // the flip — the choreography the ShaderFace toggle dispatches.
@@ -1365,6 +1379,435 @@ fn the_panel_transport_drives_all_three_clock_channels() {
     );
 }
 
+/// The peaches' root card shows the WHOLE peach — the wire its output
+/// composes, not one child's raster.
+///
+/// A module face's hero used to read its scope's two bus channels and
+/// nothing else, so the peaches' root card wore the BODY submodule's
+/// `visual.out` mirror: a full-frame pink plane standing in for a project
+/// whose actual output is 56 lamps of body AND leaf (G1 round 3 — "peach
+/// (2d) root module isn't showing control output, just the peach body
+/// visual.out"). The root `control.out` cannot answer for it either: two
+/// submodules export onto it, so it resolves to a fragments map rather than
+/// to any single product. A scope that OWNS an output now heroes that
+/// output's published frame, which is the only thing that knows the whole
+/// composition.
+///
+/// The leaf assertion is the load-bearing half: pink alone would also pass
+/// with the body's own lamps, and "the leaf is nowhere" is exactly the shape
+/// both of this gate's display defects took.
+#[test]
+fn the_peaches_open_onto_a_live_hero() {
+    for id in ["examples/peach-1d", "examples/peach-2d"] {
+        let example = crate::app::home::embedded_example(id).expect("the peach is embedded");
+        let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let _ = view.try_recv().expect("connect emits a snapshot");
+        // The connect read arms the always-live subscriptions; the probe
+        // answers on later reads, and the shader needs a frame to compile.
+        let mut snapshot = None;
+        for _ in 0..4 {
+            handle.tx.send(project_action(ProjectOp::RefreshProject));
+            drive(actor.run_one_batch_for_test());
+            if let Some(next) = view.try_recv() {
+                snapshot = Some(next);
+            }
+        }
+        let snapshot = snapshot.expect("a refresh emits a snapshot");
+
+        let hero = module_face(&snapshot)
+            .preview
+            .unwrap_or_else(|| panic!("{id}: the root module card has no hero at all"));
+        assert_eq!(
+            hero.kind,
+            crate::UiProductKind::Control,
+            "{id}: a scope owning an output heroes its lamps, not a raster"
+        );
+        let crate::UiProductPreview::ControlNative(frame) = &hero.preview else {
+            panic!("{id}: the root hero is not the composed wire: {hero:?}");
+        };
+        let Some(lpc_model::ControlDisplayLayout::Layout2d(layout)) =
+            frame.display_layout.as_deref()
+        else {
+            panic!("{id}: the root hero carries no geometry to draw its lamps with");
+        };
+        assert_eq!(
+            layout.lamps.len(),
+            56,
+            "{id}: the hero draws the WHOLE wire — body (44) plus leaf (12)"
+        );
+        assert!(
+            frame.bytes.iter().any(|byte| *byte != 0),
+            "{id}: the root module hero is entirely black"
+        );
+
+        // Both fixtures, each in its own colour. The leaf is the strand
+        // patched INTO the middle of the body's run (channels 22-33), so a
+        // hero that draws only the first producer, or draws every lamp with
+        // the first producer's offsets, fails here.
+        let lamp_colour = |slot: u32| -> [u16; 3] {
+            let lamp = layout
+                .lamps
+                .iter()
+                .find(|lamp| lamp.sample_start == slot * 3)
+                .unwrap_or_else(|| panic!("{id}: no lamp draws wire channel {slot}"));
+            let base = lamp.sample_start as usize * 2;
+            core::array::from_fn(|channel| {
+                let at = base + channel * 2;
+                u16::from_le_bytes([frame.bytes[at], frame.bytes[at + 1]])
+            })
+        };
+        for slot in [0, 21, 34, 55] {
+            let [red, green, _] = lamp_colour(slot);
+            assert!(
+                red > green,
+                "{id}: wire channel {slot} is the peach's flesh and reads pink"
+            );
+        }
+        for slot in [22, 33] {
+            let [red, green, _] = lamp_colour(slot);
+            assert!(
+                green > red,
+                "{id}: wire channel {slot} is a leaf and reads green"
+            );
+        }
+
+        // …and the rule stops at the scope that owns the output. `body/` and
+        // `leaf/` drive no output of their own, so their cards keep the
+        // ordinary two-channel hero: each shows the lamps ITS scope resolves
+        // (through a real product ref), never the merged wire.
+        let root = project_editor(&snapshot)
+            .nodes
+            .first()
+            .expect("the root module card")
+            .clone();
+        for (name, own_lamps) in [("Body", 44), ("Leaf", 12)] {
+            let child = root
+                .children
+                .iter()
+                .find(|child| child.label == name)
+                .unwrap_or_else(|| panic!("{id}: the {name} submodule card"));
+            let Some(UiNodeFace::Module(face)) = child.face.clone() else {
+                panic!("{id}: {name} wears a module face");
+            };
+            let hero = face
+                .preview
+                .unwrap_or_else(|| panic!("{id}: {name} has no hero"));
+            assert!(
+                hero.product.is_some(),
+                "{id}: {name} heroes its own scope's product, not a sink's frame"
+            );
+            let crate::UiProductPreview::ControlNative(frame) = &hero.preview else {
+                panic!("{id}: {name}'s hero is not its own lamps: {hero:?}");
+            };
+            let Some(lpc_model::ControlDisplayLayout::Layout2d(layout)) =
+                frame.display_layout.as_deref()
+            else {
+                panic!("{id}: {name}'s hero carries no geometry");
+            };
+            assert_eq!(
+                layout.lamps.len(),
+                own_lamps,
+                "{id}: {name} draws its OWN fixture, not the whole wire"
+            );
+        }
+    }
+}
+
+/// Both ends of the peach's patch, off a real running project: the output
+/// card's port row and each fixture card's own row, showing THE SAME cells.
+///
+/// The bay is the first surface in Studio whose data cannot be re-derived
+/// from the project file — auto-flow order belongs to the resolver — so
+/// this walks it the whole way: engine placements → probe → frame cache →
+/// both faces. The load-bearing assertion is the pairing: the body's
+/// reversed run wears one id on the wire row and on its own row, and the
+/// two rows disagree about ORDER (0–21 then 34–55 on the wire; 0–43
+/// unbroken in the fixture's own numbering) while agreeing about content.
+/// That disagreement IS the patch.
+#[test]
+fn the_peaches_patch_bay_shows_the_same_cells_from_both_ends() {
+    for id in ["examples/peach-1d", "examples/peach-2d"] {
+        let example = crate::app::home::embedded_example(id).expect("the peach is embedded");
+        let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let _ = view.try_recv().expect("connect emits a snapshot");
+        let mut snapshot = None;
+        for _ in 0..4 {
+            handle.tx.send(project_action(ProjectOp::RefreshProject));
+            drive(actor.run_one_batch_for_test());
+            if let Some(next) = view.try_recv() {
+                snapshot = Some(next);
+            }
+        }
+        let snapshot = snapshot.expect("a refresh emits a snapshot");
+        let faces = all_faces(&snapshot);
+
+        // -- the output side: one port, the three runs in wire order ------
+        let bay = faces
+            .iter()
+            .find_map(|face| match face {
+                UiNodeFace::Output(output) => output.patch.clone(),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{id}: the output card carries no patch bay"));
+        assert_eq!(bay.ports.len(), 1, "{id}: the peach drives one port");
+        assert_eq!(
+            bay.ports[0]
+                .cells
+                .iter()
+                .map(|cell| (
+                    cell.producer.clone(),
+                    cell.wire_start,
+                    cell.lamps,
+                    cell.reversed
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Peach body".to_string(), 0, 22, false),
+                ("Peach leaf".to_string(), 22, 12, false),
+                ("Peach body".to_string(), 34, 22, true),
+            ],
+            "{id}: body 0-21, the leaf between the halves, body backwards from 34"
+        );
+        assert_eq!(bay.contested_lamps, 0, "{id}: the peach's patch is clean");
+        assert_eq!(bay.gap_lamps, 0, "{id}: and covers its whole wire");
+        let frame = bay
+            .frame
+            .as_ref()
+            .unwrap_or_else(|| panic!("{id}: the bay draws no live wire"));
+        assert!(
+            frame.bytes.iter().any(|byte| *byte != 0),
+            "{id}: the bay's pixels are entirely black"
+        );
+
+        // -- the fixture side: the same runs, the fixture's own order -----
+        let body = faces
+            .iter()
+            .find_map(|face| match face {
+                UiNodeFace::Fixture(fixture) => fixture
+                    .patch
+                    .as_ref()
+                    .filter(|patch| patch.lamps == 44)
+                    .cloned(),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{id}: the body fixture card carries no patch row"));
+        assert_eq!(
+            body.cells
+                .iter()
+                .map(|cell| (
+                    cell.source_start,
+                    cell.lamps,
+                    cell.wire_start,
+                    cell.reversed
+                ))
+                .collect::<Vec<_>>(),
+            vec![(0, 22, 0, false), (22, 22, 34, true)],
+            "{id}: 0-21 forward at ch0, 22-43 backwards from ch34 — unbroken here"
+        );
+        assert!(
+            !body.is_single_run(),
+            "{id}: the body reaches the wire in two pieces"
+        );
+
+        // -- and they are the SAME cells ----------------------------------
+        let wire_ids: Vec<&str> = bay.ports[0]
+            .cells
+            .iter()
+            .map(|cell| cell.id.as_str())
+            .collect();
+        for cell in &body.cells {
+            assert!(
+                wire_ids.contains(&cell.id.as_str()),
+                "{id}: the body's run {} has no twin on the wire row ({wire_ids:?})",
+                cell.id
+            );
+        }
+    }
+}
+
+/// The patch pulse (Q27), the whole way: a `PatchPulseOp` naming the leaf
+/// fixture → the controller maps it through the published placements →
+/// the output's `highlight` Debug slot rides the overlay to the server →
+/// the ENGINE paints the pulse into the published frame the bay reads.
+///
+/// The leaf sits at wire lamps 22–33, patched into the middle of the
+/// body's run — so a pulse that painted producer-relative lamps, or the
+/// whole wire, fails here. The blink alternates highlight-white and dark;
+/// both are grey (R=G=B), and the leaf's own color is green, so the
+/// assertion is phase-independent: those lamps stopped being green.
+#[test]
+fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
+    let example =
+        crate::app::home::embedded_example("examples/peach-1d").expect("the peach is embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    macro_rules! refresh {
+        () => {{
+            let mut snapshot = None;
+            for _ in 0..4 {
+                handle.tx.send(project_action(ProjectOp::RefreshProject));
+                drive(actor.run_one_batch_for_test());
+                if let Some(next) = view.try_recv() {
+                    snapshot = Some(next);
+                }
+            }
+            snapshot.expect("a refresh emits a snapshot")
+        }};
+    }
+    let snapshot = refresh!();
+
+    let bay_of = |snapshot: &UiStudioView| {
+        all_faces(snapshot)
+            .iter()
+            .find_map(|face| match face {
+                UiNodeFace::Output(output) => output.patch.clone(),
+                _ => None,
+            })
+            .expect("the output card carries a patch bay")
+    };
+    let bay = bay_of(&snapshot);
+    // The subject: the leaf, addressed by the runtime id its twin-key
+    // carries (the id a patching surface selects by).
+    let leaf_cell = bay.ports[0]
+        .cells
+        .iter()
+        .find(|cell| cell.producer == "Peach leaf")
+        .expect("the leaf is on the wire");
+    let leaf_node = lpc_model::NodeId::new(
+        leaf_cell
+            .id
+            .split(':')
+            .next()
+            .and_then(|node| node.parse().ok())
+            .expect("the twin key leads with the node id"),
+    );
+    assert_eq!(
+        (leaf_cell.wire_start, leaf_cell.lamps),
+        (22, 12),
+        "the leaf is the strand patched into the body's middle"
+    );
+
+    // The wire before the pulse: leaves green, flesh pink.
+    let lamp_colour = |bay: &crate::UiPatchBay, lamp: u32| -> [u16; 3] {
+        let frame = bay.frame.as_ref().expect("the bay draws a live wire");
+        let base = lamp as usize * 3 * 2;
+        core::array::from_fn(|channel| {
+            let at = base + channel * 2;
+            u16::from_le_bytes([frame.bytes[at], frame.bytes[at + 1]])
+        })
+    };
+    for lamp in [22, 33] {
+        let [red, green, _] = lamp_colour(&bay, lamp);
+        assert!(green > red, "before the pulse, wire lamp {lamp} is a leaf");
+    }
+
+    // Pulse the whole leaf fixture.
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PatchPulseOp {
+            subject: Some(crate::PatchPulseSubject::Fixture {
+                node: leaf_node,
+                range: None,
+            }),
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = refresh!();
+    let bay = bay_of(&snapshot);
+    for lamp in [22, 33] {
+        let [red, green, blue] = lamp_colour(&bay, lamp);
+        assert!(
+            red == green && green == blue,
+            "wire lamp {lamp} pulses grey (highlight white or its dark phase), got {red},{green},{blue}"
+        );
+    }
+    for lamp in [0, 21, 34, 55] {
+        let [red, green, _] = lamp_colour(&bay, lamp);
+        assert!(
+            red > green,
+            "wire lamp {lamp} is the body's flesh and keeps the show while the leaf pulses"
+        );
+    }
+
+    // Clear the pulse: the leaf's own color is back.
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PatchPulseOp { subject: None },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = refresh!();
+    let bay = bay_of(&snapshot);
+    for lamp in [22, 33] {
+        let [red, green, _] = lamp_colour(&bay, lamp);
+        assert!(
+            green > red,
+            "after the clear, wire lamp {lamp} is a leaf again — nothing latched"
+        );
+    }
+}
+
+/// Every face in a snapshot's editor tree, root cards and nested alike.
+fn all_faces(view: &UiStudioView) -> Vec<UiNodeFace> {
+    fn walk(children: &[crate::UiNodeChild], out: &mut Vec<UiNodeFace>) {
+        for child in children {
+            if let Some(face) = child.face.clone() {
+                out.push(face);
+            }
+            walk(&child.children, out);
+        }
+    }
+    let mut faces = Vec::new();
+    for node in &project_editor(view).nodes {
+        if let Some(face) = node.face.clone() {
+            faces.push(face);
+        }
+        walk(&node.children, &mut faces);
+    }
+    faces
+}
+
 #[test]
 fn every_gallery_example_opens_onto_a_populated_root_panel() {
     // A gallery example that opens onto an EMPTY panel teaches the wrong
@@ -1413,6 +1856,20 @@ fn every_gallery_example_opens_onto_a_populated_root_panel() {
             "{}: the root panel publishes nothing — a gallery example must \
              open onto live controls, not an empty panel",
             example.id
+        );
+        // R-E: a nested group is a bordered box with a name on it, so a
+        // group with no controls anywhere inside it is a label pointing at
+        // nothing. Groups that DO publish must survive the filter, which is
+        // what the `published` count above keeps honest.
+        assert!(
+            face.panel.groups.iter().all(|group| !group.is_empty()),
+            "{}: an empty panel group reached the root card: {:?}",
+            example.id,
+            face.panel
+                .groups
+                .iter()
+                .map(|group| (group.label.clone(), group.controls.len()))
+                .collect::<Vec<_>>()
         );
     }
 }
@@ -1520,11 +1977,13 @@ fn the_module_hero_leads_with_the_control_product_and_the_toggle_flips_it() {
 
 #[test]
 fn a_one_product_module_falls_back_to_whichever_product_it_has() {
-    // The preference names a kind the scope does not resolve: the hero
-    // falls back to the other one, in both directions, and no toggle is
-    // offered — a one-product module has no choice to make. Neither
-    // project routes its primaries any differently from a real one; each
-    // simply leaves one primary channel unwritten.
+    // The preference names a kind the scope does not resolve. Both projects
+    // route their primaries like a real one; each simply leaves one primary
+    // channel unwritten — and both DRIVE AN OUTPUT, which is the other half
+    // of the answer here: a scope that owns an output heroes the wire that
+    // output composes whichever bus channels resolve, so the fallback the
+    // toggle expresses is between the wire and the raster, not between two
+    // bus channels.
     for visual_only in [false, true] {
         let server = Rc::new(RefCell::new(single_product_e2e_server(visual_only)));
         let io = InProcessServerIo {
@@ -1548,74 +2007,33 @@ fn a_one_product_module_falls_back_to_whichever_product_it_has() {
 
         let face = module_face(&snapshot);
         assert_eq!(
-            face.hero_choice, None,
-            "visual_only={visual_only}: one product is not a choice"
+            face.hero_choice,
+            // The raster-only project publishes `visual.out` AND drives an
+            // output, so there is a genuine choice to draw; the other writes
+            // no `visual.out` at all and has nothing to flip to.
+            visual_only.then_some(crate::ModuleHeroProduct::Control),
+            "visual_only={visual_only}: a toggle appears exactly when both sides exist"
         );
-        let want = if visual_only {
-            crate::UiProductKind::Visual
-        } else {
-            crate::UiProductKind::Control
-        };
         assert_eq!(
             face.preview.expect("the root module's hero").kind,
-            want,
-            "visual_only={visual_only}: the hero falls back to the product \
-             the scope actually resolves"
+            crate::UiProductKind::Control,
+            "visual_only={visual_only}: the lamps lead either way — through the \
+             scope's own control product, or through the output's wire"
         );
     }
 }
 
-/// The phase's oracle: what Studio synthesizes client-side must be what the
-/// engine would have sent, field for field.
+/// Dome scale: the ENGINE answers the 1500-lamp layout over the wire.
 ///
-/// The face project's fixture is small (16 lamps), so the engine sends its
-/// display layout outright. Synthesizing from the SAME document at the same
-/// render extent and comparing the two layouts is the only check that keeps
-/// the mirrored construction (`control_display_layout_fallback`) honest as
-/// the engine's own layout builder evolves.
+/// Packed (spans + base64 u16 centers, ~5.4 B/lamp) the dome's layout
+/// rides one project-read frame with margin — no client-side synthesis,
+/// no mapping-document fetch, no re-derivation that can drift from the
+/// engine's own geometry. The declared embedded ceiling is 2048 lamps
+/// (`a_2048_lamp_layout_fits_the_serial_frame_budget` in lpc-wire); this
+/// is the studio-tier proof that the flagship dome case lands on the face
+/// straight from the probe.
 #[test]
-fn synthesized_display_layout_matches_the_engines_own_layout() {
-    let server = Rc::new(RefCell::new(face_e2e_server()));
-    let io = InProcessServerIo {
-        server: Rc::clone(&server),
-        inbox: Rc::new(RefCell::new(VecDeque::new())),
-        sent: Rc::new(RefCell::new(Vec::new())),
-    };
-    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-    let controller = StudioController::connected_with_client_for_test(client);
-    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
-    let mut view = handle.view;
-
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
-    drive(actor.run_one_batch_for_test());
-    let _ = view.try_recv().expect("connect emits a snapshot");
-    // The connect read arms the product subscriptions; the probe answers on
-    // the next read.
-    handle.tx.send(project_action(ProjectOp::RefreshProject));
-    drive(actor.run_one_batch_for_test());
-    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
-
-    let engine = fixture_display_layout(&snapshot)
-        .expect("a 16-lamp layout is far under the wire budget, so the engine sends it");
-    let doc = lpc_mapping::Map2dDoc::from_json(FACE_MAP2D).expect("the mapping document parses");
-
-    let synthesized = synthesized_map2d_layout(&doc, engine.revision, 4, 4)
-        .expect("the same document synthesizes client-side");
-
-    assert_eq!(
-        synthesized, engine,
-        "client synthesis and engine layout must agree on every lamp, hint, and path span"
-    );
-}
-
-/// Dome scale: the engine refuses the 1500-lamp layout (over the read-frame
-/// wire budget), and the client fills it in from the mapping document
-/// instead of leaving both faces reading "Control product has no display
-/// layout."
-#[test]
-fn dome_scale_fixture_falls_back_to_a_client_synthesized_layout() {
+fn a_dome_scale_layout_arrives_over_the_wire() {
     let example = crate::app::home::embedded_example("examples/zook-dome")
         .expect("the zook-dome example ships in the bundle");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
@@ -1640,11 +2058,10 @@ fn dome_scale_fixture_falls_back_to_a_client_synthesized_layout() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("the refresh emits a snapshot");
 
-    // The engine refused the layout (over the wire budget), and the sync
-    // path fetched the mapping document itself — no card has to mount, no
-    // editor has to open. The synthesized layout is already on the preview.
+    // The probe answered: the packed layout crossed the read and is already
+    // on the preview — no card has to mount, no editor has to open.
     let layout = fixture_display_layout(&snapshot)
-        .expect("the sync fetches the document and synthesizes the layout the engine refused");
+        .expect("the engine answers the dome-scale layout over the wire");
     assert_eq!(layout.lamps.len(), 1500, "every dome lamp is laid out");
     assert_eq!(
         (layout.width_hint, layout.height_hint),
@@ -1737,11 +2154,10 @@ fn example_e2e_server(example: &crate::app::home::EmbeddedExample) -> LpServer {
 const PROJECT_DIR: &str = "/projects/face-e2e";
 
 /// The shader uses the panel uniform so its compile stays honest.
-const FACE_SHADER: &str = "layout(binding = 0) uniform float speed;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x * speed, pos.y, 0.5, 1.0);\n}\n";
+const FACE_SHADER: &str = "layout(binding = 0) uniform float speed;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(pos.x * speed, pos.y, 0.5, 1.0);\n}\n";
 
-/// The face fixture's mapping document — 16 lamps, small enough that the
-/// engine sends its display layout outright, which makes it the parity
-/// oracle for the client-side synthesis.
+/// The face fixture's mapping document — 16 lamps on a 4×4 grid, the
+/// smallest shape that exercises spans, centers, and radii together.
 const FACE_MAP2D: &str = r#"{
   "format": 1,
   "objects": [
@@ -1762,7 +2178,7 @@ fn face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1825,7 +2241,7 @@ fn face_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": {
       "endpoint": "ws281x:local:D10"
     }
@@ -1885,7 +2301,7 @@ fn single_product_e2e_server(visual_only: bool) -> LpServer {
     } else {
         ("bus:raster", "bus:control.out")
     };
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -1935,7 +2351,7 @@ fn single_product_e2e_server(visual_only: bool) -> LpServer {
     let output_json = format!(
         r#"{{
   "kind": "Output",
-  "channels": {{
+  "ports": {{
     "0": {{ "endpoint": "ws281x:local:D10" }}
   }},
   "bindings": {{
@@ -1943,7 +2359,7 @@ fn single_product_e2e_server(visual_only: bool) -> LpServer {
   }}
 }}"#
     );
-    let single_product_shader = "layout(binding = 0) uniform float speed;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x * speed, pos.y, 0.5, 1.0);\n}\n";
+    let single_product_shader = "layout(binding = 0) uniform float speed;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(pos.x * speed, pos.y, 0.5, 1.0);\n}\n";
     let files: &[(&str, &str)] = &[
         ("project.json", project_json),
         ("module.json", module_json),
@@ -1975,7 +2391,7 @@ const BOUND_GLOW_PROJECT_DIR: &str = "/projects/bound-glow-e2e";
 /// The fyeah-sign shape: `glow` bound to `bus:glow`, `speed` unbound (and
 /// therefore, since Q13, not on any panel). Both uniforms feed the shader so the
 /// compile stays honest.
-const BOUND_GLOW_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayout(binding = 1) uniform float glow;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x * speed, glow, 0.5, 1.0);\n}\n";
+const BOUND_GLOW_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayout(binding = 1) uniform float glow;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(pos.x * speed, glow, 0.5, 1.0);\n}\n";
 
 fn bound_glow_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
@@ -1990,7 +2406,7 @@ fn bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     // Authored provenance (R14/§8): the root face's footer line is derived
     // from these, and the omitted `created` proves the join skips absent
     // fields rather than leaving a dangling separator.
@@ -2050,7 +2466,7 @@ fn bound_glow_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:D10" }
   },
   "bindings": {
@@ -2084,7 +2500,7 @@ fn bound_glow_e2e_server() -> LpServer {
 
 const PALETTE_E2E_DIR: &str = "/projects/palette-e2e";
 
-const PALETTE_E2E_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayout(binding = 1) uniform sampler2D palette;\n\nvec4 render(vec2 pos) {\n    return texture(palette, vec2(pos.x * speed, 0.0));\n}\n";
+const PALETTE_E2E_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayout(binding = 1) uniform sampler2D palette;\n\nvec4 render_2d(vec2 pos) {\n    return texture(palette, vec2(pos.x * speed, 0.0));\n}\n";
 
 /// The Palette Plasma shape (M4 D5): a `palette` slot promoted to the panel
 /// by `default_bind: bus:palette` + `panel: "show"` — no authored binding.
@@ -2101,7 +2517,7 @@ fn palette_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2151,7 +2567,7 @@ fn palette_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:D10" }
   },
   "bindings": {
@@ -2413,7 +2829,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2474,7 +2890,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:D10" }
   },
   "bindings": {
@@ -2525,7 +2941,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2560,7 +2976,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
     );
     let idle_json = r#"{ "kind": "Shader", "source": "idle.glsl" }"#;
     let active_json = r#"{ "kind": "Shader", "source": "active.glsl" }"#;
-    let entry_glsl = "vec4 render(vec2 pos) {\n    return vec4(pos.x, pos.y, 0.5, 1.0);\n}\n";
+    let entry_glsl = "vec4 render_2d(vec2 pos) {\n    return vec4(pos.x, pos.y, 0.5, 1.0);\n}\n";
     let fixture_json = r#"{
   "kind": "Fixture",
   "render_size": { "width": 4, "height": 4 },
@@ -2571,7 +2987,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": {
       "endpoint": "ws281x:local:D10"
     }
@@ -2625,7 +3041,7 @@ fn output_face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 6\n}\n";
+    let project_json = "{\n  \"format\": 10\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2666,7 +3082,7 @@ fn output_face_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
-  "channels": {
+  "ports": {
     "0": { "endpoint": "ws281x:local:IO18", "count": 6 },
     "1": { "endpoint": "ws281x:local:IO16", "count": 4 },
     "2": { "endpoint": "ws281x:local:IO2" }
@@ -2743,15 +3159,15 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
     let face = output_face(&snapshot);
-    assert_eq!(face.channels.len(), 3, "one row per authored wire");
+    assert_eq!(face.ports.len(), 3, "one row per authored wire");
     let labels: Vec<&str> = face
-        .channels
+        .ports
         .iter()
         .map(|channel| channel.pin_label.as_str())
         .collect();
     assert_eq!(labels, ["IO18", "IO16", "IO2"], "in channel-key order");
     assert_eq!(
-        face.channels
+        face.ports
             .iter()
             .map(|channel| (channel.count, channel.slice_start))
             .collect::<Vec<_>>(),
@@ -2761,7 +3177,7 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
     // count-less wire can finally say what it drives.
     assert_eq!(face.total_lamps, Some(16));
     assert_eq!(
-        face.channels[2].resolved_count,
+        face.ports[2].resolved_count,
         Some(6),
         "the remainder is what the counted wires left"
     );
@@ -2770,18 +3186,18 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
         "this harness has no device registry — 'no board known' is a normal state"
     );
     assert!(
-        face.channels.iter().all(|channel| channel.gpio.is_none()),
+        face.ports.iter().all(|channel| channel.gpio.is_none()),
         "and with no board, no pin resolves"
     );
     assert_eq!(face.input_binding.as_deref(), Some("bus:control.out"));
 
     // The addresses are real: editing a count rides the ordinary slot path
     // and the whole slice plan re-derives from it.
-    let count_address = face.channels[0]
+    let count_address = face.ports[0]
         .count_address
         .clone()
         .expect("a present count is addressed");
-    assert_eq!(count_address.path.to_string(), "channels[0].count.some");
+    assert_eq!(count_address.path.to_string(), "ports[0].count.some");
     handle
         .tx
         .send(set_value_action(count_address, LpValue::U32(8)));
@@ -2789,14 +3205,14 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
     let snapshot = view.try_recv().expect("the edit emits a snapshot");
 
     let face = output_face(&snapshot);
-    assert_eq!(face.channels[0].count, Some(8));
+    assert_eq!(face.ports[0].count, Some(8));
     assert_eq!(
-        face.channels[1].slice_start,
+        face.ports[1].slice_start,
         Some(8),
         "the following wires shift with it"
     );
     assert_eq!(
-        face.channels[2].resolved_count,
+        face.ports[2].resolved_count,
         Some(4),
         "and the remainder shrinks by the same four lamps"
     );
@@ -2808,6 +3224,175 @@ fn output_face_derives_multi_channel_wires_end_to_end() {
         output_json.contains("\"count\":8"),
         "the face's edit persisted through the normal save path: {output_json}"
     );
+}
+
+/// The `space` sections both visual-side cards grow (plan-B P3), against a
+/// REAL projection: the slot rows have to flatten the way the derivation
+/// assumes, the claimed rows have to leave the advanced drawer, and the
+/// preview has to come back tagged with the space it rendered in.
+#[test]
+fn space_sections_derive_and_claim_their_rows_end_to_end() {
+    use crate::{UiSpaceCellRole, UiSpaceSide, UiVisualSpace};
+
+    let server = Rc::new(RefCell::new(face_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    // -- producer side ----------------------------------------------------
+    let shader = node_by_kind(&snapshot, "Shader");
+    let Some(UiNodeFace::Shader(face)) = &shader.face else {
+        panic!("shader node derives a shader face");
+    };
+    let space = face
+        .space
+        .as_ref()
+        .expect("the shader card's space section");
+    assert_eq!(space.side, UiSpaceSide::Producer);
+    assert_eq!(
+        space.declared_space,
+        Some(UiVisualSpace::TwoD),
+        "every shader authored before this plan declares 2D"
+    );
+    assert_eq!(space.primary.active, "TwoD");
+    assert_eq!(
+        space.primary.choices.len(),
+        2,
+        "both declared variants reach the picker"
+    );
+    let in_1d = space
+        .cell(UiSpaceCellRole::ProducerIn1d)
+        .expect("a 2D shader carries its 1D answer cell");
+    assert_eq!(
+        in_1d
+            .address
+            .as_ref()
+            .expect("the answer cell is addressed")
+            .path
+            .to_string(),
+        "space.TwoD.in_1d",
+        "the cell dispatches EnsurePresent at the real slot path"
+    );
+    assert!(
+        !in_1d.is_choosable(),
+        "centre scanline is the only declared answer today"
+    );
+    assert!(space.mismatch.is_none(), "the demo shader compiles");
+    assert!(
+        !config_row_keys(&shader).iter().any(|key| key == "space"),
+        "the section CLAIMED the row: {:?}",
+        config_row_keys(&shader)
+    );
+
+    // The hero preview is space-tagged now, and the card previews exactly
+    // one space by default — its producer's own.
+    assert_eq!(
+        face.preview
+            .spaces
+            .iter()
+            .map(|view| (view.space, view.hero))
+            .collect::<Vec<_>>(),
+        vec![(UiVisualSpace::TwoD, true)],
+        "default = primary-space-only (D15)"
+    );
+    // …and once a probe has actually answered, the view carries the
+    // metadata the D15 caption reads (`native · 2D` here).
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("the refresh emits a snapshot");
+    let shader = node_by_kind(&snapshot, "Shader");
+    let Some(UiNodeFace::Shader(face)) = &shader.face else {
+        panic!("shader node derives a shader face");
+    };
+    let hero = &face.preview.spaces[0];
+    assert!(
+        matches!(hero.preview, crate::UiProductPreview::VisualSrgb8 { .. }),
+        "the hero space carries the probed bytes, got {:?}",
+        hero.preview
+    );
+    let meta = hero.meta.expect("the probe answered space metadata");
+    assert_eq!(meta.primary, UiVisualSpace::TwoD);
+    assert_eq!(meta.space, UiVisualSpace::TwoD);
+    assert_eq!(
+        meta.projection, None,
+        "a 2D producer asked for 2D projects nothing"
+    );
+
+    // -- consumer side (the mirror) ---------------------------------------
+    let fixture = node_by_kind(&snapshot, "Fixture");
+    let Some(UiNodeFace::Fixture(face)) = &fixture.face else {
+        panic!("fixture node derives a fixture face");
+    };
+    let space = face
+        .space
+        .as_ref()
+        .expect("the fixture card's space section");
+    assert_eq!(space.side, UiSpaceSide::Consumer);
+    assert_eq!(space.declared_space, None, "a fixture states a policy");
+    assert_eq!(
+        space.primary.active, "AlongWire",
+        "the default true strip-order bit selects the dropdown's \
+         along-the-wire entry (strip-order unification)"
+    );
+    assert!(
+        space.cells.is_empty(),
+        "the consumer's primary IS its only cell"
+    );
+    let strip = space
+        .primary
+        .strip_order
+        .as_ref()
+        .expect("the strip-order row rides the consumer cell");
+    assert!(strip.value, "a bare strip is {{1D}} by default (D3)");
+    assert_eq!(
+        strip
+            .address
+            .as_ref()
+            .expect("the row is addressed")
+            .path
+            .to_string(),
+        "strip_order_meaningful",
+    );
+    let keys = config_row_keys(&fixture);
+    assert!(
+        !keys.iter().any(|key| key == "consume"
+            || key == "strip_order_meaningful"
+            || key == "wire_reversed"),
+        "the consumer rows left the drawer: {keys:?}"
+    );
+    assert!(
+        keys.iter().any(|key| key == "mapping"),
+        "and the drawer keeps everything the section did not claim: {keys:?}"
+    );
+}
+
+/// Top-level config-row keys in a card's advanced drawer.
+fn config_row_keys(node: &UiNodeView) -> Vec<String> {
+    node.tabs
+        .iter()
+        .flat_map(|tab| match &tab.body {
+            crate::UiNodeTabBody::Sections(sections) => sections.clone(),
+            _ => Vec::new(),
+        })
+        .filter_map(|section| match section {
+            crate::UiNodeSection::ConfigSlots(rows) => Some(rows),
+            _ => None,
+        })
+        .flatten()
+        .map(|row| row.key)
+        .collect()
 }
 
 fn read_project_file(server: &Rc<RefCell<LpServer>>, name: &str) -> String {
@@ -2917,4 +3502,968 @@ fn fixture_fader(view: &UiStudioView) -> UiPanelControl {
         panic!("fixture face present");
     };
     face.brightness
+}
+
+/// A gallery example must open with no warning badge on any card.
+///
+/// The badge that used to be here was the untouched panel knob: a value
+/// uniform bound to a bus channel nobody writes yet, running on its declared
+/// default. Six of the packages wore one on their shader card the moment
+/// they opened (`reach`/`sparks`, `scale`, `tail`, `depth`, `count`/`speed`)
+/// while the panel's own control for the very same channel read "default" —
+/// `modules.md` R6 calls that an invitation, and the engine now agrees
+/// (`unwritten_channel_at_rest`).
+///
+/// Warning tone only, deliberately: `fyeah-sign`'s radio card reports an
+/// Error here because this in-process server carries no radio service, which
+/// is a property of the harness rather than of the package.
+#[test]
+fn no_gallery_example_opens_onto_a_warning_badge() {
+    fn warnings(items: &[crate::ProjectNodeTreeItem], found: &mut Vec<String>) {
+        for item in items {
+            if item.status.tone == crate::ProjectNodeStatusTone::Warning {
+                found.push(format!(
+                    "{} [{}]: {}",
+                    item.label,
+                    item.kind,
+                    item.status.detail.clone().unwrap_or_default()
+                ));
+            }
+            warnings(&item.children, found);
+        }
+    }
+
+    for example in crate::app::home::embedded_examples() {
+        let server = Rc::new(RefCell::new(example_e2e_server(example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+        let mut found = Vec::new();
+        warnings(&project_editor(&snapshot).tree.roots, &mut found);
+        assert!(
+            found.is_empty(),
+            "{}: opens onto {} warning badge(s): {found:?}",
+            example.id,
+            found.len()
+        );
+    }
+}
+
+/// The patch surface (D36, slice 2), end to end at BOTH grains: on
+/// mini-dome (instance grain: two named outputs, sectors + doors,
+/// instance chips with strides) and on peach-1d (range grain: one unnamed
+/// output, NO instances — the surface must not invent an address grain
+/// the format cannot store). Selection round-trips through
+/// `ProjectEditorOp::PatchSelect` — the core-owned state the P6 verbs
+/// read.
+#[test]
+fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
+    use crate::UiPatchTarget;
+
+    for (id, expect_instances) in [("examples/mini-dome", true), ("examples/peach-1d", false)] {
+        let example = crate::app::home::embedded_example(id).expect("example embedded");
+        let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+        let io = InProcessServerIo {
+            server: Rc::clone(&server),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        };
+        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+        let controller = StudioController::connected_with_client_for_test(client);
+        let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+        let mut view = handle.view;
+
+        handle
+            .tx
+            .send(project_action(ProjectOp::ConnectRunningProject));
+        drive(actor.run_one_batch_for_test());
+        let _ = view.try_recv().expect("connect emits a snapshot");
+        let mut snapshot = None;
+        for _ in 0..4 {
+            handle.tx.send(project_action(ProjectOp::RefreshProject));
+            drive(actor.run_one_batch_for_test());
+            if let Some(next) = view.try_recv() {
+                snapshot = Some(next);
+            }
+        }
+        let snapshot = snapshot.expect("a refresh emits a snapshot");
+        // Resolve the fixtures' map2d bodies (the page dispatches the same
+        // fetch on mount), then refresh so the instance tables fill in.
+        {
+            let editor = project_editor(&snapshot);
+            let surface = editor
+                .patch_surface
+                .as_ref()
+                .unwrap_or_else(|| panic!("{id}: the editor carries no patch surface"));
+            for fixture in &surface.fixtures {
+                if let Some(artifact) = fixture.mapping_artifact.clone() {
+                    handle
+                        .tx
+                        .send(StudioCommand::Action(crate::UiAction::from_op(
+                            ProjectController::NODE_ID,
+                            crate::AssetContentFetchOp { artifact },
+                        )));
+                    drive(actor.run_one_batch_for_test());
+                }
+            }
+        }
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        let snapshot = view.try_recv().unwrap_or(snapshot);
+        let editor = project_editor(&snapshot);
+        let surface = editor
+            .patch_surface
+            .as_ref()
+            .unwrap_or_else(|| panic!("{id}: the editor carries no patch surface"));
+
+        if expect_instances {
+            // The mini-dome: two named outputs, both fixtures at instance
+            // grain with the archetype's strides (sector fine-step 1,
+            // door 3).
+            assert_eq!(surface.outputs.len(), 2, "{id}");
+            let names: Vec<&str> = surface
+                .outputs
+                .iter()
+                .map(|output| output.display_name())
+                .collect();
+            assert!(
+                names.contains(&"1") && names.contains(&"Box 2"),
+                "{names:?}"
+            );
+            let dome = surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains("dome"))
+                .unwrap_or_else(|| panic!("{id}: no dome fixture on the surface"));
+            assert_eq!(dome.instances.len(), 5, "{id}: five sector instances");
+            assert_eq!(dome.instances[2].path, "/sector/2");
+            // A path sector has no intrinsic period, so its instances step
+            // by 1 (fine rotation); the doors below carry an authored
+            // stride override instead. G1 question 3 owns whether sectors
+            // should inherit an authored override too.
+            assert_eq!(dome.instances[2].stride, 1);
+            let doors = surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains("door"))
+                .unwrap_or_else(|| panic!("{id}: no doors fixture on the surface"));
+            assert_eq!(doors.instances.len(), 3, "{id}: three door panels");
+            assert_eq!(
+                doors.instances[1].stride, 3,
+                "{id}: a door rotates a third at a time (authored stride)"
+            );
+        } else {
+            // The peach: one unnamed output; fixtures patch at range grain.
+            assert_eq!(surface.outputs.len(), 1, "{id}");
+            assert_eq!(surface.outputs[0].name, None, "{id}: unnamed output");
+            assert!(
+                surface
+                    .fixtures
+                    .iter()
+                    .all(|fixture| fixture.instances.is_empty()),
+                "{id}: no ids, no instance grain"
+            );
+            assert!(
+                !surface.fixtures.is_empty(),
+                "{id}: the range-grain fixtures still show their runs"
+            );
+        }
+
+        // The module level above the fixtures/outputs (G1): the walk
+        // collects the root module face, and every fixture/output points
+        // at its nearest enclosing module.
+        assert!(
+            !surface.modules.is_empty(),
+            "{id}: the root module is on the surface"
+        );
+        let root = &surface.modules[0];
+        assert_eq!(root.depth, 0, "{id}: the root module nests at depth 0");
+        let module_nodes: Vec<_> = surface.modules.iter().map(|module| module.node).collect();
+        assert!(
+            surface.fixtures.iter().all(|fixture| fixture
+                .module
+                .is_some_and(|node| module_nodes.contains(&node))),
+            "{id}: every fixture points at a module on the surface"
+        );
+        assert!(
+            surface.outputs.iter().all(|output| output
+                .module
+                .is_some_and(|node| module_nodes.contains(&node))),
+            "{id}: every output points at a module on the surface"
+        );
+        if expect_instances {
+            // The mini-dome's real tree: each fixture lives in its OWN
+            // sub-module (Dome, Doors) under the root show — the nearest
+            // enclosing module wins, not the root.
+            let dome_fixture = surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains("dome"))
+                .expect("dome fixture");
+            let dome_module = surface
+                .modules
+                .iter()
+                .find(|module| module.node == dome_fixture.module.expect("dome has a module"))
+                .expect("dome's module is on the surface");
+            assert_eq!(dome_module.label, "Dome", "{id}: nearest enclosing module");
+            assert_eq!(dome_module.depth, 1, "{id}: sub-module nests one deep");
+        }
+
+        // Selection round-trip: PatchSelect lands in the next snapshot.
+        let target = surface
+            .fixtures
+            .first()
+            .map(|fixture| UiPatchTarget::Fixture { node: fixture.node })
+            .expect("a fixture to select");
+        handle
+            .tx
+            .send(StudioCommand::Action(crate::UiAction::from_op(
+                crate::ProjectEditorTarget::NodeTree.node_id(),
+                crate::ProjectEditorOp::PatchSelect {
+                    target: Some(target.clone()),
+                },
+            )));
+        drive(actor.run_one_batch_for_test());
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        let mut latest = None;
+        while let Some(next) = view.try_recv() {
+            latest = Some(next);
+        }
+        let snapshot = latest.expect("selection emits a snapshot");
+        assert_eq!(
+            project_editor(&snapshot).patch_selection,
+            Some(target),
+            "{id}: the selection is core state, not view-local"
+        );
+    }
+}
+
+/// The G1 acceptance run, headless: author the mini-dome's as-built
+/// permutation LIVE through the verb ops — clear both fixtures, assign
+/// every sector and door to its port, reverse `/sector/1`, rotate
+/// `/sector/2` by ten lamps and `/door/1` by one SIDE — and the written
+/// documents equal the shipped hand-authored files **byte for byte**.
+/// Then undo walks the whole thing back to the cleared state.
+#[test]
+fn verbs_author_the_mini_dome_permutation_byte_identically() {
+    use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let shipped: std::collections::BTreeMap<&str, &[u8]> = example
+        .files
+        .iter()
+        .map(|(path, bytes)| (*path, *bytes))
+        .collect();
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let mut snapshot = None;
+    for _ in 0..4 {
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = Some(next);
+        }
+    }
+    let snapshot = snapshot.expect("a refresh emits a snapshot");
+
+    // Fetch every fixture's patch + map2d bodies (what the page does).
+    let (dome, doors) = {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        let by_label = |needle: &str| {
+            surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains(needle))
+                .unwrap_or_else(|| panic!("no {needle} fixture"))
+                .clone()
+        };
+        (by_label("dome"), by_label("door"))
+    };
+    // Fetch exactly what the page's mount prefetch would: bodies whose
+    // loaded flag is still false. If the DTO flags ever lie (claim loaded
+    // while the cache is cold), the verbs below block and this test fails —
+    // the live-surface contract, not a test-only shortcut.
+    for fixture in [&dome, &doors] {
+        let wanted = [
+            (fixture.patch_loaded, fixture.patch_artifact.clone()),
+            (fixture.mapping_loaded, fixture.mapping_artifact.clone()),
+        ];
+        for artifact in wanted
+            .into_iter()
+            .filter_map(|(loaded, artifact)| (!loaded).then_some(artifact))
+            .flatten()
+        {
+            handle
+                .tx
+                .send(StudioCommand::Action(crate::UiAction::from_op(
+                    ProjectController::NODE_ID,
+                    crate::AssetContentFetchOp { artifact },
+                )));
+            drive(actor.run_one_batch_for_test());
+        }
+    }
+
+    let fixtures = || {
+        [&dome, &doors]
+            .iter()
+            .map(|fixture| crate::PatchVerbFixture {
+                node: fixture.node,
+                patch_artifact: fixture.patch_artifact.clone().expect("patch artifact"),
+                mapping_artifact: fixture.mapping_artifact.clone(),
+                lamp_count: fixture.patch.lamps,
+            })
+            .collect::<Vec<_>>()
+    };
+    macro_rules! verb {
+        ($subject_fixture:expr, $path:expr, $kind:expr) => {{
+            handle
+                .tx
+                .send(StudioCommand::Action(crate::UiAction::from_op(
+                    ProjectController::NODE_ID,
+                    PatchVerbOp {
+                        subject_fixture: Some($subject_fixture),
+                        subject: PatchVerbSubject {
+                            path: ($path as Option<&str>).map(str::to_string),
+                            range: None,
+                        },
+                        fixtures: fixtures(),
+                        assign_output_name: None,
+                        verb: $kind,
+                    },
+                )));
+            drive(actor.run_one_batch_for_test());
+        }};
+    }
+
+    // Clear both docs, then author the permutation in row order.
+    verb!(dome.node, None, PatchVerbKind::Clear);
+    verb!(doors.node, None, PatchVerbKind::Clear);
+    let assign = |name: &str, lamp: u32| PatchVerbKind::Assign {
+        output_name: Some(name.to_string()),
+        lamp,
+    };
+    verb!(dome.node, Some("/sector/0"), assign("1", 69));
+    verb!(dome.node, Some("/sector/1"), assign("Box 2", 0));
+    verb!(dome.node, Some("/sector/1"), PatchVerbKind::Reverse);
+    verb!(dome.node, Some("/sector/2"), assign("1", 0));
+    verb!(
+        dome.node,
+        Some("/sector/2"),
+        PatchVerbKind::Rotate {
+            steps: 1,
+            stride: 10,
+        }
+    );
+    verb!(dome.node, Some("/sector/3"), assign("Box 2", 39));
+    verb!(dome.node, Some("/sector/4"), assign("1", 39));
+    verb!(doors.node, Some("/door/0"), assign("1", 30));
+    verb!(doors.node, Some("/door/1"), assign("Box 2", 30));
+    verb!(
+        doors.node,
+        Some("/door/1"),
+        PatchVerbKind::Rotate {
+            steps: 1,
+            stride: 3
+        }
+    );
+    verb!(doors.node, Some("/door/2"), assign("1", 99));
+
+    // Persist the overlay so the authored bytes are on disk (the same
+    // save the user presses), then read them back.
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    while view.try_recv().is_some() {}
+
+    // The authored bytes ARE the shipped bytes.
+    let project_dir = format!("/projects/{}", example.id.replace('/', "-"));
+    let body_of = |artifact: &lpc_model::ArtifactLocation| {
+        let path = format!(
+            "{project_dir}/{}",
+            artifact.file_path().as_str().trim_start_matches('/')
+        );
+        let bytes = server
+            .borrow()
+            .base_fs()
+            .read_file(path.as_str().as_path())
+            .unwrap_or_else(|_| panic!("no body at {path}"));
+        String::from_utf8(bytes).expect("utf8 patch doc")
+    };
+    assert_eq!(
+        body_of(dome.patch_artifact.as_ref().unwrap()),
+        String::from_utf8_lossy(shipped["dome/dome.patch.json"]).to_string(),
+        "the dome's authored patch equals the hand-authored truth"
+    );
+    assert_eq!(
+        body_of(doors.patch_artifact.as_ref().unwrap()),
+        String::from_utf8_lossy(shipped["doors/doors.patch.json"]).to_string(),
+        "the doors' authored patch equals the hand-authored truth"
+    );
+
+    // Undo restores the exact prior bytes, one gesture at a time.
+    let before_undo = body_of(doors.patch_artifact.as_ref().unwrap());
+    verb!(doors.node, None, PatchVerbKind::Undo);
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    while view.try_recv().is_some() {}
+    let after_undo = body_of(doors.patch_artifact.as_ref().unwrap());
+    assert_ne!(before_undo, after_undo, "undo moved the document back");
+    verb!(doors.node, None, PatchVerbKind::Redo);
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    while view.try_recv().is_some() {}
+    assert_eq!(
+        body_of(doors.patch_artifact.as_ref().unwrap()),
+        before_undo,
+        "redo restores the undone gesture byte-for-byte"
+    );
+}
+
+/// The Arrange substrate end-to-end (unified-editor P2): the editor.json
+/// loaded-flag settles ABSENT through the fetch op (no file in a fresh
+/// project — never a read error), an [`crate::EditorMetaOp`] Set writes a
+/// byte-stable canonical document (with the dome's cached footprint
+/// refreshed as part of the write), the surface reflects the arrangement,
+/// arrange undo/redo replay exact bytes on their own mode-scoped stack,
+/// and every edit stamps the correlation journal.
+#[test]
+fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
+    use crate::{EditorMetaFixture, EditorMetaOp, EditorMetaVerb, UiArrangeTransform};
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let mut snapshot = None;
+    for _ in 0..4 {
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = Some(next);
+        }
+    }
+    let snapshot = snapshot.expect("a refresh emits a snapshot");
+    macro_rules! refresh_snapshot {
+        ($fallback:expr) => {{
+            handle.tx.send(project_action(ProjectOp::RefreshProject));
+            drive(actor.run_one_batch_for_test());
+            let mut latest = None;
+            while let Some(next) = view.try_recv() {
+                latest = Some(next);
+            }
+            latest.unwrap_or($fallback)
+        }};
+    }
+
+    // Before the fetch: the flag says unloaded, the artifact says where.
+    let (dome, editor_artifact) = {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        assert!(
+            !surface.editor_meta_loaded,
+            "editor.json cannot be loaded before anything fetched it"
+        );
+        let dome = surface
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.label.to_lowercase().contains("dome"))
+            .expect("dome fixture")
+            .clone();
+        assert_eq!(dome.arrange, None, "no arrange facts before the fetch");
+        (
+            dome,
+            surface
+                .editor_meta_artifact
+                .clone()
+                .expect("the surface names the editor.json artifact"),
+        )
+    };
+
+    // The fetch settles ABSENT (fresh project, no editor.json) — driven by
+    // the flag exactly as a page would.
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            crate::EditorMetaFetchOp {
+                artifact: editor_artifact.clone(),
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = refresh_snapshot!(snapshot);
+    {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        assert!(surface.editor_meta_loaded, "absence IS a settled state");
+        assert_eq!(surface.editor_meta_error, None);
+        let dome = surface
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.node == dome.node)
+            .expect("dome");
+        let arrange = dome.arrange.as_ref().expect("arrange facts present");
+        assert!(!arrange.arranged, "nothing has been dragged yet");
+        assert_eq!(arrange.transform, UiArrangeTransform::default());
+    }
+
+    // Cache the dome's map2d so the write can refresh its footprint.
+    if let Some(artifact) = dome.mapping_artifact.clone() {
+        handle
+            .tx
+            .send(StudioCommand::Action(crate::UiAction::from_op(
+                ProjectController::NODE_ID,
+                crate::AssetContentFetchOp { artifact },
+            )));
+        drive(actor.run_one_batch_for_test());
+    }
+
+    // One drag gesture = one Set op.
+    let dome_key = dome.address.clone().expect("dome address");
+    let set_op = |transform: UiArrangeTransform| EditorMetaOp {
+        artifact: editor_artifact.clone(),
+        fixtures: vec![EditorMetaFixture {
+            node_key: dome_key.clone(),
+            mapping_artifact: dome.mapping_artifact.clone(),
+        }],
+        verb: EditorMetaVerb::Set {
+            node_key: dome_key.clone(),
+            node: Some(dome.node),
+            transform,
+        },
+    };
+    let dragged = UiArrangeTransform {
+        t: [40.0, -12.5],
+        r: 90.0,
+        s: 1.0,
+    };
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            set_op(dragged),
+        )));
+    drive(actor.run_one_batch_for_test());
+
+    // Persist and read the file back: canonical, byte-stable, footprinted.
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    let project_dir = format!("/projects/{}", example.id.replace('/', "-"));
+    let editor_json = || {
+        let path = format!("{project_dir}/editor.json");
+        server
+            .borrow()
+            .base_fs()
+            .read_file(path.as_str().as_path())
+            .map(|bytes| String::from_utf8(bytes).expect("utf8 editor.json"))
+    };
+    let written = editor_json().expect("editor.json written on save");
+    let parsed = lpc_mapping::EditorMetaDoc::from_json(&written).expect("canonical doc parses");
+    assert_eq!(
+        format!("{}\n", parsed.to_json_pretty()),
+        written,
+        "the written bytes ARE the canonical form (byte-stable rewrite)"
+    );
+    let entry = parsed.mapping_surface(&dome_key).expect("dome arranged");
+    assert_eq!(entry.transform.t, [40.0, -12.5]);
+    assert_eq!(entry.transform.r, 90.0);
+    let footprint = entry
+        .footprint
+        .expect("footprint refreshed from the cached map2d");
+    assert_eq!(footprint.lamps, dome.patch.lamps, "footprint lamp count");
+    assert!(
+        footprint.bbox[2] > 0.0 && footprint.bbox[3] > 0.0,
+        "a real bbox: {:?}",
+        footprint.bbox
+    );
+
+    // The surface reflects the arrangement after a re-fetch (save dropped
+    // the local caches; the loaded-flag drives the re-fetch, page-parity).
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            crate::EditorMetaFetchOp {
+                artifact: editor_artifact.clone(),
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = refresh_snapshot!(snapshot);
+    {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        let dome_now = surface
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.node == dome.node)
+            .expect("dome");
+        let arrange = dome_now.arrange.as_ref().expect("arrange facts");
+        assert!(arrange.arranged);
+        assert_eq!(arrange.transform, dragged);
+        assert_eq!(arrange.footprint.map(|fp| fp.lamps), Some(dome.patch.lamps));
+    }
+
+    // Undo restores the exact pre-arrange bytes (the canonical empty doc —
+    // the file did not exist, and file-existence is not user-facing state).
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            EditorMetaOp {
+                artifact: editor_artifact.clone(),
+                fixtures: Vec::new(),
+                verb: EditorMetaVerb::Undo,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    assert_eq!(
+        editor_json().expect("editor.json still exists after undo"),
+        "{\n  \"format\": 1\n}\n",
+        "undo walked back to the canonical empty document"
+    );
+
+    // Redo replays the arrangement byte-for-byte.
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            EditorMetaOp {
+                artifact: editor_artifact.clone(),
+                fixtures: Vec::new(),
+                verb: EditorMetaVerb::Redo,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    assert_eq!(
+        editor_json().expect("editor.json exists"),
+        written,
+        "redo replays the arrangement byte-for-byte"
+    );
+
+    // The correlation journal recorded every step with increasing seq.
+    let snapshot = refresh_snapshot!(snapshot);
+    let journal = &project_editor(&snapshot).edit_journal;
+    assert!(
+        journal.len() >= 3,
+        "set + undo + redo all journal: {journal:?}"
+    );
+    assert!(
+        journal.windows(2).all(|pair| pair[0].seq < pair[1].seq),
+        "edit_seq strictly increases: {journal:?}"
+    );
+    assert!(
+        journal
+            .iter()
+            .all(|entry| entry.mode == crate::UiEditorMode::Arrange),
+        "arrange ops journal in Arrange mode: {journal:?}"
+    );
+}
+
+/// The one sequence spans every stack (unified-editor P2): patch verbs,
+/// arrange ops, and shell-dispatched switch events interleave into ONE
+/// strictly increasing `edit_seq`, each stamped with its own mode.
+#[test]
+fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
+    use crate::{
+        EditorMetaFixture, EditorMetaOp, EditorMetaVerb, PatchVerbKind, PatchVerbOp,
+        PatchVerbSubject, UiArrangeTransform, UiEditJournalEvent, UiEditorMode,
+    };
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let mut snapshot = None;
+    for _ in 0..4 {
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = Some(next);
+        }
+    }
+    let snapshot = snapshot.expect("a refresh emits a snapshot");
+
+    let (dome, editor_artifact) = {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        (
+            surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains("dome"))
+                .expect("dome")
+                .clone(),
+            surface.editor_meta_artifact.clone().expect("artifact"),
+        )
+    };
+
+    // Prefetch what the ops need: dome bodies + editor.json presence.
+    for artifact in [dome.patch_artifact.clone(), dome.mapping_artifact.clone()]
+        .into_iter()
+        .flatten()
+    {
+        handle
+            .tx
+            .send(StudioCommand::Action(crate::UiAction::from_op(
+                ProjectController::NODE_ID,
+                crate::AssetContentFetchOp { artifact },
+            )));
+        drive(actor.run_one_batch_for_test());
+    }
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            crate::EditorMetaFetchOp {
+                artifact: editor_artifact.clone(),
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+
+    // Interleave: verb → mode switch → arrange set → node switch → verb undo.
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            PatchVerbOp {
+                subject_fixture: Some(dome.node),
+                subject: PatchVerbSubject {
+                    path: Some("/sector/1".to_string()),
+                    range: None,
+                },
+                fixtures: vec![crate::PatchVerbFixture {
+                    node: dome.node,
+                    patch_artifact: dome.patch_artifact.clone().expect("patch artifact"),
+                    mapping_artifact: dome.mapping_artifact.clone(),
+                    lamp_count: dome.patch.lamps,
+                }],
+                assign_output_name: None,
+                verb: PatchVerbKind::Reverse,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            crate::ProjectEditorTarget::NodeTree.node_id(),
+            ProjectEditorOp::EditorJournal {
+                event: UiEditJournalEvent::ModeSwitch,
+                node: None,
+                mode: UiEditorMode::Arrange,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            EditorMetaOp {
+                artifact: editor_artifact.clone(),
+                fixtures: vec![EditorMetaFixture {
+                    node_key: dome.address.clone().expect("address"),
+                    mapping_artifact: dome.mapping_artifact.clone(),
+                }],
+                verb: EditorMetaVerb::Set {
+                    node_key: dome.address.clone().expect("address"),
+                    node: Some(dome.node),
+                    transform: UiArrangeTransform {
+                        t: [10.0, 10.0],
+                        r: 0.0,
+                        s: 1.0,
+                    },
+                },
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            crate::ProjectEditorTarget::NodeTree.node_id(),
+            ProjectEditorOp::EditorJournal {
+                event: UiEditJournalEvent::NodeSwitch,
+                node: Some(dome.node),
+                mode: UiEditorMode::Mapping,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            PatchVerbOp {
+                subject_fixture: None,
+                subject: PatchVerbSubject::default(),
+                fixtures: Vec::new(),
+                assign_output_name: None,
+                verb: PatchVerbKind::Undo,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let mut latest = None;
+    while let Some(next) = view.try_recv() {
+        latest = Some(next);
+    }
+    let snapshot = latest.expect("snapshot");
+    let journal = &project_editor(&snapshot).edit_journal;
+    assert_eq!(journal.len(), 5, "{journal:?}");
+    assert!(
+        journal.windows(2).all(|pair| pair[0].seq < pair[1].seq),
+        "one strictly increasing sequence across every stack: {journal:?}"
+    );
+    let modes: Vec<UiEditorMode> = journal.iter().map(|entry| entry.mode).collect();
+    assert_eq!(
+        modes,
+        vec![
+            UiEditorMode::Patching,
+            UiEditorMode::Arrange,
+            UiEditorMode::Arrange,
+            UiEditorMode::Mapping,
+            UiEditorMode::Patching,
+        ],
+        "each event carries its own mode"
+    );
+    let events: Vec<UiEditJournalEvent> = journal.iter().map(|entry| entry.event).collect();
+    assert_eq!(
+        events,
+        vec![
+            UiEditJournalEvent::Edit,
+            UiEditJournalEvent::ModeSwitch,
+            UiEditJournalEvent::Edit,
+            UiEditJournalEvent::NodeSwitch,
+            UiEditJournalEvent::Edit,
+        ],
+    );
+}
+
+/// Every selection arm round-trips through core state (the port and range
+/// arms are pass-2 substrate: stored and echoed even before any UI reads
+/// them).
+#[test]
+fn every_patch_target_arm_round_trips_through_selection() {
+    use crate::UiPatchTarget;
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let node = lpc_model::NodeId::new(3);
+    let targets = [
+        UiPatchTarget::Output { node },
+        UiPatchTarget::Port { node, port: 2 },
+        UiPatchTarget::Cell {
+            id: "3:1:0:0".to_string(),
+        },
+        UiPatchTarget::Instance {
+            node,
+            path: "/sector/2".to_string(),
+        },
+        UiPatchTarget::Fixture { node },
+        UiPatchTarget::Range {
+            node,
+            start: 22,
+            count: None,
+        },
+    ];
+    for target in targets {
+        handle
+            .tx
+            .send(StudioCommand::Action(crate::UiAction::from_op(
+                crate::ProjectEditorTarget::NodeTree.node_id(),
+                ProjectEditorOp::PatchSelect {
+                    target: Some(target.clone()),
+                },
+            )));
+        drive(actor.run_one_batch_for_test());
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        let mut latest = None;
+        while let Some(next) = view.try_recv() {
+            latest = Some(next);
+        }
+        let snapshot = latest.expect("selection emits a snapshot");
+        assert_eq!(
+            project_editor(&snapshot).patch_selection,
+            Some(target),
+            "the arm echoes through core state"
+        );
+    }
 }

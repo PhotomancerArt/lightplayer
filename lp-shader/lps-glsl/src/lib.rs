@@ -123,8 +123,8 @@ mod tests {
         for (path, source) in EXAMPLES {
             let index = index_source(source).unwrap_or_else(|e| panic!("{path}: {e}"));
             assert!(
-                index.functions.iter().any(|f| f.name == "render"),
-                "{path}: missing render function"
+                index.functions.iter().any(|f| f.name == "render_2d"),
+                "{path}: missing render_2d function"
             );
             assert!(
                 !index.functions.is_empty(),
@@ -165,7 +165,7 @@ mod tests {
         };
         assert_eq!(job.stage(), CompileStage::Done);
         lpir::validate_module(&output.ir).expect("valid LPIR");
-        assert!(output.meta.functions.iter().any(|f| f.name == "render"));
+        assert!(output.meta.functions.iter().any(|f| f.name == "render_2d"));
         assert!(output.meta.uniforms_type.is_some());
     }
 
@@ -243,20 +243,20 @@ mod tests {
     fn synchronous_compile_validates_basic2_example() {
         let output = compile(EXAMPLES[1].1, &CompileOptions::default()).expect("compile basic2");
         lpir::validate_module(&output.ir).expect("valid LPIR");
-        assert!(output.meta.functions.iter().any(|f| f.name == "render"));
+        assert!(output.meta.functions.iter().any(|f| f.name == "render_2d"));
     }
 
     #[test]
     fn synchronous_compile_validates_basic_example() {
         let output = compile(EXAMPLES[2].1, &CompileOptions::default()).expect("compile basic");
         lpir::validate_module(&output.ir).expect("valid LPIR");
-        assert!(output.meta.functions.iter().any(|f| f.name == "render"));
+        assert!(output.meta.functions.iter().any(|f| f.name == "render_2d"));
     }
 
     #[test]
     fn synchronous_compile_prunes_if_else_after_return() {
         let source = r#"
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return vec4(1.0, 0.0, 0.0, 1.0);
     if (pos.x > 0.5) {
         return vec4(0.0, 1.0, 0.0, 1.0);
@@ -271,8 +271,8 @@ vec4 render(vec2 pos) {
             .ir
             .functions
             .values()
-            .find(|function| function.name == "render")
-            .expect("render function");
+            .find(|function| function.name == "render_2d")
+            .expect("render_2d function");
 
         assert!(
             render
@@ -631,10 +631,10 @@ FluidEmitter emitters[4];
         matches!(op, lpir::LpirOp::Load { .. })
     }
 
-    /// Compile a `render` body and return the diagnostic message it fails with.
+    /// Compile a `render_2d` body and return the diagnostic message it fails with.
     fn compile_body_error(body: &str) -> alloc::string::String {
         let source =
-            alloc::format!("vec4 render(vec2 pos) {{\n{body}\n    return vec4(1.0);\n}}\n");
+            alloc::format!("vec4 render_2d(vec2 pos) {{\n{body}\n    return vec4(1.0);\n}}\n");
         match compile(&source, &CompileOptions::default()) {
             Ok(_) => panic!("expected a compile error for body:\n{body}"),
             Err(err) => alloc::string::ToString::to_string(&err.message),
@@ -727,7 +727,7 @@ FluidEmitter emitters[4];
         // comparisons, the bool predicate builtins, and the
         // `mix(genBType, genBType, genBType)` selection overload all stay.
         let source = r#"
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     bvec2 a = bvec2(true, false);
     bvec2 b = bvec2(false, true);
     bool ok = (a == b) || !(a != b);

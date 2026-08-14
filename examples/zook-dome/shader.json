@@ -10,7 +10,6 @@
       "source": "bus:speed"
     }
   },
-  "float_mode": "fixed",
   "consumed": {
     "phase": {
       "kind": "phasor",

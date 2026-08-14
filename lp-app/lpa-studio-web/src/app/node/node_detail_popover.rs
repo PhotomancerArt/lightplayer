@@ -14,14 +14,17 @@
 use dioxus::prelude::*;
 use lpa_studio_core::core::status::UiStatusKind;
 use lpa_studio_core::{
-    NodeCopyOp, ProjectController, ProjectNodeAddress, UiAction, UiNodeHeader, UiPendingEdit,
+    ModuleExportOp, NodeCopyOp, ProjectController, ProjectNodeAddress, UiAction, UiModuleExport,
+    UiModuleFace, UiNodeHeader, UiPendingEdit,
 };
 
 use crate::app::affordance::affordance_trigger_style;
+use crate::app::module::ExportFindingRow;
 use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
 };
-use crate::base::{DetailPopover, DetailSection, StudioIcon, StudioIconName};
+use crate::app::project::{ProjectDetailContent, ProjectDetailSections};
+use crate::base::{DetailPopover, DetailSection, DetailSectionTint, StudioIcon, StudioIconName};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -31,6 +34,19 @@ pub(crate) fn NodeDetailPopover(
     /// entries addressed to THIS node (`node_path` == the header path).
     #[props(default)]
     pending_edits: Vec<UiPendingEdit>,
+    /// The module face's own extras, when this node wears one: the export
+    /// designation row (module authoring unit, P3) and the compact
+    /// provenance line the face already derives. Both are module-only, so
+    /// they arrive as an option rather than as header fields.
+    #[props(default = None)]
+    module: Option<UiModuleFace>,
+    /// The PROJECT's detail sections, on the workspace ROOT node only
+    /// (workbench ruling 2). The workbench's Nodes dock renders the project
+    /// pane flat — no header, so no [i] of its own — and this popup is where
+    /// that content now lives: identity, project settings, share, pending
+    /// edits, stats. Every other card leaves it `None`.
+    #[props(default = None)]
+    project: Option<ProjectDetailContent>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
     #[props(default = false)] initially_open: bool,
 ) -> Element {
@@ -48,6 +64,8 @@ pub(crate) fn NodeDetailPopover(
     // whose path does not parse (never in production) simply offers no
     // share row rather than dispatching a malformed op.
     let copy_target = ProjectNodeAddress::parse(&header.path).ok();
+    let provenance = module.as_ref().and_then(|face| face.provenance.clone());
+    let export = module.as_ref().and_then(|face| face.export.clone());
     let forward = EventHandler::new(move |action: UiAction| {
         if let Some(handler) = on_action {
             handler.call(action);
@@ -79,6 +97,21 @@ pub(crate) fn NodeDetailPopover(
                         NodeDetailRow { label: "source", value: source.clone() }
                     }
                     NodeDetailRow { label: "path", value: header.path.clone() }
+                    // A module's authored provenance sits beside its
+                    // identity, where the export section below can point at
+                    // it: provenance is what an importer inherits.
+                    if let Some(provenance) = provenance.clone() {
+                        NodeDetailRow { label: "provenance", value: provenance }
+                    }
+                }
+            }
+            // Export designation (module authoring unit, P3): the gesture
+            // lives on the module you are looking at, even though what it
+            // edits is the project's manifest — so the checkbox names the
+            // project.
+            if let Some(export) = export.clone() {
+                DetailSection { title: "Export", tint: DetailSectionTint::Export,
+                    ModuleExportRow { export, on_action: forward }
                 }
             }
             if let Some(detail) = header.detail.as_ref() {
@@ -129,6 +162,82 @@ pub(crate) fn NodeDetailPopover(
                         }
                     }
                 }
+            }
+            // The PROJECT's own sections, re-housed here on the root card
+            // (ruling 2) — the same component the project pane's [i] renders,
+            // so the sections and their ops never fork.
+            if let Some(project) = project {
+                ProjectDetailSections { content: project, on_action: forward }
+            }
+        }
+    }
+}
+
+/// The export designation row: a checkbox naming the project, the hint that
+/// says what an importer actually gets, and this export's lint findings.
+///
+/// A row with a `disabled_reason` still renders — it explains why the box
+/// cannot be ticked rather than vanishing (the add-node picker's
+/// disabled-row precedent) — and dispatches nothing.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ModuleExportRow(export: UiModuleExport, on_action: EventHandler<UiAction>) -> Element {
+    let disabled = export.disabled_reason.clone();
+    let blocked = disabled.is_some();
+    let folder = export.folder.clone();
+    let designated = export.designated;
+    let label_class = if blocked {
+        "tw:flex tw:min-w-0 tw:cursor-not-allowed tw:items-start tw:gap-2 tw:py-0.5 tw:text-xs tw:text-subtle-foreground tw:opacity-60"
+    } else {
+        "tw:flex tw:min-w-0 tw:cursor-pointer tw:items-start tw:gap-2 tw:py-0.5 tw:text-xs tw:text-muted-foreground"
+    };
+
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:gap-1.5",
+            label { class: label_class,
+                input {
+                    class: "tw:mt-0.5 tw:flex-none tw:accent-[var(--studio-status-export-text)]",
+                    r#type: "checkbox",
+                    checked: designated,
+                    disabled: blocked,
+                    onclick: move |event| {
+                        event.stop_propagation();
+                        if !blocked {
+                            on_action.call(UiAction::from_op(
+                                ProjectController::NODE_ID,
+                                ModuleExportOp {
+                                    folder: folder.clone(),
+                                    export: !designated,
+                                },
+                            ));
+                        }
+                    },
+                }
+                span { class: "tw:min-w-0",
+                    "Export from "
+                    strong { class: "tw:text-strong-foreground", "{export.project}" }
+                }
+            }
+            if let Some(reason) = disabled {
+                p { class: "tw:m-0 tw:text-[0.68rem] tw:leading-snug tw:text-subtle-foreground",
+                    "{reason}"
+                }
+            } else {
+                p { class: "tw:m-0 tw:text-[0.68rem] tw:leading-snug tw:text-subtle-foreground",
+                    "Importers vendor "
+                    span { class: "tw:font-mono", "{export.folder}/" }
+                    " as their own copy. The folder must be self-contained; its bus consumers are its interface."
+                }
+                if export.upgrades_to_pattern {
+                    p { class: "tw:m-0 tw:text-[0.68rem] tw:leading-snug tw:text-status-export-foreground",
+                        "The first export makes "
+                        strong { "{export.project}" }
+                        " a pattern project."
+                    }
+                }
+            }
+            for finding in export.findings.iter() {
+                ExportFindingRow { finding: finding.clone() }
             }
         }
     }

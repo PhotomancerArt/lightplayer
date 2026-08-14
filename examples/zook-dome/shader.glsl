@@ -13,7 +13,7 @@ layout(binding = 1) uniform float phase;
 
 const float TAU = 6.28318530718;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 p = pos / outputSize - 0.5;
     float r = length(p) * 2.0; // 0 at the apex, ~1 at the base ring
 

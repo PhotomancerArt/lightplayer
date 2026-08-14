@@ -7,6 +7,7 @@
 .*.rustfmt
 .mypy_cache
 \#*\#
+.idea
 .vscode/*
 !.vscode/settings.json
 !.vscode/keybindings.json

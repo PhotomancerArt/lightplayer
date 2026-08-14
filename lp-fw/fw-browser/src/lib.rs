@@ -21,9 +21,9 @@ mod tier;
 mod wasm_exports;
 
 pub use wasm_exports::{
-    attach_preview_surface, create_runtime, debug_force_panic, drain_output_json,
-    fw_browser_init_exports, handle_envelope_json, init_gpu_device, present_bus_texture,
-    render_bus_texture_rgba8, runtime_count, tick_runtime,
+    attach_preview_surface, capture_poster_rgba8, create_runtime, debug_force_panic,
+    drain_output_json, fw_browser_init_exports, handle_envelope_json, init_gpu_device,
+    present_bus_texture, render_bus_texture_rgba8, runtime_count, tick_runtime,
 };
 
 #[cfg(test)]

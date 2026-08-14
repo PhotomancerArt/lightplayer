@@ -4,6 +4,6 @@
 
 uniform sampler2D inputColor;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }

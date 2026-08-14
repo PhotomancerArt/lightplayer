@@ -15,7 +15,9 @@ use crate::dataflow::resolver::resolve_trace::ResolveTrace;
 use crate::dataflow::resolver::resolver::Resolver;
 use crate::dataflow::resolver::resolver::materialize_literal_product;
 use crate::dataflow::resolver::route::{ResolvedRoute, RouteTarget};
-use lpc_model::{ChannelName, NodeId, Revision, SlotData, SlotMapDyn, SlotMerge, SlotPath};
+use lpc_model::{
+    ChannelName, NodeId, Revision, SlotData, SlotMapDyn, SlotMapKey, SlotMerge, SlotPath,
+};
 
 /// Active engine session for one frame (or nested test scope).
 ///
@@ -214,7 +216,10 @@ impl<'a> EngineSession<'a> {
         let policy = host.merge_policy_for_consumed_slot(node, slot);
         self.trace.record_select_merge_policy(query, policy);
 
-        if policy == SlotMerge::ByKey {
+        // Both aggregate policies flatten the SAME provider walk; they differ
+        // only in what the frame then does with the leaves (combine by key vs
+        // hand the receiver the ordered set).
+        if let SlotMerge::ByKey | SlotMerge::Fragments = policy {
             self.resolver.counters_mut().binding_lookups += 1;
             let entries = host.bindings_for_consumed_slot(node, slot);
             if !entries.is_empty() {
@@ -222,7 +227,17 @@ impl<'a> EngineSession<'a> {
                 for (binding_ref, entry) in entries.iter() {
                     self.expand_merge_inputs(host, *binding_ref, &entry.source, &mut inputs)?;
                 }
-                return Ok(ResolvedRoute::MergeByKey { inputs });
+                // A fragment receiver with nothing on the channel falls back
+                // to the single-binding route on purpose: that is the path
+                // carrying R6's default-bound fallback and the `NoBusProvider`
+                // report an unwired output has always produced. Only a real
+                // provider set becomes a fragment set.
+                if policy != SlotMerge::Fragments || !inputs.is_empty() {
+                    return Ok(match policy {
+                        SlotMerge::Fragments => ResolvedRoute::MergeFragments { inputs },
+                        _ => ResolvedRoute::MergeByKey { inputs },
+                    });
+                }
             }
             return self.compute_latest_consumed_route(host, node, slot);
         }
@@ -382,6 +397,18 @@ impl<'a> EngineSession<'a> {
                 }
                 merge_maps_by_key(productions, query, &self.trace)
             }
+            ResolvedRoute::MergeFragments { inputs } => {
+                let mut productions = Vec::with_capacity(inputs.len());
+                for (binding_ref, target) in inputs.iter() {
+                    self.trace.record_merge_input(query, *binding_ref);
+                    let mut production = self.resolve_route_target(host, *binding_ref, target)?;
+                    production.source = ProductionSource::BusBinding {
+                        binding: *binding_ref,
+                    };
+                    productions.push(production);
+                }
+                collect_fragments(productions, query)
+            }
         }
     }
 
@@ -431,6 +458,34 @@ impl<'a> EngineSession<'a> {
             }
         }
     }
+}
+
+/// Present a fragment receiver's inputs as an **ordered** map, index-keyed.
+///
+/// Nothing is combined and nothing can collide: the key is the input's
+/// position in the resolver's provider order, which is the only thing the
+/// receiver is being told. A map rather than a bespoke aggregate because
+/// `SlotData` already carries one and every existing consumer of a
+/// `Production` keeps working.
+fn collect_fragments(
+    inputs: Vec<Production>,
+    query: &QueryKey,
+) -> Result<Production, SessionResolveError> {
+    let mut keys_revision = Revision::default();
+    let mut entries = VecMap::new();
+    for (index, input) in inputs.into_iter().enumerate() {
+        let SlotData::Value(value) = input.data().clone() else {
+            return Err(SessionResolveError::other(format!(
+                "fragment merge expected a leaf input for {query:?}"
+            )));
+        };
+        keys_revision = core::cmp::max(keys_revision, value.changed_at());
+        entries.insert(SlotMapKey::U32(index as u32), SlotData::Value(value));
+    }
+    Ok(Production::new(
+        SlotData::Map(SlotMapDyn::with_revision(keys_revision, entries)),
+        ProductionSource::Merged,
+    ))
 }
 
 fn merge_maps_by_key(
@@ -1089,6 +1144,228 @@ mod tests {
         assert_eq!(map_u32(production.data(), 1), 10);
         assert_eq!(map_u32(production.data(), 2), 200);
         assert_eq!(map_u32(production.data(), 3), 300);
+    }
+
+    /// A `fragments` receiver over leaf-producing nodes: each producer answers
+    /// with its own node id as an f32, so the merged map's ORDER is readable.
+    struct FragmentHost {
+        bindings: TestBindings,
+        receiver: NodeId,
+        receiver_slot: SlotPath,
+    }
+
+    impl ResolveHost for FragmentHost {
+        fn produce(
+            &mut self,
+            query: &QueryKey,
+            session: &mut ResolveSession<'_>,
+        ) -> Result<Production, SessionResolveError> {
+            let QueryKey::ProducedSlot { node, slot } = query else {
+                return Err(SessionResolveError::other("unexpected fragment query"));
+            };
+            Ok(Production::value(
+                WithRevision::new(session.revision(), LpsValueF32::F32(node.0 as f32)),
+                ProductionSource::ProducedSlot {
+                    node: *node,
+                    slot: slot.clone(),
+                },
+            )?)
+        }
+
+        fn bindings_for_consumed_slot(
+            &self,
+            node: NodeId,
+            slot: &SlotPath,
+        ) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.bindings_for_consumed_slot(node, slot)
+        }
+
+        fn binding_for_consumed_slot(
+            &self,
+            node: NodeId,
+            slot: &SlotPath,
+        ) -> Option<(BindingRef, BindingEntry)> {
+            self.bindings.binding_for_consumed_slot(node, slot)
+        }
+
+        fn providers_for_bus(
+            &self,
+            scope: Option<crate::node::ScopeRef>,
+            channel: &ChannelName,
+        ) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.providers_for_bus(scope, channel)
+        }
+
+        fn merge_policy_for_consumed_slot(&self, node: NodeId, slot: &SlotPath) -> SlotMerge {
+            if node == self.receiver && slot == &self.receiver_slot {
+                SlotMerge::Fragments
+            } else {
+                SlotMerge::Latest
+            }
+        }
+    }
+
+    /// The whole reason the policy exists: N providers on one channel are an
+    /// ORDERED SET for the receiver, not a winner and some losers — and the
+    /// order is priority, then binding ref (owner node id), so it is a
+    /// property of the project rather than of iteration.
+    #[test]
+    fn a_fragments_receiver_gets_every_bus_provider_in_order() {
+        let mut resolver = Resolver::new();
+        let mut bindings = TestBindings::default();
+        let frame = Revision::new(3);
+        let receiver = NodeId::new(99);
+        let receiver_slot = path("input");
+        let bus = ch("control.out");
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::BusChannel(bus.clone()),
+                target: BindingTarget::ConsumedSlot {
+                    node: receiver,
+                    slot: receiver_slot.clone(),
+                },
+                priority: BindingPriority::new(0),
+                kind: Kind::Color,
+                owner: receiver,
+            },
+            frame,
+        );
+        // Added highest-id first, and at EQUAL priority — the case that used
+        // to be `AmbiguousBusBinding`.
+        for producer in [NodeId::new(7), NodeId::new(2), NodeId::new(4)] {
+            bindings.add(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: producer,
+                        slot: path("output"),
+                    },
+                    target: BindingTarget::BusChannel(bus.clone()),
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: producer,
+                },
+                frame,
+            );
+        }
+
+        let mut host = FragmentHost {
+            bindings,
+            receiver,
+            receiver_slot: receiver_slot.clone(),
+        };
+        let mut session = ResolveSession::new(
+            frame,
+            &mut resolver,
+            ResolveTrace::new(ResolveLogLevel::Off),
+        );
+        let production = session
+            .resolve(
+                &mut host,
+                &QueryKey::ConsumedSlot {
+                    node: receiver,
+                    slot: receiver_slot,
+                },
+            )
+            .expect("a fragment set, not an ambiguity");
+
+        let SlotData::Map(map) = production.data() else {
+            panic!("fragments resolve to an index-keyed map, got {production:?}");
+        };
+        let order: Vec<(SlotMapKey, f32)> = map
+            .entries
+            .iter()
+            .map(|(key, data)| {
+                let SlotData::Value(value) = data else {
+                    panic!("fragment entries are leaves");
+                };
+                let lpc_model::LpValue::F32(number) = value.get() else {
+                    panic!("fragment leaf is the producer's f32");
+                };
+                (key.clone(), *number)
+            })
+            .collect();
+        assert_eq!(
+            order,
+            Vec::from([
+                (SlotMapKey::U32(0), 2.0),
+                (SlotMapKey::U32(1), 4.0),
+                (SlotMapKey::U32(2), 7.0),
+            ]),
+            "index 0..n in owner-node order, whatever order the bindings arrived in",
+        );
+        assert_eq!(production.source, ProductionSource::Merged);
+    }
+
+    /// Priority still leads: an explicitly prioritised provider sorts ahead of
+    /// a lower-priority one regardless of node id.
+    #[test]
+    fn fragment_order_puts_priority_ahead_of_node_id() {
+        let mut resolver = Resolver::new();
+        let mut bindings = TestBindings::default();
+        let frame = Revision::new(3);
+        let receiver = NodeId::new(99);
+        let receiver_slot = path("input");
+        let bus = ch("control.out");
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::BusChannel(bus.clone()),
+                target: BindingTarget::ConsumedSlot {
+                    node: receiver,
+                    slot: receiver_slot.clone(),
+                },
+                priority: BindingPriority::new(0),
+                kind: Kind::Color,
+                owner: receiver,
+            },
+            frame,
+        );
+        for (producer, priority) in [(NodeId::new(2), 5), (NodeId::new(7), 1)] {
+            bindings.add(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: producer,
+                        slot: path("output"),
+                    },
+                    target: BindingTarget::BusChannel(bus.clone()),
+                    priority: BindingPriority::new(priority),
+                    kind: Kind::Color,
+                    owner: producer,
+                },
+                frame,
+            );
+        }
+
+        let mut host = FragmentHost {
+            bindings,
+            receiver,
+            receiver_slot: receiver_slot.clone(),
+        };
+        let mut session = ResolveSession::new(
+            frame,
+            &mut resolver,
+            ResolveTrace::new(ResolveLogLevel::Off),
+        );
+        let production = session
+            .resolve(
+                &mut host,
+                &QueryKey::ConsumedSlot {
+                    node: receiver,
+                    slot: receiver_slot,
+                },
+            )
+            .expect("a fragment set");
+
+        let SlotData::Map(map) = production.data() else {
+            panic!("fragments resolve to a map");
+        };
+        let first = map.entries.values().next().expect("a first fragment");
+        let SlotData::Value(value) = first else {
+            panic!("fragment entries are leaves");
+        };
+        assert!(
+            matches!(value.get(), lpc_model::LpValue::F32(number) if *number == 7.0),
+            "the priority-1 provider leads the priority-5 one: {value:?}",
+        );
     }
 
     struct TraceHost {

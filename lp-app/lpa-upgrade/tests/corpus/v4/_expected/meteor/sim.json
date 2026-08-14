@@ -9,7 +9,6 @@
       "source": "bus:speed"
     }
   },
-  "float_mode": "fixed",
   "consumed": {
     "count": {
       "kind": "value",

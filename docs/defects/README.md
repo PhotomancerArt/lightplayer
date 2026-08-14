@@ -151,6 +151,20 @@ genuinely fits none of these, and define it here in one line.
   allocation. The design's load-bearing claim is about *ordering*, and the
   tests around it pin the protocol (it fired, output is unchanged) rather
   than the ordering, so a mechanism that does nothing passes everything.
+- **`timeout-scoped-to-sub-phase`** — a bound named for the whole operation
+  actually guards one phase of it, so any *other* phase can wedge forever
+  behind an option the caller reasonably believes covers them. The name is the
+  defect: the flag advertises the operation, the code scopes it to the step it
+  was written next to. Presents as "my timeout did nothing", and the fix shape
+  is to bound the command and let sub-phases refine, never the reverse.
+- **`newest-only-inflight-memory`** — state meant to recognize the
+  completions of a pipeline's own in-flight async operations remembers
+  only the most recent one, so an older operation's completion reads as
+  external input and triggers the external-change path. Latent while
+  operations complete faster than they are issued; a scheduling hop
+  added anywhere in the pipeline (a deferred queue, a render-cycle
+  bounce) turns it routine. The fix shape is a queue of everything still
+  in flight, never a bigger window on a single slot.
 
 ## Index
 
@@ -231,8 +245,22 @@ grow a second one. Worth watching: if a third lands, the argument stops being
 "register the target" and becomes "the frontend axis belongs in the default
 matrix".
 
+**2026-08-09 puts `backend-contract-divergence` at five, and the two open
+ones rhyme.** `q32-native-vs-wasmtime-last-bit` and
+`gpu-render-pass-floors-the-fragment-center` are both *tier-seam
+convention* divergences whose guard is a tolerance rather than a pin — a
+last-bit bound in one, a mean-divergence bound in the other — and in both
+the tolerance was calibrated while the divergence was present, so the
+suite enforces "no worse than the defect" rather than the convention
+itself. The pattern to watch: wherever two tiers implement one rendering
+contract, the exact conventions (coordinate handed to the entry, rounding
+of the final channel value) deserve identity tests with known expected
+values; statistical diffs are for the arithmetic in between.
+
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| state-conflation | 2026-08-14 | [sibling-module-bus-tie-blanks-preview](2026-08-14-sibling-module-bus-tie-blanks-preview.md) | **open** | lpc-engine (bus resolution) + fw-browser preview runtime |
+| newest-only-inflight-memory | 2026-08-13 | [stale-echo-reseeded-dive-session](2026-08-13-stale-echo-reseeded-dive-session.md) | fixed | lpa-studio-web editor_shell (mapping_session pipeline) |
 | config-masked-defect | 2026-08-05 | [generated-palette-header-dies-on-naga](2026-08-05-generated-palette-header-dies-on-naga.md) | fixed | lps-frontend (parse.rs) + lpc-model shader_header_gen |
 | unenforced-test-precondition | 2026-08-05 | [cross-core-panic-races-the-isr-thread](2026-08-05-cross-core-panic-races-the-isr-thread.md) | fixed | lp-fw/lp-ws281x tests (cross_core) |
 | reclaim-ordered-behind-its-own-rebuild | 2026-08-04 | [compile-window-drops-rebuilt-before-compile](2026-08-04-compile-window-drops-rebuilt-before-compile.md) | fixed | lpc-engine nodes (fixture + output pressure handlers) |
@@ -254,12 +282,14 @@ matrix".
 | partial-knowledge-loss | 2026-07-31 | [elf-loader-drops-relocation-addends](2026-07-31-elf-loader-drops-relocation-addends.md) | fixed | lp-riscv-elf (relocations) |
 | incomplete-subset | 2026-07-31 | [mksadj-missing-from-fp-subset](2026-07-31-mksadj-missing-from-fp-subset.md) | fixed | lp-xt/lp-xt-inst (FP subset) |
 | split-source-of-truth | 2026-07-30 | [jit-sret-return-count-zero](2026-07-30-jit-sret-return-count-zero.md) | fixed | lpvm-native/rt_jit (module.rs) |
+| split-source-of-truth | 2026-08-07 | [wasm-f32-unorm-scale-convention](2026-08-07-wasm-f32-unorm-scale-convention.md) | fixed | lpvm-wasm/emit (F32 unorm lowering) |
 | config-masked-defect | 2026-07-30 | [xtensa-call-argument-clobber](2026-07-30-xtensa-call-argument-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-sret-pointer-clobber](2026-07-30-xtensa-sret-pointer-clobber.md) | fixed | lpvm-native/regalloc (pool.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-stack-arg-staged-over](2026-07-30-xtensa-stack-arg-staged-over.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-two-value-return-clobber](2026-07-30-xtensa-two-value-return-clobber.md) | fixed | lpvm-native/regalloc (walk.rs) |
 | config-masked-defect | 2026-07-30 | [xtensa-integer-div-by-zero-trap](2026-07-30-xtensa-integer-div-by-zero-trap.md) | fixed | lpvm-native lowering (lower.rs) |
 | config-masked-defect | 2026-07-31 | [opt-z-missed-rmt-drain-deadline](2026-07-31-opt-z-missed-rmt-drain-deadline.md) | fixed | workspace release profile / fw-esp32s3 |
+| backend-contract-divergence | 2026-08-09 | [gpu-render-pass-floors-the-fragment-center](2026-08-09-gpu-render-pass-floors-the-fragment-center.md) | **open** | lp-gfx-wgpu assembly (generated fragment main) |
 | backend-contract-divergence | 2026-07-30 | [q32-native-vs-wasmtime-last-bit](2026-07-30-q32-native-vs-wasmtime-last-bit.md) | **open** | lpvm-native / lpvm-wasm (Q32 execution) |
 | backend-contract-divergence | 2026-07-17 | [deletedir-error-shape](2026-07-17-deletedir-error-shape.md) | fixed | lpa-server + lpa-client |
 | backend-contract-divergence | 2026-07-22 | [littlefs-listdir-doubled](2026-07-22-littlefs-listdir-doubled.md) | fixed | fw-esp32/fs |
@@ -270,6 +300,7 @@ matrix".
 | ungated-variant | 2026-07-30 | [stacked-prs-get-no-ci](2026-07-30-stacked-prs-get-no-ci.md) | fixed | .github/workflows/pre-merge.yml (trigger) |
 | lifecycle-ownership | 2026-07-16 | [browser-serial-endpoint-lost](2026-07-16-browser-serial-endpoint-lost.md) | fixed | lpa-link/registry |
 | lifecycle-ownership | 2026-07-22 | [flash-session-map-deleted](2026-07-22-flash-session-map-deleted.md) | fixed | lpa-link/browser-serial |
+| state-conflation | 2026-08-13 | [evicted-visible-slot-frozen](2026-08-13-evicted-visible-slot-frozen.md) | fixed | lpa-studio-core/preview_host |
 | state-conflation | 2026-08-04 | [unbound-shader-uniform-warns](2026-08-04-unbound-shader-uniform-warns.md) | fixed | lpc-engine engine host + shader nodes |
 | state-conflation | 2026-07-17 | [unreadable-masqueraded-as-empty](2026-07-17-unreadable-masqueraded-as-empty.md) | fixed | lpa-studio-core/roster |
 | state-conflation | 2026-07-22 | [read-failure-vs-unreadable-content](2026-07-22-read-failure-vs-unreadable-content.md) | **open** | lpa-studio-core/roster |
@@ -296,6 +327,8 @@ matrix".
 | silent-drop | 2026-07-28 | [flash-progress-never-reached-the-ui](2026-07-28-flash-progress-never-reached-the-ui.md) | fixed | lpa-studio-core (actor/controller) |
 | silent-drop | 2026-07-31 | [loader-silently-drops-unparseable-nodes](2026-07-31-loader-silently-drops-unparseable-nodes.md) | fixed | lpc-engine loader + flush + virtual ws281x |
 | silent-drop | 2026-08-03 | [dev-file-sync-drops-on-uart-rx-overflow](2026-08-03-dev-file-sync-drops-on-uart-rx-overflow.md) | **open** | lp-cli/src/commands/dev (fs sync) + fw-esp32v3 UART0 RX |
+| silent-drop | 2026-08-07 | [boot-compile-oom-crash-loop](2026-08-07-boot-compile-oom-crash-loop.md) | **open** | fw-esp32v3 boot-compile + lp-cli upload + lpfs partition |
+| timeout-scoped-to-sub-phase | 2026-08-07 | [upload-wait-timeout-unbounded-deploy](2026-08-07-upload-wait-timeout-unbounded-deploy.md) | **open** | lp-cli upload (deploy wait) |
 | unbounded-restatement | 2026-07-28 | [tick-error-restated-every-frame](2026-07-28-tick-error-restated-every-frame.md) | fixed | lpa-server (advance_frame) |
 | unsynchronized-shared-artifact | 2026-07-29 | [builtins-elf-uplift-race](2026-07-29-builtins-elf-uplift-race.md) | fixed | justfile `test` + lpvm-cranelift/build.rs |
 | missing-coverage | 2026-07-29 | [uniform-struct-array-runtime-index](2026-07-29-uniform-struct-array-runtime-index.md) | fixed | examples/effects/meteor + lps-frontend lowering |

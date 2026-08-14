@@ -284,7 +284,7 @@ fn fuel_on_bounded_loop_shader_renders() {
     let project_fs = build_project_with_shader(
         "layout(binding = 0) uniform vec2 outputSize; \
          layout(binding = 1) uniform float phase; \
-         vec4 render(vec2 pos) { \
+         vec4 render_2d(vec2 pos) { \
              float acc = 0.0; \
              for (int i = 0; i < 8; i++) { acc += 0.1; } \
              return vec4(acc, 0.0, 0.0, 1.0); \
@@ -325,7 +325,7 @@ fn infinite_loop_shader_reports_fuel_error_and_keeps_ticking() {
     let project_fs = build_project_with_shader(
         "layout(binding = 0) uniform vec2 outputSize; \
          layout(binding = 1) uniform float phase; \
-         vec4 render(vec2 pos) { \
+         vec4 render_2d(vec2 pos) { \
              float acc = 0.0; \
              while (true) { acc += 0.001; } \
              return vec4(acc, 0.0, 0.0, 1.0); \
@@ -395,7 +395,7 @@ fn get_fuel_builtin_links_and_reads_nonzero_on_browser_path() {
     let project_fs = build_project_with_shader(
         "layout(binding = 0) uniform vec2 outputSize; \
          layout(binding = 1) uniform float phase; \
-         vec4 render(vec2 pos) { \
+         vec4 render_2d(vec2 pos) { \
              float lit = int(__lp_get_fuel()) > 0 ? 1.0 : 0.0; \
              return vec4(lit, 0.0, 0.0, 1.0); \
          }",
@@ -651,8 +651,8 @@ fn load_project_tolerates_library_artifacts() {
                 // (ProjectManifest::write_json field order).
                 let text = String::from_utf8(content).unwrap();
                 let patched = text.replacen(
-                    "\"format\": 6",
-                    "\"format\": 6,\n  \"uid\": \"prj0000000000000042\"",
+                    "\"format\": 10",
+                    "\"format\": 10,\n  \"uid\": \"prj0000000000000042\"",
                     1,
                 );
                 assert_ne!(patched, text, "format anchor not found in manifest");

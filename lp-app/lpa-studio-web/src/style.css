@@ -180,6 +180,16 @@
     --studio-status-bound-bg: #241a33;
     --studio-status-bound-border: #5f4a85;
     --studio-status-bound-text: #c9b1f5;
+    /* EXPORT (sage): "this ships from here" — the module-authoring family
+       (spike gate 2026-08-07 ruling D11). A desaturated green-grey that sits
+       one step off `--studio-color-heading` (#94b8aa), which is exactly why
+       it was picked: exports are a quiet, structural property of the
+       project, not a status you would clear. Deliberately NOT good-green
+       (nothing here is "valid"), NOT bound-violet (that is bus linkage), and
+       NOT engaged-gold (that reads as a hand on a control right now). */
+    --studio-status-export-bg: rgba(148, 184, 170, 0.1);
+    --studio-status-export-border: #567a6d;
+    --studio-status-export-text: #94b8aa;
 
     --studio-step-marker-bg: #151a1f;
     --studio-step-active-bg: #2a2916;
@@ -217,11 +227,17 @@ body {
     var(--studio-color-bg);
 }
 
-button,
-input,
-textarea,
-select {
-    font: inherit;
+/* In `base` so Tailwind utilities (`tw:text-*`, `tw:font-*`) on the element
+   itself still win — an unlayered reset beats every layered rule and silently
+   killed them. Still overrides UA form-control fonts: UA styles lose to any
+   author layer. */
+@layer base {
+    button,
+    input,
+    textarea,
+    select {
+        font: inherit;
+    }
 }
 
 /* Tailwind v4 preflight no longer sets a pointer cursor on buttons, which left
@@ -1163,7 +1179,12 @@ label:has(> input:not(:disabled)) {
     background: transparent;
     font-family: var(--studio-font-mono);
     font-size: 0.68rem;
-    line-height: 1.45;
+    /* Integral line box, not a unitless ratio: 1.45 × 10.88px lands every
+       baseline at a different fractional phase, so some line is ALWAYS
+       parked on a device-pixel rounding tie and a sub-pixel container move
+       flips it alone (2026-08-05-popover-line-parked-on-a-rounding-tie).
+       A whole-pixel pitch gives all lines one rounding phase. */
+    line-height: 16px;
     white-space: pre;
 }
 
@@ -1507,55 +1528,6 @@ label:has(> input:not(:disabled)) {
     padding: 0 4px;
 }
 
-/* Popover breadcrumb (descended selection): ancestors click to ascend. */
-.lpme-pop-crumbs {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    min-width: 0;
-    flex: 1;
-}
-
-.lpme-pop-crumb {
-    border: none;
-    background: none;
-    padding: 0;
-    cursor: pointer;
-    font-size: 12px;
-    color: var(--studio-color-text-muted);
-}
-
-.lpme-pop-crumb:hover {
-    color: var(--studio-color-text-strong);
-    text-decoration: underline;
-}
-
-.lpme-pop-crumb-here {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--studio-color-text-strong);
-}
-
-.lpme-pop-crumb-sep {
-    font-size: 10px;
-    color: var(--studio-color-text-muted);
-}
-
-/* The "enter the group" affordance on a repeat's fields. */
-.lpme-pop-descend {
-    border: none;
-    background: none;
-    padding: 0;
-    cursor: pointer;
-    font-size: 12px;
-    color: var(--studio-color-text);
-}
-
-.lpme-pop-descend:hover {
-    color: var(--studio-color-text-strong);
-    text-decoration: underline;
-}
-
 .lpme-canvas-wrap {
     position: relative;
     flex: 1;
@@ -1733,54 +1705,78 @@ label:has(> input:not(:disabled)) {
     stroke-dasharray: 4 3;
 }
 
-.lpme-popover {
-    position: absolute;
-    z-index: 6;
-    background: var(--studio-color-surface);
-    border: 1px solid var(--studio-color-border-strong);
-    border-radius: 10px;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
-    padding: 10px 12px 12px;
+/* The Props stack (B′): one card per level of the selected path, deepest
+   first. The shell's placement card joins the same grid; a nested stack
+   (the document cards) keeps the same gap, so the rhythm stays uniform.
+   Padding is the host panel's job. */
+.lpme-stack {
+    display: grid;
+    gap: 7px;
+    align-content: start;
 }
 
-.lpme-pop-head {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    margin: -10px -12px 10px;
-    padding: 9px 12px 8px;
-    border-bottom: 1px solid var(--studio-color-border);
+/* One level card. The selected level (always the top card) wears the
+   selection blue; ancestors stay muted context. */
+.lpme-lvl {
+    border: 1px solid var(--studio-color-border);
+    border-radius: 8px;
     background: rgba(255, 255, 255, 0.02);
-    border-radius: 10px 10px 0 0;
+    overflow: hidden;
 }
 
-.lpme-pop-name {
-    flex: 1;
+.lpme-lvl-sel {
+    border-color: #4c9ffe;
+    box-shadow: 0 0 0 1px rgba(76, 159, 254, 0.25);
+}
+
+.lpme-lvl-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 9px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.lpme-lvl-head:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+/* The object-colour swatch: filled = the authored root, hollow = a
+   descended level — the same group-vs-member language as the tree rows. */
+.lpme-lvl-swatch {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 3px;
+}
+
+.lpme-lvl-swatch-hollow {
+    background: transparent;
+    border: 1.5px solid;
+}
+
+.lpme-lvl-name {
     min-width: 0;
-    background: none;
-    border: none;
-    border-bottom: 1px solid transparent;
-    color: var(--studio-color-text-strong);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 12px;
     font-weight: 600;
-    font-size: 13px;
-}
-
-.lpme-pop-name:focus {
-    outline: none;
-    border-bottom-color: #4c9ffe;
-}
-
-.lpme-pop-name-static {
-    flex: 1;
     color: var(--studio-color-text-strong);
-    font-weight: 600;
-    font-size: 13px;
 }
 
-.lpme-pop-kind {
+.lpme-lvl-kind {
+    margin-left: auto;
+    flex: none;
     font-family: var(--studio-font-mono);
     font-size: 10px;
     color: var(--studio-color-text-muted);
+}
+
+.lpme-lvl-body {
+    padding: 8px 10px 10px;
+    border-top: 1px solid var(--studio-color-border);
 }
 
 .lpme-field {
@@ -2097,12 +2093,6 @@ label:has(> input:not(:disabled)) {
     overflow: hidden;
 }
 
-.ux-map-home-full .lpme-face-editor {
-    height: auto;
-    flex: 1;
-    min-height: 0;
-}
-
 /* The output face's board diagram (P5). The renderer sizes its SVG from the
    pin pitch, which is a DRAWING decision, not a layout one — a card is
    whatever width the workspace gives it. Letting the diagram scale down to
@@ -2120,20 +2110,25 @@ label:has(> input:not(:disabled)) {
 }
 
 /* The face-embedded mapping editor (one-home edit mode). */
-.lpme-face-editor {
+.lpme-dive-editor {
+    /* The dive fills the Mapping view's center — full height, like the
+       arrange level it replaces (the face embed's 460px card sizing died
+       with the embed). */
     display: flex;
     flex-direction: column;
-    height: 460px;
+    flex: 1;
+    min-height: 0;
+    height: 100%;
 }
 
-.lpme-face-editor .lpme-editor {
+.lpme-dive-editor .lpme-editor {
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
 }
 
-.lpme-face-editor-bar {
+.lpme-dive-editor-bar {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -2141,12 +2136,12 @@ label:has(> input:not(:disabled)) {
     border-top: 1px solid var(--studio-color-border);
 }
 
-.lpme-face-editor-failure {
+.lpme-dive-editor-failure {
     font-size: 11px;
     color: #ef5350;
 }
 
-.lpme-face-editor-loading {
+.lpme-dive-editor-loading {
     padding: 18px;
     font-size: 12px;
     color: var(--studio-color-text-muted);
@@ -2732,6 +2727,61 @@ label:has(> input:not(:disabled)) {
     right: 0;
 }
 
+/* ---- the transient confirmation line (base/toast.rs) -------------------
+   One sentence, bottom centre, replaced rather than stacked. It fades
+   itself out with the keyframe below instead of a timer — see the module
+   docs — and ends `visibility: hidden` so a spent line cannot swallow a
+   click on whatever is under it. */
+.ux-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 34px;
+    /* Also on the base rule, not only in the keyframes: story capture
+       disables animations, and a line centred only by its animation would
+       land half a page to the right. */
+    transform: translateX(-50%);
+    z-index: 80;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    max-width: min(480px, calc(100vw - 32px));
+    padding: 9px 16px;
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: var(--studio-radius-sm);
+    background: var(--studio-color-surface-raised);
+    color: var(--studio-color-text);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    box-shadow: 0 14px 38px rgba(0, 0, 0, 0.5);
+    animation: ux-toast-life 3.4s ease forwards;
+}
+
+.ux-toast-warn {
+    border-color: var(--studio-status-warning-border);
+    background: var(--studio-status-warning-bg);
+    color: var(--studio-status-warning-text);
+}
+
+@keyframes ux-toast-life {
+    0% {
+        opacity: 0;
+        transform: translateX(-50%) translateY(10px);
+    }
+
+    7%,
+    82% {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+
+    100% {
+        opacity: 0;
+        visibility: hidden;
+        transform: translateX(-50%) translateY(6px);
+    }
+}
+
 .ux-popover-layer {
     position: fixed;
     inset: 0;
@@ -3244,7 +3294,9 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-color-text-muted);
     font-family: var(--studio-font-mono);
     font-size: 0.68rem;
-    line-height: 1.45;
+    /* Integral line box — same rounding-tie reasoning as
+       .ux-node-ui-status-popup-error-detail above. */
+    line-height: 16px;
     white-space: pre;
 }
 

@@ -25,7 +25,7 @@ use crate::naga_types::naga_type_handle_to_lps;
 fn uniform_sampler2d_includes_texture2d_in_uniforms_type() {
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }
+vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }
 "#;
     let naga_module = compile(glsl).expect("parse");
     let (_lpir, sig) = lower(&naga_module).expect("lower");
@@ -45,7 +45,7 @@ vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }
 fn layout_uniform_texture2d_includes_in_uniforms_type() {
     let glsl = r#"
 layout(set = 0, binding = 0) uniform texture2D albedo;
-vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }
+vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }
 "#;
     let naga_module = compile(glsl).expect("parse");
     let (_lpir, sig) = lower(&naga_module).expect("lower");
@@ -65,7 +65,7 @@ fn texture2d_plus_scalar_uniforms_stable_metadata() {
     let glsl = r#"
 layout(set = 0, binding = 0) uniform float scale;
 layout(set = 0, binding = 1) uniform sampler2D inputColor;
-vec4 render(vec2 pos) { return vec4(pos * scale, 0.0, 1.0); }
+vec4 render_2d(vec2 pos) { return vec4(pos * scale, 0.0, 1.0); }
 "#;
     let naga_module = compile(glsl).expect("parse");
     let (_lpir, sig) = lower(&naga_module).expect("lower");
@@ -84,7 +84,7 @@ vec4 render(vec2 pos) { return vec4(pos * scale, 0.0, 1.0); }
 fn texture3d_uniform_rejects_with_clear_error() {
     let glsl = r#"
 layout(set = 0, binding = 0) uniform texture3D t;
-vec4 render(vec2 pos) { return vec4(0.0); }
+vec4 render_2d(vec2 pos) { return vec4(0.0); }
 "#;
     let naga_module = compile(glsl).expect("parse");
     let e = lower(&naga_module).expect_err("expected unsupported 3D texture");
@@ -106,7 +106,7 @@ fn texture2d_std430_size_align_matches_layout_helper() {
     let glsl = r#"
 layout(set = 0, binding = 0) uniform float a;
 layout(set = 0, binding = 1) uniform sampler2D t;
-vec4 render(vec2 p) { return vec4(a) + vec4(0.0); }
+vec4 render_2d(vec2 p) { return vec4(a) + vec4(0.0); }
 "#;
     let sig = module_sig_for_glsl(glsl);
     let u = sig.uniforms_type.expect("uniforms");
@@ -246,7 +246,7 @@ fn sample_texture_binding_spec() -> lps_shared::TextureBindingSpec {
 fn texture_sample_lowers_public_sig_has_only_user_texture_uniform() {
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texture(inputColor, pos);
 }
 "#;
@@ -294,7 +294,7 @@ float add(float a, float b) { return a + b; }
 fn lower_with_options_matching_spec_retained_in_module_sig() {
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }
+vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }
 "#;
     let naga = compile(glsl).expect("parse");
     let spec = sample_texture_binding_spec();
@@ -312,7 +312,7 @@ vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }
 fn lower_with_options_missing_spec_errors_with_sampler_name() {
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }
+vec4 render_2d(vec2 pos) { return vec4(pos, 0.0, 1.0); }
 "#;
     let naga = compile(glsl).expect("parse");
     let mut texture_specs = VecMap::new();
@@ -354,7 +354,7 @@ float f() { return 1.0; }
 fn texel_fetch_valid_direct_sampler_zero_lod_lowers_four_load16u_and_unorm16to_f_rgba() {
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;
@@ -375,7 +375,7 @@ vec4 render(vec2 pos) {
 fn texel_fetch_nonzero_literal_lod_diagnostic_includes_texelfetch_lod_and_value() {
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 1);
 }
 "#;
@@ -399,7 +399,7 @@ vec4 render(vec2 pos) {
 fn texel_fetch_dynamic_lod_diagnostic_includes_texel_fetch_and_dynamic_lod() {
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), int(pos.y));
 }
 "#;
@@ -419,7 +419,7 @@ vec4 render(vec2 pos) {
 fn texel_fetch_missing_texture_spec_named_at_lowering_when_options_map_empty() {
     let glsl = r#"
 uniform sampler2D inputColor;
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     return texelFetch(inputColor, ivec2(0, 0), 0);
 }
 "#;

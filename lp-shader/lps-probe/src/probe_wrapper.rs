@@ -148,14 +148,17 @@ mod tests {
         let pos_probe = ProbeSpec {
             id: "p".to_string(),
             ty: ProbeType::Vec4,
-            expr: "render(pos)".to_string(),
+            expr: "render_2d(pos)".to_string(),
             domain: ProbeDomain::Point { at: [0.5, 0.5] },
             vary: None,
             reduce: ProbeReduce::None,
         };
         let w = emit_wrapper(&pos_probe);
-        assert_eq!(w.text, "vec4 __probe_p(vec2 pos) { return (render(pos)); }");
-        assert_eq!(&w.text[w.expr_offset..w.expr_offset + 6], "render");
+        assert_eq!(
+            w.text,
+            "vec4 __probe_p(vec2 pos) { return (render_2d(pos)); }"
+        );
+        assert_eq!(&w.text[w.expr_offset..w.expr_offset + 9], "render_2d");
 
         let sweep_probe = ProbeSpec {
             domain: ProbeDomain::Sweep {

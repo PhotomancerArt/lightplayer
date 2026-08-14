@@ -81,7 +81,7 @@ vec2 prsd_demo(vec2 scaledCoord, float time) {
 layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float time;
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     // Virtual resolution: pattern matches a 32x32 render regardless of outputSize.
     const vec2 REF_SIZE = vec2(32.0, 32.0);
     vec2 virtCoord = pos * REF_SIZE / outputSize;

@@ -138,6 +138,11 @@ impl WorkerRig {
                     runtime_id,
                     message,
                     ..
+                }
+                | BrowserOutputEnvelope::PosterError {
+                    runtime_id,
+                    message,
+                    ..
                 } => {
                     self.preview_errors.push(PreviewError {
                         runtime_id,

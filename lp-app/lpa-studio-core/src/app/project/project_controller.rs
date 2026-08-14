@@ -6,9 +6,9 @@ use std::rc::Rc;
 use lpa_client::{CancelSignal, ProgressDeadline};
 
 use crate::app::project::agent_support::{
-    AgentShaderBinding, AgentShaderTarget, param_upsert_edits,
+    AgentShaderBinding, AgentShaderTarget, param_upsert_edits, space_declaration_edits,
 };
-use crate::app::project::control_display_layout_fallback::synthesized_map2d_layout;
+use crate::app::project::edit_journal::{EditJournal, EditStep};
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
     SlotEditEntry, SlotEditEntrySource, SlotEditJoin,
@@ -32,12 +32,12 @@ use crate::{
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
-    ArtifactLocation, ArtifactSpec, AssetBodyOverlay, ControlDisplayLayout, ControlLayout2d,
-    FromLpValue, MutationCmd, MutationCmdBatch, MutationCmdId, MutationCmdStatus, MutationEffect,
-    MutationOp, MutationRejection, NodeAttachSite, NodeId, NodeKind, NodeStarter,
-    ShaderValueShapeRef, SlotEdit, SlotMapKey, SlotPath, SlotPathSegment, SlotShapeId,
-    SlotShapeLookup, SlotShapeRegistry, TreePath, glsl_type_for_lp_type,
-    resolve_artifact_specifier, resolve_slot_role, starter_for_kind,
+    ArtifactLocation, ArtifactSpec, AssetBodyOverlay, FromLpValue, LpValue, MutationCmd,
+    MutationCmdBatch, MutationCmdId, MutationCmdStatus, MutationEffect, MutationOp,
+    MutationRejection, NodeAttachSite, NodeId, NodeKind, NodeStarter, ShaderValueShapeRef,
+    SlotEdit, SlotMapKey, SlotPath, SlotPathSegment, SlotShapeId, SlotShapeLookup,
+    SlotShapeRegistry, TreePath, glsl_type_for_lp_type, resolve_artifact_specifier,
+    resolve_slot_role, starter_for_kind,
 };
 use lpc_view::ProjectView;
 use lpc_wire::{
@@ -71,6 +71,12 @@ pub struct ProjectController {
     /// or a link that is not Ready): the add-node picker then offers every
     /// kind. Gating only ever narrows when a device affirmatively reports.
     lens_device_features: Option<Vec<lpc_model::LpFeature>>,
+    /// Every pattern export the local library offers, for the add-node
+    /// picker's import source (module authoring unit, P5). Pushed down from
+    /// the studio controller at each library settle — a view build must
+    /// never reach for a store, and the gallery snapshot it is derived
+    /// from is already being read there.
+    import_patterns: Vec<crate::UiImportablePattern>,
     active_editor_target: Option<ProjectEditorTarget>,
     /// The storage dir (under `/projects/`) the LENS runtime actually
     /// serves the project from. The sim always uses the demo slot, but a
@@ -90,6 +96,11 @@ pub struct ProjectController {
     /// [`Self::edit_buffer`] with the same ack lifecycle (state machine on
     /// [`PendingAssetEdit`]).
     asset_edit_buffer: BTreeMap<ArtifactLocation, PendingAssetEdit>,
+    /// Outputs whose `highlight` Debug slot the patch pulse last wrote
+    /// ([`Self::apply_patch_pulse`]) — what a subject change or a clear
+    /// must sweep. Session bookkeeping only: the slot itself is Debug
+    /// state and dies with the project either way.
+    pulsed_outputs: BTreeSet<lpc_model::NodeId>,
     /// Passive ticks left at the tightened verdict-chase interval. Set after
     /// an accepted asset-body apply so the node's compile verdict (error or
     /// clean) is pulled promptly instead of waiting a full device cadence;
@@ -100,21 +111,6 @@ pub struct ProjectController {
     /// invalidated after commit acks (save rewrites files) and overlay
     /// clears (revert).
     asset_base_bodies: BTreeMap<ArtifactLocation, Vec<u8>>,
-    /// Mapping documents the display-layout fallback already tried to
-    /// fetch ([`Self::fetch_missing_layout_documents`]). Successes land in
-    /// the body cache and stop qualifying; failures are remembered here so
-    /// a broken read warns once instead of on every refresh.
-    attempted_layout_document_fetches: BTreeSet<ArtifactLocation>,
-    /// Memoized display-layout syntheses, keyed per artifact by the exact
-    /// inputs that shape the geometry: a hash of the document body plus the
-    /// render extent. The engine re-refuses an over-budget layout every
-    /// tick, which re-marks the preview as missing every tick — without
-    /// this cache the fallback re-parsed and re-resolved a 1500-lamp
-    /// document per frame (a top slice of the 2026-08-05 editor-perf
-    /// trace). The cached layout keeps the revision it was synthesized at;
-    /// the refusal loop never compares it, and consumers only read
-    /// geometry.
-    synthesized_layout_cache: BTreeMap<ArtifactLocation, SynthesizedLayoutEntry>,
     /// The connected project's **server** filesystem root (e.g.
     /// `/projects/studio`), from the connect flow. Artifact locations are
     /// project-relative; the base-body fetch ([`Self::asset_content`])
@@ -138,6 +134,31 @@ pub struct ProjectController {
     /// `ProjectEditorOp::NodeUi`, overlaid onto the editor DTOs at view
     /// build, pruned with the loaded project.
     node_card_ui: BTreeMap<String, NodeCardUiState>,
+    /// The patch surface's session-local undo/redo stacks (D42): one step
+    /// per verb gesture, each a set of (artifact, prior bytes) snapshots
+    /// stamped with `(edit_seq, node, mode)` (unified-editor P2). Bounded
+    /// like the map editor's (UNDO_CAP idiom); cleared with the
+    /// controller, never persisted.
+    patch_undo: Vec<EditStep>,
+    patch_redo: Vec<EditStep>,
+    /// The Arrange canvas's session-local undo/redo stacks over
+    /// `editor.json` bytes — a SEPARATE stack because ⌘Z is mode-scoped
+    /// (ratified v1): arrange gestures never pop patch verbs and vice
+    /// versa. Same step shape, same stamps.
+    arrange_undo: Vec<EditStep>,
+    arrange_redo: Vec<EditStep>,
+    /// The undo-correlation substrate: the session-global `edit_seq`
+    /// source and the bounded event journal (see [`edit_journal`]).
+    edit_journal: EditJournal,
+    /// The `editor.json` fetch settled as "no such file" — a project that
+    /// has never been arranged. Reads then resolve to the empty document
+    /// and the first arrange write creates the file. Distinct from "not
+    /// yet fetched", which blocks arrange writes instead of inventing an
+    /// empty doc over unseen data.
+    editor_meta_absent: bool,
+    /// The patch surface's one shared selection (D36; core-owned so e2e
+    /// can drive it and the P6 verbs can read it).
+    patch_selection: Option<crate::UiPatchTarget>,
     /// Monotonic correlation-id source for overlay mutation commands.
     next_mutation_cmd_id: u64,
     /// Staged node removals recorded from `RemoveNode` acks, keyed by the
@@ -180,6 +201,154 @@ pub struct ProjectController {
     /// collected yet — today, "Upgraded project from format 4 to 5". Drained
     /// by [`Self::take_open_notices`].
     open_notices: Vec<UiNotice>,
+    /// Memoized export-lint verdict for the active library project (P2 of
+    /// the module authoring unit), read through
+    /// [`Self::export_lint_report`].
+    ///
+    /// Interior-mutable so the read path can stay `&self` for view builders
+    /// while the two halves still recompute only when their own inputs
+    /// move: the STATIC half ([`lpc_model::check_exports`]) on the saved
+    /// package bytes, the GRAPH half
+    /// ([`crate::app::project::check_export_graph`]) on the binding-graph
+    /// revision. The static half reads files; the graph half does not, so
+    /// the common case (a new probe snapshot every refresh) never touches
+    /// the filesystem.
+    export_lint: std::cell::RefCell<Option<ExportLintCache>>,
+    /// Forces the STATIC half to re-run when the package bytes changed
+    /// without `last_synced` moving — a manifest patch
+    /// (`package_manifest::set_kind_and_exports`) is exactly that case, so
+    /// P3's designation editor bumps this via
+    /// [`Self::invalidate_export_lint`].
+    export_lint_epoch: std::cell::Cell<u64>,
+}
+
+/// The local `editor.json` answer, three ways (unified-editor P2): the
+/// document is readable (absent files and empty bodies read as the empty
+/// document), not yet fetched (pages dispatch
+/// [`crate::EditorMetaFetchOp`]), or present but refused (newer format /
+/// parse error — arrange writes block; refuse-don't-rewrite).
+enum EditorMetaReadState {
+    Ready(lpc_mapping::EditorMetaDoc, Vec<u8>),
+    Unfetched,
+    Refused(String),
+}
+
+/// Memoized export-lint state (see [`ProjectController::export_lint`]).
+struct ExportLintCache {
+    /// Static-half inputs: project uid, the runtime fs version the library
+    /// copy is synced to, and the manual epoch.
+    static_key: (String, lpc_model::FsVersion, u64),
+    /// Export folder names the static half read out of `project.json`.
+    /// Empty for a non-library project, which short-circuits both halves.
+    exports: Vec<String>,
+    /// Findings the static half produced for `static_key`.
+    static_findings: Vec<lpc_model::ExportFinding>,
+    /// Binding-graph revision the assembled `report` was built at; `None`
+    /// when no graph snapshot had arrived yet.
+    graph_revision: Option<lpc_model::Revision>,
+    /// Both halves joined. `Rc` so the read path hands out a cheap clone
+    /// rather than copying the findings per view build.
+    report: Rc<lpc_model::ExportLintReport>,
+}
+
+/// What every module card on one view build needs to know about the open
+/// library project's exports (module authoring unit, P3).
+///
+/// Built once by [`ProjectController::export_designation_context`] — the
+/// alternative is re-parsing `project.json` per module card.
+struct ExportDesignationContext {
+    /// The project's display name, for the checkbox copy ("Export from
+    /// yona-noise"). Falls back to the library slug.
+    project: String,
+    /// The project's authored kind, which decides whether ticking a box is
+    /// also an upgrade (`General` ⇒ `Pattern`).
+    kind: lpc_model::ProjectKind,
+    /// The manifest's `exports` list, in manifest order.
+    exports: Vec<String>,
+    /// P2's lint verdict for those exports.
+    report: Rc<lpc_model::ExportLintReport>,
+    /// The lens is a DEVICE: the manifest being edited would be the
+    /// library's, not the one in front of you, so designation disables with
+    /// a reason (planning Q4).
+    device_session: bool,
+}
+
+impl ExportDesignationContext {
+    /// Whether the popup offers designation at all. `Show` and `Rig`
+    /// projects keep the section hidden this round (P3 scope).
+    fn offers_designation(&self) -> bool {
+        matches!(
+            self.kind,
+            lpc_model::ProjectKind::General | lpc_model::ProjectKind::Pattern { .. }
+        )
+    }
+}
+
+/// What a module's def-artifact path says about its exportability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExportFolder<'a> {
+    /// `/fire/module.json` — a folder directly inside the project. The one
+    /// exportable shape.
+    Direct(&'a str),
+    /// `/effects/fire/module.json` — a folder, but not a direct child.
+    Nested,
+    /// `/fire.module.json` — no folder of its own.
+    Inline,
+    /// The def artifact is not in the connect-time map at all.
+    Unknown,
+}
+
+/// Classify a module def-artifact path for export purposes.
+///
+/// An export vendors `<folder>/` wholesale, so the only exportable shape is
+/// a module whose def IS a folder's `module.json` one level down from the
+/// project root. `/module.json` (the root module) classifies as `Nested`'s
+/// opposite — it never reaches here, because the root is excluded before
+/// the call (vision Q3: an export must not point at the root).
+fn export_folder_shape(def_path: &str) -> ExportFolder<'_> {
+    let segments: Vec<&str> = def_path
+        .trim_start_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    match segments.as_slice() {
+        [folder, "module.json"] => ExportFolder::Direct(folder),
+        [.., "module.json"] if segments.len() > 2 => ExportFolder::Nested,
+        _ => ExportFolder::Inline,
+    }
+}
+
+/// The kind the manifest takes after one designation edit.
+///
+/// The first export on a `General` project makes it a `Pattern` (vision
+/// D14's upgrade gesture); removing the last one puts it back. A `Rig`
+/// keeps being a rig — its exports are its own list — and a `Show` has no
+/// list to edit, so it is left alone.
+fn next_project_kind(
+    current: &lpc_model::ProjectKind,
+    exports: &[String],
+    folder: &str,
+    export: bool,
+) -> lpc_model::ProjectKind {
+    let mut next: Vec<String> = exports
+        .iter()
+        .filter(|name| name.as_str() != folder)
+        .cloned()
+        .collect();
+    if export {
+        next.push(folder.to_string());
+        next.sort();
+    }
+    if next.is_empty() {
+        return lpc_model::ProjectKind::General;
+    }
+    match current {
+        lpc_model::ProjectKind::Rig { .. } => lpc_model::ProjectKind::Rig { exports: next },
+        lpc_model::ProjectKind::Show => lpc_model::ProjectKind::Show,
+        lpc_model::ProjectKind::General | lpc_model::ProjectKind::Pattern { .. } => {
+            lpc_model::ProjectKind::Pattern { exports: next }
+        }
+    }
 }
 
 /// One staged node removal (see `ProjectController::staged_removals`).
@@ -199,6 +368,13 @@ struct PendingNodeFocus {
     /// Expected tree segment name of the created node (the `nodes` key, or
     /// the loader's `entry_<k>` fallback for unnamed playlist entries).
     name: String,
+    /// Whether the created node should surface the fixture Shape
+    /// declaration moment once its tree entry lands (D13, plan-B P5):
+    /// true for every "+ fixture" create and for a pasted fixture with
+    /// no authored shape. Resolved into the card-UI store at the same
+    /// moment focus resolves, because that is when the node's real
+    /// address exists.
+    shape_guided: bool,
 }
 
 /// Library wiring for load-as-push / save-as-pull (roadmap M3), reworked
@@ -233,6 +409,7 @@ impl ProjectController {
             running_project_status: RunningProjectStatus::Unknown,
             lens_runtime_kind: None,
             lens_device_features: None,
+            import_patterns: Vec::new(),
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
                 .to_string(),
@@ -240,15 +417,21 @@ impl ProjectController {
             root_nodes: Vec::new(),
             edit_buffer: BTreeMap::new(),
             asset_edit_buffer: BTreeMap::new(),
+            pulsed_outputs: BTreeSet::new(),
             verdict_chase_ticks: 0,
             asset_base_bodies: BTreeMap::new(),
-            attempted_layout_document_fetches: BTreeSet::new(),
-            synthesized_layout_cache: BTreeMap::new(),
             project_fs_root: None,
             def_artifacts: BTreeMap::new(),
             slot_shapes: SlotShapeRegistry::default(),
             root_shape_ids: BTreeMap::new(),
             node_card_ui: BTreeMap::new(),
+            patch_selection: None,
+            patch_undo: Vec::new(),
+            patch_redo: Vec::new(),
+            arrange_undo: Vec::new(),
+            arrange_redo: Vec::new(),
+            edit_journal: EditJournal::default(),
+            editor_meta_absent: false,
             next_mutation_cmd_id: 1,
             staged_removals: BTreeMap::new(),
             pending_focus: None,
@@ -256,6 +439,8 @@ impl ProjectController {
             library: None,
             classified_open_issue: None,
             open_notices: Vec::new(),
+            export_lint: std::cell::RefCell::new(None),
+            export_lint_epoch: std::cell::Cell::new(0),
         }
     }
 
@@ -429,9 +614,11 @@ impl ProjectController {
     /// state).
     pub fn ui_bus_view_for_scope(&self, scope: lpc_wire::WireScopeRef) -> Option<crate::UiBusView> {
         let graph = self.binding_graph()?;
-        // Hoisted out of the per-channel pass: the always-live set is a
-        // graph scan, and every value box asks the same question of it.
-        let always_live = self.always_live_products();
+        // Hoisted out of the per-channel pass: the subscription set is a
+        // walk of the node tree, and every value box asks the same question
+        // of it (R-C — a borrowed surface is tracking exactly while its
+        // product is still being pulled).
+        let subscribed = self.subscribed_products();
         // Sites carry their binding's priority out so the per-channel pass
         // below can mark shadowed writers and top-priority ties (E3).
         let site = |index: &u32| -> Option<(crate::UiBusSiteView, i32)> {
@@ -549,7 +736,7 @@ impl ProjectController {
                     Some(crate::UiBusChannelPreview {
                         kind: ui_product_kind(product),
                         preview: bytes,
-                        tracking: borrowed_tracking(&always_live, product),
+                        tracking: borrowed_tracking(&subscribed, product),
                         frame: crate::UiProductPreviewFrame::VISUAL_DEFAULT,
                     })
                 });
@@ -644,6 +831,118 @@ impl ProjectController {
         out
     }
 
+    /// The active project's export-lint verdict (module authoring unit, P2):
+    /// both halves of the check, joined, cached per input.
+    ///
+    /// Empty — and free — for anything that is not a library project with a
+    /// non-empty `exports` list: no active library project, a `General` or
+    /// `Show` kind, or a `Pattern`/`Rig` that exports nothing yet. Only when
+    /// there is something to check does this read package bytes, and then
+    /// only when those bytes could have moved (see [`Self::export_lint`]).
+    ///
+    /// P3 renders this; nothing here decides presentation.
+    pub fn export_lint_report(&self) -> Rc<lpc_model::ExportLintReport> {
+        let Some(active) = self
+            .library
+            .as_ref()
+            .and_then(|context| context.active.as_ref())
+        else {
+            return Rc::new(lpc_model::ExportLintReport::default());
+        };
+        let static_key = (
+            active.handle.uid.to_string(),
+            active.last_synced,
+            self.export_lint_epoch.get(),
+        );
+        let graph_revision = self.binding_graph().map(|graph| graph.revision);
+
+        let mut cache = self.export_lint.borrow_mut();
+        let static_stale = cache
+            .as_ref()
+            .is_none_or(|entry| entry.static_key != static_key);
+        if static_stale {
+            let (exports, static_findings) = static_export_findings(&active.handle);
+            *cache = Some(ExportLintCache {
+                static_key,
+                exports,
+                static_findings,
+                graph_revision: None,
+                report: Rc::new(lpc_model::ExportLintReport::default()),
+            });
+        }
+        let entry = cache.as_mut().expect("filled above");
+        if static_stale || entry.graph_revision != graph_revision {
+            let mut findings = entry.static_findings.clone();
+            if !entry.exports.is_empty()
+                && let Some(graph) = self.binding_graph()
+            {
+                findings.extend(super::export_lint::check_export_graph(
+                    graph,
+                    &entry.exports,
+                    &self.export_graph_context(),
+                ));
+            }
+            entry.graph_revision = graph_revision;
+            entry.report = Rc::new(lpc_model::ExportLintReport::new(findings));
+        }
+        Rc::clone(&entry.report)
+    }
+
+    /// Force the export lint's STATIC half to re-run on the next read.
+    ///
+    /// Needed only for package writes that do not advance the library's
+    /// synced fs version — today just a `project.json` patch (the kind /
+    /// exports designation, P3). Ordinary saves already move
+    /// `last_synced` and invalidate on their own.
+    pub fn invalidate_export_lint(&self) {
+        self.export_lint_epoch
+            .set(self.export_lint_epoch.get().wrapping_add(1));
+    }
+
+    /// Node identity and placement for the export lint's graph half, from
+    /// the synced controller tree plus the connect-time def-artifact map.
+    ///
+    /// `enclosing_scopes` is the chain of MODULE nodes above each node,
+    /// outermost first — the outward walk R5 resolution follows. Playlists
+    /// are not in it: an entry's sink scope is named by the playlist node
+    /// itself, and the graph half hops from that sink straight to the
+    /// playlist's own enclosing modules.
+    fn export_graph_context(&self) -> super::export_lint::ExportGraphContext {
+        fn walk(
+            node: &NodeController,
+            stack: &mut Vec<NodeId>,
+            def_artifacts: &BTreeMap<NodeId, ArtifactLocation>,
+            out: &mut Vec<super::export_lint::ExportGraphNode>,
+        ) {
+            let id = node.target().node_id;
+            out.push(super::export_lint::ExportGraphNode {
+                id,
+                label: node.label().to_string(),
+                def_path: def_artifacts
+                    .get(&id)
+                    .map(|artifact| artifact.file_path().as_str().to_string()),
+                enclosing_scopes: stack.clone(),
+            });
+            let is_module = node.kind() == MODULE_KIND_LABEL;
+            if is_module {
+                stack.push(id);
+            }
+            for child in node.children() {
+                walk(child, stack, def_artifacts, out);
+            }
+            if is_module {
+                stack.pop();
+            }
+        }
+
+        let mut nodes = Vec::new();
+        let mut stack = Vec::new();
+        for root in &self.root_nodes {
+            walk(root, &mut stack, &self.def_artifacts, &mut nodes);
+        }
+        super::export_lint::ExportGraphContext::new(nodes)
+    }
+
     /// The project's **primary visual product**: the resolved value of
     /// `bus:visual.out` (ADR 2026-07-16-primary-visual-product).
     ///
@@ -714,6 +1013,32 @@ impl ProjectController {
     fn root_module_scope(&self) -> Option<lpc_wire::WireScopeRef> {
         let owner = self.root_nodes.first()?.target().node_id;
         Some(lpc_wire::WireScopeRef::Module { owner })
+    }
+
+    /// The frame published by an OUTPUT node this scope owns, when it has one
+    /// worth drawing.
+    ///
+    /// Direct children only: "owns an output" is the question, and an output
+    /// two scopes down belongs to the module that holds it. A frame whose
+    /// geometry the engine refused (dome scale, over the wire budget) is not
+    /// worth drawing — the lens has no synthesis to stand in, and a card
+    /// saying "no display layout" is worse than the mirror it displaced — so
+    /// that scope keeps the ordinary two-channel hero.
+    fn scope_output_frame(
+        &self,
+        children: &[crate::UiNodeChild],
+    ) -> Option<crate::UiControlProductPreview> {
+        let sync = self.sync.as_ref()?;
+        children
+            .iter()
+            .filter(|child| child.kind == OUTPUT_KIND_LABEL)
+            .find_map(|child| {
+                let address = ProjectNodeAddress::parse(&child.detail).ok()?;
+                let node = self.node(&address)?;
+                sync.output_frame(node.target().node_id)
+                    .filter(|frame| frame.display_layout.is_some())
+                    .cloned()
+            })
     }
 
     /// The product a scope's named channel resolved to, when it resolved to
@@ -1084,6 +1409,7 @@ impl ProjectController {
                     node_address: node.address().to_string(),
                     node_label: node.label().to_string(),
                     bindings: agent_shader_bindings(node),
+                    space: agent_shader_space(node),
                 });
             }
             if let Some(found) = self.find_agent_shader(node.children(), artifact) {
@@ -1204,6 +1530,38 @@ impl ProjectController {
         artifact: &ArtifactLocation,
         upsert: &lpa_agent::ParamUpsert,
     ) -> Result<(ProjectEditRun, Option<String>), UiError> {
+        self.apply_agent_def_edits(server, artifact, param_upsert_edits(upsert))
+            .await
+    }
+
+    /// Dispatch one agent `declare_space` as ONE `MutationCmdBatch` on the
+    /// same def artifact and through the same ack path as
+    /// [`Self::upsert_shader_param`]. The edit list is
+    /// [`space_declaration_edits`] — the SAME ops the dimensionality
+    /// section's tiles dispatch, so the agent and the human share one
+    /// writer.
+    pub(crate) async fn declare_shader_space(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+        declaration: &lpa_agent::SpaceDeclaration,
+    ) -> Result<(ProjectEditRun, Option<String>), UiError> {
+        self.apply_agent_def_edits(server, artifact, space_declaration_edits(declaration))
+            .await
+    }
+
+    /// The shared body behind every agent def write: resolve the shader
+    /// node's def artifact, send `edits` as ONE `MutationCmdBatch` of
+    /// `PutSlotEdit`s, and report the joined rejection text when any
+    /// command was refused. A clean ack arms the verdict chase — a def
+    /// change flips the node's needs-compile, so the agent's
+    /// engine-verdict wait observes the fresh outcome.
+    async fn apply_agent_def_edits(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+        edits: Vec<lpc_model::SlotEdit>,
+    ) -> Result<(ProjectEditRun, Option<String>), UiError> {
         let handle_id = self.ready_handle_id()?;
         let def_artifact = {
             let node = self.agent_shader_node(artifact).ok_or_else(|| {
@@ -1223,7 +1581,7 @@ impl ProjectController {
                 })?
         };
         let batch = MutationCmdBatch::new(
-            param_upsert_edits(upsert)
+            edits
                 .into_iter()
                 .map(|edit| MutationCmd {
                     id: self.allocate_mutation_cmd_id(),
@@ -2036,11 +2394,29 @@ impl ProjectController {
         // (D10) — it lands here, before the module pass, the same way the
         // output face's board facts do.
         self.apply_clock_faces(&mut nodes);
+        // Same shape, one card kind over: the shader face's per-space
+        // preview stack is probe state the section DTOs cannot carry.
+        self.apply_face_preview_spaces(&mut nodes);
+        // Both sides of the patch bay, in one pass over output AND fixture
+        // faces: they show the same cells, so they are derived together.
+        self.apply_patch_bays(&mut nodes);
+        // The project-scoped patch surface reads what that pass just wrote
+        // onto the faces (bays + fixture rows) plus each fixture's own
+        // map2d body — built here so the two can never disagree.
+        let surface = self.build_patch_surface(&nodes);
         // Module faces derive LAST: a module's panel aggregates the panel
         // targets its finished subtree carries, so every card below it must
         // already be built (and card-UI-overlaid) before it can be read.
         self.apply_module_faces(&mut nodes);
         let mut root_add_node_menu = add_node_menu(&UiAttachTarget::ProjectRoot);
+        // The import source (P5) is attached before the device gate, so a
+        // board with no module runtime disables the vendoring rows too
+        // rather than offering a create it cannot run.
+        crate::app::project::node::set_import_source(
+            &mut root_add_node_menu,
+            &self.import_patterns,
+            self.active_library_uid().as_deref(),
+        );
         gate_add_node_menu(
             &mut root_add_node_menu,
             self.lens_device_features.as_deref(),
@@ -2078,6 +2454,8 @@ impl ProjectController {
         .with_header_actions(project_header_actions(&dirty))
         .with_add_node_menu(root_add_node_menu)
         .with_edits_in_flight(self.edits_in_flight())
+        .with_patch_surface(surface, self.patch_selection.clone())
+        .with_edit_journal(self.edit_journal.entries())
     }
 
     /// Human-readable project name for the project pane title and the root
@@ -2347,6 +2725,53 @@ impl ProjectController {
         // Without this, library/example-opened projects could not fetch
         // asset bodies ("filesystem root is unknown") — the inline editor's
         // content fetch resolves against the server fs root.
+        self.project_fs_root = loaded.fs_root;
+        self.def_artifacts = loaded.node_def_artifacts;
+        Ok(loaded.logs)
+    }
+
+    /// Re-push the ACTIVE library project's on-disk content to the running
+    /// runtime — the "apply into the open editor" half of the visitor pull
+    /// loop (P6). The platform edge fast-forwarded (or reset) the library
+    /// copy through the open project's own mounted stores; this re-loads
+    /// the handle from those same handles — the appended events and the
+    /// checked-out files are already there — and replaces the runtime's
+    /// loaded project with that content.
+    ///
+    /// No lock is taken (the open already holds it), and no format
+    /// migration runs: a tracking copy must not be diverged from its own
+    /// history by a local rewrite, so content this build cannot load
+    /// surfaces as the open error it is.
+    pub(crate) async fn reload_active_from_library(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        let (uid, slug, package_fs, history_fs) = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            let active = context.active.as_ref().ok_or_else(|| {
+                UiError::MissingSession("no active library project to reload".to_string())
+            })?;
+            (
+                active.handle.uid,
+                active.handle.slug.clone(),
+                std::rc::Rc::clone(&active.handle.package_fs),
+                std::rc::Rc::clone(&active.handle.history_fs),
+            )
+        };
+        let handle = crate::app::library::PackageHandle::load(uid, slug, package_fs, history_fs)
+            .map_err(library_ui_error)?;
+        let title = handle.slug.clone();
+        let files = handle.read_all_files().map_err(library_ui_error)?;
+        let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
+        let loaded = server
+            .open_library_project(&self.runtime_storage_id, &files, &expected_hash)
+            .await?;
+        let context = self.library.as_mut().ok_or_else(no_library_error)?;
+        context.active = Some(ActiveLibraryProject {
+            handle,
+            last_synced: loaded.synced_version,
+        });
+        self.mark_ready(title, loaded.handle_id, loaded.inventory);
         self.project_fs_root = loaded.fs_root;
         self.def_artifacts = loaded.node_def_artifacts;
         Ok(loaded.logs)
@@ -2677,6 +3102,18 @@ impl ProjectController {
                 self.apply_node_ui_op(op);
                 Ok(UiNotices::new())
             }
+            // The patch surface's one shared selection — local and
+            // synchronous like the card ops.
+            ProjectEditorOp::PatchSelect { target } => {
+                self.patch_selection = target;
+                Ok(UiNotices::new())
+            }
+            // Undo-correlation journal events from the shell (P2
+            // substrate; P5 wires the mapping-session observation).
+            ProjectEditorOp::EditorJournal { event, node, mode } => {
+                self.edit_journal.record(event, node, mode);
+                Ok(UiNotices::new())
+            }
         }
     }
 
@@ -2746,8 +3183,18 @@ impl ProjectController {
         let Some(graph) = self.binding_graph() else {
             return;
         };
+        // Read once per view build, not once per module card: it costs a
+        // `project.json` parse and the lint verdict, and every module card
+        // in the workspace is asking the same question about the same
+        // project (P3).
+        let exports = self.export_designation_context();
+        // The CURRENT subscription set, read once per view build: every
+        // borrowed surface (a module hero re-homed onto its scope's
+        // product, a wiring value box) asks the same question of it, and
+        // the answer costs a walk of the whole node tree (R-C).
+        let subscribed = self.subscribed_products();
         for node in nodes {
-            self.apply_child_module_faces(&mut node.children, graph);
+            self.apply_child_module_faces(&mut node.children, graph, exports.as_ref(), &subscribed);
             if node.header.kind != MODULE_KIND_LABEL {
                 continue;
             }
@@ -2758,10 +3205,18 @@ impl ProjectController {
                 view_sections(node),
                 &node.children,
                 node.card_ui.wiring_open,
+                exports.as_ref(),
+                &subscribed,
                 node.card_ui.hero_product,
             ) {
                 node.face = Some(crate::UiNodeFace::Module(face));
             }
+            // The child column's exports/rig split (R-A) — computed after
+            // the child faces exist, because it partitions the finished
+            // child cards rather than the manifest's name list.
+            node.exports = exports
+                .as_ref()
+                .and_then(|context| self.root_exports_group(node, context));
         }
     }
 
@@ -2769,9 +3224,11 @@ impl ProjectController {
         &self,
         children: &mut [crate::UiNodeChild],
         graph: &lpc_wire::WireBindingGraph,
+        exports: Option<&ExportDesignationContext>,
+        subscribed: &[UiProductRef],
     ) {
         for child in children {
-            self.apply_child_module_faces(&mut child.children, graph);
+            self.apply_child_module_faces(&mut child.children, graph, exports, subscribed);
             if child.kind != MODULE_KIND_LABEL {
                 continue;
             }
@@ -2782,6 +3239,8 @@ impl ProjectController {
                 &child.sections,
                 &child.children,
                 child.card_ui.wiring_open,
+                exports,
+                subscribed,
                 child.card_ui.hero_product,
             ) {
                 child.face = Some(crate::UiNodeFace::Module(face));
@@ -2858,6 +3317,344 @@ impl ProjectController {
             walk(self, node.face.as_mut());
             walk_children(self, &mut node.children);
         }
+    }
+
+    /// Attach each shader face's PER-SPACE previews (D15's checkboxes and
+    /// their origin captions).
+    ///
+    /// A decoration pass for the same reason the clock's phasors are one:
+    /// the per-space frames live in the probe cache, which the face
+    /// builder (deriving from section DTOs alone) cannot see. The face's
+    /// `preview` keeps carrying the hero frame, so nothing that renders a
+    /// product without knowing about spaces changes at all.
+    fn apply_face_preview_spaces(&self, nodes: &mut [UiNodeView]) {
+        fn walk(controller: &ProjectController, face: Option<&mut crate::UiNodeFace>) {
+            let Some(crate::UiNodeFace::Shader(shader)) = face else {
+                return;
+            };
+            let Some(product) = shader.preview.product else {
+                return;
+            };
+            let Some(sync) = controller.sync.as_ref() else {
+                return;
+            };
+            shader.preview.spaces = sync.product_space_views(&product);
+        }
+        fn walk_children(controller: &ProjectController, children: &mut [crate::UiNodeChild]) {
+            for child in children {
+                walk(controller, child.face.as_mut());
+                walk_children(controller, &mut child.children);
+            }
+        }
+        for node in nodes {
+            walk(self, node.face.as_mut());
+            walk_children(self, &mut node.children);
+        }
+    }
+
+    /// Attach both sides of the patch bay (D34a): the output face's
+    /// per-port rows and every fixture face's own-space row.
+    ///
+    /// A decoration pass for the same reason the clock's phasors are one —
+    /// the runs a wire is cut into ride the published-frame probe, and a
+    /// face builder deriving from section DTOs cannot see them. It has to
+    /// be ONE pass over both kinds: the two faces show the SAME cells, so
+    /// deriving them apart is how they would come to disagree.
+    ///
+    /// Runs first, faces second. The wires' channel rows are read out of
+    /// the output faces before anything is written back, because the
+    /// fixture cells name the port they land on — a fixture card cannot be
+    /// filled until every output's ports are known.
+    /// Build the project-scoped patch surface (D36) from what
+    /// [`Self::apply_patch_bays`] just wrote onto the faces: every output's
+    /// bay, every patched fixture's row, and each fixture's instance table
+    /// parsed from its OWN map2d body (the same bytes its mapping editor
+    /// holds). `None` when nothing patchable has answered — the surface
+    /// route then renders its empty state.
+    fn build_patch_surface(&self, nodes: &[UiNodeView]) -> Option<crate::UiPatchSurface> {
+        let mut surface = crate::UiPatchSurface::default();
+        // Modules by KIND, not face: module faces deliberately derive
+        // AFTER this surface builds (they aggregate their finished
+        // subtree), so the walk reads the tree's kind labels — set at
+        // tree-build time — and the root row wears the project name its
+        // header was just given.
+        walk_module_kinds(nodes, &mut |path, label| {
+            let Some(node) = ProjectNodeAddress::parse(path)
+                .ok()
+                .and_then(|address| self.node(&address))
+            else {
+                return;
+            };
+            surface.modules.push(crate::UiPatchSurfaceModule {
+                node: node.target().node_id,
+                label: label.to_string(),
+                address: Some(path.to_string()),
+                depth: 0,
+            });
+        });
+        walk_faces_ref(nodes, &mut |path, face| match face {
+            crate::UiNodeFace::Output(output) => {
+                let Some(bay) = output.patch.clone() else {
+                    return;
+                };
+                let Some(node) = ProjectNodeAddress::parse(path)
+                    .ok()
+                    .and_then(|address| self.node(&address))
+                else {
+                    return;
+                };
+                surface.outputs.push(crate::UiPatchSurfaceOutput {
+                    node: node.target().node_id,
+                    label: node.label().to_string(),
+                    name: output.name.clone(),
+                    address: Some(path.to_string()),
+                    name_assign: None,
+                    bay,
+                    module: None,
+                });
+            }
+            crate::UiNodeFace::Fixture(fixture) => {
+                let Some(patch) = fixture.patch.clone() else {
+                    return;
+                };
+                let Some(node) = ProjectNodeAddress::parse(path)
+                    .ok()
+                    .and_then(|address| self.node(&address))
+                else {
+                    return;
+                };
+                let body = fixture
+                    .mapping_editor
+                    .as_ref()
+                    .and_then(|editor| editor.content.as_ref())
+                    .and_then(|content| content.text());
+                let mapping_loaded = body.is_some();
+                let patch_loaded = fixture
+                    .patch_editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.content.is_some());
+                let mut instances = body
+                    .map(super::ui_patch_surface::instances_from_map2d)
+                    .unwrap_or_default();
+                // Mapped/unmapped per instance, derived from the fixture's
+                // resolved runs (the guide invariant: shown, never stored).
+                for instance in &mut instances {
+                    instance.placed = patch.cells.iter().any(|cell| {
+                        cell.source_start < instance.start + instance.lamps
+                            && cell.source_start + cell.lamps > instance.start
+                    });
+                }
+                surface.fixtures.push(crate::UiPatchSurfaceFixture {
+                    node: node.target().node_id,
+                    label: node.label().to_string(),
+                    address: Some(path.to_string()),
+                    patch,
+                    mapping_artifact: fixture
+                        .mapping_editor
+                        .as_ref()
+                        .map(|editor| editor.artifact.clone()),
+                    patch_artifact: fixture
+                        .patch_editor
+                        .as_ref()
+                        .map(|editor| editor.artifact.clone()),
+                    mapping_loaded,
+                    patch_loaded,
+                    instances,
+                    arrange: None,
+                    module: None,
+                });
+            }
+            _ => {}
+        });
+        // Module context (G1): nesting depth per module, and each
+        // fixture/output's nearest enclosing module — segment-wise tree
+        // prefixes via ProjectNodeAddress, resolved once here so the panels
+        // never re-derive path structure from strings.
+        let module_addresses: Vec<(lpc_model::NodeId, Option<ProjectNodeAddress>)> = surface
+            .modules
+            .iter()
+            .map(|module| {
+                (
+                    module.node,
+                    module
+                        .address
+                        .as_deref()
+                        .and_then(|path| ProjectNodeAddress::parse(path).ok()),
+                )
+            })
+            .collect();
+        let enclosing = |path: Option<&str>| -> Option<lpc_model::NodeId> {
+            let address = ProjectNodeAddress::parse(path?).ok()?;
+            module_addresses
+                .iter()
+                .filter(|(_, module)| {
+                    module
+                        .as_ref()
+                        .is_some_and(|module| address.is_self_or_under(module))
+                })
+                .max_by_key(|(_, module)| module.as_ref().map(|module| module.path().0.len()))
+                .map(|(node, _)| *node)
+        };
+        for index in 0..surface.modules.len() {
+            let own = module_addresses[index].1.as_ref();
+            surface.modules[index].depth = module_addresses
+                .iter()
+                .enumerate()
+                .filter(|(other, (_, module))| {
+                    *other != index
+                        && matches!(
+                            (own, module.as_ref()),
+                            (Some(own), Some(module)) if own.is_self_or_under(module)
+                        )
+                })
+                .count();
+        }
+        for fixture in &mut surface.fixtures {
+            fixture.module = enclosing(fixture.address.as_deref());
+        }
+        for output in &mut surface.outputs {
+            output.module = enclosing(output.address.as_deref());
+        }
+        // The editor.json facts (unified-editor P2): the loaded-flag pair
+        // pages drive the editor-meta prefetch from, and each fixture's
+        // arrange placement once the document has settled.
+        let editor_artifact = super::editor_meta_op::editor_meta_artifact();
+        surface.editor_meta_artifact = Some(editor_artifact);
+        match self.editor_meta_state() {
+            EditorMetaReadState::Ready(doc, _) => {
+                surface.editor_meta_loaded = true;
+                for fixture in &mut surface.fixtures {
+                    let entry = fixture
+                        .address
+                        .as_deref()
+                        .and_then(|key| doc.mapping_surface(key));
+                    fixture.arrange = Some(match entry {
+                        None => crate::UiArrangeMeta::default(),
+                        Some(entry) => crate::UiArrangeMeta {
+                            arranged: true,
+                            transform: crate::UiArrangeTransform {
+                                t: entry.transform.t,
+                                r: entry.transform.r,
+                                s: entry.transform.s,
+                            },
+                            footprint: entry.footprint.map(|fp| crate::UiArrangeFootprint {
+                                bbox: fp.bbox,
+                                lamps: fp.lamps,
+                            }),
+                        },
+                    });
+                }
+            }
+            // Unfetched stays loaded=false with no error (pages dispatch
+            // the fetch); a present-but-refused document is loaded=true
+            // with the refusal surfaced (arrange edits block on it too).
+            EditorMetaReadState::Unfetched => {}
+            EditorMetaReadState::Refused(reason) => {
+                surface.editor_meta_loaded = true;
+                surface.editor_meta_error = Some(reason);
+            }
+        }
+        // Prebuild the name auto-assign for unnamed outputs (D39): the
+        // first verb naming one applies this alongside its patch write.
+        // Numeric defaults skip names already in use ANYWHERE on the
+        // surface, including other pending assigns this pass hands out.
+        let mut known: Vec<String> = surface
+            .outputs
+            .iter()
+            .filter_map(|output| output.name.clone())
+            .collect();
+        for output in &mut surface.outputs {
+            if output.name.is_some() {
+                continue;
+            }
+            let Some(Ok(node)) = output.address.as_deref().map(ProjectNodeAddress::parse) else {
+                continue;
+            };
+            let mut candidate = 1u32;
+            let name = loop {
+                let text = candidate.to_string();
+                if !known.iter().any(|used| *used == text) {
+                    break text;
+                }
+                candidate += 1;
+            };
+            known.push(name.clone());
+            output.name_assign = Some((
+                ProjectSlotAddress::new(
+                    node,
+                    ProjectSlotRoot::Def,
+                    lpc_model::SlotPath::parse("name.some").expect("static slot path"),
+                ),
+                name,
+            ));
+        }
+        (!surface.outputs.is_empty()).then_some(surface)
+    }
+
+    fn apply_patch_bays(&self, nodes: &mut [UiNodeView]) {
+        use super::patch_bay_derivation::{OutputWire, fixture_patch, output_bay};
+
+        let Some(sync) = self.sync.as_ref() else {
+            return;
+        };
+        // (node, label, channels) for every output card in the tree.
+        let mut wires: Vec<(lpc_model::NodeId, String, Vec<crate::UiOutputPortRow>)> = Vec::new();
+        walk_faces(nodes, &mut |path, face| {
+            let crate::UiNodeFace::Output(output) = face else {
+                return;
+            };
+            let Some(node) = ProjectNodeAddress::parse(path)
+                .ok()
+                .and_then(|address| self.node(&address))
+            else {
+                return;
+            };
+            wires.push((
+                node.target().node_id,
+                node.label().to_string(),
+                output.ports.clone(),
+            ));
+        });
+        if wires.is_empty() {
+            return;
+        }
+        let wires: Vec<OutputWire<'_>> = wires
+            .iter()
+            .map(|(node, label, channels)| OutputWire {
+                node: *node,
+                label,
+                placements: sync.output_placements(*node),
+                frame: sync.output_frame(*node),
+                channels,
+            })
+            .collect();
+        let producer = |id: lpc_model::NodeId| {
+            self.node_by_runtime_id(id)
+                .map(|node| (node.label().to_string(), node.address().to_string()))
+        };
+
+        walk_faces(nodes, &mut |path, face| {
+            let Some(node) = ProjectNodeAddress::parse(path)
+                .ok()
+                .and_then(|address| self.node(&address))
+            else {
+                return;
+            };
+            let id = node.target().node_id;
+            match face {
+                crate::UiNodeFace::Output(output) => {
+                    let Some(wire) = wires.iter().find(|wire| wire.node == id) else {
+                        return;
+                    };
+                    let bay = output_bay(wire, &producer);
+                    output.patch = (!bay.is_empty()).then_some(bay);
+                }
+                crate::UiNodeFace::Fixture(fixture) => {
+                    fixture.patch = fixture_patch(id, &wires, &producer);
+                }
+                _ => {}
+            }
+        });
     }
 
     /// One wire phasor row → its trace cards, one per downstream READING
@@ -2948,6 +3745,8 @@ impl ProjectController {
         sections: &[crate::UiNodeSection],
         children: &[crate::UiNodeChild],
         wiring_open: bool,
+        exports: Option<&ExportDesignationContext>,
+        subscribed: &[UiProductRef],
         hero_product: crate::ModuleHeroProduct,
     ) -> Option<crate::UiModuleFace> {
         let address = ProjectNodeAddress::parse(path).ok()?;
@@ -2994,7 +3793,24 @@ impl ProjectController {
         // while its idle shader carried two knobs. The group is the entry's,
         // not the playlist's: its reset clears the entry's writers.
         self.collect_playlist_entry_groups(graph, children, &mut groups);
+        // A group with nothing in it says nothing (R-E): an invocation whose
+        // scope publishes no channel used to render as a bordered box with a
+        // name and no controls. Child faces are finished before this runs,
+        // so one pass per level clears the whole tree.
+        groups.retain(|group| !group.is_empty());
 
+        // A scope that OWNS an output heroes the WIRE that output composes:
+        // every producer's lamps, patched into one strand (G1 round 3 — "the
+        // root module isn't showing control output, just the peach body
+        // visual.out"). It outranks both bus channels because it is the only
+        // honest answer for such a scope: the peach's root `control.out`
+        // carries a fragments MAP of two fixtures, so it resolves to no
+        // single product at all, and its `visual.out` is one CHILD's mirror —
+        // a picture of half the project standing in for the whole of it.
+        // Scopes with no output are untouched and keep the two-channel pick
+        // below, which is why the peach's `body/` and `leaf/` submodules go
+        // on showing their own visuals.
+        let scope_output = self.scope_output_frame(children);
         // The hero: whichever of the scope's two primary products the card's
         // preference names, defaulting to `control.out` — a fixture
         // project's output IS the lamps, and the raster behind them is the
@@ -3008,14 +3824,22 @@ impl ProjectController {
         let scope_control = self
             .scope_channel_product(graph, scope, lpc_model::PRIMARY_CONTROL_CHANNEL)
             .filter(|product| matches!(product, UiProductRef::Control { .. }));
-        // Only a scope resolving BOTH offers a choice; anything else has one
-        // hero and no toggle to draw.
-        let hero_choice =
-            (scope_visual.is_some() && scope_control.is_some()).then_some(hero_product);
+        // Only a scope with BOTH a control side and a visual one offers a
+        // choice; anything else has one hero and no toggle to draw. An
+        // output's composed frame is the control side for this purpose — the
+        // toggle still flips to the mirror, which is how a viewer gets back
+        // to the raster the fixtures are sampling.
+        let has_control = scope_output.is_some() || scope_control.is_some();
+        let hero_choice = (scope_visual.is_some() && has_control).then_some(hero_product);
+        let control_first = hero_product == crate::ModuleHeroProduct::Control
+            || (hero_product == crate::ModuleHeroProduct::Visual && scope_visual.is_none());
         let chosen = match hero_product {
             crate::ModuleHeroProduct::Control => scope_control.or(scope_visual),
             crate::ModuleHeroProduct::Visual => scope_visual.or(scope_control),
         };
+        // The composed wire has no `UiProductRef` to re-home onto, so it is
+        // resolved as a preview outright rather than through `chosen`.
+        let output_hero = control_first.then_some(scope_output).flatten();
 
         // The R7 mirror ROW supplies identity and meta, but its bytes ride
         // the scope's resolved product: the mirror's own product ref is
@@ -3024,7 +3848,9 @@ impl ProjectController {
         // hero renders black while the shader card below it is live.
         let mut preview =
             super::node::node_face_builder::product_of_kind(sections, crate::UiProductKind::Visual);
-        if preview.is_none() && matches!(chosen, Some(UiProductRef::Control { .. })) {
+        if preview.is_none()
+            && (output_hero.is_some() || matches!(chosen, Some(UiProductRef::Control { .. })))
+        {
             // The asymmetry control-first exposes: the R7 mirror is a
             // VISUAL row, so a module publishing no mirror at all would get
             // NO hero even though its scope drives lamps — "control-first"
@@ -3045,7 +3871,18 @@ impl ProjectController {
                 ))
             });
         }
-        if let Some(hero) = preview.as_mut() {
+        if let (Some(hero), Some(frame)) = (preview.as_mut(), output_hero) {
+            // The composed wire, drawn straight from the published frame.
+            // There is no `UiProductRef` to borrow bytes through — an output
+            // node is a sink and publishes no product — so the row carries
+            // the preview and no product identity. It is always `Tracking`:
+            // the probe rides every read of a project that drives an output,
+            // so there is no unfocused state to be honest about.
+            hero.kind = crate::UiProductKind::Control;
+            hero.tracking = crate::UiProductTrackingState::Tracking;
+            hero.product = None;
+            hero.preview = crate::UiProductPreview::ControlNative(frame);
+        } else if let Some(hero) = preview.as_mut() {
             match chosen {
                 Some(product @ UiProductRef::Visual { .. }) => {
                     if let Some(bytes) = self
@@ -3054,7 +3891,7 @@ impl ProjectController {
                         .and_then(|sync| sync.product_preview(&product))
                     {
                         hero.preview = bytes.clone();
-                        hero.tracking = borrowed_tracking(&self.always_live_products(), product);
+                        hero.tracking = borrowed_tracking(subscribed, product);
                         hero.product = Some(product);
                     }
                 }
@@ -3067,7 +3904,7 @@ impl ProjectController {
                     // honestly when the bytes are not in the stream instead
                     // of showing the mirror.
                     hero.kind = ui_product_kind(product);
-                    hero.tracking = borrowed_tracking(&self.always_live_products(), product);
+                    hero.tracking = borrowed_tracking(subscribed, product);
                     hero.product = Some(product);
                     hero.preview = self
                         .sync
@@ -3101,6 +3938,267 @@ impl ProjectController {
                 .is_root_module(owner)
                 .then(|| self.panel_auto_save())
                 .flatten(),
+            // Designation is a property of one module, so the popup row
+            // rides every card but the root (an export must never point at
+            // the root — vision Q3). The CONTAINER's own exports are not on
+            // this face at all any more: they group the child column
+            // instead (R-A, [`crate::UiNodeView::exports`]).
+            export: if self.is_root_module(owner) {
+                None
+            } else {
+                exports.and_then(|context| self.module_export_row(context, owner))
+            },
+        })
+    }
+
+    /// Everything the export UI needs about the OPEN library project, read
+    /// once per view build (module authoring unit, P3).
+    ///
+    /// `None` when no library package backs the running project — the demo
+    /// path and a device-hosted project this library does not know have no
+    /// manifest to designate against, so neither the rail nor the popup row
+    /// appears at all (the `ProjectShareSection` precedent).
+    fn export_designation_context(&self) -> Option<ExportDesignationContext> {
+        let active = self.library.as_ref()?.active.as_ref()?;
+        let fields = {
+            let view = active.handle.package_fs.borrow();
+            crate::app::library::package_manifest::read_manifest(&*view).ok()?
+        };
+        Some(ExportDesignationContext {
+            project: fields
+                .name
+                .clone()
+                .unwrap_or_else(|| active.handle.slug.clone()),
+            kind: fields.kind,
+            exports: fields.exports,
+            report: self.export_lint_report(),
+            // The manifest is library-owned. Looking at a project through a
+            // device lens, the bytes you would be editing are not the ones
+            // in front of you, so the row disables and says so (planning
+            // Q4).
+            device_session: matches!(self.lens_runtime_kind, Some(crate::RuntimeKind::Device)),
+        })
+    }
+
+    /// How the ROOT card's child column splits into exports and rig (R-A).
+    ///
+    /// `None` for any card but the root, for a project that exports
+    /// nothing, and for a manifest whose export names match no child card
+    /// — in all three the column renders exactly as it always did.
+    ///
+    /// Membership is read from each child's DEF ARTIFACT, not from its
+    /// designation row: the row is hidden on `Show`/`Rig` projects, and a
+    /// rig's exports are still exports.
+    fn root_exports_group(
+        &self,
+        node: &UiNodeView,
+        context: &ExportDesignationContext,
+    ) -> Option<crate::UiExportsGroup> {
+        if context.exports.is_empty() {
+            return None;
+        }
+        let address = ProjectNodeAddress::parse(&node.header.path).ok()?;
+        let owner = self.node(&address)?.target().node_id;
+        if !self.is_root_module(owner) {
+            return None;
+        }
+        let keys: Vec<String> = node
+            .children
+            .iter()
+            .filter(|child| {
+                self.child_export_folder(child)
+                    .is_some_and(|folder| context.exports.iter().any(|name| name == folder))
+            })
+            .map(|child| child.detail.clone())
+            .collect();
+        if keys.is_empty() {
+            return None;
+        }
+        Some(crate::UiExportsGroup {
+            keys,
+            findings: context.report.findings.clone(),
+        })
+    }
+
+    /// The export folder one child card would ship, when it is a module
+    /// whose def IS a direct sub-folder's `module.json` — the one
+    /// exportable shape ([`export_folder_shape`]).
+    fn child_export_folder(&self, child: &crate::UiNodeChild) -> Option<&str> {
+        let address = ProjectNodeAddress::parse(&child.detail).ok()?;
+        let owner = self.node(&address)?.target().node_id;
+        let def_path = self.def_artifacts.get(&owner)?.file_path().as_str();
+        match export_folder_shape(def_path) {
+            ExportFolder::Direct(folder) => Some(folder),
+            ExportFolder::Nested | ExportFolder::Inline | ExportFolder::Unknown => None,
+        }
+    }
+
+    /// The export designation row for ONE module card's detail popup.
+    ///
+    /// `None` hides the section entirely — a `Show` or `Rig` project, which
+    /// this round does not offer designation for. Otherwise the row always
+    /// renders: when the module cannot be exported the row carries the
+    /// reason instead of vanishing, the add-node picker's disabled-row
+    /// precedent.
+    fn module_export_row(
+        &self,
+        context: &ExportDesignationContext,
+        owner: NodeId,
+    ) -> Option<crate::UiModuleExport> {
+        if !context.offers_designation() {
+            return None;
+        }
+        let def_path = self
+            .def_artifacts
+            .get(&owner)
+            .map(|artifact| artifact.file_path().as_str().to_string());
+        let shape = def_path
+            .as_deref()
+            .map_or(ExportFolder::Unknown, |path| export_folder_shape(path));
+        let (folder, mut disabled_reason) = match shape {
+            ExportFolder::Direct(folder) => (folder.to_string(), None),
+            ExportFolder::Nested => (
+                String::new(),
+                Some(
+                    "Only a folder directly inside this project can be exported; \
+                     this module sits deeper in the tree."
+                        .to_string(),
+                ),
+            ),
+            ExportFolder::Inline => (
+                String::new(),
+                Some(
+                    "An export ships a folder. This module is a single file — \
+                     move it into a folder of its own to export it."
+                        .to_string(),
+                ),
+            ),
+            ExportFolder::Unknown => (
+                String::new(),
+                Some(
+                    "This module's definition file is unknown, so its folder \
+                     cannot be identified."
+                        .to_string(),
+                ),
+            ),
+        };
+        if disabled_reason.is_none() && context.device_session {
+            disabled_reason = Some(
+                "Exports live in the project's own file, which is edited in your \
+                 library — not from a device session."
+                    .to_string(),
+            );
+        }
+        let designated = !folder.is_empty() && context.exports.iter().any(|name| *name == folder);
+        Some(crate::UiModuleExport {
+            findings: context
+                .report
+                .for_export(&folder)
+                .cloned()
+                .collect::<Vec<_>>(),
+            upgrades_to_pattern: !designated
+                && matches!(context.kind, lpc_model::ProjectKind::General),
+            folder,
+            project: context.project.clone(),
+            designated,
+            disabled_reason,
+        })
+    }
+
+    /// Add or remove one module folder from the open project's `exports`
+    /// list (module authoring unit, P3; [`crate::ModuleExportOp`]).
+    ///
+    /// The write goes through the OPEN project's own exclusive-locked
+    /// `package_fs` — not a [`crate::app::library::CatalogOp`], which would
+    /// refuse `OpenInThisTab` for the very project being edited — and is
+    /// then mirrored into the runtime copy so the save path's
+    /// library/runtime hash tripwire stays quiet. The canonical writer keeps
+    /// `project.json` byte-stable either way (P1).
+    pub async fn set_module_export(
+        &mut self,
+        server: &mut StudioServerClient,
+        folder: &str,
+        export: bool,
+    ) -> Result<ProjectEditRun, UiError> {
+        let folder = folder.trim();
+        if folder.is_empty() {
+            return Err(UiError::UnsupportedAction(
+                "an export names a module folder".to_string(),
+            ));
+        }
+        let root = self.project_fs_root.clone().ok_or_else(|| {
+            UiError::Project(
+                "the connected project's filesystem root is unknown; cannot change exports"
+                    .to_string(),
+            )
+        })?;
+        let now = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            (context.now_secs)()
+        };
+
+        // --- library write (the manifest's home) --------------------------
+        let (bytes, project, upgraded, downgraded) = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            let active = context.active.as_ref().ok_or_else(|| {
+                UiError::UnsupportedAction(
+                    "this project is not in your library, so it has no exports to change"
+                        .to_string(),
+                )
+            })?;
+            let fs = active.handle.package_fs.borrow();
+            let fields = crate::app::library::package_manifest::read_manifest(&*fs)
+                .map_err(library_ui_error)?;
+            let kind = next_project_kind(&fields.kind, &fields.exports, folder, export);
+            let upgraded = matches!(fields.kind, lpc_model::ProjectKind::General)
+                && !matches!(kind, lpc_model::ProjectKind::General);
+            let downgraded = !matches!(fields.kind, lpc_model::ProjectKind::General)
+                && matches!(kind, lpc_model::ProjectKind::General);
+            crate::app::library::package_manifest::set_kind_and_exports(&*fs, kind)
+                .map_err(library_ui_error)?;
+            let bytes = fs
+                .read_file(lpc_model::AsLpPath::as_path(
+                    &crate::app::library::package_manifest::MANIFEST_PATH,
+                ))
+                .map_err(|e| library_ui_error(crate::app::library::LibraryError::from(e)))?;
+            let project = fields
+                .name
+                .clone()
+                .unwrap_or_else(|| active.handle.slug.clone());
+            (bytes, project, upgraded, downgraded)
+        };
+
+        // --- runtime mirror (keeps the two copies hash-identical) ---------
+        // Without this the next save's tripwire would report the library
+        // copy as diverged from the running project — it hashes
+        // `project.json` too.
+        let logs = server.fs_write(&root.join("project.json"), &bytes).await?;
+
+        {
+            let context = self.library.as_mut().ok_or_else(no_library_error)?;
+            if let Some(active) = context.active.as_mut() {
+                // The bytes on disk moved without a runtime commit, so the
+                // history head is stale until this snapshot lands.
+                active.handle.record_save(now).map_err(library_ui_error)?;
+            }
+        }
+        // The package bytes changed without `last_synced` moving, which is
+        // exactly the case P2's manual epoch exists for.
+        self.invalidate_export_lint();
+
+        let notice = match (export, upgraded, downgraded) {
+            (true, true, _) => UiNotice::info(format!(
+                "{folder} is exported — {project} is now a pattern project"
+            )),
+            (true, false, _) => UiNotice::info(format!("{folder} is exported from {project}")),
+            (false, _, true) => UiNotice::info(format!(
+                "{folder} is no longer exported — {project} is a general project again"
+            )),
+            (false, _, false) => UiNotice::info(format!("{folder} is no longer exported")),
+        };
+        Ok(ProjectEditRun {
+            notices: UiNotices::new().with_notice(notice),
+            logs,
         })
     }
 
@@ -3521,7 +4619,6 @@ impl ProjectController {
         let mut logs = read.logs;
         self.sync_mut()?.apply_project_read_events(read.events)?;
         self.apply_synced_project_view()?;
-        logs.extend(self.fetch_missing_layout_documents(server).await);
         logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
         Ok(logs)
     }
@@ -3577,7 +4674,6 @@ impl ProjectController {
             Err(error) => return Err(error),
         }
         self.apply_synced_project_view()?;
-        logs.extend(self.fetch_missing_layout_documents(server).await);
         logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
         Ok(logs)
     }
@@ -3627,6 +4723,14 @@ impl ProjectController {
         self.lens_device_features = features;
     }
 
+    /// Record what the library can be imported FROM (module authoring
+    /// unit, P5): every pattern export the gallery snapshot listed. Pushed
+    /// from the studio controller's library settle, the same chokepoint
+    /// the gallery cards are hydrated at.
+    pub fn set_import_patterns(&mut self, patterns: Vec<crate::UiImportablePattern>) {
+        self.import_patterns = patterns;
+    }
+
     /// The runtime-tiered visual probe resolution for the current lens.
     fn visual_preview_frame(&self) -> crate::UiProductPreviewFrame {
         match self.lens_runtime_kind {
@@ -3640,9 +4744,68 @@ impl ProjectController {
     /// lens, and requests must always reflect the current one.
     fn sync_for_request(&mut self) -> Result<&mut ProjectSync, UiError> {
         let frame = self.visual_preview_frame();
+        let spaces = self.preview_space_requests();
         let sync = self.sync_mut()?;
         sync.set_visual_preview_frame(frame);
+        sync.set_preview_spaces(spaces);
         Ok(sync)
+    }
+
+    /// Which spaces each shader card wants its visual product previewed in
+    /// (D15), resolved from the card's checkbox state against the
+    /// producer's PRIMARY space.
+    ///
+    /// Shader cards only: they are the cards that grow the checkboxes, and
+    /// leaving every other product unregistered is what keeps playlist
+    /// thumbs, module heroes, and the always-live primary visual on
+    /// exactly today's single 2D probe.
+    ///
+    /// The primary space is a probe ANSWER, so the first read of a fresh
+    /// project resolves against the 2D default, learns the real primary
+    /// from the result, and asks for it on the next read — a one-cycle
+    /// convergence, stable thereafter (nothing here depends on the frame
+    /// it produced).
+    fn preview_space_requests(&self) -> BTreeMap<UiProductRef, crate::UiProductSpaceRequest> {
+        let mut requests = BTreeMap::new();
+        for node in &self.root_nodes {
+            self.collect_preview_space_requests(node, &mut requests);
+        }
+        requests
+    }
+
+    fn collect_preview_space_requests(
+        &self,
+        node: &NodeController,
+        requests: &mut BTreeMap<UiProductRef, crate::UiProductSpaceRequest>,
+    ) {
+        if node.kind().eq_ignore_ascii_case("shader") {
+            let state = self.node_card_ui.get(&node.address().to_string());
+            let mut products = Vec::new();
+            node.collect_produced_product_refs(&mut products);
+            for product in products {
+                if !matches!(product, UiProductRef::Visual { .. }) {
+                    continue;
+                }
+                let primary = self
+                    .sync
+                    .as_ref()
+                    .and_then(|sync| sync.product_space(&product))
+                    .map_or(crate::UiVisualSpace::TwoD, |space| space.primary);
+                let spaces = state
+                    .map(|state| state.preview_spaces_for(primary))
+                    .unwrap_or_else(|| crate::UiPreviewSpaces::only(primary));
+                requests.insert(
+                    product,
+                    crate::UiProductSpaceRequest {
+                        spaces,
+                        hero: primary,
+                    },
+                );
+            }
+        }
+        for child in node.children() {
+            self.collect_preview_space_requests(child, requests);
+        }
     }
 
     fn clear_loaded_project_state(&mut self) {
@@ -3655,8 +4818,6 @@ impl ProjectController {
         self.edit_buffer.clear();
         self.asset_edit_buffer.clear();
         self.asset_base_bodies.clear();
-        self.attempted_layout_document_fetches.clear();
-        self.synthesized_layout_cache.clear();
         self.project_fs_root = None;
         self.def_artifacts.clear();
         self.slot_shapes = SlotShapeRegistry::default();
@@ -3686,10 +4847,12 @@ impl ProjectController {
         let active = self.library.as_ref()?.active.as_ref()?;
         let view = active.handle.package_fs.borrow();
         let fields = crate::app::library::package_manifest::read_manifest(&*view).ok()?;
+        let kind = crate::app::library::package_manifest::kind_label(&fields.kind).to_string();
         Some(crate::UiProjectManifest {
             format: fields.format,
             uid: fields.uid,
             name: fields.name,
+            kind,
         })
     }
 
@@ -3722,10 +4885,24 @@ impl ProjectController {
         )
     }
 
-    /// The open library package's slug (drives the web shell's
-    /// `#/sim/<slug>` URL).
+    /// The open library package's slug (the library's directory key —
+    /// dated, e.g. `2026-08-07-2302-project`).
     pub fn active_library_slug(&self) -> Option<String> {
         Some(self.library.as_ref()?.active.as_ref()?.handle.slug.clone())
+    }
+
+    /// The open package's user-facing display name — the manifest `name`
+    /// (the same fact the cloud sidecar publishes, so the address bar's
+    /// cosmetic slug and the service's canonical URL agree), falling back
+    /// to the library slug for a manifest that carries none.
+    pub fn active_library_display_name(&self) -> Option<String> {
+        let active = self.library.as_ref()?.active.as_ref()?;
+        let view = active.handle.package_fs.borrow();
+        let name = crate::app::library::package_manifest::read_manifest(&*view)
+            .ok()
+            .and_then(|fields| fields.name)
+            .filter(|name| !name.trim().is_empty());
+        Some(name.unwrap_or_else(|| active.handle.slug.clone()))
     }
 
     /// Install the runtime-node-id → def-artifact map.
@@ -3754,185 +4931,7 @@ impl ProjectController {
         // graph through `self.sync`, which was taken out during the view
         // apply — run it now that it is restored.
         self.refresh_binding_presentation();
-        // Last, because it reads the freshly reconciled node tree (mapping
-        // source and render extent) alongside the freshly applied previews,
-        // and every DTO build downstream expects the layouts already filled.
-        self.apply_synthesized_display_layouts();
         result
-    }
-
-    /// Fill in display layouts the engine declined to send.
-    ///
-    /// The engine refuses a display layout that would not fit one
-    /// project-read frame (`DISPLAY_LAYOUT_WIRE_BUDGET`), which at dome
-    /// scale leaves the fixture face and the module output face with
-    /// nothing to draw. When the producing node is a fixture whose mapping
-    /// is a map2d document Studio already holds, the layout is derivable
-    /// here from the same document the engine resolved, so it is —
-    /// device-identical by construction (see
-    /// `app::project::control_display_layout_fallback`).
-    ///
-    /// Everything is best-effort: an unfetched document, a parse failure, a
-    /// resolve failure, or a non-map2d fixture all leave the preview exactly
-    /// as the probe left it. The preview never blocks on this.
-    fn apply_synthesized_display_layouts(&mut self) {
-        let Some(sync) = self.sync.as_ref() else {
-            return;
-        };
-        let missing = sync.control_products_missing_display_layout();
-        if missing.is_empty() {
-            return;
-        }
-        // Inputs gathered under `&self` (the node tree and the asset body
-        // cache are both immutable reads), then the cache consulted under
-        // `&mut self`, then the results installed — the sync mirror cannot
-        // be borrowed mutably while either is in hand.
-        type LayoutInput = (
-            UiProductRef,
-            lpc_model::Revision,
-            ArtifactLocation,
-            String,
-            (u32, u32),
-            u64,
-        );
-        let inputs: Vec<LayoutInput> = missing
-            .into_iter()
-            .filter_map(|(product, revision)| {
-                let (artifact, text, extent) = self.synthesized_layout_inputs(&product)?;
-                use std::hash::{Hash, Hasher};
-                let mut hasher = std::hash::DefaultHasher::new();
-                text.hash(&mut hasher);
-                extent.hash(&mut hasher);
-                Some((product, revision, artifact, text, extent, hasher.finish()))
-            })
-            .collect();
-        let mut synthesized: Vec<(UiProductRef, Rc<ControlDisplayLayout>)> = Vec::new();
-        for (product, revision, artifact, text, extent, input_hash) in inputs {
-            let cached = self
-                .synthesized_layout_cache
-                .get(&artifact)
-                .filter(|entry| entry.input_hash == input_hash);
-            let layout = if let Some(entry) = cached {
-                Rc::clone(&entry.layout)
-            } else {
-                let Some(layout) = synthesize_layout_from_text(revision, &text, extent) else {
-                    continue;
-                };
-                let layout = Rc::new(ControlDisplayLayout::Layout2d(layout));
-                self.synthesized_layout_cache.insert(
-                    artifact,
-                    SynthesizedLayoutEntry {
-                        input_hash,
-                        layout: Rc::clone(&layout),
-                    },
-                );
-                layout
-            };
-            synthesized.push((product, layout));
-        }
-        let Some(sync) = self.sync.as_mut() else {
-            return;
-        };
-        for (product, layout) in synthesized {
-            sync.set_control_display_layout(&product, layout);
-        }
-    }
-
-    /// Fetch the mapping documents the display-layout fallback is starved
-    /// of, then re-run the synthesis over the freshly cached bodies.
-    ///
-    /// [`Self::apply_synthesized_display_layouts`] is a pure local read — it
-    /// can only use bodies already in the cache, and nothing fetches a
-    /// mapping document until its editor mounts. A dome-scale fixture whose
-    /// card sits unopened would keep "no display layout" forever. This is
-    /// the async half: called by both sync paths right after the view
-    /// applies, it fetches each qualifying document once per connection
-    /// (successes land in the body cache; failures warn once rather than on
-    /// every refresh) and re-applies the synthesis.
-    async fn fetch_missing_layout_documents(
-        &mut self,
-        server: &mut StudioServerClient,
-    ) -> Vec<UiLogDraft> {
-        let artifacts = self.missing_layout_document_artifacts();
-        if artifacts.is_empty() {
-            return Vec::new();
-        }
-        let mut logs = Vec::new();
-        for artifact in artifacts {
-            self.attempted_layout_document_fetches
-                .insert(artifact.clone());
-            match self.asset_content(server, &artifact).await {
-                Ok(run) => logs.extend(run.logs),
-                // Not fatal to the sync: the preview keeps the engine's
-                // answer (no layout) and the editor path can still recover
-                // the body later.
-                Err(error) => logs.push(UiLogDraft::new(
-                    UiLogLevel::Warn,
-                    UiLogOrigin::Studio,
-                    format!(
-                        "mapping document fetch for the display-layout \
-                         fallback failed ({}): {error}",
-                        artifact.file_path().as_str()
-                    ),
-                )),
-            }
-        }
-        self.apply_synthesized_display_layouts();
-        logs
-    }
-
-    /// Mapping-document artifacts wanted by the display-layout fallback but
-    /// absent from the local body cache (and not already attempted this
-    /// connection). Mirrors [`Self::synthesized_display_layout`]'s lookup
-    /// chain up to the body read.
-    fn missing_layout_document_artifacts(&self) -> Vec<ArtifactLocation> {
-        let Some(sync) = self.sync.as_ref() else {
-            return Vec::new();
-        };
-        sync.control_products_missing_display_layout()
-            .into_iter()
-            .filter_map(|(product, _revision)| {
-                let UiProductRef::Control { node_id, .. } = product else {
-                    return None;
-                };
-                let node = self.node_by_runtime_id(NodeId::new(node_id))?;
-                if !node.kind().eq_ignore_ascii_case("fixture") {
-                    return None;
-                }
-                let source = fixture_map2d_source(node)?;
-                let artifact = self.resolve_node_asset_artifact(node, &source)?;
-                if self.asset_content_cached(&artifact).is_some()
-                    || self.attempted_layout_document_fetches.contains(&artifact)
-                {
-                    return None;
-                }
-                Some(artifact)
-            })
-            .collect()
-    }
-
-    /// The inputs the display-layout fallback synthesizes from: the mapping
-    /// artifact, its overlay-aware body text (an applied unsaved edit is
-    /// what the engine is running), and the fixture's render extent. `None`
-    /// unless the producer really is a map2d fixture whose document is
-    /// resolvable from what is already local.
-    fn synthesized_layout_inputs(
-        &self,
-        product: &UiProductRef,
-    ) -> Option<(ArtifactLocation, String, (u32, u32))> {
-        let UiProductRef::Control { node_id, .. } = product else {
-            return None;
-        };
-        let node = self.node_by_runtime_id(NodeId::new(*node_id))?;
-        if !node.kind().eq_ignore_ascii_case("fixture") {
-            return None;
-        }
-        let source = fixture_map2d_source(node)?;
-        let artifact = self.resolve_node_asset_artifact(node, &source)?;
-        let content = self.asset_content_cached(&artifact)?;
-        let text = content.text()?.to_owned();
-        let extent = fixture_render_size(node)?;
-        Some((artifact, text, (extent.width, extent.height)))
     }
 
     fn record_sync_failure(
@@ -4026,6 +5025,97 @@ impl ProjectController {
                 self.apply_revert(server, handle_id, address, "Clear").await
             }
         }
+    }
+
+    /// Execute a [`crate::PatchPulseOp`]: map the selected patch subject
+    /// through the published placements and write each involved output's
+    /// `highlight` Debug slot, so the live sim/hardware pulses the lamps
+    /// the selection is about to re-patch (Q27/D43).
+    ///
+    /// Outputs the previous pulse wrote and this one does not are swept
+    /// with Clear — one selection, one pulse, never a trail. `None` (or a
+    /// subject no wire carries) clears everything. The writes are ordinary
+    /// Debug-slot overlay edits, so they reach whatever runs the engine and
+    /// never touch dirty/save accounting.
+    pub async fn apply_patch_pulse(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: crate::PatchPulseOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        use super::patch_pulse::{PulseWire, pulse_highlights, wire_extent_lamps};
+
+        let writes: Vec<(NodeId, String)> = match (&op.subject, self.sync.as_ref()) {
+            (Some(subject), Some(sync)) => {
+                let outputs: Vec<NodeId> = sync.published_outputs().collect();
+                let wires: Vec<PulseWire<'_>> = outputs
+                    .iter()
+                    .map(|node| PulseWire {
+                        node: *node,
+                        placements: sync.output_placements(*node),
+                        lamps: wire_extent_lamps(
+                            sync.output_frame(*node),
+                            sync.output_placements(*node),
+                        ),
+                    })
+                    .collect();
+                pulse_highlights(subject, &wires)
+            }
+            _ => Vec::new(),
+        };
+
+        let written: BTreeSet<NodeId> = writes.iter().map(|(node, _)| *node).collect();
+        let stale: Vec<NodeId> = self
+            .pulsed_outputs
+            .iter()
+            .filter(|node| !written.contains(node))
+            .copied()
+            .collect();
+
+        let mut run = ProjectEditRun {
+            notices: UiNotices::new(),
+            logs: Vec::new(),
+        };
+        for node in stale {
+            let Some(address) = self.output_highlight_address(node) else {
+                // The output left the project since the pulse was set; its
+                // Debug state left with it.
+                continue;
+            };
+            let cleared = self
+                .apply_slot_edit(server, SlotEditOp::Clear { address })
+                .await?;
+            run.notices.notices.extend(cleared.notices.notices);
+            run.logs.extend(cleared.logs);
+        }
+        for (node, text) in &writes {
+            let Some(address) = self.output_highlight_address(*node) else {
+                continue;
+            };
+            let set = self
+                .apply_slot_edit(
+                    server,
+                    SlotEditOp::SetValue {
+                        address,
+                        value: LpValue::String(text.clone()),
+                    },
+                )
+                .await?;
+            run.notices.notices.extend(set.notices.notices);
+            run.logs.extend(set.logs);
+        }
+        self.pulsed_outputs = written;
+        Ok(run)
+    }
+
+    /// The `highlight` Debug slot's address on one output node, when the
+    /// node is still in the tree.
+    fn output_highlight_address(&self, node: NodeId) -> Option<ProjectSlotAddress> {
+        let controller = self.node_by_runtime_id(node)?;
+        Some(ProjectSlotAddress::new(
+            controller.address().clone(),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("highlight").ok()?,
+        ))
     }
 
     /// Execute a [`PlaylistActivateOp`]: dispatch the activate-entry runtime
@@ -4306,8 +5396,6 @@ impl ProjectController {
         // The commit rewrote persisted artifacts, so every cached base body
         // is suspect; drop them all and let the next editor open re-fetch.
         self.asset_base_bodies.clear();
-        self.attempted_layout_document_fetches.clear();
-        self.synthesized_layout_cache.clear();
         // Staged node removals materialized (files deleted); the records
         // backing their save-panel rows are done.
         self.staged_removals.clear();
@@ -4348,8 +5436,6 @@ impl ProjectController {
         // Every artifact's overlay entry clears with the batch, so cached
         // base bodies re-fetch on the next editor open (invalidate-on-clear).
         self.asset_base_bodies.clear();
-        self.attempted_layout_document_fetches.clear();
-        self.synthesized_layout_cache.clear();
         // The wholesale Clear also un-stages every node removal (site edits
         // and Delete overlays included) — the records go with them.
         self.staged_removals.clear();
@@ -4641,7 +5727,94 @@ impl ProjectController {
             site,
         );
 
-        self.run_create_request(server, request, parent, expected_name, name)
+        // Every "+ fixture" birth surfaces the Shape declaration moment
+        // (D13): the starter is a generic 8×8 grid, not a declared shape.
+        let shape_guided = kind == NodeKind::Fixture;
+        self.run_create_request(server, request, parent, expected_name, name, shape_guided)
+            .await
+    }
+
+    /// Vendor one library pattern export into this project
+    /// ([`crate::NodeImportOp`], module authoring unit, P5).
+    ///
+    /// Copy-to-own: the source package is read through a fresh read-only
+    /// catalog snapshot (no lock, no write — the source project may well be
+    /// open in another tab), its `<export>/**` files are re-rooted under
+    /// `modules/<key>/`, and the whole folder goes out as ONE `CreateNode`
+    /// — the def plus every other file as assets. The folder's internal
+    /// refs are relative, so re-rooting preserves them untouched; nothing
+    /// here rewrites a path inside the copy.
+    ///
+    /// `key` is the export's own name, deduped against the project's taken
+    /// names (`fire`, then `fire_2`) exactly as the create and paste paths
+    /// do — so importing the same pattern twice lands two independent
+    /// copies rather than a rejection.
+    pub async fn import_pattern(
+        &mut self,
+        server: &mut StudioServerClient,
+        package_uid: &str,
+        export: &str,
+    ) -> Result<ProjectEditRun, UiError> {
+        use crate::app::project::node::import_pattern::{
+            VendoredExport, collect_export_folder, source_manifest, stamp_module_provenance,
+        };
+
+        let export = export.trim();
+        if export.is_empty() {
+            return Err(UiError::UnsupportedAction(
+                "an import names an export folder".to_string(),
+            ));
+        }
+        let host = {
+            let context = self.library.as_ref().ok_or_else(no_library_error)?;
+            std::rc::Rc::clone(&context.host)
+        };
+        // Read-only snapshot: the SOURCE is somebody else's project, and a
+        // read must never take its lock (the `package_export` precedent).
+        let snapshot = host.catalog_snapshot().await?;
+        let source_files = {
+            let store = crate::app::library::LibraryStore::read_only(snapshot);
+            let uid = store.resolve_key(package_uid).map_err(library_ui_error)?;
+            store
+                .open(uid)
+                .map_err(library_ui_error)?
+                .read_all_files()
+                .map_err(library_ui_error)?
+        };
+
+        let vendored = collect_export_folder(&source_files, export)?;
+        // R14 on the way out: an export with no attribution of its own
+        // inherits the source project's, so the copy can still say who
+        // wrote it. Written through the canonical writer, never spliced.
+        let body = stamp_module_provenance(
+            &vendored.body,
+            source_manifest(&source_files).as_ref(),
+            &self.slot_shapes,
+        )?;
+
+        let key = self.unique_node_name_from(export);
+        let (site, parent, expected_name) =
+            match self.resolve_attach_site(&UiAttachTarget::ProjectRoot, &key)? {
+                Some(resolved) => resolved,
+                None => {
+                    return Ok(ProjectEditRun::notice(attach_unavailable_notice(
+                        &UiAttachTarget::ProjectRoot,
+                    )));
+                }
+            };
+
+        let request = WireCreateNodeRequest::new(
+            lpc_model::LpPathBuf::from(VendoredExport::def_path(&key).as_str()),
+            body,
+            vendored
+                .asset_paths(&key)
+                .into_iter()
+                .map(|(path, bytes)| (lpc_model::LpPathBuf::from(path.as_str()), bytes))
+                .collect(),
+            site,
+        );
+
+        self.run_create_request(server, request, parent, expected_name, key, false)
             .await
     }
 
@@ -4659,6 +5832,7 @@ impl ProjectController {
         parent: ProjectNodeAddress,
         expected_name: String,
         name: String,
+        shape_guided: bool,
     ) -> Result<ProjectEditRun, UiError> {
         let handle_id = self.ready_handle_id()?;
         let outcome = server.project_create_node(handle_id, request).await?;
@@ -4672,6 +5846,7 @@ impl ProjectController {
                 self.pending_focus = Some(PendingNodeFocus {
                     parent,
                     name: expected_name,
+                    shape_guided,
                 });
                 match self.refresh_project(server).await {
                     Ok(run) => logs.extend(run.logs),
@@ -4842,8 +6017,9 @@ impl ProjectController {
         logs.extend(read.logs);
         let def_bytes = read.data;
 
-        // Assets: the def's own sibling reference, resolved exactly the way
-        // the server resolves it (the same resolution the inline editor's
+        // Assets: every sibling the def references (a fixture has two — its
+        // mapping document and its patch), resolved exactly the way the
+        // server resolves them (the same resolution the inline editor's
         // Apply targets).
         let mut assets = Vec::new();
         // Parse through the MODEL's static registry, not the synced
@@ -4851,12 +6027,13 @@ impl ProjectController {
         // and carries no creatable factories, so it cannot read an authored
         // node def back ("slot shape is not creatable"). Writing still goes
         // through the synced registry, exactly as `create_node` does.
-        let asset_ref = core::str::from_utf8(&def_bytes)
+        let asset_refs = core::str::from_utf8(&def_bytes)
             .ok()
             .and_then(|text| lpc_model::NodeDef::from_json_str(text).ok())
             .as_ref()
-            .and_then(lpc_model::node_def_asset_ref);
-        if let Some(source) = asset_ref {
+            .map(lpc_model::node_def_asset_refs)
+            .unwrap_or_default();
+        for source in asset_refs {
             match self.resolve_node_asset_artifact_from(&def_artifact, &source) {
                 Some(artifact) => {
                     let read = server
@@ -4866,7 +6043,7 @@ impl ProjectController {
                     assets.push((source.clone(), read.data));
                 }
                 None => {
-                    log::warn!("copy {label}: cannot resolve asset {source}; copying def only");
+                    log::warn!("copy {label}: cannot resolve asset {source}; skipping it");
                 }
             }
         }
@@ -4929,23 +6106,28 @@ impl ProjectController {
             None => return Ok(ProjectEditRun::notice(attach_unavailable_notice(attach))),
         };
 
-        // Re-home the def's asset (at most one today — see
-        // `lpc_model::node_def_asset_ref`) onto the free name, and rewrite
-        // the reference to match.
+        // Re-home EVERY asset the envelope carries (a fixture brings its
+        // mapping document and its patch) onto the free name, and rewrite the
+        // references to match. Each keeps its own compound suffix, so the two
+        // siblings stay distinguishable — see `asset_extension`.
         let mut asset_paths = std::collections::BTreeMap::new();
         let mut body = envelope
             .body_text()
             .ok_or_else(|| UiError::Project("the pasted node body is not text".to_string()))?
             .as_bytes()
             .to_vec();
-        if let Some((source_path, _)) = envelope.assets.iter().next() {
-            let target = format!("./{name}{}", asset_extension(source_path));
-            asset_paths.insert(source_path.clone(), target.clone());
+        if !envelope.assets.is_empty() {
+            for (source_path, _) in envelope.assets.iter() {
+                let target = format!("./{name}{}", asset_extension(source_path));
+                asset_paths.insert(source_path.clone(), target);
+            }
             let body_text = core::str::from_utf8(&body)
                 .map_err(|_| UiError::Project("the pasted node body is not text".to_string()))?;
             match lpc_model::NodeDef::from_json_str(body_text) {
                 Ok(mut def) => {
-                    lpc_model::set_node_def_asset_ref(&mut def, &target);
+                    lpc_model::rewrite_node_def_asset_refs(&mut def, |current| {
+                        asset_paths.get(current).cloned()
+                    });
                     body = def
                         .write_json(&self.slot_shapes)
                         .map_err(|err| {
@@ -4967,9 +6149,25 @@ impl ProjectController {
         let mut request = envelope
             .to_create_request(&format!("./{name}.json"), &asset_paths, site)
             .map_err(|error| UiError::Project(format!("cannot paste this node: {error}")))?;
+        // A pasted fixture carries its declaration; only one with no
+        // authored shape gets the guided moment (P5 item 4). "No authored
+        // shape" today means: no mapping AND no 1-row render area — the
+        // two present-day shape signals (a map IS a declared shape; a
+        // 1-row TextureArea is the declared-strip idiom). D15's declared
+        // fixture space replaces this heuristic when it lands.
+        let shape_guided = core::str::from_utf8(&body)
+            .ok()
+            .and_then(|text| lpc_model::NodeDef::from_json_str(text).ok())
+            .is_some_and(|def| match def {
+                lpc_model::NodeDef::Fixture(fixture) => {
+                    matches!(fixture.mapping.value(), lpc_model::MappingConfig::Unset)
+                        && fixture.render_size.value().height != 1
+                }
+                _ => false,
+            });
         request.body = body;
 
-        self.run_create_request(server, request, parent, expected_name, name)
+        self.run_create_request(server, request, parent, expected_name, name, shape_guided)
             .await
     }
 
@@ -5328,7 +6526,7 @@ impl ProjectController {
     /// end of every applied project view; consumes [`Self::pending_focus`]
     /// when the expected child resolves under its parent.
     fn apply_pending_focus(&mut self) {
-        let target = {
+        let (target, guided_address) = {
             let Some(pending) = &self.pending_focus else {
                 return;
             };
@@ -5345,9 +6543,21 @@ impl ProjectController {
             }) else {
                 return;
             };
-            ProjectEditorTarget::addressed_node(created.target().clone())
+            (
+                ProjectEditorTarget::addressed_node(created.target().clone()),
+                pending.shape_guided.then(|| created.address().to_string()),
+            )
         };
         self.pending_focus = None;
+        // The Shape declaration moment (D13, plan-B P5): the created
+        // fixture's card renders its dimensionality section in guided
+        // clothing. Marked here — the first moment the node's REAL
+        // address exists — through the same reducer every card-UI
+        // mutation takes, so a preset pick or dismiss clears it the
+        // ordinary way.
+        if let Some(node) = guided_address {
+            self.apply_node_ui_op(NodeUiOp::SetShapeGuided { node, guided: true });
+        }
         self.focus_editor_target(&target);
         self.active_editor_target = Some(target);
     }
@@ -5647,6 +6857,303 @@ impl ProjectController {
 
     /// Execute an [`AssetEditOp`] against the loaded project's overlay — the
     /// asset counterpart of [`Self::apply_slot_edit`].
+    /// Apply one patch-surface verb (D42): load the cached documents,
+    /// transform, kernel-validate, snapshot for undo, write. See
+    /// [`crate::PatchVerbOp`] for the contract; failures return an honest
+    /// notice and write nothing.
+    pub async fn apply_patch_verb(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: crate::app::project::patch_verb_op::PatchVerbOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        use super::patch_verbs::{self, PatchSubject, PatchVerbContext, PortWindow};
+        use crate::app::project::patch_verb_op::PatchVerbKind;
+
+        let blocked = |reason: String| {
+            Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                "Patch edit blocked: {reason}"
+            ))))
+        };
+
+        // Undo / redo replay the snapshot stacks and need nothing else.
+        match &op.verb {
+            PatchVerbKind::Undo => {
+                let Some(step) = self.patch_undo.pop() else {
+                    return blocked("nothing to undo".into());
+                };
+                for (artifact, before, _) in &step.writes {
+                    self.apply_asset_body(server, artifact.clone(), before.clone())
+                        .await?;
+                }
+                self.record_edit(step.node, crate::UiEditorMode::Patching);
+                self.patch_redo.push(step);
+                return Ok(ProjectEditRun {
+                    notices: UiNotices::new(),
+                    logs: Vec::new(),
+                });
+            }
+            PatchVerbKind::Redo => {
+                let Some(step) = self.patch_redo.pop() else {
+                    return blocked("nothing to redo".into());
+                };
+                for (artifact, _, after) in &step.writes {
+                    self.apply_asset_body(server, artifact.clone(), after.clone())
+                        .await?;
+                }
+                self.record_edit(step.node, crate::UiEditorMode::Patching);
+                self.patch_undo.push(step);
+                return Ok(ProjectEditRun {
+                    notices: UiNotices::new(),
+                    logs: Vec::new(),
+                });
+            }
+            _ => {}
+        }
+
+        // The subject, in kernel terms.
+        let subject = if let Some(path) = &op.subject.path {
+            match lpc_mapping::MapObjectPath::parse(path) {
+                Ok(path) => PatchSubject::Path(path),
+                Err(error) => return blocked(error),
+            }
+        } else if let Some((start, count)) = op.subject.range {
+            PatchSubject::Range { start, count }
+        } else {
+            PatchSubject::Fixture
+        };
+
+        // Per-fixture cached facts: patch doc + span table. A body the
+        // cache has not resolved yet blocks honestly (the surface prefetches
+        // both artifacts, so this is a race, not a state).
+        let load =
+            |controller: &Self, fixture: &crate::app::project::patch_verb_op::PatchVerbFixture| {
+                let text = controller
+                    .asset_content_cached(&fixture.patch_artifact)
+                    .and_then(|content| content.text().map(|text| text.to_string()))
+                    .ok_or_else(|| "the patch document is still loading".to_string())?;
+                let doc = lpc_mapping::PatchDoc::from_json(&text).map_err(|e| e.to_string())?;
+                let spans = fixture
+                    .mapping_artifact
+                    .as_ref()
+                    .and_then(|artifact| controller.asset_content_cached(artifact))
+                    .and_then(|content| content.text().map(|text| text.to_string()))
+                    .and_then(|text| {
+                        let doc = lpc_mapping::Map2dDoc::from_json(&text).ok()?;
+                        let resolved = lpc_mapping::resolve(&doc).ok()?;
+                        Some(lpc_mapping::object_instance_spans(&doc, &resolved))
+                    })
+                    .unwrap_or_default();
+                Ok::<_, String>((doc, spans))
+            };
+
+        // EnsureIds is the one MAPPING write: transform the map2d doc.
+        if matches!(op.verb, PatchVerbKind::EnsureIds) {
+            let Some(fixture) = op
+                .fixtures
+                .iter()
+                .find(|fixture| Some(fixture.node) == op.subject_fixture)
+            else {
+                return blocked("select a fixture to assign ids".into());
+            };
+            let Some(mapping) = fixture.mapping_artifact.clone() else {
+                return blocked("this fixture has no map2d document".into());
+            };
+            let Some(text) = self
+                .asset_content_cached(&mapping)
+                .and_then(|content| content.text().map(|text| text.to_string()))
+            else {
+                return blocked("the mapping document is still loading".into());
+            };
+            let mut doc = match lpc_mapping::Map2dDoc::from_json(&text) {
+                Ok(doc) => doc,
+                Err(error) => return blocked(error.to_string()),
+            };
+            if !lpc_mapping::ensure_object_ids(&mut doc) {
+                return Ok(ProjectEditRun {
+                    notices: UiNotices::new(),
+                    logs: Vec::new(),
+                });
+            }
+            doc.normalize_format();
+            let bytes = format!("{}\n", doc.to_json_pretty()).into_bytes();
+            let seq = self.record_edit(op.subject_fixture, crate::UiEditorMode::Patching);
+            self.patch_undo.push(EditStep {
+                seq,
+                node: op.subject_fixture,
+                mode: crate::UiEditorMode::Patching,
+                writes: vec![(mapping.clone(), text.into_bytes(), bytes.clone())],
+            });
+            self.patch_redo.clear();
+            return self.apply_asset_body(server, mapping, bytes).await;
+        }
+
+        // The write set: subject verbs touch one fixture; port verbs sweep
+        // every fixture with entries in the windows.
+        let mut writes: Vec<(ArtifactLocation, String, String)> = Vec::new(); // (artifact, before, after)
+        match &op.verb {
+            PatchVerbKind::SwapPorts { a, b } => {
+                let a = PortWindow {
+                    output: a.output_name.clone(),
+                    start: a.start,
+                    lamps: a.lamps,
+                };
+                let b = PortWindow {
+                    output: b.output_name.clone(),
+                    start: b.start,
+                    lamps: b.lamps,
+                };
+                for fixture in &op.fixtures {
+                    let (doc, spans) = match load(self, fixture) {
+                        Ok(loaded) => loaded,
+                        Err(reason) => return blocked(reason),
+                    };
+                    let ctx = PatchVerbContext {
+                        fixture_lamp_count: fixture.lamp_count,
+                        object_spans: &spans,
+                    };
+                    match patch_verbs::swap_ports(&ctx, &doc, &a, &b) {
+                        Ok(next) if next != doc => writes.push((
+                            fixture.patch_artifact.clone(),
+                            doc.to_json_pretty(),
+                            next.to_json_pretty(),
+                        )),
+                        Ok(_) => {}
+                        Err(error) => return blocked(error.0),
+                    }
+                }
+            }
+            PatchVerbKind::ShiftPort { window, delta } => {
+                let window = PortWindow {
+                    output: window.output_name.clone(),
+                    start: window.start,
+                    lamps: window.lamps,
+                };
+                for fixture in &op.fixtures {
+                    let (doc, spans) = match load(self, fixture) {
+                        Ok(loaded) => loaded,
+                        Err(reason) => return blocked(reason),
+                    };
+                    let ctx = PatchVerbContext {
+                        fixture_lamp_count: fixture.lamp_count,
+                        object_spans: &spans,
+                    };
+                    match patch_verbs::shift_port(&ctx, &doc, &window, *delta) {
+                        Ok(next) if next != doc => writes.push((
+                            fixture.patch_artifact.clone(),
+                            doc.to_json_pretty(),
+                            next.to_json_pretty(),
+                        )),
+                        Ok(_) => {}
+                        Err(error) => return blocked(error.0),
+                    }
+                }
+            }
+            verb => {
+                let Some(fixture) = op
+                    .fixtures
+                    .iter()
+                    .find(|fixture| Some(fixture.node) == op.subject_fixture)
+                else {
+                    return blocked("the selection names no fixture on the surface".into());
+                };
+                let (doc, spans) = match load(self, fixture) {
+                    Ok(loaded) => loaded,
+                    Err(reason) => return blocked(reason),
+                };
+                let ctx = PatchVerbContext {
+                    fixture_lamp_count: fixture.lamp_count,
+                    object_spans: &spans,
+                };
+                let result = match verb {
+                    PatchVerbKind::Assign { output_name, lamp } => {
+                        patch_verbs::assign(&ctx, &doc, &subject, output_name.clone(), *lamp)
+                    }
+                    PatchVerbKind::ReAnchor { lamp } => {
+                        patch_verbs::re_anchor(&ctx, &doc, &subject, *lamp)
+                    }
+                    PatchVerbKind::Reverse => patch_verbs::reverse(&ctx, &doc, &subject),
+                    PatchVerbKind::Rotate { steps, stride } => {
+                        patch_verbs::rotate(&ctx, &doc, &subject, *steps, *stride)
+                    }
+                    PatchVerbKind::Clear => patch_verbs::clear(&ctx, &doc, &subject),
+                    _ => unreachable!("port/undo verbs handled above"),
+                };
+                match result {
+                    Ok(next) if next != doc => writes.push((
+                        fixture.patch_artifact.clone(),
+                        doc.to_json_pretty(),
+                        next.to_json_pretty(),
+                    )),
+                    Ok(_) => {
+                        return Ok(ProjectEditRun {
+                            notices: UiNotices::new(),
+                            logs: Vec::new(),
+                        });
+                    }
+                    Err(error) => return blocked(error.0),
+                }
+            }
+        }
+        if writes.is_empty() {
+            return Ok(ProjectEditRun {
+                notices: UiNotices::new(),
+                logs: Vec::new(),
+            });
+        }
+
+        // One undo step for the whole gesture, across every doc it touched
+        // (plus the name auto-assign's slot edit riding alongside — the
+        // slot edit is NOT snapshotted: names are additive and renaming is
+        // its own affordance).
+        let seq = self.record_edit(op.subject_fixture, crate::UiEditorMode::Patching);
+        self.patch_undo.push(EditStep {
+            seq,
+            node: op.subject_fixture,
+            mode: crate::UiEditorMode::Patching,
+            writes: writes
+                .iter()
+                .map(|(artifact, before, after)| {
+                    (
+                        artifact.clone(),
+                        before.clone().into_bytes(),
+                        format!("{after}\n").into_bytes(),
+                    )
+                })
+                .collect(),
+        });
+        self.patch_redo.clear();
+
+        if let Some((address, name)) = op.assign_output_name.clone() {
+            self.apply_slot_edit(
+                server,
+                SlotEditOp::EnsurePresent {
+                    address: address.clone(),
+                },
+            )
+            .await?;
+            self.apply_slot_edit(
+                server,
+                SlotEditOp::SetValue {
+                    address,
+                    value: lpc_model::LpValue::String(name),
+                },
+            )
+            .await?;
+        }
+        let mut last = ProjectEditRun {
+            notices: UiNotices::new(),
+            logs: Vec::new(),
+        };
+        for (artifact, _, after) in writes {
+            // Files end with a newline: the written bytes must be the ones
+            // a hand editor would save, byte for byte (the G1 diff).
+            last = self
+                .apply_asset_body(server, artifact, format!("{after}\n").into_bytes())
+                .await?;
+        }
+        Ok(last)
+    }
+
     pub async fn apply_asset_edit(
         &mut self,
         server: &mut StudioServerClient,
@@ -5657,6 +7164,239 @@ impl ProjectController {
                 self.apply_asset_body(server, artifact, bytes).await
             }
             AssetEditOp::Revert { artifact } => self.revert_asset_edit(server, artifact).await,
+        }
+    }
+
+    // --- editor.json: the Arrange canvas's document (unified-editor P2) ------
+
+    /// Record an Edit event in the correlation journal, minting its
+    /// `edit_seq` (every undo step's stamp comes from here).
+    fn record_edit(&mut self, node: Option<lpc_model::NodeId>, mode: crate::UiEditorMode) -> u64 {
+        self.edit_journal
+            .record(crate::UiEditJournalEvent::Edit, node, mode)
+    }
+
+    /// Record a shell-observed journal event (node/mode switches, and the
+    /// mapping session's step commits stamped at the glue layer — P5).
+    pub fn record_journal_event(
+        &mut self,
+        event: crate::UiEditJournalEvent,
+        node: Option<lpc_model::NodeId>,
+        mode: crate::UiEditorMode,
+    ) -> u64 {
+        self.edit_journal.record(event, node, mode)
+    }
+
+    /// The correlation journal's retained entries, oldest first (snapshot
+    /// fodder; v1 UI ignores it).
+    #[must_use]
+    pub fn edit_journal_entries(&self) -> Vec<crate::UiEditJournalEntry> {
+        self.edit_journal.entries()
+    }
+
+    /// The last minted `edit_seq` (0 = no edits or switches recorded yet).
+    #[must_use]
+    pub fn edit_seq(&self) -> u64 {
+        self.edit_journal.seq()
+    }
+
+    /// Settle the `editor.json` loaded-flag ([`crate::EditorMetaFetchOp`]):
+    /// list the project root, fetch the file when present, record "absent"
+    /// when not. Absence is a normal state (most projects have never been
+    /// arranged), so it must never surface as a read error.
+    pub async fn fetch_editor_meta(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        if self.asset_content_cached(artifact).is_some() || self.editor_meta_absent {
+            return Ok(Vec::new());
+        }
+        let root = self.project_fs_root.clone().ok_or_else(|| {
+            UiError::Project(
+                "the connected project's filesystem root is unknown; cannot look for editor.json"
+                    .to_string(),
+            )
+        })?;
+        let file_name = artifact.file_path().as_str().trim_start_matches('/');
+        let listing = server.fs_list_dir(&root, false).await?;
+        let present = listing
+            .entries
+            .iter()
+            .any(|entry| entry.as_str().trim_end_matches('/').ends_with(file_name));
+        if present {
+            let run = self.asset_content(server, artifact).await?;
+            Ok(run.logs)
+        } else {
+            self.editor_meta_absent = true;
+            Ok(listing.logs)
+        }
+    }
+
+    /// The effective `editor.json` from LOCAL state — see
+    /// [`EditorMetaReadState`] for the three-way answer.
+    fn editor_meta_state(&self) -> EditorMetaReadState {
+        let artifact = super::editor_meta_op::editor_meta_artifact();
+        match self.asset_content_cached(&artifact) {
+            Some(content) => {
+                let Some(text) = content.text() else {
+                    return EditorMetaReadState::Refused("editor.json is not text".to_string());
+                };
+                if text.trim().is_empty() {
+                    let doc = lpc_mapping::EditorMetaDoc::new();
+                    let bytes = format!("{}\n", doc.to_json_pretty()).into_bytes();
+                    return EditorMetaReadState::Ready(doc, bytes);
+                }
+                match lpc_mapping::EditorMetaDoc::from_json(text) {
+                    Ok(doc) => EditorMetaReadState::Ready(doc, text.as_bytes().to_vec()),
+                    Err(error) => EditorMetaReadState::Refused(error.to_string()),
+                }
+            }
+            None if self.editor_meta_absent => {
+                let doc = lpc_mapping::EditorMetaDoc::new();
+                let bytes = format!("{}\n", doc.to_json_pretty()).into_bytes();
+                EditorMetaReadState::Ready(doc, bytes)
+            }
+            None => EditorMetaReadState::Unfetched,
+        }
+    }
+
+    /// [`Self::editor_meta_state`] narrowed for a WRITE: the parsed doc
+    /// plus its current canonical bytes (the undo snapshot's "before"
+    /// side). `Err` while unfetched or refused — an arrange write must
+    /// never invent an empty document over unseen or refused data.
+    fn editor_meta_read(&self) -> Result<(lpc_mapping::EditorMetaDoc, Vec<u8>), String> {
+        match self.editor_meta_state() {
+            EditorMetaReadState::Ready(doc, bytes) => Ok((doc, bytes)),
+            EditorMetaReadState::Unfetched => Err("editor.json is still loading".to_string()),
+            EditorMetaReadState::Refused(reason) => Err(reason),
+        }
+    }
+
+    /// A fixture's CURRENT doc-space footprint from its cached map2d body:
+    /// tight lamp bounds + lamp count. `None` when the body is not cached
+    /// or does not resolve — footprints refresh opportunistically, never
+    /// block a write.
+    fn arrange_footprint(
+        &self,
+        mapping_artifact: Option<&ArtifactLocation>,
+    ) -> Option<lpc_mapping::EditorFootprint> {
+        let text_content = self.asset_content_cached(mapping_artifact?)?;
+        let text = text_content.text()?;
+        let doc = lpc_mapping::Map2dDoc::from_json(text).ok()?;
+        let resolved = lpc_mapping::resolve(&doc).ok()?;
+        let points: Vec<[f32; 2]> = resolved.lamps.iter().map(|lamp| lamp.pos).collect();
+        let bounds = lpc_mapping::bounds_of_points(&points)?;
+        Some(lpc_mapping::EditorFootprint {
+            bbox: [
+                f64::from(bounds.min_x),
+                f64::from(bounds.min_y),
+                f64::from(bounds.width),
+                f64::from(bounds.height),
+            ],
+            lamps: resolved.lamps.len() as u32,
+        })
+    }
+
+    /// Apply one Arrange gesture ([`crate::EditorMetaOp`]): load the cached
+    /// `editor.json`, set the transform, refresh stale footprints for
+    /// every fixture whose map2d body is cached, snapshot both sides onto
+    /// the arrange stack, write via the overlay. Undo/redo replay the
+    /// stack. Refused documents block — refuse-don't-rewrite.
+    pub async fn apply_editor_meta(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: crate::EditorMetaOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let blocked = |reason: String| {
+            Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                "Arrange edit blocked: {reason}"
+            ))))
+        };
+        match &op.verb {
+            crate::EditorMetaVerb::Undo => {
+                let Some(step) = self.arrange_undo.pop() else {
+                    return blocked("nothing to undo".into());
+                };
+                for (artifact, before, _) in &step.writes {
+                    self.apply_asset_body(server, artifact.clone(), before.clone())
+                        .await?;
+                }
+                self.record_edit(step.node, crate::UiEditorMode::Arrange);
+                self.arrange_redo.push(step);
+                Ok(ProjectEditRun {
+                    notices: UiNotices::new(),
+                    logs: Vec::new(),
+                })
+            }
+            crate::EditorMetaVerb::Redo => {
+                let Some(step) = self.arrange_redo.pop() else {
+                    return blocked("nothing to redo".into());
+                };
+                for (artifact, _, after) in &step.writes {
+                    self.apply_asset_body(server, artifact.clone(), after.clone())
+                        .await?;
+                }
+                self.record_edit(step.node, crate::UiEditorMode::Arrange);
+                self.arrange_undo.push(step);
+                Ok(ProjectEditRun {
+                    notices: UiNotices::new(),
+                    logs: Vec::new(),
+                })
+            }
+            crate::EditorMetaVerb::Set {
+                node_key,
+                node,
+                transform,
+            } => {
+                let (mut doc, before) = match self.editor_meta_read() {
+                    Ok(loaded) => loaded,
+                    Err(reason) => return blocked(reason),
+                };
+                let surface = doc.mapping_surface_mut(node_key);
+                surface.transform = lpc_mapping::EditorTransform {
+                    t: transform.t,
+                    r: transform.r,
+                    s: transform.s,
+                };
+                // Opportunistic footprint refresh: every fixture whose map2d
+                // is locally cached gets its cached footprint trued up as
+                // part of this write (never an unprompted write). Only
+                // ARRANGED fixtures get entries — a footprint alone must not
+                // arrange a node.
+                for fixture in &op.fixtures {
+                    let fresh = self.arrange_footprint(fixture.mapping_artifact.as_ref());
+                    let Some(fresh) = fresh else { continue };
+                    let entry_exists = fixture.node_key == *node_key
+                        || doc.mapping_surface(&fixture.node_key).is_some();
+                    if entry_exists {
+                        let surface = doc.mapping_surface_mut(&fixture.node_key);
+                        if surface.footprint != Some(fresh) {
+                            surface.footprint = Some(fresh);
+                        }
+                    }
+                }
+                doc.normalize_format();
+                let after = format!("{}\n", doc.to_json_pretty()).into_bytes();
+                if after == before {
+                    return Ok(ProjectEditRun {
+                        notices: UiNotices::new(),
+                        logs: Vec::new(),
+                    });
+                }
+                let seq = self.record_edit(*node, crate::UiEditorMode::Arrange);
+                self.arrange_undo.push(EditStep {
+                    seq,
+                    node: *node,
+                    mode: crate::UiEditorMode::Arrange,
+                    writes: vec![(op.artifact.clone(), before, after.clone())],
+                });
+                self.arrange_redo.clear();
+                // The file exists (in the overlay) from here on.
+                self.editor_meta_absent = false;
+                self.apply_asset_body(server, op.artifact.clone(), after)
+                    .await
+            }
         }
     }
 
@@ -5945,6 +7685,15 @@ pub struct ProjectEditRun {
     pub logs: Vec<UiLogDraft>,
 }
 
+/// Compound suffixes that identify a document FORMAT rather than a file type.
+///
+/// `sign.map2d.json` renamed to `pasted.json` would still parse as JSON and
+/// still be found by name — and would silently stop being recognizable as a
+/// mapping document by every filename-dispatching surface in the app. A
+/// fixture's two documents would also collide on one pasted name. These
+/// suffixes travel with the file.
+const COMPOUND_ASSET_SUFFIXES: &[&str] = &[".map2d.json", ".patch.json"];
+
 /// A pasted asset's extension, INCLUDING the dot (`""` when it has none).
 ///
 /// Split the file NAME, never the whole path: `"./orbit"` has no
@@ -5953,6 +7702,12 @@ pub struct ProjectEditRun {
 /// `./name./orbit`.
 fn asset_extension(source_path: &str) -> String {
     let file_name = source_path.rsplit('/').next().unwrap_or(source_path);
+    if let Some(suffix) = COMPOUND_ASSET_SUFFIXES
+        .iter()
+        .find(|suffix| file_name.len() > suffix.len() && file_name.ends_with(*suffix))
+    {
+        return (*suffix).to_string();
+    }
     match file_name.rsplit_once('.') {
         // A leading-dot name (`.hidden`) is not an extension either.
         Some((stem, ext)) if !stem.is_empty() => format!(".{ext}"),
@@ -6118,6 +7873,9 @@ fn count_nodes(node: &NodeController) -> usize {
 /// `project`, and `show` all read as one kind).
 const MODULE_KIND_LABEL: &str = "Module";
 
+/// The card kind label output nodes wear (`node_kind_label`).
+const OUTPUT_KIND_LABEL: &str = "Output";
+
 /// The name every module's output row wears — the R7 mirror's slot name,
 /// reused when a control-first hero has to be synthesized without one.
 const MODULE_OUTPUT_SLOT: &str = "output";
@@ -6245,14 +8003,21 @@ fn ui_product_kind(product: UiProductRef) -> crate::UiProductKind {
 }
 
 /// How a product presents on a surface that BORROWS it (a channel's value
-/// box, a module's output hero) rather than owning it: always-live products
-/// read as tracking, anything else as paused — Studio has bytes for it, but
-/// this surface is not what keeps them coming.
+/// box, a module's output hero) rather than owning it.
+///
+/// The honest question is whether the bytes are still coming, so the
+/// predicate is the CURRENT subscription set
+/// ([`ProjectController::subscribed_products`]) — not the always-live pair
+/// (R-C). Keying on always-live said "paused" over a child module hero that
+/// was visibly animating, because under a sim lens every expanded node is
+/// subscribed and only the root's `visual.out`/`control.out` are always
+/// live. Under a device lens the set really is small (the focused node plus
+/// the always-live pair), so Paused stays truthful there.
 fn borrowed_tracking(
-    always_live: &[UiProductRef],
+    subscribed: &[UiProductRef],
     product: UiProductRef,
 ) -> crate::UiProductTrackingState {
-    if always_live.contains(&product) {
+    if subscribed.contains(&product) {
         crate::UiProductTrackingState::Tracking
     } else {
         crate::UiProductTrackingState::Paused
@@ -6605,6 +8370,76 @@ fn project_action(op: ProjectOp) -> UiAction {
     UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op)
 }
 
+/// Visit every face in a finished node tree with its owner's address path.
+///
+/// Both halves of the tree carry faces — a root card's `header.path` and a
+/// nested card's `detail` are the same address in two DTO shapes — so a
+/// pass that only walked one of them would silently skip every fixture in
+/// the project (they are all nested cards).
+fn walk_faces(nodes: &mut [UiNodeView], visit: &mut impl FnMut(&str, &mut crate::UiNodeFace)) {
+    fn walk_children(
+        children: &mut [crate::UiNodeChild],
+        visit: &mut impl FnMut(&str, &mut crate::UiNodeFace),
+    ) {
+        for child in children {
+            if let Some(face) = child.face.as_mut() {
+                visit(&child.detail, face);
+            }
+            walk_children(&mut child.children, visit);
+        }
+    }
+    for node in nodes {
+        if let Some(face) = node.face.as_mut() {
+            visit(&node.header.path, face);
+        }
+        walk_children(&mut node.children, visit);
+    }
+}
+
+/// The read-only twin of [`walk_faces`], for passes that derive FROM the
+/// finished faces (the patch surface) rather than writing onto them.
+/// Pre-order walk of the MODULE nodes by kind label — `(path, label)` per
+/// module. Kind is set at tree-build time, unlike the module FACE, which
+/// derives after the patch surface builds; the surface's module rows read
+/// this walk. Top-level entries hand over their header title (the root
+/// wears the project's display name), children their use label.
+fn walk_module_kinds(nodes: &[UiNodeView], visit: &mut impl FnMut(&str, &str)) {
+    fn walk_children(children: &[crate::UiNodeChild], visit: &mut impl FnMut(&str, &str)) {
+        for child in children {
+            if child.kind == MODULE_KIND_LABEL {
+                visit(&child.detail, &child.label);
+            }
+            walk_children(&child.children, visit);
+        }
+    }
+    for node in nodes {
+        if node.header.kind == MODULE_KIND_LABEL {
+            visit(&node.header.path, &node.header.title);
+        }
+        walk_children(&node.children, visit);
+    }
+}
+
+fn walk_faces_ref(nodes: &[UiNodeView], visit: &mut impl FnMut(&str, &crate::UiNodeFace)) {
+    fn walk_children(
+        children: &[crate::UiNodeChild],
+        visit: &mut impl FnMut(&str, &crate::UiNodeFace),
+    ) {
+        for child in children {
+            if let Some(face) = child.face.as_ref() {
+                visit(&child.detail, face);
+            }
+            walk_children(&child.children, visit);
+        }
+    }
+    for node in nodes {
+        if let Some(face) = node.face.as_ref() {
+            visit(&node.header.path, face);
+        }
+        walk_children(&node.children, visit);
+    }
+}
+
 fn clear_node_focus(nodes: &mut [NodeController]) {
     for node in nodes {
         node.state_mut().focused = false;
@@ -6702,63 +8537,31 @@ fn shader_source_path(node: &NodeController) -> Option<String> {
     node.slots().iter().find_map(find)
 }
 
-/// The document path of a fixture node's `MappingConfig::Map2d` mapping:
-/// the `source` field under the `mapping` root slot. `None` for every other
-/// mapping variant, and deliberately anchored at `mapping` — a fixture's
-/// `bindings` carry `source` fields too (`"bus:visual.out"`), and the enum
-/// variant's own path segment is not something this needs to spell out.
-/// One memoized display-layout synthesis (see
-/// `ProjectController::synthesized_layout_cache`).
-struct SynthesizedLayoutEntry {
-    /// Hash of the document body text + render extent that produced
-    /// `layout`.
-    input_hash: u64,
-    layout: Rc<ControlDisplayLayout>,
-}
-
-/// Parse and resolve a map2d document body into the display layout its
-/// fixture would publish. The slow half of the fallback — the cache in
-/// [`ProjectController::apply_synthesized_display_layouts`] makes sure it
-/// runs per document change, not per tick.
-fn synthesize_layout_from_text(
-    revision: lpc_model::Revision,
-    text: &str,
-    (width, height): (u32, u32),
-) -> Option<ControlLayout2d> {
-    let doc = lpc_mapping::Map2dDoc::from_json(text).ok()?;
-    synthesized_map2d_layout(&doc, revision, width, height)
-}
-
-fn fixture_map2d_source(node: &NodeController) -> Option<String> {
-    fn find(slot: &SlotController) -> Option<String> {
-        let segments = slot.address().path.segments();
-        if matches!(segments.first(), Some(SlotPathSegment::Field(field)) if field.as_str() == "mapping")
-            && matches!(segments.last(), Some(SlotPathSegment::Field(field)) if field.as_str() == "source")
-            && let Some(lpc_model::LpValue::String(path)) = slot.value()
+/// The space a shader node DECLARES, read off its top-level `space` enum
+/// slot — the same row the dimensionality section reads and the agent's
+/// `declare_space` writes. A node without the slot reads as `TwoD`, the
+/// model's own default.
+fn agent_shader_space(node: &NodeController) -> lpa_agent::DeclaredSpace {
+    fn find_space(slot: &SlotController) -> Option<&SlotController> {
+        if slot.kind() == SlotKind::Enum
+            && matches!(
+                slot.address().path.segments().last(),
+                Some(SlotPathSegment::Field(field))
+                    if field.as_str()
+                        == crate::app::project::node::node_space_section::SHADER_SPACE_ROW
+            )
         {
-            return Some(path.clone());
+            return Some(slot);
         }
-        slot.children().iter().find_map(find)
+        slot.children().iter().find_map(find_space)
     }
-    node.slots().iter().find_map(find)
-}
 
-/// A fixture node's authored `render_size` — the texture extent the engine
-/// resolves its mapping document against, and the layout's width/height
-/// hints. `None` when the mirror carries no such row, which is the honest
-/// answer: guessing an extent would move every lamp.
-fn fixture_render_size(node: &NodeController) -> Option<lpc_model::Dim2u> {
-    fn find(slot: &SlotController) -> Option<lpc_model::Dim2u> {
-        if matches!(
-            slot.address().path.segments(),
-            [SlotPathSegment::Field(field)] if field.as_str() == "render_size"
-        ) && let Some(value) = slot.value()
-        {
-            return lpc_model::Dim2u::from_lp_value(value).ok();
-        }
-        slot.children().iter().find_map(find)
-    }
-    node.slots().iter().find_map(find)
+    crate::app::project::agent_support::declared_space(
+        node.slots()
+            .iter()
+            .find_map(find_space)
+            .and_then(SlotController::enum_variant),
+    )
 }
 
 /// The agent's binding table for a shader node: uniform name, GLSL type
@@ -7002,12 +8805,267 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// Run the export lint's STATIC half against a library package's **saved**
+/// bytes, returning the manifest's export list beside the findings.
+///
+/// The library snapshot is what is on disk (`package_export.rs` says the
+/// same about export): unsaved overlay edits are not in it, so the static
+/// half describes the project as it would actually be vendored — which is
+/// the question the lint asks. A non-library project (`exports` empty)
+/// short-circuits before any file walk.
+///
+/// Read failures degrade to "nothing to say" rather than a finding: a
+/// manifest that will not parse is already surfaced loudly by the open
+/// path's `PackageHealth`, and inventing a second, vaguer complaint here
+/// would only bury it.
+fn static_export_findings(
+    handle: &crate::app::library::PackageHandle,
+) -> (Vec<String>, Vec<lpc_model::ExportFinding>) {
+    let exports = {
+        let fs = handle.package_fs.borrow();
+        match crate::app::library::package_manifest::read_manifest(&*fs) {
+            Ok(fields) => fields.exports,
+            Err(error) => {
+                log::debug!("export lint: cannot read project.json: {error}");
+                return (Vec::new(), Vec::new());
+            }
+        }
+    };
+    if exports.is_empty() {
+        return (exports, Vec::new());
+    }
+    let files = match handle.read_all_files() {
+        Ok(files) => files,
+        Err(error) => {
+            log::debug!("export lint: cannot read package files: {error}");
+            return (exports, Vec::new());
+        }
+    };
+    let set: lpc_model::ExportFileSet<'_> = files
+        .iter()
+        .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
+        .collect();
+    let findings = lpc_model::check_exports(&exports, &set).findings;
+    (exports, findings)
+}
+
 fn library_ui_error(e: crate::app::library::LibraryError) -> UiError {
     UiError::MissingSession(format!("library: {e}"))
 }
 
 fn no_library_error() -> UiError {
     UiError::MissingSession("no local library is attached".to_string())
+}
+
+/// The pure halves of export DESIGNATION (P3): which def-artifact shapes
+/// can be exported at all, and what one toggle does to the project kind.
+/// The wired path is `studio_export_e2e_tests`.
+#[cfg(test)]
+mod export_designation_tests {
+    use lpc_model::ProjectKind;
+
+    use super::{ExportFolder, export_folder_shape, next_project_kind};
+
+    /// Only a folder ONE level down from the project root is exportable —
+    /// an export vendors `<folder>/` wholesale, so a single-file module has
+    /// nothing to vendor and a nested one is not the project's to hand out.
+    #[test]
+    fn only_a_direct_folder_module_is_exportable() {
+        assert_eq!(
+            export_folder_shape("/fire/module.json"),
+            ExportFolder::Direct("fire")
+        );
+        // the map is built from project-relative paths either way
+        assert_eq!(
+            export_folder_shape("fire/module.json"),
+            ExportFolder::Direct("fire")
+        );
+        assert_eq!(
+            export_folder_shape("/effects/fire/module.json"),
+            ExportFolder::Nested
+        );
+        assert_eq!(
+            export_folder_shape("/fire.module.json"),
+            ExportFolder::Inline
+        );
+        assert_eq!(export_folder_shape("/module.json"), ExportFolder::Inline);
+    }
+
+    /// The upgrade gesture (vision D14): the first export makes a General
+    /// project a Pattern project, and removing the last one puts it back —
+    /// including clearing the `exports` key rather than leaving `[]`.
+    #[test]
+    fn the_first_export_upgrades_and_the_last_one_reverts() {
+        let upgraded = next_project_kind(&ProjectKind::General, &[], "fire", true);
+        assert_eq!(
+            upgraded,
+            ProjectKind::Pattern {
+                exports: vec!["fire".to_string()]
+            }
+        );
+        let reverted = next_project_kind(&upgraded, &["fire".to_string()], "fire", false);
+        assert_eq!(reverted, ProjectKind::General);
+    }
+
+    /// A pattern project with other exports just edits its list, in a
+    /// stable (sorted) order so the manifest does not churn.
+    #[test]
+    fn additional_exports_are_a_sorted_list_edit() {
+        let current = ProjectKind::Pattern {
+            exports: vec!["ripple".to_string()],
+        };
+        assert_eq!(
+            next_project_kind(&current, &["ripple".to_string()], "fire", true),
+            ProjectKind::Pattern {
+                exports: vec!["fire".to_string(), "ripple".to_string()]
+            }
+        );
+        // re-designating an already-listed folder is idempotent, never a
+        // duplicate entry
+        assert_eq!(
+            next_project_kind(&current, &["ripple".to_string()], "ripple", true),
+            ProjectKind::Pattern {
+                exports: vec!["ripple".to_string()]
+            }
+        );
+    }
+
+    /// A rig stays a rig: its exports are its own list, and designation
+    /// must never silently retype the project.
+    #[test]
+    fn a_rig_keeps_its_kind() {
+        let current = ProjectKind::Rig {
+            exports: vec!["stage".to_string()],
+        };
+        assert_eq!(
+            next_project_kind(&current, &["stage".to_string()], "wash", true),
+            ProjectKind::Rig {
+                exports: vec!["stage".to_string(), "wash".to_string()]
+            }
+        );
+    }
+}
+
+/// The controller's half of the export lint (P2): reaching a library
+/// package's SAVED bytes and feeding them to the static half. The two pure
+/// halves have their own unit tests (`lpc_model::project::export_check`,
+/// `crate::app::project::export_lint`); what these pin is the seam — path
+/// shapes, the non-library short circuit, and the empty verdict when no
+/// library is attached at all.
+#[cfg(test)]
+mod export_lint_derivation_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use lpfs::{LpFs, LpFsMemory};
+
+    use super::{ProjectController, static_export_findings};
+    use crate::app::library::{LibraryStore, PackageHandle, PackageProvenance};
+
+    const MODULE: &str = r#"{
+  "kind": "Module",
+  "nodes": { "shader": { "ref": "./shader.json" } },
+  "provenance": { "author": "Yona", "license": "CC0-1.0" }
+}"#;
+
+    fn handle_for(files: &[(&str, &str)]) -> PackageHandle {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let store = LibraryStore::new(
+            fs,
+            Rc::new(|| [7u8; 16]),
+            Rc::new(|| String::from("2026-08-07-1017")),
+        );
+        let files: Vec<(String, Vec<u8>)> = files
+            .iter()
+            .map(|(path, text)| ((*path).to_string(), text.as_bytes().to_vec()))
+            .collect();
+        let summary = store
+            .install_package("pack", &files, PackageProvenance::Created, 1.0)
+            .expect("install");
+        store.open(summary.uid).expect("open")
+    }
+
+    /// The seam works end to end: a `pattern` manifest's `exports` list
+    /// reaches the static half, and the escaping ref inside the export
+    /// folder comes back as an error naming the file.
+    #[test]
+    fn export_lint_static_half_reads_a_library_package() {
+        let shader = r#"{
+  "kind": "Shader",
+  "source": "../common/simplex.glsl",
+  "render_order": 0,
+  "float_mode": "fixed"
+}"#;
+        let handle = handle_for(&[
+            (
+                "project.json",
+                "{\n  \"format\": 5,\n  \"name\": \"pack\",\n  \"kind\": \"pattern\",\n  \"exports\": [\n    \"chase\"\n  ]\n}\n",
+            ),
+            ("module.json", "{\n  \"kind\": \"Module\"\n}\n"),
+            ("chase/module.json", MODULE),
+            ("chase/shader.json", shader),
+        ]);
+        let (exports, findings) = static_export_findings(&handle);
+        assert_eq!(exports, vec![String::from("chase")]);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].severity, lpc_model::ExportSeverity::Error);
+        assert_eq!(findings[0].path.as_deref(), Some("/chase/shader.json"));
+    }
+
+    /// `read_all_files` yields slash-less relative paths; the file set must
+    /// still line up with the `/chase/...` refs resolve to (a clean folder
+    /// reads clean, not "everything escapes").
+    #[test]
+    fn export_lint_static_half_agrees_with_read_all_files_path_shape() {
+        let shader = r#"{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "float_mode": "fixed"
+}"#;
+        let handle = handle_for(&[
+            (
+                "project.json",
+                "{\n  \"format\": 5,\n  \"name\": \"pack\",\n  \"kind\": \"rig\",\n  \"exports\": [\n    \"chase\"\n  ]\n}\n",
+            ),
+            ("module.json", "{\n  \"kind\": \"Module\"\n}\n"),
+            ("chase/module.json", MODULE),
+            ("chase/shader.json", shader),
+            ("chase/shader.glsl", "void main() {}"),
+        ]);
+        let (exports, findings) = static_export_findings(&handle);
+        assert_eq!(exports, vec![String::from("chase")]);
+        assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    /// A general project exports nothing, so the lint never walks a file.
+    #[test]
+    fn export_lint_short_circuits_a_non_library_project() {
+        let handle = handle_for(&[
+            (
+                "project.json",
+                "{\n  \"format\": 5,\n  \"name\": \"pack\"\n}\n",
+            ),
+            ("module.json", "{\n  \"kind\": \"Module\"\n}\n"),
+        ]);
+        let (exports, findings) = static_export_findings(&handle);
+        assert!(exports.is_empty());
+        assert!(findings.is_empty());
+    }
+
+    /// No library attached (host tests, the demo project) is a clean, empty
+    /// verdict — never a complaint about a project the controller cannot
+    /// see the bytes of.
+    #[test]
+    fn export_lint_report_is_empty_without_a_library() {
+        let controller = ProjectController::new();
+        let report = controller.export_lint_report();
+        assert!(report.is_empty());
+        assert_eq!(report.worst(), None);
+        // idempotent, and invalidation on an empty controller is harmless
+        controller.invalidate_export_lint();
+        assert!(controller.export_lint_report().is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -7041,6 +9099,20 @@ mod asset_extension_tests {
     fn only_the_last_extension_counts() {
         assert_eq!(asset_extension("./orbit.tar.gz"), ".gz");
     }
+
+    /// …except for the compound suffixes that ARE the document's identity.
+    /// A pasted fixture whose `sign.map2d.json` landed as `copy.json` would
+    /// stop being a mapping document to every filename-dispatching surface,
+    /// and its patch would collide with it on the same name.
+    #[test]
+    fn document_suffixes_travel_whole() {
+        assert_eq!(asset_extension("./sign.map2d.json"), ".map2d.json");
+        assert_eq!(asset_extension("nested/sign.patch.json"), ".patch.json");
+        // Not a compound suffix, just a `.json` file.
+        assert_eq!(asset_extension("./settings.json"), ".json");
+        // The suffix alone is a dotfile-ish name, not a stem plus suffix.
+        assert_eq!(asset_extension(".patch.json"), ".json");
+    }
 }
 
 #[cfg(test)]
@@ -7055,7 +9127,8 @@ mod tests {
     use lpc_wire::{
         NodeRuntimeStatus, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent,
         ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,
-        RenderProductProbeRequest, RenderProductProbeResult, WireEntryState, WireTextureFormat,
+        RenderProductProbeRequest, RenderProductProbeResult, WireConsumerPolicy, WireEntryState,
+        WireTextureFormat, WireVisualSpace,
     };
 
     use crate::{
@@ -9002,6 +11075,139 @@ mod tests {
         assert_eq!(face.hero_choice, None);
     }
 
+    /// R-C: a borrowed hero reads Tracking exactly while its product is
+    /// still being pulled.
+    ///
+    /// The bug this pins: a CHILD module's hero said "Visual output paused"
+    /// over pixels that were visibly moving, because the predicate was the
+    /// always-live pair (root `visual.out` + `control.out`) while the bytes
+    /// rode the subscription set (sim lens = every expanded node). Same
+    /// fixture, both lenses — sim is honest about live, device is honest
+    /// about paused.
+    #[test]
+    fn a_child_module_hero_is_tracking_while_its_product_is_subscribed() {
+        let mut view = ProjectView::new();
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
+        root.children = vec![NodeId::new(2)];
+        view.tree.insert(root);
+        view.tree.insert(node_entry(
+            2,
+            "/demo.module/inner.module",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        // The inner module owns the produced visual the hero mirrors.
+        install_ui_projection_slots(&mut view, 2, Revision::new(4));
+
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        clear_node_focus(&mut project.root_nodes);
+
+        let product = VisualProduct::new(NodeId::new(2), 0);
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(2),
+        };
+        // The INNER scope's own `visual.out` — deliberately not flagged
+        // `primary_visual`, because the project's primary visual is the
+        // root's and always-live products are exactly what this predicate
+        // stopped keying on.
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+                revision: Revision::new(2),
+                bindings: Vec::new(),
+                channels: vec![lpc_wire::WireBusChannel {
+                    scope: Some(scope),
+                    name: lpc_model::PRIMARY_VISUAL_CHANNEL.to_string(),
+                    kind: Some(lpc_model::Kind::Color),
+                    providers: Vec::new(),
+                    consumers: Vec::new(),
+                    value: Some(lpc_wire::WireBusChannelValue {
+                        revision: Revision::new(2),
+                        value: Some(LpValue::Product(lpc_model::ProductRef::visual(product))),
+                        error: None,
+                    }),
+                    primary_visual: false,
+                }],
+            });
+        // Fresh bytes in the stream — the re-home branch the old predicate
+        // stamped Paused inside.
+        let bytes = vec![10, 20, 30, 40, 50, 60];
+        let _ = project
+            .sync_mut()
+            .unwrap()
+            .refresh_project_read_request(vec![UiProductRef::from_visual_product(product)]);
+        project
+            .sync_mut()
+            .unwrap()
+            .apply_project_read_events(vec![
+                ProjectReadEvent::Begin {
+                    revision: Revision::new(8),
+                },
+                ProjectReadEvent::Probe {
+                    index: 0,
+                    event: ProjectReadProbeEvent::Result(ProjectProbeResult::RenderProduct(
+                        RenderProductProbeResult::Texture {
+                            product,
+                            revision: Revision::new(8),
+                            width: 1,
+                            height: 2,
+                            format: WireTextureFormat::Srgb8,
+                            bytes: bytes.clone(),
+                            space: WireVisualSpace::TwoD,
+                            projection: None,
+                            origin: None,
+                            primary: WireVisualSpace::TwoD,
+                        },
+                    )),
+                },
+                ProjectReadEvent::End {
+                    revision: Revision::new(8),
+                },
+            ])
+            .unwrap();
+
+        let child_hero = |project: &ProjectController| {
+            let editor =
+                project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+            let child = editor.nodes[0].children[0].clone();
+            let Some(crate::UiNodeFace::Module(face)) = child.face else {
+                panic!("the inner module card wears a module face");
+            };
+            face.preview.expect("the inner module's output hero")
+        };
+
+        // Sim lens: an expanded child node is subscribed, so its hero is
+        // live and must say so.
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        let hero = child_hero(&project);
+        assert_eq!(
+            hero.product,
+            Some(UiProductRef::from_visual_product(product))
+        );
+        assert_eq!(
+            hero.tracking,
+            UiProductTrackingState::Tracking,
+            "the bytes behind this hero are still being pulled"
+        );
+
+        // Device lens, nothing focused: the product genuinely stopped
+        // streaming, and Paused is the honest word for the cached frame.
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        assert!(
+            !project
+                .subscribed_products()
+                .contains(&UiProductRef::from_visual_product(product)),
+            "the fixture's premise: nothing subscribes this product"
+        );
+        assert_eq!(
+            child_hero(&project).tracking,
+            UiProductTrackingState::Paused
+        );
+    }
+
     #[test]
     fn sim_lens_subscribes_unfocused_nodes_device_stays_focused_only() {
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
@@ -9797,6 +12003,8 @@ mod tests {
                     width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
                     height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
                     format: WireTextureFormat::Srgb8,
+                    space: Some(WireVisualSpace::TwoD),
+                    policy: Some(WireConsumerPolicy::AUTO),
                 }),
                 // The binding-graph probe rides along on every
                 // loaded-project read — module faces cannot derive without it.
@@ -9822,6 +12030,10 @@ mod tests {
                             height: 2,
                             format: WireTextureFormat::Srgb8,
                             bytes: bytes.clone(),
+                            space: WireVisualSpace::TwoD,
+                            projection: None,
+                            origin: None,
+                            primary: WireVisualSpace::TwoD,
                         },
                     )),
                 },

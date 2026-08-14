@@ -11,6 +11,12 @@ pub struct UiProjectManifest {
     pub format: Option<u32>,
     pub uid: Option<String>,
     pub name: Option<String>,
+    /// Display label for the project's authored kind (`"General"` |
+    /// `"Pattern"` | `"Show"` | `"Rig"`; module authoring unit, P1) — the
+    /// resolved [`lpc_model::ProjectKind`]'s label
+    /// ([`crate::app::library::package_manifest::kind_label`]), never the
+    /// raw JSON spelling.
+    pub kind: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +83,16 @@ pub struct ProjectEditorView {
     /// (`Pending`/`InFlight` phases). Non-zero only in mid-op progressive
     /// snapshots; drives the project header's "in progress" state.
     pub edits_in_flight: usize,
+    /// The project-scoped patch surface (D36, slice 2): every output's
+    /// ports/cells and every fixture's runs/instances, derived in the same
+    /// pass as the face bays. `None` while nothing patchable has answered.
+    pub patch_surface: Option<crate::UiPatchSurface>,
+    /// The surface's one shared selection (core-owned so e2e can drive it
+    /// and P6's verbs can read it; hover stays a web-side context).
+    pub patch_selection: Option<crate::UiPatchTarget>,
+    /// The undo-correlation journal's retained entries (unified-editor P2:
+    /// substrate for future tooling and the e2e proofs; v1 UI ignores it).
+    pub edit_journal: Vec<crate::UiEditJournalEntry>,
 }
 
 impl ProjectEditorView {
@@ -107,6 +123,9 @@ impl ProjectEditorView {
             header_actions: Vec::new(),
             add_node_menu: None,
             edits_in_flight: 0,
+            patch_surface: None,
+            patch_selection: None,
+            edit_journal: Vec::new(),
         }
     }
 
@@ -174,6 +193,23 @@ impl ProjectEditorView {
     /// Attach the count of buffered edits awaiting acknowledgement.
     pub fn with_edits_in_flight(mut self, edits_in_flight: usize) -> Self {
         self.edits_in_flight = edits_in_flight;
+        self
+    }
+
+    /// Attach the project-scoped patch surface and its selection.
+    pub fn with_patch_surface(
+        mut self,
+        surface: Option<crate::UiPatchSurface>,
+        selection: Option<crate::UiPatchTarget>,
+    ) -> Self {
+        self.patch_surface = surface;
+        self.patch_selection = selection;
+        self
+    }
+
+    /// Attach the undo-correlation journal's retained entries.
+    pub fn with_edit_journal(mut self, edit_journal: Vec<crate::UiEditJournalEntry>) -> Self {
+        self.edit_journal = edit_journal;
         self
     }
 

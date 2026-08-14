@@ -364,6 +364,7 @@ fn raw_shape_id(ty: &LpType) -> SlotShapeId {
         LpType::Mat4x4 => "slot.leaf.raw_mat4x4",
         LpType::Any => "slot.leaf.raw_any",
         LpType::Array(_, _) => "slot.leaf.raw_array",
+        LpType::Buffer { .. } => "slot.leaf.raw_buffer",
         LpType::List(_) => "slot.leaf.raw_list",
         LpType::Struct { .. } => "slot.leaf.raw_struct",
         LpType::Enum { .. } => "slot.leaf.raw_enum",

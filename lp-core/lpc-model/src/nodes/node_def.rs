@@ -431,16 +431,28 @@ fn playlist_entry_node_path(base: &SlotPath, key: u32) -> Option<SlotPath> {
     )
 }
 
+/// A fixture references up to two sibling documents — its mapping and its
+/// patch — and they are independent: either, both, or neither.
 fn assets_for_fixture(
     fixture: &FixtureDef,
     containing_file: &LpPath,
 ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
-    match fixture.mapping.value() {
-        MappingConfig::Map2d { source } => {
-            assets_for_slot(source, containing_file, AssetContentType::FixtureMap2d)
-        }
-        _ => Ok(Vec::new()),
+    let mut assets = Vec::new();
+    if let MappingConfig::Map2d { source } = fixture.mapping.value() {
+        assets.extend(assets_for_slot(
+            source,
+            containing_file,
+            AssetContentType::FixtureMap2d,
+        )?);
     }
+    if let Some(source) = fixture.patch.value().source() {
+        assets.extend(assets_for_slot(
+            source,
+            containing_file,
+            AssetContentType::FixturePatch,
+        )?);
+    }
+    Ok(assets)
 }
 
 fn assets_for_slot(
@@ -666,7 +678,10 @@ mod tests {
     use super::*;
     use alloc::string::ToString;
 
-    use crate::{BindingRef, LpValue, MappingConfig, PathSpec, SlotShapeRegistry, TextureDef};
+    use crate::{
+        BindingRef, ConsumerCell2, LpValue, MappingConfig, PathSpec, ShaderSpace,
+        SlotShapeRegistry, SpaceAnswer2, TextureDef, VisualConsumerSpace,
+    };
 
     #[test]
     fn node_def_delegates_kind_and_slots() {
@@ -686,7 +701,7 @@ mod tests {
             &registry,
             r#"{
   "kind": "Output",
-  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
+  "ports": { "0": { "endpoint": "ws281x:local:D10" } },
   "options": { "dithering_enabled": false }
 }"#,
         )
@@ -773,6 +788,189 @@ mod tests {
             points.entries.get(&1).expect("point").value().0,
             [1.0, 0.75]
         );
+    }
+
+    #[test]
+    fn shader_space_parses_authored_one_d_json_and_round_trips() {
+        let registry = registry();
+
+        // Authored form (v9, the factored record): a Slotted enum's active
+        // variant is a tagged object even when the payload is itself a
+        // unit-only enum (cf. `MappingConfig::Unset` -> `{"kind":"Unset"}`),
+        // so the answer cell is `{"kind":"Project", "shape": {...}}` with
+        // the modifiers omissible at their defaults.
+        let shader = NodeDef::read_json(
+            &registry,
+            r#"{
+  "kind": "Shader",
+  "source": { "path": "main.glsl" },
+  "space": {
+    "kind": "OneD",
+    "in_2d": {
+      "kind": "Project",
+      "shape": { "kind": "Radial" },
+      "flip": { "kind": "Flipped" }
+    }
+  }
+}"#,
+        )
+        .expect("shader with authored space");
+        let NodeDef::Shader(shader) = shader else {
+            panic!("expected shader");
+        };
+        let ShaderSpace::OneD { in_2d } = shader.space.value() else {
+            panic!("expected OneD");
+        };
+        assert_eq!(
+            *in_2d.value(),
+            SpaceAnswer2::Project {
+                shape: EnumSlot::new(crate::ProjectionShape::Radial),
+                mirror: EnumSlot::default(),
+                flip: EnumSlot::new(crate::FlipMode::Flipped),
+            }
+        );
+
+        let text = NodeDef::Shader(shader)
+            .write_json(&registry)
+            .expect("write shader");
+        let read = NodeDef::read_json(&registry, &text).expect("read shader");
+        let NodeDef::Shader(read) = read else {
+            panic!("expected shader");
+        };
+        let ShaderSpace::OneD { in_2d } = read.space.value() else {
+            panic!("expected OneD after round trip");
+        };
+        assert_eq!(
+            *in_2d.value(),
+            SpaceAnswer2::Project {
+                shape: EnumSlot::new(crate::ProjectionShape::Radial),
+                mirror: EnumSlot::default(),
+                flip: EnumSlot::new(crate::FlipMode::Flipped),
+            }
+        );
+    }
+
+    #[test]
+    fn shader_def_without_authored_space_defaults_to_two_d() {
+        let registry = registry();
+
+        let shader = NodeDef::read_json(
+            &registry,
+            r#"{ "kind": "Shader", "source": { "path": "main.glsl" } }"#,
+        )
+        .expect("shader");
+        let NodeDef::Shader(shader) = shader else {
+            panic!("expected shader");
+        };
+        assert!(matches!(shader.space.value(), ShaderSpace::TwoD { .. }));
+    }
+
+    #[test]
+    fn fixture_consume_policy_round_trips_from_authored_json() {
+        let registry = registry();
+
+        let fixture = NodeDef::read_json(
+            &registry,
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 8, "height": 8 },
+  "strip_order_meaningful": false,
+  "consume": {
+    "kind": "Policy",
+    "from_1d": { "kind": "Project", "shape": { "kind": "Radial" } },
+    "force": true
+  }
+}"#,
+        )
+        .expect("fixture with authored consume policy");
+        let NodeDef::Fixture(fixture) = fixture else {
+            panic!("expected fixture");
+        };
+        assert!(!*fixture.strip_order_meaningful.value());
+        let VisualConsumerSpace::Policy { from_1d, force } = fixture.consume.value() else {
+            panic!("expected Policy");
+        };
+        assert_eq!(
+            *from_1d.value(),
+            ConsumerCell2::Project {
+                shape: EnumSlot::new(crate::ProjectionShape::Radial),
+                mirror: EnumSlot::default(),
+                flip: EnumSlot::default(),
+            }
+        );
+        assert!(*force.value());
+
+        let text = NodeDef::Fixture(fixture)
+            .write_json(&registry)
+            .expect("write fixture");
+        let read = NodeDef::read_json(&registry, &text).expect("read fixture");
+        let NodeDef::Fixture(read) = read else {
+            panic!("expected fixture");
+        };
+        assert!(!*read.strip_order_meaningful.value());
+        let VisualConsumerSpace::Policy { from_1d, force } = read.consume.value() else {
+            panic!("expected Policy after round trip");
+        };
+        assert_eq!(
+            *from_1d.value(),
+            ConsumerCell2::Project {
+                shape: EnumSlot::new(crate::ProjectionShape::Radial),
+                mirror: EnumSlot::default(),
+                flip: EnumSlot::default(),
+            }
+        );
+        assert!(*force.value());
+    }
+
+    #[test]
+    fn fixture_def_without_authored_space_slots_defaults_true_and_auto() {
+        let registry = registry();
+
+        let fixture = NodeDef::read_json(
+            &registry,
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 8, "height": 8 }
+}"#,
+        )
+        .expect("fixture");
+        let NodeDef::Fixture(fixture) = fixture else {
+            panic!("expected fixture");
+        };
+        assert!(*fixture.strip_order_meaningful.value());
+        assert_eq!(*fixture.consume.value(), VisualConsumerSpace::Auto);
+    }
+
+    /// P1 definition-of-done: existing example projects, authored before the
+    /// `space`/`strip_order_meaningful`/`consume` slots existed, still load
+    /// and stay meaning-identical (no format bump this phase — the new
+    /// slots are additive with defaults).
+    #[test]
+    fn existing_meteor_example_loads_unchanged_with_space_defaults() {
+        let registry = registry();
+        let examples_root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/meteor");
+
+        let shader_text = std::fs::read_to_string(examples_root.join("render.json"))
+            .expect("read examples/meteor/render.json");
+        let shader = NodeDef::read_json(&registry, &shader_text).expect("parse meteor shader");
+        let NodeDef::Shader(shader) = shader else {
+            panic!("expected shader");
+        };
+        assert!(matches!(shader.space.value(), ShaderSpace::TwoD { .. }));
+
+        let fixture_text = std::fs::read_to_string(examples_root.join("fixture.json"))
+            .expect("read examples/meteor/fixture.json");
+        let fixture = NodeDef::read_json(&registry, &fixture_text).expect("parse meteor fixture");
+        let NodeDef::Fixture(fixture) = fixture else {
+            panic!("expected fixture");
+        };
+        assert!(matches!(
+            fixture.mapping.value(),
+            MappingConfig::Map2d { .. }
+        ));
+        assert!(*fixture.strip_order_meaningful.value());
+        assert_eq!(*fixture.consume.value(), VisualConsumerSpace::Auto);
     }
 
     #[test]
@@ -940,7 +1138,7 @@ mod tests {
             &registry,
             r##"{
   "kind": "Output",
-  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
+  "ports": { "0": { "endpoint": "ws281x:local:D10" } },
   "bindings": { "main": { "value": 0.25 } }
 }"##,
         )
@@ -955,7 +1153,7 @@ mod tests {
             &registry,
             r##"{
   "kind": "Output",
-  "channels": { "0": { "endpoint": "ws281x:local:D10" } },
+  "ports": { "0": { "endpoint": "ws281x:local:D10" } },
   "bindings": { "main": { "target": "bus:control.out" } }
 }"##,
         )
@@ -1074,6 +1272,65 @@ mod tests {
                 AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.map2d.json")),
                 AssetContentType::FixtureMap2d,
             )]
+        );
+    }
+
+    /// A patched fixture references TWO siblings, each under its own content
+    /// type — the loader looks assets up one per (node, content type), so a
+    /// shared type would make the pair unresolvable.
+    #[test]
+    fn node_def_referenced_assets_carry_the_fixtures_mapping_and_patch_apart() {
+        let fixture = NodeDef::from_json_str(
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 64, "height": 16 },
+  "mapping": {
+    "kind": "Map2d",
+    "source": "fixture.map2d.json"
+  },
+  "patch": {
+    "kind": "File",
+    "source": "fixture.patch.json"
+  }
+}"#,
+        )
+        .expect("fixture");
+
+        assert_eq!(
+            fixture
+                .referenced_assets(LpPath::new("/fixtures/f.json"))
+                .unwrap(),
+            vec![
+                ReferencedAsset::new(
+                    AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.map2d.json")),
+                    AssetContentType::FixtureMap2d,
+                ),
+                ReferencedAsset::new(
+                    AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.patch.json")),
+                    AssetContentType::FixturePatch,
+                ),
+            ]
+        );
+    }
+
+    /// The patch is independent of the mapping: a hand-authored `PathPoints`
+    /// fixture (no mapping document at all) can still be patched.
+    #[test]
+    fn a_patch_is_referenced_without_a_mapping_document() {
+        let fixture = NodeDef::from_json_str(
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 8, "height": 1 },
+  "patch": { "kind": "File", "source": "strip.patch.json" }
+}"#,
+        )
+        .expect("fixture");
+
+        assert_eq!(
+            fixture
+                .referenced_asset_paths(LpPath::new("/fixtures/f.json"))
+                .unwrap(),
+            vec![LpPathBuf::from("/fixtures/strip.patch.json")]
         );
     }
 

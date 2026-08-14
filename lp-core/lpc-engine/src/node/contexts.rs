@@ -15,8 +15,8 @@ use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
 use crate::products::visual::{
-    RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
-    VisualSampleTarget,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
+    VisualSampleBufferRequest, VisualSampleTarget,
 };
 use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
@@ -30,6 +30,7 @@ use lpfs::LpFs;
 
 use super::ScopeRef;
 use super::node_error::NodeError;
+use super::node_runtime::PatchedRun;
 
 /// Narrow store access for allocating node-owned visual products and runtime buffers at attach time.
 ///
@@ -340,6 +341,40 @@ impl<'r> TickContext<'r> {
             .map_err(|e| NodeError::msg(alloc::format!("render control: {}", e.message)))
     }
 
+    /// Where a control product's producer says its lamps land on THIS
+    /// node's wire: the producer's resolved runs, filtered to the ones
+    /// addressed to the current (output) node — `None` for auto-flow,
+    /// `Some(vec![])` for "patched, nothing lands here" (D40; the
+    /// distinction is documented on the engine's implementation).
+    ///
+    /// The output asks this once per producer per frame, between resolving
+    /// its input (which ticks the producer) and rendering.
+    pub fn control_patch_placement(
+        &self,
+        product: ControlProduct,
+    ) -> Option<alloc::vec::Vec<PatchedRun>> {
+        self.resolver.control_patch_placement(product, self.node_id)
+    }
+
+    /// Register this (output) node's authored name for patch routing —
+    /// called at the top of the output's `consume`, the one place its def
+    /// is readable. Returns the colliding name when a live sibling already
+    /// claims it (surface it as runtime status; routing stays exact-match).
+    pub fn register_output_identity(
+        &mut self,
+        name: Option<alloc::string::String>,
+    ) -> Option<alloc::string::String> {
+        let node = self.node_id;
+        let revision = self.revision;
+        self.resolver.register_output_identity(node, name, revision)
+    }
+
+    /// Every registered output name plus the revision the set last changed
+    /// at — the fixture's dangling-entry check caches on the revision.
+    pub fn known_output_names(&self) -> (alloc::vec::Vec<alloc::string::String>, Revision) {
+        self.resolver.known_output_names()
+    }
+
     /// Publishes this node's timebase for the current tick.
     ///
     /// A node that produces a [`lpc_model::TimeProduct`] calls this from its
@@ -503,6 +538,15 @@ impl<'a> ControlRenderContext<'a> {
         self.frame_time_seconds
     }
 
+    /// The space the bound visual product lives in — ask before choosing
+    /// which of your own coordinate sets to send (plan D17).
+    pub fn visual_product_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        self.services.visual_product_space(product)
+    }
+
     pub fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -584,6 +628,20 @@ pub trait TimebaseRead {
 
 /// Services available while materializing a [`crate::products::control::ControlProduct`].
 pub trait ControlRenderServices: TimebaseRead {
+    /// The space a visual product lives in (plan D17): a metadata query
+    /// routed exactly like `sample_visual_into`, so the product wire value
+    /// stays `{node, output}`.
+    ///
+    /// Defaulted to 2D-with-no-opinion so node-level test fakes keep
+    /// compiling; the engine host overrides it.
+    fn visual_product_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        let _ = product;
+        Ok(ProductSpaceInfo::two_d())
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -607,6 +665,20 @@ pub trait ControlRenderServices: TimebaseRead {
 
 /// Services available while materializing a [`crate::products::visual::VisualProduct`].
 pub trait VisualRenderServices: TimebaseRead {
+    /// The space a visual product lives in (plan D17): a metadata query
+    /// routed exactly like `sample_visual_into`, so the product wire value
+    /// stays `{node, output}`.
+    ///
+    /// Defaulted to 2D-with-no-opinion so node-level test fakes keep
+    /// compiling; the engine host overrides it.
+    fn visual_product_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        let _ = product;
+        Ok(ProductSpaceInfo::two_d())
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -700,6 +772,18 @@ impl<'a> RenderContext<'a> {
 
     pub fn time_seconds(&self) -> f32 {
         self.frame_time_seconds
+    }
+
+    /// The space an upstream visual product lives in — forwarded by nodes
+    /// that pass a product through (playlist, module).
+    pub fn visual_product_space(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<ProductSpaceInfo, NodeError> {
+        self.services
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("render context has no visual render services"))?
+            .visual_product_space(product)
     }
 
     pub fn render_texture(

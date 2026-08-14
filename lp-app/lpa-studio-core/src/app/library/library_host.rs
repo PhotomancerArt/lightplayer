@@ -39,9 +39,16 @@ pub type LocalBoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 /// model: home ops map onto these, and the ADR documents them.
 #[derive(Clone, Debug)]
 pub enum CatalogOp {
-    /// Create an empty project with a minimal manifest.
+    /// Create a project and install it.
+    ///
+    /// `files` absent is the historical blank create: the store writes the
+    /// minimal manifest and root module itself. `files` present installs a
+    /// generated template verbatim — `install_package` writes a manifest
+    /// only when the incoming files lack one, so a template's authored
+    /// `project.json` (with its `kind`/`exports`) survives untouched.
     Create {
         name: String,
+        files: Option<Vec<(String, Vec<u8>)>>,
     },
     /// Rename = slug edit = directory move (catalog structure). The final
     /// slug (slugified, collision-suffixed) rides the outcome summary.
@@ -148,6 +155,28 @@ pub enum CatalogOp {
         project_uid: String,
         device: RegisteredDevice,
         version: lpc_history::ContentHash,
+    },
+    /// Install a project whose content AND history already exist in full —
+    /// a cloud tracking copy (`open_shared`, P6) or a locally forked line —
+    /// both file sets verbatim, nothing minted, nothing re-saved.
+    ///
+    /// This is deliberately NOT [`CatalogOp::ImportZip`]'s shape: imports
+    /// re-mint uids and start a fresh history, while a synced install's
+    /// whole point is that the uid in the package manifest is preserved
+    /// (D17) and the event log arrived with the files (the project's real
+    /// history, origin and all). The provenance rides along for the
+    /// `.lp/meta.json` sidecar and for the host's publish-trigger decision
+    /// (a fork wants auto-publish; a tracking copy is the *service's* copy
+    /// and must not be offered back).
+    InstallSyncedProject {
+        /// The display label the dated slug derives from.
+        name: String,
+        /// The working copy, verbatim — must include a manifest carrying
+        /// the project's uid.
+        package_files: Vec<(String, Vec<u8>)>,
+        /// The history root, verbatim — must include a non-empty event log.
+        history_files: Vec<(String, Vec<u8>)>,
+        provenance: super::package_meta::PackageProvenance,
     },
 }
 
@@ -298,7 +327,10 @@ pub fn apply_catalog_op(
     // forward before they could be installed.
     let mut upgraded_from = None;
     let summary = match op {
-        CatalogOp::Create { name } => Some(store.create(&name, now)?),
+        CatalogOp::Create { name, files } => Some(match files {
+            None => store.create(&name, now)?,
+            Some(files) => store.install_package(&name, &files, PackageProvenance::Created, now)?,
+        }),
         CatalogOp::Rename { uid, new_slug } => {
             let uid = parse_uid(&uid)?;
             store.rename(uid, &new_slug)?;
@@ -426,6 +458,12 @@ pub fn apply_catalog_op(
             )?;
             Some(summary_for(store, parse_uid(&project_uid)?)?)
         }
+        CatalogOp::InstallSyncedProject {
+            name,
+            package_files,
+            history_files,
+            provenance,
+        } => Some(store.install_synced(&name, &package_files, &history_files, provenance, now)?),
     };
     Ok(CatalogOutcome {
         summary,

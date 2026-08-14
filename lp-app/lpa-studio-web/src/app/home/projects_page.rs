@@ -8,10 +8,13 @@ use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, RosterCardState, UiAction, UiHomeView, ZipBytes};
 
 use crate::app::home::gallery_paste::{install_paste_listener, paste_from_clipboard};
+use crate::app::home::gallery_preview::HoveredCard;
+use crate::app::home::new_project_menu::NewProjectMenu;
 use crate::app::home::package_card::{PackageCard, home_action};
 use crate::app::home::{card_grid_class, section_title_class};
+use crate::app::share::ArchivedProjectsSection;
 use crate::base::{StudioIcon, StudioIconName};
-use crate::core::{ActionButton, ActionButtonVariant, quiet_action_class};
+use crate::core::quiet_action_class;
 
 /// The project library. "New" keeps the open-in-sim behavior (this is
 /// the library page, not the device flow); connected-EMPTY devices still
@@ -26,6 +29,9 @@ pub fn ProjectsPage(
     now_secs: Option<f64>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    // Hover-to-play is page-scoped: one signal names one hovered card, so
+    // the whole grid holds at most one live lease at a time.
+    use_context_provider(|| HoveredCard(Signal::new(None)));
     let mut drag_active = use_signal(|| 0_i32);
     // Cmd-V anywhere on the page installs a pasted project envelope.
     // The listener declines every paste that is not one — including
@@ -65,15 +71,12 @@ pub fn ProjectsPage(
                     h2 { class: section_title_class(), "Projects" }
                     if home.library_available {
                         div { class: "tw:flex tw:items-center tw:gap-2",
-                            // "New": create a pure-blank project and open it
+                            // "New": pick a template, then create-and-open
                             // (2026-07-27 deviation from D17 — see the ADR at
-                            // docs/adr/2026-07-27-node-authoring-operations.md)
-                            ActionButton {
-                                action: home_action(HomeOp::CreateProject),
-                                running: busy,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
-                            }
+                            // docs/adr/2026-07-27-node-authoring-operations.md;
+                            // the template menu is the module authoring
+                            // unit's P4)
+                            NewProjectMenu { busy, on_action }
                             // a real button (matching the ActionButton quiet
                             // chip exactly) that forwards to the hidden file
                             // input — a file dialog can't be a UiAction
@@ -143,6 +146,11 @@ pub fn ProjectsPage(
                     }
                 }
             }
+
+            // The archive, last and collapsed (Q12). Reads the account's
+            // own project list, so it renders nothing at all when signed
+            // out, unreachable, or empty — an empty drawer is not news.
+            ArchivedProjectsSection {}
 
             if drag_active() > 0 {
                 div { class: "tw:pointer-events-none tw:absolute tw:inset-0 tw:z-10 tw:grid tw:place-items-center tw:rounded-md tw:border-2 tw:border-dashed tw:border-accent tw:bg-background/80",

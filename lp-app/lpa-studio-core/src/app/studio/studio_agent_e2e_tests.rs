@@ -27,7 +27,7 @@ use crate::{
 
 /// The staged edit. `layout(binding = N)` is required by the probe
 /// dialect (naga `glsl-in`), exactly as the agent's system prompt says.
-const GREEN_SHADER: &str = "layout(binding = 0) uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.0, 1.0, 0.0, 1.0);\n}\n";
+const GREEN_SHADER: &str = "layout(binding = 0) uniform float time;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(0.0, 1.0, 0.0, 1.0);\n}\n";
 
 #[test]
 fn agent_turn_stages_an_overlay_edit_end_to_end() {
@@ -155,7 +155,7 @@ fn agent_turn_stages_an_overlay_edit_end_to_end() {
 }
 
 /// A second staged edit for the history/revert flow.
-const BLUE_SHADER: &str = "layout(binding = 0) uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.0, 0.0, 1.0, 1.0);\n}\n";
+const BLUE_SHADER: &str = "layout(binding = 0) uniform float time;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(0.0, 0.0, 1.0, 1.0);\n}\n";
 
 /// P4: two staged edits build the session history; reverting to the first
 /// restages its source through the real overlay path — editor content and
@@ -282,7 +282,7 @@ fn history_revert_restages_an_earlier_edit_end_to_end() {
 /// uniform (`speed`) the node def has no record for — the engine then fails
 /// at RENDER time ("missing uniform field"), the exact class the probe
 /// harness cannot see.
-const SPEED_SHADER: &str = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\n\nvec4 render(vec2 pos) {\n    return vec4(fract(time * speed), 0.0, 0.0, 1.0);\n}\n";
+const SPEED_SHADER: &str = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(fract(time * speed), 0.0, 0.0, 1.0);\n}\n";
 
 #[test]
 fn staged_engine_render_error_reaches_the_iterate_result() {
@@ -607,6 +607,178 @@ fn declared_orphan_is_repaired_by_upsert_param_end_to_end() {
         ),
         "knob range follows the authored min/max: {:?}",
         knob.widget
+    );
+}
+
+/// A 1D pattern with no uniforms: the only thing the engine can complain
+/// about is the declared-vs-entry mismatch (D1), which is exactly what
+/// `declare_space` exists to repair.
+const ONE_D_SHADER: &str = "vec4 render_1d(float pos) {\n    return vec4(1.0, 0.0, 0.0, 1.0);\n}\n";
+
+/// The D1 repair loop on the REAL in-process server, all staged: the node
+/// is declared 2D, `iterate` stages a `render_1d` body → the engine
+/// refuses the mismatch → `declare_space` dispatches the `PutSlotEdit`
+/// batch → the node recompiles clean.
+///
+/// This is the gap the tool closes. Before it, the agent could reach this
+/// error and had NO way out of it — its whole tool set was source and
+/// param records — so the user had to open the dimensionality drawer by
+/// hand. The last assertion is the point of G1 ruling 2: the agent's write
+/// lands on the very section the human clicks, not beside it.
+#[test]
+fn a_declared_space_mismatch_is_repaired_by_declare_space_end_to_end() {
+    let iterate_input =
+        json!({ "source": ONE_D_SHADER, "note": "make it a strip pattern" }).to_string();
+    let declare_input = json!({ "space": "1d", "shape": "radial", "mirror": true }).to_string();
+    let scripts = vec![vec![
+        vec![
+            TurnEvent::ToolUseStart {
+                id: "tu_1".into(),
+                name: "iterate".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_1".into(),
+                json_fragment: iterate_input,
+            },
+            turn_done(StopReason::ToolUse, 10, 10),
+        ],
+        vec![
+            TurnEvent::ToolUseStart {
+                id: "tu_2".into(),
+                name: "declare_space".into(),
+            },
+            TurnEvent::ToolInputDelta {
+                id: "tu_2".into(),
+                json_fragment: declare_input,
+            },
+            turn_done(StopReason::ToolUse, 10, 10),
+        ],
+        vec![
+            TurnEvent::TextDelta("It's a 1D pattern now.".into()),
+            turn_done(StopReason::EndTurn, 10, 10),
+        ],
+    ]];
+    let harness = AgentHarness::new(scripts);
+    // Yield-once timers, like the upsert e2e: every bridge poll (write ack
+    // + engine verdict) hands control back so the test can pump batches.
+    let (mut actor, handle) = StudioActor::new(harness.controller, |_| {
+        let mut yielded = false;
+        core::future::poll_fn(move |cx| {
+            if yielded {
+                core::task::Poll::Ready(())
+            } else {
+                yielded = true;
+                cx.waker().wake_by_ref();
+                core::task::Poll::Pending
+            }
+        })
+    });
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    // The node starts declared 2D — the model default every pre-plan
+    // shader carries.
+    let space = shader_face(&snapshot)
+        .space
+        .expect("the shader card's space section");
+    assert_eq!(space.primary.active, "TwoD");
+
+    let agent = agent_view(&snapshot);
+    handle.tx.send(StudioCommand::Action(
+        agent.send_action("make this a strip pattern"),
+    ));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv();
+
+    let mut run = harness.tasks.borrow_mut().remove(0);
+    let mut last_snapshot = None;
+    {
+        use core::task::{Context, Poll};
+        use std::sync::Arc;
+        use std::task::{Wake, Waker};
+        struct NoopWake;
+        impl Wake for NoopWake {
+            fn wake(self: Arc<Self>) {}
+        }
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut context = Context::from_waker(&waker);
+        let mut pumps = 0;
+        loop {
+            match run.as_mut().poll(&mut context) {
+                Poll::Ready(()) => break,
+                Poll::Pending => {
+                    pumps += 1;
+                    assert!(pumps < 400, "agent run did not complete");
+                    handle.tx.send(project_action(ProjectOp::RefreshProject));
+                    drive(actor.run_one_batch_for_test());
+                    if let Some(snapshot) = view.try_recv() {
+                        last_snapshot = Some(snapshot);
+                    }
+                }
+            }
+        }
+    }
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().or(last_snapshot).expect("final snapshot");
+
+    let requests = harness.requests.borrow();
+    assert_eq!(requests.len(), 3);
+
+    // Turn 1's result: the engine refuses the mismatch. (The probe world is
+    // 2D-only, so `shader` reports the missing `render_2d` too — the
+    // ENGINE verdict is the one that matters here.)
+    let content = tool_result_json(&requests[1]);
+    assert_eq!(content["engine"]["status"], "error", "{content}");
+    assert!(
+        content["engine"]["message"]
+            .as_str()
+            .expect("message")
+            .contains("declared 2D but defines `render_1d`"),
+        "{content}"
+    );
+
+    // Turn 2's result: the declaration applied, it echoes the entry
+    // contract it just set, and the node recompiled clean inside the same
+    // call's verdict window.
+    let content = tool_result_json(&requests[2]);
+    assert_eq!(content["applied"], true, "{content}");
+    assert_eq!(content["space"]["space"], "1d");
+    assert_eq!(content["space"]["shape"], "radial");
+    assert_eq!(content["space"]["mirror"], true);
+    assert_eq!(content["entry_point"], "vec4 render_1d(float pos)");
+    assert_eq!(content["engine"]["status"], "ok", "{content}");
+
+    // Everything is STAGED, not saved — the same Save gate as an upsert.
+    let (persisted, _failed) = editor_dirty(&snapshot);
+    assert!(
+        persisted > 0,
+        "the declaration rides the Save-gated overlay"
+    );
+
+    // G1 ruling 2: the agent's write lands on the SAME section the human
+    // clicks. The card now reads 1D, with the projection the agent chose.
+    let space = shader_face(&snapshot)
+        .space
+        .expect("the shader card's space section");
+    assert_eq!(space.primary.active, "OneD");
+    assert_eq!(space.declared_space, Some(crate::UiVisualSpace::OneD));
+    let answer = space
+        .cell(crate::UiSpaceCellRole::ProducerIn2d)
+        .expect("a 1D shader carries its 2D answer cell");
+    assert_eq!(
+        answer.active, "Radial",
+        "the agent's shape reached the tiles"
+    );
+    let modifiers = answer.modifiers.as_ref().expect("the modifier rows");
+    assert!(modifiers.mirror.value, "the agent's mirror reached the row");
+    assert!(
+        !modifiers.flip.value,
+        "an omitted field stays at its default"
     );
 }
 

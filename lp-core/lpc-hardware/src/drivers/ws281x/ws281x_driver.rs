@@ -3,26 +3,26 @@ use alloc::boxed::Box;
 use crate::OutputError;
 use crate::{HardwareEndpointError, HwDriver, HwEndpoint, HwEndpointId};
 
-/// Maximum LEDs a single WS281x output channel will drive.
+/// Maximum LEDs a single WS281x output port will drive.
 ///
 /// Requests beyond this are truncated by [`ws281x_capped_byte_count`]. The cap
-/// is a per-channel buffer/latency bound in the RMT drivers, not a protocol
-/// limit. This is deliberately the only definition — it used to be hand-copied
+/// is a per-port buffer/latency bound imposed by the RMT drivers, not a
+/// protocol limit. This is deliberately the only definition — it used to be hand-copied
 /// into two firmware crates and drifted silently
 /// (docs/debt/output-channel-led-cap-silent-truncation.md).
 ///
 /// Enforced once, identically, at the engine's output-flush seam
 /// (`lpc-engine`'s `wire_slice`) so host, emulator, and device all grant the
-/// same byte count for the same authored channel; `Esp32OutputProvider` keeps
+/// same byte count for the same authored port; `Esp32OutputProvider` keeps
 /// its own check on top as defense-in-depth, not as the source of truth.
-pub const WS281X_MAX_LEDS_PER_CHANNEL: usize = 1024;
+pub const WS281X_MAX_LEDS_PER_PORT: usize = 1024;
 
-/// Cap a requested frame's byte count to [`WS281X_MAX_LEDS_PER_CHANNEL`].
+/// Cap a requested frame's byte count to [`WS281X_MAX_LEDS_PER_PORT`].
 ///
 /// Returns the granted byte count and whether the cap actually truncated the
 /// request. Callers own logging: warn once per cap-crossing, never per frame.
 pub fn ws281x_capped_byte_count(requested: u32) -> (u32, bool) {
-    let max_byte_count = (WS281X_MAX_LEDS_PER_CHANNEL * 3) as u32;
+    let max_byte_count = (WS281X_MAX_LEDS_PER_PORT * 3) as u32;
     let granted = requested.min(max_byte_count);
     (granted, granted < requested)
 }
@@ -150,14 +150,14 @@ mod tests {
 
     #[test]
     fn cap_passes_through_at_or_under_the_limit() {
-        let max = (WS281X_MAX_LEDS_PER_CHANNEL * 3) as u32;
+        let max = (WS281X_MAX_LEDS_PER_PORT * 3) as u32;
         assert_eq!(ws281x_capped_byte_count(3), (3, false));
         assert_eq!(ws281x_capped_byte_count(max), (max, false));
     }
 
     #[test]
     fn cap_truncates_and_reports_it_above_the_limit() {
-        let max = (WS281X_MAX_LEDS_PER_CHANNEL * 3) as u32;
+        let max = (WS281X_MAX_LEDS_PER_PORT * 3) as u32;
         assert_eq!(ws281x_capped_byte_count(max + 3), (max, true));
         assert_eq!(ws281x_capped_byte_count(u32::MAX), (max, true));
     }

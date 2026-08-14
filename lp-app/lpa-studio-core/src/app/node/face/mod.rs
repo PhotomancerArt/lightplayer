@@ -27,19 +27,21 @@ mod ui_panel_control;
 mod ui_panel_control_view;
 mod ui_panel_group;
 mod ui_panel_widget;
+mod ui_patch_bay;
 mod ui_playlist_entry;
 mod ui_playlist_face;
 mod ui_shader_face;
+mod ui_space_section;
 
 pub use ui_clock_face::{
     UiClockFace, UiClockTransport, UiPhasorReading, UiTimebaseState, phasor_rate_display,
 };
-pub use ui_fixture_face::UiFixtureFace;
+pub use ui_fixture_face::{UiFixtureFace, UiShapePresets};
 pub use ui_fixture_power::UiFixturePower;
-pub use ui_module_face::UiModuleFace;
+pub use ui_module_face::{UiExportsGroup, UiModuleExport, UiModuleFace};
 pub use ui_node_face::UiNodeFace;
 pub use ui_output_face::{
-    UiLedBudget, UiOutputBoardFacts, UiOutputChannelRow, UiOutputFace, UiOutputPin, UiWireStatus,
+    UiLedBudget, UiOutputBoardFacts, UiOutputFace, UiOutputPin, UiOutputPortRow, UiWireStatus,
 };
 pub use ui_panel_control::{
     UiPanelControl, UiPanelEmit, UiPanelTarget, UiPanelWire, UiPanelWireRole,
@@ -47,6 +49,11 @@ pub use ui_panel_control::{
 pub use ui_panel_control_view::{UiPanelControlState, UiPanelControlView};
 pub use ui_panel_group::UiPanelGroup;
 pub use ui_panel_widget::UiPanelWidget;
+pub use ui_patch_bay::{UiFixturePatch, UiPatchBay, UiPatchCell, UiPatchPort};
 pub use ui_playlist_entry::UiPlaylistEntry;
 pub use ui_playlist_face::UiPlaylistFace;
 pub use ui_shader_face::UiShaderFace;
+pub use ui_space_section::{
+    UiSpaceBoolRow, UiSpaceCell, UiSpaceCellRole, UiSpaceChoice, UiSpaceMismatch, UiSpaceModifiers,
+    UiSpaceSection, UiSpaceSide, UiWireDirectionRow,
+};

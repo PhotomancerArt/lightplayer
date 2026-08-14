@@ -42,6 +42,14 @@ pub enum LpType {
     Mat4x4,
     /// Fixed-size homogeneous sequence.
     Array(Box<LpType>, usize),
+    /// Packed typed buffer: `len` elements of a builtin scalar/vector,
+    /// stored as one flat little-endian word run
+    /// ([`LpBuffer`](crate::LpBuffer)). Unlike [`Self::Array`], elements
+    /// have no per-value identity — the buffer is one value.
+    Buffer {
+        elem: crate::BufferElem,
+        len: u32,
+    },
     /// Variable-length homogeneous sequence.
     List(Box<LpType>),
     Struct {

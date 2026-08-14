@@ -22,6 +22,59 @@ impl core::fmt::Debug for ZipBytes {
     }
 }
 
+/// Which scaffold a "New project" gesture starts from (module authoring
+/// unit, P4).
+///
+/// The templates are the New menu's whole vocabulary, so their labels and
+/// one-line descriptions live here rather than in the web crate: the menu
+/// renders the model, and a fourth template would be one arm here plus one
+/// arm in the file generator.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ProjectTemplate {
+    /// The historical `New`: a pure-blank one-file package (the D17
+    /// deviation, 2026-07-27). The library writes the minimal manifest and
+    /// root module itself, so this template generates no files at all.
+    #[default]
+    Blank,
+    /// A **pattern project** for a 1D effect: a 300-lamp strand plus the
+    /// 32x16 panel, with `effect/` pre-designated as the export.
+    Pattern1d,
+    /// The same, for a 2D effect: the panel rig alone.
+    Pattern2d,
+}
+
+impl ProjectTemplate {
+    /// Menu row title.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Blank => "Blank",
+            Self::Pattern1d => "1D pattern project",
+            Self::Pattern2d => "2D pattern project",
+        }
+    }
+
+    /// Menu row second line: what the template puts on the canvas, and —
+    /// for the library kinds — what it publishes.
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Blank => "empty canvas, no nodes",
+            Self::Pattern1d => "strip + matrix rig · exports effect/",
+            Self::Pattern2d => "matrix rig · exports effect/",
+        }
+    }
+
+    /// Label the library slugs, dates, and dedupes the new package from.
+    /// Kept distinct per template so a workbench does not land in the
+    /// gallery indistinguishable from a blank one.
+    pub fn default_project_name(self) -> &'static str {
+        match self {
+            Self::Blank => "Project",
+            Self::Pattern1d => "1D pattern",
+            Self::Pattern2d => "2D pattern",
+        }
+    }
+}
+
 /// One home-gallery gesture. Package identity travels as the `prj…` uid
 /// string straight off the card view model.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -38,14 +91,33 @@ pub enum HomeOp {
     OpenExample {
         id: String,
     },
-    /// Create a pure-blank one-file project and OPEN it — create-and-open
-    /// is the gesture: the user lands in the empty editor with the
-    /// add-node picker. Deviates from D17 (the examples place is unbuilt
-    /// and node authoring makes an empty project genuinely useful; see
+    /// Create a project from a template and OPEN it — create-and-open is
+    /// the gesture: the user lands in the editor with something to do next.
+    /// Deviates from D17 (the examples place is unbuilt and node authoring
+    /// makes an empty project genuinely useful; see
     /// `docs/adr/2026-07-27-node-authoring-operations.md`). No name
-    /// prompt: the default "Project" label is slugged/dated/deduped by
+    /// prompt: the template's default label is slugged/dated/deduped by
     /// the library, and rename lives on the card kebab.
-    CreateProject,
+    CreateProject {
+        template: ProjectTemplate,
+    },
+    /// Create a project BUILT AROUND a library pattern's export, and open
+    /// it (module authoring unit, P5): the pattern-project rig with the
+    /// vendored export designated. The card-side twin of the add-node
+    /// picker's import — import brings a pattern into what you are already
+    /// working on, this hands you a workbench for it.
+    ///
+    /// Unlike [`Self::CreateProject`] it carries a `name`: the card's
+    /// inline form has one, prefilled from the export, because "a project
+    /// about someone else's fire module" deserves a name you chose.
+    CreateFromPattern {
+        /// Source package `prj_…` uid.
+        uid: String,
+        /// Which export folder to build around.
+        export: String,
+        /// The new project's label (slugged/dated/deduped by the library).
+        name: String,
+    },
     RenamePackage {
         uid: String,
         name: String,
@@ -120,9 +192,40 @@ impl ControllerOp for HomeOp {
                 ActionPriority::Primary,
             )
             .with_icon("play"),
-            Self::CreateProject => ActionMeta::new(
+            // The blank arm keeps the bare "New" label the header chip has
+            // always worn — it is the button that opens the template menu,
+            // and the menu's own rows carry the per-template labels.
+            Self::CreateProject {
+                template: ProjectTemplate::Blank,
+            } => ActionMeta::new(
                 "New",
                 "Create a blank project and open it.",
+                ActionPriority::Secondary,
+            )
+            .with_icon("add"),
+            Self::CreateProject { template } => ActionMeta::new(
+                template.label(),
+                match template {
+                    ProjectTemplate::Pattern1d => {
+                        "Create a 1D pattern project — a strand and a panel to judge \
+                         the effect on, with `effect/` designated as the export — and \
+                         open it."
+                    }
+                    _ => {
+                        "Create a 2D pattern project — a panel to judge the effect on, \
+                         with `effect/` designated as the export — and open it."
+                    }
+                },
+                ActionPriority::Secondary,
+            )
+            .with_icon("add"),
+            Self::CreateFromPattern { export, .. } => ActionMeta::new(
+                "New project from this…",
+                format!(
+                    "Create a pattern project built around this project's {export} module — a \
+                     rig to judge it on, with your own copy of the module designated as the \
+                     export — and open it."
+                ),
                 ActionPriority::Secondary,
             )
             .with_icon("add"),
@@ -205,11 +308,12 @@ impl ControllerOp for HomeOp {
             // Opens push files to the runtime and load the project — the
             // demo-load quiet-gap budget fits. Create-and-open ends in the
             // same open, so it shares the budget.
-            Self::OpenPackage { .. } | Self::OpenExample { .. } | Self::CreateProject => {
-                ActionClass::Foreground {
-                    deadline: PROJECT_LOAD_DEADLINE,
-                }
-            }
+            Self::OpenPackage { .. }
+            | Self::OpenExample { .. }
+            | Self::CreateProject { .. }
+            | Self::CreateFromPattern { .. } => ActionClass::Foreground {
+                deadline: PROJECT_LOAD_DEADLINE,
+            },
             // Library/registry CRUD is local store work (a device rename's
             // live write-back is one small wire write); the standard budget
             // bounds it.
@@ -273,7 +377,15 @@ mod tests {
             HomeOp::OpenExample {
                 id: "examples/basic".to_string(),
             },
-            HomeOp::CreateProject,
+            HomeOp::CreateProject {
+                template: ProjectTemplate::Blank,
+            },
+            HomeOp::CreateProject {
+                template: ProjectTemplate::Pattern1d,
+            },
+            HomeOp::CreateProject {
+                template: ProjectTemplate::Pattern2d,
+            },
         ] {
             assert_eq!(
                 op.action_class(),
@@ -283,6 +395,55 @@ mod tests {
                 "{op:?}"
             );
         }
+    }
+
+    /// The header chip keeps saying "New" — it opens the menu; only the
+    /// template ROWS name templates.
+    #[test]
+    fn the_blank_template_keeps_the_bare_new_label() {
+        assert_eq!(
+            HomeOp::CreateProject {
+                template: ProjectTemplate::Blank,
+            }
+            .default_action_meta()
+            .label,
+            "New"
+        );
+        for template in [ProjectTemplate::Pattern1d, ProjectTemplate::Pattern2d] {
+            assert_eq!(
+                HomeOp::CreateProject { template }
+                    .default_action_meta()
+                    .label,
+                template.label(),
+            );
+        }
+    }
+
+    /// Every template presents a title, a one-line description, and a
+    /// distinct library label — the three strings the New menu renders and
+    /// the store slugs from.
+    #[test]
+    fn every_template_presents_itself() {
+        let templates = [
+            ProjectTemplate::Blank,
+            ProjectTemplate::Pattern1d,
+            ProjectTemplate::Pattern2d,
+        ];
+        for template in templates {
+            assert!(!template.label().is_empty());
+            assert!(!template.description().is_empty());
+            assert!(!template.default_project_name().is_empty());
+        }
+        for (a, b) in [(0, 1), (0, 2), (1, 2)] {
+            assert_ne!(
+                templates[a].default_project_name(),
+                templates[b].default_project_name(),
+            );
+        }
+        // The historical blank label is what existing slugs were dated
+        // from; changing it would rename what "New" makes.
+        assert_eq!(ProjectTemplate::Blank.default_project_name(), "Project");
+        assert_eq!(ProjectTemplate::default(), ProjectTemplate::Blank);
     }
 
     #[test]

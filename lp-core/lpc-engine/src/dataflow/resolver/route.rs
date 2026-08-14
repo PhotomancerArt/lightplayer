@@ -50,4 +50,13 @@ pub enum ResolvedRoute {
     MergeByKey {
         inputs: Vec<(BindingRef, RouteTarget)>,
     },
+    /// A fragment receiver: hand it every source, in this order.
+    ///
+    /// Same flattened provider walk as [`Self::MergeByKey`] — and the same
+    /// reason it belongs to the decision rather than the frame — but nothing
+    /// is combined: the order IS the answer, and the receiver decides what
+    /// each input covers. The output node's control input is the case.
+    MergeFragments {
+        inputs: Vec<(BindingRef, RouteTarget)>,
+    },
 }

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use fw_core::{drain_client_messages, tick_server_frame};
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::{
-    ButtonService, LpGraphics, LpServer, RadioService, RenderTextureRequest, TextureRenderProduct,
-    VisualProduct,
+    ButtonService, ConsumerPolicy, LpGraphics, LpServer, RadioService, RenderTextureRequest,
+    TextureRenderProduct, VisualProduct, VisualSpace,
 };
 use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
 use lpc_model::AsLpPath;
@@ -30,6 +30,16 @@ use crate::manual_time_provider::ManualTimeProvider;
 use crate::preview_surface::PreviewSurface;
 use crate::server_transport::BrowserServerTransport;
 use crate::tier::{RuntimeTier, TierSelection};
+
+/// A poster capture in progress — see
+/// [`BrowserFirmwareRuntime::begin_poster_capture`].
+pub(crate) enum PosterCapture {
+    /// CPU tier: the bytes were host-resident; capture completed inline.
+    Ready(Vec<u8>),
+    /// GPU tier: the copy is submitted; await the map outside any registry
+    /// borrow. Resolves to sRGB RGBA8 bytes.
+    Pending(core::pin::Pin<Box<dyn core::future::Future<Output = Result<Vec<u8>, String>>>>),
+}
 
 /// GLSL frontend for the browser runtime's CPU tier.
 ///
@@ -71,6 +81,12 @@ pub(crate) struct BrowserFirmwareRuntime {
     /// resolved once per channel and re-resolved only after a render error
     /// (e.g. a project reload invalidated the handle).
     bus_visual_product: Option<(String, VisualProduct)>,
+    /// The project resolves NO visual product but IS control-first: the
+    /// lamps are the picture and the raster stays dark by design (the
+    /// user-side ruling for multi-module projects, whose sibling modules
+    /// tie on `visual.out`). Cached so the fallback resolves once, not
+    /// per frame.
+    bus_visual_control_only: bool,
     /// Cached "does the root scope resolve `control.out`?" answer.
     ///
     /// A property of the loaded project, not of a frame, and the resolve that
@@ -154,6 +170,10 @@ impl BrowserFirmwareRuntime {
             Some(radio_service),
             graphics,
         );
+        // Browser sim transport is postMessage — no 16 KiB serial frame —
+        // so this link declares no frame budget and answers display
+        // layouts at any scale (dome-class included).
+        server.set_project_read_frame_budget(None);
         // Wire hello identity (sans-IO: injected here). Browser runtimes
         // carry no git provenance or stamped identity; the hello's
         // capability half comes from the constructor above.
@@ -186,6 +206,7 @@ impl BrowserFirmwareRuntime {
             running: false,
             outbox: Vec::new(),
             bus_visual_product: None,
+            bus_visual_control_only: false,
             control_first: None,
             tier,
             gpu,
@@ -291,7 +312,16 @@ impl BrowserFirmwareRuntime {
         width: u32,
         height: u32,
     ) -> Result<Vec<u8>, String> {
-        let texture = self.render_bus_texture(channel, width, height)?;
+        let Some(texture) = self.render_bus_texture(channel, width, height)? else {
+            // Control-first fallback (see `render_bus_texture`): serve an
+            // opaque black frame so the blit succeeds and the cadence
+            // stays normal; the card shows its lamp layer over this.
+            let mut bytes = vec![0u8; width as usize * height as usize * 4];
+            for alpha in bytes.iter_mut().skip(3).step_by(4) {
+                *alpha = 255;
+            }
+            return Ok(bytes);
+        };
         let bytes = texture.try_raw_bytes().ok_or_else(|| {
             "render produced a GPU-resident texture (GPU-tier runtime); use surface \
              presentation (`present_frame`) instead of the byte transport"
@@ -329,22 +359,79 @@ impl BrowserFirmwareRuntime {
         let Some(project) = self.server.project_manager_mut().get_project_mut(handle) else {
             return (false, Vec::new());
         };
-        let control_first = cached.unwrap_or_else(|| {
+        let resolved = cached.unwrap_or_else(|| {
             match project.resolve_bus_control_product(lpc_model::PRIMARY_CONTROL_CHANNEL) {
                 Ok(_) => true,
                 Err(error) => {
-                    // The ordinary state of a shader-only project, but it is
-                    // also the only place a genuine resolve failure would
-                    // read as "no lamps" — so say why, once (this is cached).
-                    log::debug!("preview runtime: project is not control-first: {error}");
+                    // The ordinary state of a shader-only project — but ALSO
+                    // the state of a multi-module project whose sibling
+                    // modules tie on the bus (mini-dome, the peaches). The
+                    // published outputs below settle it either way; say why
+                    // once (this is cached).
+                    log::debug!("preview runtime: bus control product did not resolve: {error}");
                     false
                 }
             }
         });
         let OutputFrameProbeResult::Frame { outputs } =
             project.read_output_frame(OutputFrameProbeRequest { display_layout });
+        // Published outputs break the tie ONLY for a project whose visual
+        // side already took the control-only fallback (multi-module bus
+        // ties): there the outputs are the ground truth — fragments MERGE,
+        // so the project drives real lamps while bus resolution refuses.
+        // A project whose visual resolves keeps the resolve-based verdict,
+        // so raster-led cards stay raster-led.
+        let control_first = resolved || (self.bus_visual_control_only && !outputs.is_empty());
         self.control_first = Some(control_first);
         (control_first, outputs)
+    }
+
+    /// Begin a one-shot poster capture: render the visual product on
+    /// `channel` at the requested size and hand back sRGB RGBA8 bytes —
+    /// immediately on the CPU tier, or via an async GPU readback the caller
+    /// awaits AFTER releasing its registry borrow (the returned future owns
+    /// refcounted wgpu handles only).
+    ///
+    /// This is the poster exit of the "GPU products stay GPU-resident"
+    /// doctrine: a single on-demand capture (a gallery poster), never a
+    /// per-frame transport — the per-frame paths remain `preview_frame`
+    /// (CPU bytes) and `present_frame` (GPU surface, zero readback).
+    pub(crate) fn begin_poster_capture(
+        &mut self,
+        channel: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<PosterCapture, String> {
+        let Some(texture) = self.render_bus_texture(channel, width, height)? else {
+            return Err(
+                "control-first project has no visual product; the lamp poster path owns this card"
+                    .to_string(),
+            );
+        };
+        if let Some(bytes) = texture.try_raw_bytes() {
+            return Ok(PosterCapture::Ready(
+                crate::texture_convert::rgba16_unorm_to_rgba8_srgb(bytes),
+            ));
+        }
+        let gpu = self
+            .gpu
+            .as_ref()
+            .ok_or_else(|| "GPU-resident product on a runtime without GPU state".to_string())?;
+        let handle = texture.gpu_handle().ok_or_else(|| {
+            "render produced a texture with neither host bytes nor GPU handle".to_string()
+        })?;
+        let readback = gpu
+            .graphics
+            .read_back_texture_async(handle)
+            .map_err(|error| format!("begin poster readback: {error}"))?;
+        Ok(PosterCapture::Pending(Box::pin(async move {
+            let data = readback
+                .await
+                .map_err(|error| format!("poster readback: {error}"))?;
+            Ok(crate::texture_convert::rgba16_unorm_to_rgba8_srgb(
+                data.bytes(),
+            ))
+        })))
     }
 
     /// Attach a transferred `OffscreenCanvas` as this runtime's card surface.
@@ -391,7 +478,14 @@ impl BrowserFirmwareRuntime {
             (surface.width(), surface.height())
         };
 
-        let texture = self.render_bus_texture(channel, width, height)?;
+        let Some(texture) = self.render_bus_texture(channel, width, height)? else {
+            // Control-first fallback: the lamps are the picture and this
+            // present becomes a no-op. Answering Ok keeps the frame cadence
+            // (present acks, frame budgets, lamp ride-alongs) exactly as if
+            // a frame had landed — the card's raster canvas is hidden under
+            // its lamp layer anyway.
+            return Ok(());
+        };
         let gpu = self.gpu.as_ref().expect("gpu state checked above");
         let surface = gpu.surface.as_ref().expect("surface checked above");
 
@@ -424,12 +518,23 @@ impl BrowserFirmwareRuntime {
     }
 
     /// Resolve (with caching) and render the visual product on a bus channel.
+    ///
+    /// `Ok(None)` is the **control-first fallback**: the project resolves
+    /// no visual product (e.g. a multi-module project whose sibling
+    /// modules tie on `visual.out`) but its root scope resolves
+    /// `control.out` — the lamps are its picture, the raster stays dark,
+    /// and the failure is a state, not an error. A shader-only project
+    /// with the same resolution failure still errors: swallowing it there
+    /// would render black and hide a real defect.
     fn render_bus_texture(
         &mut self,
         channel: &str,
         width: u32,
         height: u32,
-    ) -> Result<TextureRenderProduct, String> {
+    ) -> Result<Option<TextureRenderProduct>, String> {
+        if self.bus_visual_control_only {
+            return Ok(None);
+        }
         let handle = self
             .server
             .project_manager()
@@ -445,13 +550,36 @@ impl BrowserFirmwareRuntime {
 
         let product = match &self.bus_visual_product {
             Some((cached_channel, product)) if cached_channel == channel => *product,
-            _ => {
-                let product = project
-                    .resolve_bus_visual_product(channel)
-                    .map_err(|error| format!("{error}"))?;
-                self.bus_visual_product = Some((channel.to_string(), product));
-                product
-            }
+            _ => match project.resolve_bus_visual_product(channel) {
+                Ok(product) => {
+                    self.bus_visual_product = Some((channel.to_string(), product));
+                    product
+                }
+                Err(resolve_error) => {
+                    // A project that publishes outputs (or resolves the
+                    // control bus) leads with lamps: its visual tie is a
+                    // state, not an error. Only a project with NEITHER —
+                    // genuinely shader-only — errors loudly here.
+                    let control_resolves = project
+                        .resolve_bus_control_product(lpc_model::PRIMARY_CONTROL_CHANNEL)
+                        .is_ok();
+                    let OutputFrameProbeResult::Frame { outputs } =
+                        project.read_output_frame(OutputFrameProbeRequest {
+                            display_layout: ControlDisplayLayoutRead::None,
+                        });
+                    log::debug!(
+                        "preview runtime: visual fallback: control_resolves={} outputs={} \
+                         ({resolve_error})",
+                        control_resolves,
+                        outputs.len()
+                    );
+                    if control_resolves || !outputs.is_empty() {
+                        self.bus_visual_control_only = true;
+                        return Ok(None);
+                    }
+                    return Err(format!("{resolve_error}"));
+                }
+            },
         };
 
         let request = RenderTextureRequest {
@@ -459,9 +587,11 @@ impl BrowserFirmwareRuntime {
             height,
             format: TextureStorageFormat::Rgba16Unorm,
             time_seconds: project.engine().frame_time().total_ms as f32 / 1000.0,
+            space: VisualSpace::TwoD,
+            policy: ConsumerPolicy::default(),
         };
         match project.render_visual_texture(product, &request) {
-            Ok(texture) => Ok(texture),
+            Ok(texture) => Ok(Some(texture)),
             Err(error) => {
                 // A stale product handle (project reload) renders as an error;
                 // drop the cache so the next frame re-resolves the bus.

@@ -35,7 +35,7 @@ vec3 drawMeteor(vec3 accum, uint id, vec2 head, vec3 color, float intensity, vec
     return accum + color * tail * lane * intensity;
 }
 
-vec4 render(vec2 pos) {
+vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
     vec3 accum = vec3(0.0, 0.0, 0.0);
     accum = drawMeteor(accum, meteors[0].id, meteors[0].pos, meteors[0].color, meteors[0].intensity, uv);

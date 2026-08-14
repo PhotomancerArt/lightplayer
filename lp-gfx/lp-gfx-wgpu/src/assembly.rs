@@ -25,10 +25,23 @@
 //!    `texture()` / `texelFetch()` site on a spec'd sampler is rewritten to
 //!    a generated helper implementing the CPU tier's sampling semantics
 //!    (index-space wrap, `texelFetch` edge clamp) over `textureLoad`;
-//! 5. a **generated fragment `main()`** wrapping
-//!    `render(floor(gl_FragCoord.xy))` — matching the CPU path's `pos`
-//!    convention (the synthesised render-texture loop passes integer pixel
-//!    coordinates without a half-pixel offset).
+//! 5. a **generated fragment `main()`** wrapping the shader's declared entry
+//!    — `render_2d(floor(gl_FragCoord.xy))` for a 2D shader,
+//!    `render_1d(floor(gl_FragCoord.x))` for a 1D one. KNOWN DEFECT: this
+//!    does **not** match the CPU path's `pos` convention. The synthesised
+//!    render-texture loop hands the entry pixel *centers* (`x + 0.5`,
+//!    seeded at `Q_HALF`) — which is exactly what `gl_FragCoord` already
+//!    carries — so the `floor` here evaluates every fragment half a pixel
+//!    away from the CPU tier
+//!    (`docs/defects/2026-08-09-gpu-render-pass-floors-the-fragment-center.md`).
+//!    The likely fix is dropping the `floor`; it is parked in that entry
+//!    rather than done here because it moves every GPU frame and the
+//!    render-parity bounds with it.
+//!
+//! Which entry is spliced comes from the compile request's declared space
+//! ([`lp_gfx::ShaderEntrySpace`], authored on the shader node), never from
+//! sniffing the source: the CPU tier validates the same declaration, so both
+//! tiers refuse the same sources for the same reason.
 //!
 //! Pixel shaders are self-contained sources (uniforms declared in the
 //! authored text); the engine's generated-header machinery is
@@ -38,7 +51,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use lp_gfx::GfxError;
-use lp_shader::TextureBindingSpecs;
+use lp_shader::{ShaderEntrySpace, TextureBindingSpecs};
 use lps_builtins::canonical_glsl::{CANONICAL_GLSL, CanonicalGlsl};
 
 use crate::texture_lowering::lower_texture_calls;
@@ -49,7 +62,8 @@ const FRAG_OUT: &str = "lp_gfx_frag_color";
 /// Name of the generated sample-position varying (sample-point pass).
 const SAMPLE_POS_IN: &str = "lp_gfx_sample_pos";
 
-/// Assemble the full fragment-stage GLSL for an authored pixel shader.
+/// Assemble the full fragment-stage GLSL for an authored pixel shader
+/// declaring `space`.
 ///
 /// `textures` is the compile-time [`lps_shared::TextureBindingSpec`] map
 /// keyed by sampler uniform leaf path; sampling call sites are lowered
@@ -57,12 +71,19 @@ const SAMPLE_POS_IN: &str = "lp_gfx_sample_pos";
 pub fn assemble_fragment_glsl(
     authored: &str,
     textures: &TextureBindingSpecs,
+    space: ShaderEntrySpace,
 ) -> Result<String, GfxError> {
     let mut out = assembled_unit_prefix(authored, textures)?;
+    // A 1D target is one row, so the raster x coordinate is the whole
+    // position; y is discarded rather than projected.
+    let call = match space {
+        ShaderEntrySpace::TwoD => "render_2d(floor(gl_FragCoord.xy))",
+        ShaderEntrySpace::OneD => "render_1d(floor(gl_FragCoord.x))",
+    };
     let _ = write!(
         out,
         "\nlayout(location = 0) out vec4 {FRAG_OUT};\n\
-         void main() {{\n    {FRAG_OUT} = render(floor(gl_FragCoord.xy));\n}}\n"
+         void main() {{\n    {FRAG_OUT} = {call};\n}}\n"
     );
     Ok(out)
 }
@@ -97,21 +118,30 @@ fn assembled_unit_prefix(
 
 /// Assemble the sample-point fragment-stage GLSL for an authored pixel
 /// shader: identical prelude/prototypes/authored unit, but `main` evaluates
-/// `render` at a caller-provided pixel-space position carried in a varying
-/// (one point primitive per sample — see `crate::sample_pass`) instead of
-/// `gl_FragCoord`. Points may be fractional; no `floor` is applied, matching
-/// the CPU tier's `__render_samples_rgba16` loop, which passes raw Q16.16
-/// coordinates through to `render`.
+/// the declared entry at a caller-provided pixel-space position carried in a
+/// varying (one point primitive per sample — see `crate::sample_pass`)
+/// instead of `gl_FragCoord`. Points may be fractional; no `floor` is
+/// applied, matching the CPU tier's `__render_samples_rgba16` loop, which
+/// passes raw Q16.16 coordinates through to the entry.
+///
+/// The varying's type follows the space — `vec2` for 2D, `float` for 1D —
+/// and the vertex stage feeds it from a matching 1- or 2-lane attribute
+/// (`crate::sample_pass`).
 pub fn assemble_sample_fragment_glsl(
     authored: &str,
     textures: &TextureBindingSpecs,
+    space: ShaderEntrySpace,
 ) -> Result<String, GfxError> {
     let mut out = assembled_unit_prefix(authored, textures)?;
+    let (varying_ty, entry) = match space {
+        ShaderEntrySpace::TwoD => ("vec2", "render_2d"),
+        ShaderEntrySpace::OneD => ("float", "render_1d"),
+    };
     let _ = write!(
         out,
-        "\nlayout(location = 0) in vec2 {SAMPLE_POS_IN};\n\
+        "\nlayout(location = 0) in {varying_ty} {SAMPLE_POS_IN};\n\
          layout(location = 0) out vec4 {FRAG_OUT};\n\
-         void main() {{\n    {FRAG_OUT} = render({SAMPLE_POS_IN});\n}}\n"
+         void main() {{\n    {FRAG_OUT} = {entry}({SAMPLE_POS_IN});\n}}\n"
     );
     Ok(out)
 }
@@ -537,18 +567,18 @@ mod tests {
 
     #[test]
     fn prelude_empty_when_no_builtins_referenced() {
-        assert!(assemble_prelude("vec4 render(vec2 p) { return vec4(0.0); }").is_empty());
+        assert!(assemble_prelude("vec4 render_2d(vec2 p) { return vec4(0.0); }").is_empty());
     }
 
     #[test]
     fn prototypes_cover_out_of_order_functions() {
         let authored = r#"
 layout(binding = 0) uniform vec2 outputSize;
-vec4 render(vec2 pos) { return helper(pos, 1.0); }
+vec4 render_2d(vec2 pos) { return helper(pos, 1.0); }
 vec4 helper(vec2 scaledCoord, float time) { return vec4(scaledCoord, time, 1.0); }
 "#;
         let protos = authored_prototypes(authored);
-        assert!(protos.contains("vec4 render(vec2 pos);"));
+        assert!(protos.contains("vec4 render_2d(vec2 pos);"));
         assert!(protos.contains("vec4 helper(vec2 scaledCoord, float time);"));
     }
 
@@ -580,10 +610,10 @@ float f(float x) { return x; }
 
     #[test]
     fn prototypes_normalize_multi_line_signatures() {
-        let authored = "vec4 render(vec2 pos,\n            float t)\n{ return vec4(0.0); }";
+        let authored = "vec4 render_2d(vec2 pos,\n            float t)\n{ return vec4(0.0); }";
         assert_eq!(
             authored_prototypes(authored),
-            "vec4 render(vec2 pos, float t);\n"
+            "vec4 render_2d(vec2 pos, float t);\n"
         );
     }
 
@@ -591,13 +621,17 @@ float f(float x) { return x; }
     fn hoists_structs_and_consts_above_prototypes() {
         let authored = r#"
 const int N = 2;
-vec4 render(vec2 pos) { Point p = make_point(pos.x); return vec4(p.x); }
+vec4 render_2d(vec2 pos) { Point p = make_point(pos.x); return vec4(p.x); }
 struct Point { float x; float y; };
 Point make_point(float x) { return Point(x, x); }
 float sum(float arr[N]) { return arr[0] + arr[1]; }
 "#;
-        let unit =
-            assemble_fragment_glsl(authored, &TextureBindingSpecs::new()).expect("assembles");
+        let unit = assemble_fragment_glsl(
+            authored,
+            &TextureBindingSpecs::new(),
+            ShaderEntrySpace::TwoD,
+        )
+        .expect("assembles");
         let struct_at = unit.find("struct Point").expect("struct hoisted");
         let const_at = unit.find("const int N = 2;").expect("const hoisted");
         let proto_at = unit.find("Point make_point(float x);").expect("prototype");
@@ -612,15 +646,19 @@ float sum(float arr[N]) { return arr[0] + arr[1]; }
     fn strips_authored_prototypes_but_not_globals() {
         let authored = "float helper(float x);\n\
                         float scale = 2.0;\n\
-                        vec4 render(vec2 pos) { return vec4(helper(pos.x)); }\n\
+                        vec4 render_2d(vec2 pos) { return vec4(helper(pos.x)); }\n\
                         float helper(float x) { return x * scale; }\n";
-        let unit =
-            assemble_fragment_glsl(authored, &TextureBindingSpecs::new()).expect("assembles");
+        let unit = assemble_fragment_glsl(
+            authored,
+            &TextureBindingSpecs::new(),
+            ShaderEntrySpace::TwoD,
+        )
+        .expect("assembles");
         // Only the generated prototype survives (naga rejects duplicates),
         // and it precedes render's per callee-first ordering.
         assert_eq!(unit.matches("float helper(float x);").count(), 1);
         let helper_proto = unit.find("float helper(float x);").expect("prototype");
-        let render_proto = unit.find("vec4 render(vec2 pos);").expect("prototype");
+        let render_proto = unit.find("vec4 render_2d(vec2 pos);").expect("prototype");
         assert!(helper_proto < render_proto);
         assert!(unit.contains("float scale = 2.0;"));
     }
@@ -651,28 +689,76 @@ float sum(float arr[N]) { return arr[0] + arr[1]; }
     #[test]
     fn assembled_unit_has_version_prelude_prototypes_and_wrapper() {
         let authored = "layout(binding = 0) uniform vec2 outputSize;\n\
-                        vec4 render(vec2 pos) { return vec4(lpfn_saturate(pos.x)); }\n";
-        let unit =
-            assemble_fragment_glsl(authored, &TextureBindingSpecs::new()).expect("assembles");
+                        vec4 render_2d(vec2 pos) { return vec4(lpfn_saturate(pos.x)); }\n";
+        let unit = assemble_fragment_glsl(
+            authored,
+            &TextureBindingSpecs::new(),
+            ShaderEntrySpace::TwoD,
+        )
+        .expect("assembles");
         assert!(unit.starts_with("#version 450 core\n"));
         let saturate_at = unit.find("float lpfn_saturate(").expect("prelude");
-        let proto_at = unit.find("vec4 render(vec2 pos);").expect("prototype");
-        let authored_at = unit.find("vec4 render(vec2 pos) {").expect("authored");
+        let proto_at = unit.find("vec4 render_2d(vec2 pos);").expect("prototype");
+        let authored_at = unit.find("vec4 render_2d(vec2 pos) {").expect("authored");
         let main_at = unit.find("void main()").expect("wrapper");
         assert!(saturate_at < proto_at && proto_at < authored_at && authored_at < main_at);
-        assert!(unit.contains("render(floor(gl_FragCoord.xy))"));
+        assert!(unit.contains("render_2d(floor(gl_FragCoord.xy))"));
+    }
+
+    /// The 1D unit calls `render_1d` with the raster **x** only: a 1D
+    /// target is one row, so `gl_FragCoord.y` carries no information.
+    #[test]
+    fn one_d_unit_splices_the_one_d_entry_over_the_x_coordinate() {
+        let authored = "layout(binding = 0) uniform vec2 outputSize;\n\
+                        vec4 render_1d(float pos) { return vec4(pos / outputSize.x); }\n";
+        let unit = assemble_fragment_glsl(
+            authored,
+            &TextureBindingSpecs::new(),
+            ShaderEntrySpace::OneD,
+        )
+        .expect("assembles");
+        assert!(unit.contains("render_1d(floor(gl_FragCoord.x))"), "{unit}");
+        assert!(
+            !unit.contains("gl_FragCoord.xy"),
+            "a 1D shader takes one coordinate:\n{unit}"
+        );
+        // The prototype set follows the authored text, so the 1D entry is
+        // declared before the wrapper calls it.
+        assert!(unit.contains("vec4 render_1d(float pos);"), "{unit}");
+    }
+
+    /// The 1D sample unit's varying is a scalar, matching the 1-lane vertex
+    /// attribute `crate::sample_pass` feeds it.
+    #[test]
+    fn one_d_sample_unit_declares_a_scalar_position_varying() {
+        let authored = "vec4 render_1d(float pos) { return vec4(pos); }\n";
+        let unit = assemble_sample_fragment_glsl(
+            authored,
+            &TextureBindingSpecs::new(),
+            ShaderEntrySpace::OneD,
+        )
+        .expect("assembles");
+        assert!(
+            unit.contains("layout(location = 0) in float lp_gfx_sample_pos;"),
+            "{unit}"
+        );
+        assert!(unit.contains("render_1d(lp_gfx_sample_pos)"), "{unit}");
     }
 
     #[test]
     fn sample_unit_reads_the_position_varying_without_flooring() {
         let authored = "layout(binding = 0) uniform vec2 outputSize;\n\
-                        vec4 render(vec2 pos) { return vec4(lpfn_saturate(pos.x)); }\n";
-        let unit = assemble_sample_fragment_glsl(authored, &TextureBindingSpecs::new())
-            .expect("assembles");
+                        vec4 render_2d(vec2 pos) { return vec4(lpfn_saturate(pos.x)); }\n";
+        let unit = assemble_sample_fragment_glsl(
+            authored,
+            &TextureBindingSpecs::new(),
+            ShaderEntrySpace::TwoD,
+        )
+        .expect("assembles");
         assert!(unit.starts_with("#version 450 core\n"));
         assert!(unit.contains("float lpfn_saturate("), "prelude spliced");
         assert!(unit.contains("layout(location = 0) in vec2 lp_gfx_sample_pos;"));
-        assert!(unit.contains("render(lp_gfx_sample_pos)"));
+        assert!(unit.contains("render_2d(lp_gfx_sample_pos)"));
         assert!(
             !unit.contains("gl_FragCoord"),
             "sample positions come from the varying, not the raster position"
