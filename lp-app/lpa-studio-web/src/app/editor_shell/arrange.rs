@@ -24,6 +24,8 @@ use lpa_studio_core::{
 };
 use lpc_mapping::Bounds2d;
 
+use crate::app::node::lamp_view::fixture_live_colors;
+
 /// Display cap: a fixture with more lamps than this renders every k-th
 /// lamp (display subsampling only — dome-scale fixtures must not melt the
 /// SVG; the resolver still ran the full document).
@@ -169,7 +171,10 @@ pub(crate) fn ProjectCanvasHost(
     // fixture is dived (there is nothing to edit in fixture view).
     let arrange_session = use_signal(|| MapEditorSession::new(lpc_mapping::Map2dDoc::new()));
     let arrange_drag = use_signal(|| None::<CanvasDrag>);
-    let arrange_live = use_signal(Vec::<[u8; 3]>::new);
+    let mut arrange_live = use_signal(Vec::<[u8; 3]>::new);
+    // Which fixture the live feed's colors belong to — a dive SWITCH must
+    // drop them (another fixture's colors on this doc's lamps would lie).
+    let mut live_source = use_signal(|| None::<NodeId>);
     // Live drag override, held until the snapshot confirms the write.
     let mut drag_override = use_signal(|| None::<DragOverride>);
 
@@ -213,6 +218,33 @@ pub(crate) fn ProjectCanvasHost(
                 .find(|sprite| sprite.key == key)
                 .map(|sprite| (key, sprite.placement, sprite.bounds))
         });
+
+    // The live feed (the toolbar's `live` / L): while dived, decode the
+    // focused fixture's lamp colors out of its output's published wire
+    // frame and WRITE them into the canvas's live signal — a signal, never
+    // a prop, so a frame tick re-renders nothing (the canvas applies them
+    // as direct DOM writes). Keep-last-good: an apply round-trip can drop
+    // the frame for a tick or two, and falling back to the palette would
+    // read as live mode dropping out.
+    if dive_focus.is_some()
+        && let Some(dive) = dive.as_ref()
+    {
+        if *live_source.peek() != Some(dive.node) {
+            live_source.set(Some(dive.node));
+            arrange_live.set(Vec::new());
+        }
+        if view_opts.read().live {
+            let colors = surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.node == dive.node)
+                .map(|fixture| fixture_live_colors(&fixture.patch))
+                .unwrap_or_default();
+            if !colors.is_empty() && *arrange_live.peek() != colors {
+                arrange_live.set(colors);
+            }
+        }
+    }
 
     // Fit runs at render, guarded: armed at mount and by the zoom float /
     // `0` key, waiting for a real viewport measurement and real bounds.
