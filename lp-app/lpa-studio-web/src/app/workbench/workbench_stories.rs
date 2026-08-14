@@ -8,7 +8,7 @@ use lpa_mapping_editor::{Map2dDoc, MapEditorSession, ShapePath};
 use lpa_studio_web_story_macros::story;
 
 use super::panels::{FixturesPanel, OutputsPanel, PropsPanel};
-use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchView};
+use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchHrefs, WorkbenchView};
 use crate::app::StudioShell;
 use crate::app::module::module_fixtures::root_module_node_view;
 use crate::app::node::NodeDetailPopover;
@@ -86,7 +86,7 @@ fn workbench_story(project_view: ProjectView) -> Element {
                 view: view_with_surface(selection),
                 running: true,
                 project_view,
-                workbench_hrefs: Some(("#".to_string(), Some("#".to_string()))),
+                workbench_hrefs: Some(WorkbenchHrefs::inert_all()),
                 on_action: move |_| {},
             }
         }
@@ -212,8 +212,7 @@ fn workbench_mobile_outputs_summoned() -> Element {
                     ),
                 lens_card: Some(simulator_lens_card()),
                 running: true,
-                workspace_href: "#".to_string(),
-                mapping_href: Some("#".to_string()),
+                hrefs: WorkbenchHrefs::inert_all(),
                 initial_summoned: Some(super::PanelId::Outputs),
                 on_action: move |_| {},
             }
@@ -225,32 +224,46 @@ fn workbench_mobile_outputs_summoned() -> Element {
     description = "Both docks collapsed (a press on the active dock tab): the vertical edge strips are all that remain of the sides — the collapsed state's handle — and the center takes the full width. A strip button expands that panel, and the strip is replaced by the dock's tab row."
 )]
 fn workbench_docks_collapsed() -> Element {
-    workbench_memory_story(PanelMemory {
-        nodes: DockState {
-            left: None,
-            right: None,
-        },
-        mapping: DockState {
-            left: None,
-            right: None,
-        },
-    })
+    workbench_memory_story(
+        PanelMemory::default()
+            .with(
+                WorkbenchView::Nodes,
+                DockState {
+                    left: None,
+                    right: None,
+                },
+            )
+            .with(
+                WorkbenchView::Mapping,
+                DockState {
+                    left: None,
+                    right: None,
+                },
+            ),
+    )
 }
 
 #[story(
     description = "The two side treatments in one frame: the left side collapsed to its vertical strip, the right side open under its Device · Outputs tab row. The comparison is the point — a side is named EITHER by a strip or by tabs, never both, and the dock tabs stay lighter than the center's view tabs."
 )]
 fn workbench_mixed_dock_states() -> Element {
-    workbench_memory_story(PanelMemory {
-        nodes: DockState {
-            left: None,
-            right: Some(super::PanelId::Device),
-        },
-        mapping: DockState {
-            left: None,
-            right: Some(super::PanelId::Outputs),
-        },
-    })
+    workbench_memory_story(
+        PanelMemory::default()
+            .with(
+                WorkbenchView::Nodes,
+                DockState {
+                    left: None,
+                    right: Some(super::PanelId::Device),
+                },
+            )
+            .with(
+                WorkbenchView::Mapping,
+                DockState {
+                    left: None,
+                    right: Some(super::PanelId::Outputs),
+                },
+            ),
+    )
 }
 
 #[story(
@@ -283,8 +296,7 @@ fn workbench_memory_story(memory: PanelMemory) -> Element {
                 project_editor: project_editor_fixture(ProjectSyncPhase::Ready),
                 lens_card: Some(simulator_lens_card()),
                 running: true,
-                workspace_href: "#".to_string(),
-                mapping_href: Some("#".to_string()),
+                hrefs: WorkbenchHrefs::inert_all(),
                 initial_memory: Some(memory),
                 on_action: move |_| {},
             }

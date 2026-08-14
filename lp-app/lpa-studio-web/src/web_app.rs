@@ -31,6 +31,7 @@ use crate::app::layout::{
 use crate::app::share::{
     ProjectShareControl, VisitorBannerHost, VisitorShareSlot, archive_project, use_visitor_session,
 };
+use crate::app::workbench;
 use crate::base::{ToastHost, use_toast_provider};
 use crate::cloud::SharedOpenState;
 use crate::local_store::{self, LocalStoreStatus};
@@ -759,16 +760,18 @@ pub fn App() -> Element {
     let patch_toggle = matches!(&current_route, StudioRoute::Project { .. })
         .then(|| current_route.with_patch(!patch).path());
     // The workbench view tabs' targets: same-session view suffixes on the
-    // current lens address, plain links like the play/patch toggles. A
-    // device lens has no mapping address yet, so its Mapping tab hides.
+    // current lens address, plain links like the play/patch toggles — one
+    // slot per view-table row. Only the default view is addressable on a
+    // device lens (no mapping address yet), so the other tabs hide there.
     let workbench_hrefs = current_route.is_lens().then(|| {
-        (
-            current_route
-                .with_view(router::ProjectView::Workspace)
-                .path(),
-            matches!(&current_route, StudioRoute::Project { .. })
-                .then(|| current_route.with_view(router::ProjectView::Mapping).path()),
-        )
+        workbench::WorkbenchHrefs::from_entries(workbench::VIEWS.iter().map(|spec| {
+            let addressable = spec.view == workbench::WorkbenchView::default()
+                || matches!(&current_route, StudioRoute::Project { .. });
+            (
+                spec.view,
+                addressable.then(|| current_route.with_view(spec.route_view).path()),
+            )
+        }))
     });
     // Workbench routes trade the scrolling-document page for a
     // full-height app frame: the docks and center scroll INTERNALLY.

@@ -9,7 +9,7 @@
 //! - Panels with FIXED homes — left: Nodes (the project pane) · Fixtures;
 //!   right: Device · Outputs · Props (Mapping view only — the selection's
 //!   properties, R4). The assignment lives in [`PanelId::side`] and
-//!   [`PanelId::strip`], data tables by design, so experiments are a
+//!   [`roster`], data tables by design, so experiments are a
 //!   constant edit — but there is deliberately no user arrangement in v1
 //!   ("things have one home", spike round-2 ruling).
 //! - Panels toggle **radio-per-side**. An EXPANDED dock says so with a
@@ -59,6 +59,86 @@ pub enum WorkbenchView {
     Mapping,
 }
 
+/// One row of the view table: everything the chrome needs to draw and
+/// address a workbench view. The tabs, hrefs, rosters, and memory all
+/// key off [`VIEWS`], so adding a view is adding a row (plus its
+/// [`roster`]/[`defaults`] arms).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ViewSpec {
+    pub view: WorkbenchView,
+    /// The view tab's label.
+    pub label: &'static str,
+    /// The route suffix this view lives at — the href builder's slot.
+    pub route_view: crate::router::ProjectView,
+}
+
+/// The workbench's views, in tab order.
+pub const VIEWS: &[ViewSpec] = &[
+    ViewSpec {
+        view: WorkbenchView::Nodes,
+        label: "Nodes",
+        route_view: crate::router::ProjectView::Workspace,
+    },
+    ViewSpec {
+        view: WorkbenchView::Mapping,
+        label: "Mapping",
+        route_view: crate::router::ProjectView::Mapping,
+    },
+];
+
+/// The view a route suffix addresses: the [`VIEWS`] row that claims it,
+/// or the default view (play and patch short-circuit before the
+/// workbench mounts, so an unclaimed suffix means the workspace).
+pub fn view_for_route(route_view: crate::router::ProjectView) -> WorkbenchView {
+    VIEWS
+        .iter()
+        .find(|spec| spec.route_view == route_view)
+        .map(|spec| spec.view)
+        .unwrap_or_default()
+}
+
+/// The view tabs' targets, one slot per [`VIEWS`] row: `None` hides the
+/// tab (a device lens has no mapping address yet). Stories default to
+/// inert fragments.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WorkbenchHrefs {
+    entries: Vec<(WorkbenchView, Option<String>)>,
+}
+
+impl WorkbenchHrefs {
+    pub fn from_entries(
+        entries: impl IntoIterator<Item = (WorkbenchView, Option<String>)>,
+    ) -> Self {
+        WorkbenchHrefs {
+            entries: entries.into_iter().collect(),
+        }
+    }
+
+    /// The route-less fallback (stories through the shell): only the
+    /// default view is addressable, as an inert fragment.
+    pub fn inert_default() -> Self {
+        Self::from_entries(VIEWS.iter().map(|spec| {
+            (
+                spec.view,
+                (spec.view == WorkbenchView::default()).then(|| "#".to_string()),
+            )
+        }))
+    }
+
+    /// Stories only: every view addressable as an inert fragment, so
+    /// every tab draws without navigation.
+    pub fn inert_all() -> Self {
+        Self::from_entries(VIEWS.iter().map(|spec| (spec.view, Some("#".to_string()))))
+    }
+
+    fn href(&self, view: WorkbenchView) -> Option<String> {
+        self.entries
+            .iter()
+            .find(|(entry, _)| *entry == view)
+            .and_then(|(_, href)| href.clone())
+    }
+}
+
 /// The dockable panels. `side` is the fixed-home table (ratified:
 /// content/structure left, hardware right).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,17 +184,35 @@ impl PanelId {
             PanelId::Props => "Props",
         }
     }
+}
 
-    /// Strip order per side (top to bottom), per view: Props exists only
-    /// where a canvas selection exists to describe (the Mapping view).
-    fn strip(side: DockSide, view: WorkbenchView) -> &'static [PanelId] {
-        match (side, view) {
-            (DockSide::Left, _) => &[PanelId::Nodes, PanelId::Fixtures],
-            (DockSide::Right, WorkbenchView::Nodes) => &[PanelId::Device, PanelId::Outputs],
-            (DockSide::Right, WorkbenchView::Mapping) => {
-                &[PanelId::Props, PanelId::Outputs, PanelId::Device]
-            }
+/// Panel order per (view, side), top to bottom — the strip and tab-row
+/// orders both read this one table. Total over [`VIEWS`]: Props exists
+/// only where a canvas selection exists to describe (the Mapping view).
+pub fn roster(view: WorkbenchView, side: DockSide) -> &'static [PanelId] {
+    match (side, view) {
+        (DockSide::Left, _) => &[PanelId::Nodes, PanelId::Fixtures],
+        (DockSide::Right, WorkbenchView::Nodes) => &[PanelId::Device, PanelId::Outputs],
+        (DockSide::Right, WorkbenchView::Mapping) => {
+            &[PanelId::Props, PanelId::Outputs, PanelId::Device]
         }
+    }
+}
+
+/// Each view's ratified dock defaults — what [`PanelMemory`] seeds a
+/// view with on first visit. Nodes opens the node tree + Device; the
+/// Mapping view opens Fixtures + Props (the fixture tree and the object
+/// properties: what actual mapping wants, R4 ruling).
+pub fn defaults(view: WorkbenchView) -> DockState {
+    match view {
+        WorkbenchView::Nodes => DockState {
+            left: Some(PanelId::Nodes),
+            right: Some(PanelId::Device),
+        },
+        WorkbenchView::Mapping => DockState {
+            left: Some(PanelId::Fixtures),
+            right: Some(PanelId::Props),
+        },
     }
 }
 
@@ -140,43 +238,36 @@ impl DockState {
 }
 
 /// Per-view panel visibility (R3-2 ruling: remembered by main view, so
-/// each view keeps its own arrangement), seeded with the ratified
-/// defaults. Ephemeral session state by design.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// each view keeps its own arrangement): a small view-keyed map, each
+/// view seeded lazily from [`defaults`] on first visit. Ephemeral
+/// session state by design (spike A2): losing it on reload costs one
+/// click.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PanelMemory {
-    nodes: DockState,
-    mapping: DockState,
-}
-
-impl Default for PanelMemory {
-    fn default() -> Self {
-        PanelMemory {
-            nodes: DockState {
-                left: Some(PanelId::Nodes),
-                right: Some(PanelId::Device),
-            },
-            mapping: DockState {
-                left: Some(PanelId::Fixtures),
-                // The mapping defaults (R4 ruling): the fixture tree and
-                // the object props — what actual mapping wants open.
-                right: Some(PanelId::Props),
-            },
-        }
-    }
+    entries: Vec<(WorkbenchView, DockState)>,
 }
 
 impl PanelMemory {
+    /// Stories only: preset one view's dock state.
+    pub fn with(mut self, view: WorkbenchView, state: DockState) -> Self {
+        *self.view_mut(view) = state;
+        self
+    }
+
     fn view(&self, view: WorkbenchView) -> DockState {
-        match view {
-            WorkbenchView::Nodes => self.nodes,
-            WorkbenchView::Mapping => self.mapping,
-        }
+        self.entries
+            .iter()
+            .find(|(entry, _)| *entry == view)
+            .map(|(_, state)| *state)
+            .unwrap_or_else(|| defaults(view))
     }
 
     fn view_mut(&mut self, view: WorkbenchView) -> &mut DockState {
-        match view {
-            WorkbenchView::Nodes => &mut self.nodes,
-            WorkbenchView::Mapping => &mut self.mapping,
+        if let Some(index) = self.entries.iter().position(|(entry, _)| *entry == view) {
+            &mut self.entries[index].1
+        } else {
+            self.entries.push((view, defaults(view)));
+            &mut self.entries.last_mut().expect("entry just pushed").1
         }
     }
 }
@@ -200,12 +291,8 @@ pub fn WorkbenchFrame(
     lens_card: Option<UiDeviceCard>,
     running: bool,
     #[props(default)] now_secs: Option<f64>,
-    /// The Nodes tab's href (the suffix-less project address).
-    workspace_href: String,
-    /// The Mapping tab's href; `None` hides the tab (a device lens has
-    /// no mapping address yet).
-    #[props(default)]
-    mapping_href: Option<String>,
+    /// The view tabs' targets, one slot per [`VIEWS`] row.
+    hrefs: WorkbenchHrefs,
     /// Stories only: preset panel memory (collapsed docks and the like).
     #[props(default)]
     initial_memory: Option<PanelMemory>,
@@ -214,8 +301,13 @@ pub fn WorkbenchFrame(
     initial_summoned: Option<PanelId>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let mut memory = use_signal(move || initial_memory.unwrap_or_default());
+    let mut memory = use_signal(move || initial_memory.clone().unwrap_or_default());
     let docks = memory.read().view(view);
+    // The Nodes view's route — threaded to the Props stack's
+    // context-strip link (and any panel that addresses the workspace).
+    let workspace_href = hrefs
+        .href(WorkbenchView::default())
+        .unwrap_or_else(|| "#".to_string());
     // The DIVE's shared state (R4): the focused fixture, its mapping
     // session (one selection/document for the canvas, the Fixtures tree,
     // and the Props pane), and the Props pane's commit bump (plain data
@@ -283,15 +375,14 @@ pub fn WorkbenchFrame(
                 SummonStrip {
                     view,
                     summoned: *summoned.read(),
-                    workspace_href: workspace_href.clone(),
-                    mapping_href: mapping_href.clone(),
+                    hrefs: hrefs.clone(),
                     on_summon: move |panel: PanelId| {
                         let current = *summoned.peek();
                         summoned.set(if current == Some(panel) { None } else { Some(panel) });
                     },
                 }
                 div { class: "tw:max-[960px]:hidden",
-                    ViewTabs { view, workspace_href: workspace_href.clone(), mapping_href }
+                    ViewTabs { view, hrefs: hrefs.clone() }
                 }
                 div { class: "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
                     match view {
@@ -392,8 +483,7 @@ pub fn WorkbenchFrame(
 fn SummonStrip(
     view: WorkbenchView,
     summoned: Option<PanelId>,
-    workspace_href: String,
-    mapping_href: Option<String>,
+    hrefs: WorkbenchHrefs,
     on_summon: EventHandler<PanelId>,
 ) -> Element {
     let button = |panel: PanelId, glyph: &'static str| {
@@ -426,9 +516,10 @@ fn SummonStrip(
             {button(PanelId::Nodes, "▤")}
             {button(PanelId::Fixtures, "⬡")}
             div { class: "tw:mx-1 tw:flex tw:flex-1 tw:gap-0.5 tw:rounded-md tw:border tw:border-border-strong tw:p-0.5",
-                {seg("Nodes", workspace_href, view == WorkbenchView::Nodes)}
-                if let Some(href) = mapping_href {
-                    {seg("Mapping", href, view == WorkbenchView::Mapping)}
+                for spec in VIEWS.iter() {
+                    if let Some(href) = hrefs.href(spec.view) {
+                        {seg(spec.label, href, view == spec.view)}
+                    }
                 }
             }
             {button(PanelId::Outputs, "▦")}
@@ -441,19 +532,17 @@ fn SummonStrip(
 /// into a same-session view swap, exactly like the play/patch toggles).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ViewTabs(view: WorkbenchView, workspace_href: String, mapping_href: Option<String>) -> Element {
+fn ViewTabs(view: WorkbenchView, hrefs: WorkbenchHrefs) -> Element {
     rsx! {
         div { class: "tw:flex tw:min-h-[38px] tw:flex-none tw:items-end tw:gap-1 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2",
-            ViewTab {
-                label: "Nodes",
-                href: workspace_href,
-                active: view == WorkbenchView::Nodes,
-            }
-            if let Some(href) = mapping_href {
-                ViewTab {
-                    label: "Mapping",
-                    href,
-                    active: view == WorkbenchView::Mapping,
+            for spec in VIEWS.iter() {
+                if let Some(href) = hrefs.href(spec.view) {
+                    ViewTab {
+                        key: "{spec.label}",
+                        label: spec.label,
+                        href,
+                        active: view == spec.view,
+                    }
                 }
             }
         }
@@ -500,7 +589,7 @@ fn EdgeStrip(
     };
     rsx! {
         div { class: "tw:flex tw:w-[27px] tw:flex-none tw:flex-col tw:items-center tw:gap-1.5 tw:py-2 {border} tw:border-border-subtle tw:bg-card-muted",
-            for panel in PanelId::strip(side, view).iter().copied() {
+            for panel in roster(view, side).iter().copied() {
                 button {
                     class: if open == Some(panel) {
                         "tw:cursor-pointer tw:rounded tw:border tw:border-border-strong tw:bg-card-raised tw:px-0.5 tw:py-2 tw:text-[9.5px] tw:font-semibold tw:uppercase tw:tracking-[0.12em] tw:text-accent"
@@ -565,7 +654,7 @@ fn PanelDock(
     rsx! {
         div { class: "tw:flex {width} tw:flex-none tw:flex-col tw:bg-card-subtle",
             div { class: "tw:flex tw:min-h-[28px] tw:flex-none tw:items-stretch tw:border-b tw:border-border-subtle tw:bg-card-muted",
-                for tab in PanelId::strip(side, view).iter().copied() {
+                for tab in roster(view, side).iter().copied() {
                     DockTab {
                         key: "{tab.title()}",
                         panel: tab,
@@ -715,5 +804,113 @@ fn PanelBody(
                 on_action,
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roster_preserves_the_ratified_homes_and_is_total_over_views() {
+        for spec in VIEWS {
+            for side in [DockSide::Left, DockSide::Right] {
+                let roster = roster(spec.view, side);
+                assert!(!roster.is_empty(), "{:?} {side:?} roster empty", spec.view);
+                for panel in roster {
+                    assert_eq!(panel.side(), side, "{panel:?} rostered off its home side");
+                }
+            }
+        }
+        assert_eq!(
+            roster(WorkbenchView::Nodes, DockSide::Left),
+            &[PanelId::Nodes, PanelId::Fixtures]
+        );
+        assert_eq!(
+            roster(WorkbenchView::Mapping, DockSide::Left),
+            &[PanelId::Nodes, PanelId::Fixtures]
+        );
+        assert_eq!(
+            roster(WorkbenchView::Nodes, DockSide::Right),
+            &[PanelId::Device, PanelId::Outputs]
+        );
+        assert_eq!(
+            roster(WorkbenchView::Mapping, DockSide::Right),
+            &[PanelId::Props, PanelId::Outputs, PanelId::Device]
+        );
+    }
+
+    #[test]
+    fn defaults_open_rostered_panels_only() {
+        for spec in VIEWS {
+            let docks = defaults(spec.view);
+            for (side, open) in [(DockSide::Left, docks.left), (DockSide::Right, docks.right)] {
+                if let Some(panel) = open {
+                    assert!(
+                        roster(spec.view, side).contains(&panel),
+                        "{:?} default {panel:?} missing from its roster",
+                        spec.view
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            defaults(WorkbenchView::Nodes),
+            DockState {
+                left: Some(PanelId::Nodes),
+                right: Some(PanelId::Device),
+            }
+        );
+        assert_eq!(
+            defaults(WorkbenchView::Mapping),
+            DockState {
+                left: Some(PanelId::Fixtures),
+                right: Some(PanelId::Props),
+            }
+        );
+    }
+
+    #[test]
+    fn memory_seeds_per_view_from_defaults_and_toggles_radio_per_side() {
+        let mut memory = PanelMemory::default();
+        assert_eq!(
+            memory.view(WorkbenchView::Nodes),
+            defaults(WorkbenchView::Nodes)
+        );
+
+        // Pressing the open panel collapses its side; the other view's
+        // memory is untouched (per-view memory).
+        memory.view_mut(WorkbenchView::Nodes).toggle(PanelId::Nodes);
+        assert_eq!(memory.view(WorkbenchView::Nodes).left, None);
+        assert_eq!(
+            memory.view(WorkbenchView::Mapping),
+            defaults(WorkbenchView::Mapping)
+        );
+
+        // Pressing another panel on the same side is a radio swap.
+        memory
+            .view_mut(WorkbenchView::Nodes)
+            .toggle(PanelId::Fixtures);
+        assert_eq!(
+            memory.view(WorkbenchView::Nodes).left,
+            Some(PanelId::Fixtures)
+        );
+        memory
+            .view_mut(WorkbenchView::Nodes)
+            .toggle(PanelId::Device);
+        assert_eq!(memory.view(WorkbenchView::Nodes).right, None);
+    }
+
+    #[test]
+    fn view_table_routes_round_trip() {
+        for spec in VIEWS {
+            assert_eq!(view_for_route(spec.route_view), spec.view);
+        }
+        // Unclaimed suffixes (play/patch short-circuit before the
+        // workbench) fall back to the default view.
+        assert_eq!(
+            view_for_route(crate::router::ProjectView::Patch),
+            WorkbenchView::default()
+        );
     }
 }
