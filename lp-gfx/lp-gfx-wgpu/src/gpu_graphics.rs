@@ -93,6 +93,27 @@ impl GpuGraphics {
         )
     }
 
+    /// One-shot async whole-texture readback for the browser GPU tier —
+    /// the poster-capture path (see `read_back`'s module docs for the
+    /// policy split). The copy is submitted before this returns; the
+    /// returned future owns refcounted handles only, so the caller drops
+    /// its borrows of `self` and the texture before awaiting.
+    #[cfg(target_arch = "wasm32")]
+    pub fn read_back_texture_async(
+        &self,
+        texture: &TextureHandle,
+    ) -> Result<impl core::future::Future<Output = Result<TextureData, GfxError>> + 'static, GfxError>
+    {
+        Ok(crate::read_back::read_back_texture_async(
+            &self.shared.device,
+            &self.shared.queue,
+            gpu_texture(texture)?,
+            texture.width(),
+            texture.height(),
+            texture.format(),
+        ))
+    }
+
     /// Present a render product to a wgpu surface (zero readback).
     ///
     /// The GPU-tier card path: the product texture is blitted to the

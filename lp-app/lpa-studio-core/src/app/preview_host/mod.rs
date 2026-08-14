@@ -39,8 +39,8 @@ pub use frame_schedule::{FrameDecision, FrameSchedule, MAX_TICK_DELTA_MS};
 pub use preview_content::{catalog_deploy_files, example_deploy_files};
 pub use preview_output_feed::PreviewOutputFeed;
 pub use preview_types::{
-    PreviewHostConfig, PreviewProfile, PreviewSlotRequest, PreviewSlotStatus, PreviewSource,
-    PreviewTier, is_teardown_abort_reason,
+    PreviewHostConfig, PreviewPosterFrame, PreviewProfile, PreviewSlotRequest, PreviewSlotStatus,
+    PreviewSource, PreviewTier, is_teardown_abort_reason,
 };
 pub use slot_policy::{EvictionCandidate, choose_eviction, choose_starts, choose_worker};
 

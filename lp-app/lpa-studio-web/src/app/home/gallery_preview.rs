@@ -221,7 +221,10 @@ mod wasm {
     use wasm_bindgen::prelude::Closure;
 
     use super::{ThumbCanvas, ThumbMode, ThumbPreview, ThumbPreviewBadge};
-    use crate::app::home::thumb_poster::{cached_poster, canvas_poster, lamp_poster, store_poster};
+    use crate::app::home::thumb_poster::{
+        POSTER_HEIGHT, POSTER_WIDTH, cached_poster, canvas_poster, lamp_poster, pixel_poster,
+        store_poster,
+    };
     use crate::app::node::lamp_view::control_sample_layout_has_rgb;
 
     /// Status/visibility poll cadence per thumb. Change detection rides
@@ -709,16 +712,34 @@ mod wasm {
             }
             // Shader-only on the GPU tier: the canvas was permanently
             // handed to the worker by `transferControlToOffscreen`, so
-            // there is nothing readable on this thread. ⇢ P3 SEAM: the
-            // worker captures its own `OffscreenCanvas` and sends the image
-            // back; until then the card keeps its identity gradient.
+            // there is nothing readable on this thread. The WORKER captures
+            // instead: one `capture_poster` round-trip (render at poster
+            // size + async texture readback), answered through the handle.
             (None, true, PreviewTier::Gpu) => {
-                log::debug!(
-                    "gallery poster #{}: shader-only GPU slot has no capture path yet (P3)",
-                    slot.frame_id
-                );
-                stand_down(state);
-                return ThumbTick::Rest;
+                let frame = state
+                    .handle
+                    .as_ref()
+                    .and_then(|handle| handle.poster_frame());
+                match frame {
+                    Some(frame) => pixel_poster(&frame),
+                    None => {
+                        // Idempotent while pending; survives worker
+                        // recycles until answered.
+                        if let Some(handle) = &state.handle {
+                            handle.request_poster_capture(POSTER_WIDTH, POSTER_HEIGHT);
+                        }
+                        if state.poster_live_ticks < POSTER_LIVE_TICK_LIMIT {
+                            return ThumbTick::Poll;
+                        }
+                        log::debug!(
+                            "gallery poster #{}: worker poster capture did not answer; \
+                             releasing with the placeholder",
+                            slot.frame_id
+                        );
+                        stand_down(state);
+                        return ThumbTick::Rest;
+                    }
+                }
             }
             // A control-first slot that spent its budget without ever
             // publishing a drawable output frame: its raster is presenting

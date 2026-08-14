@@ -43,7 +43,8 @@ use super::preview_content::{catalog_deploy_files, example_deploy_files};
 use super::preview_output_feed::PreviewOutputFeed;
 use super::preview_sleep::PreviewSleeper;
 use super::preview_types::{
-    PreviewHostConfig, PreviewSlotRequest, PreviewSlotStatus, PreviewSource, PreviewTier,
+    PreviewHostConfig, PreviewPosterFrame, PreviewSlotRequest, PreviewSlotStatus, PreviewSource,
+    PreviewTier,
 };
 use super::preview_worker::PreviewWorker;
 use super::slot_policy::{EvictionCandidate, choose_eviction, choose_starts, choose_worker};
@@ -145,6 +146,17 @@ struct Slot {
     presented_frames: u64,
     status: PreviewSlotStatus,
     status_revision: u64,
+    /// Consumer-requested one-shot poster capture size; `Some` until the
+    /// request is posted to the worker (shader-only GPU tier — the one
+    /// quadrant whose picture the page cannot read itself).
+    poster_request: Option<(u32, u32)>,
+    /// A `capture_poster` is in flight. Self-heals on runtime loss: the
+    /// send gate clears it whenever the slot has no runtime.
+    poster_inflight: bool,
+    /// The captured poster, once the worker answers.
+    poster_frame: Option<PreviewPosterFrame>,
+    /// Bumped when `poster_frame` lands — poll to re-read cheaply.
+    poster_revision: u64,
     /// CPU-tier render size (the mounted canvas's pixel size).
     cpu_size: (u32, u32),
     /// CPU-tier blit context cache (re-resolved if the canvas remounts).
@@ -231,6 +243,10 @@ impl PreviewHost {
             output: PreviewOutputFeed::default(),
             last_active_ms: now_ms(),
             presented_frames: 0,
+            poster_request: None,
+            poster_inflight: false,
+            poster_frame: None,
+            poster_revision: 0,
             status: if shut_down {
                 PreviewSlotStatus::Error {
                     reason: "preview host is shut down".to_string(),
@@ -283,6 +299,7 @@ impl PreviewHost {
             self.start_pending_leases(&mut tasks);
             let mut recycles = Vec::new();
             self.schedule_due_frames(&mut recycles);
+            self.send_poster_requests(&mut recycles);
             self.collect_worker_outputs(&mut recycles);
             self.apply_recycles(recycles, &mut tasks);
             poll_tasks(&mut tasks);
@@ -696,6 +713,66 @@ impl PreviewHost {
         }
     }
 
+    /// Post pending `capture_poster` requests for slots whose consumer
+    /// asked for one (see [`PreviewSlotHandle::request_poster_capture`]).
+    /// One in flight per slot; a slot that lost its runtime mid-flight
+    /// self-heals (the request stays queued for the next live runtime).
+    fn send_poster_requests(&self, recycles: &mut Vec<RecycleRequest>) {
+        let slots = self.shared.borrow().slots.clone();
+        for slot_rc in &slots {
+            let (envelope, worker_index, generation) = {
+                let mut slot = slot_rc.borrow_mut();
+                let Some(runtime_id) = slot.runtime_id else {
+                    // Runtime lost (recycle/evict) — any in-flight capture
+                    // died with it; re-arm so the request is re-sent if the
+                    // slot comes back live.
+                    slot.poster_inflight = false;
+                    continue;
+                };
+                if slot.poster_inflight || !slot.presentable {
+                    continue;
+                }
+                let Some((width, height)) = slot.poster_request else {
+                    continue;
+                };
+                slot.poster_inflight = true;
+                (
+                    BrowserInputEnvelope::CapturePoster {
+                        runtime_id,
+                        channel: PREVIEW_CHANNEL.to_string(),
+                        width,
+                        height,
+                        frame_id: 1,
+                    },
+                    slot.worker_index.expect("live slot has a worker"),
+                    slot.worker_generation,
+                )
+            };
+            let worker = {
+                let shared = self.shared.borrow();
+                match shared.workers.get(worker_index) {
+                    Some(entry) if entry.generation == generation => match &entry.state {
+                        WorkerState::Ready(worker) => Some(Rc::clone(worker)),
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            };
+            match worker {
+                Some(worker) => {
+                    if let Err(error) = worker.borrow().post(&envelope) {
+                        recycles.push(RecycleRequest {
+                            worker_index,
+                            cause_runtime: None,
+                            reason: format!("post poster capture: {error}"),
+                        });
+                    }
+                }
+                None => slot_rc.borrow_mut().poster_inflight = false,
+            }
+        }
+    }
+
     /// Drain every ready worker: complete presents, blit CPU pixel
     /// frames, route attach errors to their pipelines, and collect
     /// worker-poisoning failures as recycle requests.
@@ -725,6 +802,35 @@ impl PreviewHost {
                     worker.take_worker_errors(),
                 )
             };
+            let (poster_frames, poster_errors) = {
+                let mut worker = worker.borrow_mut();
+                (worker.take_poster_frames(), worker.take_poster_errors())
+            };
+            for frame in poster_frames {
+                if let Some(slot) = self.slot_by_runtime(worker_index, frame.runtime_id) {
+                    let mut slot = slot.borrow_mut();
+                    let bytes: Vec<u8> = js_sys::Uint8Array::new(&frame.pixels).to_vec();
+                    slot.poster_frame = Some(PreviewPosterFrame {
+                        width: frame.width,
+                        height: frame.height,
+                        bytes: Rc::from(bytes.as_slice()),
+                    });
+                    slot.poster_revision += 1;
+                    slot.poster_request = None;
+                    slot.poster_inflight = false;
+                }
+            }
+            for error in poster_errors {
+                // Poster failures never condemn the slot or the worker: the
+                // card keeps its placeholder (and its live rendering, if
+                // any). One debug line, capture abandoned.
+                if let Some(slot) = self.slot_by_runtime(worker_index, error.runtime_id) {
+                    let mut slot = slot.borrow_mut();
+                    slot.poster_request = None;
+                    slot.poster_inflight = false;
+                }
+                log::debug!("poster capture failed: {}", error.message);
+            }
             for reason in worker_errors {
                 recycles.push(RecycleRequest {
                     worker_index,
@@ -946,6 +1052,30 @@ impl PreviewSlotHandle {
     /// revision) — poll this to re-read [`Self::output_frame`] cheaply.
     pub fn output_frame_revision(&self) -> u64 {
         self.slot.borrow().output.frame_revision()
+    }
+
+    /// Ask the worker to capture ONE poster frame of this slot's visual
+    /// product at `width`×`height` — the readback path for the quadrant
+    /// whose canvas the page cannot read (shader-only GPU tier). The
+    /// answer lands in [`Self::poster_frame`]; the request survives worker
+    /// recycles until it is answered or the handle is dropped. Idempotent
+    /// while a capture is pending.
+    pub fn request_poster_capture(&self, width: u32, height: u32) {
+        let mut slot = self.slot.borrow_mut();
+        if slot.poster_frame.is_none() && slot.poster_request.is_none() {
+            slot.poster_request = Some((width, height));
+        }
+    }
+
+    /// The captured poster frame, once the worker has answered
+    /// [`Self::request_poster_capture`].
+    pub fn poster_frame(&self) -> Option<PreviewPosterFrame> {
+        self.slot.borrow().poster_frame.clone()
+    }
+
+    /// Bumped when a poster frame lands — poll to re-read cheaply.
+    pub fn poster_revision(&self) -> u64 {
+        self.slot.borrow().poster_revision
     }
 
     /// Suspend (`false`) or resume (`true`) presenting. Hiding pauses the
