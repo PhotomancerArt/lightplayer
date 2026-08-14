@@ -209,7 +209,10 @@ pub fn allocate_from_tree(
         classes,
         spill: SpillAlloc::new(max_vreg_idx + 16),
         allocs: vec![Alloc::None; total_operands],
-        edits: Vec::new(),
+        // Spills, reloads and call staging are a minority of instructions;
+        // an eighth is a cheap floor that skips the first few doublings of a
+        // buffer that grows through the whole walk.
+        edits: Vec::with_capacity(vinsts.len() / 8),
         trace: trace_sink_new(),
         loop_carried: RegSet::new(),
         passthrough,
@@ -223,6 +226,10 @@ pub fn allocate_from_tree(
 /// cleared per call. In Q32 saturating mode nearly every float op lowers to a
 /// call, so fresh per-call `Vec`s were a measurable allocator-churn source;
 /// with reuse the steady state allocates nothing.
+///
+/// "Nothing" is the whole point, so it has to mean every buffer the call path
+/// fills — the parallel-move working sets below live here for the same reason
+/// the edit lists do.
 #[derive(Default)]
 struct CallScratch {
     before_arg_moves: Vec<(EditPoint, Edit)>,
@@ -233,6 +240,15 @@ struct CallScratch {
     clobbered_pregs: Vec<PReg>,
     reg_pass_args: Vec<(VReg, PReg)>,
     stack_pass_args: Vec<(usize, VReg)>,
+    /// Return-direction parallel-move input (`(source, ABI return reg home)`).
+    pending_ret_moves: Vec<(Alloc, PReg)>,
+    /// `Reg(pool_home) -> Stack(slot)` stores that must follow every return move.
+    ret_write_throughs: Vec<(EditPoint, Edit)>,
+    /// Argument-direction parallel-move input.
+    pending_moves: Vec<(Alloc, PReg)>,
+    /// [`sequence_arg_moves_into`]'s output, reused across both directions —
+    /// each is consumed into an edit list before the next call fills it.
+    sequenced_moves: Vec<(Alloc, Alloc)>,
 }
 
 impl CallScratch {
@@ -245,6 +261,10 @@ impl CallScratch {
         self.clobbered_pregs.clear();
         self.reg_pass_args.clear();
         self.stack_pass_args.clear();
+        self.pending_ret_moves.clear();
+        self.ret_write_throughs.clear();
+        self.pending_moves.clear();
+        self.sequenced_moves.clear();
     }
 }
 
@@ -1066,6 +1086,10 @@ fn process_call(
         clobbered_pregs,
         reg_pass_args,
         stack_pass_args,
+        pending_ret_moves,
+        ret_write_throughs,
+        pending_moves,
+        sequenced_moves,
     } = scratch;
 
     // ── Step 1: Defs (return values) ──
@@ -1079,12 +1103,11 @@ fn process_call(
     // allocatable pool (18..31) are disjoint, and false on Xtensa, where the
     // caller-view return bank a10/a11 sits inside its own 12-register pool.
     //
-    // Collected here and sequenced below via the same `sequence_arg_moves`
-    // used for the argument direction.
-    let mut pending_ret_moves: Vec<(Alloc, PReg)> = Vec::new();
-    // Write-throughs `Reg(pool_home) -> Stack(slot)`: they read a *destination*
-    // of the moves above, so they must run after all of them.
-    let mut ret_write_throughs: Vec<(EditPoint, Edit)> = Vec::new();
+    // Collected in `pending_ret_moves` and sequenced below via the same
+    // `sequence_arg_moves_into` used for the argument direction.
+    //
+    // `ret_write_throughs` holds `Reg(pool_home) -> Stack(slot)` stores: they
+    // read a *destination* of those moves, so they must run after all of them.
 
     let mut operand_idx: usize = 0;
     for (i, &ret_vreg) in rets.iter().enumerate() {
@@ -1156,10 +1179,11 @@ fn process_call(
     //      one. Stores touch no register, so they cannot disturb the moves.
     //   2. the sequenced reg->reg moves.
     //   3. the write-throughs, which read a move *destination*.
-    for (from, to) in sequence_arg_moves(pending_ret_moves, isa.move_cycle_scratch()) {
+    sequence_arg_moves_into(pending_ret_moves, isa.move_cycle_scratch(), sequenced_moves);
+    for &(from, to) in sequenced_moves.iter() {
         after_ret_moves.push((EditPoint::After(inst_idx_u16), Edit::Move { from, to }));
     }
-    after_ret_moves.extend(ret_write_throughs);
+    after_ret_moves.extend(ret_write_throughs.iter().copied());
 
     // ── Step 2: Evict-then-reload for caller-saved pool t-regs ──
     // regalloc2-style: evict clobbered-reg occupants from the pool and remove
@@ -1349,7 +1373,6 @@ fn process_call(
     // false on Xtensa, where the staging bank IS the caller-saved half of the
     // pool. `sequence_arg_moves` orders them (and breaks cycles) so the
     // simultaneity holds on both.
-    let mut pending_moves: Vec<(Alloc, PReg)> = Vec::new();
     for &(arg_vreg, target) in reg_pass_args.iter() {
         if let Some(pool_reg) = pool.home(arg_vreg) {
             if pool_reg != target {
@@ -1431,7 +1454,8 @@ fn process_call(
     // The parks are pushed after the Phase-A reloads and before the staging
     // moves, which is the only order that works: a stack-pass arg may itself
     // have been reloaded into its home by one of those reloads.
-    for (from, to) in sequence_arg_moves(pending_moves, move_scratch) {
+    sequence_arg_moves_into(pending_moves, move_scratch, sequenced_moves);
+    for &(from, to) in sequenced_moves.iter() {
         before_arg_moves.push((EditPoint::Before(inst_idx_u16), Edit::Move { from, to }));
     }
 
@@ -1458,7 +1482,10 @@ fn process_call(
     Ok(())
 }
 
-/// Order a set of simultaneous register moves into a safe sequence.
+/// Order a set of simultaneous register moves into a safe sequence, allocating
+/// the result. For the per-call-site path see [`sequence_arg_moves_into`],
+/// which does the same work over reused buffers; this form is for the callers
+/// that sequence once per function (the entry moves).
 ///
 /// Used in both call directions:
 ///
@@ -1490,11 +1517,25 @@ fn process_call(
 /// (there are no float argument registers to shuffle), so the caller passes the
 /// ISA's integer scratch.
 fn sequence_arg_moves(mut pending: Vec<(Alloc, PReg)>, scratch: PReg) -> Vec<(Alloc, Alloc)> {
+    let mut out = Vec::with_capacity(pending.len());
+    sequence_arg_moves_into(&mut pending, scratch, &mut out);
+    out
+}
+
+/// [`sequence_arg_moves`] over caller-owned buffers — same ordering rules,
+/// same output, no allocation: `pending` is consumed (left empty) and `out` is
+/// overwritten, so the call path hands in [`CallScratch`]'s buffers and the
+/// steady state allocates nothing.
+fn sequence_arg_moves_into(
+    pending: &mut Vec<(Alloc, PReg)>,
+    scratch: PReg,
+    out: &mut Vec<(Alloc, Alloc)>,
+) {
     fn src_reg(a: &Alloc) -> Option<PReg> {
         a.preg()
     }
 
-    let mut out: Vec<(Alloc, Alloc)> = Vec::with_capacity(pending.len());
+    out.clear();
     while !pending.is_empty() {
         let mut progressed = false;
         let mut i = 0;
@@ -1528,7 +1569,6 @@ fn sequence_arg_moves(mut pending: Vec<(Alloc, PReg)>, scratch: PReg) -> Vec<(Al
             }
         }
     }
-    out
 }
 
 #[cfg(test)]

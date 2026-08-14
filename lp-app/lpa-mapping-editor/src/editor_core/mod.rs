@@ -5,6 +5,7 @@ pub mod camera;
 pub mod doc_fit;
 pub mod doc_refusal;
 pub mod editor_session;
+pub mod fit_reconcile;
 pub mod map_selection;
 pub mod map_tool;
 pub mod placement;

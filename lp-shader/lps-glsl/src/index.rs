@@ -88,7 +88,6 @@ struct Parser<'src, 'tok> {
     source: &'src str,
     tokens: &'tok [Token],
     pos: usize,
-    struct_names: Vec<String>,
 }
 
 enum FunctionParse {
@@ -103,7 +102,6 @@ impl<'src, 'tok> Parser<'src, 'tok> {
             source,
             tokens,
             pos: 0,
-            struct_names: Vec::new(),
         }
     }
 
@@ -173,24 +171,23 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         let ty = self.expect_type_ref()?;
         if self.at_punct("{") {
             let block_name = ty.name.clone();
-            self.struct_names.push(block_name.clone());
             let members = self.parse_struct_members()?;
             self.expect_punct("}")?;
             if self.at_punct(";") {
                 let end = self.expect_punct(";")?.span.end;
-                index.structs.push(StructDecl {
-                    name: block_name,
-                    members: members.clone(),
-                    span: Span::new(start, end),
-                });
-                for member in members {
+                for member in &members {
                     index.uniforms.push(UniformDecl {
-                        name: member.name,
-                        ty: member.ty,
+                        name: member.name.clone(),
+                        ty: member.ty.clone(),
                         binding,
                         span: member.span,
                     });
                 }
+                index.structs.push(StructDecl {
+                    name: block_name,
+                    members,
+                    span: Span::new(start, end),
+                });
                 return Ok(());
             }
             let name = self.expect_identifier_like()?.to_string();
@@ -288,7 +285,6 @@ impl<'src, 'tok> Parser<'src, 'tok> {
         self.expect_identifier_text("struct")?;
         let name_tok = self.current();
         let name = self.expect_identifier_like()?.to_string();
-        self.struct_names.push(name.clone());
         let members = self.parse_struct_members()?;
         self.expect_punct("}")?;
         let end = self.expect_punct(";")?.span.end;

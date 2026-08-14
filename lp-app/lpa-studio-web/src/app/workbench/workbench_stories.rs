@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use lpa_mapping_editor::{Map2dDoc, MapEditorSession, ShapePath};
 use lpa_studio_web_story_macros::story;
 
-use super::panels::{FixturesPanel, OutputsPanel};
+use super::panels::{FixturesPanel, OutputsPanel, PropsPanel};
 use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchView};
 use crate::app::StudioShell;
 use crate::app::module::module_fixtures::root_module_node_view;
@@ -19,7 +19,8 @@ use crate::app::story_fixtures::{
 };
 use crate::router::ProjectView;
 use lpa_studio_core::{
-    NodeId, ProjectSyncPhase, UiPatchSurface, UiPatchTarget, UiStatus, UiStudioView, UiViewContent,
+    ArtifactLocation, NodeId, ProjectSyncPhase, UiArrangeMeta, UiArrangeTransform, UiPatchSurface,
+    UiPatchTarget, UiStatus, UiStudioView, UiViewContent,
 };
 
 /// Stamp port/output labels onto every cell by id join — what
@@ -287,6 +288,154 @@ fn workbench_memory_story(memory: PanelMemory) -> Element {
                 initial_memory: Some(memory),
                 on_action: move |_| {},
             }
+        }
+    }
+}
+
+/// The props-stack stories' surface: the mini-dome with the dome fixture's
+/// arrange facts stamped (address, artifact, a placed transform) so the
+/// PLACEMENT card renders its editable fields rather than the unarranged
+/// meta.
+fn props_stack_surface() -> UiPatchSurface {
+    let mut surface = labelled(mini_dome_surface(false));
+    surface.fixtures[0].address = Some("/dome".to_string());
+    surface.fixtures[0].mapping_artifact = Some(ArtifactLocation::file("/dome/dome.map2d.json"));
+    surface.fixtures[0].arrange = Some(UiArrangeMeta {
+        arranged: true,
+        transform: UiArrangeTransform {
+            t: [12.0, 4.5],
+            r: 0.0,
+            s: 1.0,
+        },
+        footprint: None,
+    });
+    surface
+}
+
+/// The dome fixture's real document (the embedded example's bytes — the
+/// same resolver the device runs).
+fn dome_doc() -> Map2dDoc {
+    let example = lpa_studio_core::app::home::embedded_example("examples/mini-dome")
+        .expect("mini-dome embedded");
+    let bytes = example
+        .files
+        .iter()
+        .find(|(path, _)| *path == "dome/dome.map2d.json")
+        .map(|(_, bytes)| *bytes)
+        .expect("dome map2d");
+    Map2dDoc::from_json(std::str::from_utf8(bytes).expect("utf8 map2d")).expect("dome parses")
+}
+
+/// The Props panel at dock width with deterministic dive state — the
+/// props-stack stories' shared mount.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PropsStackStory(
+    doc: Map2dDoc,
+    surface: UiPatchSurface,
+    #[props(default)] select: Option<ShapePath>,
+    #[props(default)] multi_roots: Vec<usize>,
+    #[props(default = true)] dived: bool,
+    #[props(default)] selection: Option<UiPatchTarget>,
+) -> Element {
+    let session = use_signal(move || {
+        let mut session = MapEditorSession::new(doc.clone());
+        if let Some(path) = &select {
+            session.selection.select_only_path(path.clone());
+        }
+        for index in &multi_roots {
+            session.selection.insert_path(ShapePath::root(*index));
+        }
+        session
+    });
+    let dive_focused = use_signal(move || dived.then(|| NodeId::new(2)));
+    let dive_commits = use_signal(|| 0u64);
+    dock_frame(rsx! {
+        PropsPanel {
+            surface: Some(surface),
+            selection,
+            dive_focused,
+            dive_session: session,
+            dive_commits,
+            workspace_href: "#".to_string(),
+            on_action: move |_| {},
+        }
+    })
+}
+
+#[story(
+    description = "The props STACK (B′), dived into the dome with the sector repeat's inner path selected: the selection is the TOP card (path, selection blue), the repeat unwinds beneath it with its instances field editable in place — the edit-the-repeat-while-the-inner-item-stays-selected workflow the stack exists for — then the object-level actions on the root card, the fixture's PLACEMENT card (shell composition: editor.json x/y/rotation/scale), and the module chain as the muted context strip pointing at the Nodes view."
+)]
+fn props_stack_dived_descended() -> Element {
+    rsx! {
+        PropsStackStory {
+            doc: dome_doc(),
+            surface: props_stack_surface(),
+            select: ShapePath::root(0).child(0),
+        }
+    }
+}
+
+#[story(
+    description = "The props stack at multi-select: sibling roots share one 'N objects' leaf card (lamp total, delete all) over the placement card — shared-ancestor cards would stack between them if the siblings were descended, but sibling-level multi-select at today's arity means the fixture is the only shared level."
+)]
+fn props_stack_multi_select() -> Element {
+    let doc = Map2dDoc::from_json(
+        r#"{"format":3,"sample_diameter":2.0,"canvas":[0.0,0.0,100.0,100.0],"objects":[
+            {"name":"left run","id":"a","shape":{"path":{"points":[[10.0,20.0],[90.0,20.0]],"count":24,"reversed":false,"gaps":[]}}},
+            {"name":"right run","id":"b","shape":{"path":{"points":[[10.0,60.0],[90.0,60.0]],"count":24,"reversed":false,"gaps":[]}}}
+        ]}"#,
+    )
+    .expect("story doc parses");
+    rsx! {
+        PropsStackStory {
+            doc,
+            surface: props_stack_surface(),
+            multi_roots: vec![0, 1],
+        }
+    }
+}
+
+#[story(
+    description = "The props stack with the dive's selection EMPTY: the fixture's placement card stands alone as the top card (selection blue — the level esc's clear-rung leaves selected), never the old 'select an object' placeholder. Esc from here leaves the dive."
+)]
+fn props_stack_empty_dived() -> Element {
+    rsx! {
+        PropsStackStory { doc: dome_doc(), surface: props_stack_surface() }
+    }
+}
+
+#[story(
+    description = "The props stack NOT dived, a fixture selected at the arranged level: the same placement card alone — editable x/y/rotation/scale committing one arrange undo step each, and the 'edit mapping' action that enters the dive — over the module context strip. One card serving both states is the point of the shell composition."
+)]
+fn props_stack_fixture_selected() -> Element {
+    rsx! {
+        PropsStackStory {
+            doc: Map2dDoc::new(),
+            surface: props_stack_surface(),
+            dived: false,
+            selection: Some(UiPatchTarget::Fixture { node: NodeId::new(2) }),
+        }
+    }
+}
+
+#[story(
+    description = "The awkward cases the stack must survive: an UNNAMED object shows its honest '(unnamed)' placeholder on the root card, and the loaner rig's absurd fixture label truncates in the unarranged placement card's header rather than widening the dock."
+)]
+fn props_stack_awkward_names() -> Element {
+    let doc = Map2dDoc::from_json(
+        r#"{"format":3,"sample_diameter":2.0,"canvas":[0.0,0.0,100.0,100.0],"objects":[
+            {"name":"","id":"u","shape":{"path":{"points":[[10.0,80.0],[90.0,80.0]],"count":8,"reversed":true,"gaps":[]}}}
+        ]}"#,
+    )
+    .expect("story doc parses");
+    let mut surface = labelled(mini_dome_surface(false));
+    surface.fixtures[0].label = "left_wing_underside_strip_final_v3_ACTUAL".to_string();
+    rsx! {
+        PropsStackStory {
+            doc,
+            surface,
+            select: ShapePath::root(0),
         }
     }
 }

@@ -42,6 +42,20 @@ NOT wanted: per-instance overrides in the document.
    selects at the top level; **double-click descends** into a group;
    **Esc ascends** (after the existing vertex/draft backout steps);
    the popover breadcrumbs the scope (`sector ▸ path`).
+
+   > **Amended 2026-08-14: the breadcrumb presentation is superseded by
+   > the Props STACK** (B′, design record `spikes/props-stack/index.html`,
+   > ratified with the workbench Props dock). The pane now shows one
+   > editable card per level of the selected path, deepest first — the
+   > selection always the top card, ancestors unwinding beneath, the
+   > fixture's placement card (shell composition) at the bottom, the
+   > module chain as a context strip. The selection MODEL is untouched:
+   > paths, derived scope, no co-selection, and the esc ladder all hold —
+   > esc popping the selection now reads as popping the top card. The
+   > repeat card's descend button is gone with the breadcrumb; descent
+   > lives on the tree (full depth since the tree-depth pass) and canvas
+   > double-click. Clicking an ancestor card's header ascends exactly as
+   > the breadcrumb click did.
 5. **Only the primary is interactive.** Inside a scoped repeat, the
    authored sub-object (rendered at instance 0) takes hits, handles, and
    edits; instances 1..N-1 are **inert, live-updating previews** — they

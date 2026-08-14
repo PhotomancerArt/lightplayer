@@ -89,7 +89,7 @@ pub use debug_asm::compile_module_asm_text;
 pub use emit::{EmittedCode, emit_lowered_with_alloc};
 pub use error::{LowerError, NativeError};
 pub use isa::IsaTarget;
-pub use link::{LinkedJitImage, link_elf, link_jit};
+pub use link::{LinkedJitImage, link_elf, link_jit, link_jit_taking};
 pub use lower::{LoopRegion, LoweredFunction, lower_lpir_op, lower_ops};
 pub use lower_opts::LowerOpts;
 pub use native_options::NativeCompileOptions;
