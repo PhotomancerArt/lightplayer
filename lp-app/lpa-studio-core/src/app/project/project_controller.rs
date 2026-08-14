@@ -3373,6 +3373,25 @@ impl ProjectController {
     /// route then renders its empty state.
     fn build_patch_surface(&self, nodes: &[UiNodeView]) -> Option<crate::UiPatchSurface> {
         let mut surface = crate::UiPatchSurface::default();
+        // Modules by KIND, not face: module faces deliberately derive
+        // AFTER this surface builds (they aggregate their finished
+        // subtree), so the walk reads the tree's kind labels — set at
+        // tree-build time — and the root row wears the project name its
+        // header was just given.
+        walk_module_kinds(nodes, &mut |path, label| {
+            let Some(node) = ProjectNodeAddress::parse(path)
+                .ok()
+                .and_then(|address| self.node(&address))
+            else {
+                return;
+            };
+            surface.modules.push(crate::UiPatchSurfaceModule {
+                node: node.target().node_id,
+                label: label.to_string(),
+                address: Some(path.to_string()),
+                depth: 0,
+            });
+        });
         walk_faces_ref(nodes, &mut |path, face| match face {
             crate::UiNodeFace::Output(output) => {
                 let Some(bay) = output.patch.clone() else {
@@ -3391,6 +3410,7 @@ impl ProjectController {
                     address: Some(path.to_string()),
                     name_assign: None,
                     bay,
+                    module: None,
                 });
             }
             crate::UiNodeFace::Fixture(fixture) => {
@@ -3441,10 +3461,60 @@ impl ProjectController {
                     patch_loaded,
                     instances,
                     arrange: None,
+                    module: None,
                 });
             }
             _ => {}
         });
+        // Module context (G1): nesting depth per module, and each
+        // fixture/output's nearest enclosing module — segment-wise tree
+        // prefixes via ProjectNodeAddress, resolved once here so the panels
+        // never re-derive path structure from strings.
+        let module_addresses: Vec<(lpc_model::NodeId, Option<ProjectNodeAddress>)> = surface
+            .modules
+            .iter()
+            .map(|module| {
+                (
+                    module.node,
+                    module
+                        .address
+                        .as_deref()
+                        .and_then(|path| ProjectNodeAddress::parse(path).ok()),
+                )
+            })
+            .collect();
+        let enclosing = |path: Option<&str>| -> Option<lpc_model::NodeId> {
+            let address = ProjectNodeAddress::parse(path?).ok()?;
+            module_addresses
+                .iter()
+                .filter(|(_, module)| {
+                    module
+                        .as_ref()
+                        .is_some_and(|module| address.is_self_or_under(module))
+                })
+                .max_by_key(|(_, module)| module.as_ref().map(|module| module.path().0.len()))
+                .map(|(node, _)| *node)
+        };
+        for index in 0..surface.modules.len() {
+            let own = module_addresses[index].1.as_ref();
+            surface.modules[index].depth = module_addresses
+                .iter()
+                .enumerate()
+                .filter(|(other, (_, module))| {
+                    *other != index
+                        && matches!(
+                            (own, module.as_ref()),
+                            (Some(own), Some(module)) if own.is_self_or_under(module)
+                        )
+                })
+                .count();
+        }
+        for fixture in &mut surface.fixtures {
+            fixture.module = enclosing(fixture.address.as_deref());
+        }
+        for output in &mut surface.outputs {
+            output.module = enclosing(output.address.as_deref());
+        }
         // The editor.json facts (unified-editor P2): the loaded-flag pair
         // pages drive the editor-meta prefetch from, and each fixture's
         // arrange placement once the document has settled.
@@ -8328,6 +8398,28 @@ fn walk_faces(nodes: &mut [UiNodeView], visit: &mut impl FnMut(&str, &mut crate:
 
 /// The read-only twin of [`walk_faces`], for passes that derive FROM the
 /// finished faces (the patch surface) rather than writing onto them.
+/// Pre-order walk of the MODULE nodes by kind label — `(path, label)` per
+/// module. Kind is set at tree-build time, unlike the module FACE, which
+/// derives after the patch surface builds; the surface's module rows read
+/// this walk. Top-level entries hand over their header title (the root
+/// wears the project's display name), children their use label.
+fn walk_module_kinds(nodes: &[UiNodeView], visit: &mut impl FnMut(&str, &str)) {
+    fn walk_children(children: &[crate::UiNodeChild], visit: &mut impl FnMut(&str, &str)) {
+        for child in children {
+            if child.kind == MODULE_KIND_LABEL {
+                visit(&child.detail, &child.label);
+            }
+            walk_children(&child.children, visit);
+        }
+    }
+    for node in nodes {
+        if node.header.kind == MODULE_KIND_LABEL {
+            visit(&node.header.path, &node.header.title);
+        }
+        walk_children(&node.children, visit);
+    }
+}
+
 fn walk_faces_ref(nodes: &[UiNodeView], visit: &mut impl FnMut(&str, &crate::UiNodeFace)) {
     fn walk_children(
         children: &[crate::UiNodeChild],
