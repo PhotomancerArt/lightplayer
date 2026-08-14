@@ -1,12 +1,10 @@
-use alloc::vec::Vec;
-
 use lpir::{IrType, LpirOp};
 use lps_shared::LpsType;
 
 use crate::hir::{BuiltinKind, HirUserCallWriteback, scalar_base_type, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
-use super::super::{LowerCtx, LowerValue};
+use super::super::{Lanes, LowerCtx, LowerValue};
 use super::numeric::lane_at;
 use super::place_write::assign_target;
 
@@ -241,8 +239,8 @@ fn lower_add_sub_carry_builtin(
         return Err(Diagnostic::error(span, "carry builtin writeback mismatch"));
     };
     let width = scalar_lane_count(result_ty);
-    let mut result_lanes = Vec::new();
-    let mut carry_lanes = Vec::new();
+    let mut result_lanes = Lanes::new();
+    let mut carry_lanes = Lanes::new();
     for i in 0..width {
         let lhs = lane_at(&values[0], i);
         let rhs = lane_at(&values[1], i);
@@ -308,8 +306,8 @@ fn lower_mul_extended_builtin(
         ));
     };
     let width = scalar_lane_count(&msb_writeback.ty);
-    let mut msb_lanes = Vec::new();
-    let mut lsb_lanes = Vec::new();
+    let mut msb_lanes = Lanes::new();
+    let mut lsb_lanes = Lanes::new();
     for i in 0..width {
         let lhs = lane_at(&values[0], i);
         let rhs = lane_at(&values[1], i);
@@ -343,7 +341,7 @@ fn lower_mul_extended_builtin(
     )?;
     Ok(LowerValue {
         ty: result_ty.clone(),
-        lanes: Vec::new(),
+        lanes: Lanes::new(),
     })
 }
 
