@@ -116,6 +116,6 @@ pub use slot::{
 pub use ui_affordance::UiAffordance;
 pub use ui_patch_surface::{
     UiArrangeFootprint, UiArrangeMeta, UiArrangeTransform, UiPatchInstance, UiPatchSurface,
-    UiPatchSurfaceFixture, UiPatchSurfaceOutput, UiPatchTarget,
+    UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput, UiPatchTarget,
 };
 pub use ui_pending_edit::{UiPendingEdit, UiPendingEditKind, UiPendingEditPhase};

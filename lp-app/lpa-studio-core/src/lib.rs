@@ -97,9 +97,9 @@ pub use app::project::{
     UiArrangeMeta, UiArrangeTransform, UiAssetContent, UiAssetContentBody, UiAttachTarget,
     UiEditJournalEntry, UiEditJournalEvent, UiEditorMode, UiImportablePattern,
     UiNodeRemovePreflight, UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture,
-    UiPatchSurfaceOutput, UiPatchTarget, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
-    UiPreviewSpaces, UiProductSpaceRequest, UiProjectManifest, UiShaderError, UiTimebaseRead,
-    editor_meta_artifact, visual_probe_request,
+    UiPatchSurfaceModule, UiPatchSurfaceOutput, UiPatchTarget, UiPendingEdit, UiPendingEditKind,
+    UiPendingEditPhase, UiPreviewSpaces, UiProductSpaceRequest, UiProjectManifest, UiShaderError,
+    UiTimebaseRead, editor_meta_artifact, visual_probe_request,
 };
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
