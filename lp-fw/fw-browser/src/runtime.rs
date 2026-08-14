@@ -81,6 +81,12 @@ pub(crate) struct BrowserFirmwareRuntime {
     /// resolved once per channel and re-resolved only after a render error
     /// (e.g. a project reload invalidated the handle).
     bus_visual_product: Option<(String, VisualProduct)>,
+    /// The project resolves NO visual product but IS control-first: the
+    /// lamps are the picture and the raster stays dark by design (the
+    /// user-side ruling for multi-module projects, whose sibling modules
+    /// tie on `visual.out`). Cached so the fallback resolves once, not
+    /// per frame.
+    bus_visual_control_only: bool,
     /// Cached "does the root scope resolve `control.out`?" answer.
     ///
     /// A property of the loaded project, not of a frame, and the resolve that
@@ -200,6 +206,7 @@ impl BrowserFirmwareRuntime {
             running: false,
             outbox: Vec::new(),
             bus_visual_product: None,
+            bus_visual_control_only: false,
             control_first: None,
             tier,
             gpu,
@@ -305,7 +312,16 @@ impl BrowserFirmwareRuntime {
         width: u32,
         height: u32,
     ) -> Result<Vec<u8>, String> {
-        let texture = self.render_bus_texture(channel, width, height)?;
+        let Some(texture) = self.render_bus_texture(channel, width, height)? else {
+            // Control-first fallback (see `render_bus_texture`): serve an
+            // opaque black frame so the blit succeeds and the cadence
+            // stays normal; the card shows its lamp layer over this.
+            let mut bytes = vec![0u8; width as usize * height as usize * 4];
+            for alpha in bytes.iter_mut().skip(3).step_by(4) {
+                *alpha = 255;
+            }
+            return Ok(bytes);
+        };
         let bytes = texture.try_raw_bytes().ok_or_else(|| {
             "render produced a GPU-resident texture (GPU-tier runtime); use surface \
              presentation (`present_frame`) instead of the byte transport"
@@ -377,7 +393,12 @@ impl BrowserFirmwareRuntime {
         width: u32,
         height: u32,
     ) -> Result<PosterCapture, String> {
-        let texture = self.render_bus_texture(channel, width, height)?;
+        let Some(texture) = self.render_bus_texture(channel, width, height)? else {
+            return Err(
+                "control-first project has no visual product; the lamp poster path owns this card"
+                    .to_string(),
+            );
+        };
         if let Some(bytes) = texture.try_raw_bytes() {
             return Ok(PosterCapture::Ready(
                 crate::texture_convert::rgba16_unorm_to_rgba8_srgb(bytes),
@@ -448,7 +469,14 @@ impl BrowserFirmwareRuntime {
             (surface.width(), surface.height())
         };
 
-        let texture = self.render_bus_texture(channel, width, height)?;
+        let Some(texture) = self.render_bus_texture(channel, width, height)? else {
+            // Control-first fallback: the lamps are the picture and this
+            // present becomes a no-op. Answering Ok keeps the frame cadence
+            // (present acks, frame budgets, lamp ride-alongs) exactly as if
+            // a frame had landed — the card's raster canvas is hidden under
+            // its lamp layer anyway.
+            return Ok(());
+        };
         let gpu = self.gpu.as_ref().expect("gpu state checked above");
         let surface = gpu.surface.as_ref().expect("surface checked above");
 
@@ -481,12 +509,23 @@ impl BrowserFirmwareRuntime {
     }
 
     /// Resolve (with caching) and render the visual product on a bus channel.
+    ///
+    /// `Ok(None)` is the **control-first fallback**: the project resolves
+    /// no visual product (e.g. a multi-module project whose sibling
+    /// modules tie on `visual.out`) but its root scope resolves
+    /// `control.out` — the lamps are its picture, the raster stays dark,
+    /// and the failure is a state, not an error. A shader-only project
+    /// with the same resolution failure still errors: swallowing it there
+    /// would render black and hide a real defect.
     fn render_bus_texture(
         &mut self,
         channel: &str,
         width: u32,
         height: u32,
-    ) -> Result<TextureRenderProduct, String> {
+    ) -> Result<Option<TextureRenderProduct>, String> {
+        if self.bus_visual_control_only {
+            return Ok(None);
+        }
         let handle = self
             .server
             .project_manager()
@@ -502,13 +541,29 @@ impl BrowserFirmwareRuntime {
 
         let product = match &self.bus_visual_product {
             Some((cached_channel, product)) if cached_channel == channel => *product,
-            _ => {
-                let product = project
-                    .resolve_bus_visual_product(channel)
-                    .map_err(|error| format!("{error}"))?;
-                self.bus_visual_product = Some((channel.to_string(), product));
-                product
-            }
+            _ => match project.resolve_bus_visual_product(channel) {
+                Ok(product) => {
+                    self.bus_visual_product = Some((channel.to_string(), product));
+                    product
+                }
+                Err(resolve_error) => {
+                    let control_first = self.control_first.unwrap_or_else(|| {
+                        project
+                            .resolve_bus_control_product(lpc_model::PRIMARY_CONTROL_CHANNEL)
+                            .is_ok()
+                    });
+                    if control_first {
+                        self.control_first = Some(true);
+                        self.bus_visual_control_only = true;
+                        log::debug!(
+                            "preview runtime: control-first project has no visual product \
+                             ({resolve_error}); lamps are the picture"
+                        );
+                        return Ok(None);
+                    }
+                    return Err(format!("{resolve_error}"));
+                }
+            },
         };
 
         let request = RenderTextureRequest {
@@ -520,7 +575,7 @@ impl BrowserFirmwareRuntime {
             policy: ConsumerPolicy::default(),
         };
         match project.render_visual_texture(product, &request) {
-            Ok(texture) => Ok(texture),
+            Ok(texture) => Ok(Some(texture)),
             Err(error) => {
                 // A stale product handle (project reload) renders as an error;
                 // drop the cache so the next frame re-resolves the bus.
