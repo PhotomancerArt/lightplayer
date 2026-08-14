@@ -157,6 +157,14 @@ genuinely fits none of these, and define it here in one line.
   defect: the flag advertises the operation, the code scopes it to the step it
   was written next to. Presents as "my timeout did nothing", and the fix shape
   is to bound the command and let sub-phases refine, never the reverse.
+- **`newest-only-inflight-memory`** — state meant to recognize the
+  completions of a pipeline's own in-flight async operations remembers
+  only the most recent one, so an older operation's completion reads as
+  external input and triggers the external-change path. Latent while
+  operations complete faster than they are issued; a scheduling hop
+  added anywhere in the pipeline (a deferred queue, a render-cycle
+  bounce) turns it routine. The fix shape is a queue of everything still
+  in flight, never a bigger window on a single slot.
 
 ## Index
 
@@ -251,6 +259,7 @@ values; statistical diffs are for the arithmetic in between.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| newest-only-inflight-memory | 2026-08-13 | [stale-echo-reseeded-dive-session](2026-08-13-stale-echo-reseeded-dive-session.md) | fixed | lpa-studio-web editor_shell (mapping_session pipeline) |
 | config-masked-defect | 2026-08-05 | [generated-palette-header-dies-on-naga](2026-08-05-generated-palette-header-dies-on-naga.md) | fixed | lps-frontend (parse.rs) + lpc-model shader_header_gen |
 | unenforced-test-precondition | 2026-08-05 | [cross-core-panic-races-the-isr-thread](2026-08-05-cross-core-panic-races-the-isr-thread.md) | fixed | lp-fw/lp-ws281x tests (cross_core) |
 | reclaim-ordered-behind-its-own-rebuild | 2026-08-04 | [compile-window-drops-rebuilt-before-compile](2026-08-04-compile-window-drops-rebuilt-before-compile.md) | fixed | lpc-engine nodes (fixture + output pressure handlers) |
