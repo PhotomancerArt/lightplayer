@@ -146,13 +146,15 @@ fn thumb_poster_class(has_poster: bool) -> &'static str {
     }
 }
 
-/// The live canvas layer: hidden (gradient shows) until the first frame
-/// reaches it, then revealed with a short fade.
+/// The live canvas layer: hidden (poster or gradient shows) until the first
+/// frame reaches it, then revealed with a short fade — and faded back out
+/// the same way when a hover lease ends, so motion arrives and leaves over
+/// the poster instead of cutting.
 fn thumb_canvas_class(revealed: bool) -> &'static str {
     if revealed {
         "tw:absolute tw:inset-0 tw:h-full tw:w-full tw:opacity-100 tw:transition-opacity tw:duration-200"
     } else {
-        "tw:absolute tw:inset-0 tw:h-full tw:w-full tw:opacity-0"
+        "tw:absolute tw:inset-0 tw:h-full tw:w-full tw:opacity-0 tw:transition-opacity tw:duration-200"
     }
 }
 
