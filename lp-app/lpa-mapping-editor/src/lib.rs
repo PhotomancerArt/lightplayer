@@ -31,7 +31,7 @@ pub use editor_core::editor_session::MapEditorSession;
 pub use editor_core::map_selection::MapSelection;
 pub use editor_core::map_tool::MapTool;
 pub use editor_core::placement::Placement;
-pub use editor_core::shape_path::ShapePath;
+pub use editor_core::shape_path::{ShapePath, structural_child, structural_child_count};
 pub use editor_core::view_geometry::{
     ArrowInput, MapArrowOverlay, MapArrowSeg, neutral_lamp_rgb, wiring_arrows,
 };

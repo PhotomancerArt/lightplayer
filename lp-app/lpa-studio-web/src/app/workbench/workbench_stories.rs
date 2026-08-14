@@ -4,6 +4,7 @@
 //! placeholder center) — panel content keeps its own stories.
 
 use dioxus::prelude::*;
+use lpa_mapping_editor::{Map2dDoc, MapEditorSession, ShapePath};
 use lpa_studio_web_story_macros::story;
 
 use super::panels::{FixturesPanel, OutputsPanel};
@@ -112,6 +113,38 @@ fn fixtures_panel_mini_dome() -> Element {
                 node: NodeId::new(2),
                 path: "/sector/2".to_string(),
             }),
+            on_action: move |_| {},
+        }
+    })
+}
+
+#[story(
+    description = "The Fixtures panel while DIVED into the dome fixture (G1): the module row is the tree level above the fixtures, and the dived fixture grows its FULL shape tree — the sector repeat group (×5) with its inner path as a nested child row, the inner item selected by its exact ShapePath. Rows select through the shared editor session; the doors fixture keeps its instance rows beside the dive."
+)]
+fn fixtures_panel_dived_dome_tree() -> Element {
+    let example = lpa_studio_core::app::home::embedded_example("examples/mini-dome")
+        .expect("mini-dome embedded");
+    let bytes = example
+        .files
+        .iter()
+        .find(|(path, _)| *path == "dome/dome.map2d.json")
+        .map(|(_, bytes)| *bytes)
+        .expect("dome map2d");
+    let doc =
+        Map2dDoc::from_json(std::str::from_utf8(bytes).expect("utf8 map2d")).expect("dome parses");
+    let session = use_signal(move || {
+        let mut session = MapEditorSession::new(doc.clone());
+        // The repeat's inner path — the row the flat tree used to hide.
+        session
+            .selection
+            .select_only_path(ShapePath::root(0).child(0));
+        session
+    });
+    dock_frame(rsx! {
+        FixturesPanel {
+            surface: Some(labelled(mini_dome_surface(false))),
+            selection: None,
+            dive: Some((NodeId::new(2), session)),
             on_action: move |_| {},
         }
     })
