@@ -19,9 +19,11 @@
 //!    source, shown as soon as one exists ([`ThumbMode::PosterFirst`]).
 //!    It is what makes a gallery card stable: the picture arrives without
 //!    a running slot, and on a revisit it is there on the first render.
-//!    Sourceless (and hidden) on a card that has no poster — including
-//!    every story, and the shader-only GPU quadrant until P3. The same
-//!    `<img>` is M6's save-time snapshot seam.
+//!    Every quadrant has a capture path, including the shader-only GPU
+//!    tier (worker-side texture readback; see
+//!    `docs/adr/2026-08-14-poster-first-gallery-previews.md`). Sourceless
+//!    (and hidden) only on a card that genuinely has none yet — including
+//!    every story. The same `<img>` is M6's save-time snapshot seam.
 //! 4. **Gradient base** — the deterministic identity gradient with the
 //!    name's initial: the placeholder before the first present, the
 //!    stories' whole face, and the fallback when previews fail.
@@ -59,11 +61,17 @@ pub(crate) fn CardThumb(
     /// pose). Overrides the live one when both exist.
     #[props(default)]
     static_lamps: Option<UiControlProductPreview>,
+    /// Story/test injection: show this poster image (a data URL), without
+    /// any PreviewHost or capture — the poster-first states are otherwise
+    /// unposable statically, since a real poster is always a captured
+    /// frame. Overrides the live one when both exist.
+    #[props(default)]
+    static_poster: Option<String>,
 ) -> Element {
     let preview = use_thumb_preview(source, mode);
     let badge = static_badge.or(preview.badge);
     let lamps = static_lamps.or(preview.lamps);
-    let poster = preview.poster;
+    let poster = static_poster.or(preview.poster);
     let style = thumb_swatch_style(&seed, muted);
     // dated slugs (2026-07-09-1421-basic) take their initial from the
     // label part, not the stamp
