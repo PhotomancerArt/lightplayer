@@ -17,12 +17,16 @@
 
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
-    MapEditorSession, ObjectPropertiesPane, ShapePath, object_color as editor_object_color,
+    MapEditorSession, MapSelection, ObjectPropertiesPane, ShapePath,
+    object_color as editor_object_color, shape_kind_label, structural_child,
+    structural_child_count,
 };
 use lpa_studio_core::{
     NodeId, ProjectController, ProjectEditorOp, UiAction, UiPatchCell, UiPatchInstance,
-    UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceOutput, UiPatchTarget,
+    UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput,
+    UiPatchTarget,
 };
+use lpc_mapping::{Map2dDoc, Map2dShape};
 
 /// The editor-canvas object palette (OBJECT_COLORS), indexed per fixture:
 /// the one colour language — objects wear it everywhere, ports never do.
@@ -109,6 +113,62 @@ const CHIP: &str = "tw:whitespace-nowrap tw:rounded tw:border tw:border-border-s
 const ROW_IDLE: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash";
 const ROW_SELECTED: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1";
 
+/// Indent per tree level as an inline style — arbitrary depth (nested
+/// modules, nested repeats) must never outrun a generated tailwind class.
+fn indent_style(level: usize) -> String {
+    format!("margin-left: {}px;", level * 14)
+}
+
+/// The modules worth a row: a module renders when its subtree (itself or
+/// any deeper module before the walk pops back) encloses one of the
+/// panel's items — a module row is context for something, never an empty
+/// header.
+fn module_encloses_items(
+    modules: &[UiPatchSurfaceModule],
+    index: usize,
+    used: &std::collections::BTreeSet<NodeId>,
+) -> bool {
+    let base = modules[index].depth;
+    used.contains(&modules[index].node)
+        || modules[index + 1..]
+            .iter()
+            .take_while(|module| module.depth > base)
+            .any(|module| used.contains(&module.node))
+}
+
+/// One module context row: the tree level above fixtures/outputs (G1),
+/// selecting like every other surface row.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ModuleRow(
+    module: UiPatchSurfaceModule,
+    selection: Option<UiPatchTarget>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let target = UiPatchTarget::Module { node: module.node };
+    let row_class = if is_selected(&selection, &target) {
+        ROW_SELECTED
+    } else {
+        ROW_IDLE
+    };
+    rsx! {
+        div {
+            class: "{row_class}",
+            style: indent_style(module.depth),
+            onclick: {
+                let on_action = on_action;
+                let target = target.clone();
+                move |_| select(&on_action, Some(target.clone()))
+            },
+            span { class: "tw:flex-none tw:text-[10px] tw:text-dim-foreground", "▤" }
+            span { class: "tw:truncate tw:font-medium tw:text-foreground", "{module.label}" }
+            span { class: "tw:ml-auto tw:flex-none tw:font-mono tw:text-[9.5px] tw:text-dim-foreground",
+                "module"
+            }
+        }
+    }
+}
+
 /// The Fixtures panel: fixture → instance rows with mapped-state dots
 /// and text channel chips. Selection routes through the shared patch
 /// selection; the Outputs panel and the interim page light up in step.
@@ -135,12 +195,43 @@ pub fn FixturesPanel(
     let fixtures = surface.fixtures.clone();
     let lamps: u32 = fixtures.iter().map(|fixture| fixture.patch.lamps).sum();
     let instances: usize = fixtures.iter().map(|f| f.instances.len()).sum();
+    // Fixture colour rides SURFACE order, so grouping under modules never
+    // reshuffles the palette the canvas already wears.
+    let indexed = |fixture: &UiPatchSurfaceFixture| {
+        fixtures
+            .iter()
+            .position(|other| other.node == fixture.node)
+            .unwrap_or_default()
+    };
+    let orphans: Vec<(usize, UiPatchSurfaceFixture)> = fixtures
+        .iter()
+        .filter(|fixture| fixture.module.is_none())
+        .map(|fixture| (indexed(fixture), fixture.clone()))
+        .collect();
+    let used: std::collections::BTreeSet<NodeId> = fixtures
+        .iter()
+        .filter_map(|fixture| fixture.module)
+        .collect();
+    let groups: Vec<(UiPatchSurfaceModule, Vec<(usize, UiPatchSurfaceFixture)>)> = surface
+        .modules
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| module_encloses_items(&surface.modules, *index, &used))
+        .map(|(_, module)| {
+            let members = fixtures
+                .iter()
+                .filter(|fixture| fixture.module == Some(module.node))
+                .map(|fixture| (indexed(fixture), fixture.clone()))
+                .collect();
+            (module.clone(), members)
+        })
+        .collect();
     rsx! {
         div { class: "tw:grid tw:content-start tw:gap-0.5 tw:text-sm",
             p { class: "tw:m-0 tw:px-1.5 tw:pb-1.5 tw:font-mono tw:text-[10px] tw:text-dim-foreground",
                 "{fixtures.len()} fixtures · {lamps} lamps · {instances} instances"
             }
-            for (index, fixture) in fixtures.into_iter().enumerate() {
+            for (index, fixture) in orphans {
                 FixtureRows {
                     key: "{fixture.node.0}",
                     dive_session: dive
@@ -148,12 +239,103 @@ pub fn FixturesPanel(
                         .map(|(_, session)| session),
                     fixture,
                     color: object_color(index),
+                    indent: 0,
                     selection: selection.clone(),
                     on_action,
                 }
             }
+            for (module, members) in groups {
+                ModuleRow {
+                    key: "m-{module.node.0}",
+                    module: module.clone(),
+                    selection: selection.clone(),
+                    on_action,
+                }
+                for (index, fixture) in members {
+                    FixtureRows {
+                        key: "{fixture.node.0}",
+                        dive_session: dive
+                            .filter(|(node, _)| *node == fixture.node)
+                            .map(|(_, session)| session),
+                        fixture,
+                        color: object_color(index),
+                        indent: module.depth + 1,
+                        selection: selection.clone(),
+                        on_action,
+                    }
+                }
+            }
         }
     }
+}
+
+/// One row of the dived fixture's shape tree, flattened for rendering:
+/// path (the selection unit), descent depth, text, and whether it is the
+/// exact selected node.
+struct DiveRow {
+    path: ShapePath,
+    depth: usize,
+    label: String,
+    trail: String,
+    selected: bool,
+    object_index: usize,
+}
+
+/// The one-word text a tree row shows for a shape — the kind, with a
+/// repeat carrying its instance count (`repeat ×5`).
+fn shape_row_text(shape: &Map2dShape) -> String {
+    match shape {
+        Map2dShape::Repeat(repeat) => format!("repeat ×{}", repeat.count),
+        other => shape_kind_label(other).to_string(),
+    }
+}
+
+/// Flatten the dived document's shape tree in wiring order: each object's
+/// root row, then its structural descendants (a repeat's inner item, at
+/// any nesting) — the full depth the G1 feedback asked for. Selection is
+/// the EXACT path, so a group and its inner item highlight distinctly.
+fn dive_rows(doc: &Map2dDoc, selection: &MapSelection) -> Vec<DiveRow> {
+    fn descend(
+        rows: &mut Vec<DiveRow>,
+        doc: &Map2dDoc,
+        path: &ShapePath,
+        depth: usize,
+        object_index: usize,
+        selection: &MapSelection,
+    ) {
+        let Some(shape) = path.resolve(doc) else {
+            return;
+        };
+        for step in 0..structural_child_count(shape) {
+            let child_path = path.child(step);
+            let Some(child) = structural_child(shape, step) else {
+                continue;
+            };
+            rows.push(DiveRow {
+                path: child_path.clone(),
+                depth,
+                label: shape_row_text(child),
+                trail: String::new(),
+                selected: selection.contains(&child_path),
+                object_index,
+            });
+            descend(rows, doc, &child_path, depth + 1, object_index, selection);
+        }
+    }
+    let mut rows = Vec::new();
+    for (object_index, object) in doc.objects.iter().enumerate() {
+        let path = ShapePath::root(object_index);
+        rows.push(DiveRow {
+            path: path.clone(),
+            depth: 0,
+            label: object.name.clone(),
+            trail: shape_row_text(&object.shape),
+            selected: selection.contains(&path),
+            object_index,
+        });
+        descend(&mut rows, doc, &path, 1, object_index, selection);
+    }
+    rows
 }
 
 /// One fixture's row plus its instance (or range-grain) children.
@@ -162,6 +344,8 @@ pub fn FixturesPanel(
 fn FixtureRows(
     fixture: UiPatchSurfaceFixture,
     color: &'static str,
+    /// Tree level under the module rows (0 = no enclosing module).
+    indent: usize,
     selection: Option<UiPatchTarget>,
     /// Present while this fixture is the dive: its object tree renders
     /// from (and selects through) the shared session.
@@ -180,6 +364,7 @@ fn FixtureRows(
     rsx! {
         div {
             class: "{row_class}",
+            style: indent_style(indent),
             onclick: {
                 let on_action = on_action;
                 let target = fixture_target.clone();
@@ -196,43 +381,43 @@ fn FixtureRows(
         }
         if let Some(mut session) = dive_session {
             // The DIVE's object tree (one tree, one selection): the edited
-            // document's objects in wiring order, selecting through the
+            // document's FULL shape tree in wiring order — objects, and
+            // inside each the structural descent (a repeat's inner item at
+            // any nesting) — selecting exact ShapePaths through the
             // session the canvas and Props pane share.
             {
                 let session_read = session.read();
-                let objects: Vec<(usize, String, &'static str, bool)> = session_read
-                    .doc()
-                    .objects
-                    .iter()
-                    .enumerate()
-                    .map(|(object_index, object)| {
-                        (
-                            object_index,
-                            object.name.clone(),
-                            lpa_mapping_editor::shape_kind_label(&object.shape),
-                            session_read.selection.object_selected(object_index),
-                        )
-                    })
-                    .collect();
+                let rows = dive_rows(session_read.doc(), &session_read.selection);
                 drop(session_read);
                 rsx! {
-                    for (object_index, name, kind, object_selected) in objects {
+                    for row in rows {
                         div {
-                            key: "obj-{object_index}",
-                            class: if object_selected { "{ROW_SELECTED} tw:ml-4 tw:py-0.5" } else { "{ROW_IDLE} tw:ml-4 tw:py-0.5" },
-                            onclick: move |_| {
-                                session
-                                    .write()
-                                    .selection
-                                    .select_only_path(ShapePath::root(object_index));
+                            key: "obj-{row.object_index}-{row.path.descent:?}",
+                            class: if row.selected { "{ROW_SELECTED} tw:py-0.5" } else { "{ROW_IDLE} tw:py-0.5" },
+                            style: indent_style(indent + 1 + row.depth),
+                            onclick: {
+                                let path = row.path.clone();
+                                move |_| {
+                                    session.write().selection.select_only_path(path.clone());
+                                }
                             },
-                            span {
-                                class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-[2px]",
-                                style: "background: {editor_object_color(object_index)};",
+                            // Root objects wear the filled object-colour
+                            // square; descendants an outlined one — same
+                            // colour language, group vs member.
+                            if row.path.is_root() {
+                                span {
+                                    class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-[2px]",
+                                    style: "background: {editor_object_color(row.object_index)};",
+                                }
+                            } else {
+                                span {
+                                    class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-[2px] tw:border",
+                                    style: "border-color: {editor_object_color(row.object_index)};",
+                                }
                             }
-                            span { class: "tw:truncate tw:text-[12px] tw:text-muted-foreground", "{name}" }
+                            span { class: "tw:truncate tw:text-[12px] tw:text-muted-foreground", "{row.label}" }
                             span { class: "tw:ml-auto tw:flex-none tw:font-mono tw:text-[9.5px] tw:text-dim-foreground",
-                                "{kind}"
+                                "{row.trail}"
                             }
                         }
                     }
@@ -241,7 +426,9 @@ fn FixtureRows(
         } else if range_grain {
             // The peach case: no instance grain — one honest row for the
             // fixture's whole channel range, chips from its cells.
-            div { class: "tw:ml-4 tw:flex tw:flex-wrap tw:items-center tw:gap-1 tw:px-1.5 tw:py-0.5",
+            div {
+                class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1 tw:px-1.5 tw:py-0.5",
+                style: indent_style(indent + 1),
                 span { class: "tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground",
                     "0..{fixture.patch.lamps}"
                 }
@@ -259,6 +446,7 @@ fn FixtureRows(
                         .collect::<Vec<_>>(),
                     node: fixture.node,
                     instance,
+                    indent: indent + 1,
                     selection: selection.clone(),
                     on_action,
                 }
@@ -274,6 +462,8 @@ fn InstanceRow(
     node: lpa_studio_core::NodeId,
     instance: UiPatchInstance,
     cells: Vec<UiPatchCell>,
+    /// Tree level under the fixture row.
+    indent: usize,
     selection: Option<UiPatchTarget>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
@@ -303,7 +493,8 @@ fn InstanceRow(
     );
     rsx! {
         div {
-            class: "{row_class} tw:ml-4 tw:py-0.5",
+            class: "{row_class} tw:py-0.5",
+            style: indent_style(indent),
             title: "{title}",
             onclick: {
                 let on_action = on_action;
@@ -349,23 +540,67 @@ pub fn OutputsPanel(
         };
     };
     prefetch_bodies(&on_action, &surface);
+    // Same module grouping as the Fixtures panel: the tree above the
+    // outputs is context worth a slim row, never an empty header.
+    let outputs = surface.outputs.clone();
+    let orphans: Vec<UiPatchSurfaceOutput> = outputs
+        .iter()
+        .filter(|output| output.module.is_none())
+        .cloned()
+        .collect();
+    let used: std::collections::BTreeSet<NodeId> =
+        outputs.iter().filter_map(|output| output.module).collect();
+    let groups: Vec<(UiPatchSurfaceModule, Vec<UiPatchSurfaceOutput>)> = surface
+        .modules
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| module_encloses_items(&surface.modules, *index, &used))
+        .map(|(_, module)| {
+            let members = outputs
+                .iter()
+                .filter(|output| output.module == Some(module.node))
+                .cloned()
+                .collect();
+            (module.clone(), members)
+        })
+        .collect();
+    let on_toggle = move |node| {
+        collapsed.with_mut(|closed| {
+            if !closed.remove(&node) {
+                closed.insert(node);
+            }
+        });
+    };
     rsx! {
         div { class: "tw:grid tw:content-start tw:gap-0.5",
-            for output in surface.outputs.clone() {
+            for output in orphans {
                 OutputBox {
                     key: "{output.node.0}",
                     expanded: !collapsed.read().contains(&output.node),
                     output,
+                    indent: 0,
                     selection: selection.clone(),
-                    on_toggle: move |node| {
-                        collapsed
-                            .with_mut(|closed| {
-                                if !closed.remove(&node) {
-                                    closed.insert(node);
-                                }
-                            });
-                    },
+                    on_toggle,
                     on_action,
+                }
+            }
+            for (module, members) in groups {
+                ModuleRow {
+                    key: "m-{module.node.0}",
+                    module: module.clone(),
+                    selection: selection.clone(),
+                    on_action,
+                }
+                for output in members {
+                    OutputBox {
+                        key: "{output.node.0}",
+                        expanded: !collapsed.read().contains(&output.node),
+                        output,
+                        indent: module.depth + 1,
+                        selection: selection.clone(),
+                        on_toggle,
+                        on_action,
+                    }
                 }
             }
         }
@@ -380,6 +615,8 @@ pub fn OutputsPanel(
 fn OutputBox(
     output: UiPatchSurfaceOutput,
     expanded: bool,
+    /// Tree level under the module rows (0 = no enclosing module).
+    indent: usize,
     selection: Option<UiPatchTarget>,
     on_toggle: EventHandler<lpa_studio_core::NodeId>,
     on_action: EventHandler<UiAction>,
@@ -407,7 +644,7 @@ fn OutputBox(
         "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash"
     };
     rsx! {
-        section { class: "tw:grid tw:content-start",
+        section { class: "tw:grid tw:content-start", style: indent_style(indent),
             header {
                 class: "{header_class}",
                 onclick: {
@@ -578,6 +815,33 @@ pub fn PropsPanel(
                     let next = *dive_commits.peek() + 1;
                     dive_commits.set(next);
                 },
+            }
+        };
+    }
+    // A selected MODULE row reads out its context facts — the level the
+    // Props stack will grow from.
+    if let (Some(surface), Some(UiPatchTarget::Module { node })) = (&surface, &selection)
+        && let Some(module) = surface.modules.iter().find(|module| module.node == *node)
+    {
+        let fixtures = surface
+            .fixtures
+            .iter()
+            .filter(|fixture| fixture.module == Some(module.node))
+            .count();
+        let outputs = surface
+            .outputs
+            .iter()
+            .filter(|output| output.module == Some(module.node))
+            .count();
+        return rsx! {
+            div { class: "tw:grid tw:content-start tw:gap-1 tw:px-1.5 tw:text-sm",
+                p { class: "tw:m-0 tw:font-medium tw:text-foreground", "{module.label}" }
+                p { class: "tw:m-0 tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground",
+                    "module · {fixtures} fixtures · {outputs} outputs"
+                }
+                p { class: "tw:m-0 tw:mt-2 tw:text-[11px] tw:text-dim-foreground",
+                    "Select a fixture beneath it for placement, or dive in for object properties."
+                }
             }
         };
     }
