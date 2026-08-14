@@ -37,7 +37,7 @@ use lpa_studio_core::{UiControlProductPreview, UiFixturePatch, UiPatchBay, UiPat
 use wasm_bindgen::{Clamped, JsCast};
 
 use crate::app::node::face::NodeCardSection;
-use crate::app::node::lamp_view::control_rgb_at_sample;
+use crate::app::node::lamp_view::{UNLIT_RGB, control_rgb_at_sample};
 
 /// Monotonic cell-canvas element ids (one per mounted strip).
 static NEXT_CELL_CANVAS_ID: AtomicU64 = AtomicU64::new(0);
@@ -371,11 +371,6 @@ fn cell_strip_rgba(
     }
     rgba
 }
-
-/// What a lamp with no frame behind it draws as — the same neutral the lamp
-/// field uses for an unlit product, so an unfed bay reads as geometry
-/// rather than as black lamps.
-const UNLIT_RGB: [u8; 3] = [58, 63, 70];
 
 // -- derivations ---------------------------------------------------------------
 
