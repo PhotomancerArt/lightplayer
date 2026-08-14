@@ -519,7 +519,7 @@ mod tests {
         assert_eq!(
             fixture_live_colors(&patch),
             vec![
-                RED, GREEN, BLUE, // wire 3,4,5 (cycle restarts at wire 3 = red)
+                RED, GREEN, BLUE,      // wire 3,4,5 (cycle restarts at wire 3 = red)
                 UNLIT_RGB, // doc 3: no cell claims it
                 BLUE, GREEN, RED, // wire 2,1,0
             ]
