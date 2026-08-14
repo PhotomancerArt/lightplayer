@@ -407,6 +407,7 @@
   .smbar .bl { display: flex; gap: 3px; align-items: center; justify-self: start; }
   .smbar .br { display: flex; gap: 3px; align-items: center; justify-self: end; }
   .smbar .pchip { padding: 2px 5px; }
+  .smbar .vseg button { padding: 3px 8px; font-size: 10.5px; }
   .sq { display: inline-flex; align-items: center; justify-content: center; padding: 3px 6px;
         border: 1px solid transparent; border-radius: 6px; font-size: 11px; color: var(--dim);
         cursor: pointer; user-select: none; }
@@ -436,13 +437,17 @@
   tab rows (active tab shares the panel fill), summary lines moved to a Finder-style
   <b>panel footer</b>, VS Code-style corner region toggles for collapse/reopen — against
   <b>B</b>, today's one-band structure with the attached-tab treatment applied in place.
-  Rounds 1–4 in git history.
+  <b>Sibling ruling applied:</b> Mapping and Patching are sibling <i>views</i> (matches the
+  shipped <code>/patch</code> route + the R5 authored-vs-effective grain split) — the old
+  mapping|patching mode segment is DELETED; the toolbar is per-view (D1 data-driven strip) and
+  Patching gets its own dock defaults (Fixtures + Outputs). Rounds 1–4 in git history.
 </p>
 
 <div class="xcontrols">
   <span class="grp"><b>view</b>
     <button id="xv-nodes" onclick="setView('nodes')">Nodes</button>
     <button id="xv-map" onclick="setView('map')">Mapping</button>
+    <button id="xv-patch" onclick="setView('patch')">Patching</button>
   </span>
   <span class="grp"><b>project state</b>
     <button id="xp-saved" onclick="setProj('saved')">saved</button>
@@ -539,8 +544,7 @@
 <script>
 /* ================= state ================= */
 const state = {
-  view: 'map',
-  mode: 'map',
+  view: 'map',              // 'nodes' | 'map' | 'patch' — SIBLING views, no mode segment
   sel: 'dome/2',
   tabs: 'under',            // Q1: 'under' | 'seg'
   proj: 'saved',
@@ -551,6 +555,7 @@ const state = {
   docks: {
     nodes: { left: 'project', right: 'device' },
     map:   { left: 'fixtures', right: 'props' },
+    patch: { left: 'fixtures', right: 'outputs' },
   },
 };
 const Q = new URLSearchParams(location.search);
@@ -614,7 +619,9 @@ const PANELS = {
 };
 function roster(view, side) {
   if (side === 'left') return ['project', 'fixtures'];
-  return view === 'map' ? ['props', 'outputs', 'device'] : ['device', 'outputs'];
+  if (view === 'map') return ['props', 'outputs', 'device'];
+  if (view === 'patch') return ['outputs', 'props', 'device'];
+  return ['device', 'outputs'];
 }
 const FOOTERS = {
   project: '9 nodes · 1 module',
@@ -758,7 +765,7 @@ function nodeCardsView() {
   </div>`;
 }
 function canvasSVG(idsuffix, draggable) {
-  const patch = state.mode === 'patch';
+  const patch = state.view === 'patch';
   let dome = '';
   for (let s = 0; s < 5; s++) {
     const seld = state.sel === `dome/${s}`;
@@ -804,13 +811,17 @@ function canvasSVG(idsuffix, draggable) {
     ${peach}
   </svg>`;
 }
-function mapToolbar() {
-  const patch = state.mode === 'patch';
+function viewToolbar() {
+  /* D1 data-driven ToolbarStrip: per-view item lists, same strip */
+  if (state.view === 'patch') {
+    return `<div class="etools">
+      <button class="tbtn on">assign</button><button class="tbtn">flip <kbd>r</kbd></button>
+      <button class="tbtn">rotate <kbd>;</kbd><kbd>'</kbd></button>
+      <button class="tbtn">swap <kbd>s</kbd></button><button class="tbtn">clear</button>
+      <span class="sep"></span><button class="tbtn on">⌁ pulse on select</button>
+      <span class="sp"></span><button class="tbtn">show visual</button></div>`;
+  }
   return `<div class="etools">
-    <span class="modeseg">
-      <button class="${!patch ? 'on' : ''}" onclick="setMode('map')">mapping</button>
-      <button class="${patch ? 'on' : ''}" onclick="setMode('patch')">patching</button>
-    </span><span class="sep"></span>
     <button class="tbtn on">⊙ select</button><button class="tbtn">▦ grid</button>
     <button class="tbtn">◯ ring</button><button class="tbtn">〰 path</button>
     <span class="sep"></span><button class="tbtn">fit</button>
@@ -820,7 +831,7 @@ function mapToolbar() {
 function center(idsuffix, draggable) {
   return state.view === 'nodes'
     ? `<div class="mainbody">${nodeCardsView()}</div>`
-    : `${mapToolbar()}<div class="mainbody canvas">${canvasSVG(idsuffix, draggable)}</div>`;
+    : `${viewToolbar()}<div class="mainbody canvas">${canvasSVG(idsuffix, draggable && state.view === 'map')}</div>`;
 }
 
 /* ================= shared chrome pieces ================= */
@@ -864,18 +875,19 @@ function popoverHTML(concept) {
   </div>`;
 }
 function viewTabsHTML() {
+  /* Mapping and Patching are SIBLING views (round-5 ruling; matches the shipped
+     /patch route + the R5 grain split: authored vs effective tree) — never a
+     mode segment inside Mapping */
   if (state.tabs === 'seg') {
-    return `<span class="vseg">
-      <button class="${state.view === 'nodes' ? 'on' : ''}" onclick="setView('nodes')">
-        <span class="vico">▤</span>Nodes</button>
-      <button class="${state.view === 'map' ? 'on' : ''}" onclick="setView('map')">
-        <span class="vico">⌖</span>Mapping</button></span>`;
+    const b = (id, ico, label) => `<button class="${state.view === id ? 'on' : ''}"
+      onclick="setView('${id}')"><span class="vico">${ico}</span>${label}</button>`;
+    return `<span class="vseg">${b('nodes', '▤', 'Nodes')}${b('map', '⌖', 'Mapping')}
+      ${b('patch', '⌁', 'Patching')}</span>`;
   }
-  return `<span class="vtabs">
-    <span class="vtab ${state.view === 'nodes' ? 'on' : ''}" onclick="setView('nodes')">
-      <span class="vico">▤</span>Nodes</span>
-    <span class="vtab ${state.view === 'map' ? 'on' : ''}" onclick="setView('map')">
-      <span class="vico">⌖</span>Mapping</span>
+  const t = (id, ico, label) => `<span class="vtab ${state.view === id ? 'on' : ''}"
+    onclick="setView('${id}')"><span class="vico">${ico}</span>${label}</span>`;
+  return `<span class="vtabs">${t('nodes', '▤', 'Nodes')}${t('map', '⌖', 'Mapping')}
+    ${t('patch', '⌁', 'Patching')}
     <span class="vtab future"><span class="vico">▸</span>Live</span></span>`;
 }
 /* attached tab row for one dock */
@@ -933,7 +945,7 @@ function renderA() {
      </div>
      <div class="wbstatus"><span class="good">sim ▸ running</span><span>217 lamps</span>
        <span>60 fps</span>
-       <span>view: ${state.view}${state.view === 'map' ? ' · ' + state.mode : ''}</span>
+       <span>view: ${state.view}</span>
        <span class="sp"></span></div>`;
   wireDrag('a');
 }
@@ -966,7 +978,7 @@ function renderB() {
      </div>
      <div class="wbstatus"><span class="good">sim ▸ running</span><span>217 lamps</span>
        <span>60 fps</span>
-       <span>view: ${state.view}${state.view === 'map' ? ' · ' + state.mode : ''}</span>
+       <span>view: ${state.view}</span>
        <span class="sp"></span></div>`;
   wireDrag('b');
 }
@@ -1010,7 +1022,8 @@ function wireDrag(suffix) {
 function smBar(summon) {
   const seg = `<span class="vseg">
     <button class="${state.view === 'nodes' ? 'on' : ''}" onclick="setView('nodes')">Nodes</button>
-    <button class="${state.view === 'map' ? 'on' : ''}" onclick="setView('map')">Map</button></span>`;
+    <button class="${state.view === 'map' ? 'on' : ''}" onclick="setView('map')">Map</button>
+    <button class="${state.view === 'patch' ? 'on' : ''}" onclick="setView('patch')">Patch</button></span>`;
   const tg = (side) => roster(state.view, side).map(id => {
     const on = state.phoneView === id;
     return `<span class="sq ${on ? 'on' : ''}" onclick="phoneSummon('${id}')"
@@ -1068,6 +1081,7 @@ function renderAll() {
   renderA(); renderB(); renderPhones();
   const B2 = (id, on) => { const el = document.getElementById(id); if (el) el.classList.toggle('on', on); };
   B2('xv-nodes', state.view === 'nodes'); B2('xv-map', state.view === 'map');
+  B2('xv-patch', state.view === 'patch');
   B2('xp-saved', state.proj === 'saved'); B2('xp-unsaved', state.proj === 'unsaved');
   B2('xp-failed', state.proj === 'failed'); B2('xp-syncing', state.proj === 'syncing');
   B2('xt-under', state.tabs === 'under'); B2('xt-seg', state.tabs === 'seg');
@@ -1075,7 +1089,6 @@ function renderAll() {
     `view=${state.view} · proj=${state.proj} · edits=${state.edits.length}`;
 }
 function setView(v) { state.view = v; state.phoneView = 'main'; renderAll(); }
-function setMode(m) { state.mode = m; state.view = 'map'; renderAll(); }
 function setProj(p) {
   state.proj = p;
   if (p === 'unsaved' && !state.edits.length)
