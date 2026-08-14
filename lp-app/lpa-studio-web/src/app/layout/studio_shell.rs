@@ -64,6 +64,8 @@ pub fn StudioShell(
         // consumed by the web shell's URL sync, not the layout
         lens: _,
         open_project_uid: _,
+        // the chrome renders the header project chip (web_app builds it
+        // from the editor pane's own view — see `ChromeProjectChip`)
         open_project_name: _,
         // the lens card renders the sync facts (D43)
         device_sync: _,

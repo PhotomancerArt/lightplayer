@@ -65,6 +65,21 @@ pub struct ProjectDetailContent {
 }
 
 impl ProjectDetailContent {
+    /// The merged affordance — the header chip's state glyph reads it.
+    pub fn affordance(&self) -> UiAffordance {
+        self.affordance
+    }
+
+    /// The project's display name — the header chip's text.
+    pub fn project_name(&self) -> &str {
+        &self.project_name
+    }
+
+    /// Unsaved persisted edits — the header chip's amber count.
+    pub fn unsaved_count(&self) -> usize {
+        self.dirty.persisted
+    }
+
     /// Gather the popup's content from the editor view and the pane status
     /// (the same merge the pane header's affordance uses).
     pub fn new(view: &ProjectEditorView, status: UiStatus) -> Self {
@@ -379,8 +394,9 @@ fn ProjectDetailRow(label: String, value: String) -> Element {
     }
 }
 
-/// Accessible trigger label for the pane's merged affordance.
-fn trigger_label(affordance: UiAffordance) -> &'static str {
+/// Accessible trigger label for the pane's merged affordance — shared
+/// with the site header's project chip (D8), which opens the same popup.
+pub(crate) fn trigger_label(affordance: UiAffordance) -> &'static str {
     match affordance {
         UiAffordance::Info => "Project details — no unsaved changes",
         UiAffordance::Busy => "Project activity in progress",

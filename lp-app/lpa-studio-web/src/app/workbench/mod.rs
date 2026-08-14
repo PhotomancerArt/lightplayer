@@ -342,12 +342,6 @@ pub fn WorkbenchFrame(
     // docks again.
     let mut summoned = use_signal(move || initial_summoned);
 
-    // The project pane's controller status, so the root card's re-housed
-    // project popup keeps the same status word the pane header showed.
-    let project_status = panes.iter().find_map(|pane| {
-        matches!(pane.body, UiViewContent::ProjectEditor(_)).then(|| pane.status.clone())
-    });
-
     rsx! {
         // No outer box (R5): the workbench is the page's working surface,
         // not a card on it. Hairline separators inside do the dividing —
@@ -400,11 +394,7 @@ pub fn WorkbenchFrame(
                     match view {
                         WorkbenchView::Nodes => rsx! {
                             div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-3.5 tw:max-[960px]:p-2",
-                                ProjectNodeWorkspace {
-                                    view: project_editor,
-                                    project_status: project_status.clone(),
-                                    on_action,
-                                }
+                                ProjectNodeWorkspace { view: project_editor, on_action }
                             }
                         },
                         WorkbenchView::Mapping => rsx! {
