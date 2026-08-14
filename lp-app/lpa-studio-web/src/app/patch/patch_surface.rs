@@ -111,7 +111,9 @@ fn verb_subject(
             },
             1,
         )),
-        UiPatchTarget::Output { .. } | UiPatchTarget::Port { .. } => None,
+        UiPatchTarget::Output { .. }
+        | UiPatchTarget::Port { .. }
+        | UiPatchTarget::Module { .. } => None,
     }
 }
 

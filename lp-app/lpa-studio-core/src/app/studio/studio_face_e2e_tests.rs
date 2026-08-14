@@ -3682,6 +3682,46 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
             );
         }
 
+        // The module level above the fixtures/outputs (G1): the walk
+        // collects the root module face, and every fixture/output points
+        // at its nearest enclosing module.
+        assert!(
+            !surface.modules.is_empty(),
+            "{id}: the root module is on the surface"
+        );
+        let root = &surface.modules[0];
+        assert_eq!(root.depth, 0, "{id}: the root module nests at depth 0");
+        let module_nodes: Vec<_> = surface.modules.iter().map(|module| module.node).collect();
+        assert!(
+            surface.fixtures.iter().all(|fixture| fixture
+                .module
+                .is_some_and(|node| module_nodes.contains(&node))),
+            "{id}: every fixture points at a module on the surface"
+        );
+        assert!(
+            surface.outputs.iter().all(|output| output
+                .module
+                .is_some_and(|node| module_nodes.contains(&node))),
+            "{id}: every output points at a module on the surface"
+        );
+        if expect_instances {
+            // The mini-dome's real tree: each fixture lives in its OWN
+            // sub-module (Dome, Doors) under the root show — the nearest
+            // enclosing module wins, not the root.
+            let dome_fixture = surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.label.to_lowercase().contains("dome"))
+                .expect("dome fixture");
+            let dome_module = surface
+                .modules
+                .iter()
+                .find(|module| module.node == dome_fixture.module.expect("dome has a module"))
+                .expect("dome's module is on the surface");
+            assert_eq!(dome_module.label, "Dome", "{id}: nearest enclosing module");
+            assert_eq!(dome_module.depth, 1, "{id}: sub-module nests one deep");
+        }
+
         // Selection round-trip: PatchSelect lands in the next snapshot.
         let target = surface
             .fixtures

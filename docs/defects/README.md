@@ -157,6 +157,14 @@ genuinely fits none of these, and define it here in one line.
   defect: the flag advertises the operation, the code scopes it to the step it
   was written next to. Presents as "my timeout did nothing", and the fix shape
   is to bound the command and let sub-phases refine, never the reverse.
+- **`newest-only-inflight-memory`** — state meant to recognize the
+  completions of a pipeline's own in-flight async operations remembers
+  only the most recent one, so an older operation's completion reads as
+  external input and triggers the external-change path. Latent while
+  operations complete faster than they are issued; a scheduling hop
+  added anywhere in the pipeline (a deferred queue, a render-cycle
+  bounce) turns it routine. The fix shape is a queue of everything still
+  in flight, never a bigger window on a single slot.
 
 ## Index
 
@@ -252,6 +260,7 @@ values; statistical diffs are for the arithmetic in between.
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
 | state-conflation | 2026-08-14 | [sibling-module-bus-tie-blanks-preview](2026-08-14-sibling-module-bus-tie-blanks-preview.md) | **open** | lpc-engine (bus resolution) + fw-browser preview runtime |
+| newest-only-inflight-memory | 2026-08-13 | [stale-echo-reseeded-dive-session](2026-08-13-stale-echo-reseeded-dive-session.md) | fixed | lpa-studio-web editor_shell (mapping_session pipeline) |
 | config-masked-defect | 2026-08-05 | [generated-palette-header-dies-on-naga](2026-08-05-generated-palette-header-dies-on-naga.md) | fixed | lps-frontend (parse.rs) + lpc-model shader_header_gen |
 | unenforced-test-precondition | 2026-08-05 | [cross-core-panic-races-the-isr-thread](2026-08-05-cross-core-panic-races-the-isr-thread.md) | fixed | lp-fw/lp-ws281x tests (cross_core) |
 | reclaim-ordered-behind-its-own-rebuild | 2026-08-04 | [compile-window-drops-rebuilt-before-compile](2026-08-04-compile-window-drops-rebuilt-before-compile.md) | fixed | lpc-engine nodes (fixture + output pressure handlers) |
@@ -291,6 +300,7 @@ values; statistical diffs are for the arithmetic in between.
 | ungated-variant | 2026-07-30 | [stacked-prs-get-no-ci](2026-07-30-stacked-prs-get-no-ci.md) | fixed | .github/workflows/pre-merge.yml (trigger) |
 | lifecycle-ownership | 2026-07-16 | [browser-serial-endpoint-lost](2026-07-16-browser-serial-endpoint-lost.md) | fixed | lpa-link/registry |
 | lifecycle-ownership | 2026-07-22 | [flash-session-map-deleted](2026-07-22-flash-session-map-deleted.md) | fixed | lpa-link/browser-serial |
+| state-conflation | 2026-08-13 | [evicted-visible-slot-frozen](2026-08-13-evicted-visible-slot-frozen.md) | fixed | lpa-studio-core/preview_host |
 | state-conflation | 2026-08-04 | [unbound-shader-uniform-warns](2026-08-04-unbound-shader-uniform-warns.md) | fixed | lpc-engine engine host + shader nodes |
 | state-conflation | 2026-07-17 | [unreadable-masqueraded-as-empty](2026-07-17-unreadable-masqueraded-as-empty.md) | fixed | lpa-studio-core/roster |
 | state-conflation | 2026-07-22 | [read-failure-vs-unreadable-content](2026-07-22-read-failure-vs-unreadable-content.md) | **open** | lpa-studio-core/roster |
