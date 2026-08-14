@@ -473,7 +473,37 @@ hours), and neither is an exit path on its own.
   branch never touched and (unlike the traces) carrying no canvas, so it is a
   different mechanism. It is what (5b) asks for: diagnose, do not suppress.
 
-- 2026-07-31 — **`just studio-story-pull` was broken, and the guard step's
+- 2026-08-14 — **the workbench Mapping-canvas zoom churner: a camera fit
+  frozen on a PRE-SETTLE viewport measurement — mechanism fixed, plus a
+  geometry guard.** Main run 31776357645 refreshed `workbench-mapping-view`
+  and `workbench-mobile-outputs-summoned` one way; run 31777574897
+  immediately flagged the lg variant drifted back — the same story rendered
+  at **82% zoom in one capture and 157% in the next**, otherwise identical.
+  Mechanism: `ProjectCanvasHost` seeds its camera from a fit-all that waits
+  for the canvas svg's measured size (`viewport` signal, ResizeObserver) and
+  then freezes (`fit_pending` cleared). The fit consumes the FIRST
+  measurement, and that measurement races container layout settling (dock
+  widths, the workbench's mobile-fold breakpoint, stylesheet arrival) — so
+  the same mount fits against different container sizes run to run, and both
+  zooms are stable terminals the stable-pair passes on. Same class as the
+  2026-08-05 clock-face bitmap (the freeze pins *time*, not *geometry*: a
+  surface that stops adjusting to be photographed must have finished reading
+  everything it depends on, and "layout has settled" is not something a
+  first measurement may assume). Fix, per the ratified never-the-thresholds
+  rule: `FitReconcile` (lpa-mapping-editor) records the `(viewport, camera)`
+  each fit consumed, and both fit sites (`ProjectCanvasHost`, the composed
+  mapping-editor story mount) now RE-fit whenever the measurement moves
+  while the camera is still exactly the fitted value — untouched by
+  pan/zoom — so the final camera is a function of the settled layout, not of
+  measurement timing; the moment the user touches the camera it is theirs
+  and reconciliation stops. Guard (the `ux-box-sized-canvas` idiom): the
+  canvas wrap stamps `data-fit-viewport` with the size the camera was last
+  reconciled against, and the ready gate refuses to shoot while any visible
+  stamp disagrees with the svg's real box — a future fit race is a loud
+  capture timeout naming the story, not a baseline flap. Hidden mounts (the
+  mobile fold's replaced center at sm) are exempt; an empty canvas records
+  its reconciliation too (the default camera is deterministic), so the guard
+  cannot deadlock on content-less mounts.
   message points at it.** `story-apply-refresh.mjs` parsed `process.argv` and
   called `process.exit(2)` at *module scope*, so `story-pull.mjs` — which
   imports `applyRefresh` from it — exited 2 before doing anything. The
