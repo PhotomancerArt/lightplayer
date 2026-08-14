@@ -975,7 +975,7 @@ fn PlacementCard(
         )
     };
     let dispatch = crate::app::editor_shell::arrange_dispatch(&surface);
-    let commit = move |transform: UiArrangeTransform| {
+    let commit = EventHandler::new(move |transform: UiArrangeTransform| {
         let Some(node_key) = node_key.clone() else {
             return;
         };
@@ -986,30 +986,7 @@ fn PlacementCard(
         }) {
             on_action.call(UiAction::from_op(ProjectController::NODE_ID, op));
         }
-    };
-    // One field row: parse on change, replace one component of the
-    // CURRENT transform, commit. Values re-render from the surface DTO.
-    let field = |label: &'static str,
-                 shown: String,
-                 apply: fn(UiArrangeTransform, f64) -> UiArrangeTransform| {
-        let commit = commit.clone();
-        rsx! {
-            div { class: "lpme-field",
-                label { "{label}" }
-                input {
-                    r#type: "number",
-                    value: "{shown}",
-                    onchange: move |evt| {
-                        if let Ok(parsed) = evt.value().parse::<f64>()
-                            && parsed.is_finite()
-                        {
-                            commit(apply(transform, parsed));
-                        }
-                    },
-                }
-            }
-        }
-    };
+    });
     let card_class = if selected {
         "lpme-lvl lpme-lvl-sel"
     } else {
@@ -1036,13 +1013,43 @@ fn PlacementCard(
             }
             div { class: "lpme-lvl-body",
                 if arrange.arranged {
-                    {field("x", format!("{:.1}", transform.t[0]), |mut t, v| { t.t[0] = v; t })}
-                    {field("y", format!("{:.1}", transform.t[1]), |mut t, v| { t.t[1] = v; t })}
-                    {field("rotation", format!("{:.0}", transform.r), |mut t, v| { t.r = v; t })}
-                    {field("scale", format!("{:.2}", transform.s), |mut t, v| {
-                        t.s = v.clamp(0.05, 20.0);
-                        t
-                    })}
+                    PlacementField {
+                        label: "x",
+                        shown: format!("{:.1}", transform.t[0]),
+                        on_commit: move |v: f64| {
+                            let mut t = transform;
+                            t.t[0] = v;
+                            commit.call(t);
+                        },
+                    }
+                    PlacementField {
+                        label: "y",
+                        shown: format!("{:.1}", transform.t[1]),
+                        on_commit: move |v: f64| {
+                            let mut t = transform;
+                            t.t[1] = v;
+                            commit.call(t);
+                        },
+                    }
+                    PlacementField {
+                        label: "rotation",
+                        shown: format!("{:.0}", transform.r),
+                        on_commit: move |v: f64| {
+                            let mut t = transform;
+                            t.r = v;
+                            commit.call(t);
+                        },
+                    }
+                    PlacementField {
+                        label: "scale",
+                        shown: format!("{:.2}", transform.s),
+                        on_commit: move |v: f64| {
+                            let mut t = transform;
+                            // Same bound the toolbar verbs enforce.
+                            t.s = v.clamp(0.05, 20.0);
+                            commit.call(t);
+                        },
+                    }
                 } else {
                     div { class: "lpme-pop-meta", "unarranged — drag it on the canvas to place it" }
                 }
@@ -1059,6 +1066,39 @@ fn PlacementCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// One placement field row: number input committing on CHANGE only (there
+/// is no uncommitted-preview lane through the controller). While the user
+/// types, a local draft signal owns the rendered value — live frames
+/// re-render this panel constantly, and a value bound straight to the DTO
+/// would clobber in-progress typing every frame. The draft drops on
+/// change/blur, so canonical values (canvas drags, undo) show through
+/// whenever the field is not being edited.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PlacementField(label: &'static str, shown: String, on_commit: EventHandler<f64>) -> Element {
+    let mut draft = use_signal(|| None::<String>);
+    let value = draft.read().clone().unwrap_or(shown);
+    rsx! {
+        div { class: "lpme-field",
+            label { "{label}" }
+            input {
+                r#type: "number",
+                value: "{value}",
+                oninput: move |evt| draft.set(Some(evt.value())),
+                onchange: move |evt| {
+                    if let Ok(parsed) = evt.value().parse::<f64>()
+                        && parsed.is_finite()
+                    {
+                        on_commit.call(parsed);
+                    }
+                    draft.set(None);
+                },
+                onblur: move |_| draft.set(None),
             }
         }
     }

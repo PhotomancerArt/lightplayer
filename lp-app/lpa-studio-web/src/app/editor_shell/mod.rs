@@ -105,8 +105,9 @@ pub fn EditorShellCenter(
             ProjectEditorOp::EditorJournal { event, node, mode },
         ));
     };
-    let enter_focus =
-        move |on_action: &EventHandler<UiAction>, node: NodeId| enter_dive(on_action, focused, node);
+    let enter_focus = move |on_action: &EventHandler<UiAction>, node: NodeId| {
+        enter_dive(on_action, focused, node)
+    };
     let mut exit_focus = move |on_action: &EventHandler<UiAction>| {
         if focused.peek().is_some() {
             focus_journal(
