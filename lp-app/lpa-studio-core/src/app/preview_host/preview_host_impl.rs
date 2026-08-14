@@ -46,7 +46,7 @@ use super::preview_types::{
     PreviewHostConfig, PreviewSlotRequest, PreviewSlotStatus, PreviewSource, PreviewTier,
 };
 use super::preview_worker::PreviewWorker;
-use super::slot_policy::{EvictionCandidate, choose_eviction, choose_worker};
+use super::slot_policy::{EvictionCandidate, choose_eviction, choose_starts, choose_worker};
 
 /// Scheduler/polling loop period while any slot or sub-task is active.
 const LOOP_SLEEP_MS: u32 = 4;
@@ -227,7 +227,7 @@ impl PreviewHost {
             tier_reason: None,
             presentable: false,
             attach_error: None,
-            schedule: FrameSchedule::new(fps),
+            schedule: FrameSchedule::new(fps).with_frame_budget(request.profile.frame_budget),
             output: PreviewOutputFeed::default(),
             last_active_ms: now_ms(),
             presented_frames: 0,
@@ -405,16 +405,44 @@ impl PreviewHost {
         }
     }
 
-    /// Start lease pipelines for pending slots: pick the least-loaded
-    /// ready worker, enforce the live-slot cap (LRU eviction), and spawn
-    /// the pipeline sub-task.
+    /// Start lease pipelines for pending slots: bound how many deploys run
+    /// at once ([`choose_starts`]), then per chosen slot pick the
+    /// least-loaded ready worker, enforce the live-slot cap (LRU
+    /// eviction), and spawn the pipeline sub-task.
+    ///
+    /// Slots left unchosen simply stay `pending` — no state changes, no
+    /// deadline — and are reconsidered every tick until they start; a long
+    /// wait is a queue, not a failure, and consumers already read `pending`
+    /// and `Deploying` as "not yet", never as an error.
     fn start_pending_leases(&self, tasks: &mut Vec<LocalTask>) {
         let slots = self.shared.borrow().slots.clone();
+        let mut candidates: Vec<(u64, bool)> = Vec::new();
+        let mut deploying_now = 0usize;
+        for slot_rc in &slots {
+            let slot = slot_rc.borrow();
+            if slot.deploying {
+                deploying_now += 1;
+                continue;
+            }
+            if slot.pending && !slot.released && !slot.terminal {
+                candidates.push((slot.id, slot.visible));
+            }
+        }
+        // One in-flight deploy per worker: past that the pipelines only
+        // contend for the same pool and time each other out.
+        let cap = self.shared.borrow().config.pool_size.max(1);
+        let starting = choose_starts(candidates, deploying_now, cap);
+        if starting.is_empty() {
+            return;
+        }
         for slot_rc in &slots {
             {
                 let slot = slot_rc.borrow();
                 if !slot.pending || slot.deploying || slot.released || slot.terminal {
                     continue;
+                }
+                if !starting.contains(&slot.id) {
+                    continue; // waits its turn; still pending next tick
                 }
             }
             let Some((worker_index, worker, generation)) = self.pick_worker(slot_rc) else {
@@ -735,6 +763,11 @@ impl PreviewHost {
                 if let Some(slot) = self.slot_by_runtime(worker_index, done.runtime_id) {
                     let mut slot = slot.borrow_mut();
                     slot.schedule.frame_completed();
+                    // Spends the slot's frame budget, if it has one: the
+                    // schedule stops at its last frame while the slot keeps
+                    // its runtime, its status, and its picture (the poster
+                    // case — see `PreviewProfile::frame_budget`).
+                    slot.schedule.note_present();
                     slot.presented_frames += 1;
                     slot.last_active_ms = now;
                 }
@@ -747,7 +780,11 @@ impl PreviewHost {
                 slot.schedule.frame_completed();
                 slot.last_active_ms = now;
                 match blit_pixel_frame(&mut slot, &frame) {
-                    Ok(()) => slot.presented_frames += 1,
+                    // Only a frame that reached the canvas spends budget.
+                    Ok(()) => {
+                        slot.schedule.note_present();
+                        slot.presented_frames += 1;
+                    }
                     Err(reason) => {
                         slot.schedule.pause();
                         slot.terminal = true;
