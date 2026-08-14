@@ -533,6 +533,16 @@ mod wasm {
             )
         };
         let presented = presented_frames > 0;
+        // A lease that actually presented proves the project renders: the
+        // recovery budgets meter consecutive attempts WITHOUT progress, so
+        // they reset here. Without this, an innocent card sharing a worker
+        // with a permanently-failing project burns its whole remount budget
+        // on that neighbour's recycles and parks even though every one of
+        // its own leases was healthy.
+        if presented && (state.errors != 0 || state.remounts != 0) {
+            state.errors = 0;
+            state.remounts = 0;
+        }
 
         // The lamp half: a control-first project draws its published output.
         if let Some((output_revision, frame)) = output_frame {
