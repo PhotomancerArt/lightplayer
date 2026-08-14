@@ -46,7 +46,9 @@ use super::preview_types::{
     PreviewHostConfig, PreviewSlotRequest, PreviewSlotStatus, PreviewSource, PreviewTier,
 };
 use super::preview_worker::PreviewWorker;
-use super::slot_policy::{EvictionCandidate, choose_eviction, choose_worker};
+use super::slot_policy::{
+    DetachedSlotNext, EvictionCandidate, choose_eviction, choose_worker, detached_slot_next,
+};
 
 /// Scheduler/polling loop period while any slot or sub-task is active.
 const LOOP_SLEEP_MS: u32 = 4;
@@ -559,10 +561,12 @@ impl PreviewHost {
         true
     }
 
-    /// Destroy an LRU-evicted slot's runtime and park it `Suspended` (the
-    /// canvas keeps its last frame). It re-leases on the next visibility
-    /// edge — GPU slots then need a consumer-remounted canvas, since the
-    /// old one was consumed by its transfer.
+    /// Destroy an LRU-evicted slot's runtime and detach it, per
+    /// [`detached_slot_next`]: a still-visible slot re-leases (status
+    /// `Deploying`, like the recycle path), an invisible one parks
+    /// `Suspended` (the canvas keeps its last frame) until its next
+    /// visibility edge. GPU slots then need a consumer-remounted canvas,
+    /// since the old one was consumed by its transfer.
     fn evict_slot(&self, slot_rc: &Rc<RefCell<Slot>>) {
         let (runtime, worker_index, generation) = {
             let slot = slot_rc.borrow();
@@ -577,8 +581,14 @@ impl PreviewHost {
         slot.schedule.pause();
         slot.schedule.frame_failed();
         slot.output.invalidate_runtime();
-        if !slot.terminal {
-            slot.set_status(PreviewSlotStatus::Suspended);
+        if !slot.terminal && !slot.released {
+            match detached_slot_next(slot.visible) {
+                DetachedSlotNext::Redeploy => {
+                    slot.resume_requested = true;
+                    slot.set_status(PreviewSlotStatus::Deploying);
+                }
+                DetachedSlotNext::Park => slot.set_status(PreviewSlotStatus::Suspended),
+            }
         }
         log::info!("preview host: evicted slot {} (live-slot cap)", slot.id);
     }
@@ -854,16 +864,19 @@ impl PreviewHost {
                 slot.set_status(PreviewSlotStatus::Error {
                     reason: format!("preview failed repeatedly: {reason}"),
                 });
-            } else if slot.visible {
-                // Re-lease once the pipeline (if any) unwinds. A GPU
-                // slot's canvas was consumed by its transfer, so the
-                // re-lease surfaces a clear canvas error unless the
-                // consumer remounted; that is the consumer's remount
-                // discipline (P4).
-                slot.resume_requested = true;
-                slot.set_status(PreviewSlotStatus::Deploying);
             } else {
-                slot.set_status(PreviewSlotStatus::Suspended);
+                match detached_slot_next(slot.visible) {
+                    DetachedSlotNext::Redeploy => {
+                        // Re-lease once the pipeline (if any) unwinds. A GPU
+                        // slot's canvas was consumed by its transfer, so the
+                        // re-lease surfaces a clear canvas error unless the
+                        // consumer remounted; that is the consumer's remount
+                        // discipline (P4).
+                        slot.resume_requested = true;
+                        slot.set_status(PreviewSlotStatus::Deploying);
+                    }
+                    DetachedSlotNext::Park => slot.set_status(PreviewSlotStatus::Suspended),
+                }
             }
         }
     }
