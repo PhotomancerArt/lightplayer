@@ -1,10 +1,12 @@
-//! The studio workbench — the editor chrome (PanelDock model).
+//! The studio workbench — the editor chrome (PanelDock model, one-band
+//! presentation).
 //!
-//! An IntelliJ-shaped frame on the project editor routes: a full-height
-//! `[strip][dock][center][dock][strip]` row under the site header. The
-//! **shell owns the docks**; the center's **view tabs** (Nodes · Mapping)
-//! own only the center; the **user owns visibility** through the edge
-//! strips. Nothing rearranges itself:
+//! An IntelliJ-shaped frame on the project editor routes: ONE chrome
+//! band under the site header, then a full-height `[dock][center][dock]`
+//! row. The **shell owns the docks**; the band carries the **view tabs**
+//! (Nodes · Map) centered between the docks' tab segments; the **user
+//! owns visibility** through those persistent tab rows. Nothing
+//! rearranges itself:
 //!
 //! - Panels with FIXED homes — left: Tree (one panel, one ROLE — the
 //!   view supplies the content: the project's node tree on Nodes, the
@@ -14,27 +16,26 @@
 //!   by design, so experiments are a constant edit — but there is
 //!   deliberately no user arrangement in v1 ("things have one home",
 //!   spike round-2 ruling).
-//! - Panels toggle **radio-per-side**. An EXPANDED dock says so with a
-//!   TAB ROW at its top — both of the side's panels as tabs, the open one
-//!   active; clicking the other switches, clicking the active one
-//!   collapses the side (R4-1: the tab row replaces both the edge strip
-//!   and the old "—" hide button while the dock is open). A COLLAPSED
-//!   side falls back to the vertical edge strip, which is then the only
-//!   thing left of that side and the handle that reopens it. One panel
+//! - Panels toggle **radio-per-side** through the band's ATTACHED tabs
+//!   (D7): the active tab shares its dock's fill and breaks the band's
+//!   bottom border; pressing it collapses the side, whose tab row then
+//!   REMAINS with no active tab — the persistent row is the reopen
+//!   affordance (D11: edge strips and hide chevrons are gone). One panel
 //!   per side keeps the dense panels honest (the radiance-scale Outputs
 //!   rail never shares a column).
 //! - Panel visibility is remembered **per view** ([`PanelMemory`]),
-//!   seeded by each view's defaults — the Nodes view opens the Nodes
-//!   tree + Device, the Mapping view opens Fixtures + Props (the fixture
-//!   tree and the object properties: what actual mapping wants) — so
-//!   switching views feels like the view helping, never like the room
-//!   rearranging. The memory is ephemeral by design (spike A2): losing
-//!   it on reload costs one click.
+//!   seeded by each view's defaults — the Nodes view opens the Tree +
+//!   Device, the Mapping view opens the Tree + Props — so switching
+//!   views feels like the view helping, never like the room rearranging.
+//!   The memory is ephemeral by design (spike A2): losing it on reload
+//!   costs one click.
 //!
-//! Design record: `spikes/studio-chrome/index.html` (rounds 1–3, ratified
-//! 2026-08-12). The Mapping view's center mounts the unified editor's
-//! coordinator ([`crate::app::editor_shell::EditorShellCenter`]); the
-//! Fixtures and Outputs panels are that editor's rails, grown in place.
+//! Design record: `spikes/studio-chrome/index.html` (rounds 1–3 ratified
+//! 2026-08-12; rounds 4–6 — the band, the attached tabs, the Tree merge
+//! — ratified 2026-08-14). The Mapping view's center mounts the unified
+//! editor's coordinator
+//! ([`crate::app::editor_shell::EditorShellCenter`]); the Tree's Mapping
+//! body and the Outputs panel are that editor's rails, grown in place.
 
 pub mod panels;
 #[cfg(feature = "stories")]
@@ -83,7 +84,10 @@ pub const VIEWS: &[ViewSpec] = &[
     },
     ViewSpec {
         view: WorkbenchView::Mapping,
-        label: "Mapping",
+        // "Map" (D9): a deliberate override of the round-2 gerund
+        // ruling — the sibling-views posture reads best as short nouns.
+        // Route strings are UNCHANGED (`/mapping`).
+        label: "Map",
         route_view: crate::router::ProjectView::Mapping,
     },
 ];
@@ -346,56 +350,53 @@ pub fn WorkbenchFrame(
 
     rsx! {
         // No outer box (R5): the workbench is the page's working surface,
-        // not a card on it. Hairline separators inside the row do the
-        // dividing — a rounded border here was box-in-box at every width.
-        // Below the fold (R4-2) the frame bleeds the shell's mobile inset
-        // back out, so the summon strip is a full-width toolbar rather than
-        // a floating bar; the site chrome above keeps the inset.
-        div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:overflow-hidden tw:bg-background tw:max-[960px]:-mx-[10px]",
-            div { class: "tw:contents tw:max-[960px]:hidden",
-                // Only a COLLAPSED side keeps its strip: an open dock wears
-                // the tab row instead, so the side is named exactly once.
-                if docks.left.is_none() {
-                    EdgeStrip {
-                        side: DockSide::Left,
-                        view,
-                        open: docks.left,
-                        on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
-                    }
-                }
-                if let Some(panel) = docks.left {
-                    PanelDock {
-                        panel,
-                        view,
-                        panes: panes.clone(),
-                        lens_card: lens_card.clone(),
-                        surface: surface.clone(),
-                        patch_selection: patch_selection.clone(),
-                        dive_focused,
-                        dive_session,
-                        dive_commits,
-                        workspace_href: workspace_href.clone(),
-                        running,
-                        now_secs,
-                        on_tab: move |panel| memory.write().view_mut(view).toggle(panel),
-                        on_action,
-                    }
-                }
+        // not a card on it. Hairline separators inside do the dividing —
+        // a rounded border here was box-in-box at every width. Below the
+        // fold (R4-2) the frame bleeds the shell's mobile inset back out,
+        // so the summon strip is a full-width toolbar rather than a
+        // floating bar; the site chrome above keeps the inset.
+        div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:flex-col tw:overflow-hidden tw:bg-background tw:max-[960px]:-mx-[10px]",
+            SummonStrip {
+                view,
+                summoned: *summoned.read(),
+                hrefs: hrefs.clone(),
+                on_summon: move |panel: PanelId| {
+                    let current = *summoned.peek();
+                    summoned.set(if current == Some(panel) { None } else { Some(panel) });
+                },
             }
-            div { class: "tw:flex tw:min-w-0 tw:flex-1 tw:flex-col tw:border-x tw:border-border-subtle tw:max-[960px]:border-x-0",
-                SummonStrip {
-                    view,
-                    summoned: *summoned.read(),
-                    hrefs: hrefs.clone(),
-                    on_summon: move |panel: PanelId| {
-                        let current = *summoned.peek();
-                        summoned.set(if current == Some(panel) { None } else { Some(panel) });
-                    },
+            // ONE band across the workbench top (D7): the dock tab rows
+            // and the view tabs share it — left segment over the left
+            // dock, view tabs centered, right segment over the right
+            // dock. A collapsed side keeps its (inactive) tab row: that
+            // IS the reopen affordance (D11 — no edge strips).
+            WorkbenchBand {
+                view,
+                hrefs: hrefs.clone(),
+                docks,
+                on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
+            }
+            div { class: "tw:flex tw:min-h-0 tw:flex-1",
+                div { class: "tw:contents tw:max-[960px]:hidden",
+                    if let Some(panel) = docks.left {
+                        PanelDock {
+                            panel,
+                            view,
+                            panes: panes.clone(),
+                            lens_card: lens_card.clone(),
+                            surface: surface.clone(),
+                            patch_selection: patch_selection.clone(),
+                            dive_focused,
+                            dive_session,
+                            dive_commits,
+                            workspace_href: workspace_href.clone(),
+                            running,
+                            now_secs,
+                            on_action,
+                        }
+                    }
                 }
-                div { class: "tw:max-[960px]:hidden",
-                    ViewTabs { view, hrefs: hrefs.clone() }
-                }
-                div { class: "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
+                div { class: "tw:relative tw:flex tw:min-h-0 tw:min-w-0 tw:flex-1 tw:flex-col tw:border-x tw:border-border-subtle tw:max-[960px]:border-x-0",
                     match view {
                         WorkbenchView::Nodes => rsx! {
                             div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-3.5 tw:max-[960px]:p-2",
@@ -457,32 +458,23 @@ pub fn WorkbenchFrame(
                         }
                     }
                 }
-            }
-            div { class: "tw:contents tw:max-[960px]:hidden",
-                if let Some(panel) = docks.right {
-                    PanelDock {
-                        panel,
-                        view,
-                        panes: panes.clone(),
-                        lens_card: lens_card.clone(),
-                        surface: surface.clone(),
-                        patch_selection: patch_selection.clone(),
-                        dive_focused,
-                        dive_session,
-                        dive_commits,
-                        workspace_href: workspace_href.clone(),
-                        running,
-                        now_secs,
-                        on_tab: move |panel| memory.write().view_mut(view).toggle(panel),
-                        on_action,
-                    }
-                }
-                if docks.right.is_none() {
-                    EdgeStrip {
-                        side: DockSide::Right,
-                        view,
-                        open: docks.right,
-                        on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
+                div { class: "tw:contents tw:max-[960px]:hidden",
+                    if let Some(panel) = docks.right {
+                        PanelDock {
+                            panel,
+                            view,
+                            panes: panes.clone(),
+                            lens_card: lens_card.clone(),
+                            surface: surface.clone(),
+                            patch_selection: patch_selection.clone(),
+                            dive_focused,
+                            dive_session,
+                            dive_commits,
+                            workspace_href: workspace_href.clone(),
+                            running,
+                            now_secs,
+                            on_action,
+                        }
                     }
                 }
             }
@@ -546,20 +538,63 @@ fn SummonStrip(
     }
 }
 
-/// The center's view tabs: plain links (the route listener turns a click
-/// into a same-session view swap, exactly like the play/patch toggles).
+/// The docks' widths, shared by [`PanelDock`] and the band's side
+/// segments so the tab rows always sit exactly over their docks. The md
+/// middle narrows rather than auto-collapsing — closing a dock the user
+/// opened would be the room rearranging itself.
+const LEFT_DOCK_WIDTH: &str = "tw:w-[270px] tw:max-[1240px]:w-[225px]";
+const RIGHT_DOCK_WIDTH: &str = "tw:w-[320px] tw:max-[1240px]:w-[265px]";
+
+/// The workbench band (D7): ONE chrome row across the workbench top —
+/// each dock's tab row in a segment sized to its dock, the view tabs
+/// centered between them. Panel tabs wear the ATTACHED treatment: the
+/// active tab shares its dock's fill and breaks the band's bottom
+/// border, so the tab reads as the panel's own. A collapsed side keeps
+/// its tab row with no active tab — that persistent row IS the reopen
+/// affordance (D11: no edge strips, no chevrons). Hidden below the fold,
+/// where the summon strip is the bar.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ViewTabs(view: WorkbenchView, hrefs: WorkbenchHrefs) -> Element {
+fn WorkbenchBand(
+    view: WorkbenchView,
+    hrefs: WorkbenchHrefs,
+    docks: DockState,
+    /// A tab press: the same radio `toggle` every chrome control
+    /// dispatches — the active tab collapses its side, any other tab
+    /// opens (or swaps to) its panel.
+    on_toggle: EventHandler<PanelId>,
+) -> Element {
     rsx! {
-        div { class: "tw:flex tw:min-h-[38px] tw:flex-none tw:items-end tw:gap-1 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2",
-            for spec in VIEWS.iter() {
-                if let Some(href) = hrefs.href(spec.view) {
-                    ViewTab {
-                        key: "{spec.label}",
-                        label: spec.label,
-                        href,
-                        active: view == spec.view,
+        div { class: "tw:flex tw:min-h-[38px] tw:flex-none tw:items-stretch tw:border-b tw:border-border-strong tw:bg-card-muted tw:max-[960px]:hidden",
+            div { class: "tw:flex tw:flex-none tw:items-end tw:gap-1 tw:px-1.5 {LEFT_DOCK_WIDTH}",
+                for tab in roster(view, DockSide::Left).iter().copied() {
+                    BandPanelTab {
+                        key: "{tab.title()}",
+                        panel: tab,
+                        active: docks.left == Some(tab),
+                        on_press: move |panel| on_toggle.call(panel),
+                    }
+                }
+            }
+            div { class: "tw:flex tw:min-w-0 tw:flex-1 tw:items-end tw:justify-center tw:gap-1",
+                for spec in VIEWS.iter() {
+                    if let Some(href) = hrefs.href(spec.view) {
+                        ViewTab {
+                            key: "{spec.label}",
+                            label: spec.label,
+                            href,
+                            active: view == spec.view,
+                        }
+                    }
+                }
+            }
+            div { class: "tw:flex tw:flex-none tw:items-end tw:gap-1 tw:px-1.5 {RIGHT_DOCK_WIDTH}",
+                for tab in roster(view, DockSide::Right).iter().copied() {
+                    BandPanelTab {
+                        key: "{tab.title()}",
+                        panel: tab,
+                        active: docks.right == Some(tab),
+                        on_press: move |panel| on_toggle.call(panel),
                     }
                 }
             }
@@ -568,71 +603,65 @@ fn ViewTabs(view: WorkbenchView, hrefs: WorkbenchHrefs) -> Element {
 }
 
 /// One view tab: the nav-tab grammar (accent underline = you are here).
-/// Deliberately HEAVIER than the dock tabs — bigger text, mixed case, a
-/// 2px underline against the dock tab's hairline — so the tab hierarchy
-/// reads view tabs > dock tabs at a glance (R4-1).
+/// Deliberately the band's only PROMINENT text — bigger, mixed case, a
+/// 2px underline against the panel tabs' quiet small-caps — so the
+/// hierarchy reads view tabs > panel tabs at a glance (R4-1). Plain
+/// links: the route listener turns a click into a same-session view
+/// swap, exactly like the play/patch toggles.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ViewTab(label: &'static str, href: String, active: bool) -> Element {
     let class = if active {
-        "tw:relative tw:px-3.5 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2 tw:after:bottom-0 tw:after:h-[2.5px] tw:after:rounded-full tw:after:bg-accent tw:after:content-['']"
+        "tw:relative tw:px-3.5 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2 tw:after:bottom-0 tw:after:h-[2.5px] tw:after:rounded-full tw:after:bg-accent tw:after:content-[''] tw:max-[1240px]:px-2.5 tw:max-[1240px]:text-[13px]"
     } else {
-        "tw:px-3.5 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:text-strong-foreground"
+        "tw:px-3.5 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:text-strong-foreground tw:max-[1240px]:px-2.5 tw:max-[1240px]:text-[13px]"
     };
     rsx! {
         a { class: "{class}", href: "{href}", "{label}" }
     }
 }
 
-/// One edge strip: the side's panel toggles, always visible, vertical
-/// labels. The strip is the collapsed state's handle — with no panel
-/// open it is all that remains of the side.
+/// One panel tab on the band. Active = ATTACHED: rounded-top, bordered,
+/// overlapping the band's bottom hairline by a pixel with the dock's own
+/// fill, so the border visibly breaks under it and the tab merges into
+/// the dock below (the round-4 "toggles don't look connected to the
+/// panels" answer). Inactive = quiet small-caps text; pressing the
+/// active tab collapses the side.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn EdgeStrip(
-    side: DockSide,
-    view: WorkbenchView,
-    open: Option<PanelId>,
-    on_toggle: EventHandler<PanelId>,
-) -> Element {
-    let border = match side {
-        DockSide::Left => "tw:border-r",
-        DockSide::Right => "tw:border-l",
+fn BandPanelTab(panel: PanelId, active: bool, on_press: EventHandler<PanelId>) -> Element {
+    // No-preflight trap: buttons name their bg/border; the unlayered
+    // `font: inherit` trap puts the text utilities on the inner span.
+    let class = if active {
+        "tw:relative tw:top-px tw:cursor-pointer tw:rounded-t-md tw:border tw:border-b-0 tw:border-border-strong tw:bg-card-subtle tw:px-2.5 tw:pb-2 tw:pt-1.5 tw:max-[1240px]:px-2"
+    } else {
+        "tw:cursor-pointer tw:rounded-t-md tw:border tw:border-transparent tw:bg-transparent tw:px-2.5 tw:pb-2 tw:pt-1.5 tw:hover:bg-background-wash tw:max-[1240px]:px-2"
     };
-    // The left strip's glyphs read bottom-up (rotated 180°) so their
-    // baselines face the dock they open, IntelliJ-style.
-    let rotate = match side {
-        DockSide::Left => "writing-mode: vertical-rl; transform: rotate(180deg);",
-        DockSide::Right => "writing-mode: vertical-rl;",
+    let text = if active {
+        "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-strong-foreground"
+    } else {
+        "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-dim-foreground"
+    };
+    let title = if active {
+        format!("Hide the {} panel", panel.title())
+    } else {
+        format!("Show the {} panel", panel.title())
     };
     rsx! {
-        div { class: "tw:flex tw:w-[27px] tw:flex-none tw:flex-col tw:items-center tw:gap-1.5 tw:py-2 {border} tw:border-border-subtle tw:bg-card-muted",
-            for panel in roster(view, side).iter().copied() {
-                button {
-                    class: if open == Some(panel) {
-                        "tw:cursor-pointer tw:rounded tw:border tw:border-border-strong tw:bg-card-raised tw:px-0.5 tw:py-2 tw:text-[9.5px] tw:font-semibold tw:uppercase tw:tracking-[0.12em] tw:text-accent"
-                    } else {
-                        "tw:cursor-pointer tw:rounded tw:border tw:border-transparent tw:bg-transparent tw:px-0.5 tw:py-2 tw:text-[9.5px] tw:font-semibold tw:uppercase tw:tracking-[0.12em] tw:text-dim-foreground tw:hover:bg-background-wash tw:hover:text-strong-foreground"
-                    },
-                    style: "{rotate}",
-                    title: "Show the {panel.title()} panel",
-                    onclick: move |_| on_toggle.call(panel),
-                    "{panel.title()}"
-                }
-            }
+        button {
+            class,
+            title: "{title}",
+            aria_pressed: "{active}",
+            onclick: move |_| on_press.call(panel),
+            span { class: "{text}", "{panel.title()}" }
         }
     }
 }
 
-/// One open panel in a dock: the side's TAB ROW + scrolling body. Bodies
+/// One open panel in a dock: the scrolling body plus its optional
+/// summary footer — the tabs live on the band above (D7). Bodies
 /// re-house existing components whole — the project pane column, the
 /// device card — never redesigns of them.
-///
-/// The tab row is the whole side's control (R4-1): both of the side's
-/// panels appear, the open one is active, the inactive one switches, and
-/// the ACTIVE one collapses the side — which is why there is no "—"
-/// button any more, and why the edge strip only returns once the side is
-/// collapsed. Every click is the same radio toggle the strip dispatches.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PanelDock(
@@ -649,45 +678,14 @@ fn PanelDock(
     workspace_href: String,
     running: bool,
     now_secs: Option<f64>,
-    /// A tab press: the SAME radio toggle the strip sends — the active
-    /// tab collapses the side, the other opens in its place.
-    on_tab: EventHandler<PanelId>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    // The md middle: docks narrow rather than auto-collapsing — closing
-    // a dock the user opened would be the room rearranging itself.
-    let side = panel.side();
-    let width = match side {
-        DockSide::Left => "tw:w-[270px] tw:max-[1240px]:w-[225px]",
-        DockSide::Right => "tw:w-[320px] tw:max-[1240px]:w-[265px]",
-    };
-    // The explicit hide affordance (Final-gate ruling): a chevron at the
-    // row's end pointing at the edge the dock retreats to. Pressing the
-    // active tab still collapses (the strip-toggle shortcut), but the
-    // icon is the discoverable path.
-    let hide_glyph = match side {
-        DockSide::Left => "«",
-        DockSide::Right => "»",
+    let width = match panel.side() {
+        DockSide::Left => LEFT_DOCK_WIDTH,
+        DockSide::Right => RIGHT_DOCK_WIDTH,
     };
     rsx! {
         div { class: "tw:flex {width} tw:flex-none tw:flex-col tw:bg-card-subtle",
-            div { class: "tw:flex tw:min-h-[28px] tw:flex-none tw:items-stretch tw:border-b tw:border-border-subtle tw:bg-card-muted",
-                for tab in roster(view, side).iter().copied() {
-                    DockTab {
-                        key: "{tab.title()}",
-                        panel: tab,
-                        active: tab == panel,
-                        on_press: move |panel| on_tab.call(panel),
-                    }
-                }
-                span { class: "tw:flex-1" }
-                button {
-                    class: "tw:cursor-pointer tw:border-none tw:bg-transparent tw:px-2 tw:text-xs tw:text-dim-foreground tw:hover:bg-background-wash tw:hover:text-strong-foreground",
-                    title: "Hide the {panel.title()} panel",
-                    onclick: move |_| on_tab.call(panel),
-                    "{hide_glyph}"
-                }
-            }
             div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-2.5",
                 PanelBody {
                     panel,
@@ -751,34 +749,6 @@ fn PanelFooter(summary: String) -> Element {
     rsx! {
         div { class: "tw:flex-none tw:border-t tw:border-border-subtle tw:bg-card-muted tw:px-2.5 tw:py-1 tw:font-mono tw:text-[10px] tw:text-dim-foreground",
             "{summary}"
-        }
-    }
-}
-
-/// One dock tab: small-caps, deliberately LIGHTER than the center's view
-/// tabs (the hierarchy reads view tabs > dock tabs) — the active one wears
-/// the dock's own surface plus a hairline accent underline, and pressing it
-/// collapses the side.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn DockTab(panel: PanelId, active: bool, on_press: EventHandler<PanelId>) -> Element {
-    let class = if active {
-        "tw:relative tw:cursor-pointer tw:border-none tw:bg-card-subtle tw:px-2.5 tw:py-1 tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-strong-foreground tw:after:absolute tw:after:inset-x-0 tw:after:bottom-0 tw:after:h-px tw:after:bg-accent tw:after:content-['']"
-    } else {
-        "tw:cursor-pointer tw:border-none tw:bg-transparent tw:px-2.5 tw:py-1 tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-dim-foreground tw:hover:bg-background-wash tw:hover:text-strong-foreground"
-    };
-    let title = if active {
-        format!("Hide the {} panel", panel.title())
-    } else {
-        format!("Show the {} panel", panel.title())
-    };
-    rsx! {
-        button {
-            class,
-            title: "{title}",
-            aria_pressed: "{active}",
-            onclick: move |_| on_press.call(panel),
-            "{panel.title()}"
         }
     }
 }
