@@ -320,10 +320,8 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
             1.0,
         )
         .expect("install library package");
-    controller.attach_library(Rc::new(MemoryLibraryHost::new(
-        store.clone(),
-        Rc::new(|| 1.0),
-    )));
+    let host = Rc::new(MemoryLibraryHost::new(store.clone(), Rc::new(|| 1.0)));
+    controller.attach_library(host.clone());
 
     let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
     let mut view = handle.view;
@@ -336,6 +334,11 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
     )));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("open emits a snapshot");
+    assert!(
+        host.abandoned_projects().is_empty(),
+        "an open that finished commits its receipt: the close path owns the \
+         project's lock from here"
+    );
 
     // the open replaced the running project with the library head: home is
     // gone, the editor shows, and the runtime's manifest carries the
@@ -358,6 +361,72 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
     assert!(
         pushed_manifest.contains(&summary.uid.to_string()),
         "the runtime holds the library copy (uid pushed): {pushed_manifest}"
+    );
+}
+
+/// A failed open gives the project straight back to the library (P1).
+///
+/// The failure staged here is the cheapest one to reach — a below-floor
+/// package the migrator refuses — but the shape is the one that ruined
+/// demos: the host has already taken the project lock and started its
+/// flushers when the *caller's* half of the open fails (a worker boot
+/// timeout, in the live repro). The project never reaches the active slot,
+/// so nothing would ever queue its close; without the open's receipt the
+/// lock is held for the page's lifetime and every retry is refused with
+/// "open in this tab" until a reload.
+#[test]
+fn a_failed_open_gives_the_project_back_to_the_library() {
+    use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
+    use crate::{HOME_NODE_ID, HomeOp};
+
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let mut controller = StudioController::connected_with_client_for_test(client);
+
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [7u8; 16]),
+        Rc::new(|| "2026-08-14-1900".to_string()),
+    );
+    // Format 3 is below this build's floor: the open pre-flight refuses it
+    // AFTER the host has handed the project over.
+    let summary = store
+        .install_package(
+            "Ancient",
+            &[(
+                "project.json".to_string(),
+                br#"{"format":3,"name":"ancient"}"#.to_vec(),
+            )],
+            PackageProvenance::Created,
+            1.0,
+        )
+        .expect("install library package");
+    let host = Rc::new(MemoryLibraryHost::new(store, Rc::new(|| 1.0)));
+    controller.attach_library(host.clone());
+
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::OpenPackage {
+            key: summary.uid.to_string(),
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+
+    assert_eq!(
+        host.abandoned_projects(),
+        vec![summary.uid.to_string()],
+        "the refused open released the library's hold on the project"
+    );
+    assert!(
+        host.closed_projects().is_empty(),
+        "and did it through the open's own receipt — nothing else knew the \
+         project was open, so nothing would ever have queued its close"
     );
 }
 

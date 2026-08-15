@@ -12,7 +12,7 @@
 use gloo_timers::future::TimeoutFuture;
 use lpa_fs_opfs::{
     LibraryLock, LibraryLockGuard, LpFsOpfs, held_project_uids, open_dir, open_library_subdir,
-    opfs_root, remove_path, try_acquire, write_file,
+    opfs_root, remove_path, try_acquire, try_acquire_polling, write_file,
 };
 use lpfs::{LpFs, LpPath};
 use wasm_bindgen_test::*;
@@ -20,15 +20,19 @@ use web_sys::FileSystemDirectoryHandle;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
+/// The open path's acquire ladder, restated: `OPEN_RETRIES` ×
+/// `OPEN_RETRY_DELAY_MS` in `lpa-studio-web/src/library_host_opfs.rs`.
+/// Restated rather than shared because the *policy* belongs to the caller
+/// — this crate only offers the poll.
+const OPEN_LADDER_ATTEMPTS: usize = 10;
+const OPEN_LADDER_DELAY_MS: u32 = 50;
+
 /// Poll `try_acquire` until the lock manager has processed a release.
 async fn acquire_eventually(lock: &LibraryLock) -> LibraryLockGuard {
-    for _ in 0..50 {
-        if let Some(guard) = try_acquire(lock).await.expect("web locks available") {
-            return guard;
-        }
-        TimeoutFuture::new(10).await;
-    }
-    panic!("lock {} never became available", lock.name());
+    try_acquire_polling(lock, 50, 10)
+        .await
+        .expect("web locks available")
+        .unwrap_or_else(|| panic!("lock {} never became available", lock.name()))
 }
 
 #[wasm_bindgen_test]
@@ -55,6 +59,77 @@ async fn drop_releases_the_lock() {
     }
     let reacquired = acquire_eventually(&lock).await;
     reacquired.release();
+}
+
+/// The open path's guarantee (P1): a hold that is about to end must not be
+/// reported as "open in another tab". The lock manager hands a release on
+/// in a later task, so the instant shot loses this race every time and the
+/// ladder is what wins it.
+#[wasm_bindgen_test]
+async fn the_open_ladder_waits_out_a_hold_that_is_ending() {
+    let lock = LibraryLock::Project("prjtestpollrelease".to_string());
+    let guard = try_acquire(&lock).await.unwrap().expect("first acquire");
+
+    // let go on a later task — a finishing cloud sync trip, or the
+    // sim-crash recovery that releases and immediately reopens
+    wasm_bindgen_futures::spawn_local(async move {
+        TimeoutFuture::new(120).await;
+        guard.release();
+    });
+
+    assert!(
+        try_acquire(&lock).await.unwrap().is_none(),
+        "one instant shot loses the race (this is the bug being fixed)"
+    );
+    let polled = try_acquire_polling(&lock, OPEN_LADDER_ATTEMPTS, OPEN_LADDER_DELAY_MS)
+        .await
+        .unwrap()
+        .expect("the ladder outlasts a hold that ends inside its budget");
+    polled.release();
+}
+
+/// …and stays bounded: a project a *real* other tab holds still refuses,
+/// which is what `OpenElsewhere` is for.
+#[wasm_bindgen_test]
+async fn the_open_ladder_still_refuses_a_lock_held_throughout() {
+    let lock = LibraryLock::Project("prjtestpollrefuse".to_string());
+    let guard = try_acquire(&lock).await.unwrap().expect("acquire");
+
+    assert!(
+        try_acquire_polling(&lock, 3, 10).await.unwrap().is_none(),
+        "the ladder is bounded; exhausting it is the refusal"
+    );
+
+    guard.release();
+}
+
+/// The other half of P1: an open that fails *after* acquiring must give
+/// the project straight back, so the retry a second click makes finds it
+/// free. The teardown itself is `OpenRegistry::release_open`
+/// (`lpa-studio-web/src/library_host_opfs.rs`), which cannot run here; what
+/// this pins is the lock-level guarantee it rests on — a guard that unwinds
+/// with the failure leaves nothing behind.
+#[wasm_bindgen_test]
+async fn a_failed_open_leaves_the_project_reopenable() {
+    async fn open_then_fail(lock: &LibraryLock) -> Result<(), &'static str> {
+        let _guard = try_acquire_polling(lock, OPEN_LADDER_ATTEMPTS, OPEN_LADDER_DELAY_MS)
+            .await
+            .expect("web locks available")
+            .expect("uncontended acquire");
+        // the caller's half of the open fails (worker boot timeout, a
+        // refused migration): the guard unwinds with the error, exactly as
+        // an abandoned `OpenReceipt` arranges
+        Err("timed out waiting for browser worker boot")
+    }
+
+    let lock = LibraryLock::Project("prjtestfailedopen".to_string());
+    assert!(open_then_fail(&lock).await.is_err());
+
+    let reopened = try_acquire_polling(&lock, OPEN_LADDER_ATTEMPTS, OPEN_LADDER_DELAY_MS)
+        .await
+        .unwrap()
+        .expect("a failed open must not keep the project");
+    reopened.release();
 }
 
 #[wasm_bindgen_test]

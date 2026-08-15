@@ -157,6 +157,21 @@ genuinely fits none of these, and define it here in one line.
   defect: the flag advertises the operation, the code scopes it to the step it
   was written next to. Presents as "my timeout did nothing", and the fix shape
   is to bound the command and let sub-phases refine, never the reverse.
+- **`lock-held-across-foreign-latency`** — a lock taken to guard a local
+  invariant is held across work that invariant does not cover (a network
+  round trip, a user prompt), so its hold time is set by an unrelated
+  latency budget. Presents as contention that is real but meaningless,
+  and it is worse when the refusal is *also* a user-facing claim ("open
+  in another tab"): the product then states something false. The fix
+  shape is to snapshot under the lock and do the foreign work outside it.
+- **`fixed-budget-over-variable-work`** — a fixed elapsed-time budget
+  bounds an operation whose duration is set by something outside the
+  process (a network fetch, a shared device queue), usually because the
+  budget was sized for a smaller operation and the work grew into it. The
+  timeout then reports the environment rather than a fault, and fires
+  hardest exactly when the system is already slowest. The honest bound is
+  on *progress* — a phase that has not advanced in N seconds — with the
+  variable-length step reporting itself.
 - **`newest-only-inflight-memory`** — state meant to recognize the
   completions of a pipeline's own in-flight async operations remembers
   only the most recent one, so an older operation's completion reads as
@@ -259,6 +274,9 @@ values; statistical diffs are for the arithmetic in between.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| lifecycle-ownership | 2026-08-14 | [post-acquire-open-failure-leaks-the-project-lock](2026-08-14-post-acquire-open-failure-leaks-the-project-lock.md) | fixed | lpa-studio-web library_host_opfs + lpa-studio-core project_controller |
+| lock-held-across-foreign-latency | 2026-08-14 | [sync-holds-the-project-lock-across-the-network](2026-08-14-sync-holds-the-project-lock-across-the-network.md) | **open** (registration race fixed) | lpa-studio-web cloud/sync + library_host_opfs |
+| fixed-budget-over-variable-work | 2026-08-14 | [worker-boot-timeout-races-the-wasm-fetch](2026-08-14-worker-boot-timeout-races-the-wasm-fetch.md) | **open** (zombies + recovery fixed) | lpa-link browser_worker + lpa-studio-core preview_host |
 | state-conflation | 2026-08-14 | [sibling-module-bus-tie-blanks-preview](2026-08-14-sibling-module-bus-tie-blanks-preview.md) | **open** | lpc-engine (bus resolution) + fw-browser preview runtime |
 | newest-only-inflight-memory | 2026-08-13 | [stale-echo-reseeded-dive-session](2026-08-13-stale-echo-reseeded-dive-session.md) | fixed | lpa-studio-web editor_shell (mapping_session pipeline) |
 | config-masked-defect | 2026-08-05 | [generated-palette-header-dies-on-naga](2026-08-05-generated-palette-header-dies-on-naga.md) | fixed | lps-frontend (parse.rs) + lpc-model shader_header_gen |
