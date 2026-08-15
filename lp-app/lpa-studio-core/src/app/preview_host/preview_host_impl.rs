@@ -3,12 +3,13 @@
 //!
 //! Architecture (preview-host ADR): consumers `lease()` a slot and observe
 //! it through [`PreviewSlotHandle`] — they never touch workers, runtimes,
-//! or envelopes. One `run()` future owns all IO: it boots the pool,
-//! executes lease pipelines (create runtime → deploy → attach surface),
-//! schedules `present_frame`/`preview_frame` posts per slot fps with
-//! in-flight backpressure, enforces the global live-slot cap with LRU
-//! eviction, and recycles a poisoned worker (respawn + re-lease of
-//! still-visible slots) on device loss or present errors.
+//! or envelopes. One `run()` future owns all IO: it boots the pool one
+//! member at a time (never while a user open holds priority — see
+//! [`start_gate`]), executes lease pipelines (create runtime → deploy →
+//! attach surface), schedules `present_frame`/`preview_frame` posts per
+//! slot fps with in-flight backpressure, enforces the global live-slot cap
+//! with LRU eviction, and recycles a poisoned worker (respawn + re-lease
+//! of still-visible slots) on device loss or present errors.
 //!
 //! A slot has two halves. The visual half is the raster (`visual.out`,
 //! presented to the GPU-tier surface or blitted from CPU-tier pixel frames);
@@ -36,6 +37,7 @@ use lpa_link::providers::browser_worker::{BrowserInputEnvelope, BrowserRuntimeTi
 use wasm_bindgen::JsCast;
 
 use crate::app::library::LibraryHost;
+use crate::app::open_priority::user_open_in_flight;
 
 use super::frame_schedule::{FrameDecision, FrameSchedule};
 use super::preview_client_io::PreviewClientIo;
@@ -48,8 +50,9 @@ use super::preview_types::{
 };
 use super::preview_worker::PreviewWorker;
 use super::slot_policy::{
-    DEAD_WORKER_RETRY_BUDGET, DeadWorkerNext, DetachedSlotNext, EvictionCandidate, choose_eviction,
-    choose_starts, choose_worker, dead_worker_next, detached_slot_next,
+    BootSlotState, DEAD_WORKER_RETRY_BUDGET, DeadWorkerNext, DetachedSlotNext, EvictionCandidate,
+    StartGate, choose_boot_start, choose_eviction, choose_starts, choose_worker, dead_worker_next,
+    detached_slot_next, pool_may_start_boot,
 };
 
 /// Scheduler/polling loop period while any slot or sub-task is active.
@@ -111,6 +114,11 @@ struct WorkerEntry {
 }
 
 enum WorkerState {
+    /// Never started: waiting its turn in the staggered boot queue (see
+    /// [`PreviewHost::start_next_boot`]). Indistinguishable from `Booting`
+    /// to every consumer — a slot leased against this pool member simply
+    /// stays pending, exactly as it would while the boot ran.
+    Pending,
     /// Spawn/boot in flight (initial boot, post-recycle respawn, or a
     /// dead-worker retry).
     Booting,
@@ -203,13 +211,14 @@ impl PreviewHost {
     /// Build a host over `config`. `library` backs
     /// [`PreviewSource::ProjectUid`] leases (catalog snapshots); without
     /// it those leases fail with a clear status while example leases
-    /// still work. Nothing boots until [`Self::run`] is driven.
+    /// still work. Nothing boots until [`Self::run`] is driven — and then
+    /// one member at a time (see [`Self::start_next_boot`]).
     pub fn new(config: PreviewHostConfig, library: Option<Rc<dyn LibraryHost>>) -> Self {
         let pool_size = config.pool_size.max(1);
         let workers = (0..pool_size)
             .map(|_| WorkerEntry {
                 generation: 0,
-                state: WorkerState::Booting,
+                state: WorkerState::Pending,
                 retries_used: 0,
             })
             .collect();
@@ -298,18 +307,13 @@ impl PreviewHost {
             shared.running = true;
         }
         let mut tasks: Vec<LocalTask> = Vec::new();
-        {
-            let shared = self.shared.borrow();
-            for index in 0..shared.workers.len() {
-                tasks.push(boot_task(Rc::clone(&self.shared), index, 0));
-            }
-        }
         let sleeper = PreviewSleeper::new();
         loop {
             if self.shared.borrow().shutdown {
                 self.finish_shutdown();
                 break;
             }
+            self.start_next_boot(&mut tasks);
             self.reap_released_slots();
             self.apply_resume_requests();
             self.start_pending_leases(&mut tasks);
@@ -345,7 +349,9 @@ impl PreviewHost {
                         },
                     ) {
                         WorkerState::Ready(worker) => Some(worker),
-                        WorkerState::Booting | WorkerState::Dead { .. } => None,
+                        WorkerState::Pending | WorkerState::Booting | WorkerState::Dead { .. } => {
+                            None
+                        }
                     }
                 })
                 .collect();
@@ -416,7 +422,7 @@ impl PreviewHost {
             }
             match &entry.state {
                 WorkerState::Ready(worker) => Rc::clone(worker),
-                WorkerState::Booting | WorkerState::Dead { .. } => return,
+                WorkerState::Pending | WorkerState::Booting | WorkerState::Dead { .. } => return,
             }
         };
         let mut worker = worker.borrow_mut();
@@ -474,9 +480,11 @@ impl PreviewHost {
             self.revive_dead_workers(tasks);
         }
         // One in-flight deploy per worker: past that the pipelines only
-        // contend for the same pool and time each other out.
+        // contend for the same pool and time each other out. A user open in
+        // flight holds every new start back (the gate) while the deploys
+        // already running finish untouched.
         let cap = self.shared.borrow().config.pool_size.max(1);
-        let starting = choose_starts(candidates, deploying_now, cap);
+        let starting = choose_starts(candidates, deploying_now, cap, start_gate());
         if starting.is_empty() {
             return;
         }
@@ -517,28 +525,58 @@ impl PreviewHost {
         }
     }
 
-    /// Re-boot dead pool workers whose cooldown has elapsed, spending one
-    /// retry each ([`dead_worker_next`]).
+    /// Start the next pool member's boot, if the scheduler may take one
+    /// this tick ([`choose_boot_start`]).
+    ///
+    /// The whole stagger: pool members leave [`WorkerState::Pending`] one
+    /// at a time, so the engine wasm is fetched and compiled once at a
+    /// time instead of by every member at once, and none of them starts
+    /// while a user open holds priority. A member left `Pending` is
+    /// reconsidered every tick — the wait is a queue, not a failure.
+    fn start_next_boot(&self, tasks: &mut Vec<LocalTask>) {
+        let start = {
+            let shared = self.shared.borrow();
+            if shared.shutdown {
+                return;
+            }
+            choose_boot_start(&boot_states(&shared), start_gate())
+        };
+        let Some(index) = start else {
+            return;
+        };
+        let generation = {
+            let mut shared = self.shared.borrow_mut();
+            let entry = &mut shared.workers[index];
+            entry.state = WorkerState::Booting;
+            entry.generation
+        };
+        tasks.push(boot_task(Rc::clone(&self.shared), index, generation));
+    }
+
+    /// Re-boot ONE dead pool worker whose cooldown has elapsed, spending a
+    /// retry ([`dead_worker_next`]).
     ///
     /// Called only when a lease actually wants a worker, so recovery costs
     /// nothing on an idle page, and bounded by
     /// [`DEAD_WORKER_RETRY_BUDGET`] so a broken environment settles into
-    /// an honest error instead of respawning workers forever. The
-    /// generation bump makes any in-flight pipeline holding the old
-    /// snapshot unwind as stale, exactly like a recycle.
+    /// an honest error instead of respawning workers forever. A retry is a
+    /// boot like any other, so it takes its turn behind
+    /// [`pool_may_start_boot`]: never two at once, never during a user
+    /// open. The generation bump makes any in-flight pipeline holding the
+    /// old snapshot unwind as stale, exactly like a recycle.
     fn revive_dead_workers(&self, tasks: &mut Vec<LocalTask>) {
         let now = now_ms();
         // (worker index, new generation, attempt number, previous reason)
-        let revives: Vec<(usize, u32, usize, String)> = {
+        let revive: Option<(usize, u32, usize, String)> = {
             let mut shared = self.shared.borrow_mut();
-            if shared.shutdown {
+            if shared.shutdown || !pool_may_start_boot(&boot_states(&shared), start_gate()) {
                 return;
             }
             shared
                 .workers
                 .iter_mut()
                 .enumerate()
-                .filter_map(|(index, entry)| {
+                .find_map(|(index, entry)| {
                     let WorkerState::Dead { reason, since_ms } = &entry.state else {
                         return None;
                     };
@@ -553,9 +591,8 @@ impl PreviewHost {
                         DeadWorkerNext::Cooling | DeadWorkerNext::Spent => None,
                     }
                 })
-                .collect()
         };
-        for (index, generation, attempt, reason) in revives {
+        if let Some((index, generation, attempt, reason)) = revive {
             log::info!(
                 "preview host: retrying dead worker {index} \
                  (attempt {attempt}/{DEAD_WORKER_RETRY_BUDGET}, was: {reason})"
@@ -589,7 +626,7 @@ impl PreviewHost {
                         })
                         .count(),
                 ),
-                WorkerState::Booting | WorkerState::Dead { .. } => None,
+                WorkerState::Pending | WorkerState::Booting | WorkerState::Dead { .. } => None,
             })
             .collect();
         match choose_worker(&loads) {
@@ -1226,6 +1263,27 @@ struct RecycleRequest {
     /// worker-level failures), for strike accounting.
     cause_runtime: Option<u32>,
     reason: String,
+}
+
+/// The pool as the boot scheduler sees it (see [`choose_boot_start`]).
+fn boot_states(shared: &SharedState) -> Vec<BootSlotState> {
+    shared
+        .workers
+        .iter()
+        .map(|entry| match &entry.state {
+            WorkerState::Pending => BootSlotState::Pending,
+            WorkerState::Booting => BootSlotState::Booting,
+            WorkerState::Ready(_) => BootSlotState::Ready,
+            WorkerState::Dead { .. } => BootSlotState::Dead,
+        })
+        .collect()
+}
+
+/// Whether background preview work may start this tick: a user-initiated
+/// open owns the engine's boot budget for as long as it runs
+/// ([`crate::app::open_priority`]).
+fn start_gate() -> StartGate {
+    StartGate::from_user_open(user_open_in_flight())
 }
 
 /// Boot (or respawn) pool worker `index` at `generation`.

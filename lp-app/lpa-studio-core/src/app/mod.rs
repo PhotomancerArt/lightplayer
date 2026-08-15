@@ -5,6 +5,7 @@ pub mod docs_host;
 pub mod home;
 pub mod library;
 pub mod node;
+pub mod open_priority;
 pub mod places;
 pub mod preview_host;
 pub mod project;
