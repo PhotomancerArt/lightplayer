@@ -349,7 +349,7 @@ pub fn WorkbenchFrame(
         // fold (R4-2) the frame bleeds the shell's mobile inset back out,
         // so the summon strip is a full-width toolbar rather than a
         // floating bar; the site chrome above keeps the inset.
-        div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:flex-col tw:overflow-hidden tw:bg-background tw:max-[960px]:-mx-[10px]",
+        div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:flex-col tw:overflow-hidden tw:bg-background tw:max-[820px]:-mx-[10px]",
             SummonStrip {
                 view,
                 summoned: *summoned.read(),
@@ -371,7 +371,7 @@ pub fn WorkbenchFrame(
                 on_toggle: move |panel| memory.write().view_mut(view).toggle(panel),
             }
             div { class: "tw:flex tw:min-h-0 tw:flex-1",
-                div { class: "tw:contents tw:max-[960px]:hidden",
+                div { class: "tw:contents tw:max-[820px]:hidden",
                     if let Some(panel) = docks.left {
                         PanelDock {
                             panel,
@@ -390,10 +390,10 @@ pub fn WorkbenchFrame(
                         }
                     }
                 }
-                div { class: "tw:relative tw:flex tw:min-h-0 tw:min-w-0 tw:flex-1 tw:flex-col tw:border-x tw:border-border-subtle tw:max-[960px]:border-x-0",
+                div { class: "tw:relative tw:flex tw:min-h-0 tw:min-w-0 tw:flex-1 tw:flex-col tw:border-x tw:border-border-subtle tw:max-[820px]:border-x-0",
                     match view {
                         WorkbenchView::Nodes => rsx! {
-                            div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-3.5 tw:max-[960px]:p-2",
+                            div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-3.5 tw:max-[820px]:p-2",
                                 ProjectNodeWorkspace { view: project_editor, on_action }
                             }
                         },
@@ -414,7 +414,7 @@ pub fn WorkbenchFrame(
                     }
                     if let Some(panel) = *summoned.read() {
                         // The summoned panel, replacing main below the fold.
-                        div { class: "tw:absolute tw:inset-0 tw:z-10 tw:hidden tw:flex-col tw:bg-background tw:max-[960px]:flex",
+                        div { class: "tw:absolute tw:inset-0 tw:z-10 tw:hidden tw:flex-col tw:bg-background tw:max-[820px]:flex",
                             div { class: "tw:flex tw:min-h-[32px] tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border-subtle tw:bg-card-subtle tw:px-2.5",
                                 button {
                                     class: "tw:cursor-pointer tw:border-none tw:bg-transparent tw:p-0 tw:text-xs tw:text-selection-border",
@@ -448,7 +448,7 @@ pub fn WorkbenchFrame(
                         }
                     }
                 }
-                div { class: "tw:contents tw:max-[960px]:hidden",
+                div { class: "tw:contents tw:max-[820px]:hidden",
                     if let Some(panel) = docks.right {
                         PanelDock {
                             panel,
@@ -510,7 +510,7 @@ fn SummonStrip(
         }
     };
     rsx! {
-        div { class: "tw:hidden tw:min-h-[38px] tw:flex-none tw:items-center tw:gap-1.5 tw:border-b tw:border-border-strong tw:bg-card-muted tw:px-2 tw:max-[960px]:flex",
+        div { class: "tw:hidden tw:min-h-[38px] tw:flex-none tw:items-center tw:gap-1.5 tw:border-b tw:border-border-strong tw:bg-card-muted tw:px-2 tw:max-[820px]:flex",
             for panel in roster(view, DockSide::Left).iter().copied() {
                 {button(panel)}
             }
@@ -555,7 +555,7 @@ fn WorkbenchBand(
     on_toggle: EventHandler<PanelId>,
 ) -> Element {
     rsx! {
-        div { class: "tw:flex tw:min-h-[38px] tw:flex-none tw:items-stretch tw:border-b tw:border-border-strong tw:bg-card-muted tw:max-[960px]:hidden",
+        div { class: "tw:flex tw:min-h-[38px] tw:flex-none tw:items-stretch tw:border-b tw:border-border-strong tw:bg-card-muted tw:max-[820px]:hidden",
             div { class: "tw:flex tw:flex-none tw:items-end tw:gap-1 tw:px-1.5 {LEFT_DOCK_WIDTH}",
                 for tab in roster(view, DockSide::Left).iter().copied() {
                     BandPanelTab {
