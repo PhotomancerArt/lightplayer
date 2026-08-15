@@ -10,12 +10,16 @@
 //!   mount the whole store fresh, apply the op synchronously, **flush
 //!   fully before releasing**, broadcast `"changed"`.
 //! - **Project open** ([`LibraryHost::open_project`]): resolve the key
-//!   from a fresh snapshot, acquire the project's exclusive lock,
-//!   **re-verify the key still resolves to the same uid under the lock**
-//!   (a rename in another tab can race the unlocked read; retry once),
-//!   then mount the package and history subtrees as their own
+//!   from a fresh snapshot, acquire the project's exclusive lock — polling
+//!   briefly, because a refusal here is usually this tab's own momentary
+//!   hold — **re-verify the key still resolves to the same uid under the
+//!   lock** (a rename in another tab can race the unlocked read; retry
+//!   once), then mount the package and history subtrees as their own
 //!   memory-primary stores with write-behind flushers. The held lock is
-//!   what makes write-behind correct: one writer per subtree.
+//!   what makes write-behind correct: one writer per subtree. The open
+//!   returns an `OpenReceipt`: the caller's open is not finished when this
+//!   one is, and an uncommitted receipt runs [`OpenRegistry::release_open`]
+//!   rather than leaving the lock held for the page's lifetime.
 //! - **Snapshots** ([`LibraryHost::catalog_snapshot`]): fresh read-only
 //!   mounts (no flusher) skipping history payloads; no locks — whole-file
 //!   atomic writes make torn files impossible, torn *sets* merely stale.
@@ -31,10 +35,11 @@ use gloo_timers::future::TimeoutFuture;
 use lpa_fs_opfs::{
     HISTORY_DIR, LibraryLock, LibraryLockGuard, LpFsOpfs, PACKAGES_DIR, held_project_uids,
     list_child_dirs, open_dir, open_library_root, open_library_subdir, remove_path, try_acquire,
+    try_acquire_polling,
 };
 use lpa_studio_core::app::library::{
     CatalogOp, CatalogOutcome, LibraryHost, LibraryHostError, LibraryStore, LocalBoxFuture,
-    OpenedProject, apply_catalog_op,
+    OpenReceipt, OpenedProject, apply_catalog_op,
 };
 use lpfs::{LpFs, LpPath};
 
@@ -47,6 +52,18 @@ const FLUSH_INTERVAL_MS: u32 = 100;
 /// beats surfacing `Busy` on the first collision.
 const CATALOG_RETRIES: usize = 5;
 const CATALOG_RETRY_DELAY_MS: u32 = 50;
+
+/// Project-lock acquisition on the OPEN path — the same ladder shape as
+/// the catalog's, one notch longer.
+///
+/// Release travels through the lock manager asynchronously, so a lock this
+/// tab let go a moment ago (a sim-crash recovery reopening the project it
+/// just released, a sync trip finishing) still refuses the next instant
+/// shot. Half a second of polling turns those benign races into a slightly
+/// slower open instead of a wrong "open in another tab"; a lock a *real*
+/// other tab holds outlasts the ladder and refuses as before.
+const OPEN_RETRIES: usize = 10;
+const OPEN_RETRY_DELAY_MS: u32 = 50;
 
 /// How long an open waits out this tab's own cloud sync trip before
 /// concluding somebody else holds the project. A trip is a network round
@@ -68,16 +85,70 @@ struct OpenProjectStores {
     stop_flushers: Rc<Cell<bool>>,
 }
 
+/// The open projects of this tab, plus the ping channel — everything a
+/// teardown touches, behind one `Rc` so an [`OpenReceipt`] can carry it
+/// (see [`OpenRegistry::release_open`]). Releasing a project's lock is
+/// exactly as interesting to other tabs' badges as taking it, which is
+/// why the channel lives here and not beside it.
+struct OpenRegistry {
+    open: RefCell<HashMap<String, OpenProjectStores>>,
+    /// Sender side of the cross-tab ping channel (`None` if the browser
+    /// lacks BroadcastChannel; pings are best-effort).
+    channel: Option<web_sys::BroadcastChannel>,
+}
+
+impl OpenRegistry {
+    fn broadcast_changed(&self) {
+        if let Some(channel) = &self.channel {
+            let _ = channel.post_message(&wasm_bindgen::JsValue::from_str("changed"));
+        }
+    }
+
+    /// **The** teardown of one open: take it out of the registry, stop its
+    /// flushers, flush both stores, release the project lock, tell the
+    /// other tabs. Idempotent — a uid this tab does not hold open is a
+    /// no-op, which is what makes it safe to call from both endings.
+    ///
+    /// Both endings run through here: [`LibraryHost::close_project`] awaits
+    /// it, and an [`OpenReceipt`] dropped uncommitted (a failed open; a
+    /// superseded one, later) spawns it. There is deliberately no second
+    /// copy of this sequence anywhere.
+    async fn release_open(&self, uid: &str) {
+        let state = self.open.borrow_mut().remove(uid);
+        let Some(state) = state else {
+            return;
+        };
+        state.stop_flushers.set(true);
+        if let Err(e) = state.package.flush().await {
+            log::warn!("close flush (package): {e}");
+        }
+        if let Err(e) = state.history.flush().await {
+            log::warn!("close flush (history): {e}");
+        }
+        if let Some(guard) = state.guard {
+            guard.release();
+        }
+        // other tabs' "open in another tab" badges clear promptly
+        self.broadcast_changed();
+    }
+}
+
+/// Start [`OpenRegistry::release_open`] without waiting for it — what an
+/// abandoned [`OpenReceipt`] can do, `Drop` being synchronous while the
+/// teardown flushes.
+fn spawn_release_open(registry: Rc<OpenRegistry>, uid: String) {
+    wasm_bindgen_futures::spawn_local(async move {
+        registry.release_open(&uid).await;
+    });
+}
+
 /// The OPFS-backed [`LibraryHost`]. One per tab, attached at startup.
 pub struct OpfsLibraryHost {
-    open: RefCell<HashMap<String, OpenProjectStores>>,
+    registry: Rc<OpenRegistry>,
     /// Project uids this tab's cloud driver is holding the project lock for
     /// (see [`Self::mount_for_sync`]). Shared with the live [`SyncMount`]s,
     /// which clear their own entry when they drop.
     syncing: Rc<RefCell<HashSet<String>>>,
-    /// Sender side of the cross-tab ping channel (`None` if the browser
-    /// lacks BroadcastChannel; pings are best-effort).
-    channel: Option<web_sys::BroadcastChannel>,
 }
 
 impl OpfsLibraryHost {
@@ -86,9 +157,11 @@ impl OpfsLibraryHost {
             .map_err(|e| log::warn!("BroadcastChannel unavailable: {e:?}"))
             .ok();
         Self {
-            open: RefCell::new(HashMap::new()),
+            registry: Rc::new(OpenRegistry {
+                open: RefCell::new(HashMap::new()),
+                channel,
+            }),
             syncing: Rc::new(RefCell::new(HashSet::new())),
-            channel,
         }
     }
 
@@ -97,7 +170,7 @@ impl OpfsLibraryHost {
     /// the write-behind loss window (≤ ~flush interval + write time),
     /// nothing more.
     pub fn flush_open_projects_best_effort(&self) {
-        for state in self.open.borrow().values() {
+        for state in self.registry.open.borrow().values() {
             let package = state.package.clone();
             let history = state.history.clone();
             wasm_bindgen_futures::spawn_local(async move {
@@ -108,9 +181,7 @@ impl OpfsLibraryHost {
     }
 
     fn broadcast_changed(&self) {
-        if let Some(channel) = &self.channel {
-            let _ = channel.post_message(&wasm_bindgen::JsValue::from_str("changed"));
-        }
+        self.registry.broadcast_changed();
     }
 
     /// Borrow (or mount) one project's two subtrees for a cloud sync trip.
@@ -136,7 +207,7 @@ impl OpfsLibraryHost {
         uid: &str,
         slug: Option<&str>,
     ) -> Result<Option<SyncMount>, LibraryHostError> {
-        if let Some(state) = self.open.borrow().get(uid) {
+        if let Some(state) = self.registry.open.borrow().get(uid) {
             return Ok(Some(SyncMount {
                 guard: None,
                 held: None,
@@ -145,18 +216,28 @@ impl OpfsLibraryHost {
                 borrowed: true,
             }));
         }
+        // Registered as ours BEFORE the acquire, not after it: an open
+        // polling `syncing` in the gap would see no trip, skip the handoff
+        // wait entirely, and be refused instantly by the lock this is about
+        // to take. Dropping `held` un-registers, so a refusal (that project
+        // really is another tab's) costs one poll interval at worst.
+        //
+        // Only the mount that *added* the uid carries the guard: the visitor
+        // pull loop and the sync driver can both reach for one project, and
+        // the second one to arrive must not clear a registration the first
+        // is still standing behind.
+        let held = self
+            .syncing
+            .borrow_mut()
+            .insert(uid.to_string())
+            .then(|| HeldForSync {
+                uid: uid.to_string(),
+                syncing: Rc::clone(&self.syncing),
+            });
         let guard = match acquire(&LibraryLock::Project(uid.to_string())).await {
             Acquired::Held(guard) => Some(guard),
             Acquired::Unguarded => None,
             Acquired::Refused => return Ok(None),
-        };
-        // Registered as ours from the moment the lock is held, so an open in
-        // this tab waits the trip out instead of being told the project is
-        // open somewhere else. `SyncMount`'s `Drop` clears it.
-        self.syncing.borrow_mut().insert(uid.to_string());
-        let held = HeldForSync {
-            uid: uid.to_string(),
-            syncing: Rc::clone(&self.syncing),
         };
         let slug = match slug {
             Some(slug) => slug.to_string(),
@@ -170,7 +251,7 @@ impl OpfsLibraryHost {
             .map_err(|e| LibraryHostError::Host(format!("open history dir: {e}")))?;
         Ok(Some(SyncMount {
             guard,
-            held: Some(held),
+            held,
             package: LpFsOpfs::mount(package_dir)
                 .await
                 .map_err(|e| LibraryHostError::Host(format!("mount package: {e}")))?,
@@ -239,7 +320,7 @@ impl LibraryHost for OpfsLibraryHost {
             // "open in another tab" answer, before anything mutates.
             let _project_guard = match structural_target_uid(&op) {
                 Some(uid) => {
-                    if self.open.borrow().contains_key(uid) {
+                    if self.registry.open.borrow().contains_key(uid) {
                         return Err(LibraryHostError::OpenInThisTab {
                             uid: uid.to_string(),
                         });
@@ -298,11 +379,16 @@ impl LibraryHost for OpfsLibraryHost {
             // exactly that race.
             for _attempt in 0..2 {
                 let (uid, _slug) = resolve_key_snapshot(key).await?;
-                if self.open.borrow().contains_key(&uid) {
+                if self.registry.open.borrow().contains_key(&uid) {
                     return Err(LibraryHostError::OpenInThisTab { uid });
                 }
+                // Parsed before anything is acquired: a malformed uid is a
+                // refusal, not a lock to unwind.
+                let parsed_uid = uid
+                    .parse()
+                    .map_err(|e| LibraryHostError::Host(format!("uid {uid:?}: {e}")))?;
                 self.await_sync_handoff(&uid).await;
-                let guard = match acquire(&LibraryLock::Project(uid.clone())).await {
+                let guard = match acquire_for_open(&LibraryLock::Project(uid.clone())).await {
                     Acquired::Held(guard) => Some(guard),
                     Acquired::Unguarded => None,
                     Acquired::Refused => {
@@ -335,7 +421,7 @@ impl LibraryHost for OpfsLibraryHost {
                 let stop_flushers = Rc::new(Cell::new(false));
                 spawn_flusher(package.clone(), Rc::clone(&stop_flushers));
                 spawn_flusher(history.clone(), Rc::clone(&stop_flushers));
-                self.open.borrow_mut().insert(
+                self.registry.open.borrow_mut().insert(
                     uid.clone(),
                     OpenProjectStores {
                         guard,
@@ -345,14 +431,18 @@ impl LibraryHost for OpfsLibraryHost {
                     },
                 );
 
-                let uid = uid
-                    .parse()
-                    .map_err(|e| LibraryHostError::Host(format!("uid {uid:?}: {e}")))?;
+                // From here the lock, the registration and two flush loops
+                // are live and only the caller knows whether the open ever
+                // finishes — so it leaves holding the undo.
+                let registry = Rc::clone(&self.registry);
+                let abandoned = uid.clone();
+                let receipt = OpenReceipt::new(move || spawn_release_open(registry, abandoned));
                 return Ok(OpenedProject {
-                    uid,
+                    uid: parsed_uid,
                     slug,
                     package_fs: rc_fs(package),
                     history_fs: rc_fs(history),
+                    receipt,
                 });
             }
             Err(LibraryHostError::Busy(
@@ -362,31 +452,14 @@ impl LibraryHost for OpfsLibraryHost {
     }
 
     fn close_project<'a>(&'a self, uid: &'a str) -> LocalBoxFuture<'a, ()> {
-        Box::pin(async move {
-            // idempotent: closing a project this tab doesn't hold is a no-op
-            let state = self.open.borrow_mut().remove(uid);
-            let Some(state) = state else {
-                return;
-            };
-            state.stop_flushers.set(true);
-            if let Err(e) = state.package.flush().await {
-                log::warn!("close flush (package): {e}");
-            }
-            if let Err(e) = state.history.flush().await {
-                log::warn!("close flush (history): {e}");
-            }
-            if let Some(guard) = state.guard {
-                guard.release();
-            }
-            // other tabs' "open in another tab" badges clear promptly
-            self.broadcast_changed();
-        })
+        // the same teardown an abandoned open runs; idempotent either way
+        Box::pin(async move { self.registry.release_open(uid).await })
     }
 
     fn open_elsewhere_uids(&self) -> LocalBoxFuture<'_, Vec<String>> {
         Box::pin(async move {
             let mut held = held_project_uids().await;
-            let open = self.open.borrow();
+            let open = self.registry.open.borrow();
             held.retain(|uid| !open.contains_key(uid));
             held
         })
@@ -440,9 +513,10 @@ pub(crate) struct SyncMount {
 
 /// "This tab's driver is holding that project", as a drop guard.
 ///
-/// A guard rather than a paired insert/remove because a trip that fails
-/// mid-mount must not leave the uid registered — an open would then wait the
-/// full handoff bound for a trip that is not running.
+/// A guard rather than a paired insert/remove because a trip that never
+/// starts (a refused acquire) or fails mid-mount must not leave the uid
+/// registered — an open would then wait the full handoff bound for a trip
+/// that is not running.
 struct HeldForSync {
     uid: String,
     syncing: Rc<RefCell<HashSet<String>>>,
@@ -494,7 +568,19 @@ enum Acquired {
 }
 
 async fn acquire(lock: &LibraryLock) -> Acquired {
-    match try_acquire(lock).await {
+    classify(try_acquire(lock).await)
+}
+
+/// [`acquire`] with the open path's policy: poll the ladder before calling
+/// it a refusal (see [`OPEN_RETRIES`]). Everything else keeps the one-shot
+/// — a structural catalog op asking "is this open elsewhere" wants the
+/// instant answer, not a wait.
+async fn acquire_for_open(lock: &LibraryLock) -> Acquired {
+    classify(try_acquire_polling(lock, OPEN_RETRIES, OPEN_RETRY_DELAY_MS).await)
+}
+
+fn classify(outcome: Result<Option<LibraryLockGuard>, wasm_bindgen::JsValue>) -> Acquired {
+    match outcome {
         Ok(Some(guard)) => Acquired::Held(guard),
         Ok(None) => Acquired::Refused,
         Err(e) => {

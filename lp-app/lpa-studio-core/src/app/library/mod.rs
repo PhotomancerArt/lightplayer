@@ -24,7 +24,7 @@ pub mod package_zip;
 
 pub use library_host::{
     CatalogOp, CatalogOutcome, LibraryHost, LibraryHostError, LocalBoxFuture, MemoryLibraryHost,
-    OpenedProject, apply_catalog_op, open_project_via_store,
+    OpenReceipt, OpenedProject, apply_catalog_op, open_project_via_store,
 };
 pub use library_store::{LibraryError, LibraryStore, PackageHandle, PackageSummary};
 pub use package_format::{PackageHealth, classify_package, health_for};

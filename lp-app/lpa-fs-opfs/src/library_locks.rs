@@ -19,6 +19,12 @@
 //! are fresh read-only hydrations; [`held_project_uids`] powers the "open
 //! in another tab" badges.
 //!
+//! Acquisition policy is the **caller's**: [`try_acquire`] is one
+//! `ifAvailable` shot, because for a structural catalog op the refusal
+//! *is* the answer. Callers whose refusal is only ever momentary — an
+//! open racing this tab's own release or its own cloud sync trip — poll
+//! with [`try_acquire_polling`] instead.
+//!
 //! Web Locks are origin-wide and auto-released when the holding context
 //! dies — a killed tab never strands its projects. Bound dynamically via
 //! `Reflect`: web-sys 0.3 gates its static Web Locks bindings behind the
@@ -29,6 +35,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use gloo_timers::future::TimeoutFuture;
 use js_sys::Promise;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -108,6 +115,32 @@ impl Drop for LibraryLockGuard {
 /// browser) — callers decide whether to proceed unguarded.
 pub async fn try_acquire(lock: &LibraryLock) -> Result<Option<LibraryLockGuard>, JsValue> {
     try_acquire_named(&lock.name()).await
+}
+
+/// [`try_acquire`] retried on refusal: up to `attempts` shots, `delay_ms`
+/// apart, stopping at the first grant.
+///
+/// `ifAvailable` never queues, and a release travels through the lock
+/// manager asynchronously — a holder that let go one task ago can still
+/// refuse the very next request (the browser tests here poll for exactly
+/// that reason). A caller whose refusal is a *momentary* condition rather
+/// than the answer polls it out instead of reporting "somebody else has
+/// it". `Err` (no Web Locks at all) is not retried: it will not change.
+pub async fn try_acquire_polling(
+    lock: &LibraryLock,
+    attempts: usize,
+    delay_ms: u32,
+) -> Result<Option<LibraryLockGuard>, JsValue> {
+    for attempt in 0..attempts {
+        if let Some(guard) = try_acquire(lock).await? {
+            return Ok(Some(guard));
+        }
+        // no trailing wait: the budget is the gaps between the shots
+        if attempt + 1 < attempts {
+            TimeoutFuture::new(delay_ms).await;
+        }
+    }
+    Ok(None)
 }
 
 /// [`try_acquire`] by raw Web Lock name (kept private: product code goes
