@@ -15,6 +15,18 @@ use crate::providers::browser_worker::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserWorkerOptions,
 };
 
+/// How long [`BrowserWorkerHandle::boot`] sleeps between drains of the
+/// worker's output buffer while waiting for `ready`.
+const BOOT_POLL_INTERVAL_MS: i32 = 25;
+/// How many [`BOOT_POLL_INTERVAL_MS`] polls a boot may spend before it is
+/// declared timed out — 200 × 25 ms ≈ 5 s of TOTAL elapsed time, which is
+/// the whole fw-browser fetch + compile + runtime init.
+///
+/// The policy (total elapsed, flat) is unchanged here on purpose; this is
+/// the one seam it lives on, so the inactivity-based, phase-aware timeout
+/// replaces these two constants rather than hunting inline numbers.
+const BOOT_POLL_BUDGET: usize = 200;
+
 /// One binary preview frame received from the worker.
 ///
 /// The pixel payload is a transferable `ArrayBuffer` (sRGB RGBA8, row-major,
@@ -212,8 +224,8 @@ impl BrowserWorkerHandle {
             tick_mode: options.tick_mode,
         })?;
         let mut outputs = Vec::new();
-        for _ in 0..200 {
-            sleep_ms(25).await?;
+        for _ in 0..BOOT_POLL_BUDGET {
+            sleep_ms(BOOT_POLL_INTERVAL_MS).await?;
             for output in self.take_outputs() {
                 let ready = matches!(
                     &output,
@@ -322,6 +334,24 @@ impl BrowserWorkerHandle {
     }
 
     pub fn terminate(&self) {
+        self.worker.terminate();
+    }
+}
+
+/// Dropping a handle terminates its worker.
+///
+/// Nothing else can: the `onmessage`/`onerror` closures were `forget()`ed
+/// into the worker, so a handle that goes out of scope (a boot that timed
+/// out or errored, a spawn whose caller bailed) would otherwise leave the
+/// worker alive — still fetching and compiling the multi-MB fw-browser
+/// binary, competing for bandwidth with the retry that follows.
+///
+/// Safe from a synchronous `Drop`: `Worker::terminate()` is a synchronous
+/// DOM call (no await) and is idempotent, so the session-owned path —
+/// `BrowserWorkerProvider::close` terminates, the handle drops later —
+/// terminates twice with no effect the second time.
+impl Drop for BrowserWorkerHandle {
+    fn drop(&mut self) {
         self.worker.terminate();
     }
 }
