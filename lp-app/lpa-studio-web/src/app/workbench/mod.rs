@@ -49,7 +49,7 @@ use lpa_studio_core::{
 };
 
 use crate::app::{ProjectNodeWorkspace, ProjectPane};
-use crate::core::PaneView;
+use crate::core::{ActionButton, ActionButtonVariant, PaneView};
 use panels::{FixturesPanel, OutputsPanel};
 
 /// Which center the workbench renders — the route's view suffix
@@ -769,6 +769,7 @@ fn PanelBody(
     match (panel, view) {
         (PanelId::Tree, WorkbenchView::Nodes) => rsx! {
             div { class: "tw:grid tw:content-start tw:gap-3.5",
+                TreePanelActions { panes: panes.clone(), running, on_action }
                 for (index, pane) in panes.into_iter().enumerate() {
                     // The project pane renders FLAT here (ruling 2): the dock
                     // tab already names it, so a card inside the panel was
@@ -796,15 +797,18 @@ fn PanelBody(
             }
         },
         (PanelId::Tree, WorkbenchView::Mapping) => rsx! {
-            // Today's fixture tree, re-housed whole: mixed grain
-            // (effective instances + the dive's authored objects) is
-            // DELIBERATE until the R5 patching plan splits the grains
-            // (grain-follows-activity ruling).
-            FixturesPanel {
-                surface,
-                selection: patch_selection,
-                dive: (*dive_focused.read()).map(|node| (node, dive_session)),
-                on_action,
+            div { class: "tw:grid tw:content-start tw:gap-2.5",
+                TreePanelActions { panes: panes.clone(), running, on_action }
+                // Today's fixture tree, re-housed whole: mixed grain
+                // (effective instances + the dive's authored objects) is
+                // DELIBERATE until the R5 patching plan splits the grains
+                // (grain-follows-activity ruling).
+                FixturesPanel {
+                    surface,
+                    selection: patch_selection,
+                    dive: (*dive_focused.read()).map(|node| (node, dive_session)),
+                    on_action,
+                }
             }
         },
         (PanelId::Device, _) => rsx! {
@@ -836,6 +840,45 @@ fn PanelBody(
                 on_action,
             }
         },
+    }
+}
+
+/// The Tree panel's save affordances (G1 ruling): ONE row shared by every
+/// view's Tree body — the controller-supplied Save/Revert actions and the
+/// debug chip ride the PANEL composition, not the Nodes view's embedded
+/// pane, so the Map view offers the same affordances and the two can
+/// never drift. Renders nothing while there is nothing to offer.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn TreePanelActions(
+    panes: Vec<UiPaneView>,
+    running: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let Some(editor) = panes.iter().find_map(|pane| match &pane.body {
+        UiViewContent::ProjectEditor(editor) => Some((**editor).clone()),
+        _ => None,
+    }) else {
+        return rsx! {};
+    };
+    let header_actions = editor.header_actions.clone();
+    let debug_overrides = editor.debug_overrides;
+    if header_actions.is_empty() && debug_overrides == 0 {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-1.5",
+            for action in header_actions {
+                ActionButton {
+                    key: "{action.action.meta().label}",
+                    action: action.action.clone(),
+                    running,
+                    variant: ActionButtonVariant::Quiet,
+                    on_action,
+                }
+            }
+            crate::app::project::project_pane::DebugActiveChip { count: debug_overrides, on_action }
+        }
     }
 }
 

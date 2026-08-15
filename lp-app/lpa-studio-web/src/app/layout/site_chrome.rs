@@ -40,7 +40,7 @@ use dioxus::prelude::*;
 use dioxus_icons::lucide::{Archive, UserRound};
 use lpa_studio_core::{UiAction, UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget};
 
-use crate::app::affordance::{affordance_glyph_class, affordance_trigger_style};
+use crate::app::affordance::{affordance_chip_class, affordance_trigger_style};
 use crate::app::project::project_pane::trigger_label;
 use crate::app::project::{ProjectDetailContent, ProjectDetailSections};
 use crate::base::{
@@ -237,11 +237,12 @@ fn ProjectHeaderChip(chip: ChromeProjectChip) -> Element {
     let ChromeProjectChip { content, on_action } = chip;
     let affordance = content.affordance();
     let style = affordance_trigger_style(affordance);
-    let glyph_class = affordance_glyph_class(affordance);
     let name = content.project_name().to_string();
     let unsaved = content.unsaved_count();
     let trigger = rsx! {
-        span { class: "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:flex-none tw:items-center tw:justify-center {glyph_class}",
+        // Glyph and label inherit the toned button's color (the chip
+        // itself wears the state, G1 ruling).
+        span { class: "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:flex-none tw:items-center tw:justify-center",
             StudioIcon { name: style.icon, size: 13 }
         }
         // The unlayered `font: inherit` reset beats tw:font-*/tw:text-*
@@ -262,8 +263,8 @@ fn ProjectHeaderChip(chip: ChromeProjectChip) -> Element {
             tone: style.tone,
             placement: PopoverPlacement::BottomStart,
             trigger,
-            trigger_class: PROJECT_CHIP_IDLE.to_string(),
-            trigger_open_class: PROJECT_CHIP_OPEN.to_string(),
+            trigger_class: affordance_chip_class(affordance, false).to_string(),
+            trigger_open_class: affordance_chip_class(affordance, true).to_string(),
             layer_keeps_layout: true,
             ProjectDetailSections { content, on_action }
         }
@@ -732,14 +733,6 @@ const SESSION_CHIP_HERE: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:i
 const SESSION_CHIP_OPEN: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border tw:bg-background-wash tw:px-2 tw:py-1 tw:text-[11px] tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:text-strong-foreground";
 /// Idle: a live session the lens is not on.
 const SESSION_CHIP_IDLE: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1 tw:text-[11px] tw:font-semibold tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground";
-
-// The project chip (D8): the session chips' squared entity geometry —
-// a `<button>` under the popover base, so it names its own bg/border
-// (no-preflight trap) and keeps its text utilities on inner spans.
-/// Chip at rest.
-const PROJECT_CHIP_IDLE: &str = "tw:inline-flex tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1 tw:text-muted-foreground tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground";
-/// Chip while its popup is open.
-const PROJECT_CHIP_OPEN: &str = "tw:inline-flex tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border-strong tw:bg-background-wash tw:px-2 tw:py-1 tw:text-strong-foreground";
 
 /// The one ⋯ menu popup: wide enough for tool cards; section and session
 /// rows ride the same width.
