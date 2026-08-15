@@ -242,6 +242,17 @@ impl PendingOpen {
             PendingOpen::Example(id) => id,
         }
     }
+
+    /// The action that runs this open again — what the failed opening
+    /// frame's Retry dispatches. Built from the pending open itself so
+    /// Retry can never drift from what was actually attempted.
+    fn retry_action(&self) -> UiAction {
+        let op = match self {
+            PendingOpen::Package(key) => HomeOp::OpenPackage { key: key.clone() },
+            PendingOpen::Example(id) => HomeOp::OpenExample { id: id.clone() },
+        };
+        UiAction::from_op(crate::ControllerId::new(HOME_NODE_ID), op)
+    }
 }
 
 impl StudioController {
@@ -4993,17 +5004,49 @@ impl StudioController {
 
     /// Open a package or example ON THE SIMULATOR: start or reuse THE sim
     /// session, put the lens on it, and load. The explicit sim path.
+    ///
+    /// This is also where the open's public narration begins and ends
+    /// ([`crate::app::open_progress`]): the stage the opening frame reads,
+    /// the supersede generation the parked flow checks, and the terminal
+    /// failure that replaces the eternal skeleton with an error and a
+    /// Retry.
     async fn open_on_simulator(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
-        self.library_host()?;
         // The click owns the engine while it runs: background preview work
         // (pool boots, new lease deploys, hover-to-play) stops STARTING
         // until this guard drops, on every exit path — success, failure, or
         // the whole future being dropped. See `app::open_priority`.
         let _open_priority = crate::app::open_priority::begin_user_open();
-        self.pending_open = Some(pending);
-        let result = self.open_from_home_inner(updates).await;
-        self.pending_open = None;
-        result
+        crate::app::open_progress::note_open_started();
+        let retry = pending.retry_action();
+        // The missing-library refusal rides the SAME reporting as every
+        // other failure below (it used to `?` straight out, which left the
+        // opening frame narrating an open that had already given up).
+        let result = match self.library_host() {
+            Ok(_) => {
+                self.pending_open = Some(pending);
+                let result = self.open_from_home_inner(updates).await;
+                self.pending_open = None;
+                result
+            }
+            Err(error) => Err(error),
+        };
+        // A superseded open has no verdict to report: the user did not
+        // fail at anything, they clicked somewhere else. Its error (if the
+        // unwind produced one) is swallowed, and the stage is left to the
+        // open that replaced it — which has already started narrating.
+        if crate::app::open_progress::open_superseded() {
+            return Ok(UiNotices::new());
+        }
+        match result {
+            Ok(notices) => {
+                crate::app::open_progress::note_open_settled();
+                Ok(notices)
+            }
+            Err(error) => {
+                crate::app::open_progress::note_open_failed(error.message(), retry);
+                Err(error)
+            }
+        }
     }
 
     async fn open_from_home_inner(&mut self, updates: UxUpdateSink) -> UiResult {
@@ -5037,6 +5080,13 @@ impl StudioController {
                 // points run after this open, which needs the lock itself.
                 self.project.release_closed_library_projects().await;
             }
+        }
+        // Boundary 1 of 3 (post-teardown): the first real await this open
+        // can be outlived at. Nothing project-specific has happened yet —
+        // no lock, no worker, no deploy — so a stale open just leaves, and
+        // the teardown it did was work the newer open wanted anyway.
+        if crate::app::open_progress::open_superseded() {
+            return Ok(UiNotices::new());
         }
         // The open targets THE sim session: reuse it when it exists — the
         // lens moves onto it (the editor mirror opens on the sim) — and
@@ -5114,10 +5164,22 @@ impl StudioController {
 
     /// Push the pending package to the connected runtime and load it.
     async fn open_pending_package(&mut self, updates: UxUpdateSink) -> UiResult {
+        // Boundary 2 of 3 (post-boot): the engine is up and attached, and
+        // that is the expensive part — so the superseded open leaves the
+        // SIM SESSION STANDING and only skips its own deploy. The engine
+        // binary is identical for every open and projects deploy into a
+        // booted worker later (boot protocol), so the click that replaced
+        // this one walks straight into `open_pending_package` on the same
+        // worker. Terminating it here would make the newest click the
+        // slowest one.
+        if crate::app::open_progress::open_superseded() {
+            return Ok(UiNotices::new());
+        }
         let pending = self
             .pending_open
             .clone()
             .ok_or_else(|| UiError::MissingSession("no pending package to open".to_string()))?;
+        crate::app::open_progress::note_preparing_project();
         emit_activity(
             &updates,
             UxActivityTarget::pane(ProjectController::NODE_ID),

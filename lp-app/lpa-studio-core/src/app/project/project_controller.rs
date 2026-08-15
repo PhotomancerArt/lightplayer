@@ -2695,6 +2695,19 @@ impl ProjectController {
             history_fs,
             receipt,
         } = opened;
+        // Boundary 3 of 3 (post-lock): acquiring the project lock is the
+        // one long wait inside the open that a newer click can outlive —
+        // this tab's own cloud sync trip can be snapshotting under it (D1),
+        // and the acquire polls. Giving the open back HERE, before
+        // anything is mutated, is exactly what the receipt is for: the
+        // lock, the registration and the flushers all go, so the click
+        // that replaced this one can take the same project a moment later.
+        if crate::app::open_progress::open_superseded() {
+            receipt.abandon();
+            return Err(UiError::Cancelled(
+                "the open was superseded by a newer one".to_string(),
+            ));
+        }
         let now = {
             let context = self.library.as_mut().ok_or_else(no_library_error)?;
             if let Some(previous) = context.active.take() {

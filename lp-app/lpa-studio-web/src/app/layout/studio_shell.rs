@@ -79,8 +79,10 @@ pub fn StudioShell(
     } = view;
 
     if opening_frame && panes.is_empty() {
+        // The frame polls the open pipeline itself (its module explains
+        // why); all it needs from here is somewhere for Retry to go.
         return rsx! {
-            div { class: "tw:grid tw:gap-7", ProjectOpeningFrame {} }
+            div { class: "tw:grid tw:gap-7", ProjectOpeningFrame { on_action } }
         };
     }
 

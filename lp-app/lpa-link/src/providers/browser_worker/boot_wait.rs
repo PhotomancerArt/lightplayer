@@ -12,6 +12,12 @@
 //! This module is browser-free on purpose: it lives outside the wasm32
 //! gate so its unit tests run in the native suite (the wasm half,
 //! `worker_handle::boot`, only feeds it observations).
+//!
+//! It also PUBLISHES those observations ([`worker_boot_phase`]) so the
+//! opening frame can name the phase a click is waiting on. That is a read
+//! surface over the existing protocol, not an addition to it.
+
+use std::cell::RefCell;
 
 /// How the worker receives the fw-browser wasm (boot protocol v2).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,6 +53,65 @@ pub const BOOT_PHASE_INACTIVITY_MS: f64 = 20_000.0;
 /// emits no intermediate statuses, so this budget must cover the whole
 /// download on a slow connection.
 pub const BOOT_PATH_INSTANTIATE_INACTIVITY_MS: f64 = 120_000.0;
+
+/// The `label` [`BrowserWorkerHandle::boot`](crate::providers::browser_worker::BrowserWorkerHandle::boot)
+/// is given for the STUDIO's own runtime worker — the one a project opens
+/// on. Preview-pool members boot under their own labels, so a reader
+/// narrating a user's open (the opening frame) can tell the click's engine
+/// from the gallery's.
+pub const STUDIO_RUNTIME_WORKER_LABEL: &str = "Studio browser runtime";
+
+/// The boot phase a worker last reported: its label and the raw status
+/// word from the boot protocol (`booting`, `instantiating`, `gpu-init`,
+/// `runtime-create`, `ready`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkerBootPhase {
+    /// The booting worker's label (see [`STUDIO_RUNTIME_WORKER_LABEL`]).
+    pub label: String,
+    /// The protocol's status word for the phase now in progress.
+    pub status: String,
+}
+
+thread_local! {
+    static BOOT_PHASE: RefCell<Option<WorkerBootPhase>> = const { RefCell::new(None) };
+}
+
+/// The boot phase currently in progress, or `None` when no worker is
+/// booting. A read surface only — the boot protocol itself is unchanged.
+///
+/// A signal rather than a plumbed handle for the same reason
+/// `engine_asset_phase` is one: the producer is a worker handle deep in a
+/// connect ladder, and the consumer is a frame in the page's view tree.
+/// Everything here runs on the browser's single thread.
+pub fn worker_boot_phase() -> Option<WorkerBootPhase> {
+    BOOT_PHASE.with(|phase| phase.borrow().clone())
+}
+
+/// Record the phase `label`'s boot just entered.
+pub fn note_boot_phase(label: &str, status: &str) {
+    BOOT_PHASE.with(|phase| {
+        *phase.borrow_mut() = Some(WorkerBootPhase {
+            label: label.to_string(),
+            status: status.to_string(),
+        });
+    });
+}
+
+/// Clear the published phase when `label`'s boot settles (ready, failed,
+/// or timed out). Scoped to the label that published last so a
+/// concurrently-booting preview worker cannot clear the studio's phase (or
+/// the other way round).
+pub fn note_boot_settled(label: &str) {
+    BOOT_PHASE.with(|phase| {
+        let mine = phase
+            .borrow()
+            .as_ref()
+            .is_some_and(|published| published.label == label);
+        if mine {
+            phase.borrow_mut().take();
+        }
+    });
+}
 
 /// One expired boot wait: which phase went quiet and for how long.
 #[derive(Clone, Debug, PartialEq)]
@@ -92,7 +157,8 @@ impl BootWaitClock {
 
     /// The inactivity budget the current phase is entitled to.
     pub fn budget_ms(&self) -> f64 {
-        if self.delivery == BootDelivery::Path && self.last_status.as_deref() == Some("instantiating")
+        if self.delivery == BootDelivery::Path
+            && self.last_status.as_deref() == Some("instantiating")
         {
             BOOT_PATH_INSTANTIATE_INACTIVITY_MS
         } else {
@@ -144,7 +210,9 @@ mod tests {
         clock.advance(BOOT_PHASE_INACTIVITY_MS / 2.0);
         clock.observe_status("booting");
         clock.advance(BOOT_PHASE_INACTIVITY_MS / 2.0);
-        let expired = clock.expired().expect("a re-posted status must not extend the wait");
+        let expired = clock
+            .expired()
+            .expect("a re-posted status must not extend the wait");
         assert_eq!(expired.phase.as_deref(), Some("booting"));
     }
 

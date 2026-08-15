@@ -16,7 +16,9 @@ pub(crate) fn ExampleCard(
     /// This card's open is in flight.
     #[props(default = false)]
     opening: bool,
-    /// Some other open is in flight — clicks are ignored.
+    /// Some other open is in flight. The card reads busy — but it still
+    /// takes clicks: the newest click wins (D4), and a click that looks
+    /// ignored is the failure this whole change exists to remove.
     #[props(default = false)]
     busy: bool,
     on_action: EventHandler<UiAction>,
@@ -29,12 +31,17 @@ pub(crate) fn ExampleCard(
 
     rsx! {
         article {
-            class: example_card_class(opening),
+            class: example_card_class(opening, busy),
             onclick: move |_| {
-                if !busy && !opening {
-                    on_action.call(home_action(HomeOp::OpenExample {
-                        id: open_id.clone(),
-                    }));
+                // `busy` no longer swallows the click: an open already in
+                // flight is SUPERSEDED by this one (D4). Only the card
+                // whose own open is running stays inert — there is nothing
+                // for it to supersede but itself.
+                if !opening {
+                    on_action
+                        .call(home_action(HomeOp::OpenExample {
+                            id: open_id.clone(),
+                        }));
                 }
             },
             onmouseenter: hover_enter,
@@ -62,10 +69,18 @@ pub(crate) fn ExampleCard(
     }
 }
 
-fn example_card_class(opening: bool) -> &'static str {
-    if opening {
-        "tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
-    } else {
-        "tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+/// The card's treatment while an open runs. Busy is a DIMMING, not a
+/// disabling: the cursor stays a pointer because the card still acts.
+fn example_card_class(opening: bool, busy: bool) -> &'static str {
+    match (opening, busy) {
+        (true, _) => {
+            "tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
+        }
+        (false, true) => {
+            "tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
+        }
+        (false, false) => {
+            "tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+        }
     }
 }
