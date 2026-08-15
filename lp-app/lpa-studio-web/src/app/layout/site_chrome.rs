@@ -75,6 +75,8 @@ pub struct ChromeProjectMenu {
 pub struct ChromeProjectChip {
     pub content: ProjectDetailContent,
     pub on_action: EventHandler<UiAction>,
+    /// Open the detail popup immediately (stories only).
+    pub initially_open: bool,
 }
 
 /// Which nav tab renders as the current section. Home has no tab — the
@@ -234,7 +236,11 @@ pub fn SiteChrome(
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectHeaderChip(chip: ChromeProjectChip) -> Element {
-    let ChromeProjectChip { content, on_action } = chip;
+    let ChromeProjectChip {
+        content,
+        on_action,
+        initially_open,
+    } = chip;
     let affordance = content.affordance();
     let style = affordance_trigger_style(affordance);
     let name = content.project_name().to_string();
@@ -266,6 +272,7 @@ fn ProjectHeaderChip(chip: ChromeProjectChip) -> Element {
             trigger_class: affordance_chip_class(affordance, false).to_string(),
             trigger_open_class: affordance_chip_class(affordance, true).to_string(),
             layer_keeps_layout: true,
+            initially_open,
             ProjectDetailSections { content, on_action }
         }
     }
