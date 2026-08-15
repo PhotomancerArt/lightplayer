@@ -11,21 +11,19 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{ErrorEvent, MessageEvent, Url, Worker, WorkerOptions, WorkerType};
 
 use crate::LinkError;
+use crate::providers::browser_worker::boot_wait::{BootDelivery, BootWaitClock};
 use crate::providers::browser_worker::{
-    BrowserInputEnvelope, BrowserOutputEnvelope, BrowserWorkerOptions,
+    BrowserInputEnvelope, BrowserOutputEnvelope, BrowserWorkerOptions, engine_cache,
 };
 
 /// How long [`BrowserWorkerHandle::boot`] sleeps between drains of the
 /// worker's output buffer while waiting for `ready`.
-const BOOT_POLL_INTERVAL_MS: i32 = 25;
-/// How many [`BOOT_POLL_INTERVAL_MS`] polls a boot may spend before it is
-/// declared timed out — 200 × 25 ms ≈ 5 s of TOTAL elapsed time, which is
-/// the whole fw-browser fetch + compile + runtime init.
 ///
-/// The policy (total elapsed, flat) is unchanged here on purpose; this is
-/// the one seam it lives on, so the inactivity-based, phase-aware timeout
-/// replaces these two constants rather than hunting inline numbers.
-const BOOT_POLL_BUDGET: usize = 200;
+/// The timeout itself is inactivity-based and phase-aware — see
+/// [`boot_wait::BootWaitClock`]; this is only the drain cadence. Idle time
+/// is accounted in nominal intervals, so a throttled (hidden) tab counts
+/// slower than wall-clock — conservative in the safe direction.
+const BOOT_POLL_INTERVAL_MS: i32 = 25;
 
 /// One binary preview frame received from the worker.
 ///
@@ -217,16 +215,47 @@ impl BrowserWorkerHandle {
     ) -> Result<Vec<BrowserOutputEnvelope>, LinkError> {
         let fw_browser_module_path = resolve_page_url(&options.fw_browser_module_path)?;
         let fw_browser_wasm_path = resolve_page_url(&options.fw_browser_wasm_path)?;
+        // Prefer the page-shared compiled module (one fetch + one compile
+        // serve every worker); fall back to per-worker path fetch when the
+        // page-side compile failed — the boot budget knows the difference.
+        let shared_module = match engine_cache::shared_engine_module(&fw_browser_wasm_path).await {
+            Ok(module) => Some(module),
+            Err(error) => {
+                web_sys::console::warn_1(&JsValue::from_str(&format!(
+                    "[lpa-link] shared engine module unavailable, worker {label} falls back \
+                     to path fetch: {error}"
+                )));
+                None
+            }
+        };
+        let delivery = if shared_module.is_some() {
+            BootDelivery::SharedModule
+        } else {
+            BootDelivery::Path
+        };
         self.post(&BrowserInputEnvelope::Boot {
             label: label.to_string(),
             fw_browser_module_path,
             fw_browser_wasm_path,
             tick_mode: options.tick_mode,
+            module_delivery: delivery.wire_value().to_string(),
         })?;
+        if let Some(module) = &shared_module {
+            self.post_boot_module(module)?;
+        }
+        // Inactivity-based wait: each phase-status change resets the clock,
+        // so a slow-but-alive boot (cold GPU device, big instantiate, or a
+        // fallback-path network fetch) keeps going while a genuinely hung
+        // phase still fails within its budget.
+        let mut clock = BootWaitClock::new(delivery);
         let mut outputs = Vec::new();
-        for _ in 0..BOOT_POLL_BUDGET {
+        loop {
             sleep_ms(BOOT_POLL_INTERVAL_MS).await?;
+            clock.advance(f64::from(BOOT_POLL_INTERVAL_MS));
             for output in self.take_outputs() {
+                if let BrowserOutputEnvelope::Status { status, .. } = &output {
+                    clock.observe_status(status);
+                }
                 let ready = matches!(
                     &output,
                     BrowserOutputEnvelope::Status { status, .. } if status == "ready"
@@ -242,11 +271,41 @@ impl BrowserWorkerHandle {
                     return Ok(outputs);
                 }
             }
+            if let Some(expired) = clock.expired() {
+                let phase = expired
+                    .phase
+                    .as_deref()
+                    .unwrap_or("before any worker status");
+                return Err(LinkError::other(format!(
+                    "timed out waiting for browser worker boot (no status change for \
+                     {:.0}s during {phase}){}",
+                    expired.budget_ms / 1000.0,
+                    boot_output_summary(&outputs)
+                )));
+            }
         }
-        Err(LinkError::other(format!(
-            "timed out waiting for browser worker boot{}",
-            boot_output_summary(&outputs)
-        )))
+    }
+
+    /// Deliver the page-compiled engine module for a pending boot (boot
+    /// protocol v2). Like [`Self::attach_preview_surface`], this cannot
+    /// ride the serde envelope path: a `WebAssembly.Module` is a JS object
+    /// that must travel by structured clone (no transfer list — cloning a
+    /// module shares the compiled code).
+    fn post_boot_module(&self, module: &JsValue) -> Result<(), LinkError> {
+        if let Some(message) = self.fatal.borrow().as_ref() {
+            return Err(LinkError::other(message.clone()));
+        }
+        let message = js_sys::Object::new();
+        let set = |key: &str, value: &JsValue| -> Result<(), LinkError> {
+            js_sys::Reflect::set(&message, &JsValue::from_str(key), value)
+                .map(|_| ())
+                .map_err(|error| LinkError::other(format!("{error:?}")))
+        };
+        set("kind", &JsValue::from_str("boot_module"))?;
+        set("module", module)?;
+        self.worker
+            .post_message(&message)
+            .map_err(|error| LinkError::other(format!("{error:?}")))
     }
 
     pub fn post(&self, envelope: &BrowserInputEnvelope) -> Result<(), LinkError> {
