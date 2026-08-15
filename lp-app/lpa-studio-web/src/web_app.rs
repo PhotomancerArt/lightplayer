@@ -829,6 +829,7 @@ pub fn App() -> Element {
                 lpa_studio_core::UiViewContent::ProjectEditor(editor) => Some(ChromeProjectChip {
                     content: ProjectDetailContent::new(editor, pane.status.clone()),
                     on_action,
+                    initially_open: false,
                 }),
                 _ => None,
             })

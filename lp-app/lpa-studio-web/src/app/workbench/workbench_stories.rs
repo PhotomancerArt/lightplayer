@@ -177,21 +177,21 @@ fn outputs_panel_mini_dome() -> Element {
 }
 
 #[story(
-    description = "The workbench's Nodes view: both docks open, so each wears its own TAB ROW (Nodes · Fixtures left, Device · Outputs right) instead of an edge strip — the active tab is the open panel, and pressing it collapses the side. The project pane renders FLAT in the left dock (no card, no header, no [i] — that popup moved to the root node card's ⓘ in the center), and the center's view tabs sit visibly heavier than the dock tabs above it."
+    description = "The workbench's Nodes view under the ONE band (D7): the Tree's attached tab over the left dock, Nodes · Map centered, Device · Outputs over the right — the active panel tab shares its dock's fill and breaks the band's bottom hairline, so it reads as the panel's own. The Tree carries the shared Save row and the embedded project tree; its popup lives on the header project chip."
 )]
 fn workbench_nodes_view() -> Element {
     workbench_story(ProjectView::Workspace)
 }
 
 #[story(
-    description = "The workbench's Mapping view with the unified editor's coordinator mounted in the center: the Arrange toolbar strip (fixture/arranged counts on the right, the reserved tool slot on the left) over the canvas pane's honest placeholder — the arrange canvas itself is the next mount. Docks default to Fixtures left, Outputs right."
+    description = "The workbench's Map view: the SAME Tree panel now shows the fixture tree (one panel, one ROLE — the view supplies the content, D10) with its summary footer pinned at the dock bottom (D12); the right roster reads Props · Outputs · Device with Props attached. The unified editor's coordinator is the center."
 )]
 fn workbench_mapping_view() -> Element {
     workbench_story(ProjectView::Mapping)
 }
 
 #[story(
-    description = "The mobile fold with a panel summoned: below the fold breakpoint the summon strip carries the view switch plus the four panel toggles (the edge strips, folded), and the summoned Outputs panel replaces the main view under a back header. The sm capture is the point — at lg the same mount shows the desktop docks."
+    description = "The mobile fold (≤820px — the G1 ruling moved it down from 960 so md widths keep real docks) with a panel summoned: the summon strip carries the view switch plus the view's ROSTERED panel toggles, and the summoned Outputs panel replaces the main view under a back header. The sm capture is the point — at lg the same mount shows the band and docks."
 )]
 fn workbench_mobile_outputs_summoned() -> Element {
     rsx! {
@@ -218,7 +218,7 @@ fn workbench_mobile_outputs_summoned() -> Element {
 }
 
 #[story(
-    description = "Both docks collapsed (a press on the active dock tab): the vertical edge strips are all that remain of the sides — the collapsed state's handle — and the center takes the full width. A strip button expands that panel, and the strip is replaced by the dock's tab row."
+    description = "Both docks collapsed (a press on each active band tab): the tab rows PERSIST on the band with no active tab — the persistent row IS the reopen affordance (D11; edge strips and chevrons are gone) — and the center takes the full width under an unbroken band hairline."
 )]
 fn workbench_docks_collapsed() -> Element {
     workbench_memory_story(
@@ -241,7 +241,7 @@ fn workbench_docks_collapsed() -> Element {
 }
 
 #[story(
-    description = "The two side treatments in one frame: the left side collapsed to its vertical strip, the right side open under its Device · Outputs tab row. The comparison is the point — a side is named EITHER by a strip or by tabs, never both, and the dock tabs stay lighter than the center's view tabs."
+    description = "The two side treatments in one band: the left side collapsed (its TREE tab persists, inactive, with the band hairline running unbroken beneath it), the right side open (Device's attached tab sharing the dock fill). The comparison is the point — one grammar names both states, and the panel tabs stay lighter than the view tabs."
 )]
 fn workbench_mixed_dock_states() -> Element {
     workbench_memory_story(
