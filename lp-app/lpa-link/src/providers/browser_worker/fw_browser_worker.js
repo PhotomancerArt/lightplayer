@@ -3,6 +3,15 @@ let booted = false;
 let fwBrowser = null;
 let wasmExports = null;
 
+// Shared-module delivery (boot protocol v2). The host may compile the
+// fw-browser wasm once on the page and hand every worker the compiled
+// `WebAssembly.Module` in a `boot_module` message, so workers only
+// instantiate. The module and the `boot` envelope race on the same
+// message queue; either arrival order works — whichever side is second
+// completes the wait.
+let sharedModule = null;
+let sharedModuleWaiters = [];
+
 // Clock ownership. In "self_ticking" mode the worker drives the firmware clock
 // from its own timer using real measured deltas so previews animate at roughly
 // real time even when no protocol request is in flight. In "explicit" mode the
@@ -41,7 +50,18 @@ self.onmessage = async (event) => {
           message.fw_browser_module_path,
           message.fw_browser_wasm_path,
           message.tick_mode || "self_ticking",
+          message.module_delivery || "path",
         );
+        break;
+      case "boot_module":
+        // Compiled-module delivery for a pending (or upcoming) boot. May
+        // arrive while `boot` is awaiting the glue import — the handler
+        // interleaves on the worker event loop and completes the wait.
+        sharedModule = message.module;
+        for (const waiter of sharedModuleWaiters) {
+          waiter(sharedModule);
+        }
+        sharedModuleWaiters = [];
         break;
       case "create_runtime": {
         requireBooted();
@@ -143,25 +163,45 @@ function isTeardownAbort(error) {
   );
 }
 
-async function boot(label, modulePath, wasmPath, mode) {
+// Boot phases post a status at every transition — the host's timeout is
+// inactivity-based (no status change for too long), so each phase label
+// below is protocol, not logging. The vocabulary (booting → instantiating
+// → gpu-init → runtime-create → ready) is documented in the boot-protocol
+// ADR; keep the strings stable.
+async function boot(label, modulePath, wasmPath, mode, moduleDelivery) {
   if (!booted) {
     if (!modulePath) {
       throw new Error("missing fw_browser_module_path");
     }
     self.postMessage({ kind: "status", status: "booting" });
     fwBrowser = await import(modulePath);
+    // "message" delivery: instantiate the page-compiled Module (no fetch,
+    // no compile in this worker). "path" delivery: classic per-worker
+    // fetch+compile from the URL — the fallback when page-side compile
+    // failed, and the long phase the host budgets generously for.
+    let moduleOrPath;
+    if (moduleDelivery === "message") {
+      moduleOrPath =
+        sharedModule ??
+        (await new Promise((resolve) => sharedModuleWaiters.push(resolve)));
+    } else {
+      moduleOrPath = wasmPath;
+    }
+    self.postMessage({ kind: "status", status: "instantiating" });
     wasmExports = await fwBrowser.default(
-      wasmPath ? { module_or_path: wasmPath } : undefined,
+      moduleOrPath ? { module_or_path: moduleOrPath } : undefined,
     );
     fwBrowser.fw_browser_init_exports(wasmExports);
     // One WebGPU device request per worker, at boot. The outcome (available
     // or unavailable with a reason) is recorded inside the wasm module and
     // applied to every later `gpu` tier request — boot never fails over it.
+    self.postMessage({ kind: "status", status: "gpu-init" });
     const gpuInit = JSON.parse(await fwBrowser.init_gpu_device());
     if (!gpuInit.available) {
       console.info("[fw-browser-worker] webgpu unavailable:", gpuInit.reason);
     }
     // The boot runtime is always CPU-tier (the authoritative sim tier).
+    self.postMessage({ kind: "status", status: "runtime-create" });
     bootRuntimeId = JSON.parse(fwBrowser.create_runtime(label, "cpu")).runtime_id;
     booted = true;
     tickMode = mode;

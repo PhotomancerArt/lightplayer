@@ -24,6 +24,11 @@
 pub mod browser_serial_esp32;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub mod browser_worker;
+// Pure (browser-free) boot-wait policy for the browser-worker provider.
+// Declared outside the wasm32 gate so its unit tests run in the native
+// suite; `browser_worker::worker_handle` only feeds it observations.
+#[path = "browser_worker/boot_wait.rs"]
+pub mod browser_worker_boot_wait;
 pub mod fake;
 #[cfg(feature = "fake-device")]
 pub mod fake_device;
