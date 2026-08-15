@@ -933,7 +933,10 @@ mod tests {
         // ran on a fresh connect rather than the first error surfacing.
         let registry = registry_with_fake_endpoint();
         let connector = registry.create_connector(LinkProviderKind::Fake).unwrap();
-        set_fake_connect_error(&connector, Some("first boot lost the fetch race".to_string()));
+        set_fake_connect_error(
+            &connector,
+            Some("first boot lost the fetch race".to_string()),
+        );
         let healing = Rc::clone(&connector);
         let timers = DeviceTimers::new(move |_duration| {
             set_fake_connect_error(&healing, None);

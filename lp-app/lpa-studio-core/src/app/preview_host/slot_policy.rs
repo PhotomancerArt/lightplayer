@@ -1,6 +1,6 @@
 //! Pure pool policies: least-loaded worker choice, LRU eviction, which
-//! pending leases may start deploying, and when a dead pool worker may be
-//! re-booted.
+//! pending leases may start deploying, which pool member boots next, and
+//! when a dead pool worker may be re-booted.
 //!
 //! Kept browser-free so the decisions the host makes under budget pressure
 //! are unit-testable natively.
@@ -21,6 +21,78 @@ pub const DEAD_WORKER_RETRY_BUDGET: usize = 3;
 /// demand, never on a timer).
 pub const DEAD_WORKER_RETRY_BACKOFF_MS: [f64; DEAD_WORKER_RETRY_BUDGET] =
     [2_000.0, 8_000.0, 30_000.0];
+
+/// Whether the host may START background preview work this tick.
+///
+/// The hold is a *deferral*, not a cancellation: nothing in flight is
+/// touched and nothing queues up behind the gate — every decision it
+/// declines is simply taken again on the next tick, so the pool resumes by
+/// itself the moment the gate opens.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StartGate {
+    /// Nothing is competing for the engine: start what the budgets allow.
+    Open,
+    /// A user-initiated open is in flight and owns the engine's
+    /// fetch/compile budget: start nothing new until it settles.
+    HoldForUserOpen,
+}
+
+impl StartGate {
+    /// The gate a scheduler tick runs under, read off the page's
+    /// open-in-flight signal ([`crate::user_open_in_flight`]).
+    pub fn from_user_open(user_open_in_flight: bool) -> Self {
+        if user_open_in_flight {
+            Self::HoldForUserOpen
+        } else {
+            Self::Open
+        }
+    }
+
+    fn holds(self) -> bool {
+        matches!(self, Self::HoldForUserOpen)
+    }
+}
+
+/// One pool entry as the boot scheduler sees it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BootSlotState {
+    /// Never started: waiting its turn in the staggered boot queue.
+    Pending,
+    /// A boot (first start, respawn, or dead-worker retry) is in flight.
+    Booting,
+    /// Booted and serving leases.
+    Ready,
+    /// Boot failed; whether it may try again is [`dead_worker_next`]'s
+    /// business, not this scheduler's.
+    Dead,
+}
+
+/// Whether the pool may start ANY boot this tick.
+///
+/// One boot at a time, page-wide: the pool members all fetch and compile
+/// the *same* multi-MB engine wasm, so starting them together turns one
+/// download into N racing downloads, each slower than the single one would
+/// have been — which is exactly what made a boot budget expire on a cold,
+/// throttled load. Serialized, the second boot also finds the first one's
+/// bytes already in the HTTP cache.
+pub fn pool_may_start_boot(states: &[BootSlotState], gate: StartGate) -> bool {
+    !gate.holds() && !states.contains(&BootSlotState::Booting)
+}
+
+/// Which pool member starts booting this tick, if any: the lowest-indexed
+/// entry that has never started, once [`pool_may_start_boot`] allows it.
+///
+/// A `Dead` entry does not block its successors — its own recovery is
+/// demand-driven and cooled down ([`dead_worker_next`]) — so a pool whose
+/// first member failed still fills in behind it.
+pub fn choose_boot_start(states: &[BootSlotState], gate: StartGate) -> Option<usize> {
+    if !pool_may_start_boot(states, gate) {
+        return None;
+    }
+    states
+        .iter()
+        .position(|state| *state == BootSlotState::Pending)
+}
 
 /// What a dead pool worker's entry should do next.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -126,16 +198,23 @@ pub fn choose_worker(loads: &[Option<usize>]) -> Option<usize> {
 ///
 /// `candidates` are `(slot_id, visible)` for the slots that passed the
 /// caller's pending gate, `deploying_now` counts slots already mid-deploy
-/// across the whole pool, and `max_concurrent_deploys` is the cap (the
-/// pool size: one in-flight deploy per worker). Visible slots go first —
-/// they are what the user is looking at — then ascending slot id, which is
-/// lease order, so the queue is stable and nothing starves: a slot not
-/// chosen this tick stays pending and is reconsidered on the next one.
+/// across the whole pool, `max_concurrent_deploys` is the cap (the pool
+/// size: one in-flight deploy per worker), and `gate` is the tick's
+/// open-priority verdict — a user-initiated open starts no background
+/// deploys at all, and the deploys already running are left to finish.
+/// Visible slots go first — they are what the user is looking at — then
+/// ascending slot id, which is lease order, so the queue is stable and
+/// nothing starves: a slot not chosen this tick stays pending and is
+/// reconsidered on the next one.
 pub fn choose_starts(
     mut candidates: Vec<(u64, bool)>,
     deploying_now: usize,
     max_concurrent_deploys: usize,
+    gate: StartGate,
 ) -> Vec<u64> {
+    if gate.holds() {
+        return Vec::new();
+    }
     let room = max_concurrent_deploys.saturating_sub(deploying_now);
     if room == 0 {
         return Vec::new();
@@ -212,20 +291,29 @@ mod tests {
     #[test]
     fn starts_take_visible_slots_before_invisible_ones() {
         let candidates = vec![(1, false), (2, false), (3, true), (4, true)];
-        assert_eq!(choose_starts(candidates, 0, 3), vec![3, 4, 1]);
+        assert_eq!(
+            choose_starts(candidates, 0, 3, StartGate::Open),
+            vec![3, 4, 1]
+        );
     }
 
     #[test]
     fn starts_within_a_visibility_class_follow_lease_order() {
         let candidates = vec![(9, true), (2, true), (5, true)];
-        assert_eq!(choose_starts(candidates, 0, 2), vec![2, 5]);
+        assert_eq!(choose_starts(candidates, 0, 2, StartGate::Open), vec![2, 5]);
     }
 
     #[test]
     fn starts_leave_room_for_the_deploys_already_in_flight() {
         let candidates = vec![(1, true), (2, true), (3, true)];
-        assert_eq!(choose_starts(candidates.clone(), 1, 2), vec![1]);
-        assert_eq!(choose_starts(candidates, 2, 2), Vec::<u64>::new());
+        assert_eq!(
+            choose_starts(candidates.clone(), 1, 2, StartGate::Open),
+            vec![1]
+        );
+        assert_eq!(
+            choose_starts(candidates, 2, 2, StartGate::Open),
+            Vec::<u64>::new()
+        );
     }
 
     #[test]
@@ -233,18 +321,115 @@ mod tests {
         // More in flight than the cap allows (the cap shrank, or a recycle
         // left extra deploys behind): no new starts, and no underflow.
         let candidates = vec![(1, true)];
-        assert_eq!(choose_starts(candidates, 5, 2), Vec::<u64>::new());
+        assert_eq!(
+            choose_starts(candidates, 5, 2, StartGate::Open),
+            Vec::<u64>::new()
+        );
     }
 
     #[test]
     fn starts_with_nothing_pending_are_empty() {
-        assert_eq!(choose_starts(Vec::new(), 0, 2), Vec::<u64>::new());
+        assert_eq!(
+            choose_starts(Vec::new(), 0, 2, StartGate::Open),
+            Vec::<u64>::new()
+        );
     }
 
     #[test]
     fn starts_are_capped_below_what_is_pending() {
         let candidates = vec![(1, true), (2, true), (3, true), (4, true)];
-        assert_eq!(choose_starts(candidates, 0, 2), vec![1, 2]);
+        assert_eq!(choose_starts(candidates, 0, 2, StartGate::Open), vec![1, 2]);
+    }
+
+    #[test]
+    fn no_lease_starts_while_a_user_open_is_in_flight() {
+        // Open-priority: an idle pool with room to spare still starts
+        // nothing while the user's click is being served.
+        let candidates = vec![(1, true), (2, false)];
+        assert_eq!(
+            choose_starts(candidates, 0, 4, StartGate::HoldForUserOpen),
+            Vec::<u64>::new()
+        );
+    }
+
+    #[test]
+    fn lease_starts_resume_by_themselves_when_the_open_settles() {
+        // Nothing was queued or cancelled by the hold: the same candidates
+        // are chosen on the next tick, in the same order.
+        let candidates = vec![(1, true), (2, false)];
+        assert_eq!(
+            choose_starts(candidates.clone(), 0, 4, StartGate::HoldForUserOpen),
+            Vec::<u64>::new()
+        );
+        assert_eq!(choose_starts(candidates, 0, 4, StartGate::Open), vec![1, 2]);
+    }
+
+    #[test]
+    fn the_start_gate_follows_the_open_in_flight_signal() {
+        assert_eq!(StartGate::from_user_open(false), StartGate::Open);
+        assert_eq!(StartGate::from_user_open(true), StartGate::HoldForUserOpen);
+    }
+
+    #[test]
+    fn the_pool_boots_one_member_at_a_time() {
+        use BootSlotState::{Booting, Pending, Ready};
+        // Nothing in flight: the first member starts.
+        assert_eq!(
+            choose_boot_start(&[Pending, Pending], StartGate::Open),
+            Some(0)
+        );
+        // While it boots, its successor waits — three racing fetches of the
+        // same multi-MB engine wasm is the boot storm this phase removes.
+        assert_eq!(
+            choose_boot_start(&[Booting, Pending], StartGate::Open),
+            None
+        );
+        // Ready (or failed) frees the queue for the next one.
+        assert_eq!(
+            choose_boot_start(&[Ready, Pending, Pending], StartGate::Open),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn a_failed_pool_member_does_not_block_the_boots_behind_it() {
+        use BootSlotState::{Dead, Pending};
+        // A Dead entry's own recovery is demand-driven and cooled down; the
+        // rest of the pool must not wait on it.
+        assert_eq!(
+            choose_boot_start(&[Dead, Pending], StartGate::Open),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn a_fully_started_pool_starts_nothing_more() {
+        use BootSlotState::{Dead, Ready};
+        assert_eq!(choose_boot_start(&[Ready, Ready], StartGate::Open), None);
+        assert_eq!(choose_boot_start(&[Ready, Dead], StartGate::Open), None);
+        assert_eq!(choose_boot_start(&[], StartGate::Open), None);
+    }
+
+    #[test]
+    fn no_boot_starts_while_a_user_open_is_in_flight() {
+        use BootSlotState::{Dead, Pending};
+        let states = [Pending, Pending];
+        assert!(!pool_may_start_boot(&states, StartGate::HoldForUserOpen));
+        assert_eq!(choose_boot_start(&states, StartGate::HoldForUserOpen), None);
+        // The same hold covers a dead member's retry — a re-boot is a boot.
+        assert!(!pool_may_start_boot(
+            &[Dead, Dead],
+            StartGate::HoldForUserOpen
+        ));
+    }
+
+    #[test]
+    fn boots_resume_from_where_they_stopped_when_the_open_settles() {
+        use BootSlotState::{Pending, Ready};
+        let states = [Ready, Pending];
+        assert_eq!(choose_boot_start(&states, StartGate::HoldForUserOpen), None);
+        assert_eq!(choose_boot_start(&states, StartGate::Open), Some(1));
+        assert!(pool_may_start_boot(&states, StartGate::Open));
     }
 
     #[test]

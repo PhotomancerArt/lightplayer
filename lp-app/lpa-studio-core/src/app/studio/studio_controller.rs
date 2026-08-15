@@ -4995,6 +4995,11 @@ impl StudioController {
     /// session, put the lens on it, and load. The explicit sim path.
     async fn open_on_simulator(&mut self, pending: PendingOpen, updates: UxUpdateSink) -> UiResult {
         self.library_host()?;
+        // The click owns the engine while it runs: background preview work
+        // (pool boots, new lease deploys, hover-to-play) stops STARTING
+        // until this guard drops, on every exit path — success, failure, or
+        // the whole future being dropped. See `app::open_priority`.
+        let _open_priority = crate::app::open_priority::begin_user_open();
         self.pending_open = Some(pending);
         let result = self.open_from_home_inner(updates).await;
         self.pending_open = None;
