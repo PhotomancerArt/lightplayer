@@ -631,10 +631,7 @@ impl SyncMount {
         let Some(owner) = self.snapshot_of else {
             return;
         };
-        let pending = [
-            self.package.pending_writes(),
-            self.history.pending_writes(),
-        ];
+        let pending = [self.package.pending_writes(), self.history.pending_writes()];
         if pending.iter().all(|writes| writes.is_empty()) {
             return;
         }

@@ -31,7 +31,8 @@ pub use library_layout::{
     HISTORY_DIR, LIBRARY_ROOT_DIR, PACKAGES_DIR, open_library_root, open_library_subdir,
 };
 pub use library_locks::{
-    LibraryLock, LibraryLockGuard, held_project_uids, try_acquire, try_acquire_polling,
+    LibraryLock, LibraryLockGuard, held_project_uids, projects_awaiting_lock, try_acquire,
+    try_acquire_polling,
 };
 pub use lp_fs_opfs::{FlushReport, LpFsOpfs};
 pub use opfs_error::OpfsError;

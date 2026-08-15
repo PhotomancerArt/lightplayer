@@ -667,6 +667,28 @@ impl CommandPlan {
 /// change what a path *means*, so each queued gesture must reach the server
 /// in order.
 fn push_action_coalesced(actions: &mut Vec<UiAction>, action: UiAction) {
+    // Supersede (D4) inside one batch. Two clicks that land before the
+    // actor wakes must behave exactly like two clicks across batches: the
+    // newest wins. Without this the older open would run to completion
+    // first (it starts with the newest generation already recorded, so it
+    // never sees itself as stale) and the user would watch the wrong
+    // project open before theirs did.
+    //
+    // Only a PURE open is dropped — a create-and-open carries a catalog
+    // transaction no later click repeats — and only off the tail, so an
+    // unrelated action between two opens is a barrier like everywhere else
+    // in this function.
+    if action
+        .op_as::<crate::HomeOp>()
+        .is_some_and(crate::HomeOp::opens_a_project)
+        && let Some(queued) = actions.last_mut()
+        && queued
+            .op_as::<crate::HomeOp>()
+            .is_some_and(crate::HomeOp::is_pure_open)
+    {
+        *queued = action;
+        return;
+    }
     if let Some(op) = action.op_as::<crate::PanelWriteOp>() {
         // Panel writes coalesce per (scope, channel) with the same
         // tail-scan rule: a knob-drag flood collapses to the newest value,

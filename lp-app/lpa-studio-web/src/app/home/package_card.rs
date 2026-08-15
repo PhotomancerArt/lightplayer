@@ -30,7 +30,9 @@ pub(crate) fn PackageCard(
     /// This card's open is in flight.
     #[props(default = false)]
     opening: bool,
-    /// Some other open is in flight — clicks are ignored.
+    /// Some other open is in flight. The card reads busy — but it still
+    /// takes clicks: the newest click wins (D4), and a click that looks
+    /// ignored is the failure this whole change exists to remove.
     #[props(default = false)]
     busy: bool,
     /// Fixed clock for stories; `None` uses the platform clock.
@@ -86,7 +88,7 @@ pub(crate) fn PackageCard(
 
     rsx! {
         article {
-            class: package_card_class(opening, blocked.is_some()),
+            class: package_card_class(opening, busy, blocked.is_some()),
             onmouseenter: hover_enter,
             onmouseleave: hover_leave,
             // drag a project onto a device card = the push-confirm sheet
@@ -114,7 +116,11 @@ pub(crate) fn PackageCard(
                     href: "{open_href}",
                     aria_label: "Open {card.slug}",
                     onclick: move |event| {
-                        if busy || opening {
+                        // Only this card's OWN in-flight open holds the
+                        // navigation: any other card's click supersedes it
+                        // (D4), which is exactly what following the link
+                        // does — the route listener dispatches the new open.
+                        if opening {
                             event.prevent_default();
                         }
                     },
@@ -223,7 +229,7 @@ pub(crate) fn PackageCard(
                         href: "{open_href}",
                         title: "Open this project in the simulator.",
                         onclick: move |event| {
-                            if busy || opening {
+                            if opening {
                                 event.prevent_default();
                             }
                         },
@@ -508,13 +514,18 @@ pub(crate) fn home_action(op: HomeOp) -> UiAction {
     UiAction::from_op(ControllerId::new(HOME_NODE_ID), op)
 }
 
-fn package_card_class(opening: bool, blocked: bool) -> &'static str {
+/// The card's treatment while an open runs. `busy` is a DIMMING, not a
+/// disabling: the card still acts (it supersedes), so it keeps its
+/// pointer cursor.
+fn package_card_class(opening: bool, busy: bool, blocked: bool) -> &'static str {
     // tw:relative anchors the stretched open link (see the card markup)
     if blocked {
         // amber edge, default cursor: the card is a statement, not a door
         "tw:relative tw:overflow-hidden tw:rounded-md tw:border tw:border-status-attention-border tw:bg-card"
     } else if opening {
         "tw:relative tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
+    } else if busy {
+        "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
     } else {
         "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
     }
@@ -673,7 +684,7 @@ mod tests {
             blocked.health.blocked().map(|(headline, _)| headline),
             Some("Format 3 — too old for this Studio")
         );
-        assert!(package_card_class(false, true).contains("status-attention-border"));
+        assert!(package_card_class(false, false, true).contains("status-attention-border"));
     }
 
     #[test]
@@ -682,7 +693,7 @@ mod tests {
         upgradable.health = PackageHealth::UpgradesOnOpen { found: 4 };
         assert!(upgradable.health.is_openable());
         assert_eq!(upgradable.health.blocked(), None);
-        assert!(!package_card_class(false, false).contains("status-attention-border"));
+        assert!(!package_card_class(false, false, false).contains("status-attention-border"));
     }
 
     #[test]

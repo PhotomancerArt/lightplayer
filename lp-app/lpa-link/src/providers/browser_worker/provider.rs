@@ -168,9 +168,14 @@ impl LinkProvider for BrowserWorkerProvider {
         // connect that already gave up.
         let mut state = BrowserWorkerSessionState::new(endpoint.id, session.clone());
         let mut handle = BrowserWorkerHandle::new(&self.options.worker_script_path())?;
-        state
-            .pending_outputs
-            .extend(handle.boot("Studio browser runtime", &self.options).await?);
+        state.pending_outputs.extend(
+            handle
+                .boot(
+                    crate::providers::browser_worker::boot_wait::STUDIO_RUNTIME_WORKER_LABEL,
+                    &self.options,
+                )
+                .await?,
+        );
         state.handle = Some(handle);
         self.sessions.borrow_mut().insert(session_id, state);
         Ok(session)

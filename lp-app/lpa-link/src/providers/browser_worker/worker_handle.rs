@@ -11,6 +11,7 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{ErrorEvent, MessageEvent, Url, Worker, WorkerOptions, WorkerType};
 
 use crate::LinkError;
+use crate::providers::browser_worker::boot_wait;
 use crate::providers::browser_worker::boot_wait::{BootDelivery, BootWaitClock};
 use crate::providers::browser_worker::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserWorkerOptions, engine_cache,
@@ -255,6 +256,9 @@ impl BrowserWorkerHandle {
             for output in self.take_outputs() {
                 if let BrowserOutputEnvelope::Status { status, .. } = &output {
                     clock.observe_status(status);
+                    // Republished for the UI: the opening frame names the
+                    // phase a click is waiting on (P6).
+                    boot_wait::note_boot_phase(label, status);
                 }
                 let ready = matches!(
                     &output,
@@ -263,11 +267,13 @@ impl BrowserWorkerHandle {
                 let error = boot_error_message(&output);
                 outputs.push(output);
                 if let Some(message) = error {
+                    boot_wait::note_boot_settled(label);
                     return Err(LinkError::other(format!(
                         "browser worker boot failed: {message}"
                     )));
                 }
                 if ready {
+                    boot_wait::note_boot_settled(label);
                     return Ok(outputs);
                 }
             }
@@ -276,6 +282,7 @@ impl BrowserWorkerHandle {
                     .phase
                     .as_deref()
                     .unwrap_or("before any worker status");
+                boot_wait::note_boot_settled(label);
                 return Err(LinkError::other(format!(
                     "timed out waiting for browser worker boot (no status change for \
                      {:.0}s during {phase}){}",

@@ -131,16 +131,68 @@ pub async fn try_acquire_polling(
     attempts: usize,
     delay_ms: u32,
 ) -> Result<Option<LibraryLockGuard>, JsValue> {
+    // Only registered from the first REFUSAL on: a lock that is free is
+    // never a wait, and the opening frame must not claim one.
+    let mut waiting: Option<ProjectLockWait> = None;
     for attempt in 0..attempts {
         if let Some(guard) = try_acquire(lock).await? {
             return Ok(Some(guard));
         }
         // no trailing wait: the budget is the gaps between the shots
         if attempt + 1 < attempts {
+            if waiting.is_none() {
+                waiting = ProjectLockWait::begin(lock);
+            }
             TimeoutFuture::new(delay_ms).await;
         }
     }
     Ok(None)
+}
+
+thread_local! {
+    /// Project uids whose polling acquire is currently waiting out another
+    /// holder — one entry per in-flight [`ProjectLockWait`].
+    static LOCK_WAITS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The project uids a [`try_acquire_polling`] call is currently waiting on.
+///
+/// A read surface for the UI: an open whose project lock is momentarily
+/// held (this tab's own cloud sync trip snapshotting under D1, or another
+/// tab letting go) is *waiting*, not stuck, and the opening frame says so
+/// instead of narrating a phase that already finished. Empty is the
+/// ordinary case — an uncontended acquire never registers.
+pub fn projects_awaiting_lock() -> Vec<String> {
+    LOCK_WAITS.with(|waits| waits.borrow().clone())
+}
+
+/// One registered wait, unregistered on drop (so an early return, an
+/// error, or a dropped future all clear it).
+struct ProjectLockWait {
+    uid: String,
+}
+
+impl ProjectLockWait {
+    /// Register `lock`'s wait, or `None` for the catalog lock — a catalog
+    /// transaction is not a project the user is waiting to open.
+    fn begin(lock: &LibraryLock) -> Option<Self> {
+        let LibraryLock::Project(uid) = lock else {
+            return None;
+        };
+        LOCK_WAITS.with(|waits| waits.borrow_mut().push(uid.clone()));
+        Some(Self { uid: uid.clone() })
+    }
+}
+
+impl Drop for ProjectLockWait {
+    fn drop(&mut self) {
+        LOCK_WAITS.with(|waits| {
+            let mut waits = waits.borrow_mut();
+            if let Some(index) = waits.iter().position(|uid| *uid == self.uid) {
+                waits.remove(index);
+            }
+        });
+    }
 }
 
 /// [`try_acquire`] by raw Web Lock name (kept private: product code goes

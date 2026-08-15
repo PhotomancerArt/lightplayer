@@ -71,7 +71,23 @@ impl Drop for CommandSender {
 
 impl CommandSender {
     /// Enqueue a command and wake the actor.
+    ///
+    /// An enqueued OPEN also bumps the open generation (D4). This is the
+    /// one place every open dispatch passes through — a card click, a
+    /// `/p/…` route resolution, a docs `open-in-studio` embed — and,
+    /// critically, the one place that still runs while an earlier open is
+    /// parked inside the actor's serial action loop. A queued action
+    /// cannot reach that open; a signal write can, and it lands the
+    /// instant the click happens rather than whenever the actor next
+    /// yields. See [`crate::app::open_progress`].
     pub fn send(&self, command: StudioCommand) {
+        if let StudioCommand::Action(action) = &command
+            && action
+                .op_as::<crate::HomeOp>()
+                .is_some_and(crate::HomeOp::opens_a_project)
+        {
+            crate::app::open_progress::note_open_requested();
+        }
         let mut inner = self.inner.borrow_mut();
         inner.items.push_back(command);
         inner.wake();
