@@ -275,7 +275,7 @@ values; statistical diffs are for the arithmetic in between.
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
 | lifecycle-ownership | 2026-08-14 | [post-acquire-open-failure-leaks-the-project-lock](2026-08-14-post-acquire-open-failure-leaks-the-project-lock.md) | fixed | lpa-studio-web library_host_opfs + lpa-studio-core project_controller |
-| lock-held-across-foreign-latency | 2026-08-14 | [sync-holds-the-project-lock-across-the-network](2026-08-14-sync-holds-the-project-lock-across-the-network.md) | **open** (registration race fixed) | lpa-studio-web cloud/sync + library_host_opfs |
+| lock-held-across-foreign-latency | 2026-08-14 | [sync-holds-the-project-lock-across-the-network](2026-08-14-sync-holds-the-project-lock-across-the-network.md) | fixed | lpa-studio-web cloud/sync + library_host_opfs |
 | fixed-budget-over-variable-work | 2026-08-14 | [worker-boot-timeout-races-the-wasm-fetch](2026-08-14-worker-boot-timeout-races-the-wasm-fetch.md) | **open** (zombies + recovery fixed) | lpa-link browser_worker + lpa-studio-core preview_host |
 | state-conflation | 2026-08-14 | [sibling-module-bus-tie-blanks-preview](2026-08-14-sibling-module-bus-tie-blanks-preview.md) | **open** | lpc-engine (bus resolution) + fw-browser preview runtime |
 | newest-only-inflight-memory | 2026-08-13 | [stale-echo-reseeded-dive-session](2026-08-13-stale-echo-reseeded-dive-session.md) | fixed | lpa-studio-web editor_shell (mapping_session pipeline) |

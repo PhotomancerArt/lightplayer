@@ -23,6 +23,12 @@
 //! - **Snapshots** ([`LibraryHost::catalog_snapshot`]): fresh read-only
 //!   mounts (no flusher) skipping history payloads; no locks — whole-file
 //!   atomic writes make torn files impossible, torn *sets* merely stale.
+//! - **Cloud sync trips** ([`OpfsLibraryHost::mount_for_sync`]): the lock
+//!   is held to take one internally consistent snapshot of the project and
+//!   released before the trip goes anywhere near the network; whatever the
+//!   trip wrote is banked afterwards under a second, equally short hold
+//!   ([`SyncMount::finish`]). **No lock is ever held across network IO** —
+//!   `docs/adr/2026-07-08-per-project-library-locking.md`, amended.
 //!
 //! Browsers without Web Locks (non-secure contexts) proceed unguarded
 //! rather than losing persistence — M2's behavior, kept deliberately.
@@ -41,7 +47,7 @@ use lpa_studio_core::app::library::{
     CatalogOp, CatalogOutcome, LibraryHost, LibraryHostError, LibraryStore, LocalBoxFuture,
     OpenReceipt, OpenedProject, apply_catalog_op,
 };
-use lpfs::{LpFs, LpPath};
+use lpfs::{LpFs, LpPath, LpPathBuf};
 
 use crate::cloud::sync::sync_queue::SyncTrigger;
 
@@ -65,11 +71,25 @@ const CATALOG_RETRY_DELAY_MS: u32 = 50;
 const OPEN_RETRIES: usize = 10;
 const OPEN_RETRY_DELAY_MS: u32 = 50;
 
-/// How long an open waits out this tab's own cloud sync trip before
-/// concluding somebody else holds the project. A trip is a network round
-/// trip, so this is seconds rather than the catalog's tens of ms — and a
-/// slow open beats a wrong "open in another tab".
-const SYNC_HANDOFF_RETRIES: usize = 30;
+/// Project-lock acquisition on the CLOUD SYNC path.
+///
+/// A sync hold is now local work only — read the project into a snapshot,
+/// or write back what the trip produced (D1) — so waiting for one is
+/// waiting out somebody else's local work, and a trip that gives up costs
+/// nothing worse than a retry on the sweep timer. Nobody is watching it, so
+/// it can afford a longer ladder than an open.
+const SYNC_RETRIES: usize = 20;
+const SYNC_RETRY_DELAY_MS: u32 = 50;
+
+/// Residual guard: how long an open waits out this tab's own cloud sync
+/// trip before treating the project as somebody else's.
+///
+/// Since D1 a trip holds the project lock only while it snapshots the
+/// project or banks what it wrote, so this covers a large project's mount,
+/// not a network round trip — hundreds of milliseconds, not seconds. Past
+/// it the [`OPEN_RETRIES`] ladder takes over, and past that the ordinary
+/// refusal.
+const SYNC_HANDOFF_RETRIES: usize = 5;
 const SYNC_HANDOFF_DELAY_MS: u32 = 100;
 
 /// BroadcastChannel name for cross-tab library-change pings.
@@ -184,20 +204,29 @@ impl OpfsLibraryHost {
         self.registry.broadcast_changed();
     }
 
-    /// Borrow (or mount) one project's two subtrees for a cloud sync trip.
+    /// Borrow (or snapshot) one project's two subtrees for a cloud sync
+    /// trip.
     ///
-    /// The cloud driver writes `/cloud-binding.json` into the history root,
-    /// so it needs the same single-writer guarantee every other write path
-    /// has:
+    /// The trip writes into what it gets back (`/cloud-binding.json` at
+    /// least), so it needs the same single-writer guarantee every other
+    /// write path has — but a trip is mostly *network*, and the project
+    /// lock guards local OPFS consistency alone. So the lock scopes the
+    /// local half only (D1):
     ///
     /// - **Open in this tab** — hand back the open's own live handles. Its
     ///   flusher persists whatever the trip writes, and taking the project
     ///   lock here would deadlock against the lock the open already holds.
-    /// - **Not open anywhere** — take the project lock for the trip and
-    ///   mount both subtrees fresh; [`SyncMount::release`] flushes before it
-    ///   lets go, exactly as a catalog transaction does.
+    /// - **Not open anywhere** — take the project lock, read both subtrees
+    ///   into memory, and **let the lock go before returning**. The mounts
+    ///   are the snapshot: `LpFsOpfs::mount` loads the whole subtree, so
+    ///   everything the trip will read is already in hand and nothing it
+    ///   does afterwards touches OPFS until [`SyncMount::finish`] banks it.
     /// - **Open in another tab** — `Ok(None)`. That tab runs its own driver
     ///   and owns this project's trips; this one skips it.
+    ///
+    /// The snapshot is taken entirely inside the one hold — a set read in
+    /// pieces across two holds could mix a pre-save package with a
+    /// post-save history and publish a version that never existed.
     ///
     /// `slug` is the package directory's name. The caller usually has it
     /// from the roster it just read; `None` costs a snapshot mount to
@@ -209,23 +238,47 @@ impl OpfsLibraryHost {
     ) -> Result<Option<SyncMount>, LibraryHostError> {
         if let Some(state) = self.registry.open.borrow().get(uid) {
             return Ok(Some(SyncMount {
-                guard: None,
-                held: None,
                 package: state.package.clone(),
                 history: state.history.clone(),
-                borrowed: true,
+                snapshot_of: None,
             }));
         }
-        // Registered as ours BEFORE the acquire, not after it: an open
-        // polling `syncing` in the gap would see no trip, skip the handoff
-        // wait entirely, and be refused instantly by the lock this is about
-        // to take. Dropping `held` un-registers, so a refusal (that project
-        // really is another tab's) costs one poll interval at worst.
-        //
-        // Only the mount that *added* the uid carries the guard: the visitor
-        // pull loop and the sync driver can both reach for one project, and
-        // the second one to arrive must not clear a registration the first
-        // is still standing behind.
+        let Some(hold) = self.hold_for_sync(uid).await else {
+            return Ok(None);
+        };
+        // Everything between here and the release is local reading, and it
+        // is the whole of the trip's exposure to the project lock.
+        let snapshot = snapshot_project(uid, slug).await;
+        hold.release();
+
+        let (package, history) = snapshot?;
+        Ok(Some(SyncMount {
+            package,
+            history,
+            snapshot_of: Some(SnapshotOwner {
+                uid: uid.to_string(),
+                registry: Rc::clone(&self.registry),
+                syncing: Rc::clone(&self.syncing),
+            }),
+        }))
+    }
+
+    /// Take the project lock for one local stretch of a cloud sync trip,
+    /// registered in `syncing` for exactly as long as it is held.
+    ///
+    /// Registered as ours BEFORE the acquire, not after it: an open polling
+    /// `syncing` in the gap would see no trip, skip the handoff wait
+    /// entirely, and be refused instantly by the lock this is about to
+    /// take. Dropping the registration un-registers, so a refusal (that
+    /// project really is another tab's) costs one poll interval at worst.
+    ///
+    /// Only the hold that *added* the uid carries the registration: the
+    /// visitor pull loop and the sync driver can both reach for one
+    /// project, and the second one to arrive must not clear a registration
+    /// the first is still standing behind.
+    ///
+    /// `None` is a refusal — another tab holds the project.
+    async fn hold_for_sync(&self, uid: &str) -> Option<SyncHold> {
         let held = self
             .syncing
             .borrow_mut()
@@ -234,40 +287,24 @@ impl OpfsLibraryHost {
                 uid: uid.to_string(),
                 syncing: Rc::clone(&self.syncing),
             });
-        let guard = match acquire(&LibraryLock::Project(uid.to_string())).await {
-            Acquired::Held(guard) => Some(guard),
-            Acquired::Unguarded => None,
-            Acquired::Refused => return Ok(None),
-        };
-        let slug = match slug {
-            Some(slug) => slug.to_string(),
-            None => resolve_key_snapshot(uid).await?.1,
-        };
-        let package_dir = open_library_subdir(&format!("{PACKAGES_DIR}/{slug}"), false)
-            .await
-            .map_err(|e| LibraryHostError::Host(format!("open package dir: {e}")))?;
-        let history_dir = open_library_subdir(&format!("{HISTORY_DIR}/{uid}"), true)
-            .await
-            .map_err(|e| LibraryHostError::Host(format!("open history dir: {e}")))?;
-        Ok(Some(SyncMount {
-            guard,
-            held,
-            package: LpFsOpfs::mount(package_dir)
-                .await
-                .map_err(|e| LibraryHostError::Host(format!("mount package: {e}")))?,
-            history: LpFsOpfs::mount(history_dir)
-                .await
-                .map_err(|e| LibraryHostError::Host(format!("mount history: {e}")))?,
-            borrowed: false,
-        }))
+        match acquire_for_sync(&LibraryLock::Project(uid.to_string())).await {
+            Acquired::Held(guard) => Some(SyncHold {
+                guard: Some(guard),
+                held,
+            }),
+            Acquired::Unguarded => Some(SyncHold { guard: None, held }),
+            // `held` drops here, un-registering the trip that never started
+            Acquired::Refused => None,
+        }
     }
 
-    /// Wait out this tab's own cloud sync trip on `uid`, if there is one.
+    /// Wait out this tab's own cloud sync hold on `uid`, if there is one.
     ///
-    /// The driver holds the project lock across a network round trip, and a
-    /// user who just created a project and clicked into it must not be told
-    /// it is "open in another tab" — the hold is this tab's, and it ends.
-    /// Bounded: past the bound the ordinary refusal path takes over.
+    /// A user who just created a project and clicked into it must not be
+    /// told it is "open in another tab" — the hold is this tab's, and it is
+    /// local work that ends. Bounded, and short since D1 (see
+    /// [`SYNC_HANDOFF_RETRIES`]): past the bound the acquire ladder and then
+    /// the ordinary refusal path take over.
     async fn await_sync_handoff(&self, uid: &str) {
         for _ in 0..SYNC_HANDOFF_RETRIES {
             if !self.syncing.borrow().contains(uid) {
@@ -275,7 +312,7 @@ impl OpfsLibraryHost {
             }
             TimeoutFuture::new(SYNC_HANDOFF_DELAY_MS).await;
         }
-        log::warn!("open of {uid} gave up waiting for its cloud sync trip");
+        log::warn!("open of {uid} gave up waiting for its cloud sync hold");
     }
 
     /// Acquire the catalog lock with a short retry, mapping exhaustion to
@@ -495,28 +532,59 @@ fn sync_trigger_for(op: &CatalogOp) -> Option<SyncTrigger> {
     }
 }
 
-/// One project's subtrees, held for the duration of a cloud sync trip.
+/// One project's subtrees for a cloud sync trip: either an open project's
+/// live handles, or a snapshot taken under a lock that is already gone.
 ///
 /// See [`OpfsLibraryHost::mount_for_sync`] for how it was obtained; the
-/// difference between the two cases is entirely in [`Self::release`].
+/// difference between the two cases is entirely in [`Self::finish`]. The
+/// mount deliberately carries **no lock** — that is the whole of D1.
 pub(crate) struct SyncMount {
-    /// The project lock, when this mount took one.
-    guard: Option<LibraryLockGuard>,
-    /// Registration in the host's `syncing` set, cleared on drop.
-    held: Option<HeldForSync>,
     package: LpFsOpfs,
     history: LpFsOpfs,
-    /// These are an open project's live handles, not ours: its flusher and
-    /// its lock outlive the trip.
-    borrowed: bool,
+    /// `None` for an open project's live handles: its flusher and its lock
+    /// outlive the trip, and it owns the write-back. `Some` for a snapshot,
+    /// which has to bank its own writes.
+    snapshot_of: Option<SnapshotOwner>,
+}
+
+/// What a snapshot needs to bank itself: which project it is, and the two
+/// pieces of host state that decide where its writes belong.
+struct SnapshotOwner {
+    uid: String,
+    registry: Rc<OpenRegistry>,
+    syncing: Rc<RefCell<HashSet<String>>>,
+}
+
+/// The project lock, taken for one local stretch of a cloud sync trip, with
+/// the `syncing` registration that names it as this tab's.
+///
+/// Held for exactly as long as the lock is: since D1 that window is the
+/// only one an open can collide with, so it is also the only one
+/// [`OpfsLibraryHost::await_sync_handoff`] should wait out.
+struct SyncHold {
+    /// `None` when Web Locks are unavailable (unguarded mode).
+    guard: Option<LibraryLockGuard>,
+    /// `None` when another hold on the same project registered first.
+    held: Option<HeldForSync>,
+}
+
+impl SyncHold {
+    fn release(self) {
+        if let Some(guard) = self.guard {
+            guard.release();
+        }
+        // After the lock, so an open that was waiting on the registration
+        // finds the lock already free when it stops waiting.
+        drop(self.held);
+    }
 }
 
 /// "This tab's driver is holding that project", as a drop guard.
 ///
-/// A guard rather than a paired insert/remove because a trip that never
+/// A guard rather than a paired insert/remove because a hold that never
 /// starts (a refused acquire) or fails mid-mount must not leave the uid
-/// registered — an open would then wait the full handoff bound for a trip
-/// that is not running.
+/// registered — an open would then wait the full handoff bound for a hold
+/// that is not there.
 struct HeldForSync {
     uid: String,
     syncing: Rc<RefCell<HashSet<String>>>,
@@ -537,25 +605,92 @@ impl SyncMount {
         &self.history
     }
 
-    /// Flush what the trip wrote and let the project go.
+    /// Bank what the trip wrote and let the project go.
     ///
-    /// A borrowed mount does neither: flushing would race the open's own
-    /// flusher for no gain, and there is no lock here to release.
-    pub(crate) async fn release(self) {
-        if self.borrowed {
+    /// The trip ran against an in-memory snapshot with no lock held, so
+    /// whatever it wrote (`/cloud-binding.json` on a settled publish;
+    /// nothing at all on a failed trip) is still only in memory. Landing it
+    /// is local OPFS work, which means holding the project lock again —
+    /// briefly, and only for the writes:
+    ///
+    /// - **Borrowed** — nothing to do. Those were an open project's live
+    ///   handles; its flusher owns them.
+    /// - **Nothing pending** — no lock, no write. Every failed trip and
+    ///   every push that changed no heads ends here.
+    /// - **Opened meanwhile** — the project is now open in this tab, which
+    ///   is the ordinary outcome of a first click landing mid-publish. Its
+    ///   store owns those files now, so the pending writes are replayed
+    ///   into it and its flusher persists them.
+    /// - **Otherwise** — reacquire and flush.
+    ///
+    /// A refusal at the end loses only the binding record: the next trip
+    /// re-publishes and banks it then. The same is true if the project was
+    /// deleted mid-trip — the write fails against a directory that is gone,
+    /// which is a warning, not a resurrection.
+    pub(crate) async fn finish(self) {
+        let Some(owner) = self.snapshot_of else {
+            return;
+        };
+        let pending = [
+            self.package.pending_writes(),
+            self.history.pending_writes(),
+        ];
+        if pending.iter().all(|writes| writes.is_empty()) {
             return;
         }
-        // Only the binding is ever written, and only on a successful trip;
-        // a clean store makes this a no-op.
-        if let Err(e) = self.history.flush().await {
-            log::warn!("cloud sync flush (history): {e}");
+        let opened_meanwhile = owner
+            .registry
+            .open
+            .borrow()
+            .get(&owner.uid)
+            .map(|state| [state.package.clone(), state.history.clone()]);
+        if let Some(live) = opened_meanwhile {
+            for (live, writes) in live.iter().zip(&pending) {
+                replay_into(live, writes);
+            }
+            return;
         }
-        if let Some(guard) = self.guard {
-            guard.release();
+        // Same registration discipline as the snapshot hold — an open
+        // racing this one waits it out rather than being refused.
+        let held = owner
+            .syncing
+            .borrow_mut()
+            .insert(owner.uid.clone())
+            .then(|| HeldForSync {
+                uid: owner.uid.clone(),
+                syncing: Rc::clone(&owner.syncing),
+            });
+        let guard = match acquire_for_sync(&LibraryLock::Project(owner.uid.clone())).await {
+            Acquired::Held(guard) => Some(guard),
+            Acquired::Unguarded => None,
+            Acquired::Refused => {
+                log::warn!(
+                    "cloud sync: {} changed hands mid-trip; its writes land on the next one",
+                    owner.uid
+                );
+                return;
+            }
+        };
+        for (store, what) in [(&self.package, "package"), (&self.history, "history")] {
+            if let Err(e) = store.flush().await {
+                log::warn!("cloud sync flush ({what}): {e}");
+            }
         }
-        // After the lock, so an open that was waiting on the registration
-        // finds the lock already free when it stops waiting.
-        drop(self.held);
+        SyncHold { guard, held }.release();
+    }
+}
+
+/// Apply a snapshot's pending writes to the store that owns those files
+/// now. Memory-only: the destination's own flusher persists them.
+fn replay_into(live: &LpFsOpfs, pending: &[(LpPathBuf, Option<Vec<u8>>)]) {
+    for (path, bytes) in pending {
+        let result = match bytes {
+            Some(bytes) => live.write_file(path.as_path(), bytes),
+            None => live.delete_file(path.as_path()),
+        };
+        if let Err(e) = result {
+            log::warn!("cloud sync hand-off of {}: {e}", path.as_str());
+        }
     }
 }
 
@@ -577,6 +712,11 @@ async fn acquire(lock: &LibraryLock) -> Acquired {
 /// instant answer, not a wait.
 async fn acquire_for_open(lock: &LibraryLock) -> Acquired {
     classify(try_acquire_polling(lock, OPEN_RETRIES, OPEN_RETRY_DELAY_MS).await)
+}
+
+/// [`acquire`] with the cloud sync path's policy (see [`SYNC_RETRIES`]).
+async fn acquire_for_sync(lock: &LibraryLock) -> Acquired {
+    classify(try_acquire_polling(lock, SYNC_RETRIES, SYNC_RETRY_DELAY_MS).await)
 }
 
 fn classify(outcome: Result<Option<LibraryLockGuard>, wasm_bindgen::JsValue>) -> Acquired {
@@ -663,6 +803,37 @@ async fn mount_snapshot(skip_dir: impl Fn(&str) -> bool) -> Result<LpFsOpfs, Lib
 fn skip_history_payloads(path: &str) -> bool {
     path.starts_with(&format!("{HISTORY_DIR}/"))
         && (path.ends_with("/blobs") || path.ends_with("/trees"))
+}
+
+/// Read one project's package and history subtrees into memory — the
+/// cloud sync trip's snapshot.
+///
+/// Called under the project lock and nowhere else: `LpFsOpfs::mount` loads
+/// the whole subtree, so when this returns the trip holds everything it
+/// will read and the lock has nothing left to guard. Its memory cost is
+/// the cost the trip always had — mounting *was* already the whole-subtree
+/// read; what changed is only how long the lock stays on.
+async fn snapshot_project(
+    uid: &str,
+    slug: Option<&str>,
+) -> Result<(LpFsOpfs, LpFsOpfs), LibraryHostError> {
+    let slug = match slug {
+        Some(slug) => slug.to_string(),
+        None => resolve_key_snapshot(uid).await?.1,
+    };
+    let package_dir = open_library_subdir(&format!("{PACKAGES_DIR}/{slug}"), false)
+        .await
+        .map_err(|e| LibraryHostError::Host(format!("open package dir: {e}")))?;
+    let history_dir = open_library_subdir(&format!("{HISTORY_DIR}/{uid}"), true)
+        .await
+        .map_err(|e| LibraryHostError::Host(format!("open history dir: {e}")))?;
+    let package = LpFsOpfs::mount(package_dir)
+        .await
+        .map_err(|e| LibraryHostError::Host(format!("mount package: {e}")))?;
+    let history = LpFsOpfs::mount(history_dir)
+        .await
+        .map_err(|e| LibraryHostError::Host(format!("mount history: {e}")))?;
+    Ok((package, history))
 }
 
 /// Resolve a slug-or-uid key to `(uid, slug)` from a fresh snapshot that

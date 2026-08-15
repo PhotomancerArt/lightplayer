@@ -1,7 +1,7 @@
 ---
-status: open           # registration race fixed in P1; the hold itself is P2
+status: fixed          # registration race in P1; the hold itself in P2
 found: 2026-08-14      # how: live-debugging (demo repro, deployed site)
-fixed:                 # P2 of the first-click-open-resilience plan
+fixed: 2026-08-14      # P2 of the first-click-open-resilience plan
 area: lpa-studio-web cloud/sync/sync_engine + library_host_opfs
 class: lock-held-across-foreign-latency
 related:
@@ -37,20 +37,37 @@ uid in the `syncing` set *after* awaiting the acquire, so an open polling
 that set in between saw no trip in flight, skipped the wait entirely, and
 was refused instantly by the lock the driver was about to take.
 
-**Fix** — P1 (this change) closes the registration hole only: the uid
-goes into `syncing` before the acquire is awaited, and the drop guard
-un-registers it if the acquire is refused. The hold itself is P2, per the
-plan's D1: snapshot the project's files *under* the lock, release, then
-publish from the snapshot — project locks never span the network. Once
-that lands, the 3 s handoff wait covers a local snapshot rather than a
-round trip, and the open path's ~500 ms acquire ladder (P1) absorbs what
-is left.
+**Fix** — in two parts.
 
-**Regression coverage** — none yet for the hold (P2 owns it, with a
-snapshot-outside-the-lock test in `lpa-fs-opfs/tests/library_locks.rs`).
-The registration order is not directly testable without a browser: it is
-an ordering inside one `async fn`, asserted only by the sequence in
-`mount_for_sync`.
+P1 closed the registration hole: the uid goes into `syncing` before the
+acquire is awaited, and the drop guard un-registers it if the acquire is
+refused.
+
+P2 removed the hold itself, per the plan's D1. `mount_for_sync` now
+acquires (polling, since the hold it waits out is local work),
+mounts both subtrees — memory-primary mounting reads the whole subtree,
+so the mount *is* the snapshot — and **releases before returning**. The
+trip runs against that snapshot with no lock held; `SyncMount::finish`
+banks what it wrote under a second short hold, or hands those writes to
+the open's live store when the project was opened in this tab meanwhile
+(the first click landing mid-publish — the ordinary case). With no long
+holds left, `await_sync_handoff` dropped from 3 s to 500 ms; the open
+path's ~500 ms acquire ladder (P1) absorbs what is left. The locking ADR
+is amended to say the rule out loud.
+
+**Regression coverage** —
+`lpa-fs-opfs/tests/library_locks.rs::a_publishing_sync_trip_does_not_hold_the_project`
+plays the trip's new shape and asserts an open-style acquire wins while
+the publish is still in flight (and that an *instant* shot does too —
+nothing is held). Its companion,
+`a_snapshot_banks_only_what_the_trip_wrote`, pins the property that makes
+publishing from a copy safe: the write-back lands only the paths the trip
+dirtied, so a save that arrived mid-publish survives.
+`sync_queue::work_arriving_mid_flight_earns_another_trip` (host) covers
+the other half — a project that changed mid-publish earns its own trip.
+The registration order is still not directly testable without a browser:
+it is an ordering inside one `async fn`, asserted only by the sequence in
+`hold_for_sync`.
 
 **Lesson** — A lock's *name* says what it protects; only its hold says
 what it costs. This one is documented as guarding local OPFS writes, and

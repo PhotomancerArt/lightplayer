@@ -9,6 +9,9 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gloo_timers::future::TimeoutFuture;
 use lpa_fs_opfs::{
     LibraryLock, LibraryLockGuard, LpFsOpfs, held_project_uids, open_dir, open_library_subdir,
@@ -130,6 +133,105 @@ async fn a_failed_open_leaves_the_project_reopenable() {
         .unwrap()
         .expect("a failed open must not keep the project");
     reopened.release();
+}
+
+/// P2/D1, at lock level: a cloud sync trip takes the project lock only to
+/// snapshot the project and lets it go *before* the network, so the click a
+/// user makes while that trip is still publishing wins — instantly, and
+/// well inside the open ladder's budget. Holding across the round trip is
+/// what turned a fresh seed's first click into "open in another tab"
+/// (`docs/defects/2026-08-14-sync-holds-the-project-lock-across-the-network.md`).
+///
+/// The trip is played here rather than driven, because `mount_for_sync`
+/// (`lpa-studio-web/src/library_host_opfs.rs`) is not reachable from this
+/// crate; what is pinned is the shape it now has.
+#[wasm_bindgen_test]
+async fn a_publishing_sync_trip_does_not_hold_the_project() {
+    let lock = LibraryLock::Project("prjtestsyncsnapshot".to_string());
+    let publishing = Rc::new(Cell::new(false));
+
+    let trip_lock = lock.clone();
+    let trip_publishing = Rc::clone(&publishing);
+    wasm_bindgen_futures::spawn_local(async move {
+        let guard = try_acquire_polling(&trip_lock, OPEN_LADDER_ATTEMPTS, OPEN_LADDER_DELAY_MS)
+            .await
+            .expect("web locks available")
+            .expect("the trip's snapshot hold");
+        // snapshotting: local reads, all of the trip's exposure to the lock
+        TimeoutFuture::new(20).await;
+        guard.release();
+        // …and only now the network, from the snapshot
+        trip_publishing.set(true);
+        TimeoutFuture::new(2_000).await;
+        trip_publishing.set(false);
+    });
+
+    while !publishing.get() {
+        TimeoutFuture::new(10).await;
+    }
+    let opened = try_acquire_polling(&lock, OPEN_LADDER_ATTEMPTS, OPEN_LADDER_DELAY_MS)
+        .await
+        .unwrap()
+        .expect("an open must win against a trip that is only publishing");
+    assert!(
+        publishing.get(),
+        "the open has to land while the publish is still in flight, or this proves nothing"
+    );
+    opened.release();
+
+    // Stronger, and the phrasing the plan uses: the publish half could take
+    // the lock itself — one instant shot, no ladder, nothing held.
+    let during_publish = acquire_eventually(&lock).await;
+    assert!(publishing.get(), "still mid-publish");
+    during_publish.release();
+}
+
+/// The other half of the snapshot model: the trip publishes from a copy, so
+/// its write-back must land *only what the trip itself wrote*. A save that
+/// arrived on disk while the publish was in flight is newer than the
+/// snapshot, and banking the binding must not carry the stale copy over it.
+#[wasm_bindgen_test]
+async fn a_snapshot_banks_only_what_the_trip_wrote() {
+    let dir = fresh_test_dir("s-snapshot-bank").await;
+    write_file(&dir, LpPath::new("/events.jsonl"), b"created\n")
+        .await
+        .unwrap();
+
+    // under the project lock: read the whole subtree into memory
+    let snapshot = LpFsOpfs::mount(dir.clone()).await.unwrap();
+
+    // lock released; the trip runs on the snapshot and writes its binding
+    snapshot
+        .write_file(LpPath::new("/cloud-binding.json"), b"{\"bound\":true}")
+        .unwrap();
+    // …while the user opened the project and saved into the same subtree
+    write_file(&dir, LpPath::new("/events.jsonl"), b"created\nsaved\n")
+        .await
+        .unwrap();
+
+    // the bank phase, under the lock again
+    let pending: Vec<String> = snapshot
+        .pending_writes()
+        .into_iter()
+        .map(|(path, _)| path.as_str().to_string())
+        .collect();
+    assert_eq!(
+        pending,
+        vec!["/cloud-binding.json".to_string()],
+        "the snapshot is dirty only where the trip wrote"
+    );
+    snapshot.flush().await.unwrap();
+
+    let after = LpFsOpfs::mount(dir).await.unwrap();
+    assert_eq!(
+        after.read_file(LpPath::new("/events.jsonl")).unwrap(),
+        b"created\nsaved\n",
+        "the mid-publish save survives the bank"
+    );
+    assert_eq!(
+        after.read_file(LpPath::new("/cloud-binding.json")).unwrap(),
+        b"{\"bound\":true}"
+    );
 }
 
 #[wasm_bindgen_test]
