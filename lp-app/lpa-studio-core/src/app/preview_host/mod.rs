@@ -11,7 +11,11 @@
 //! LRU eviction). Failure stays visible: tier fallback reasons, present
 //! errors, and device loss all surface on the slot's observable status,
 //! and a poisoned worker is recycled deliberately (respawn + re-lease of
-//! still-visible slots), never retried in a flap.
+//! still-visible slots), never retried in a flap. A worker that failed to
+//! BOOT is likewise recovered rather than abandoned: it is re-booted on
+//! the next lease demand after a cooldown, on a bounded attempt budget
+//! ([`slot_policy::dead_worker_next`]), so a transient boot failure costs
+//! a wait instead of a page reload.
 //!
 //! The browser-facing half ([`PreviewHost`] itself, its worker pool, and
 //! the per-runtime deploy transport) only exists on
