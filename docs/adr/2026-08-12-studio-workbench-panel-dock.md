@@ -78,3 +78,61 @@ project editor routes only (galleries untouched):
 - Mobile stack-and-scroll is gone on editor routes; any new panel must
   fit the summon model and a dock column, which constrains future
   panel design toward vertical layouts.
+
+## Amended 2026-08-14 — one band, the Tree merge, the header chip
+
+- Plan: `2026-08-14-0826-workbench-bar-chrome`
+- Design record: `spikes/studio-chrome/index.html` rounds 4–6 (same
+  spike file, later commits on its branch — the round-6 direction
+  D7–D13 was ratified 2026-08-14); gate G1 passed on the live app the
+  same day.
+
+The PanelDock **model** above stands (fixed homes, radio per side,
+per-view ephemeral memory, full-height frame). Its **presentation** is
+superseded, and two of its decisions are amended:
+
+- **One band replaces the three tab surfaces (D7).** The per-dock tab
+  rows, the center's view-tab row, and the edge strips merge into ONE
+  chrome band across the workbench top: each dock's tabs sit in a
+  segment sized exactly to its dock (shared width constants), with the
+  view tabs centered between them. Panel tabs wear the ATTACHED
+  treatment — the active tab shares its dock's fill and breaks the
+  band's bottom hairline — which answers the round-4 rejection
+  ("toggles don't look connected to the panels").
+- **Collapse leaves the tab row in place (D11).** Pressing the active
+  tab still collapses its side, but the side's tab row PERSISTS with no
+  active tab — the persistent row is the reopen affordance. The
+  vertical edge strips and the «» hide chevrons are deleted; "tabs when
+  open, strip when closed" is no longer true.
+- **One panel, one ROLE — the view supplies the content (D10).** The
+  `Nodes` and `Fixtures` panels merged into one left panel named
+  **Tree**, whose body is keyed by `(panel, view)`: the project's node
+  tree on the Nodes view, the fixture → object → instance tree on the
+  Map view (today's mixed grain, deliberate until the R5 patching plan
+  splits authored from effective). Rosters and defaults are data
+  (`roster(view, side)` / `defaults(view)`) over a `VIEWS` table, so a
+  new view is a table row plus roster arms. Panel-level furniture rides
+  the panel, not a view's body: the Save/Revert row (`TreePanelActions`)
+  renders on every Tree body, and Finder-style summary footers (D12)
+  belong to the dock composition (`panel_footer`).
+- **The project's identity moved to the site header (D8 — reversing
+  this ADR's root-card ruling).** The root-card [i] mount is retired;
+  a header PROJECT CHIP (state glyph + name + amber unsaved count,
+  toned by the shared affordance vocabulary) opens the same
+  `ProjectDetailSections` popup — the Google-Docs pattern: document
+  state lives in the chrome, visible on every view at every width (the
+  chip is one ungated mount, so no container-query double-mount). The
+  non-workbench pane-header [i] survives unchanged.
+- **View tab labels read `Nodes · Map` (D9)** — short sibling nouns; the
+  `/mapping` route string is unchanged. The "panels live on view" open
+  question is answered: they live on the VIEW via rosters, but content
+  is view-supplied per role.
+- **The fold moved 960px → 820px (G1 ruling).** md-width windows keep
+  real docks — the docks only ever take a portion of the screen — and
+  the full-view summon model now begins at genuinely narrow widths.
+
+Follow-up recorded (G1): the header now holds both the project chip and
+the lensed session's chip, which read as near-duplicates on a sim
+session; Yona's direction is one grouped device+project cluster
+(possibly absorbing Save/Revert). Tracked as a separate task, not part
+of this change.

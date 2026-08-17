@@ -25,12 +25,14 @@ use std::rc::Rc;
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
 use crate::app::layout::{
-    ChromeProjectMenu, CloudAccountControl, PatchToggle, PlayToggle, SiteChrome, SiteSection,
-    StudioSettingsPopover, VersionBadge,
+    ChromeProjectChip, ChromeProjectMenu, CloudAccountControl, PatchToggle, PlayToggle, SiteChrome,
+    SiteSection, StudioSettingsPopover, VersionBadge,
 };
+use crate::app::project::ProjectDetailContent;
 use crate::app::share::{
     ProjectShareControl, VisitorBannerHost, VisitorShareSlot, archive_project, use_visitor_session,
 };
+use crate::app::workbench;
 use crate::base::{ToastHost, use_toast_provider};
 use crate::cloud::SharedOpenState;
 use crate::local_store::{self, LocalStoreStatus};
@@ -759,16 +761,18 @@ pub fn App() -> Element {
     let patch_toggle = matches!(&current_route, StudioRoute::Project { .. })
         .then(|| current_route.with_patch(!patch).path());
     // The workbench view tabs' targets: same-session view suffixes on the
-    // current lens address, plain links like the play/patch toggles. A
-    // device lens has no mapping address yet, so its Mapping tab hides.
+    // current lens address, plain links like the play/patch toggles — one
+    // slot per view-table row. Only the default view is addressable on a
+    // device lens (no mapping address yet), so the other tabs hide there.
     let workbench_hrefs = current_route.is_lens().then(|| {
-        (
-            current_route
-                .with_view(router::ProjectView::Workspace)
-                .path(),
-            matches!(&current_route, StudioRoute::Project { .. })
-                .then(|| current_route.with_view(router::ProjectView::Mapping).path()),
-        )
+        workbench::WorkbenchHrefs::from_entries(workbench::VIEWS.iter().map(|spec| {
+            let addressable = spec.view == workbench::WorkbenchView::default()
+                || matches!(&current_route, StudioRoute::Project { .. });
+            (
+                spec.view,
+                addressable.then(|| current_route.with_view(spec.route_view).path()),
+            )
+        }))
     });
     // Workbench routes trade the scrolling-document page for a
     // full-height app frame: the docks and center scroll INTERNALLY.
@@ -814,6 +818,23 @@ pub fn App() -> Element {
     // Shared by the chrome and the section body below: an EventHandler is
     // Copy, the raw closure is not.
     let on_action = EventHandler::new(on_action);
+    // The header project chip (D8): the SAME detail content the pane's
+    // [i] renders, threaded to the chrome so project state (unsaved /
+    // failed / syncing) is visible on every view at every width.
+    // Presentation only — zero new state; `None` off the lens routes.
+    let project_chip = current_route
+        .is_lens()
+        .then(|| {
+            current_view.panes.iter().find_map(|pane| match &pane.body {
+                lpa_studio_core::UiViewContent::ProjectEditor(editor) => Some(ChromeProjectChip {
+                    content: ProjectDetailContent::new(editor, pane.status.clone()),
+                    on_action,
+                    initially_open: false,
+                }),
+                _ => None,
+            })
+        })
+        .flatten();
     let section = match &current_route {
         // `/` is Home: no tab lights — the logo wears the underline.
         StudioRoute::Home => SiteSection::Home,
@@ -841,7 +862,7 @@ pub fn App() -> Element {
     // reads as a full-width toolbar under the site chrome; the chrome itself
     // keeps the inset.
     let main_class = if workbench_route {
-        "tw:mx-auto tw:flex tw:h-dvh tw:min-h-0 tw:w-[min(1520px,100%)] tw:flex-col tw:px-3 tw:pb-2 tw:pt-2 tw:max-[960px]:px-[10px] tw:max-[960px]:pb-0 tw:max-[960px]:pt-1"
+        "tw:mx-auto tw:flex tw:h-dvh tw:min-h-0 tw:w-[min(1520px,100%)] tw:flex-col tw:px-3 tw:pb-2 tw:pt-2 tw:max-[820px]:px-[10px] tw:max-[820px]:pb-0 tw:max-[820px]:pt-1"
     } else {
         "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]"
     };
@@ -854,6 +875,7 @@ pub fn App() -> Element {
                 sessions: current_view.sessions.clone(),
                 on_editor: current_route.is_lens(),
                 project_menu,
+                project_chip,
                 tight: workbench_route,
                 if let Some(href) = patch_toggle {
                     // Same-session zoom like play: the route listener sees

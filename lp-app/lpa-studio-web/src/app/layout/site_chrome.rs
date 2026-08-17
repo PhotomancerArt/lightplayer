@@ -38,10 +38,14 @@
 
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{Archive, UserRound};
-use lpa_studio_core::{UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget};
+use lpa_studio_core::{UiAction, UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget};
 
+use crate::app::affordance::{affordance_chip_class, affordance_trigger_style};
+use crate::app::project::project_pane::trigger_label;
+use crate::app::project::{ProjectDetailContent, ProjectDetailSections};
 use crate::base::{
-    IconMenuButton, IconMenuTone, LogoLockup, PopoverCloseHandle, StudioIcon, StudioIconName,
+    DetailPopover, IconMenuButton, IconMenuTone, LogoLockup, PopoverCloseHandle, PopoverPlacement,
+    StudioIcon, StudioIconName,
 };
 use crate::router::StudioRoute;
 
@@ -60,6 +64,19 @@ pub struct ChromeProjectMenu {
     pub on_share: EventHandler<()>,
     /// Archive this project. Quiet, not destructive: it is reversible.
     pub on_archive: EventHandler<()>,
+}
+
+/// The header project chip's data (D8, Google-Docs pattern): the open
+/// project's identity and state, always visible in the chrome — state
+/// glyph + name + amber unsaved count, opening the SAME
+/// [`ProjectDetailSections`] popup the pane's [i] renders (one content
+/// value, two homes; presentation only, zero new state).
+#[derive(Clone, PartialEq)]
+pub struct ChromeProjectChip {
+    pub content: ProjectDetailContent,
+    pub on_action: EventHandler<UiAction>,
+    /// Open the detail popup immediately (stories only).
+    pub initially_open: bool,
 }
 
 /// Which nav tab renders as the current section. Home has no tab — the
@@ -104,6 +121,11 @@ pub fn SiteChrome(
     /// everywhere else (the menu then reads exactly as it always has).
     #[props(default)]
     project_menu: Option<ChromeProjectMenu>,
+    /// The open project's chip (D8); `None` off the editor routes. Mounted
+    /// UNGATED — no `tw:@min-*` — so it is present at every header width
+    /// (Q10 ruling: one mount, no top-layer/container-query workaround).
+    #[props(default)]
+    project_chip: Option<ChromeProjectChip>,
     /// The workbench routes' spacing (Final-gate ruling): the header's
     /// gap below shrinks so the full-height frame starts close under the
     /// chrome. Document routes keep the roomy default.
@@ -135,6 +157,12 @@ pub fn SiteChrome(
                     href: "/projects",
                     active: section == SiteSection::Projects,
                 }
+            }
+            if let Some(chip) = project_chip {
+                // The project chip (D8): after the primary family, ahead
+                // of the session strip's divider — the open project is
+                // the most local thing in the bar.
+                ProjectHeaderChip { chip }
             }
             if !sessions.is_empty() {
                 // Hairline divider + the strip (concept A dock) — wide
@@ -194,6 +222,58 @@ pub fn SiteChrome(
                     }
                 }
             }
+        }
+    }
+}
+
+/// The header project chip (D8): state glyph + project name + amber
+/// unsaved count, opening the project detail popup
+/// ([`ProjectDetailSections`] — Save/Revert/per-entry revert/Share/
+/// stats, mounted AS-IS). Project state is visible on every view at
+/// every width; dragging a fixture on the Map canvas makes the
+/// pencil+count appear because arrange edits already flow into
+/// `dirty.persisted` — this is presentation only.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ProjectHeaderChip(chip: ChromeProjectChip) -> Element {
+    let ChromeProjectChip {
+        content,
+        on_action,
+        initially_open,
+    } = chip;
+    let affordance = content.affordance();
+    let style = affordance_trigger_style(affordance);
+    let name = content.project_name().to_string();
+    let unsaved = content.unsaved_count();
+    let trigger = rsx! {
+        // Glyph and label inherit the toned button's color (the chip
+        // itself wears the state, G1 ruling).
+        span { class: "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:flex-none tw:items-center tw:justify-center",
+            StudioIcon { name: style.icon, size: 13 }
+        }
+        // The unlayered `font: inherit` reset beats tw:font-*/tw:text-*
+        // on the button itself, so every text utility rides the spans.
+        span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-[11px] tw:font-semibold",
+            "{name}"
+        }
+        if unsaved > 0 {
+            span { class: "tw:flex-none tw:rounded-full tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:font-mono tw:text-[9.5px] tw:font-semibold tw:text-status-warning-foreground",
+                "{unsaved}"
+            }
+        }
+    };
+    rsx! {
+        DetailPopover {
+            icon: style.icon,
+            label: trigger_label(affordance).to_string(),
+            tone: style.tone,
+            placement: PopoverPlacement::BottomStart,
+            trigger,
+            trigger_class: affordance_chip_class(affordance, false).to_string(),
+            trigger_open_class: affordance_chip_class(affordance, true).to_string(),
+            layer_keeps_layout: true,
+            initially_open,
+            ProjectDetailSections { content, on_action }
         }
     }
 }

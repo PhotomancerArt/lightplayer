@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiNodeFace, UiPaneView, UiStudioView, UiViewContent};
 
 use crate::app::module::{PlayModeSurface, panel_gesture_actions};
-use crate::app::workbench::{WorkbenchFrame, WorkbenchView};
+use crate::app::workbench::{WorkbenchFrame, WorkbenchHrefs, view_for_route};
 use crate::app::{DevicesPage, ProjectOpeningFrame, ProjectsPage};
 use crate::core::PaneView;
 use crate::router::ProjectView;
@@ -47,12 +47,11 @@ pub fn StudioShell(
     /// lens has a play zoom too but no project-view suffixes.
     #[props(default)]
     project_view: ProjectView,
-    /// The workbench view tabs' hrefs: (Nodes tab, Mapping tab). The
-    /// Mapping href is `None` on a device lens — it has no mapping
-    /// address yet — which hides the tab. Stories default to inert
-    /// fragments.
+    /// The workbench view tabs' hrefs, one slot per view-table row; a
+    /// `None` slot hides its tab (a device lens has no mapping address
+    /// yet). Stories default to inert fragments.
     #[props(default)]
-    workbench_hrefs: Option<(String, Option<String>)>,
+    workbench_hrefs: Option<WorkbenchHrefs>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let UiStudioView {
@@ -65,6 +64,8 @@ pub fn StudioShell(
         // consumed by the web shell's URL sync, not the layout
         lens: _,
         open_project_uid: _,
+        // the chrome renders the header project chip (web_app builds it
+        // from the editor pane's own view — see `ChromeProjectChip`)
         open_project_name: _,
         // the lens card renders the sync facts (D43)
         device_sync: _,
@@ -139,15 +140,10 @@ pub fn StudioShell(
     // workbench view. Play and patch returned above; the states below
     // (no editor yet, bare panes) keep the legacy grid.
     if let Some(project_editor) = project_editor {
-        let view = if project_view == ProjectView::Mapping {
-            WorkbenchView::Mapping
-        } else {
-            WorkbenchView::Nodes
-        };
+        let view = view_for_route(project_view);
         // Stories mount without a route; inert fragment hrefs keep the
         // tabs drawable without navigation.
-        let (workspace_href, mapping_href) =
-            workbench_hrefs.unwrap_or_else(|| ("#".to_string(), None));
+        let hrefs = workbench_hrefs.unwrap_or_else(WorkbenchHrefs::inert_default);
         return rsx! {
             WorkbenchFrame {
                 view,
@@ -156,8 +152,7 @@ pub fn StudioShell(
                 lens_card: lens_card.map(|card| *card),
                 running,
                 now_secs,
-                workspace_href,
-                mapping_href,
+                hrefs,
                 on_action,
             }
         };

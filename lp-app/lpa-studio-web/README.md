@@ -3,11 +3,16 @@
 `lpa-studio-web` is the static browser shell for `lpa-studio-core`.
 
 The project editor renders as the **workbench** (`src/app/workbench/`):
-a full-height PanelDock frame — center view tabs (Nodes · Mapping, as
-route suffixes) between two docks holding four fixed-home panels
-(Nodes · Fixtures | Device · Outputs), radio per side with per-view
-memory, folding to a summon toolbar on mobile. See
-`docs/adr/2026-08-12-studio-workbench-panel-dock.md`.
+a full-height PanelDock frame under ONE chrome band — each dock's
+attached panel tabs in a segment sized to its dock, the view tabs
+(Nodes · Map, as route suffixes) centered between them. Fixed-home
+panels (Tree | Device · Outputs · Props), radio per side with per-view
+memory; a collapsed side keeps its tab row as the reopen affordance;
+the Tree's body is view-keyed (node tree on Nodes, fixture tree on
+Map). Below 820px it folds to a summon toolbar; the open project's
+state lives on the site header's project chip. See
+`docs/adr/2026-08-12-studio-workbench-panel-dock.md` (amended
+2026-08-14).
 
 The web app owns Dioxus presentation. It renders `StudioView` panes and
 contextual `UiAction` controls, then dispatches those actions back into

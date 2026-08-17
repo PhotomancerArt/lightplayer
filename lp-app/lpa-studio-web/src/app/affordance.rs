@@ -70,6 +70,44 @@ pub(crate) fn affordance_pane_tone(affordance: UiAffordance, status: UiStatusKin
     }
 }
 
+/// The header project chip's BUTTON treatment (D8 + G1 ruling: the chip
+/// itself wears the state tone, not just its glyph): the session chips'
+/// squared entity geometry, washed with the affordance's status family —
+/// quiet while silent (`Info`), yellow while unsaved, hazard for debug,
+/// red for the attention class. Glyph and label inherit the button's
+/// color, so the whole chip announces the state.
+pub(crate) fn affordance_chip_class(affordance: UiAffordance, open: bool) -> &'static str {
+    match (affordance, open) {
+        (UiAffordance::Info, false) => {
+            "tw:inline-flex tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1 tw:text-muted-foreground tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground"
+        }
+        (UiAffordance::Info, true) => {
+            "tw:inline-flex tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border-strong tw:bg-background-wash tw:px-2 tw:py-1 tw:text-strong-foreground"
+        }
+        (UiAffordance::Busy, false) => {
+            "tw:inline-flex tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-status-working-border tw:bg-status-working-bg tw:px-2 tw:py-1 tw:text-status-working-foreground tw:transition-colors tw:hover:border-status-working-foreground"
+        }
+        (UiAffordance::Busy, true) => {
+            "tw:inline-flex tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-status-working-foreground tw:bg-status-working-bg tw:px-2 tw:py-1 tw:text-status-working-foreground"
+        }
+        (UiAffordance::Debug, _) => {
+            "tw:inline-flex tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:px-2 tw:py-1 tw:transition-colors lp-debug-icon-chrome"
+        }
+        (UiAffordance::Unsaved, false) => {
+            "tw:inline-flex tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2 tw:py-1 tw:text-status-warning-foreground tw:transition-colors tw:hover:border-status-warning-foreground"
+        }
+        (UiAffordance::Unsaved, true) => {
+            "tw:inline-flex tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-status-warning-foreground tw:bg-status-warning-bg tw:px-2 tw:py-1 tw:text-status-warning-foreground"
+        }
+        (UiAffordance::Error, false) => {
+            "tw:inline-flex tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-2 tw:py-1 tw:text-status-error-foreground tw:transition-colors tw:hover:border-status-error-foreground"
+        }
+        (UiAffordance::Error, true) => {
+            "tw:inline-flex tw:max-w-[200px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-status-error-foreground tw:bg-status-error-bg tw:px-2 tw:py-1 tw:text-status-error-foreground"
+        }
+    }
+}
+
 /// Foreground color class for the tree row's small affordance indicator;
 /// `None` for the silent `Info` affordance (clean rows show nothing).
 pub(crate) fn affordance_indicator_class(affordance: UiAffordance) -> Option<&'static str> {
