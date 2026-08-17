@@ -1038,21 +1038,29 @@ jobs:
             { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  # Story baselines are CI-canonical: this job captures every story with a
-  # pinned browser and compares against the committed PNGs (pixel tolerance,
-  # see studio-story-pngs.mjs). On drift from a same-repo PR it commits the
-  # fresh set straight to the PR head branch (github-actions[bot]) and PASSES;
-  # a sticky PR comment summarizes the change. Fork PRs, push races, crashed
-  # captures, and main-push drift keep the fail path: `story-images-fresh`
-  # artifact + `just studio-story-pull` as the manual fallback.
+  # Story baselines are CI-canonical and live OUTSIDE this repo, in the
+  # companion repo PhotomancerArt/lightplayer-stories: one snapshot commit per
+  # captured lightplayer main commit (ref `sha-<sha>`), each parented on the
+  # snapshot it was compared against so GitHub's compare view shows exactly
+  # the changed stories. Merge-to-main IS acceptance — nothing here ever
+  # commits or pushes to THIS repo, on any path.
   #
-  # GITHUB_TOKEN pushes deliberately do not trigger workflow runs: no loop
-  # risk, but the bot commit (the new PR head) gets no CI run of its own — the
-  # green run sits one commit back. Accepted (ADR
-  # docs/adr/2026-07-26-ci-story-auto-commit.md): no required checks on this
-  # repo, and the commit is images-only, produced by the very job that
-  # validated it. Day-to-day: after a drift run goes green, `git pull` before
-  # pushing again.
+  #   - PR runs: baseline = nearest captured first-parent ancestor of the
+  #     merge ref's first parent. Capture, compare (pixel tolerance, see
+  #     studio-story-pngs.mjs), push a `pr-<n>` snapshot, post a sticky
+  #     comment (counts, thumbnails, compare link). Visual changes PASS —
+  #     the comment is the review surface, merging is acceptance.
+  #   - main pushes: publish the new acceptance snapshot (`sha-<sha>`) and
+  #     force-update `latest` (the root README's hero images point there).
+  #     The delta-vs-parent step summary is the standing churn monitor.
+  #   - Failure paths: capture crash/incomplete, no captured ancestor found,
+  #     snapshot push failure. Fork PRs (no secrets): capture + compare still
+  #     run; the fresh set uploads as `story-images-fresh` instead.
+  #
+  # Pushes to the stories repo use an app token for the org-wide
+  # `lightplayer-infra` GitHub App (deploy keys are disabled by org policy).
+  # Those pushes trigger no workflows here — no loop risk, no bot commits on
+  # PR branches, no add/add PNG conflicts, structurally.
   #
   # This job is deliberately EXEMPT from the sccache/incremental/debug env the
   # other jobs set: it is the pinned canonical capture environment, and its
@@ -1066,12 +1074,14 @@ jobs:
     timeout-minutes: 45
     needs: detect-changes
     if: needs.detect-changes.outputs.studio == 'true'
-    # The repo defaults workflow tokens to read-only; this job pushes baseline
-    # refreshes to PR branches and posts the sticky summary comment.
+    # The repo defaults workflow tokens to read-only; this job posts the
+    # sticky story-changes comment. It has NO write access to this repo's
+    # contents — snapshot pushes go to the stories repo via an app token.
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
     env:
+      STORIES_REPO: PhotomancerArt/lightplayer-stories
       # Bumping the pinned browser (or oxipng) is a DELIBERATE baseline-refresh
       # PR: bump, push, and this job auto-commits the regenerated PNGs to the
       # branch. Do not bump casually.
@@ -1168,16 +1178,50 @@ jobs:
           echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
           "$CHROME_BIN" --version
 
+      # Baseline lookup needs main's recent first-parent chain: the checkout
+      # is depth-1, and the comparison root is HEAD's first parent — on a PR
+      # merge-ref checkout that is the main tip the merge was built against
+      # (so the comparison shows exactly what this PR changes relative to
+      # current main); on a main push it is the previous main commit. The
+      # depth must stay comfortably above the lookup's walk limit (50).
+      - name: Fetch main history (baseline lookup)
+        run: cd lp2025 && git fetch origin main --depth=60
+
+      # Resolve which stories-repo snapshot to compare against, and fetch its
+      # PNG set. Exit 2 (job failure) when no captured ancestor exists within
+      # the walk — the remedy is rebasing on main.
+      - name: Resolve baseline snapshot
+        id: baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd lp2025
+          # NOT `git rev-parse HEAD^1`: the depth-1 checkout grafts HEAD as
+          # parentless in .git/shallow, so ^1 is "unknown revision" even
+          # though the parent OBJECT arrived via the main fetch above. The
+          # raw commit header keeps its parent lines regardless of grafts.
+          root="$(git cat-file commit HEAD | awk '/^parent /{print $2; exit}')"
+          test -n "$root"
+          node lp-app/lpa-studio-web/scripts/story-baseline-lookup.mjs \
+            --root "$root" --fetch "$RUNNER_TEMP/story-baseline" \
+            > "$RUNNER_TEMP/baseline.json"
+          cat "$RUNNER_TEMP/baseline.json"
+          {
+            echo "source_sha=$(jq -r .baselineSourceSha "$RUNNER_TEMP/baseline.json")"
+            echo "stories_sha=$(jq -r .storiesCommitSha "$RUNNER_TEMP/baseline.json")"
+            echo "ref=$(jq -r .ref "$RUNNER_TEMP/baseline.json")"
+          } >> "$GITHUB_OUTPUT"
+
       # `shell: bash` (not the default) so pipefail keeps tee from masking the
       # check's exit code — piped-away failures have bitten this pipeline
       # before (docs/debt/story-capture-pipeline.md).
       #
-      # continue-on-error: drift is not a job failure by itself anymore — the
-      # auto-commit step below resolves the common case. The "Fail on
-      # unresolved story drift" step at the end restores the failure for every
-      # path auto-commit can't handle. NOTE: this makes `failure()` false for
-      # the rest of the job; downstream steps condition on
-      # `steps.story_check.outcome` instead.
+      # continue-on-error: a failing check with a COMPLETE capture means
+      # story drift, which is expected output here (the snapshot + comment
+      # carry it; merging is acceptance), not a job failure. The "Fail on
+      # crashed capture" step at the end restores the failure for incomplete
+      # captures. NOTE: this makes `failure()` false for the rest of the job;
+      # downstream steps condition on step outcomes instead.
       - name: Story check
         id: story_check
         continue-on-error: true
@@ -1192,14 +1236,21 @@ jobs:
           # from disk.
           STUDIO_STORY_CDP_TIMEOUT_MS: 120000
           STUDIO_STORY_CAPTURE_ATTEMPTS: 4
+          # Compare against the fetched snapshot, not any in-repo directory.
+          STUDIO_STORY_BASELINES_DIR: ${{ runner.temp }}/story-baseline/images
         run: cd lp2025 && just studio-story-check 2>&1 | tee "$RUNNER_TEMP/story-check.log"
 
-      # Only a COMPLETE comparison may publish an artifact: a crashed partial
-      # capture staged via story-pull would delete every baseline it didn't
-      # reach. The capture script writes .check-complete only after comparing
-      # a full capture set. Runs on the success path too (not just failure):
-      # the tolerated-evidence step below needs the completeness verdict and
-      # the manifest's tolerated count even when the check passed.
+      # Only a COMPLETE comparison may become a snapshot: a crashed partial
+      # capture is missing stories, and snapshotting it would publish an
+      # images/ set whose absences lie. The capture script writes
+      # .check-complete only after comparing a full capture set.
+      #
+      # Tolerated-diff evidence retention (the Δ199 `opening-a-project`
+      # lesson, docs/defects/2026-07-27-story-check-tolerance-ignores-
+      # amplitude.md) now lives INSIDE the snapshot: fresh pixels of
+      # tolerated files land in its `tolerated/` directory while `images/`
+      # keeps the parent's bytes, so both variants stay diffable forever —
+      # no separate artifact needed.
       - name: Detect completed comparison
         id: check_complete
         shell: bash
@@ -1210,170 +1261,118 @@ jobs:
           else
             echo "complete=false" >> "$GITHUB_OUTPUT"
           fi
-          count=0
-          if [ -f "$new_dir/.refresh-manifest.json" ]; then
-            count=$(jq '.tolerated | length' "$new_dir/.refresh-manifest.json" 2>/dev/null || echo 0)
-          fi
-          echo "tolerated_count=$count" >> "$GITHUB_OUTPUT"
 
-      # Evidence retention for tolerated diffs. The check tolerates
-      # sub-ratio pixel diffs and (before this step) THREW THE PIXELS AWAY —
-      # `story-images-fresh` uploads only on failure, so a tolerated diff
-      # left one log line of counts and nothing to diff. That is how the
-      # Δ199 `opening-a-project` flip became undiagnosable (see
-      # docs/defects/2026-07-27-story-check-tolerance-ignores-amplitude.md).
-      # Uploads BOTH variants (fresh + committed baseline) of just the
-      # tolerated files — a few hundred KB, never the whole set. Runs on
-      # pass and fail alike: the auto-commit path also drops tolerated
-      # pixels (the bot commit contains only manifest-listed files).
-      # Deliberately a different artifact name from story-images-fresh:
-      # story-pull selects runs by that artifact's presence, and a passing
-      # run must never shadow a real drift capture.
-      - name: Preserve tolerated-diff evidence (story-images-tolerated)
+      # Deploy keys are disabled by org policy; snapshot pushes authenticate
+      # as the org-wide `lightplayer-infra` GitHub App (contents: write on all
+      # org repos — same pattern as deploy-pages-channel.yml), scoped here to
+      # just the stories repo. Fork PRs have no secrets and skip this — they
+      # fall through to the story-images-fresh artifact below.
+      - name: Mint stories-repo token
+        id: stories_token
         if: >-
           steps.check_complete.outputs.complete == 'true' &&
-          steps.check_complete.outputs.tolerated_count != '0'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd lp2025
-          new_dir=lp-app/lpa-studio-web/story-images/.new
-          baseline_dir=lp-app/lpa-studio-web/story-images
-          dest="$RUNNER_TEMP/story-tolerated"
-          mkdir -p "$dest/fresh" "$dest/baseline"
-          cp "$new_dir/.refresh-manifest.json" "$dest/"
-          while IFS= read -r name; do
-            cp "$new_dir/$name" "$dest/fresh/$name"
-            cp "$baseline_dir/$name" "$dest/baseline/$name"
-          done < <(jq -r '.tolerated[]?' "$new_dir/.refresh-manifest.json")
-          {
-            echo "## Tolerated story diffs (evidence retained)"
-            echo
-            echo 'The check tolerated pixel diffs on these stories. Both variants are'
-            echo 'in the `story-images-tolerated` artifact — if the log above flags any'
-            echo 'as suspected bistable (significant pixels > 0), diff them from there.'
-            echo
-            echo '```'
-            jq -r '.tolerated[]' "$new_dir/.refresh-manifest.json"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload tolerated-diff evidence
-        if: >-
-          steps.check_complete.outputs.complete == 'true' &&
-          steps.check_complete.outputs.tolerated_count != '0'
-        uses: actions/upload-artifact@v4
+          (github.event_name == 'push' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/create-github-app-token@v3
         with:
-          name: story-images-tolerated
-          path: ${{ runner.temp }}/story-tolerated/
-          retention-days: 14
-          if-no-files-found: error
-          include-hidden-files: true
+          app-id: ${{ secrets.LIGHTPLAYER_PAGES_APP_ID }}
+          private-key: ${{ secrets.LIGHTPLAYER_PAGES_PRIVATE_KEY }}
+          owner: PhotomancerArt
+          repositories: lightplayer-stories
 
-      # Same-repo PRs only: fork PRs get a read-only token and fall through to
-      # the artifact path below. Never --force, never rebase — a push race
-      # (someone pushed mid-capture) rejects as non-fast-forward and falls
-      # through likewise.
-      - name: Auto-commit refreshed baselines
-        id: auto_commit
-        if: >-
-          steps.story_check.outcome == 'failure' &&
-          steps.check_complete.outputs.complete == 'true' &&
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository
+      # Runs on drift AND on no-change: an unchanged capture still publishes
+      # (a `sha-*` ref marks the commit as captured — the lookup walk depends
+      # on that; a `pr-*` snapshot records "captured, no changes"). Snapshots
+      # are manifest-applied, so tolerated jitter never rewrites images/
+      # bytes and the snapshot-to-snapshot compare view stays clean.
+      - name: Push snapshot to the stories repo
+        id: snapshot
+        if: steps.stories_token.outcome == 'success'
         shell: bash
         env:
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          STORIES_TOKEN: ${{ steps.stories_token.outputs.token }}
+          BASELINE_REF: ${{ steps.baseline.outputs.ref }}
+          BASELINE_STORIES_SHA: ${{ steps.baseline.outputs.stories_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           cd lp2025
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch --depth=1 origin "$HEAD_REF"
-          BEFORE_SHA="$(git rev-parse "origin/$HEAD_REF")"
-          # The build steps above can leave tracked files modified (observed
-          # 2026-08-01: the dx story build regenerated assets/tailwind.css
-          # with drifted content, and the checkout below aborted with "local
-          # changes would be overwritten"). Everything this step commits comes
-          # from the gitignored story-images/.new/ staging area, so tracked
-          # dirt is never payload — discard it, but log the paths so a
-          # checked-in generated file that SHOULD be refreshed shows up here
-          # instead of vanishing silently.
-          if ! git diff --quiet HEAD --; then
-            echo "Discarding incidental build-produced changes to tracked files:"
-            git diff --name-only HEAD --
-            git reset --hard HEAD
-          fi
-          # The pull_request checkout is a detached merge commit; the fresh
-          # captures live in the gitignored story-images/.new/ and survive the
-          # branch switch in place (reset --hard above leaves them alone too).
-          git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
-          # Manifest-driven, NOT a wholesale swap: the check tolerates
-          # sub-threshold anti-aliasing jitter, and copying the whole fresh set
-          # committed those tolerated files anyway — that is how run-to-run
-          # raster noise turned into ping-ponging baselines (see
-          # docs/debt/story-capture-pipeline.md). Replace only what the
-          # comparison judged stale; removals still propagate.
-          node lp-app/lpa-studio-web/scripts/story-apply-refresh.mjs \
-            lp-app/lpa-studio-web/story-images/.new
-          git add -A -- lp-app/lpa-studio-web/story-images
-          if git diff --cached --quiet; then
-            # Drift was against the merge commit's baselines but the head
-            # already matches the fresh set (e.g. main moved). Nothing to do.
-            echo "resolved=clean" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git commit -m "chore(studio): auto-refresh story baselines [validate-stories]" \
-            -m "Captured in the pinned CI environment by run:" \
-            -m "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          if git push origin "$HEAD_REF"; then
-            {
-              echo "resolved=pushed"
-              echo "before_sha=$BEFORE_SHA"
-              echo "bot_sha=$(git rev-parse HEAD)"
-            } >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            target_ref="pr-${PR_NUMBER}"
+            source_sha="$HEAD_SHA"
+            extra=()
           else
-            echo "resolved=push-rejected" >> "$GITHUB_OUTPUT"
+            target_ref="sha-${GITHUB_SHA}"
+            source_sha="$GITHUB_SHA"
+            extra=(--update-latest)
           fi
+          node lp-app/lpa-studio-web/scripts/story-snapshot.mjs \
+            --new-dir lp-app/lpa-studio-web/story-images/.new \
+            --baseline-ref "$BASELINE_REF" \
+            --baseline-commit "$BASELINE_STORIES_SHA" \
+            --target-ref "$target_ref" \
+            --source-sha "$source_sha" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --push-url "https://x-access-token:${STORIES_TOKEN}@github.com/${STORIES_REPO}.git" \
+            "${extra[@]}" \
+            > "$RUNNER_TEMP/story-changes.json"
+          cat "$RUNNER_TEMP/story-changes.json"
+          {
+            echo "snapshot_sha=$(jq -r .snapshotSha "$RUNNER_TEMP/story-changes.json")"
+            echo "changed_total=$(jq -r '(.added|length)+(.modified|length)+(.removed|length)' "$RUNNER_TEMP/story-changes.json")"
+            echo "tolerated_count=$(jq -r .toleratedCount "$RUNNER_TEMP/story-changes.json")"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Post baseline-change PR comment
-        if: steps.auto_commit.outputs.resolved == 'pushed'
-        # Cosmetic: a comment failure must not fail the job — the push already
-        # landed, and GITHUB_TOKEN pushes don't retrigger CI, so a red run
-        # here would stay red with no follow-up run to clear it.
+      # The comment is the review surface (visual changes pass CI; merging is
+      # acceptance). Cosmetic failure tolerance: the snapshot already landed,
+      # and a red here would stay red with nothing left to validate.
+      - name: Post story-changes PR comment
+        if: github.event_name == 'pull_request' && steps.snapshot.outcome == 'success'
         continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-          BEFORE_SHA: ${{ steps.auto_commit.outputs.before_sha }}
-          BOT_SHA: ${{ steps.auto_commit.outputs.bot_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASELINE_STORIES_SHA: ${{ steps.baseline.outputs.stories_sha }}
+          BASELINE_SOURCE_SHA: ${{ steps.baseline.outputs.source_sha }}
+          CHANGES_FILE: ${{ runner.temp }}/story-changes.json
         run: cd lp2025 && node lp-app/lpa-studio-web/scripts/story-drift-comment.mjs
 
-      - name: Baselines auto-committed summary
-        if: steps.auto_commit.outputs.resolved == 'pushed'
+      # The standing churn monitor: on main this delta is against the parent
+      # snapshot, so a nondeterministic story shows up here run after run
+      # (defect family: docs/defects/2026-08-08-tape-transport-baselines-
+      # oscillate.md). Check this summary when comment noise appears on PRs.
+      - name: Snapshot summary
+        if: steps.snapshot.outcome == 'success'
         shell: bash
         env:
-          BOT_SHA: ${{ steps.auto_commit.outputs.bot_sha }}
+          SNAPSHOT_SHA: ${{ steps.snapshot.outputs.snapshot_sha }}
+          CHANGED_TOTAL: ${{ steps.snapshot.outputs.changed_total }}
+          TOLERATED_COUNT: ${{ steps.snapshot.outputs.tolerated_count }}
+          BASELINE_SOURCE_SHA: ${{ steps.baseline.outputs.source_sha }}
         run: |
           {
-            echo "## Story baselines auto-committed"
+            echo "## Story snapshot published"
             echo
-            echo "Drift was detected and resolved: fresh baselines were committed to the"
-            echo "PR branch as \`${BOT_SHA}\`. GITHUB_TOKEN pushes do not trigger workflow"
-            echo "runs, so that commit has no CI run of its own — this green run is the"
-            echo "validating run. Remember to \`git pull\` before pushing again."
+            echo "Snapshot \`${SNAPSHOT_SHA}\` pushed to \`${STORIES_REPO}\`"
+            echo "(baseline: main \`${BASELINE_SOURCE_SHA:0:10}\`)."
+            echo
+            echo "- Changed vs baseline: **${CHANGED_TOTAL}** file(s)"
+            echo "- Tolerated (sub-threshold jitter, evidence in \`tolerated/\`): ${TOLERATED_COUNT}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Fallback artifact path: fork PRs, push races, and main-push drift.
-      # Skipped when the bot commit landed (the commit *is* the fresh set).
-      - name: Upload fresh captures (story-images-fresh)
+      # Fork PRs can't mint the app token, so their capture can't become a
+      # snapshot or a comment — upload the fresh set for manual review
+      # instead. The capture and comparison still ran; this is review
+      # evidence, not a failure.
+      - name: Upload fresh captures (fork PRs — story-images-fresh)
         if: >-
-          steps.story_check.outcome == 'failure' &&
           steps.check_complete.outputs.complete == 'true' &&
-          steps.auto_commit.outputs.resolved != 'pushed' &&
-          steps.auto_commit.outputs.resolved != 'clean'
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository
         uses: actions/upload-artifact@v4
         with:
           name: story-images-fresh
@@ -1384,23 +1383,22 @@ jobs:
           # default hidden-file exclusion uploads nothing.
           include-hidden-files: true
 
-      - name: Story drift summary
+      - name: Fork-PR story summary
         if: >-
-          steps.story_check.outcome == 'failure' &&
           steps.check_complete.outputs.complete == 'true' &&
-          steps.auto_commit.outputs.resolved != 'pushed' &&
-          steps.auto_commit.outputs.resolved != 'clean'
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository
         shell: bash
         run: |
           {
-            echo "## Story baselines differ (not auto-committed)"
+            echo "## Story capture from a fork PR"
             echo
-            echo 'Auto-commit did not apply (fork PR, push race, or main-push drift).'
-            echo 'Fresh captures are uploaded as the `story-images-fresh` artifact.'
-            echo 'On this branch, run `just studio-story-pull` to stage them, review the diff, and commit.'
+            echo 'Fork PRs have no stories-repo credentials, so no snapshot or PR comment'
+            echo 'was produced. The full fresh capture is the `story-images-fresh`'
+            echo 'artifact; the comparison log tail is below.'
             echo
             echo '```'
-            tail -80 "$RUNNER_TEMP/story-check.log"
+            tail -40 "$RUNNER_TEMP/story-check.log"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -1422,17 +1420,18 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # story_check runs with continue-on-error, so this is what actually
-      # fails the job for every drift/crash path auto-commit couldn't resolve.
-      - name: Fail on unresolved story drift
+      # fails the job when the capture never completed. Drift with a complete
+      # capture is NOT a failure — the snapshot + comment carry it, and
+      # merging is acceptance. Lookup and snapshot-push failures fail their
+      # own steps directly.
+      - name: Fail on crashed capture
         if: >-
           steps.story_check.outcome == 'failure' &&
-          steps.auto_commit.outputs.resolved != 'pushed' &&
-          steps.auto_commit.outputs.resolved != 'clean'
+          steps.check_complete.outputs.complete != 'true'
         shell: bash
         run: |
-          echo "Story check failed and was not auto-resolved (fork PR, push race," \
-               "crashed capture, or main-push drift). See the run summary;" \
-               "'just studio-story-pull' is the manual fallback."
+          echo "Story capture did not complete — this is a pipeline failure," \
+               "not story drift. See the crash summary above."
           exit 1
 
       # Main-only saves (see the restore steps above). `always()` preserves
