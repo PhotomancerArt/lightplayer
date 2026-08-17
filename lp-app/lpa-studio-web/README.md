@@ -384,18 +384,16 @@ Run the dev server and open:
 http://127.0.0.1:2820/stories
 ```
 
-Visual baselines are **CI-canonical**: the `validate-stories` CI job captures
-them in a pinned environment (x64 Linux, Chrome for Testing, bundled fonts)
-and uploads drift as the `story-images-fresh` artifact. Stage it on your
-branch with:
-
-```bash
-just studio-story-pull
-```
-
-Do not commit locally-captured baselines — local rendering differs from the
-canonical environment. See `docs/adr/2026-07-26-ci-canonical-story-capture.md`
-and AGENTS.md "Studio UI visual baselines".
+Visual baselines are **CI-canonical** and live in the companion repo
+`PhotomancerArt/lightplayer-stories` (one snapshot per captured `main`
+commit; nothing is committed here). The `validate-stories` CI job captures
+in a pinned environment (x64 Linux, Chrome for Testing, bundled fonts),
+compares against the nearest captured main ancestor, and posts a sticky PR
+comment with the changed stories and a compare link — **merging the PR is
+what accepts the changes**. Do not commit locally-captured PNGs — local
+rendering differs from the canonical environment. See
+`docs/adr/2026-08-17-story-baselines-companion-repo.md` and AGENTS.md
+"Studio UI visual baselines".
 
 Baselines are captured for `sm`, `md`, and `lg` viewports. Files are named as a
 story id plus viewport suffix, for example:
@@ -410,9 +408,8 @@ Useful commands:
 
 ```bash
 just studio-story-pngs [filter...]   # scratch captures under story-images/.scratch
-just studio-story-check [filter...]  # compare fresh captures with committed baselines
-just studio-story-pull               # stage CI-captured baselines for this branch
-just studio-story-baselines          # emergency full local regen (do not commit)
+just studio-story-check [filter...]  # compare vs the auto-fetched CI baseline snapshot
+just studio-story-baselines          # full local set under story-images/ (never committed)
 ```
 
 Filters are case-insensitive story-id substrings (OR-matched), so
