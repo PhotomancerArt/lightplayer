@@ -193,8 +193,6 @@ pub fn FixturesPanel(
     };
     prefetch_bodies(&on_action, &surface);
     let fixtures = surface.fixtures.clone();
-    let lamps: u32 = fixtures.iter().map(|fixture| fixture.patch.lamps).sum();
-    let instances: usize = fixtures.iter().map(|f| f.instances.len()).sum();
     // Fixture colour rides SURFACE order, so grouping under modules never
     // reshuffles the palette the canvas already wears.
     let indexed = |fixture: &UiPatchSurfaceFixture| {
@@ -227,10 +225,9 @@ pub fn FixturesPanel(
         })
         .collect();
     rsx! {
+        // The old top summary line is now the dock's Finder-style footer
+        // (D12) — see `panel_footer` in the workbench module.
         div { class: "tw:grid tw:content-start tw:gap-0.5 tw:text-sm",
-            p { class: "tw:m-0 tw:px-1.5 tw:pb-1.5 tw:font-mono tw:text-[10px] tw:text-dim-foreground",
-                "{fixtures.len()} fixtures · {lamps} lamps · {instances} instances"
-            }
             for (index, fixture) in orphans {
                 FixtureRows {
                     key: "{fixture.node.0}",

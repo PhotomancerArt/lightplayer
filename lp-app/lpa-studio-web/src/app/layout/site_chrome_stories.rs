@@ -9,11 +9,18 @@
 //! wide.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget};
+use lpa_studio_core::{
+    DirtySummary, ProjectSyncPhase, UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget,
+    UiStatus,
+};
 use lpa_studio_web_story_macros::story;
 
-use crate::app::layout::site_chrome::{ChromeProjectMenu, SiteChrome, SiteSection};
+use crate::app::layout::site_chrome::{
+    ChromeProjectChip, ChromeProjectMenu, SiteChrome, SiteSection,
+};
 use crate::app::layout::version_badge::{BuildChip, VersionChipPreview};
+use crate::app::project::ProjectDetailContent;
+use crate::app::story_fixtures::project_editor_fixture;
 use crate::base::{LogoLockup, LogoMark};
 
 #[story(
@@ -224,6 +231,60 @@ pub(crate) fn overflow_menu_project_group() -> Element {
                 project_menu: Some(ChromeProjectMenu {
                     on_share: EventHandler::new(|()| {}),
                     on_archive: EventHandler::new(|()| {}),
+                }),
+                VersionChipPreview { chip: branch_chip() }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The header project chip (D8, Google-Docs pattern) across states, beside the lensed session chip: clean (quiet i), unsaved (yellow wash, pencil, amber count), failed edits (red), and the unsaved chip at a narrow bar — the chip is UNGATED, one mount at every width, so project state never disappears."
+)]
+pub(crate) fn project_chip_states() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:gap-2",
+            {chip_frame(1000, chip_content(0, 0), false)}
+            {chip_frame(1000, chip_content(3, 0), false)}
+            {chip_frame(1000, chip_content(1, 2), false)}
+            {chip_frame(520, chip_content(3, 0), false)}
+        }
+    }
+}
+
+#[story(
+    label = "Project chip popover open",
+    description = "The chip's detail popup — the SAME ProjectDetailSections the pane's [i] renders (identity + status word, Project settings, Share, pending edits with per-entry revert, stats) — open from the yellow unsaved chip. Unlike the ⋯ menu there is no narrow-frame caveat: the chip has ONE ungated mount, so the popover always has a visible trigger to measure."
+)]
+pub(crate) fn project_chip_popover_open() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[560px]",
+            {chip_frame(700, chip_content(2, 0), true)}
+        }
+    }
+}
+
+/// The chip stories' content: the shared editor fixture with the dirty
+/// counts stamped, gathered exactly the way `web_app` builds the chip.
+fn chip_content(persisted: usize, failed: usize) -> ProjectDetailContent {
+    let mut editor = project_editor_fixture(ProjectSyncPhase::Ready);
+    editor.dirty = DirtySummary { persisted, failed };
+    ProjectDetailContent::new(&editor, UiStatus::good("Ready"))
+}
+
+fn chip_frame(width: u32, content: ProjectDetailContent, popover_open: bool) -> Element {
+    rsx! {
+        div {
+            class: "tw:border tw:border-dashed tw:border-border-muted tw:px-4 tw:pt-3",
+            style: "max-width: {width}px;",
+            SiteChrome {
+                section: SiteSection::Session,
+                on_editor: true,
+                sessions: vec![sim_session("mini-dome", true, UiChromeSessionStatus::Run)],
+                project_chip: Some(ChromeProjectChip {
+                    content,
+                    on_action: EventHandler::new(|_| {}),
+                    initially_open: popover_open,
                 }),
                 VersionChipPreview { chip: branch_chip() }
             }

@@ -299,6 +299,15 @@ pub fn PopoverButton(
         } else {
             auto_update_for_effect.borrow_mut().take();
             panel_resize_for_effect.borrow_mut().take();
+            // A measurement rAF queued by the loop above can fire AFTER the
+            // closed render and imperatively re-pin the trigger's inline
+            // width/height (`trigger_rect_by_id` restores what it removes).
+            // The closed VDOM style string carries no pin, so Dioxus never
+            // rewrites it — the stale pin would freeze the trigger at its
+            // open-state size, truncating any trigger whose content grows
+            // while closed (the header project chip's pencil+count). Queue a
+            // clear behind the stale rAF.
+            clear_trigger_pin_after_detach(&measured_id_for_effect);
         }
         // The layer unmounts only when the close animation lands at 0.
         animate_progress(
@@ -810,6 +819,47 @@ fn spawn_measure_trigger_element(
     let size = current_panel_size.unwrap_or_else(SizeSnapshot::fallback);
     trigger_rect.set(Some(anchor));
     position.set(PopoverPosition::from_anchor(anchor, size, placement));
+}
+
+/// Drop any leftover inline size pin from the in-flow trigger once the
+/// popover has detached (see the close branch of the attach effect). rAF
+/// ordering is FIFO within a frame, so a clear queued at close time runs
+/// AFTER any stale measurement callback from the open loop. If the popover
+/// reopened before this fires, the placeholder class is back and the pin is
+/// load-bearing again — leave it.
+fn clear_trigger_pin_after_detach(trigger_id: &str) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let trigger_id = trigger_id.to_string();
+    let callback = Closure::once(move || {
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let Some(element) = document.get_element_by_id(&trigger_id) else {
+            return;
+        };
+        let Some(element) = element.dyn_ref::<web_sys::HtmlElement>() else {
+            return;
+        };
+        let pinned_open = element.get_attribute("class").is_some_and(|class| {
+            class
+                .split_whitespace()
+                .any(|c| c == TRIGGER_PLACEHOLDER_CLASS)
+        });
+        if pinned_open {
+            return;
+        }
+        let style = element.style();
+        let _ = style.remove_property("width");
+        let _ = style.remove_property("height");
+    });
+    if window
+        .request_animation_frame(callback.as_ref().unchecked_ref())
+        .is_ok()
+    {
+        callback.forget();
+    }
 }
 
 /// The trigger's rect, measured free of its own placeholder pin.

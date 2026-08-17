@@ -8,19 +8,16 @@ use lpa_mapping_editor::{Map2dDoc, MapEditorSession, ShapePath};
 use lpa_studio_web_story_macros::story;
 
 use super::panels::{FixturesPanel, OutputsPanel, PropsPanel};
-use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchView};
+use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchHrefs, WorkbenchView};
 use crate::app::StudioShell;
-use crate::app::module::module_fixtures::root_module_node_view;
-use crate::app::node::NodeDetailPopover;
 use crate::app::patch::patch_surface_stories::{mini_dome_surface, peach_surface};
-use crate::app::project::ProjectDetailContent;
 use crate::app::story_fixtures::{
     project_editor_fixture, project_ready_view, project_synced_pane_view, simulator_lens_card,
 };
 use crate::router::ProjectView;
 use lpa_studio_core::{
     ArtifactLocation, NodeId, ProjectSyncPhase, UiArrangeMeta, UiArrangeTransform, UiPatchSurface,
-    UiPatchTarget, UiStatus, UiStudioView, UiViewContent,
+    UiPatchTarget, UiStudioView, UiViewContent,
 };
 
 /// Stamp port/output labels onto every cell by id join — what
@@ -86,7 +83,7 @@ fn workbench_story(project_view: ProjectView) -> Element {
                 view: view_with_surface(selection),
                 running: true,
                 project_view,
-                workbench_hrefs: Some(("#".to_string(), Some("#".to_string()))),
+                workbench_hrefs: Some(WorkbenchHrefs::inert_all()),
                 on_action: move |_| {},
             }
         }
@@ -180,21 +177,21 @@ fn outputs_panel_mini_dome() -> Element {
 }
 
 #[story(
-    description = "The workbench's Nodes view: both docks open, so each wears its own TAB ROW (Nodes · Fixtures left, Device · Outputs right) instead of an edge strip — the active tab is the open panel, and pressing it collapses the side. The project pane renders FLAT in the left dock (no card, no header, no [i] — that popup moved to the root node card's ⓘ in the center), and the center's view tabs sit visibly heavier than the dock tabs above it."
+    description = "The workbench's Nodes view under the ONE band (D7): the Tree's attached tab over the left dock, Nodes · Map centered, Device · Outputs over the right — the active panel tab shares its dock's fill and breaks the band's bottom hairline, so it reads as the panel's own. The Tree carries the shared Save row and the embedded project tree; its popup lives on the header project chip."
 )]
 fn workbench_nodes_view() -> Element {
     workbench_story(ProjectView::Workspace)
 }
 
 #[story(
-    description = "The workbench's Mapping view with the unified editor's coordinator mounted in the center: the Arrange toolbar strip (fixture/arranged counts on the right, the reserved tool slot on the left) over the canvas pane's honest placeholder — the arrange canvas itself is the next mount. Docks default to Fixtures left, Outputs right."
+    description = "The workbench's Map view: the SAME Tree panel now shows the fixture tree (one panel, one ROLE — the view supplies the content, D10) with its summary footer pinned at the dock bottom (D12); the right roster reads Props · Outputs · Device with Props attached. The unified editor's coordinator is the center."
 )]
 fn workbench_mapping_view() -> Element {
     workbench_story(ProjectView::Mapping)
 }
 
 #[story(
-    description = "The mobile fold with a panel summoned: below the fold breakpoint the summon strip carries the view switch plus the four panel toggles (the edge strips, folded), and the summoned Outputs panel replaces the main view under a back header. The sm capture is the point — at lg the same mount shows the desktop docks."
+    description = "The mobile fold (≤820px — the G1 ruling moved it down from 960 so md widths keep real docks) with a panel summoned: the summon strip carries the view switch plus the view's ROSTERED panel toggles, and the summoned Outputs panel replaces the main view under a back header. The sm capture is the point — at lg the same mount shows the band and docks."
 )]
 fn workbench_mobile_outputs_summoned() -> Element {
     rsx! {
@@ -212,8 +209,7 @@ fn workbench_mobile_outputs_summoned() -> Element {
                     ),
                 lens_card: Some(simulator_lens_card()),
                 running: true,
-                workspace_href: "#".to_string(),
-                mapping_href: Some("#".to_string()),
+                hrefs: WorkbenchHrefs::inert_all(),
                 initial_summoned: Some(super::PanelId::Outputs),
                 on_action: move |_| {},
             }
@@ -222,54 +218,49 @@ fn workbench_mobile_outputs_summoned() -> Element {
 }
 
 #[story(
-    description = "Both docks collapsed (a press on the active dock tab): the vertical edge strips are all that remain of the sides — the collapsed state's handle — and the center takes the full width. A strip button expands that panel, and the strip is replaced by the dock's tab row."
+    description = "Both docks collapsed (a press on each active band tab): the tab rows PERSIST on the band with no active tab — the persistent row IS the reopen affordance (D11; edge strips and chevrons are gone) — and the center takes the full width under an unbroken band hairline."
 )]
 fn workbench_docks_collapsed() -> Element {
-    workbench_memory_story(PanelMemory {
-        nodes: DockState {
-            left: None,
-            right: None,
-        },
-        mapping: DockState {
-            left: None,
-            right: None,
-        },
-    })
+    workbench_memory_story(
+        PanelMemory::default()
+            .with(
+                WorkbenchView::Nodes,
+                DockState {
+                    left: None,
+                    right: None,
+                },
+            )
+            .with(
+                WorkbenchView::Mapping,
+                DockState {
+                    left: None,
+                    right: None,
+                },
+            ),
+    )
 }
 
 #[story(
-    description = "The two side treatments in one frame: the left side collapsed to its vertical strip, the right side open under its Device · Outputs tab row. The comparison is the point — a side is named EITHER by a strip or by tabs, never both, and the dock tabs stay lighter than the center's view tabs."
+    description = "The two side treatments in one band: the left side collapsed (its TREE tab persists, inactive, with the band hairline running unbroken beneath it), the right side open (Device's attached tab sharing the dock fill). The comparison is the point — one grammar names both states, and the panel tabs stay lighter than the view tabs."
 )]
 fn workbench_mixed_dock_states() -> Element {
-    workbench_memory_story(PanelMemory {
-        nodes: DockState {
-            left: None,
-            right: Some(super::PanelId::Device),
-        },
-        mapping: DockState {
-            left: None,
-            right: Some(super::PanelId::Outputs),
-        },
-    })
-}
-
-#[story(
-    description = "The re-housed project popup (ruling 2): the workspace ROOT card's ⓘ now carries what the project pane's header used to — project identity with the status word, the Project settings rows, Share, pending edits, and the project stats — because the workbench's Nodes dock renders the project pane flat, with no header to hang a popup from. Same component, same ops; the pane's own [i] is untouched on every other route."
-)]
-fn workbench_root_card_project_popup() -> Element {
-    let editor = project_editor_fixture(ProjectSyncPhase::Ready);
-    let root = root_module_node_view();
-    rsx! {
-        div { class: "tw:flex tw:min-h-[760px] tw:items-start tw:justify-end",
-            NodeDetailPopover {
-                header: root.header,
-                pending_edits: editor.pending_edits.clone(),
-                project: Some(ProjectDetailContent::new(&editor, UiStatus::good("Ready"))),
-                on_action: move |_| {},
-                initially_open: true,
-            }
-        }
-    }
+    workbench_memory_story(
+        PanelMemory::default()
+            .with(
+                WorkbenchView::Nodes,
+                DockState {
+                    left: None,
+                    right: Some(super::PanelId::Device),
+                },
+            )
+            .with(
+                WorkbenchView::Mapping,
+                DockState {
+                    left: None,
+                    right: Some(super::PanelId::Outputs),
+                },
+            ),
+    )
 }
 
 /// The Nodes-view frame with preset dock memory — the strip/tab stories'
@@ -283,8 +274,7 @@ fn workbench_memory_story(memory: PanelMemory) -> Element {
                 project_editor: project_editor_fixture(ProjectSyncPhase::Ready),
                 lens_card: Some(simulator_lens_card()),
                 running: true,
-                workspace_href: "#".to_string(),
-                mapping_href: Some("#".to_string()),
+                hrefs: WorkbenchHrefs::inert_all(),
                 initial_memory: Some(memory),
                 on_action: move |_| {},
             }

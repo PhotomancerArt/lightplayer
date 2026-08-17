@@ -43,7 +43,6 @@ use crate::app::project::pending_edit_section::{
 };
 use crate::app::project::{ProjectNodeTree, ProjectSettingsSection, ProjectShareSection};
 use crate::base::{DetailPopover, DetailSection, PopoverPlacement};
-use crate::core::{ActionButton, ActionButtonVariant};
 
 /// Everything the project's detail popup shows, gathered from the editor view
 /// plus the pane-level status — one value so the SAME sections can render in
@@ -65,6 +64,21 @@ pub struct ProjectDetailContent {
 }
 
 impl ProjectDetailContent {
+    /// The merged affordance — the header chip's state glyph reads it.
+    pub fn affordance(&self) -> UiAffordance {
+        self.affordance
+    }
+
+    /// The project's display name — the header chip's text.
+    pub fn project_name(&self) -> &str {
+        &self.project_name
+    }
+
+    /// Unsaved persisted edits — the header chip's amber count.
+    pub fn unsaved_count(&self) -> usize {
+        self.dirty.persisted
+    }
+
     /// Gather the popup's content from the editor view and the pane status
     /// (the same merge the pane header's affordance uses).
     pub fn new(view: &ProjectEditorView, status: UiStatus) -> Self {
@@ -126,26 +140,13 @@ pub fn ProjectPane(
     let debug_overrides = view.debug_overrides;
 
     if embedded {
-        // Flat on the dock's background: the save/revert affordances as a
-        // quiet row (they used to ride the header), the debug chip, the sync
-        // issue, and the tree. No card, no title row, no [i] — the dock's tab
-        // names this, and the popup moved to the root node card.
+        // Flat on the dock's background: the sync issue and the tree. No
+        // card, no title row, no [i] — the dock's tab names this, the popup
+        // lives on the header project chip, and the Save/Revert row rides
+        // the TREE PANEL itself (`workbench::TreePanelActions`) so every
+        // view's Tree body shares the one affordance row.
         return rsx! {
             div { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-2.5",
-                if !header_actions.is_empty() || debug_overrides > 0 {
-                    div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-1.5",
-                        for action in header_actions {
-                            ActionButton {
-                                key: "{action.action.meta().label}",
-                                action: action.action.clone(),
-                                running,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
-                            }
-                        }
-                        DebugActiveChip { count: debug_overrides, on_action }
-                    }
-                }
                 if let Some(issue) = sync_issue.as_ref() {
                     div { class: "tw:grid tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-2 tw:text-xs tw:text-status-error-foreground",
                         strong { "{issue.message}" }
@@ -218,7 +219,7 @@ pub fn ProjectPane(
 /// presentation); persisted edits survive untouched — this is not Revert-all.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn DebugActiveChip(count: usize, on_action: EventHandler<UiAction>) -> Element {
+pub(crate) fn DebugActiveChip(count: usize, on_action: EventHandler<UiAction>) -> Element {
     if count == 0 {
         return rsx! {};
     }
@@ -379,8 +380,9 @@ fn ProjectDetailRow(label: String, value: String) -> Element {
     }
 }
 
-/// Accessible trigger label for the pane's merged affordance.
-fn trigger_label(affordance: UiAffordance) -> &'static str {
+/// Accessible trigger label for the pane's merged affordance — shared
+/// with the site header's project chip (D8), which opens the same popup.
+pub(crate) fn trigger_label(affordance: UiAffordance) -> &'static str {
     match affordance {
         UiAffordance::Info => "Project details — no unsaved changes",
         UiAffordance::Busy => "Project activity in progress",
