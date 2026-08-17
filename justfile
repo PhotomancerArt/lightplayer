@@ -359,32 +359,34 @@ studio-story-pngs *filters: studio-web-story-build
     STUDIO_STORY_SITE_DIR="target/dx/lpa-studio-web/release/web/public" \
         node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs pngs {{ filters }}
 
-# CI-canonical: story baselines are captured by the `validate-stories` CI job,
-# which auto-commits refreshed baselines to same-repo PR branches (fallback
-# paths use `just studio-story-pull`) — do NOT commit locally-captured
-# baselines (macOS rendering differs from the pinned CI environment). This
-# recipe remains as the emergency full-regen escape hatch. See
-# docs/adr/2026-07-26-ci-story-auto-commit.md.
+# Write a LOCAL story set under story-images/ (gitignored — baselines are
+# never committed; they live in the companion stories repo, one snapshot per
+# captured main commit, and merging a PR is what accepts its visual changes.
+# See docs/adr/2026-08-17-story-baselines-companion-repo.md). macOS rendering
+# differs from the pinned CI environment, so a local set is for iteration
+# only, never authoritative.
 studio-story-baselines: studio-web-story-build
     #!/usr/bin/env bash
     set -euo pipefail
     STUDIO_STORY_SITE_DIR="target/dx/lpa-studio-web/release/web/public" \
         node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs baselines
 
+# Compare a local capture against this branch's CI baseline snapshot: the
+# nearest captured main ancestor, auto-fetched from the stories repo into
+# target/story-baselines/current (cached by snapshot sha) unless
+# STUDIO_STORY_BASELINES_DIR already points somewhere. Output is
+# NON-AUTHORITATIVE (macOS ≠ pinned CI rendering) — use it for "did my change
+# move only the stories I expected" sanity, not as a gate.
 studio-story-check *filters: studio-web-story-build
     #!/usr/bin/env bash
     set -euo pipefail
+    if [ -z "${STUDIO_STORY_BASELINES_DIR:-}" ]; then
+        node lp-app/lpa-studio-web/scripts/story-baseline-lookup.mjs \
+            --fetch target/story-baselines/current > /dev/null
+        export STUDIO_STORY_BASELINES_DIR="target/story-baselines/current/images"
+    fi
     STUDIO_STORY_SITE_DIR="target/dx/lpa-studio-web/release/web/public" \
         node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs check {{ filters }}
-
-# Pull CI-captured story baselines for the current branch and stage them.
-# MANUAL FALLBACK: on same-repo PRs validate-stories auto-commits refreshed
-# baselines to the branch (just `git pull`); this recipe covers fork PRs, push
-# races, and main-push drift. Do not commit locally-captured baselines —
-# macOS rendering differs from the pinned CI environment. See
-# docs/adr/2026-07-26-ci-story-auto-commit.md.
-studio-story-pull:
-    node lp-app/lpa-studio-web/scripts/story-pull.mjs
 
 # Write this worktree's .claude/launch.json with the SAME port
 # `just studio-dev` will pick (scripts/dev-port.sh hash of worktree +
