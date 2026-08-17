@@ -402,6 +402,62 @@ pub fn ProjectOpeningFrame(
     }
 }
 
+/// The opening pipeline at card size: the state label plus the engine
+/// download's bar, for the card whose own open is running.
+///
+/// An example opened from Explore never reaches a `/p/` route until the
+/// open completes, so the full [`ProjectOpeningFrame`] never shows for
+/// it — on a slow connection the whole engine download would pass behind
+/// a static "Opening…" (the G1 finding). This line is the same probe,
+/// state machine, and debounce, rendered where that open actually lives:
+/// on the card. Failed states render as the calm fallback here — the
+/// grid-level [`OpenFailureNotice`] owns failure, and the card's
+/// `opening` flag clears with it.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn OpeningProgressLine() -> Element {
+    let mut polled = use_signal(OpeningState::default);
+    // One poll loop per mount — only the single opening card mounts one,
+    // and it stops when the open settles and the card re-renders idle.
+    use_future(move || async move {
+        let mut label = OpeningLabel::default();
+        loop {
+            let next = label.observe(opening_state(&OpenProbe::read()));
+            let changed = *polled.peek() != next;
+            if changed {
+                polled.set(next);
+            }
+            TimeoutFuture::new(POLL_INTERVAL_MS).await;
+        }
+    });
+    let shown = polled.read().clone();
+    let label = match &shown {
+        OpeningState::Failed { .. } => None,
+        state => state.label(),
+    };
+
+    rsx! {
+        div { class: "tw:grid tw:gap-1",
+            p { class: "tw:m-0 tw:text-xs tw:text-status-working-foreground",
+                {label.unwrap_or_else(|| "Opening…".to_string())}
+            }
+            if let Some(fraction) = shown.fraction() {
+                div {
+                    class: "tw:h-0.5 tw:w-full tw:overflow-hidden tw:rounded-pill tw:bg-card-subtle",
+                    role: "progressbar",
+                    aria_valuemin: "0",
+                    aria_valuemax: "100",
+                    aria_valuenow: "{(fraction * 100.0).round()}",
+                    div {
+                        class: "tw:h-full tw:rounded-pill tw:bg-accent tw:transition-[width]",
+                        style: "width: {(fraction * 100.0).round()}%;",
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The dead end, with both ways out of it.
 ///
 /// Split into its own component for two reasons. Retry's handler is then
