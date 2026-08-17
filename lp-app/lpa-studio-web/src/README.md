@@ -156,13 +156,9 @@ Story source-root guidance:
   component stories yet.
 
 When a change touches Studio web source or story output, follow the repo
-baseline workflow (AGENTS.md "Studio UI visual baselines"): push, let the
-`validate-stories` CI job capture, then stage the result with
-
-```bash
-just studio-story-pull
-```
-
-Baselines are CI-canonical — do not commit locally-captured PNGs. Include the
-pulled `lp-app/lpa-studio-web/story-images/` changes in the same PR as the
-source change.
+baseline workflow (AGENTS.md "Studio UI visual baselines"): push, and the
+`validate-stories` CI job captures, compares against the nearest captured
+main ancestor's snapshot in the companion stories repo, and posts a sticky
+PR comment with the changed stories. Nothing is committed to this repo —
+merging the PR is what accepts the visual changes. Do not commit
+locally-captured PNGs.
