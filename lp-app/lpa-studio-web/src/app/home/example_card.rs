@@ -6,6 +6,7 @@ use lpa_studio_core::{HomeOp, PreviewSource, UiAction, UiExampleCard};
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::gallery_preview::{ThumbMode, card_hover_handlers};
 use crate::app::home::package_card::home_action;
+use crate::app::home::project_opening_frame::OpeningProgressLine;
 
 /// One example. Click → running simulator, zero choices; the copy becomes
 /// yours in the library (seed-once) and forks on first divergent save.
@@ -60,7 +61,11 @@ pub(crate) fn ExampleCard(
                     "{card.name}"
                 }
                 if opening {
-                    p { class: "tw:m-0 tw:text-xs tw:text-status-working-foreground", "Opening…" }
+                    // The live pipeline, not a static "Opening…": an example
+                    // open never routes to the full opening frame, so on a
+                    // slow connection this line is the only honest indicator
+                    // of the engine download it is waiting on.
+                    OpeningProgressLine {}
                 } else {
                     p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "Example" }
                 }
