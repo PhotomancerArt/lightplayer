@@ -2,6 +2,12 @@
 
 ## Status
 
+**Storage/delivery superseded by
+[ADR 2026-08-17: Story Baselines Live in a Companion Repo](2026-08-17-story-baselines-companion-repo.md):**
+the pinned capture environment, path gate, and CI-canonical rule stand;
+committed baseline files, the fresh-set artifact delivery loop, and
+`just studio-story-pull` do not.
+
 Accepted; superseded in part by
 [ADR 2026-07-26: CI Auto-Commits Story Baseline Refreshes](2026-07-26-ci-story-auto-commit.md) —
 the "CI never commits / branch owner pulls and commits" delivery loop

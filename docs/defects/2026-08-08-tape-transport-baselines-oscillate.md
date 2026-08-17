@@ -148,3 +148,12 @@ both must be pinned" (the earlier entry's deeper lesson, now violated
 once and re-learned). Grep check when adding such a canvas:
 `ux-box-sized-canvas` must appear beside every `data-preview-painted`
 writer whose loop can stop.
+
+**2026-08-17 addendum** — the committed-baseline delivery loop this entry's
+recovery lore targets is gone (ADR
+`2026-08-17-story-baselines-companion-repo.md`): oscillation can no longer
+ping-pong commits or block merges. The mechanism (unpinned paint inputs)
+is unchanged and now surfaces as phantom rows in PR story comments and in
+the main-push run's delta-vs-parent step summary — that summary is the
+standing monitor for this class. `studio-story-pull`/`applyRefresh`
+recovery steps above are era history.

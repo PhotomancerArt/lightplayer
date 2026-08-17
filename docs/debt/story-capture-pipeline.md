@@ -31,9 +31,19 @@ queue behind it; byte-noise churn in a known set of stories
 (slot-row/editor family) must be manually reverted on every capture;
 each new agent session re-learns the incantations from memory notes.
 
-**Workarounds** (current lore, keep updated — since the 2026-07-26 paydown
-these apply only to local SCRATCH captures; canonical baselines come from the
-`validate-stories` CI job via `just studio-story-pull`):
+**2026-08-17 paydown (storage half)** — committed baselines are GONE
+(ADR `2026-08-17-story-baselines-companion-repo.md`): snapshots live in the
+companion stories repo, merging a PR is acceptance, and CI never commits or
+pushes to this repo. The entire delivery-loop burden below (auto-commit
+ping-pong, run-approval stalls, add/add PNG conflicts, tolerated-pixel
+baseline churn, `story-pull` recovery lore) is historical. **This entry
+stays active** for what remains: the capture itself is still slow (~15 min),
+load-sensitive, and nondeterminism-prone — which now degrades PR-comment
+signal and main-snapshot deltas instead of blocking merges. References to
+`studio-story-pull`/auto-commit below are era history, not current commands.
+
+**Workarounds** (current lore, keep updated — these apply to local SCRATCH
+captures; canonical baselines come from the `validate-stories` CI job):
 - `STUDIO_STORY_PNGS_CONCURRENCY=1` (2 on a quiet machine) and
   `STUDIO_STORY_CDP_TIMEOUT_MS=120000`.
 - Run on a quiet machine — not while the dev server + live debugging
