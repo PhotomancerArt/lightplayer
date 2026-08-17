@@ -2,6 +2,11 @@
 
 ## Status
 
+**Committed-PNG storage superseded by
+[ADR 2026-08-17: Story Baselines Live in a Companion Repo](2026-08-17-story-baselines-companion-repo.md):**
+story-id naming, viewport matrix, and PNG-comparison methodology stand;
+baselines are no longer committed to this repo.
+
 Accepted. **Partially superseded by
 [ADR 2026-07-26](2026-07-26-ci-canonical-story-capture.md):** capture is now
 CI-canonical — baselines are captured by the `validate-stories` CI job and
