@@ -97,6 +97,13 @@ pub fn App() -> Element {
     // here would run before the hooks below, which is why the surfaces
     // that do it can only be entered by a page load. See the render body.
 
+    // The engine wasm every worker boots from, fetched once now rather than
+    // N times after the first click (see `preload_engine_assets`). First
+    // hook of the running app on purpose: the download should already be in
+    // flight while the rest of the page wires itself up.
+    #[cfg(target_arch = "wasm32")]
+    use_hook(preload_engine_assets);
+
     let mut view = use_signal(UiStudioView::empty);
     // The OpenRouter connect return leg (`?code=…`): consumed synchronously
     // BEFORE the router reads the URL — it scrubs the query and restores the
@@ -1112,6 +1119,48 @@ pub(crate) fn make_pull_timer(delay: Duration) -> TimeoutFuture {
 /// the session's injected factory (the `make_pull_timer` pattern).
 pub(crate) fn make_device_timers() -> DeviceTimers {
     DeviceTimers::new(|delay| Box::pin(TimeoutFuture::new(delay.as_millis() as u32)))
+}
+
+/// Warm the browser engine's assets once, at page load.
+///
+/// Every worker this page ever boots — the simulator's and each preview
+/// pool member's — fetches the SAME multi-MB `fw_browser` wasm. Left to the
+/// first boot, that download starts only once the user has already clicked,
+/// and on a cold, throttled connection it is most of what a boot spends its
+/// budget on. One fire-and-forget fetch at load puts the bytes in the HTTP
+/// cache first, where Chrome also parks the compiled code for a streaming
+/// instantiation of the same URL, so the boot that follows pays for neither.
+///
+/// Fire-and-forget by design: a failure here is silent and costs nothing —
+/// the boot demands the same asset again through the same cache. The URLs
+/// come from `BrowserWorkerOptions`'s defaults, the same source the workers
+/// boot from, so there is one place to change them.
+///
+/// The wasm goes through `warm_engine_cache` (boot protocol v2): one
+/// streaming fetch with byte progress, one `WebAssembly.compile`, and the
+/// compiled `Module` is what every worker instantiates from. The glue JS is
+/// still `import()`ed per worker, so for it a plain read into the HTTP
+/// cache is the whole job. (Dev caveat: a `dx serve` rebuild invalidates
+/// the cache entries mid-session — harmless, the next demand re-fetches.)
+#[cfg(target_arch = "wasm32")]
+fn preload_engine_assets() {
+    use lpa_link::providers::browser_worker::{BrowserWorkerOptions, warm_engine_cache};
+
+    let options = BrowserWorkerOptions::default();
+    warm_engine_cache(&options.fw_browser_wasm_path);
+    let module_url = options.fw_browser_module_path;
+    wasm_bindgen_futures::spawn_local(async move {
+        // The body has to be consumed for the response to land in the
+        // cache — a `Response` whose stream is never read warms nothing.
+        match gloo_net::http::Request::get(&module_url).send().await {
+            Ok(response) => {
+                if let Err(error) = response.binary().await {
+                    log::debug!("engine preload: reading {module_url}: {error}");
+                }
+            }
+            Err(error) => log::debug!("engine preload: fetching {module_url}: {error}"),
+        }
+    });
 }
 
 /// M6 (D32): the `navigator.serial` hotplug listeners. A `connect`

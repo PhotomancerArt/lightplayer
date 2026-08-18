@@ -40,6 +40,10 @@ mod studio_link_e2e_tests;
 /// revert, and save-materialized deletion.
 #[cfg(test)]
 mod studio_node_crud_e2e_tests;
+/// End-to-end supersede tests (D4): a newer click landing on an open —
+/// in the same batch, and while the open is parked holding its lock.
+#[cfg(test)]
+mod studio_open_supersede_e2e_tests;
 pub mod studio_snapshot;
 pub mod studio_view_channel;
 pub mod ui_console_view;

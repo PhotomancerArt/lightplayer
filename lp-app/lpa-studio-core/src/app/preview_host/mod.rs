@@ -11,7 +11,18 @@
 //! LRU eviction). Failure stays visible: tier fallback reasons, present
 //! errors, and device loss all surface on the slot's observable status,
 //! and a poisoned worker is recycled deliberately (respawn + re-lease of
-//! still-visible slots), never retried in a flap.
+//! still-visible slots), never retried in a flap. A worker that failed to
+//! BOOT is likewise recovered rather than abandoned: it is re-booted on
+//! the next lease demand after a cooldown, on a bounded attempt budget
+//! ([`slot_policy::dead_worker_next`]), so a transient boot failure costs
+//! a wait instead of a page reload.
+//!
+//! Boots are also **scheduled**, not stampeded: the pool starts one member
+//! at a time ([`slot_policy::choose_boot_start`]) because they all fetch
+//! and compile the same engine wasm, and every start — boots, retries, and
+//! new lease deploys alike — yields to a user-initiated project open
+//! ([`slot_policy::StartGate`], fed by [`crate::user_open_in_flight`]).
+//! Yielding defers; work already in flight finishes untouched.
 //!
 //! The browser-facing half ([`PreviewHost`] itself, its worker pool, and
 //! the per-runtime deploy transport) only exists on
@@ -42,7 +53,10 @@ pub use preview_types::{
     PreviewHostConfig, PreviewPosterFrame, PreviewProfile, PreviewSlotRequest, PreviewSlotStatus,
     PreviewSource, PreviewTier, is_teardown_abort_reason,
 };
-pub use slot_policy::{EvictionCandidate, choose_eviction, choose_starts, choose_worker};
+pub use slot_policy::{
+    BootSlotState, EvictionCandidate, StartGate, choose_boot_start, choose_eviction, choose_starts,
+    choose_worker, pool_may_start_boot,
+};
 
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use preview_host_impl::{PreviewHost, PreviewSlotHandle};

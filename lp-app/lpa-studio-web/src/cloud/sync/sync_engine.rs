@@ -21,11 +21,22 @@
 //!
 //! # Locks
 //!
-//! A trip needs the project's history subtree, and exactly one writer may
-//! hold it. When this tab has the project open the driver borrows that
-//! open's live handles (its flusher persists the binding); otherwise it
-//! takes the project lock for the trip and flushes before releasing. A
-//! project another tab holds is skipped — that tab's own driver has it.
+//! A trip needs the project's two subtrees, and exactly one writer may hold
+//! them. When this tab has the project open the driver borrows that open's
+//! live handles (its flusher persists the binding); otherwise it snapshots
+//! the project under its lock and lets the lock go before the trip starts.
+//! A project another tab holds is skipped — that tab's own driver has it.
+//!
+//! **The project lock is never held across the network** (D1;
+//! `docs/adr/2026-07-08-per-project-library-locking.md`, amended). It
+//! guards local OPFS consistency, and a refusal of it is a user-facing
+//! claim ("open in another tab") that a round trip has no business making
+//! true. So the trip is three phases: snapshot under the lock, publish
+//! from the snapshot with no lock at all, bank what came back under a
+//! second short hold. A project that changed while the publish was in
+//! flight simply earns another trip — `SyncQueue::request` has always
+//! treated a trip as one attempt against a consistent snapshot, and
+//! `sync_queue::work_arriving_mid_flight_earns_another_trip` pins it.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -188,7 +199,9 @@ impl SyncEngine {
         }
     }
 
-    /// One project's trip, mount and all.
+    /// One project's trip: snapshot, publish, bank — in that order, and
+    /// with the project lock alive only inside the first and the last (see
+    /// the module's `# Locks`).
     async fn run_one(&self, due: &DueProject, roster: &Roster) -> TripResult {
         let Some(host) = opfs_library_host() else {
             return TripResult::Refused;
@@ -211,9 +224,11 @@ impl SyncEngine {
             }
         };
 
+        // No lock is held from here until `finish`: `mount_for_sync`
+        // released it once the snapshot was in memory.
         let fallback = entry.map_or(due.uid.as_str(), |entry| entry.name.as_str());
         let result = run_mounted(&mount, uid, fallback, due.restate).await;
-        mount.release().await;
+        mount.finish().await;
 
         match result {
             Ok(report) => {

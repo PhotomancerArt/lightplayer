@@ -177,6 +177,36 @@ pub enum HomeOp {
     CardUi(crate::app::home::card_ui_state::CardUiOp),
 }
 
+impl HomeOp {
+    /// Whether this op ends in a project being opened on the simulator.
+    ///
+    /// The supersede rule (D4) is keyed off this: enqueuing one of these
+    /// makes it THE current open, and whatever open is already parked in
+    /// the actor unwinds at its next await boundary
+    /// ([`crate::app::open_progress`]). Create-and-open counts — the
+    /// catalog transaction is a prelude to the same open.
+    pub fn opens_a_project(&self) -> bool {
+        matches!(
+            self,
+            Self::OpenPackage { .. }
+                | Self::OpenExample { .. }
+                | Self::CreateProject { .. }
+                | Self::CreateFromPattern { .. }
+        )
+    }
+
+    /// Whether this op is a PURE open — nothing but opening an existing
+    /// thing, so dropping it costs the user nothing.
+    ///
+    /// The distinction matters where supersede drops a queued open (two
+    /// clicks landing in one actor batch): a create-and-open must still
+    /// run, because its catalog transaction is real work the user asked
+    /// for and no later click repeats it.
+    pub fn is_pure_open(&self) -> bool {
+        matches!(self, Self::OpenPackage { .. } | Self::OpenExample { .. })
+    }
+}
+
 impl ControllerOp for HomeOp {
     fn default_action_meta(&self) -> ActionMeta {
         match self {

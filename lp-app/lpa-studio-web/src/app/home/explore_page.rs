@@ -10,6 +10,7 @@ use lpa_studio_core::{UiAction, UiExampleCard, UiHomeView};
 
 use crate::app::home::example_card::ExampleCard;
 use crate::app::home::gallery_preview::HoveredCard;
+use crate::app::home::project_opening_frame::OpenFailureNotice;
 use crate::app::home::{card_grid_class, section_title_class};
 
 /// The example grid. `home` is `None` while a project is open (the view
@@ -33,8 +34,24 @@ pub fn ExplorePage(
         ),
         None => (embedded_example_cards(), None, false),
     };
+    // An example open never reaches a `/p/` route, so it has no opening
+    // frame to fail inside — and before P6 a failed example open left the
+    // card back to normal and the error in the console only. Read at
+    // render: the terminal failure is a page-thread signal, and this page
+    // re-renders on the very emission that clears `home.opening`.
+    let failure = match lpa_studio_core::open_stage() {
+        lpa_studio_core::OpenStage::Failed(failure) => Some(failure),
+        _ => None,
+    };
     rsx! {
         div { class: "tw:grid tw:content-start tw:gap-7",
+            if let Some(failure) = failure {
+                OpenFailureNotice {
+                    message: failure.message,
+                    retry: failure.retry,
+                    on_action: Some(on_action),
+                }
+            }
             section { class: "tw:grid tw:gap-3",
                 header { class: "tw:flex tw:items-center tw:gap-3",
                     h2 { class: section_title_class(), "Examples" }

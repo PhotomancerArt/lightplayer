@@ -555,7 +555,9 @@ mod io {
         }
     }
 
-    /// Borrow (or briefly lock) the project's stores for one operation.
+    /// Borrow (or snapshot under a brief lock) the project's stores for one
+    /// operation. Every caller here works on the OPEN copy, so in practice
+    /// these are the open's live handles; `finish` banks either shape.
     async fn mount(uid: PrefixedUid) -> Option<SyncMount> {
         let host = crate::local_store::opfs_library_host()?;
         match host.mount_for_sync(&uid.to_string(), None).await {
@@ -618,7 +620,7 @@ mod io {
         let report = match pull(&FetchCloudPort::new(), &project).await {
             Ok(report) => report,
             Err(error) => {
-                mount.release().await;
+                mount.finish().await;
                 return Err(error);
             }
         };
@@ -656,7 +658,7 @@ mod io {
                 }
             }
         }
-        mount.release().await;
+        mount.finish().await;
         recompute_banner(session.clone(), uid, false).await;
         Ok(())
     }
@@ -677,7 +679,7 @@ mod io {
         };
         let project = LocalProject::new(uid, mount.package(), mount.history());
         let state = classify_stores(&project, *session.relation.peek());
-        mount.release().await;
+        mount.finish().await;
         let Some(state) = state else {
             return;
         };
@@ -720,13 +722,13 @@ mod io {
                 Ok(identity) => identity,
                 Err(error) => {
                     log::warn!("visitor push: {uid} identity: {error}");
-                    mount.release().await;
+                    mount.finish().await;
                     return;
                 }
             };
         let project = LocalProject::new(uid, mount.package(), mount.history());
         let result = push(&FetchCloudPort::new(), &project, &identity.sidecar()).await;
-        mount.release().await;
+        mount.finish().await;
         match result {
             Ok(_) => {
                 session.relation.set(Some(SyncRelation::AtHead));
@@ -805,7 +807,7 @@ mod io {
             crate::web_app::now_secs(),
         )
         .map_err(|e| e.to_string())?;
-        mount.release().await;
+        mount.finish().await;
 
         // The forked content carries the PARENT's manifest; the fork gets
         // its own identity — uid and "<name> (fork)" — and records that as
@@ -920,7 +922,7 @@ mod io {
             Ok(())
         }
         .await;
-        mount.release().await;
+        mount.finish().await;
         result
     }
 }

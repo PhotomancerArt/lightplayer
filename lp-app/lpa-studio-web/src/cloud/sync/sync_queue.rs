@@ -325,6 +325,12 @@ mod tests {
 
     /// A save that lands while the trip is in flight must not be swallowed:
     /// the trip is one attempt against the snapshot it started from.
+    ///
+    /// Load-bearing since D1 (P2): the driver now publishes from a copy
+    /// taken under the project lock and released before the network, so a
+    /// project *can* change mid-publish where it could not before. This is
+    /// the whole of what happens when it does — the trip that is running
+    /// stands, and the change earns its own.
     #[test]
     fn work_arriving_mid_flight_earns_another_trip() {
         let mut queue = SyncQueue::new();
