@@ -161,18 +161,28 @@ impl LinkProvider for BrowserWorkerProvider {
             },
             endpoint.capabilities.clone(),
         );
+        // Re-resolve the engine URLs on every connect rather than caching
+        // them at construction: `self.options` is fixed at provider
+        // construction time (before `index.html`'s manifest fetch can have
+        // settled), while `window.__lpEngineAssets` is a page-lifetime
+        // promise that resolves once and then answers every later await
+        // instantly. `tick_mode` is the one field callers legitimately
+        // override (see `with_tick_mode`), so it rides along unchanged.
+        let options = crate::providers::browser_worker::resolved_engine_urls()
+            .await
+            .with_tick_mode(self.options.tick_mode);
         // Boot the worker on locals so the boot await runs with no session
         // borrow held; only the finished state enters the map. A failed
         // boot returns here with the handle still local, and dropping it
         // terminates the worker — no zombie keeps fetching wasm behind a
         // connect that already gave up.
         let mut state = BrowserWorkerSessionState::new(endpoint.id, session.clone());
-        let mut handle = BrowserWorkerHandle::new(&self.options.worker_script_path())?;
+        let mut handle = BrowserWorkerHandle::new(&options.worker_script_path())?;
         state.pending_outputs.extend(
             handle
                 .boot(
                     crate::providers::browser_worker::boot_wait::STUDIO_RUNTIME_WORKER_LABEL,
-                    &self.options,
+                    &options,
                 )
                 .await?,
         );

@@ -307,14 +307,11 @@ studio-web-copy-sidecars profile out_dir include_firmware="false":
     #!/usr/bin/env bash
     set -euo pipefail
     sidecar_dir="{{ studio_assets_dir }}/{{ profile }}/pkg"
-    if [[ ! -f "${sidecar_dir}/fw_browser.js" || ! -f "${sidecar_dir}/fw_browser_bg.wasm" ]]; then
-        echo "missing fw-browser sidecar artifacts in ${sidecar_dir}" >&2
-        exit 1
-    fi
-
-    mkdir -p "{{ out_dir }}/pkg"
-    cp "${sidecar_dir}/fw_browser.js" "{{ out_dir }}/pkg/fw_browser.js"
-    cp "${sidecar_dir}/fw_browser_bg.wasm" "{{ out_dir }}/pkg/fw_browser_bg.wasm"
+    # Hashes fw_browser.js / fw_browser_bg.wasm into pkg/fw_browser-<hash>.js
+    # / pkg/fw_browser_bg-<hash>.wasm + pkg/engine-manifest.json — see the
+    # script header for why (immutable caching) and for the shared
+    # cleanup/hashing this recipe has in common with `studio-dev`.
+    scripts/sync-engine-sidecar.sh "${sidecar_dir}" "{{ out_dir }}/pkg"
 
     if [[ "{{ include_firmware }}" == "true" ]]; then
         # Every served build, no exceptions: the picker offers a board on the
@@ -430,9 +427,10 @@ studio-dev: install-wasm32-target studio-firmware-package-served
     done < <(just studio-served-builds)
     sync_generated_assets() {
         [[ -d "${public_dir}" ]] || return 0
-        mkdir -p "${public_dir}/pkg"
-        cp "${sidecar_dir}/fw_browser.js" "${public_dir}/pkg/fw_browser.js"
-        cp "${sidecar_dir}/fw_browser_bg.wasm" "${public_dir}/pkg/fw_browser_bg.wasm"
+        # Hashed names + engine-manifest.json (see the script header); this
+        # loop re-runs every second, so a mid-serve sidecar rebuild lands a
+        # fresh hash pair and the script sweeps the stale one it replaces.
+        scripts/sync-engine-sidecar.sh "${sidecar_dir}" "${public_dir}/pkg"
         for build_id in "${served_builds[@]}"; do
             firmware_dir="{{ studio_assets_dir }}/firmware/${build_id}"
             mkdir -p "${public_dir}/firmware/${build_id}"

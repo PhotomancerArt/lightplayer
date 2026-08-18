@@ -23,6 +23,22 @@
             html, body { margin: 0; background: #101317; }
         </style>
         <!--
+          Pre-boot engine asset discovery (P2, hashed engine sidecar). The
+          fw-browser engine wasm/glue are served under content-hashed names
+          (see justfile's `sync-engine-sidecar.sh`), so nothing that boots a
+          browser worker can hardcode their URLs; this fetches the small
+          pkg/engine-manifest.json as early as possible so the resolved
+          URLs are ready before the wasm bundle boots. `lpa-link`'s
+          `resolved_engine_urls()` awaits this global (falling back to the
+          unhashed constants on any failure); a later phase's shell loader
+          also reads it for its own progress UI.
+        -->
+        <script>
+            window.__lpEngineAssets = fetch("/pkg/engine-manifest.json")
+                .then((response) => (response.ok ? response.json() : null))
+                .catch(() => null);
+        </script>
+        <!--
           Vendored CodeMirror bundle (globalThis.LpCodeMirror), regenerated
           via `just studio-codemirror-bundle`; see vendor-src/codemirror/.
           The CodeEditor component polls for the global, so load order vs

@@ -70,6 +70,13 @@ mod tests {
             "main-a1b2c3d4.js",
             "lpa_studio_web_bg-9f8e7d6c5b4a.wasm",
             "index-4e2b19ca.css",
+            // The fw-browser engine sidecar (P2, hashed engine sidecar):
+            // `scripts/sync-engine-sidecar.sh` names these, growing the hash
+            // segment past 16 hex chars if it ever fails to mix a digit and
+            // a letter — see `sixteen_hex_chars_are_not_always_mixed` below
+            // for why that guard exists at all.
+            "fw_browser-a1b2c3d4e5f60718.js",
+            "fw_browser_bg-a1b2c3d4e5f60718.wasm",
         ] {
             assert_eq!(for_file(name), IMMUTABLE, "for {name}");
         }
@@ -82,11 +89,30 @@ mod tests {
         for name in [
             "manifest.json",
             "dev-settings.json",
-            "fw_browser_bg.wasm",
+            // The engine sidecar itself is hashed (see
+            // `hashed_bundles_are_immutable`) — only the tiny manifest that
+            // points at it stays on the short tier, the same as any other
+            // small pointer file that a deploy can change underneath it.
+            "engine-manifest.json",
             "favicon.ico",
             "logo.svg",
         ] {
             assert_eq!(for_file(name), SHORT, "for {name}");
         }
+    }
+
+    /// `scripts/sync-engine-sidecar.sh` grows its hash slice past 16 hex
+    /// characters when the first 16 fail to mix a digit and a letter — this
+    /// is why that guard exists: a plausible (if rare) hex slice can be
+    /// all-digit or all-letter, and `looks_content_hashed` would silently
+    /// misclassify it as an unhashed name (5-minute cache instead of
+    /// immutable).
+    #[test]
+    fn sixteen_hex_chars_are_not_always_mixed() {
+        assert!(!looks_content_hashed("fw_browser-1111111111111111.js"));
+        assert!(!looks_content_hashed("fw_browser-abcdefabcdefabcd.js"));
+        // A longer slice that mixes both classes is what the script falls
+        // back to in that case, and must be recognized.
+        assert!(looks_content_hashed("fw_browser-1111111111111111a.js"));
     }
 }

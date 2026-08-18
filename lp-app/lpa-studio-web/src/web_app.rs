@@ -1133,8 +1133,10 @@ pub(crate) fn make_device_timers() -> DeviceTimers {
 ///
 /// Fire-and-forget by design: a failure here is silent and costs nothing —
 /// the boot demands the same asset again through the same cache. The URLs
-/// come from `BrowserWorkerOptions`'s defaults, the same source the workers
-/// boot from, so there is one place to change them.
+/// come from `resolved_engine_urls`, the same pre-boot manifest resolution
+/// the workers boot from (falling back to `BrowserWorkerOptions`'s unhashed
+/// defaults when the manifest fetch in `index.html` hasn't landed or
+/// failed), so there is one place to change them.
 ///
 /// The wasm goes through `warm_engine_cache` (boot protocol v2): one
 /// streaming fetch with byte progress, one `WebAssembly.compile`, and the
@@ -1144,12 +1146,12 @@ pub(crate) fn make_device_timers() -> DeviceTimers {
 /// the cache entries mid-session — harmless, the next demand re-fetches.)
 #[cfg(target_arch = "wasm32")]
 fn preload_engine_assets() {
-    use lpa_link::providers::browser_worker::{BrowserWorkerOptions, warm_engine_cache};
+    use lpa_link::providers::browser_worker::{resolved_engine_urls, warm_engine_cache};
 
-    let options = BrowserWorkerOptions::default();
-    warm_engine_cache(&options.fw_browser_wasm_path);
-    let module_url = options.fw_browser_module_path;
     wasm_bindgen_futures::spawn_local(async move {
+        let options = resolved_engine_urls().await;
+        warm_engine_cache(&options.fw_browser_wasm_path);
+        let module_url = options.fw_browser_module_path;
         // The body has to be consumed for the response to land in the
         // cache — a `Response` whose stream is never read warms nothing.
         match gloo_net::http::Request::get(&module_url).send().await {
