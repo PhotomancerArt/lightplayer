@@ -3,12 +3,13 @@
 //!
 //! Architecture (preview-host ADR): consumers `lease()` a slot and observe
 //! it through [`PreviewSlotHandle`] — they never touch workers, runtimes,
-//! or envelopes. One `run()` future owns all IO: it boots the pool,
-//! executes lease pipelines (create runtime → deploy → attach surface),
-//! schedules `present_frame`/`preview_frame` posts per slot fps with
-//! in-flight backpressure, enforces the global live-slot cap with LRU
-//! eviction, and recycles a poisoned worker (respawn + re-lease of
-//! still-visible slots) on device loss or present errors.
+//! or envelopes. One `run()` future owns all IO: it boots the pool one
+//! member at a time (never while a user open holds priority — see
+//! [`start_gate`]), executes lease pipelines (create runtime → deploy →
+//! attach surface), schedules `present_frame`/`preview_frame` posts per
+//! slot fps with in-flight backpressure, enforces the global live-slot cap
+//! with LRU eviction, and recycles a poisoned worker (respawn + re-lease
+//! of still-visible slots) on device loss or present errors.
 //!
 //! A slot has two halves. The visual half is the raster (`visual.out`,
 //! presented to the GPU-tier surface or blitted from CPU-tier pixel frames);
@@ -36,6 +37,7 @@ use lpa_link::providers::browser_worker::{BrowserInputEnvelope, BrowserRuntimeTi
 use wasm_bindgen::JsCast;
 
 use crate::app::library::LibraryHost;
+use crate::app::open_priority::user_open_in_flight;
 
 use super::frame_schedule::{FrameDecision, FrameSchedule};
 use super::preview_client_io::PreviewClientIo;
@@ -48,8 +50,9 @@ use super::preview_types::{
 };
 use super::preview_worker::PreviewWorker;
 use super::slot_policy::{
-    DetachedSlotNext, EvictionCandidate, choose_eviction, choose_starts, choose_worker,
-    detached_slot_next,
+    BootSlotState, DEAD_WORKER_RETRY_BUDGET, DeadWorkerNext, DetachedSlotNext, EvictionCandidate,
+    StartGate, choose_boot_start, choose_eviction, choose_starts, choose_worker, dead_worker_next,
+    detached_slot_next, pool_may_start_boot,
 };
 
 /// Scheduler/polling loop period while any slot or sub-task is active.
@@ -104,15 +107,32 @@ struct WorkerEntry {
     /// stale so a recycled worker never receives a zombie pipeline's posts.
     generation: u32,
     state: WorkerState,
+    /// Re-boots spent on the CURRENT failure episode (see
+    /// [`dead_worker_next`]). Reset the moment the worker boots healthy
+    /// again, so the budget bounds one bad stretch rather than the page.
+    retries_used: usize,
 }
 
 enum WorkerState {
-    /// Spawn/boot in flight (initial boot or post-recycle respawn).
+    /// Never started: waiting its turn in the staggered boot queue (see
+    /// [`PreviewHost::start_next_boot`]). Indistinguishable from `Booting`
+    /// to every consumer — a slot leased against this pool member simply
+    /// stays pending, exactly as it would while the boot ran.
+    Pending,
+    /// Spawn/boot in flight (initial boot, post-recycle respawn, or a
+    /// dead-worker retry).
     Booting,
     Ready(Rc<RefCell<PreviewWorker>>),
-    /// Boot failed; the pool member stays down (recycling is deliberate,
-    /// never a retry flap).
-    Dead(String),
+    /// Boot failed. Still recoverable: the entry is re-booted on the next
+    /// lease demand once its cooldown elapses, up to
+    /// [`DEAD_WORKER_RETRY_BUDGET`] attempts. Bounded and spaced out on
+    /// purpose — recovery, never a retry flap — and final once the budget
+    /// is spent.
+    Dead {
+        reason: String,
+        /// When the entry entered `Dead`, for the cooldown.
+        since_ms: f64,
+    },
 }
 
 struct Slot {
@@ -191,13 +211,15 @@ impl PreviewHost {
     /// Build a host over `config`. `library` backs
     /// [`PreviewSource::ProjectUid`] leases (catalog snapshots); without
     /// it those leases fail with a clear status while example leases
-    /// still work. Nothing boots until [`Self::run`] is driven.
+    /// still work. Nothing boots until [`Self::run`] is driven — and then
+    /// one member at a time (see [`Self::start_next_boot`]).
     pub fn new(config: PreviewHostConfig, library: Option<Rc<dyn LibraryHost>>) -> Self {
         let pool_size = config.pool_size.max(1);
         let workers = (0..pool_size)
             .map(|_| WorkerEntry {
                 generation: 0,
-                state: WorkerState::Booting,
+                state: WorkerState::Pending,
+                retries_used: 0,
             })
             .collect();
         Self {
@@ -285,18 +307,13 @@ impl PreviewHost {
             shared.running = true;
         }
         let mut tasks: Vec<LocalTask> = Vec::new();
-        {
-            let shared = self.shared.borrow();
-            for index in 0..shared.workers.len() {
-                tasks.push(boot_task(Rc::clone(&self.shared), index, 0));
-            }
-        }
         let sleeper = PreviewSleeper::new();
         loop {
             if self.shared.borrow().shutdown {
                 self.finish_shutdown();
                 break;
             }
+            self.start_next_boot(&mut tasks);
             self.reap_released_slots();
             self.apply_resume_requests();
             self.start_pending_leases(&mut tasks);
@@ -314,18 +331,27 @@ impl PreviewHost {
     }
 
     fn finish_shutdown(&self) {
+        let shutdown_ms = now_ms();
         let (workers, slots) = {
             let mut shared = self.shared.borrow_mut();
             let workers: Vec<_> = shared
                 .workers
                 .iter_mut()
                 .filter_map(|entry| {
+                    // Shutdown spends the budget too: a shut-down host
+                    // must never revive a worker.
+                    entry.retries_used = DEAD_WORKER_RETRY_BUDGET;
                     match core::mem::replace(
                         &mut entry.state,
-                        WorkerState::Dead("preview host shut down".to_string()),
+                        WorkerState::Dead {
+                            reason: "preview host shut down".to_string(),
+                            since_ms: shutdown_ms,
+                        },
                     ) {
                         WorkerState::Ready(worker) => Some(worker),
-                        WorkerState::Booting | WorkerState::Dead(_) => None,
+                        WorkerState::Pending | WorkerState::Booting | WorkerState::Dead { .. } => {
+                            None
+                        }
                     }
                 })
                 .collect();
@@ -396,7 +422,7 @@ impl PreviewHost {
             }
             match &entry.state {
                 WorkerState::Ready(worker) => Rc::clone(worker),
-                WorkerState::Booting | WorkerState::Dead(_) => return,
+                WorkerState::Pending | WorkerState::Booting | WorkerState::Dead { .. } => return,
             }
         };
         let mut worker = worker.borrow_mut();
@@ -448,10 +474,17 @@ impl PreviewHost {
                 candidates.push((slot.id, slot.visible));
             }
         }
+        if !candidates.is_empty() {
+            // Demand is what wakes a dead pool member — an idle page never
+            // pays for a retry.
+            self.revive_dead_workers(tasks);
+        }
         // One in-flight deploy per worker: past that the pipelines only
-        // contend for the same pool and time each other out.
+        // contend for the same pool and time each other out. A user open in
+        // flight holds every new start back (the gate) while the deploys
+        // already running finish untouched.
         let cap = self.shared.borrow().config.pool_size.max(1);
-        let starting = choose_starts(candidates, deploying_now, cap);
+        let starting = choose_starts(candidates, deploying_now, cap, start_gate());
         if starting.is_empty() {
             return;
         }
@@ -492,8 +525,85 @@ impl PreviewHost {
         }
     }
 
+    /// Start the next pool member's boot, if the scheduler may take one
+    /// this tick ([`choose_boot_start`]).
+    ///
+    /// The whole stagger: pool members leave [`WorkerState::Pending`] one
+    /// at a time, so the engine wasm is fetched and compiled once at a
+    /// time instead of by every member at once, and none of them starts
+    /// while a user open holds priority. A member left `Pending` is
+    /// reconsidered every tick — the wait is a queue, not a failure.
+    fn start_next_boot(&self, tasks: &mut Vec<LocalTask>) {
+        let start = {
+            let shared = self.shared.borrow();
+            if shared.shutdown {
+                return;
+            }
+            choose_boot_start(&boot_states(&shared), start_gate())
+        };
+        let Some(index) = start else {
+            return;
+        };
+        let generation = {
+            let mut shared = self.shared.borrow_mut();
+            let entry = &mut shared.workers[index];
+            entry.state = WorkerState::Booting;
+            entry.generation
+        };
+        tasks.push(boot_task(Rc::clone(&self.shared), index, generation));
+    }
+
+    /// Re-boot ONE dead pool worker whose cooldown has elapsed, spending a
+    /// retry ([`dead_worker_next`]).
+    ///
+    /// Called only when a lease actually wants a worker, so recovery costs
+    /// nothing on an idle page, and bounded by
+    /// [`DEAD_WORKER_RETRY_BUDGET`] so a broken environment settles into
+    /// an honest error instead of respawning workers forever. A retry is a
+    /// boot like any other, so it takes its turn behind
+    /// [`pool_may_start_boot`]: never two at once, never during a user
+    /// open. The generation bump makes any in-flight pipeline holding the
+    /// old snapshot unwind as stale, exactly like a recycle.
+    fn revive_dead_workers(&self, tasks: &mut Vec<LocalTask>) {
+        let now = now_ms();
+        // (worker index, new generation, attempt number, previous reason)
+        let revive: Option<(usize, u32, usize, String)> = {
+            let mut shared = self.shared.borrow_mut();
+            if shared.shutdown || !pool_may_start_boot(&boot_states(&shared), start_gate()) {
+                return;
+            }
+            shared
+                .workers
+                .iter_mut()
+                .enumerate()
+                .find_map(|(index, entry)| {
+                    let WorkerState::Dead { reason, since_ms } = &entry.state else {
+                        return None;
+                    };
+                    match dead_worker_next(entry.retries_used, *since_ms, now) {
+                        DeadWorkerNext::Reboot => {
+                            let reason = reason.clone();
+                            entry.retries_used += 1;
+                            entry.generation += 1;
+                            entry.state = WorkerState::Booting;
+                            Some((index, entry.generation, entry.retries_used, reason))
+                        }
+                        DeadWorkerNext::Cooling | DeadWorkerNext::Spent => None,
+                    }
+                })
+        };
+        if let Some((index, generation, attempt, reason)) = revive {
+            log::info!(
+                "preview host: retrying dead worker {index} \
+                 (attempt {attempt}/{DEAD_WORKER_RETRY_BUDGET}, was: {reason})"
+            );
+            tasks.push(boot_task(Rc::clone(&self.shared), index, generation));
+        }
+    }
+
     /// Least-loaded ready worker for a pending slot. `None` keeps the slot
-    /// pending (a worker is booting) or parks it in `Error` (all dead).
+    /// pending (a worker is booting or cooling toward a retry) or parks it
+    /// in `Error` (every worker dead with its budget spent).
     fn pick_worker(
         &self,
         slot_rc: &Rc<RefCell<Slot>>,
@@ -516,7 +626,7 @@ impl PreviewHost {
                         })
                         .count(),
                 ),
-                WorkerState::Booting | WorkerState::Dead(_) => None,
+                WorkerState::Pending | WorkerState::Booting | WorkerState::Dead { .. } => None,
             })
             .collect();
         match choose_worker(&loads) {
@@ -528,25 +638,40 @@ impl PreviewHost {
                 Some((index, Rc::clone(worker), entry.generation))
             }
             None => {
-                let all_dead = shared
+                // Every worker dead is only TERMINAL once every one of
+                // them has spent its retry budget. While any of them is
+                // still cooling toward a re-boot, the slot simply stays
+                // pending — the wait is a queue, not a failure, and
+                // `revive_dead_workers` restarts them on demand.
+                let now = now_ms();
+                let spent: Vec<Option<&String>> = shared
                     .workers
                     .iter()
-                    .all(|entry| matches!(entry.state, WorkerState::Dead(_)));
-                if all_dead {
-                    let reason = shared
-                        .workers
-                        .iter()
-                        .find_map(|entry| match &entry.state {
-                            WorkerState::Dead(reason) => Some(reason.clone()),
-                            _ => None,
-                        })
+                    .map(|entry| match &entry.state {
+                        WorkerState::Dead { reason, since_ms } => matches!(
+                            dead_worker_next(entry.retries_used, *since_ms, now),
+                            DeadWorkerNext::Spent
+                        )
+                        .then_some(reason),
+                        _ => None,
+                    })
+                    .collect();
+                if spent.iter().all(Option::is_some) && !spent.is_empty() {
+                    let reason = spent
+                        .into_iter()
+                        .flatten()
+                        .next()
+                        .cloned()
                         .unwrap_or_else(|| "no preview workers".to_string());
                     drop(shared);
                     let mut slot = slot_rc.borrow_mut();
                     slot.pending = false;
                     slot.terminal = true;
                     slot.set_status(PreviewSlotStatus::Error {
-                        reason: format!("preview workers unavailable: {reason}"),
+                        reason: format!(
+                            "preview workers unavailable after \
+                             {DEAD_WORKER_RETRY_BUDGET} boot retries: {reason}"
+                        ),
                     });
                 }
                 None
@@ -1140,6 +1265,27 @@ struct RecycleRequest {
     reason: String,
 }
 
+/// The pool as the boot scheduler sees it (see [`choose_boot_start`]).
+fn boot_states(shared: &SharedState) -> Vec<BootSlotState> {
+    shared
+        .workers
+        .iter()
+        .map(|entry| match &entry.state {
+            WorkerState::Pending => BootSlotState::Pending,
+            WorkerState::Booting => BootSlotState::Booting,
+            WorkerState::Ready(_) => BootSlotState::Ready,
+            WorkerState::Dead { .. } => BootSlotState::Dead,
+        })
+        .collect()
+}
+
+/// Whether background preview work may start this tick: a user-initiated
+/// open owns the engine's boot budget for as long as it runs
+/// ([`crate::app::open_priority`]).
+fn start_gate() -> StartGate {
+    StartGate::from_user_open(user_open_in_flight())
+}
+
 /// Boot (or respawn) pool worker `index` at `generation`.
 fn boot_task(shared: Rc<RefCell<SharedState>>, index: usize, generation: u32) -> LocalTask {
     Box::pin(async move {
@@ -1157,7 +1303,7 @@ fn boot_task(shared: Rc<RefCell<SharedState>>, index: usize, generation: u32) ->
             }
             return;
         }
-        shared.workers[index].state = match result {
+        let state = match result {
             Ok(worker) => WorkerState::Ready(Rc::new(RefCell::new(worker))),
             Err(reason) => {
                 // An aborted wasm fetch is the page tearing down mid-boot
@@ -1168,9 +1314,19 @@ fn boot_task(shared: Rc<RefCell<SharedState>>, index: usize, generation: u32) ->
                 } else {
                     log::warn!("preview host: worker {index} boot failed: {reason}");
                 }
-                WorkerState::Dead(reason)
+                WorkerState::Dead {
+                    reason,
+                    since_ms: now_ms(),
+                }
             }
         };
+        let entry = &mut shared.workers[index];
+        if matches!(state, WorkerState::Ready(_)) {
+            // Healthy again: the retry budget bounds ONE failure episode,
+            // not the page's lifetime.
+            entry.retries_used = 0;
+        }
+        entry.state = state;
     })
 }
 

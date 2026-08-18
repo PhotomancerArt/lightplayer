@@ -117,3 +117,21 @@ instead of reshaping the service contract.
 - A future GPU fluid solver (wanted for CPU-bound sims) will change
   per-slot cost assumptions; the scheduler's budgets are config for
   that reason.
+
+## Amendment (2026-08-14, first-click open resilience)
+
+Three boot-time behaviors this ADR described changed; the steady-state
+design above is untouched.
+
+- **Pool members boot one at a time from a `Pending` state**, not all at
+  construction — and never while a user-initiated open is in flight
+  (`app::open_priority`). Preview boots yield to the click.
+- **`Dead` is no longer terminal for the page**: a dead member revives
+  lazily on demand after a cooldown, within a bounded exponential
+  budget (see `slot_policy::dead_worker_next`). Budget-exhausted Dead
+  is final, with the retries named in the reason.
+- **Workers no longer fetch or compile the engine wasm themselves**: the
+  page compiles one shared `WebAssembly.Module` and posts it to each
+  worker, which only instantiates (boot protocol v2 —
+  `2026-08-14-browser-worker-boot-protocol-v2.md`). The per-worker
+  WebGPU device request at boot is unchanged.

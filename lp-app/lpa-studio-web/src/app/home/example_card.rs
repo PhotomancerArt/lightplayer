@@ -6,6 +6,7 @@ use lpa_studio_core::{HomeOp, PreviewSource, UiAction, UiExampleCard};
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::gallery_preview::{ThumbMode, card_hover_handlers};
 use crate::app::home::package_card::home_action;
+use crate::app::home::project_opening_frame::OpeningProgressLine;
 
 /// One example. Click → running simulator, zero choices; the copy becomes
 /// yours in the library (seed-once) and forks on first divergent save.
@@ -16,7 +17,9 @@ pub(crate) fn ExampleCard(
     /// This card's open is in flight.
     #[props(default = false)]
     opening: bool,
-    /// Some other open is in flight — clicks are ignored.
+    /// Some other open is in flight. The card reads busy — but it still
+    /// takes clicks: the newest click wins (D4), and a click that looks
+    /// ignored is the failure this whole change exists to remove.
     #[props(default = false)]
     busy: bool,
     on_action: EventHandler<UiAction>,
@@ -29,12 +32,17 @@ pub(crate) fn ExampleCard(
 
     rsx! {
         article {
-            class: example_card_class(opening),
+            class: example_card_class(opening, busy),
             onclick: move |_| {
-                if !busy && !opening {
-                    on_action.call(home_action(HomeOp::OpenExample {
-                        id: open_id.clone(),
-                    }));
+                // `busy` no longer swallows the click: an open already in
+                // flight is SUPERSEDED by this one (D4). Only the card
+                // whose own open is running stays inert — there is nothing
+                // for it to supersede but itself.
+                if !opening {
+                    on_action
+                        .call(home_action(HomeOp::OpenExample {
+                            id: open_id.clone(),
+                        }));
                 }
             },
             onmouseenter: hover_enter,
@@ -53,7 +61,11 @@ pub(crate) fn ExampleCard(
                     "{card.name}"
                 }
                 if opening {
-                    p { class: "tw:m-0 tw:text-xs tw:text-status-working-foreground", "Opening…" }
+                    // The live pipeline, not a static "Opening…": an example
+                    // open never routes to the full opening frame, so on a
+                    // slow connection this line is the only honest indicator
+                    // of the engine download it is waiting on.
+                    OpeningProgressLine {}
                 } else {
                     p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "Example" }
                 }
@@ -62,10 +74,18 @@ pub(crate) fn ExampleCard(
     }
 }
 
-fn example_card_class(opening: bool) -> &'static str {
-    if opening {
-        "tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
-    } else {
-        "tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+/// The card's treatment while an open runs. Busy is a DIMMING, not a
+/// disabling: the cursor stays a pointer because the card still acts.
+fn example_card_class(opening: bool, busy: bool) -> &'static str {
+    match (opening, busy) {
+        (true, _) => {
+            "tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
+        }
+        (false, true) => {
+            "tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
+        }
+        (false, false) => {
+            "tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+        }
     }
 }

@@ -200,6 +200,69 @@ pub struct OpenedProject {
     pub slug: String,
     pub package_fs: Rc<RefCell<dyn LpFs>>,
     pub history_fs: Rc<RefCell<dyn LpFs>>,
+    /// The open is provisional until this is committed — see
+    /// [`OpenReceipt`]. Held, not dropped, until the project is somewhere
+    /// a close can be queued from.
+    pub receipt: OpenReceipt,
+}
+
+/// A provisional open, as a drop guard.
+///
+/// The host's `open_project` is only the first half of opening: the caller
+/// still has to migrate, read, and push the package to the runtime, and
+/// any of that can fail. By then the host holds the project lock and has
+/// started the write-behind flushers, and **nothing else knows the project
+/// is open** — it never reached the controller's active slot, so no close
+/// is ever queued for it, and the lock outlives the failure for the page's
+/// lifetime.
+///
+/// So every open carries this receipt: dropped without
+/// [`OpenReceipt::commit`], it runs the host's own teardown (unregister,
+/// stop the flushers, release the lock); committed, it does nothing,
+/// because from that moment the ordinary close path owns the lock. `?` on
+/// any step in between is therefore already correct.
+///
+/// Teardown may be asynchronous (the OPFS host flushes before releasing)
+/// while `Drop` is not, so hosts hand in a closure that *starts* it —
+/// spawning is the edge's business, not the core's.
+pub struct OpenReceipt {
+    abandon: Option<Box<dyn FnOnce()>>,
+}
+
+impl OpenReceipt {
+    /// A receipt that runs `abandon` unless committed first.
+    pub fn new(abandon: impl FnOnce() + 'static) -> Self {
+        Self {
+            abandon: Some(Box::new(abandon)),
+        }
+    }
+
+    /// A receipt with nothing to undo — hosts that hold no lock and start
+    /// no flusher (the memory host's plain store handles).
+    pub fn nothing_to_undo() -> Self {
+        Self { abandon: None }
+    }
+
+    /// The open finished: the project is where a close can be queued from,
+    /// so stop guarding it.
+    pub fn commit(mut self) {
+        self.abandon = None;
+    }
+
+    /// Give the open back, now. Identical to dropping the receipt — a name
+    /// for the places where abandoning is the deliberate act (an open
+    /// superseded by a newer click) rather than an error unwinding past it.
+    pub fn abandon(self) {
+        // Drop does the work.
+    }
+}
+
+impl Drop for OpenReceipt {
+    fn drop(&mut self) {
+        if let Some(abandon) = self.abandon.take() {
+            abandon();
+        }
+    }
 }
 
 /// Library host failure, split so the UI can be friendly about the
@@ -297,6 +360,10 @@ pub trait LibraryHost {
     /// Open a project for writing. `key` is a slug or `prj…` uid; the
     /// host resolves it, acquires the project lock, and re-verifies the
     /// mapping under the lock.
+    ///
+    /// The [`OpenReceipt`] riding the result is the caller's obligation:
+    /// commit it once the project is really open, or let it drop and the
+    /// host takes everything back.
     fn open_project<'a>(
         &'a self,
         key: &'a str,
@@ -530,9 +597,13 @@ fn generate_for_board(
 /// Resolve + open a project through a [`LibraryStore`] — the sync middle
 /// of every host's `open_project` (wrapped in resolve → lock → re-verify
 /// by the real host).
+///
+/// The receipt is the caller's to supply: this middle takes no lock and
+/// starts no flusher, so it has nothing of its own to undo.
 pub fn open_project_via_store(
     store: &LibraryStore,
     key: &str,
+    receipt: OpenReceipt,
 ) -> Result<OpenedProject, LibraryHostError> {
     let uid = store.resolve_key(key)?;
     let handle = store.open(uid)?;
@@ -541,6 +612,7 @@ pub fn open_project_via_store(
         slug: handle.slug,
         package_fs: handle.package_fs,
         history_fs: handle.history_fs,
+        receipt,
     })
 }
 
@@ -565,6 +637,9 @@ pub struct MemoryLibraryHost {
     clock: Rc<dyn Fn() -> f64>,
     open_elsewhere: RefCell<Vec<String>>,
     closed: RefCell<Vec<String>>,
+    /// Uids whose [`OpenReceipt`] was dropped uncommitted. `Rc` because
+    /// the receipt's closure outlives the borrow that made it.
+    abandoned: Rc<RefCell<Vec<String>>>,
     saved_notifications: RefCell<Vec<String>>,
 }
 
@@ -577,6 +652,7 @@ impl MemoryLibraryHost {
             clock,
             open_elsewhere: RefCell::new(Vec::new()),
             closed: RefCell::new(Vec::new()),
+            abandoned: Rc::new(RefCell::new(Vec::new())),
             saved_notifications: RefCell::new(Vec::new()),
         }
     }
@@ -590,6 +666,13 @@ impl MemoryLibraryHost {
     /// Uids passed to `close_project`, in order (lock-release assertions).
     pub fn closed_projects(&self) -> Vec<String> {
         self.closed.borrow().clone()
+    }
+
+    /// Uids whose open was abandoned — the receipt dropped uncommitted,
+    /// which on the real host releases the project lock. A failed open
+    /// that leaves this empty is the leak.
+    pub fn abandoned_projects(&self) -> Vec<String> {
+        self.abandoned.borrow().clone()
     }
 
     /// Uids passed to `notify_saved`, in order.
@@ -652,7 +735,13 @@ impl LibraryHost for MemoryLibraryHost {
                     key: key.to_string(),
                 });
             }
-            open_project_via_store(&self.store, key)
+            // Nothing to release here, but the receipt still records the
+            // abandon: that is what lets a core test assert a failed open
+            // gave the project back.
+            let abandoned = Rc::clone(&self.abandoned);
+            let noted = uid.to_string();
+            let receipt = OpenReceipt::new(move || abandoned.borrow_mut().push(noted));
+            open_project_via_store(&self.store, key, receipt)
         })();
         Box::pin(core::future::ready(result))
     }

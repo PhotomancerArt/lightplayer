@@ -281,6 +281,7 @@ mod wasm {
     use lpa_studio_core::{
         ControlDisplayLayout, PreviewHost, PreviewHostConfig, PreviewProfile, PreviewSlotHandle,
         PreviewSlotRequest, PreviewSlotStatus, PreviewSource, PreviewTier, UiControlProductPreview,
+        user_open_in_flight,
     };
     use wasm_bindgen::JsCast;
     use wasm_bindgen::prelude::Closure;
@@ -628,6 +629,12 @@ mod wasm {
     /// producing. (The alternative — promoting the poster lease in place —
     /// would have to unwind its frame budget, its capture and its stand-down
     /// mid-flight for a difference of about a second.)
+    ///
+    /// **Hover during a user open is dropped**, not deferred into a queue:
+    /// the click owns the engine, and the pointer will say so again if it
+    /// is still on the card afterwards. A hover lease already held when the
+    /// open starts is left alone — the pause holds back new starts and
+    /// never takes a running preview away.
     async fn hold_hover_lease(
         state: Rc<RefCell<LiveThumbState>>,
         epoch: u64,
@@ -648,6 +655,13 @@ mod wasm {
         }
         if !hover_current(&state, epoch) {
             return; // the cursor moved on during the wait
+        }
+        if user_open_in_flight() {
+            // A user-initiated open owns the engine right now, and a hover
+            // is a courtesy: drop it rather than queue it. Nothing stale
+            // fires when the open settles — a hover that still matters
+            // arrives again with the next pointer edge, debounce and all.
+            return;
         }
         {
             let mut state = state.borrow_mut();
