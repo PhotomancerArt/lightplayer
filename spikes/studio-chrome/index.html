@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Studio chrome — header chip + one band + view-keyed Tree (round 6)</title>
+<title>Studio chrome — the header session·project group (round 7)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
@@ -83,15 +83,14 @@
         overflow: hidden; background: var(--bg); margin-top: 10px; }
   .ghead { display: flex; align-items: center; gap: 14px; padding: 6px 14px;
            background: var(--surface-muted); border-bottom: 1px solid var(--border-strong);
-           font-size: 11.5px; color: var(--subtle); position: relative; }
-  .ghead .brand { font-weight: 600; color: var(--subtle); }
+           font-size: 11.5px; color: var(--subtle); position: relative; min-height: 38px; }
+  .ghead .brand { font-weight: 600; color: var(--subtle); white-space: nowrap; }
   .ghead .brand b { color: var(--accent); }
   .ghead .gnav { display: flex; gap: 14px; }
-  .ghead .gnav span { cursor: pointer; }
+  .ghead .gnav span { cursor: pointer; white-space: nowrap; }
   .ghead .gnav span:hover { color: var(--strong); }
+  .ghead .gnav span.on { color: var(--strong); box-shadow: 0 2px 0 var(--accent); }
   .ghead .sp { flex: 1; }
-  .ghead .sess { font-family: var(--mono); font-size: 10px; color: var(--good);
-                 border: 1px solid rgba(63,214,142,.35); border-radius: 20px; padding: 1px 9px; }
   .ghead .dots { color: var(--dim); letter-spacing: 2px; }
   .ghead .shico { display: inline-flex; align-items: center; justify-content: center;
                   width: 26px; height: 22px; border: 1px solid var(--border-subtle);
@@ -100,24 +99,107 @@
 
   .wbbody { display: flex; min-height: 0; height: 520px; background: var(--bg); }
 
-  /* project chip (header-resident in round 6) */
+  /* ---- shared chip anatomy (state glyph · name · dirty count · dot) ---- */
+  .st { font-size: 11px; width: 13px; text-align: center; color: var(--dim); flex: none; }
+  .pname { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .cnt { font-family: var(--mono); font-size: 9.5px; color: var(--dirty);
+         border: 1px solid rgba(228,192,101,.45); border-radius: 20px; padding: 0 5px; }
+  .hdot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex: none; }
+  .hdot.hollow { background: none; border: 1px solid var(--dim); }
+  .hdot.attn { background: var(--dirty); }
+  .dglyph { color: var(--dim); font-size: 10.5px; flex: none; }
+  .dglyph.sim { color: var(--obj-3); }
+  .hdvd { width: 1px; height: 18px; background: var(--border-subtle); flex: none; }
+
+  /* production project chip (#426 baseline, P) */
   .pchip { display: inline-flex; align-items: center; gap: 6px; padding: 2.5px 9px;
            border: 1px solid var(--border-strong); border-radius: 6px; cursor: pointer;
            background: var(--surface-subtle); font-size: 11.5px; color: var(--subtle);
            user-select: none; }
   .pchip:hover { color: var(--strong); border-color: var(--dim); }
-  .pchip .st { font-size: 11px; width: 13px; text-align: center; color: var(--dim); }
   .pchip.unsaved { border-color: rgba(228,192,101,.55); }
   .pchip.unsaved .st { color: var(--dirty); }
   .pchip.failed { border-color: var(--err-border); background: var(--err-bg); }
   .pchip.failed .st { color: var(--err-text); }
   .pchip.syncing .st { color: var(--sel); animation: spin 1.2s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .pchip .cnt { font-family: var(--mono); font-size: 9.5px; color: var(--dirty); }
-  .pchip .pname { color: var(--muted); font-weight: 600; }
+
+  /* production session chip (D16 strip grammar) */
+  .schip { display: inline-flex; align-items: center; gap: 6px; padding: 2.5px 9px;
+           border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 11px;
+           color: var(--subtle); cursor: pointer; user-select: none; white-space: nowrap; }
+  .schip:hover { color: var(--strong); border-color: var(--border-strong); }
+  .schip.here { border-color: var(--accent-border); color: var(--strong); font-weight: 600; }
+  .schip.open { background: var(--bg-wash); border-color: var(--border); color: var(--muted); }
+
+  /* ---- concept A: the plate (common region) ---- */
+  .plate { display: inline-flex; align-items: center; gap: 3px; padding: 2.5px 3px;
+           background: var(--bg-wash); border: 1px solid var(--border-subtle);
+           border-radius: 8px; }
+  .plate .pit { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px;
+                border-radius: 5px; font-size: 11.5px; color: var(--subtle); cursor: pointer;
+                user-select: none; }
+  .plate .pit:hover { background: var(--raised); color: var(--strong); }
+  .plate .pit b { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .plate.unsaved .pit.proj { background: rgba(228,192,101,.08); }
+  .plate.unsaved .pit.proj .st { color: var(--dirty); }
+  .plate.failed .pit.proj { background: var(--err-bg); }
+  .plate.failed .pit.proj .st { color: var(--err-text); }
+  .plate.syncing .pit.proj .st { color: var(--sel); animation: spin 1.2s linear infinite; }
+  .plate .pit.save { color: var(--dirty); font-weight: 600; font-size: 11px; }
+  .plate .pit.rvt { color: var(--dim); font-size: 12px; padding: 2px 6px; }
+
+  /* ---- concept B: the segmented lockup (one border, hairline splits) ---- */
+  .sgrp { display: inline-flex; align-items: stretch; border: 1px solid var(--border-strong);
+          border-radius: 7px; background: var(--surface-subtle); overflow: hidden;
+          user-select: none; }
+  .sgrp .seg { display: inline-flex; align-items: center; gap: 6px; padding: 3.5px 10px;
+               font-size: 11.5px; color: var(--subtle); cursor: pointer; white-space: nowrap; }
+  .sgrp .seg + .seg { border-left: 1px solid var(--border-subtle); }
+  .sgrp .seg:hover { background: var(--bg-wash); color: var(--strong); }
+  .sgrp .seg b { color: var(--muted); font-weight: 600; }
+  .sgrp.unsaved .seg.proj { background: rgba(228,192,101,.07); }
+  .sgrp.unsaved .seg.proj .st { color: var(--dirty); }
+  .sgrp.failed .seg.proj { background: var(--err-bg); }
+  .sgrp.failed .seg.proj .st { color: var(--err-text); }
+  .sgrp.syncing .seg.proj .st { color: var(--sel); animation: spin 1.2s linear infinite; }
+  .sgrp .seg.act { padding: 3.5px 9px; }
+  .sgrp .seg.act.save { color: var(--dirty); font-weight: 600; font-size: 11px; }
+  .sgrp .seg.act.rvt { color: var(--dim); font-size: 12px; }
+  .sgrp .seg.act:hover { color: var(--strong); }
+
+  /* ---- concept C: the fused chip ---- */
+  .fchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+           border: 1px solid var(--accent-border); border-radius: 7px; font-size: 11.5px;
+           color: var(--subtle); cursor: pointer; background: var(--surface-subtle);
+           user-select: none; }
+  .fchip:hover { color: var(--strong); }
+  .fchip.unsaved { border-color: rgba(228,192,101,.55); }
+  .fchip.unsaved .st { color: var(--dirty); }
+  .fchip.failed { border-color: var(--err-border); background: var(--err-bg); }
+  .fchip.failed .st { color: var(--err-text); }
+  .fchip.syncing .st { color: var(--sel); animation: spin 1.2s linear infinite; }
+
+  /* ---- concept D: the title-bar stack ---- */
+  .stk { display: inline-flex; flex-direction: column; justify-content: center;
+         padding: 2px 10px; border-radius: 6px; cursor: pointer; line-height: 1.25;
+         user-select: none; }
+  .stk:hover { background: var(--bg-wash); }
+  .stk .l1 { font-size: 12px; font-weight: 600; color: var(--muted);
+             display: flex; gap: 7px; align-items: center; }
+  .stk .l2 { font-size: 9.5px; color: var(--dim); display: flex; gap: 5px;
+             align-items: center; }
+  .stk .l2 .sw { text-transform: uppercase; letter-spacing: .05em; }
+  .stk .l2 .sw.unsaved { color: var(--dirty); }
+  .stk .l2 .sw.failed { color: var(--err-text); }
+  .stk .l2 .sw.syncing { color: var(--sel); }
+  .stk .stksave { font-size: 10px; color: var(--dirty); font-weight: 600;
+                  border: 1px solid rgba(228,192,101,.5); border-radius: 4px;
+                  padding: 0 6px; cursor: pointer; }
+  .stk .stksave:hover { color: var(--strong); }
 
   /* chip popover — ProjectDetailSections as-is (D4) */
-  .ppop { position: absolute; top: calc(100% + 6px); left: 210px; width: 292px; z-index: 60;
+  .ppop { position: absolute; top: calc(100% + 6px); left: 265px; width: 292px; z-index: 60;
           border: 1px solid var(--border-strong); border-radius: var(--r-md);
           background: var(--surface); box-shadow: 0 12px 30px rgba(0,0,0,.5); overflow: hidden;
           text-align: left; }
@@ -159,9 +241,6 @@
   .bband .bseg.l { width: 262px; flex: none; }
   .bband .bseg.r { width: 300px; flex: none; justify-content: flex-end; }
   .bband .bmid { flex: 1; display: flex; justify-content: center; align-items: stretch; }
-  .bband.md .atab { padding: 4px 8px 5px; font-size: 10.5px; }
-  .bband.md .vtab { padding: 0 9px; font-size: 11.5px; }
-  .bband.md .vtab.future { display: none; }
 
   /* attached tabs — active shares the panel fill, border breaks under it */
   .atab { padding: 4px 11px 5px; font-size: 11px; color: var(--dim); cursor: pointer;
@@ -351,39 +430,28 @@
   .dragdome { cursor: grab; }
   .dragdome.dragging { cursor: grabbing; }
 
-  /* ---- comparison / rejected strips ---- */
+  /* ---- comparison strips ---- */
   .barrow { margin-top: 10px; display: grid; gap: 6px; max-width: 1080px; }
   .barrow .cap { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
                  color: var(--dim); margin-top: 8px; }
-  .barframe { border: 1px solid var(--border-strong); border-radius: var(--r-sm); overflow: hidden; }
+  .barrow .cap b { color: var(--subtle); }
+  .barrow .sub { font-size: 10.5px; color: var(--dim); letter-spacing: 0;
+                 text-transform: none; margin: 2px 0 0; max-width: 1040px; }
+  .barframe { border: 1px solid var(--border-strong); border-radius: var(--r-sm); overflow: visible;
+              position: relative; }
+  .barframe .ghead { border-bottom: none; border-radius: var(--r-sm); }
   .rejrow { display: flex; gap: 8px; align-items: baseline; font-size: 11px; color: var(--dim);
             padding: 3px 0; max-width: 1080px; }
   .rejrow b { color: var(--subtle); font-weight: 600; flex: none; }
 
-  /* ---- Tree-across-views strip (section 3) ---- */
-  .treerow { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; align-items: flex-start; }
-  .treecol { width: 300px; flex: none; }
-  .treecol h3 { font-size: 11px; margin: 0 0 2px; color: var(--muted); font-weight: 600; }
-  .treecol .role { font-size: 10.5px; color: var(--dim); margin: 0 0 8px; min-height: 28px; }
-  .treecol .role b { color: var(--subtle); }
-  .treecol .tframe { border: 1px solid var(--border-strong); border-radius: var(--r-md);
-                     overflow: hidden; background: var(--surface-subtle); height: 340px;
-                     display: flex; flex-direction: column; }
-  .treecol .tframe .atabsrow { display: flex; align-items: flex-end; gap: 2px; padding: 4px 6px 0;
-                               background: var(--surface-muted);
-                               border-bottom: 1px solid var(--border-strong); }
-
-  /* ================= mobile / md frames ================= */
+  /* ---- sm phone ---- */
   .phones { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; margin-top: 10px; }
   .phone { width: 310px; flex: none; border: 1px solid var(--border-strong); border-radius: 14px;
            overflow: hidden; background: var(--bg); }
-  .phone.tab { width: 660px; border-radius: 10px; }
   .phone .pcap { padding: 4px 12px; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
                  color: var(--dim); background: var(--surface-muted);
                  border-bottom: 1px solid var(--border-subtle); }
   .phone .pbdy { height: 540px; display: flex; flex-direction: column; min-height: 0; }
-  .phone.tab .pbdy { height: 440px; }
-  .phone.tab .tbody { flex: 1; display: flex; min-height: 0; }
   .pmain { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
   .pmain.canvas { overflow: hidden; display: flex; align-items: center; }
   .pmain.canvas svg { width: 100%; height: 100%; }
@@ -400,8 +468,7 @@
   .mghead .brand { font-weight: 600; color: var(--subtle); }
   .mghead .brand b { color: var(--accent); }
   .mghead .sp { flex: 1; }
-  .mghead .sess { font-family: var(--mono); font-size: 9px; color: var(--good);
-                  border: 1px solid rgba(63,214,142,.35); border-radius: 20px; padding: 0 7px; }
+  .mghead .sgrp .seg { padding: 2.5px 8px; font-size: 11px; }
 
   .smbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
            gap: 3px; padding: 4px 6px; min-height: 32px; background: var(--surface-muted);
@@ -428,144 +495,129 @@
 </head>
 <body>
 
-<h1>Studio chrome — header chip · one band · view-keyed Tree (round 6)</h1>
+<h1>Studio chrome — the header session·project group (round 7)</h1>
 <p class="hint">
-  <b>Round-5 rulings (Yona):</b> <b>B chosen</b> (closer to mobile, less height); A's extras
-  (name, Save, Share) move to the popup / header; <b>Map · Patch</b> over the gerunds
-  (deliberate override of R2-2's "term of art" lean); <b>Nodes + Fixtures panels MERGE into
-  one view-keyed "Tree"</b> — the kind of tree is controlled by the view (this unblocks the
-  R5 patching plan: authored vs effective grain <i>requires</i> view-owned tree content); and
-  <b>project status/share move UP into the site header</b> (Google-Docs/Figma pattern; the
-  header already carries project identity — one home; supersedes vision D3, deliberate
-  reversal). Each hierarchy level now owns exactly one band: header = project · band =
-  views + panels · docks = panel bodies. Rounds 1–5 in git history.
+  <b>G1 round-2 ruling on PR #426 (Yona):</b> the project chip and the lensed session chip
+  "should just be together, a small section with the <b>device info and project info</b>, maybe
+  also the <b>save/revert button</b> as a little group." This round explores the shapes that
+  grouping can take. Ground rules carried in: the group is <b>lens-route furniture</b> (the
+  project chip exists only there); <b>non-lensed sessions keep their strip chips</b> (D15 —
+  wayfinding only); the detail popup stays as-is (D4). Rounds 1–6 in git history.
 </p>
 
 <div class="xcontrols">
-  <span class="grp"><b>view</b>
-    <button id="xv-nodes" onclick="setView('nodes')">Nodes</button>
-    <button id="xv-map" onclick="setView('map')">Map</button>
-    <button id="xv-patch" onclick="setView('patch')">Patch</button>
-  </span>
-  <span class="grp"><b>project state</b>
+  <span class="grp"><b>project</b>
     <button id="xp-saved" onclick="setProj('saved')">saved</button>
     <button id="xp-unsaved" onclick="setProj('unsaved')">unsaved</button>
     <button id="xp-failed" onclick="setProj('failed')">failed</button>
     <button id="xp-syncing" onclick="setProj('syncing')">syncing</button>
   </span>
-  <span class="grp"><b>chip home</b>
-    <button id="xc-header" onclick="setChipLoc('header')">header</button>
-    <button id="xc-band" onclick="setChipLoc('band')">band</button>
+  <span class="grp"><b>lensed session</b>
+    <button id="xs-sim" onclick="setSession('sim')">simulator</button>
+    <button id="xs-hw" onclick="setSession('hw')">hardware</button>
   </span>
-  <span class="grp"><b>docks</b>
-    <button onclick="preset('both')">both open</button>
-    <button onclick="preset('none')">both collapsed</button>
+  <span class="grp"><b>other sessions</b>
+    <button id="xo-0" onclick="setOthers(0)">0</button>
+    <button id="xo-1" onclick="setOthers(1)">1</button>
+    <button id="xo-2" onclick="setOthers(2)">2</button>
+  </span>
+  <span class="grp"><b>save in group</b>
+    <button id="xsv-on" onclick="setSaveInline(true)">on</button>
+    <button id="xsv-off" onclick="setSaveInline(false)">off (popup only)</button>
+  </span>
+  <span class="grp"><b>view</b>
+    <button id="xv-nodes" onclick="setView('nodes')">Nodes</button>
+    <button id="xv-map" onclick="setView('map')">Map</button>
+    <button id="xv-patch" onclick="setView('patch')">Patch</button>
   </span>
   <span id="xstatus" style="font-family:var(--mono); font-size:10.5px; color:var(--dim);"></span>
 </div>
 
 <section id="sec1">
-<h2>1 · B-final (live) — header owns the project, band owns views + panels</h2>
+<h2>1 · Five shapes for "together" — production baseline first</h2>
 <p class="thesis">
-  Header: brand · nav · <b>project chip</b> (state glyph + name + dirty count → detail popover
-  with Save/Revert/Share) · share icon · sim chip. Band: <b>[Tree] · Nodes Map Patch ·
-  [Props Outputs Device]</b> — attached tabs, persistent when collapsed (B's reopen model).
-  The Tree's content <b>follows the view</b>: assembly in Nodes, authored objects in Map,
-  effective instances + wire chips in Patch — switch views and watch the left panel's grain
-  change. <b>Drag the dome</b> in Map → the pencil lands in the header. Flip <b>chip home</b>
-  above to feel header-vs-band placement live.
+  Every bar below is the same header at the same moment; only the session·project unit changes.
+  Flip <b>project → unsaved</b> to watch the save affordance materialize (the Google-Docs
+  moment), and <b>lensed session → hardware</b> to check each shape still works when the device
+  name matters. The <b>⇗ share pill and everything right of it stay put</b> — this round touches
+  only the left-of-center cluster.
 </p>
-<div class="wb" id="c-main"></div>
-<p class="secnote">
-  Live: chip popover (Save/Revert work), share icon, view switching w/ tree grain swap, panel
-  toggles, dome drag → unsaved. The status word ("Ready"/"Unsaved") stays popup-only — the
-  glyph carries it in chrome.</p>
+<div class="barrow" id="c-concepts"></div>
 </section>
 
 <section id="sec2">
-<h2>2 · Chip home — header vs band, stacked for comparison</h2>
+<h2>2 · The lean (B) live — drag the dome, watch the group</h2>
 <p class="thesis">
-  The same chrome, chip in each home. <b>Header:</b> one identity, one home (the sess chip
-  already put "mini dome" there); band stays pure workbench furniture. <b>Band:</b> closer to
-  the editing action, but duplicates the header's identity 40px below it.
+  Concept B in the full workbench. <b>Drag the dome</b> on the Map canvas: the arrange edit
+  lands in <code>dirty.persisted</code>, the pencil + count light the project segment, and
+  <b>Save · ↺ appear as trailing segments</b> of the same lockup. Save collapses the group back
+  to rest. The project segment opens the detail popup; the device segment is the lens
+  wayfinder (a hash link in production).
 </p>
-<div class="barrow" id="c-chiploc"></div>
+<div class="wb" id="c-main"></div>
+<p class="secnote">
+  If save moves into the group, the Tree panel's Save/Revert row (a G1 round-1 addition) has a
+  duplicate-home question — see R7-2 below.</p>
 </section>
 
 <section id="sec3">
-<h2>3 · The Tree across the three views — grain follows the view</h2>
+<h2>3 · Situations the group must survive</h2>
 <p class="thesis">
-  One panel, one home, one name — the <b>view supplies the content</b> (the R5 ruling's
-  "grain follows activity", finally with a chrome home). Nodes = assembly (add node, structure).
-  Map = <b>authored</b> tree (fixtures → objects; no wire info). Patch = <b>effective</b> tree
-  (instances/ranges + wire chips). Footers summarize per grain.
+  Fixed showcases (the controls above don't drive these): the hardware lens where device and
+  project are genuinely different things; a busy strip (lensed group + two idle sessions —
+  D15 chips unchanged); the off-editor state where the group does not exist at all; and the
+  sm fold where the device name drops but glyph + dot survive.
 </p>
-<div class="treerow" id="c-trees"></div>
-</section>
-
-<section id="sec4">
-<h2>4 · md and sm — chip rides the (slim) header everywhere</h2>
-<p class="thesis">
-  The header exists at every width, so the chip does too — the sm strip drops to
-  <b>[⬡] Nodes Map Patch [☰ ▦ ⌁]</b>, its roomiest form yet (the Tree merge gave back the
-  width the third view tab took). md = band with narrowed docks, same attached tabs.
-</p>
+<div class="barrow" id="c-showcase"></div>
 <div class="phones" id="c-phones"></div>
 </section>
 
-<section id="sec5">
-<h2>5 · Rejected along the way</h2>
-<div class="rejrow"><b>R4 one-bar:</b> panel toggles in the top band read disconnected from
-  their panels — putting them up top <i>promoted</i> panels into navigation (the opposite of
-  the goal). md/sm survived into this round.</div>
-<div class="rejrow"><b>R5-A project band:</b> clean ownership, but its identity row duplicates
-  the header's (the sess chip already names the project + sim) — and it costs a full band the
-  header provides for free. Its Save-materializes moment moves to the popup; its corner
-  region toggles die with it (B's persistent tab rows reopen).</div>
-<div class="rejrow"><b>mapping|patching mode segment (R3–R4):</b> Map and Patch are sibling
-  views (shipped /patch route; authored-vs-effective grain needs view-owned trees).</div>
-</section>
-
-<section id="sec6">
-<h2>6 · Round-6 questions</h2>
+<section id="sec4">
+<h2>4 · Round-7 questions</h2>
 <table class="dec">
   <tr><th></th><th>Question</th><th>Status</th></tr>
-  <tr><td class="q">R6-1</td>
-      <td><b>Chip home</b> — header (one identity, one home; supersedes D3) vs band (closer
-          to the action). §2 stacks them; §1 flips live.</td>
-      <td>GATE — lean header</td></tr>
-  <tr><td class="q">R6-2</td>
-      <td><b>The Tree merge</b> — one view-keyed panel named "Tree": does the grain swap on
-          view-switch feel like the view helping (§1 live, §3 side-by-side), and is "Tree"
-          the right name (vs Structure/Outline)?</td>
-      <td>GATE</td></tr>
-  <tr><td class="q">R6-3</td>
-      <td><b>Single left tab</b> — "Tree" alone in the left segment (a tab with no siblings
-          yet; it doubles as the collapse toggle). Acceptable until a second left panel
-          exists?</td>
-      <td>GATE — lean yes</td></tr>
-  <tr><td class="q">R6-4</td>
-      <td><b>Header complexity</b> — chip + share icon added to the real header (container
-          queries; the top-layer-popover gotcha). Keep the header's version minimal: glyph +
-          name + count, everything else in the popup?</td>
-      <td>GATE — lean yes</td></tr>
+  <tr><td class="q">R7-1</td>
+      <td><b>Which shape?</b> A plate (common region, chips keep selves) · B segmented lockup
+          (one border, hairline splits) · C fused chip (smallest, but one border can't say
+          both "here" and "unsaved") · D title stack (strong document read, abandons the
+          strip's chip grammar).</td>
+      <td>GATE — lean B</td></tr>
+  <tr><td class="q">R7-2</td>
+      <td><b>Save/Revert in the group?</b> Trailing segments that appear when dirty (flip the
+          toggle above to feel both). If yes: does the Tree panel's Save/Revert row retire so
+          save has ONE home (+ the popup detail), or stay as panel-local convenience?</td>
+      <td>GATE — lean yes + retire</td></tr>
+  <tr><td class="q">R7-3</td>
+      <td><b>The strip:</b> on lens routes the lensed chip leaves the strip — the group IS its
+          representation; other sessions keep their chips after the divider; off the editor
+          nothing changes. (This is the reading of "they should just be together".)</td>
+      <td>CONFIRM</td></tr>
+  <tr><td class="q">R7-4</td>
+      <td><b>Click grammar:</b> device segment = the lens link (as the session chip today);
+          project segment = detail popup (as the project chip today); Save/Revert = direct
+          actions. Whole group never navigates as one target.</td>
+      <td>CONFIRM</td></tr>
 </table>
 <p class="leannote">
-  <b>Lean.</b> This is the one. Header = project (Google Docs' title-bar pattern), band =
-  views + panels (GitHub's object tabs, panel tabs attached), docks = bodies. Three bands,
-  three ownership levels, zero duplication — and the Tree merge is the piece that makes the
-  hierarchy true in the data model, not just the pixels, which is exactly what the R5
-  patching plan needs to exist.
+  <b>Lean: B, save-inline on.</b> One border makes it read as one thing — "this session" —
+  while the hairline splits keep the three intents (go there · inspect/save state · act)
+  separately clickable, which is exactly what A dilutes (three boxes in a well still read as
+  three things) and C collapses (one surface, three meanings). D is the prettiest at rest but
+  the strip's other sessions still wear chips, and two grammars for the same kind of thing in
+  one bar was the complaint that started this round. The save segment materializing on dirty
+  is the Google-Docs moment made actionable without hunting for the popup.
 </p>
 </section>
 
 <script>
 /* ================= state ================= */
 const state = {
-  view: 'map',              // 'nodes' | 'map' | 'patch' — sibling views
+  view: 'map',              // 'nodes' | 'map' | 'patch'
   sel: 'dome/2',
-  chipLoc: 'header',        // R6-1: 'header' | 'band'
-  proj: 'saved',
+  proj: 'saved',            // 'saved' | 'unsaved' | 'failed' | 'syncing'
+  session: 'sim',           // 'sim' | 'hw' — the LENSED session
+  others: 1,                // 0..2 non-lensed sessions in the strip
+  saveInline: true,         // R7-2: Save/Revert ride the group when dirty
   edits: [],
   popOpen: null,
   domeDx: 0, domeDy: 0,
@@ -579,10 +631,10 @@ const state = {
 const Q = new URLSearchParams(location.search);
 if (Q.get('view')) state.view = Q.get('view');
 if (Q.get('proj')) state.proj = Q.get('proj');
-if (Q.get('chip')) state.chipLoc = Q.get('chip');
+if (Q.get('session')) state.session = Q.get('session');
+if (Q.get('others')) state.others = +Q.get('others');
+if (Q.get('save') === 'off') state.saveInline = false;
 if (Q.get('pop')) state.popOpen = Q.get('pop');
-if (Q.get('docks') === 'none') state.docks[state.view] = { left: null, right: null };
-if (Q.get('phone')) state.phoneView = Q.get('phone');
 if (Q.get('only')) {
   document.querySelectorAll('section').forEach(s => { if (s.id !== Q.get('only')) s.hidden = true; });
   document.querySelector('.xcontrols').style.position = 'static';
@@ -667,7 +719,6 @@ function treeNodes() {
   return h + '<div class="addrow">+ Add node…</div></div>';
 }
 function treeAuthored() {
-  /* Map view: AUTHORED grain — fixtures → objects, no wire info */
   let h = `<div class="tree">`;
   for (const f of FIXTURES) {
     h += `<div class="trow ${state.sel === f.id ? 'sel' : ''}" onclick="selectPath('${f.id}')">
@@ -688,7 +739,6 @@ function treeAuthored() {
   return h + '</div>';
 }
 function treeEffective() {
-  /* Patch view: EFFECTIVE grain — instances/ranges + wire chips */
   let h = `<div class="tree">`;
   for (const f of FIXTURES) {
     h += `<div class="trow ${state.sel === f.id ? 'sel' : ''}" onclick="selectPath('${f.id}')">
@@ -880,23 +930,87 @@ function center(idsuffix, draggable) {
     : `${viewToolbar()}<div class="mainbody canvas">${canvasSVG(idsuffix, draggable && state.view === 'map')}</div>`;
 }
 
-/* ================= chrome pieces ================= */
-function chipHTML(where, opts = {}) {
-  const st = { saved: 'i', unsaved: '✎', failed: '⚠', syncing: '◌' }[state.proj];
-  const cnt = state.proj === 'unsaved' && state.edits.length
-    ? `<span class="cnt">${state.edits.length}</span>` : '';
-  const name = opts.name === false ? '' : '<span class="pname">mini dome</span>';
-  const title = { saved: 'Project — saved', unsaved: 'Project has unsaved changes',
-                  failed: 'Project — failed edits', syncing: 'Project — syncing' }[state.proj];
-  return `<span class="pchip ${state.proj}" onclick="togglePop('${where}', event)" title="${title}">
-    <span class="st">${st}</span>${name}${cnt}</span>`;
+/* ================= round-7 chrome pieces ================= */
+function dirty() { return state.proj === 'unsaved' || state.proj === 'failed'; }
+function dirtyN() { return dirty() ? state.edits.length : 0; }
+function devGlyph(kind) {
+  return kind === 'sim' ? '<span class="dglyph sim">❖</span>' : '<span class="dglyph">⌁</span>';
 }
+function devName() { return state.session === 'sim' ? 'Simulator' : 'Garage dome'; }
+function hdot(kind) { return `<span class="hdot ${kind}"></span>`; }
+function devBody() {
+  return `${devGlyph(state.session)}${hdot('run')}<b>${devName()}</b>`;
+}
+function stGlyph() { return { saved: 'i', unsaved: '✎', failed: '⚠', syncing: '◌' }[state.proj]; }
+function projBody() {
+  const cnt = dirtyN() ? `<span class="cnt">${dirtyN()}</span>` : '';
+  return `<span class="st">${stGlyph()}</span><span class="pname">mini dome</span>${cnt}`;
+}
+function stWord() {
+  return { saved: 'Ready', unsaved: 'Unsaved', failed: 'Failed edits', syncing: 'Syncing' }[state.proj];
+}
+/* the non-lensed strip chips (D15 — unchanged grammar) */
+function othersHTML() {
+  const all = state.session === 'sim'
+    ? [{ g: 'hw', name: 'Garage dome', dot: 'hollow' }, { g: 'hw', name: 'Test rig', dot: 'run' }]
+    : [{ g: 'sim', name: 'Simulator', dot: 'run' }, { g: 'hw', name: 'Test rig', dot: 'hollow' }];
+  const list = all.slice(0, state.others);
+  if (!list.length) return '';
+  return `<span class="hdvd"></span>` + list.map(o =>
+    `<span class="schip">${devGlyph(o.g)}${hdot(o.dot)}${o.name}</span>`).join('');
+}
+
+/* P — production baseline (#426 as shipped) */
+function groupP(where) {
+  return `<span class="pchip ${state.proj}" onclick="togglePop('${where}', event)"
+    title="project — detail popup">
+    <span class="st">${stGlyph()}</span><span class="pname">mini dome</span>
+    ${dirtyN() ? `<span class="cnt">${dirtyN()}</span>` : ''}</span>
+    <span class="hdvd"></span>
+    <span class="schip here" title="the lensed session">${devGlyph(state.session)}${hdot('run')}${devName()}</span>`;
+}
+/* A — the plate: common region, chips keep themselves */
+function groupA(where) {
+  const acts = dirty() && state.saveInline
+    ? `<span class="pit save" onclick="saveAll(event)">Save</span>
+       <span class="pit rvt" title="Revert to saved" onclick="revertAll(event)">↺</span>` : '';
+  return `<span class="plate ${state.proj}">
+    <span class="pit dev" title="the lensed session — go to editor">${devBody()}</span>
+    <span class="pit proj" onclick="togglePop('${where}', event)" title="project — detail popup">${projBody()}</span>
+    ${acts}</span>`;
+}
+/* B — the segmented lockup: one border, hairline splits */
+function groupB(where) {
+  const acts = dirty() && state.saveInline
+    ? `<span class="seg act save" onclick="saveAll(event)">Save</span>
+       <span class="seg act rvt" title="Revert to saved" onclick="revertAll(event)">↺</span>` : '';
+  return `<span class="sgrp ${state.proj}">
+    <span class="seg dev" title="the lensed session — go to editor">${devBody()}</span>
+    <span class="seg proj" onclick="togglePop('${where}', event)" title="project — detail popup">${projBody()}</span>
+    ${acts}</span>`;
+}
+/* C — the fused chip: session and project as one surface */
+function groupC(where) {
+  return `<span class="fchip ${state.proj}" onclick="togglePop('${where}', event)"
+    title="session + project — one chip, one click (the conflict)">
+    ${devGlyph(state.session)}${hdot('run')}<span class="pname">mini dome</span>
+    ${dirtyN() ? `<span class="cnt">${dirtyN()}</span>` : ''}</span>`;
+}
+/* D — the title-bar stack: document line over device line */
+function groupD(where) {
+  const save = dirty() && state.saveInline
+    ? `<span class="stksave" onclick="saveAll(event)">Save</span>` : '';
+  return `<span class="stk" onclick="togglePop('${where}', event)">
+    <span class="l1">mini dome ${dirtyN() ? `<span class="cnt">${dirtyN()}</span>` : ''} ${save}</span>
+    <span class="l2">${devGlyph(state.session)} ${devName()} · running ·
+      <span class="sw ${state.proj}">${stWord()}</span></span></span>`;
+}
+
 function popoverHTML(where, style = '') {
   if (state.popOpen !== where) return '';
-  const dirty = state.proj === 'unsaved' || state.proj === 'failed';
-  const stw = { saved: 'Ready', unsaved: 'Unsaved', failed: 'Failed edits', syncing: 'Syncing' }[state.proj];
+  const isDirty = dirty();
   let edits = '';
-  if (dirty && state.edits.length) {
+  if (isDirty && state.edits.length) {
     edits = `<div class="sec">
       <div class="sechead">Unsaved (persisted)<span class="meta">${state.edits.length}</span></div>` +
       state.edits.map((e, i) => `<div class="erow"><span class="eico">✎</span>
@@ -908,10 +1022,10 @@ function popoverHTML(where, style = '') {
         <button onclick="revertAll(event)">Revert to saved</button></div></div>`;
   }
   return `<div class="ppop" style="${style}" onclick="event.stopPropagation()">
-    <div class="ph"><b>mini dome</b><span class="stw ${dirty ? 'dirty' : ''}">${stw}</span></div>
+    <div class="ph"><b>mini dome</b><span class="stw ${isDirty ? 'dirty' : ''}">${stWord()}</span></div>
     ${edits}
     <div class="sec"><div class="sechead">Share</div>
-      <div class="sharenote ${dirty ? 'blocked' : ''}">${dirty
+      <div class="sharenote ${isDirty ? 'blocked' : ''}">${isDirty
         ? 'save before sharing — link reflects saved state'
         : 'lightplayer.app/p/9f3k2 · view link active'}</div></div>
     <div class="sec"><div class="sechead">Project</div>
@@ -920,15 +1034,45 @@ function popoverHTML(where, style = '') {
       <div class="krow"><span class="k">Overlay rev</span><span class="v">v41</span></div></div>
   </div>`;
 }
-function gheadHTML(where) {
-  const chip = state.chipLoc === 'header'
-    ? `${chipHTML(where)}<span class="shico" title="Share">⇗</span>` : '';
+
+/* a full header bar around a given group */
+function barHTML(where, groupHtml, opts = {}) {
+  const others = opts.others !== undefined ? opts.others : othersHTML();
+  const nav = opts.docsActive
+    ? `<span>Devices</span><span>Projects</span><span class="on">Docs</span>`
+    : `<span>Devices</span><span>Projects</span>`;
   return `<div class="ghead"><span class="brand">⏵ <b>Light</b>Player</span>
-    <span class="gnav"><span>Devices</span><span>Projects</span></span>
-    ${chip}<span class="sp"></span>
-    <span class="sess">sim ▸</span><span class="dots">···</span>
-    ${state.chipLoc === 'header' ? popoverHTML(where) : ''}</div>`;
+    <span class="gnav">${nav}</span>
+    ${groupHtml}${others}<span class="sp"></span>
+    <span class="shico" title="Share">⇗</span><span class="dots">···</span>
+    ${popoverHTML(where)}</div>`;
 }
+
+/* ================= section 1: the concepts ================= */
+function renderConcepts() {
+  const rows = [
+    ['p0', groupP('p0'),
+     '<b>P · production (#426 as shipped)</b> — neighbors, not a group',
+     'Two grammars side by side: the toned project pill, a divider, the squared session chip. On a sim session they name the same thing twice — the complaint that opened this round.'],
+    ['a1', groupA('a1'),
+     '<b>A · the plate</b> — common region; chips keep themselves',
+     'A washed well holds device, project, and Save. Cheapest read of "together" and every piece keeps its own click — but it is a box of boxes: three surfaces deep where the bar around it has one.'],
+    ['b2', groupB('b2'),
+     '<b>B · the segmented lockup</b> — one border, hairline splits (the lean)',
+     'One object — "this session" — with three separately-clickable intents: go there · inspect/save state · act. Save materializes as a trailing segment when dirty. GitHub button-group / Xcode status prior art.'],
+    ['c3', groupC('c3'),
+     '<b>C · the fused chip</b> — smallest possible',
+     'Session glyph + dot + project name + count on one surface. But one border must say both "you are here" (accent) and "unsaved" (amber) — flip project state to watch the channels fight — and hardware sessions need the device name back anyway.'],
+    ['d4', groupD('d4'),
+     '<b>D · the title-bar stack</b> — document line over device line',
+     'The macOS/Ableton document header. Prettiest at rest and the device line carries live status in words — but it abandons the chip grammar the strip’s other sessions still wear, and whispers state the chrome should declare.'],
+  ];
+  document.getElementById('c-concepts').innerHTML = rows.map(([id, g, cap, sub]) =>
+    `<div class="cap">${cap}</div><p class="sub">${sub}</p>
+     <div class="barframe">${barHTML(id, g)}</div>`).join('');
+}
+
+/* ================= section 2: the lean live ================= */
 function viewTabsHTML(seg) {
   if (seg) {
     const b = (id, label) => `<button class="${state.view === id ? 'on' : ''}"
@@ -941,24 +1085,19 @@ function viewTabsHTML(seg) {
     ${t('patch', '⌁', 'Patch')}
     <span class="vtab future"><span class="vico">▸</span>Live</span></span>`;
 }
-function bSegment(side, where) {
+function bSegment(side) {
   const ids = roster(state.view, side);
   const open = state.docks[state.view][side];
   const tabs = ids.map(id =>
     `<span class="atab ${open === id ? 'on' : ''}" onclick="toggleDock('${id}')">
       ${PANELS[id].title}</span>`).join('');
-  if (side === 'left') {
-    const chip = state.chipLoc === 'band' ? chipHTML(where, { name: false }) : '';
-    return `<span class="bseg l">${chip}${tabs}</span>`;
-  }
-  return `<span class="bseg r">${tabs}</span>`;
+  return `<span class="bseg ${side === 'left' ? 'l' : 'r'}">${tabs}</span>`;
 }
-function bandHTML(where) {
+function bandHTML() {
   return `<div class="bband">
-    ${bSegment('left', where)}
+    ${bSegment('left')}
     <span class="bmid">${viewTabsHTML(false)}</span>
-    ${bSegment('right', where)}
-    ${state.chipLoc === 'band' ? popoverHTML(where, 'left:8px') : ''}</div>`;
+    ${bSegment('right')}</div>`;
 }
 function dockHTML(side) {
   const open = state.docks[state.view][side];
@@ -970,8 +1109,8 @@ function dockHTML(side) {
 }
 function renderMain() {
   document.getElementById('c-main').innerHTML =
-    `${gheadHTML('main')}
-     ${bandHTML('main')}
+    `${barHTML('main', groupB('main'))}
+     ${bandHTML()}
      <div class="wbbody">
        ${dockHTML('left')}
        <div class="col main">${center('main', true)}</div>
@@ -1016,52 +1155,35 @@ function wireDrag(suffix) {
   });
 }
 
-/* ================= section 2: chip home comparison ================= */
-function renderChipLoc() {
-  const saved = state.chipLoc;
+/* ================= section 3: fixed showcases ================= */
+function withState(patch, fn) {
+  const saved = {};
+  for (const k of Object.keys(patch)) { saved[k] = state[k]; state[k] = patch[k]; }
+  const out = fn();
+  Object.assign(state, saved);
+  return out;
+}
+function renderShowcase() {
   let h = '';
-  state.chipLoc = 'header';
-  h += `<div class="cap">chip in the HEADER — one identity, one home (the lean)</div>
-        <div class="barframe">${gheadHTML('x1')}${bandHTML('x1')}</div>`;
-  state.chipLoc = 'band';
-  h += `<div class="cap">chip in the BAND — closer to the action, but "mini dome" appears twice</div>
-        <div class="barframe">
-          <div class="ghead"><span class="brand">⏵ <b>Light</b>Player</span>
-            <span class="gnav"><span>Devices</span><span>Projects</span></span><span class="sp"></span>
-            <span class="sess">mini dome · sim ▸</span><span class="dots">···</span></div>
-          ${bandHTML('x2')}</div>`;
-  state.chipLoc = saved;
-  document.getElementById('c-chiploc').innerHTML = h;
-}
-
-/* ================= section 3: the Tree across views ================= */
-function renderTrees() {
-  const saved = state.view;
-  const col = (view, title, role) => {
-    state.view = view;
-    const foot = treeFooter();
-    const html = `<div class="treecol"><h3>${title}</h3><p class="role">${role}</p>
-      <div class="tframe">
-        <div class="atabsrow"><span class="atab on">Tree</span></div>
-        <div class="pbody">${treePanel()}</div>
-        <div class="pfoot">${foot}</div>
-      </div></div>`;
-    return html;
-  };
-  let h = col('nodes', 'Nodes view — assembly',
-              '<b>Node graph.</b> Everything in the project; add node; structure.');
-  h += col('map', 'Map view — authored',
-           '<b>Authored grain.</b> Fixtures → objects as designed. No wire info here.');
-  h += col('patch', 'Patch view — effective',
-           '<b>Effective grain.</b> Resolved instances/ranges with wire chips.');
-  state.view = saved;
-  document.getElementById('c-trees').innerHTML = h;
-}
-
-/* ================= section 4: md + sm ================= */
-function mgheadHTML() {
-  return `<div class="mghead"><span class="brand">⏵ <b>LP</b></span>
-    ${chipHTML('m', { name: false })}<span class="sp"></span><span class="sess">sim ▸</span></div>`;
+  h += withState({ session: 'hw', proj: 'unsaved', others: 1,
+                   edits: [{ path: 'editor.json', what: 'arrange dome' }] }, () =>
+    `<div class="cap"><b>hardware lens, unsaved</b> — device and project are genuinely two things</div>
+     <p class="sub">"Garage dome" is the device, "mini dome" the project running on it — the
+     group's two segments carry both without a second grammar; the sim idles in the strip.</p>
+     <div class="barframe">${barHTML('hw1', groupB('hw1'))}</div>`);
+  h += withState({ session: 'sim', proj: 'saved', others: 2 }, () =>
+    `<div class="cap"><b>busy strip</b> — the group + two idle sessions (D15 chips unchanged)</div>
+     <div class="barframe">${barHTML('bs1', groupB('bs1'))}</div>`);
+  h += withState({ session: 'sim', proj: 'saved', others: 0 }, () =>
+    `<div class="cap"><b>off the editor (Docs fronted)</b> — no group; the session keeps its
+       washed chip; nothing changes</div>
+     <p class="sub">The group is lens-route furniture (the project chip already was). Away from
+     the editor the strip shows the plain "open" chip exactly as today.</p>
+     <div class="barframe">${barHTML('off1',
+       `<span class="schip open">${devGlyph('sim')}${hdot('run')}Simulator</span>`,
+       { others: '', docsActive: true })}</div>`);
+  document.getElementById('c-showcase').innerHTML = h;
+  renderPhone();
 }
 function smBar() {
   const tg = (side) => roster(state.view, side).map(id => {
@@ -1086,45 +1208,37 @@ function phoneMain() {
     ? `<div class="pmain">${nodeCardsView()}</div>`
     : `<div class="pmain canvas">${canvasSVG('ph', false)}</div>`;
 }
-function renderPhones() {
-  const live = `<div class="phone"><div class="pcap">sm · live — chip in the slim header</div>
-    <div class="pbdy">${mgheadHTML()}${smBar()}${phoneMain()}</div></div>`;
-  const saved = { view: state.view, phoneView: state.phoneView };
-  state.view = 'patch'; state.phoneView = 'tree';
-  const summoned = `<div class="phone"><div class="pcap">sm · Patch view, Tree summoned (effective)</div>
-    <div class="pbdy">${mgheadHTML()}${smBar()}${phoneMain()}</div></div>`;
-  state.view = saved.view; state.phoneView = saved.phoneView;
-  const mdLeft = state.docks[state.view].left;
-  const md = `<div class="phone tab"><div class="pcap">md · same chrome, docks narrow</div>
-    <div class="pbdy">${mgheadHTML()}
-      <div class="bband md">
-        <span class="bseg l" style="width:210px">${roster(state.view, 'left').map(id =>
-          `<span class="atab ${mdLeft === id ? 'on' : ''}" onclick="toggleDock('${id}')">${PANELS[id].title}</span>`).join('')}</span>
-        <span class="bmid">${viewTabsHTML(false)}</span>
-        <span class="bseg r" style="width:auto">${roster(state.view, 'right').map(id =>
-          `<span class="atab ${state.docks[state.view].right === id ? 'on' : ''}"
-             onclick="toggleDock('${id}')">${PANELS[id].title}</span>`).join('')}</span>
-      </div>
-      <div class="tbody">
-        ${mdLeft ? `<div class="dock l" style="width:210px">
-          <div class="pbody">${BODY[mdLeft]()}</div>
-          ${FOOTERS[mdLeft]() ? `<div class="pfoot">${FOOTERS[mdLeft]()}</div>` : ''}</div>` : ''}
-        <div class="col main">${center('md', false)}</div>
-      </div></div></div>`;
-  document.getElementById('c-phones').innerHTML = live + summoned + md;
+function renderPhone() {
+  const acts = dirty() && state.saveInline
+    ? `<span class="seg act save" onclick="saveAll(event)">Save</span>` : '';
+  const folded = `<span class="sgrp ${state.proj}">
+    <span class="seg dev" style="padding:2.5px 7px" title="${devName()}">${devGlyph(state.session)}${hdot('run')}</span>
+    <span class="seg proj" onclick="togglePop('sm', event)">${projBody()}</span>
+    ${acts}</span>`;
+  document.getElementById('c-phones').innerHTML =
+    `<div class="phone"><div class="pcap">sm · the group folds — device name drops, glyph + dot stay</div>
+     <div class="pbdy">
+       <div class="mghead" style="position:relative"><span class="brand">⏵ <b>LP</b></span>
+         ${folded}<span class="sp"></span>
+         ${popoverHTML('sm', 'left:8px; width:272px;')}</div>
+       ${smBar()}${phoneMain()}
+     </div></div>`;
 }
 
 /* ================= state changes ================= */
 function renderAll() {
-  renderMain(); renderChipLoc(); renderTrees(); renderPhones();
+  renderConcepts(); renderMain(); renderShowcase();
   const B2 = (id, on) => { const el = document.getElementById(id); if (el) el.classList.toggle('on', on); };
-  B2('xv-nodes', state.view === 'nodes'); B2('xv-map', state.view === 'map');
-  B2('xv-patch', state.view === 'patch');
   B2('xp-saved', state.proj === 'saved'); B2('xp-unsaved', state.proj === 'unsaved');
   B2('xp-failed', state.proj === 'failed'); B2('xp-syncing', state.proj === 'syncing');
-  B2('xc-header', state.chipLoc === 'header'); B2('xc-band', state.chipLoc === 'band');
+  B2('xs-sim', state.session === 'sim'); B2('xs-hw', state.session === 'hw');
+  B2('xo-0', state.others === 0); B2('xo-1', state.others === 1); B2('xo-2', state.others === 2);
+  B2('xsv-on', state.saveInline); B2('xsv-off', !state.saveInline);
+  B2('xv-nodes', state.view === 'nodes'); B2('xv-map', state.view === 'map');
+  B2('xv-patch', state.view === 'patch');
   document.getElementById('xstatus').textContent =
-    `view=${state.view} · proj=${state.proj} · chip=${state.chipLoc} · edits=${state.edits.length}`;
+    `proj=${state.proj} · session=${state.session} · others=${state.others}` +
+    ` · save=${state.saveInline ? 'group' : 'popup'} · edits=${state.edits.length}`;
 }
 function setView(v) { state.view = v; state.phoneView = 'main'; renderAll(); }
 function setProj(p) {
@@ -1135,13 +1249,9 @@ function setProj(p) {
   if (p === 'saved') { state.edits = []; state.domeDx = 0; state.domeDy = 0; }
   renderAll();
 }
-function setChipLoc(c) { state.chipLoc = c; renderAll(); }
-function preset(p) {
-  const d = state.docks[state.view];
-  if (p === 'both') { d.left = 'tree'; d.right = roster(state.view, 'right')[0]; }
-  if (p === 'none') { d.left = null; d.right = null; }
-  renderAll();
-}
+function setSession(s) { state.session = s; renderAll(); }
+function setOthers(n) { state.others = n; renderAll(); }
+function setSaveInline(b) { state.saveInline = b; renderAll(); }
 function toggleDock(id) {
   const side = PANELS[id].side;
   const d = state.docks[state.view];
@@ -1152,9 +1262,10 @@ function togglePop(w, e) { e.stopPropagation(); state.popOpen = state.popOpen ==
 document.addEventListener('click', () => {
   if (state.popOpen) { state.popOpen = null; renderAll(); }
 });
-function saveAll(e) { e.stopPropagation(); state.edits = []; state.proj = 'saved'; renderAll(); }
+function saveAll(e) { e.stopPropagation(); state.edits = []; state.proj = 'saved';
+  state.domeDx = 0; state.domeDy = 0; state.popOpen = null; renderAll(); }
 function revertAll(e) { e.stopPropagation(); state.edits = []; state.proj = 'saved';
-  state.domeDx = 0; state.domeDy = 0; renderAll(); }
+  state.domeDx = 0; state.domeDy = 0; state.popOpen = null; renderAll(); }
 function revertOne(i, e) { e.stopPropagation();
   const [ed] = state.edits.splice(i, 1);
   if (ed && ed.path === 'editor.json') { state.domeDx = 0; state.domeDy = 0; }
