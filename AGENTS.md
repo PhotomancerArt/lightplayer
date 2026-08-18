@@ -525,52 +525,47 @@ index are architecture signals — surface them when you see one repeat.
 
 ## Studio UI visual baselines
 
-Story baselines are **CI-canonical** (see
-`docs/adr/2026-07-26-ci-canonical-story-capture.md` and
-`docs/adr/2026-07-26-ci-story-auto-commit.md`): the committed PNGs under
-`lp-app/lpa-studio-web/story-images/` are captured by the `validate-stories`
-CI job in a pinned environment (x64 Linux, Chrome for Testing, bundled fonts).
-**Never commit locally-captured baselines** — macOS rendering differs and will
-churn the whole set. On drift, CI commits the refresh itself:
+Story baselines are **CI-canonical** and live **outside this repo**, in the
+companion repo `PhotomancerArt/lightplayer-stories` — one snapshot commit per
+captured `main` commit, on refs named `sha-<full-sha>` (see
+`docs/adr/2026-08-17-story-baselines-companion-repo.md`). No PNGs are
+committed here, and **merging a PR is what accepts its visual changes** —
+there is no baseline file to update, pull, or conflict on.
 
-1. Push UI changes (a PR triggers the path-gated `validate-stories` job).
-2. On story drift, the job commits the fresh baselines directly to the PR
-   branch as `github-actions[bot]`, passes, and posts a sticky PR comment
-   summarizing the changes. Review the PNG diff in the PR's Files-changed
-   view, and **`git pull` before pushing again** — the bot commit is now the
-   branch head. Note the green run sits on the commit *before* the bot's
-   (GITHUB_TOKEN pushes don't trigger CI runs); that is expected — the bot
-   commit only adds PNGs the green run itself produced, so it is known-safe
-   by construction. **Do not kick an empty commit to get a green run on the
-   head**: merging with the run one commit back is the accepted tradeoff of
-   the auto-commit design (2026-08-03), and the kick just burns a full CI
-   cycle re-proving the same tree.
-3. Fallback (fork PRs, push races, main-push drift): the job fails and
-   uploads the fresh set as the `story-images-fresh` artifact. On the branch,
-   run `just studio-story-pull` to stage it, review, commit, push, and
-   confirm the re-run is green.
-4. Mention the affected story baselines in the final summary either way.
+How it plays out:
 
-If pushes to a PR branch suddenly create **no CI runs at all**, check
-`gh api repos/{owner}/{repo}/pulls/N --jq .mergeable_state` — `dirty` means a
-baseline PNG conflict with main is blocking the merge ref and GitHub silently
-skips `pull_request` runs. Merge `main`, resolving every conflicted PNG by
-taking **main's bytes** (if main's copy is stale, the next capture re-drifts
-and the bot fixes it), then push. A modify/delete conflict means main *retired*
-that baseline — take the deletion.
+1. Push UI changes; the path-gated `validate-stories` job captures every
+   story in the pinned environment (x64 Linux, Chrome for Testing) and
+   compares against the nearest captured main ancestor's snapshot.
+2. On visual changes the job **passes** and posts a sticky PR comment:
+   change counts, before/after thumbnails, and a compare link into the
+   stories repo (swipe/onion-skin on every changed PNG). That comment is the
+   review surface — mention the changed stories in your final summary and
+   make sure the human has seen the comment before merge.
+3. The job pushes the PR's fresh capture to the stories repo as a `pr-<n>`
+   snapshot; nothing is ever committed or pushed to your branch. It fails
+   only on a crashed/incomplete capture or when no captured ancestor exists
+   within the lookup walk (remedy: rebase on main).
+4. After merge, the main-push run publishes the new `sha-<merge-sha>`
+   snapshot — that becomes the baseline for subsequent PRs — and
+   force-updates the `latest` ref (the root README's hero images embed
+   `latest` raw URLs; never point durable docs at `pr-*` refs, they are
+   force-updated and GC'd).
 
-For local interactive review, capture scratch PNGs — optionally filtered to a
-story-id substring so small subsets are cheap:
+Local iteration (non-authoritative — macOS rendering ≠ pinned CI):
 
 ```bash
 just studio-story-pngs slot-value-editor   # scratch captures, filter optional
-just studio-story-check slot-value-editor  # compare against committed baselines
+just studio-story-check slot-value-editor  # compare vs the fetched CI baseline
 ```
 
-Local check output is **non-authoritative** (macOS rendering ≠ CI): use it for
-quick "did my change move only the stories I expected" sanity, not as a gate.
-`studio-story-check` requires `oxipng`; run `scripts/dev-init.sh` or install it
-with `cargo install oxipng` / `brew install oxipng`.
+`studio-story-check` auto-fetches the right baseline snapshot into
+`target/story-baselines/current` (override with `STUDIO_STORY_BASELINES_DIR`).
+Use it for "did my change move only the stories I expected" sanity, not as a
+gate. **Never commit locally-captured PNGs anywhere** — the local
+`story-images/` dir is gitignored scratch space. `studio-story-check`
+requires `oxipng`; run `scripts/dev-init.sh` or install it with
+`cargo install oxipng` / `brew install oxipng`.
 
 Do not add an auto-mutating Git hook for this workflow unless the user asks for
 one explicitly. Hooks that rewrite the working tree during commit are annoying

@@ -2,6 +2,12 @@
 
 ## Status
 
+**Superseded entirely by
+[ADR 2026-08-17: Story Baselines Live in a Companion Repo](2026-08-17-story-baselines-companion-repo.md):**
+CI no longer commits anything to this repo — baselines moved to the
+companion stories repo and merging a PR is acceptance. Kept for the
+history of the auto-commit era (2026-07-26 → 2026-08-17).
+
 Accepted. Supersedes, in part,
 [ADR 2026-07-26: CI-Canonical Story Capture](2026-07-26-ci-canonical-story-capture.md):
 the capture environment, pinning, path gate, artifact, and local-capture

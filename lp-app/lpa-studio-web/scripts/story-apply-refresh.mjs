@@ -62,10 +62,10 @@ export async function applyRefresh(freshDir, baselineDir) {
   return { replaced: replace.length, removed: remove.length };
 }
 
-// CLI entry only. Argument parsing MUST stay inside this guard: `story-pull.mjs`
-// imports `applyRefresh`, and a module-scope `process.exit(2)` for missing argv
-// made that import — and therefore `just studio-story-pull`, the documented
-// manual fallback for drift — exit 2 before it did anything.
+// CLI entry only. Argument parsing MUST stay inside this guard:
+// `story-snapshot.mjs` imports `applyRefresh`, and a module-scope
+// `process.exit(2)` for missing argv would kill the importer before it did
+// anything (that exact bug shipped once via the old story-pull.mjs).
 if (import.meta.url === `file://${process.argv[1]}`) {
   const freshDir = path.resolve(process.argv[2] ?? "");
   const baselineDir = path.resolve(
