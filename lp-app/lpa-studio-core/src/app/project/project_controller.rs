@@ -1108,7 +1108,8 @@ impl ProjectController {
         let edits = self.slot_edit_join();
         let extra_config = |node: NodeId| self.binding_derived_config_slots(node);
         let subscribes = |node: &NodeController| self.node_subscribes_products(node);
-        self.root_nodes
+        let mut nodes = self
+            .root_nodes
             .iter()
             .map(|node| {
                 node.ui_node_with_product_previews(
@@ -1121,7 +1122,13 @@ impl ProjectController {
                     &subscribes,
                 )
             })
-            .collect()
+            .collect::<Vec<_>>();
+        // Same card-UI overlay as `editor_view`: the fold/drawer state is
+        // part of what a node DTO says, whichever path built it.
+        for node in &mut nodes {
+            self.overlay_node_card_ui(node);
+        }
+        nodes
     }
 
     /// Read-only rows for wiring with no backing slot row: effective
@@ -3965,12 +3972,12 @@ impl ProjectController {
             ProjectProductSubscriptionIntent::Default => match self.lens_runtime_kind {
                 // Sim probes ride an in-memory postMessage wire and (post
                 // probe-performance plan) render onto canvases, so every
-                // expanded node keeps live previews. `collapsed` is the
-                // controller-side signal; today the web pane's collapse
-                // toggle is view-local (always false here — effectively
-                // "all nodes") and this gate becomes real when the UI
-                // state audit moves live collapse state into core.
-                Some(crate::RuntimeKind::Sim) => !node.state().collapsed,
+                // VISIBLE node keeps live previews. The collapse bit is
+                // the core-owned card fold (`NodeCardUiState`, G1 R-B) —
+                // and it reads ancestors too, because collapsing a card
+                // folds its whole child column away: a hidden card must
+                // not keep streaming just because its own bit is clear.
+                Some(crate::RuntimeKind::Sim) => !self.collapse_hides(node.address()),
                 // Device serial bandwidth is precious: focused node only
                 // (the primary visual is unioned in regardless).
                 Some(crate::RuntimeKind::Device) | None => self.is_focused_node(node),
@@ -3978,6 +3985,19 @@ impl ProjectController {
             ProjectProductSubscriptionIntent::Subscribed => true,
             ProjectProductSubscriptionIntent::Unsubscribed => false,
         }
+    }
+
+    /// True when this node's card, or any ancestor's, is folded to its
+    /// header in the card-UI store — i.e. the card is not visible in the
+    /// workspace column, so nothing about it should stream.
+    fn collapse_hides(&self, address: &ProjectNodeAddress) -> bool {
+        let segments = &address.path().0;
+        (1..=segments.len()).any(|depth| {
+            let prefix = ProjectNodeAddress::new(TreePath(segments[..depth].to_vec()));
+            self.node_card_ui
+                .get(&prefix.to_string())
+                .is_some_and(|state| state.collapsed)
+        })
     }
 
     fn subscribed_products(&self) -> Vec<UiProductRef> {
@@ -8355,7 +8375,6 @@ mod tests {
             .apply_project_view(&single_node_view(1, NodeRuntimeStatus::Ok))
             .unwrap();
         let node = project.node_mut(&address).unwrap();
-        node.state_mut().collapsed = true;
         node.state_mut().focused = true;
         node.state_mut().product_subscription_intent = ProjectProductSubscriptionIntent::Subscribed;
 
@@ -8369,7 +8388,6 @@ mod tests {
         let node = project.node(&address).unwrap();
         assert_eq!(node.target().node_id, NodeId::new(42));
         assert_eq!(node.status().label, "Warning");
-        assert!(node.state().collapsed);
         assert!(node.state().focused);
         assert_eq!(
             node.state().product_subscription_intent,
@@ -8608,7 +8626,12 @@ mod tests {
         project.apply_project_view(&view).unwrap();
         let node = node_address("/demo.module");
         project.node_mut(&node).unwrap().state_mut().focused = true;
-        project.node_mut(&node).unwrap().state_mut().collapsed = true;
+        // The card fold rides the card-UI store (G1 R-B), and `ui_nodes`
+        // overlays it exactly like `editor_view` does.
+        project.apply_node_ui_op(NodeUiOp::SetCollapsed {
+            node: node.to_string(),
+            collapsed: true,
+        });
 
         let nodes = project.ui_nodes();
 
@@ -8618,7 +8641,7 @@ mod tests {
         assert_eq!(nodes[0].header.path, "/demo.module");
         assert_eq!(nodes[0].header.status.label, "Running");
         assert!(nodes[0].focused);
-        assert!(nodes[0].collapsed);
+        assert!(nodes[0].card_ui.collapsed);
         let action_target =
             ProjectEditorTarget::parse(nodes[0].action.as_ref().unwrap().node_id()).unwrap();
         assert_eq!(
@@ -8830,6 +8853,119 @@ mod tests {
             "make it pulse slowly",
             "expanding never clears the mirrored draft"
         );
+    }
+
+    #[test]
+    fn collapsing_a_child_card_rides_the_seam_and_never_touches_the_selection() {
+        // The G1 R-B follow-up's contract: the fold is core-owned (survives
+        // re-renders, resyncs and remounts) and it is ONLY a fold — the
+        // one-live-surface selection rules do not move.
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary::default();
+        project.mark_ready("studio-demo", 7, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+        let orbit = node_address("/demo.module/orbit.shader");
+        project.node_mut(&orbit).unwrap().state_mut().focused = true;
+
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetCollapsed {
+                node: orbit.to_string(),
+                collapsed: true,
+            },
+        );
+
+        // A tree resync rebuilds every controller; the fold must not care.
+        project.apply_project_view(&tree_view()).unwrap();
+
+        let view = project.editor_view("studio-demo", 7, &inventory);
+        let cards = root_children(&view);
+        assert!(
+            cards[1].card_ui.collapsed,
+            "the Orbit card folds, keyed by its address"
+        );
+        assert!(
+            !cards[0].card_ui.collapsed && !view.nodes[0].card_ui.collapsed,
+            "the fold is per card — Clock and the root stay open"
+        );
+        assert!(
+            cards[1].focused,
+            "collapsing a card never steals or clears the selection"
+        );
+
+        dispatch_node_ui(
+            &mut project,
+            NodeUiOp::SetCollapsed {
+                node: orbit.to_string(),
+                collapsed: false,
+            },
+        );
+        let view = project.editor_view("studio-demo", 7, &inventory);
+        assert!(!root_children(&view)[1].card_ui.collapsed);
+    }
+
+    #[test]
+    fn collapsed_cards_stop_streaming_under_the_sim_lens() {
+        // The `node_subscribes_products` gate the collapse bit makes real:
+        // under the sim lens every visible card streams, and a folded card
+        // (or anything inside a folded ancestor) stops.
+        let mut view = tree_view();
+        install_ui_projection_slots(&mut view, 3, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("studio-demo", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        clear_node_focus(&mut project.root_nodes);
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+
+        let orbit_products = [
+            UiProductRef::Visual {
+                node_id: 3,
+                output: 0,
+            },
+            UiProductRef::Control {
+                node_id: 3,
+                output: 1,
+                rows: 2,
+                samples_per_row: 16,
+            },
+        ];
+        assert_eq!(
+            project.subscribed_products(),
+            orbit_products.to_vec(),
+            "expanded: the sim lens streams every card's products"
+        );
+
+        // Folding the card itself stops its streams.
+        project.apply_node_ui_op(NodeUiOp::SetCollapsed {
+            node: "/demo.module/orbit.shader".to_string(),
+            collapsed: true,
+        });
+        assert_eq!(project.subscribed_products(), Vec::new());
+
+        // Expanding restores them.
+        project.apply_node_ui_op(NodeUiOp::SetCollapsed {
+            node: "/demo.module/orbit.shader".to_string(),
+            collapsed: false,
+        });
+        assert_eq!(project.subscribed_products(), orbit_products.to_vec());
+
+        // Folding an ANCESTOR hides the card just as thoroughly — the
+        // whole child column folds with the root, so Orbit's own clear bit
+        // must not keep it streaming invisibly.
+        project.apply_node_ui_op(NodeUiOp::SetCollapsed {
+            node: "/demo.module".to_string(),
+            collapsed: true,
+        });
+        assert_eq!(project.subscribed_products(), Vec::new());
+
+        // An explicit subscribe intent still wins over the fold (the same
+        // precedence focus rules have always had).
+        project
+            .node_mut(&node_address("/demo.module/orbit.shader"))
+            .unwrap()
+            .state_mut()
+            .product_subscription_intent = ProjectProductSubscriptionIntent::Subscribed;
+        assert_eq!(project.subscribed_products(), orbit_products.to_vec());
     }
 
     #[test]

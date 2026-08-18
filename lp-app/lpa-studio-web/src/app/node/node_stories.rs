@@ -35,7 +35,7 @@ pub(crate) fn collapsed_node_pane() -> Element {
     let mut view = playlist_node_view();
     view.action = Some(story_focus_action());
     view.focused = true;
-    view.collapsed = true;
+    view.card_ui.collapsed = true;
 
     rsx! {
         NodePane { view, on_action: move |_| {} }
