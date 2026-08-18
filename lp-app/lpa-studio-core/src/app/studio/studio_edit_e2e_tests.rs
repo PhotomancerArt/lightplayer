@@ -434,9 +434,7 @@ fn an_open_narrates_on_the_card_while_it_runs() {
     let openings: Vec<Option<String>> = seen
         .iter()
         .filter_map(|update| match update {
-            UxUpdate::View(view) => {
-                Some(view.home.as_ref().and_then(|home| home.opening.clone()))
-            }
+            UxUpdate::View(view) => Some(view.home.as_ref().and_then(|home| home.opening.clone())),
             _ => None,
         })
         .collect();

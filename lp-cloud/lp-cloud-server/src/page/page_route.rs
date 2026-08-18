@@ -53,10 +53,7 @@ pub async fn get_page_or_asset(
 ) -> Response {
     let path = uri.path();
 
-    if let Some(file) = state
-        .site()
-        .file_negotiated(path, accepts_brotli(&headers))
-    {
+    if let Some(file) = state.site().file_negotiated(path, accepts_brotli(&headers)) {
         let file_name = path.rsplit('/').next().unwrap_or_default();
         // `x-uncompressed-length` rides on EVERY asset answer, identity
         // included: the shell loader and the engine cache read one header
