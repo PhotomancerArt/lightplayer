@@ -364,6 +364,96 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
     );
 }
 
+/// An open must NARRATE while it runs, not only when it lands — the open
+/// twin of `a_flash_narrates_its_progress_while_it_runs`
+/// (2026-07-28-flash-progress-never-reached-the-ui, same mechanism class).
+///
+/// The card's whole opening treatment (the dim, the pipeline line that
+/// shows the engine download) rides `home.opening`, which reaches the DOM
+/// only inside a published view — and the actor is parked inside the open
+/// for its whole duration. The dispatch wrapper's two snapshots bracket
+/// the action: before it, `pending_open` is not set yet; after it, the
+/// open is already over. Unless `open_on_simulator` emits a view of its
+/// own after setting `pending_open`, a slow open runs to completion
+/// behind a gallery that never acknowledged the click (the live G1 Q1
+/// residual: a throttled first click showed no "Downloading the engine…"
+/// line, because the line's mount gate never arrived).
+#[test]
+fn an_open_narrates_on_the_card_while_it_runs() {
+    use crate::app::library::{LibraryStore, MemoryLibraryHost, PackageProvenance};
+    use crate::{HOME_NODE_ID, HomeOp, UxUpdate, UxUpdateSink};
+
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    // A bare studio with a stub sim — NOT `connected_with_client_for_test`,
+    // whose already-loaded project hides the home gallery this test is
+    // entirely about.
+    let mut controller = StudioController::new(|| 1.0);
+    controller.install_stub_sim_with_client_for_test(client);
+
+    let store = LibraryStore::new(
+        Rc::new(RefCell::new(LpFsMemory::new())),
+        Rc::new(|| [9u8; 16]),
+        Rc::new(|| "2026-08-18-1200".to_string()),
+    );
+    let summary = store
+        .install_package(
+            "Porch sign",
+            &edit_e2e_files()
+                .iter()
+                .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+                .collect::<Vec<_>>(),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .expect("install library package");
+    controller.attach_library(Rc::new(MemoryLibraryHost::new(store, Rc::new(|| 1.0))));
+
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let sink = UxUpdateSink::new({
+        let seen = Rc::clone(&seen);
+        move |update| seen.borrow_mut().push(update)
+    });
+    drive(controller.dispatch_with_updates(
+        UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenPackage {
+                key: summary.uid.to_string(),
+            },
+        ),
+        sink,
+    ))
+    .expect("the open lands");
+
+    let seen = seen.borrow();
+    let openings: Vec<Option<String>> = seen
+        .iter()
+        .filter_map(|update| match update {
+            UxUpdate::View(view) => {
+                Some(view.home.as_ref().and_then(|home| home.opening.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        openings
+            .iter()
+            .any(|opening| opening.as_deref() == Some(summary.uid.to_string().as_str())),
+        "some view published DURING the open must carry home.opening so the \
+         card can mount its pipeline line; saw {openings:?}"
+    );
+    assert_eq!(
+        openings.last().and_then(|opening| opening.as_deref()),
+        None,
+        "the final view clears the opening treatment"
+    );
+}
+
 /// A failed open gives the project straight back to the library (P1).
 ///
 /// The failure staged here is the cheapest one to reach — a below-floor
