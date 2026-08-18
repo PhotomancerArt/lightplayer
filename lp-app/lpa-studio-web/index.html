@@ -23,6 +23,227 @@
             html, body { margin: 0; background: #101317; }
         </style>
         <!--
+          The shell loader. Everything the page can show BEFORE the app
+          wasm boots lives here: dx's injected glue fetches a multi-MB wasm
+          with no UI of its own, so this script wraps `fetch` to watch that
+          download and narrates it into the #lp-shell overlay in <body>.
+          The app dismisses the overlay on its first mounted render
+          (`__lpShell.done()` from web_app.rs); a MutationObserver on #main
+          is the belt-and-braces dismissal if that call ever goes missing.
+
+          `window.__lpShell` is a page-internal contract (ADR: static asset
+          serving and the shell loader):
+
+            observe(response, onProgress) -> Response  byte-counting tee
+            phase(text)                                headline swap
+            done() / fail(message)                     dismiss / dead end
+
+          The engine handoff extends it with `engineFetch` (see the
+          engine-manifest script below and lpa-link's engine_cache).
+
+          Progress totals come from `x-uncompressed-length` (lp-cloud sets
+          it on every asset answer) because Content-Length stops describing
+          what a reader yields once a content-encoding applies; a plain
+          Content-Length is the fallback on identity responses (dx dev
+          serve), and no total at all degrades to an MB counter.
+        -->
+        <style>
+            #lp-shell {
+                position: fixed;
+                inset: 0;
+                display: grid;
+                place-content: center;
+                justify-items: center;
+                gap: 14px;
+                background: #101317;
+                color: #aab4bf;
+                font: 13px/1.4 system-ui, sans-serif;
+                z-index: 9999;
+                /* Invisible for the first beat so a warm load never
+                   flashes it; a cold load fades in at 150 ms. */
+                opacity: 0;
+                animation: lp-shell-in 200ms ease 150ms forwards;
+            }
+            @keyframes lp-shell-in { to { opacity: 1; } }
+            #lp-shell img { width: 56px; height: 56px; }
+            #lp-shell-bar {
+                width: 240px;
+                height: 3px;
+                border-radius: 2px;
+                background: #232a33;
+                overflow: hidden;
+            }
+            #lp-shell-bar > div {
+                height: 100%;
+                width: 0%;
+                border-radius: 2px;
+                background: #7f9cf5;
+                transition: width 120ms linear;
+            }
+            #lp-shell-bar.lp-indeterminate > div {
+                width: 30%;
+                animation: lp-shell-slide 1.1s ease-in-out infinite alternate;
+            }
+            @keyframes lp-shell-slide { to { transform: translateX(233%); } }
+            #lp-shell button {
+                margin-top: 6px;
+                padding: 7px 14px;
+                border: 1px solid #3a4552;
+                border-radius: 6px;
+                background: transparent;
+                color: #e2e8f0;
+                font: inherit;
+                cursor: pointer;
+                display: none;
+            }
+            #lp-shell.lp-failed #lp-shell-bar { visibility: hidden; }
+            #lp-shell.lp-failed button { display: block; }
+        </style>
+        <script>
+            (() => {
+                const shell = (window.__lpShell = {});
+                const el = (id) => document.getElementById(id);
+                const mb = (bytes) => (bytes / 1048576).toFixed(1);
+                let dismissed = false;
+
+                shell.phase = (text) => {
+                    if (!dismissed) el("lp-shell-phase").textContent = text;
+                };
+                shell.progress = (label, received, total) => {
+                    const bar = el("lp-shell-bar");
+                    if (!bar || dismissed) return;
+                    if (total > 0) {
+                        const pct = Math.min(100, Math.round((received / total) * 100));
+                        bar.classList.remove("lp-indeterminate");
+                        bar.firstElementChild.style.width = pct + "%";
+                        shell.phase(`${label}… ${pct}%`);
+                    } else {
+                        bar.classList.add("lp-indeterminate");
+                        shell.phase(`${label}… ${mb(received)} MB`);
+                    }
+                };
+                shell.done = () => {
+                    dismissed = true;
+                    el("lp-shell")?.remove();
+                };
+                shell.fail = (message) => {
+                    if (dismissed) return;
+                    const root = el("lp-shell");
+                    if (!root) return;
+                    root.classList.add("lp-failed");
+                    shell.phase("Studio could not load");
+                    el("lp-shell-detail").textContent = String(message || "");
+                };
+
+                // The byte-counting tee: same Response contract out, so
+                // WebAssembly.instantiateStreaming keeps working on the
+                // copy (status, statusText, and headers — including the
+                // application/wasm content-type it insists on — ride over).
+                shell.observe = (response, onProgress, onDone) => {
+                    if (!response.ok || !response.body) return response;
+                    const total =
+                        Number(response.headers.get("x-uncompressed-length")) ||
+                        (!response.headers.get("content-encoding")
+                            ? Number(response.headers.get("content-length")) || 0
+                            : 0);
+                    let received = 0;
+                    const reader = response.body.getReader();
+                    const counted = new ReadableStream({
+                        async pull(controller) {
+                            const { done, value } = await reader.read();
+                            if (done) {
+                                onDone?.();
+                                return controller.close();
+                            }
+                            received += value.byteLength;
+                            onProgress(received, total);
+                            controller.enqueue(value);
+                        },
+                        cancel(reason) { return reader.cancel(reason); },
+                    });
+                    return new Response(counted, {
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: response.headers,
+                    });
+                };
+
+                // The engine handoff: the moment the app wasm's BYTES are
+                // done (compile/boot still ahead of it), start the engine
+                // wasm download so it overlaps them instead of waiting for
+                // the app to boot and ask. Sequential on purpose — running
+                // both multi-MB fetches at once starves the app download
+                // on the slow links this whole shell exists for.
+                // `engine_cache` (lpa-link) adopts `shell.engineFetch`
+                // instead of fetching its own copy; the shell never reads
+                // the body — moving bytes is the whole job here, and the
+                // Module's compile/ownership stays engine_cache's.
+                shell.startEngineFetch = async () => {
+                    if (shell.engineFetch) return;
+                    const manifest = await window.__lpEngineAssets;
+                    const url = manifest?.fw_browser_wasm;
+                    if (!url) return;
+                    shell.engineFetch = { url, promise: plainFetch(url) };
+                    // A failed pre-fetch must not surface anywhere here:
+                    // engine_cache sees the rejection when it adopts, falls
+                    // back to its own fetch, and owns the error story.
+                    shell.engineFetch.promise.catch(() => {});
+                };
+
+                // Watch the app wasm ride through fetch. dx's glue calls a
+                // plain fetch(url); the URL names lpa-studio-web_bg in both
+                // dev (/wasm/lpa-studio-web_bg.wasm) and release
+                // (/assets/lpa-studio-web_bg-dxh….wasm) layouts.
+                const isAppWasm = (input) => {
+                    const url = typeof input === "string" ? input : input?.url || "";
+                    return /lpa-studio-web_bg[^/]*\.wasm(\?|$)/.test(url);
+                };
+                const plainFetch = window.fetch.bind(window);
+                window.fetch = async (input, init) => {
+                    if (!isAppWasm(input)) return plainFetch(input, init);
+                    try {
+                        const response = await plainFetch(input, init);
+                        if (!response.ok) {
+                            shell.fail(`the app failed to download (HTTP ${response.status})`);
+                            return response;
+                        }
+                        return shell.observe(
+                            response,
+                            (received, total) => {
+                                shell.progress("Downloading Studio", received, total);
+                                if (total > 0 && received >= total) shell.phase("Starting Studio…");
+                            },
+                            () => {
+                                shell.phase("Starting Studio…");
+                                shell.startEngineFetch();
+                            },
+                        );
+                    } catch (error) {
+                        shell.fail(error?.message || "the network request failed");
+                        throw error;
+                    }
+                };
+
+                // A wasm that downloads but fails to start (a panic in
+                // init, a compile error) surfaces as the glue's rejected
+                // promise — nothing else on a pre-boot page rejects, and
+                // once the app is up this listener stops narrating.
+                addEventListener("unhandledrejection", (event) => {
+                    if (!dismissed) shell.fail(event.reason?.message || event.reason);
+                });
+                addEventListener("DOMContentLoaded", () => {
+                    el("lp-shell-reload").onclick = () => location.reload();
+                    // Anything rendered into #main means the app is up —
+                    // the fallback for surfaces that never call done()
+                    // (story book, standalone editor pages).
+                    const main = el("main");
+                    new MutationObserver(() => {
+                        if (main.childElementCount > 0) shell.done();
+                    }).observe(main, { childList: true });
+                });
+            })();
+        </script>
+        <!--
           Pre-boot engine asset discovery (P2, hashed engine sidecar). The
           fw-browser engine wasm/glue are served under content-hashed names
           (see justfile's `sync-engine-sidecar.sh`), so nothing that boots a
@@ -47,6 +268,15 @@
         <script defer src="/vendor/codemirror/codemirror.js"></script>
     </head>
     <body>
+        <!-- The shell loader's overlay (script + contract in <head>).
+             Static markup on purpose: it paints before any JS runs. -->
+        <div id="lp-shell" role="status" aria-live="polite">
+            <img src="/favicon.svg" alt="">
+            <div id="lp-shell-bar" class="lp-indeterminate"><div></div></div>
+            <p id="lp-shell-phase" style="margin:0">Loading Studio…</p>
+            <p id="lp-shell-detail" style="margin:0;font-size:11px;color:#6b7683;max-width:340px;text-align:center"></p>
+            <button id="lp-shell-reload" type="button">Reload</button>
+        </div>
         <div id="main"></div>
     </body>
 </html>
