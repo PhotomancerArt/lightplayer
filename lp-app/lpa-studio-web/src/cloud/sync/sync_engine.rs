@@ -115,6 +115,10 @@ struct SyncEngine {
     /// One pump at a time — the trips inside it run sequentially, which is
     /// the whole concurrency cap (libraries are small).
     pumping: Cell<bool>,
+    /// A pump fired while a pass was running. The pass owns the re-check:
+    /// it takes another look at the queue before clearing `pumping`, so the
+    /// work that armed the swallowed pump is not stranded until the sweep.
+    wanted: Cell<bool>,
 }
 
 impl SyncEngine {
@@ -123,6 +127,7 @@ impl SyncEngine {
             queue: RefCell::new(SyncQueue::new()),
             signed_in: Cell::new(false),
             pumping: Cell::new(false),
+            wanted: Cell::new(false),
         }
     }
 
@@ -139,21 +144,35 @@ impl SyncEngine {
 
     /// Take everything that is due and run it, one project at a time.
     ///
-    /// A single pass. Anything that arrives mid-pass arms its own pump, and
-    /// anything that failed is picked up by the sweep timer, so there is no
-    /// inner loop here to spin.
+    /// Anything that arrives mid-pass arms its own pump, but that pump may
+    /// fire while this pass is still on an earlier trip — and it cannot run
+    /// concurrently, so it marks `wanted` and leaves. The mark makes this
+    /// pass go around again: a swallowed pump only ever fires at or after
+    /// its entry's due time, so the re-check is guaranteed to pick the
+    /// entry up. Failures still wait for the sweep timer — `finish` re-arms
+    /// them a minute out, so the loop never spins on them.
     async fn pump(self: &Rc<Self>) {
-        if !self.signed_in.get() || self.pumping.replace(true) {
+        if !self.signed_in.get() {
             return;
         }
-        let due = self.queue.borrow_mut().take_due(now_ms());
-        if !due.is_empty() {
-            let library = roster().await;
-            for project in due {
-                let result = self.run_one(&project, &library).await;
-                self.queue
-                    .borrow_mut()
-                    .finish(&project.uid, result, now_ms());
+        if self.pumping.replace(true) {
+            self.wanted.set(true);
+            return;
+        }
+        loop {
+            self.wanted.set(false);
+            let due = self.queue.borrow_mut().take_due(now_ms());
+            if !due.is_empty() {
+                let library = roster().await;
+                for project in due {
+                    let result = self.run_one(&project, &library).await;
+                    self.queue
+                        .borrow_mut()
+                        .finish(&project.uid, result, now_ms());
+                }
+            }
+            if !self.wanted.get() {
+                break;
             }
         }
         self.pumping.set(false);
