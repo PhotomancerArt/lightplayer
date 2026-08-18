@@ -89,6 +89,20 @@ impl LpFsOpfs {
             .is_empty()
     }
 
+    /// The unflushed changes as a batch — `Some(bytes)` to write, `None` to
+    /// remove — without draining anything.
+    ///
+    /// Exactly the set [`Self::flush`] would write. It is public for the one
+    /// caller that must land those writes somewhere *other* than this
+    /// store's own OPFS directory: a cloud-sync snapshot whose project was
+    /// opened in this tab while the trip was on the network hands its
+    /// writes to the open's live store, which owns those files now (see
+    /// `lpa-studio-web::library_host_opfs`).
+    pub fn pending_writes(&self) -> Vec<(LpPathBuf, Option<Vec<u8>>)> {
+        let inner = self.shared.inner.borrow();
+        batch_since(&inner, self.shared.watermark.get())
+    }
+
     /// Drain and persist all pending changes to OPFS.
     ///
     /// Snapshots the dirty set and file contents synchronously, then writes
@@ -99,18 +113,10 @@ impl LpFsOpfs {
         // synchronous snapshot: events + bytes, borrows dropped before IO
         let (batch, target_version) = {
             let inner = self.shared.inner.borrow();
-            let events = inner.get_changes_since(self.shared.watermark.get().next());
-            let batch: Vec<(LpPathBuf, Option<Vec<u8>>)> = events
-                .into_iter()
-                .map(|FsEvent { path, kind }| {
-                    let bytes = match kind {
-                        FsEventKind::Delete => None,
-                        _ => inner.read_file(path.as_path()).ok(),
-                    };
-                    (path, bytes)
-                })
-                .collect();
-            (batch, inner.current_version())
+            (
+                batch_since(&inner, self.shared.watermark.get()),
+                inner.current_version(),
+            )
         };
 
         let mut report = FlushReport {
@@ -139,6 +145,23 @@ impl LpFsOpfs {
             .clear_changes_before(target_version);
         Ok(report)
     }
+}
+
+/// Everything changed after `watermark`, paired with the bytes to write
+/// (or `None` where the path was deleted). Synchronous and borrow-only:
+/// the caller decides whether that batch goes to OPFS or somewhere else.
+fn batch_since(inner: &LpFsMemory, watermark: FsVersion) -> Vec<(LpPathBuf, Option<Vec<u8>>)> {
+    inner
+        .get_changes_since(watermark.next())
+        .into_iter()
+        .map(|FsEvent { path, kind }| {
+            let bytes = match kind {
+                FsEventKind::Delete => None,
+                _ => inner.read_file(path.as_path()).ok(),
+            };
+            (path, bytes)
+        })
+        .collect()
 }
 
 impl LpFs for LpFsOpfs {

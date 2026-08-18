@@ -51,6 +51,15 @@ use crate::app::device::link_ux::is_port_held_error;
 /// enough that the "Resetting…" narration doesn't feel stuck.
 const CONNECT_RETRY_BACKOFF: core::time::Duration = core::time::Duration::from_millis(750);
 
+/// Rungs on the SIMULATOR connect ladder: how many browser workers a
+/// single connect may spawn before the failure surfaces. A boot that lost
+/// its race with a cold, multi-MB wasm fetch is the common failure, and it
+/// is exactly the kind a second attempt clears.
+const SIM_CONNECT_ATTEMPTS: u32 = 3;
+/// The breath between simulator connect attempts: short, because the
+/// worker boot the next rung starts carries the long wait itself.
+const SIM_CONNECT_RETRY_BACKOFF: core::time::Duration = core::time::Duration::from_millis(400);
+
 pub struct DeviceController {
     /// Catalog + factory: consulted when a flow needs the picker list or
     /// the kind's shared connector (memoized per kind, so endpoint state
@@ -455,6 +464,11 @@ impl DeviceController {
     /// held by another holder short-circuits to `PortHeld` (D32 soft
     /// failure — the quiet periodic retry takes over). Ladder endings are
     /// [`DeviceOpenOutcome::SoftFailed`], never errors.
+    ///
+    /// Simulator connects walk their own bounded ladder
+    /// ([`open_sim_attachment_ladder`]) — a failed worker boot is retried
+    /// on a fresh worker before the error reaches the caller — but they
+    /// still END as an error, since the sim has no card state to park in.
     pub async fn connect_endpoint(
         &mut self,
         provider_id: LinkProviderKind,
@@ -483,7 +497,8 @@ impl DeviceController {
             }
         };
         let (payload, logs) = if provider_id == LinkProviderKind::BrowserWorker {
-            match open_sim_attachment(connector, &endpoint_id).await {
+            let timers = self.timers.clone();
+            match open_sim_attachment_ladder(connector, &endpoint_id, &timers).await {
                 Ok(result) => result,
                 Err(error) => {
                     self.recover_to_provider_selection(error.message());
@@ -680,6 +695,44 @@ impl DeviceController {
     }
 }
 
+/// Open the simulator attachment, walking a bounded RETRY LADDER:
+/// [`SIM_CONNECT_ATTEMPTS`] rungs with a [`SIM_CONNECT_RETRY_BACKOFF`]
+/// breath between them, mirroring the hardware ladder's shape.
+///
+/// Each rung connects through a FRESH browser worker — the previous one
+/// terminates when its handle drops, so a boot that timed out is never
+/// left fetching wasm against the retry. The final error names the
+/// attempt count and the last cause, so an exhausted ladder never reads
+/// like a single unlucky failure.
+async fn open_sim_attachment_ladder(
+    connector: Rc<LinkConnector>,
+    endpoint_id: &LinkEndpointId,
+    timers: &DeviceTimers,
+) -> Result<(RuntimePayload, Vec<UiLogDraft>), UiError> {
+    let mut last_error: Option<UiError> = None;
+    for attempt in 1..=SIM_CONNECT_ATTEMPTS {
+        match open_sim_attachment(Rc::clone(&connector), endpoint_id).await {
+            Ok(result) => return Ok(result),
+            Err(error) => {
+                log::warn!(
+                    "simulator connect attempt {attempt}/{SIM_CONNECT_ATTEMPTS} failed: {}",
+                    error.message()
+                );
+                last_error = Some(error);
+            }
+        }
+        if attempt < SIM_CONNECT_ATTEMPTS {
+            timers.sleep(SIM_CONNECT_RETRY_BACKOFF).await;
+        }
+    }
+    let cause = last_error
+        .as_ref()
+        .map_or("no failure was recorded", UiError::message);
+    Err(UiError::Link(format!(
+        "simulator runtime did not start after {SIM_CONNECT_ATTEMPTS} attempts: {cause}"
+    )))
+}
+
 /// Open the simulator attachment: connect + connection handoff (no
 /// readiness — boot-ready IS the session, D22).
 async fn open_sim_attachment(
@@ -840,6 +893,79 @@ mod tests {
                 .iter()
                 .any(|draft| draft.message.contains("server handoff failed"))
         );
+    }
+
+    #[test]
+    fn the_simulator_ladder_walks_every_rung_before_surfacing_a_failure() {
+        let registry = registry_with_fake_endpoint();
+        let connector = registry.create_connector(LinkProviderKind::Fake).unwrap();
+        set_fake_connect_error(&connector, Some("worker boot timed out".to_string()));
+
+        let result = block_on_ready(open_sim_attachment_ladder(
+            Rc::clone(&connector),
+            &LinkEndpointId::new("fake-runtime"),
+            &immediate_timers(),
+        ));
+
+        let error = result
+            .err()
+            .expect("an always-failing connect exhausts the ladder");
+        // Informative ending: how many tries were spent, and why the last
+        // one failed — never the bare first error.
+        assert!(
+            error
+                .message()
+                .contains(&format!("{SIM_CONNECT_ATTEMPTS} attempts")),
+            "{}",
+            error.message()
+        );
+        assert!(
+            error.message().contains("worker boot timed out"),
+            "{}",
+            error.message()
+        );
+    }
+
+    #[test]
+    fn the_simulator_ladder_recovers_when_a_later_rung_succeeds() {
+        // The between-rungs backoff is the ladder's one observable seam:
+        // healing the connector from inside the sleep proves a second rung
+        // ran on a fresh connect rather than the first error surfacing.
+        let registry = registry_with_fake_endpoint();
+        let connector = registry.create_connector(LinkProviderKind::Fake).unwrap();
+        set_fake_connect_error(
+            &connector,
+            Some("first boot lost the fetch race".to_string()),
+        );
+        let healing = Rc::clone(&connector);
+        let timers = DeviceTimers::new(move |_duration| {
+            set_fake_connect_error(&healing, None);
+            Box::pin(std::future::ready(()))
+        });
+
+        let result = block_on_ready(open_sim_attachment_ladder(
+            Rc::clone(&connector),
+            &LinkEndpointId::new("fake-runtime"),
+            &timers,
+        ));
+
+        assert!(matches!(result, Ok((RuntimePayload::Sim(_), _))));
+    }
+
+    fn immediate_timers() -> DeviceTimers {
+        DeviceTimers::new(|_| Box::pin(std::future::ready(())))
+    }
+
+    fn set_fake_connect_error(connector: &Rc<LinkConnector>, message: Option<String>) {
+        #[allow(
+            unreachable_patterns,
+            reason = "providers beyond Fake are feature/target-gated, so the \
+                      wildcard arm is unreachable in some test configurations"
+        )]
+        match &**connector {
+            LinkConnector::Fake(provider) => provider.set_connect_error(message),
+            _ => unreachable!("factory Fake kind builds a fake connector"),
+        }
     }
 
     fn fake_endpoint() -> LinkEndpoint {

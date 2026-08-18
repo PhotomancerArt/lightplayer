@@ -21,11 +21,22 @@
 //!
 //! # Locks
 //!
-//! A trip needs the project's history subtree, and exactly one writer may
-//! hold it. When this tab has the project open the driver borrows that
-//! open's live handles (its flusher persists the binding); otherwise it
-//! takes the project lock for the trip and flushes before releasing. A
-//! project another tab holds is skipped — that tab's own driver has it.
+//! A trip needs the project's two subtrees, and exactly one writer may hold
+//! them. When this tab has the project open the driver borrows that open's
+//! live handles (its flusher persists the binding); otherwise it snapshots
+//! the project under its lock and lets the lock go before the trip starts.
+//! A project another tab holds is skipped — that tab's own driver has it.
+//!
+//! **The project lock is never held across the network** (D1;
+//! `docs/adr/2026-07-08-per-project-library-locking.md`, amended). It
+//! guards local OPFS consistency, and a refusal of it is a user-facing
+//! claim ("open in another tab") that a round trip has no business making
+//! true. So the trip is three phases: snapshot under the lock, publish
+//! from the snapshot with no lock at all, bank what came back under a
+//! second short hold. A project that changed while the publish was in
+//! flight simply earns another trip — `SyncQueue::request` has always
+//! treated a trip as one attempt against a consistent snapshot, and
+//! `sync_queue::work_arriving_mid_flight_earns_another_trip` pins it.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -104,6 +115,10 @@ struct SyncEngine {
     /// One pump at a time — the trips inside it run sequentially, which is
     /// the whole concurrency cap (libraries are small).
     pumping: Cell<bool>,
+    /// A pump fired while a pass was running. The pass owns the re-check:
+    /// it takes another look at the queue before clearing `pumping`, so the
+    /// work that armed the swallowed pump is not stranded until the sweep.
+    wanted: Cell<bool>,
 }
 
 impl SyncEngine {
@@ -112,6 +127,7 @@ impl SyncEngine {
             queue: RefCell::new(SyncQueue::new()),
             signed_in: Cell::new(false),
             pumping: Cell::new(false),
+            wanted: Cell::new(false),
         }
     }
 
@@ -128,21 +144,35 @@ impl SyncEngine {
 
     /// Take everything that is due and run it, one project at a time.
     ///
-    /// A single pass. Anything that arrives mid-pass arms its own pump, and
-    /// anything that failed is picked up by the sweep timer, so there is no
-    /// inner loop here to spin.
+    /// Anything that arrives mid-pass arms its own pump, but that pump may
+    /// fire while this pass is still on an earlier trip — and it cannot run
+    /// concurrently, so it marks `wanted` and leaves. The mark makes this
+    /// pass go around again: a swallowed pump only ever fires at or after
+    /// its entry's due time, so the re-check is guaranteed to pick the
+    /// entry up. Failures still wait for the sweep timer — `finish` re-arms
+    /// them a minute out, so the loop never spins on them.
     async fn pump(self: &Rc<Self>) {
-        if !self.signed_in.get() || self.pumping.replace(true) {
+        if !self.signed_in.get() {
             return;
         }
-        let due = self.queue.borrow_mut().take_due(now_ms());
-        if !due.is_empty() {
-            let library = roster().await;
-            for project in due {
-                let result = self.run_one(&project, &library).await;
-                self.queue
-                    .borrow_mut()
-                    .finish(&project.uid, result, now_ms());
+        if self.pumping.replace(true) {
+            self.wanted.set(true);
+            return;
+        }
+        loop {
+            self.wanted.set(false);
+            let due = self.queue.borrow_mut().take_due(now_ms());
+            if !due.is_empty() {
+                let library = roster().await;
+                for project in due {
+                    let result = self.run_one(&project, &library).await;
+                    self.queue
+                        .borrow_mut()
+                        .finish(&project.uid, result, now_ms());
+                }
+            }
+            if !self.wanted.get() {
+                break;
             }
         }
         self.pumping.set(false);
@@ -188,7 +218,9 @@ impl SyncEngine {
         }
     }
 
-    /// One project's trip, mount and all.
+    /// One project's trip: snapshot, publish, bank — in that order, and
+    /// with the project lock alive only inside the first and the last (see
+    /// the module's `# Locks`).
     async fn run_one(&self, due: &DueProject, roster: &Roster) -> TripResult {
         let Some(host) = opfs_library_host() else {
             return TripResult::Refused;
@@ -211,9 +243,11 @@ impl SyncEngine {
             }
         };
 
+        // No lock is held from here until `finish`: `mount_for_sync`
+        // released it once the snapshot was in memory.
         let fallback = entry.map_or(due.uid.as_str(), |entry| entry.name.as_str());
         let result = run_mounted(&mount, uid, fallback, due.restate).await;
-        mount.release().await;
+        mount.finish().await;
 
         match result {
             Ok(report) => {

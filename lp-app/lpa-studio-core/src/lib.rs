@@ -72,6 +72,11 @@ pub use app::node::{
     UiTimebaseState, UiVisualProductSpace, UiVisualSpace, UiWireDirectionRow, UiWireStatus,
     phasor_rate_display,
 };
+pub use app::open_priority::{UserOpenGuard, begin_user_open, user_open_in_flight};
+pub use app::open_progress::{
+    OpenFailure, OpenStage, current_open_generation, note_open_requested, open_stage,
+    open_superseded,
+};
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
 pub use app::preview_host::{
