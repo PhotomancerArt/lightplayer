@@ -1,6 +1,7 @@
 # Per-project library locking: two lock kinds, one ordering rule
 
-- Status: accepted
+- Status: accepted, amended 2026-08-14 (locks guard local OPFS
+  consistency only, never network IO — see the Amendment section)
 - Date: 2026-07-10 (planned 2026-07-08)
 
 ## Context
@@ -100,3 +101,56 @@ now per-project in blast radius.
 - Empty directory husks (the flusher removes files, never directories)
   are swept at the end of catalog transactions, while the catalog lock
   is still held.
+
+## Amendment (2026-08-14): locks never span network IO; sync works from a snapshot
+
+The decision above says what each lock *guards* and left what a holder
+may *do* implicit. Cloud sync then read the guarantee it needed — single
+writer over `/history/<uid>/**`, which it writes `/cloud-binding.json`
+into — and took `lp-project:<uid>` for the whole trip, network included.
+Example seeding publishes at 0 ms, so the first click on a fresh example
+raced its own publish and was told `This project is open in another tab`
+with one tab open
+([defect](../defects/2026-08-14-sync-holds-the-project-lock-across-the-network.md)).
+
+That is worse than slow. This model deliberately makes a project lock's
+*refusal* a user-facing claim — the "open in another tab" answer is the
+refusal, by design — so a hold whose length is set by somebody else's
+latency does not merely delay the UI, it makes the product state
+something false.
+
+**A project lock guards local OPFS consistency and nothing else, and is
+therefore never held across network IO.** A caller whose work is mostly
+elsewhere takes the snapshot under the lock and does the elsewhere-work
+outside it. Concretely, a cloud sync trip is three phases:
+
+1. **Snapshot** — acquire (polling: the hold being waited out is local
+   work now, so waiting is cheap and refusing is wrong), mount the
+   project's package and history subtrees, release. Memory-primary
+   mounting already reads the whole subtree, so the mount *is* the
+   snapshot at no extra cost. It must be taken inside the one hold: a set
+   read across two holds could pair a pre-save package with a post-save
+   history and publish a version that never existed.
+2. **Publish** — the round trip, from the snapshot, with no lock held.
+3. **Bank** — reacquire briefly and flush what the trip wrote, or, when
+   the project was opened in this tab meanwhile (a first click landing
+   mid-publish — the ordinary case), replay those writes into the open's
+   live store, which owns those files now.
+
+Consequences of the fold:
+
+- A project that changed while its publish was in flight is not a
+  conflict and not an error: the trip that is running stands, and the
+  change earns another trip. `SyncQueue` already worked this way ("one
+  attempt against a consistent snapshot"); the snapshot is now literal.
+- The write-back lands only the paths the trip dirtied — whole-file
+  atomic writes, the same property that makes lock-free reads safe — so a
+  save that arrived mid-publish is not clobbered by the stale copy.
+- Deleting or renaming a project no longer waits out a publish.
+- The open path's compensation for this tab's own trip
+  (`await_sync_handoff`) drops from a round-trip-shaped 3 s to a
+  local-work-shaped 500 ms, with the acquire ladder behind it.
+
+The rule generalizes past sync: **take the snapshot under the lock, do
+the foreign-latency work outside it.** Anything that wants a project lock
+across an await it does not control is asking the wrong question.

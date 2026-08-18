@@ -74,6 +74,12 @@ pub enum BrowserInputEnvelope {
         fw_browser_module_path: String,
         fw_browser_wasm_path: String,
         tick_mode: BrowserTickMode,
+        /// How the wasm reaches the worker (boot protocol v2): `"message"`
+        /// = a page-compiled `WebAssembly.Module` follows in a raw
+        /// `boot_module` message (workers only instantiate); `"path"` =
+        /// classic per-worker fetch+compile from `fw_browser_wasm_path`
+        /// (the fallback). See [`super::boot_wait::BootDelivery`].
+        module_delivery: String,
     },
     /// Create an additional named runtime in an already-booted worker.
     ///

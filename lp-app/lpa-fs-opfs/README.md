@@ -43,15 +43,49 @@ Two sharing subtleties encoded here:
   history/<prj-uid>/    lpc-history roots — beside, never inside, packages
 ```
 
+## The locks (`library_locks`)
+
+Two typed Web Locks, not one page-wide lock (that was M2, and it blocked
+project Y in a second tab because project X was open in the first). See
+`docs/adr/2026-07-08-per-project-library-locking.md`.
+
+- **`lp-project:<uid>`** — exclusive, taken when a project opens and held
+  while it stays open. Guards that project's `/packages/<slug>/**` and
+  `/history/<uid>/**`; the holder being the only writer is what makes
+  write-behind correct.
+- **`lp-catalog`** — short-lived, guarding catalog *structure*: package
+  directory create/remove/move, `/registry.json`, seed-once installs.
+  Transactions flush fully before releasing.
+- **Ordering: Project before Catalog, never the reverse.** Reads take no
+  locks — gallery data is a fresh read-only mount, and whole-file atomic
+  writes make torn files impossible.
+
+Acquisition *policy* is the caller's, which is why this crate offers both
+`try_acquire` (one `ifAvailable` shot — for a structural op the refusal
+is the answer) and `try_acquire_polling` (a bounded ladder — for a caller
+whose refusal is only ever momentary, like an open racing this tab's own
+release).
+
+**A lock is held for local OPFS work only, never across network IO**
+(ADR amendment 2026-08-14). A caller whose work is mostly elsewhere —
+cloud sync — mounts the project under the lock, releases, does the round
+trip against that in-memory snapshot, and reacquires briefly to bank what
+came back; `LpFsOpfs::pending_writes` exists for the case where the
+write-back has to be handed to a store that took ownership meanwhile.
+Holding longer would not just be slow: a project lock's refusal is the
+"open in another tab" message, so a hold set by foreign latency makes the
+UI say something untrue.
+
 ## Who mounts it
 
-The **studio main thread** (`lpa-studio-web::local_store`), at startup,
-after taking the `lp-library` Web Lock (`acquire_exclusive_lock` — origin
-wide, auto-released on tab death; a refused acquisition is the "open in
-another tab" state). The **simulator never mounts this store**:
-persistence belongs to the local project store, and the sim is an
-ephemeral place — opening a project is a push, saving is a pull (roadmap
-D19/D20; the wire transfer lands with milestone M2b).
+The **studio main thread** (`lpa-studio-web::library_host_opfs`), which
+mounts per scope rather than whole-library: a fresh read-only tree per
+catalog transaction and per gallery snapshot, and one memory-primary
+store with a flusher per open project subtree (under that project's
+lock). The **simulator never mounts this store**: persistence belongs to
+the local project store, and the sim is an ephemeral place — opening a
+project is a push, saving is a pull (roadmap D19/D20; the wire transfer
+lands with milestone M2b).
 
 ## Tests
 

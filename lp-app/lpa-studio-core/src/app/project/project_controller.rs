@@ -2677,27 +2677,49 @@ impl ProjectController {
     /// Push a host-opened project to the runtime and make it the active
     /// library project. A previously active project's lock is queued for
     /// release (the settle points drain it).
+    ///
+    /// Everything from here to `context.active` runs under the open's
+    /// `receipt`: until the project is active, nothing would ever queue
+    /// its close, so a failure that walked out with the host's lock still
+    /// held would refuse every later open of it until the page reloaded.
+    /// The receipt makes each `?` below give the project back.
     async fn open_opened_package(
         &mut self,
         server: &mut StudioServerClient,
         opened: crate::app::library::OpenedProject,
     ) -> Result<Vec<UiLogDraft>, UiError> {
+        let crate::app::library::OpenedProject {
+            uid,
+            slug,
+            package_fs,
+            history_fs,
+            receipt,
+        } = opened;
+        // Boundary 3 of 3 (post-lock): acquiring the project lock is the
+        // one long wait inside the open that a newer click can outlive —
+        // this tab's own cloud sync trip can be snapshotting under it (D1),
+        // and the acquire polls. Giving the open back HERE, before
+        // anything is mutated, is exactly what the receipt is for: the
+        // lock, the registration and the flushers all go, so the click
+        // that replaced this one can take the same project a moment later.
+        if crate::app::open_progress::open_superseded() {
+            receipt.abandon();
+            return Err(UiError::Cancelled(
+                "the open was superseded by a newer one".to_string(),
+            ));
+        }
         let now = {
             let context = self.library.as_mut().ok_or_else(no_library_error)?;
             if let Some(previous) = context.active.take() {
-                if previous.handle.uid != opened.uid {
+                if previous.handle.uid != uid {
                     context.pending_close.push(previous.handle.uid.to_string());
                 }
             }
             (context.now_secs)()
         };
-        let mut handle = crate::app::library::PackageHandle::load(
-            opened.uid,
-            opened.slug,
-            opened.package_fs,
-            opened.history_fs,
-        )
-        .map_err(library_ui_error)?;
+        let mut handle =
+            crate::app::library::PackageHandle::load(uid, slug, package_fs, history_fs)
+                .map_err(library_ui_error)?;
         // the slug is THE user-facing identifier — it titles the editor
         let title = handle.slug.clone();
 
@@ -2721,6 +2743,8 @@ impl ProjectController {
             handle,
             last_synced: loaded.synced_version,
         });
+        // Active: the close path owns the host's lock from here on.
+        receipt.commit();
         self.mark_ready(title, loaded.handle_id, loaded.inventory);
         // Without this, library/example-opened projects could not fetch
         // asset bodies ("filesystem root is unknown") — the inline editor's

@@ -162,12 +162,20 @@ impl LinkProvider for BrowserWorkerProvider {
             endpoint.capabilities.clone(),
         );
         // Boot the worker on locals so the boot await runs with no session
-        // borrow held; only the finished state enters the map.
+        // borrow held; only the finished state enters the map. A failed
+        // boot returns here with the handle still local, and dropping it
+        // terminates the worker — no zombie keeps fetching wasm behind a
+        // connect that already gave up.
         let mut state = BrowserWorkerSessionState::new(endpoint.id, session.clone());
         let mut handle = BrowserWorkerHandle::new(&self.options.worker_script_path())?;
-        state
-            .pending_outputs
-            .extend(handle.boot("Studio browser runtime", &self.options).await?);
+        state.pending_outputs.extend(
+            handle
+                .boot(
+                    crate::providers::browser_worker::boot_wait::STUDIO_RUNTIME_WORKER_LABEL,
+                    &self.options,
+                )
+                .await?,
+        );
         state.handle = Some(handle);
         self.sessions.borrow_mut().insert(session_id, state);
         Ok(session)
