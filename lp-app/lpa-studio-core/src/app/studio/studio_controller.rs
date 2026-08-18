@@ -5214,11 +5214,10 @@ impl StudioController {
                 )))
             }
             Err(error) => {
-                self.push_log(UiLogDraft::new(
-                    UiLogLevel::Error,
-                    UiLogOrigin::Studio,
-                    error.to_string(),
-                ));
+                // `from_error`, not a bare Error draft: a superseded open
+                // unwinds through here as `Cancelled`, and the user clicking
+                // somewhere else is information, not a failure (Q5/P7).
+                self.push_log(UiLogDraft::from_error(error.clone()));
                 self.project.fail(error.to_string());
                 Err(error)
             }

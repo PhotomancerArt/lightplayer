@@ -1,7 +1,7 @@
 ---
-status: open           # zombies + recovery fixed in P3; the budget itself is P5
+status: fixed          # P3 zombies+recovery; P4 preload/stagger/priority; P5 inactivity budget
 found: 2026-08-14      # how: live-debugging (demo repro, deployed site)
-fixed:                 # P3 `ac4dde195` (partial); P4/P5 own the rest
+fixed: 2026-08-14      # P3 `ac4dde195`, P4 `f29640bbd`, P5 `888e3de61` (boot protocol v2 ADR)
 area: lpa-link browser_worker (worker_handle) + lpa-studio-core preview_host
 class: fixed-budget-over-variable-work
 related:
