@@ -102,3 +102,19 @@ repo.
 - The stories repo is now infrastructure: deleting it, its deploy key, or
   the seed/retained refs blinds PR comparisons (remedy: any green main run
   re-seeds forward).
+
+## Amendment 2026-08-18: history purge executed
+
+The deferred purge ran as planned (P5 of the same plan): `git filter-repo`
+stripped `lp-app/lpa-studio-web/story-images` and the pre-rename
+`lp-app/lp-studio-web/story-images` from all history, and the rewritten
+refs were force-pushed. Pack size went from 953 MiB to 42.6 MiB; a fresh
+clone carries zero story-PNG objects. Every commit SHA after the first PNG
+commit changed (old main `3e53a042ea` → new main `8dab339274`); all 440
+branches and 353 tags were rewritten in place (one deploy tag created
+mid-window was re-pointed through the commit map afterwards — a
+same-content duplicate of the new main tag). The stories repo's `sha-*`
+keys were re-keyed to the rewritten SHAs. The old→new commit map lives in
+the planning archive (`2026-08-14-1132-story-baselines-external/purge/`).
+Pre-rewrite SHAs in older docs/ADRs are historical labels and no longer
+resolve.
