@@ -119,6 +119,7 @@
   .sgrp .seg:hover { background: var(--bg-wash); color: var(--strong); }
   .sgrp .seg b { color: var(--muted); font-weight: 600; }
   .sgrp .seg .dimtxt { color: var(--dim); font-style: italic; }
+  .sgrp .seg .brd { color: var(--dim); font-size: 10.5px; }
   .sgrp.unsaved .seg.proj { background: rgba(228,192,101,.07); }
   .sgrp.unsaved .seg.proj .st { color: var(--dirty); }
   .sgrp.failed .seg.proj { background: var(--err-bg); }
@@ -313,8 +314,10 @@
   leaving the studio ends the session (edits are safe — the dirty overlay is persisted; the
   session is disposable, the document is durable). Consequences drawn here: the session strip
   and the ⋯-menu Sessions group <b>retire</b>; the detail popup is <b>reworked</b> into the
-  control's panel (device zone + project zone, no switcher); Docs/Explore from studio open a
-  <b>new tab</b>. Rounds 1–7 in git history.
+  control's panel (device zone + project zone, no switcher). <b>Round 8.1 rulings:</b> Explore
+  is a gallery of LIVE projects — it stays in the main app (plain exit); <b>Docs and Boards</b>
+  are the new-tab pair; the sim names the board it simulates ("Sim · ESP32-C6" — board_id is
+  already on the session evidence, vision D4). Rounds 1–7 in git history.
 </p>
 
 <div class="xcontrols">
@@ -345,9 +348,10 @@
 <p class="thesis">
   The only session UI left in the chrome. lg carries the full lockup; md drops the device
   name (glyph + dot keep the kind and health); sm keeps name + count + Save (revert retreats
-  into the panel). In studio mode <b>Explore and Docs wear the new-tab mark</b> (browsing
-  beside a running session = two tabs); Devices and Projects are plain exits — leaving ends
-  the session. Flip <b>project</b> and <b>session</b> above; click any group to open its panel.
+  into the panel). In studio mode <b>Docs and Boards wear the new-tab mark</b>; Devices,
+  Projects, and Explore (live projects — a real app section) are plain exits — leaving ends
+  the session. The sim <b>names the board it simulates</b>. Flip <b>project</b> and
+  <b>session</b> above; click any group to open its panel.
 </p>
 <div class="barrow" id="c-widths"></div>
 </section>
@@ -408,10 +412,10 @@
           toggles.)</td>
       <td>GATE — lean yes</td></tr>
   <tr><td class="q">R8-3</td>
-      <td><b>Nav grammar in studio mode</b> — Explore + Docs = new-tab marks; Devices +
-          Projects = plain exits that end the session; Boards = exit too (only Docs/Explore
-          were ruled). Where should Boards fall?</td>
-      <td>GATE — lean exit</td></tr>
+      <td><b>Nav grammar in studio mode</b> — Docs + Boards = new-tab marks (reference
+          surfaces); Devices + Projects + Explore = plain exits that end the session
+          (Explore is a gallery of LIVE projects — a real app section).</td>
+      <td>RULED 8.1</td></tr>
   <tr><td class="q">R8-4</td>
       <td><b>The toast + guard pair</b> — leave silently-with-toast when idle or dirty
           (draft is durable), refuse only while an operation is in flight. Right line?</td>
@@ -495,7 +499,10 @@ function dirtyN() { return dirty() ? state.edits.length : 0; }
 function devGlyph(kind) {
   return kind === 'sim' ? '<span class="dglyph sim">❖</span>' : '<span class="dglyph">⌁</span>';
 }
-function devName() { return state.session === 'sim' ? 'Simulator' : 'Garage dome'; }
+function devName() { return state.session === 'sim' ? 'Sim' : 'Garage dome'; }
+/* the sim names the board it simulates (8.1; board_id rides the session
+   evidence, inherited from the project — vision D4) */
+function devBoard() { return state.session === 'sim' ? 'ESP32-C6' : null; }
 function hdot(kind) { return `<span class="hdot ${kind}"></span>`; }
 function stGlyph() { return { saved: 'i', unsaved: '✎', failed: '⚠', syncing: '◌' }[state.proj]; }
 function stWord() {
@@ -508,9 +515,10 @@ function projBody() {
 
 /* THE control. size: 'lg' (full) | 'md' (device folds to glyph+dot) | 'sm' (no revert) */
 function control(where, size = 'lg') {
+  const board = devBoard() ? `<span class="brd">· ${devBoard()}</span>` : '';
   const devseg = size === 'lg'
     ? `<span class="seg dev" onclick="togglePop('${where}', event)"
-         title="this tab's session — open detail">${devGlyph(state.session)}${hdot('run')}<b>${devName()}</b></span>`
+         title="this tab's session — open detail">${devGlyph(state.session)}${hdot('run')}<b>${devName()}</b>${board}</span>`
     : `<span class="seg dev" style="padding:3.5px 7px" onclick="togglePop('${where}', event)"
          title="${devName()}">${devGlyph(state.session)}${hdot('run')}</span>`;
   let acts = '';
@@ -531,7 +539,8 @@ function panelHTML(where, style = '') {
   if (state.popOpen !== where) return '';
   const isDirty = dirty();
   const sim = state.session === 'sim';
-  const stats = sim ? '60 fps · 217 lamps · 5 ports' : 'USB · 217 lamps · 5 ports · v41 on device';
+  const stats = sim ? 'simulating ESP32-C6 · 60 fps · 217 lamps · 5 ports'
+                    : 'USB · 217 lamps · 5 ports · v41 on device';
   let editsHtml = '';
   if (isDirty && state.edits.length) {
     editsHtml = `<div class="sechead" style="margin-top:7px">Unsaved (draft — survives this tab)
@@ -546,7 +555,7 @@ function panelHTML(where, style = '') {
   const stwClass = { saved: '', unsaved: 'dirty', failed: 'err', syncing: 'sync' }[state.proj];
   return `<div class="dpanel" style="${style}" onclick="event.stopPropagation()">
     <div class="dz devz">
-      <div class="devrow">${devGlyph(state.session)}<b>${devName()}</b>
+      <div class="devrow">${devGlyph(state.session)}<b>${sim ? 'Simulator' : devName()}</b>
         <span class="runw">${state.busy ? 'deploying…' : 'running'}</span></div>
       <div class="statline">${stats}</div>
     </div>
@@ -572,8 +581,9 @@ function navHTML(mode) {
   if (mode === 'studio') {
     return `<span class="gnav"><span onclick="leaveDemo(event)">Devices</span>
       <span onclick="leaveDemo(event)">Projects</span>
-      <span title="opens in a new tab — this session keeps running">Explore<sup>↗</sup></span>
-      <span title="opens in a new tab">Docs<sup>↗</sup></span></span>`;
+      <span onclick="leaveDemo(event)">Explore</span>
+      <span title="opens in a new tab — this session keeps running">Docs<sup>↗</sup></span>
+      <span title="opens in a new tab">Boards<sup>↗</sup></span></span>`;
   }
   return `<span class="gnav"><span>Devices</span><span class="on">Projects</span>
     <span>Explore</span><span>Boards</span><span>Docs</span></span>`;
