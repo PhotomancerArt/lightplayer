@@ -1,6 +1,6 @@
-<!-- GENERATED from src/base/logo_mark.rs (favicon_svg) — do not edit by hand.
-     Regenerate: cargo test -p lpa-studio-web favicon_regen -- --ignored -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- GENERATED from src/base/logo_mark.rs (favicon_svg); do not edit by hand.
+       Regenerate: cargo test -p lpa-studio-web favicon_regen (with the ignored flag) -->
   <style>
     .s { stroke: #14181d; } .i { fill: #14181d; }
     @media (prefers-color-scheme: dark) { .s { stroke: #fffaf0; } .i { fill: #fffaf0; } }

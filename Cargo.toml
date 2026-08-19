@@ -308,6 +308,18 @@ opt-level = 2
 [profile.dev.package.lpa-mapping-editor]
 opt-level = 2
 
+# dx (dioxus-cli) compiles WEB DEV builds under this profile, not `dev` —
+# so this is the wasm-only knob. Full default debuginfo made the dev wasm
+# ~306 MB, which turned every dev reload into a multi-second serve and made
+# throttled loading tests impractical. Measured (2026-08-18): full debug
+# 306 MB, line-tables-only 89.6 MB, false 29.3 MB. Line tables win the
+# tradeoff: panic locations in the browser console still name source
+# lines, and dev is exactly where panics happen. The per-package
+# opt-level overrides above still apply through `inherits`.
+[profile.wasm-dev]
+inherits = "dev"
+debug = "line-tables-only"
+
 [profile.release]
 # Link-time optimization for all release builds - saves ~100-300 KB
 lto = true

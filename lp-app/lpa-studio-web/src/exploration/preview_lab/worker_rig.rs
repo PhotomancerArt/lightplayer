@@ -9,7 +9,7 @@ use std::collections::{HashMap, VecDeque};
 
 use lpa_link::providers::browser_worker::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeTier, BrowserTickMode,
-    BrowserWorkerHandle, BrowserWorkerOptions, PreviewPixelFrame,
+    BrowserWorkerHandle, PreviewPixelFrame, resolved_engine_urls,
 };
 
 /// One failed `preview_frame` / `present_frame` / `attach_surface` request.
@@ -52,7 +52,9 @@ pub(super) struct WorkerRig {
 impl WorkerRig {
     /// Spawn and boot one explicit-tick worker.
     pub(super) async fn boot(label: String) -> Result<Self, String> {
-        let options = BrowserWorkerOptions::default().with_tick_mode(BrowserTickMode::Explicit);
+        let options = resolved_engine_urls()
+            .await
+            .with_tick_mode(BrowserTickMode::Explicit);
         let mut handle = BrowserWorkerHandle::new(&options.worker_script_path())
             .map_err(|error| format!("spawn worker: {error}"))?;
         handle

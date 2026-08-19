@@ -20,7 +20,7 @@
 //! other path gets the document, because it is a client route.
 
 use axum::extract::{Path, State};
-use axum::http::{StatusCode, Uri, header};
+use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use lpc_cloud_api::request::GetProject;
 use lpc_cloud_api::response::ProjectInfo;
@@ -46,18 +46,30 @@ pub async fn get_share_page(State(state): State<AppState>, Path(share): Path<Str
 }
 
 /// Everything else: a static file if there is one, otherwise the app.
-pub async fn get_page_or_asset(State(state): State<AppState>, uri: Uri) -> Response {
+pub async fn get_page_or_asset(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
     let path = uri.path();
 
-    if let Some(bytes) = state.site().file(path) {
+    if let Some(file) = state.site().file_negotiated(path, accepts_brotli(&headers)) {
         let file_name = path.rsplit('/').next().unwrap_or_default();
-        return (
-            [
-                (header::CONTENT_TYPE, media_type::for_file(file_name)),
-                (header::CACHE_CONTROL, cache_policy::for_file(file_name)),
-            ],
-            bytes,
-        )
+        // `x-uncompressed-length` rides on EVERY asset answer, identity
+        // included: the shell loader and the engine cache read one header
+        // for their progress totals instead of guessing whether
+        // `Content-Length` still describes the bytes a reader will yield.
+        let mut response = Response::builder()
+            .header(header::CONTENT_TYPE, media_type::for_file(file_name))
+            .header(header::CACHE_CONTROL, cache_policy::for_file(file_name))
+            .header(header::VARY, "accept-encoding")
+            .header("x-uncompressed-length", file.uncompressed_len);
+        if let Some(encoding) = file.encoding {
+            response = response.header(header::CONTENT_ENCODING, encoding);
+        }
+        return response
+            .body(axum::body::Body::from(file.bytes))
+            .expect("static headers are valid")
             .into_response();
     }
 
@@ -66,6 +78,32 @@ pub async fn get_page_or_asset(State(state): State<AppState>, uri: Uri) -> Respo
     }
 
     document_response(state.site().index_html().to_vec())
+}
+
+/// Whether the request accepts brotli.
+///
+/// A token scan over the `Accept-Encoding` list, honoring only the one
+/// qvalue shape that changes the answer (`br;q=0` means "do not"). Full
+/// qvalue *ranking* is deliberately skipped: this server offers exactly two
+/// encodings, and no real client prefers identity over br by fractions.
+fn accepts_brotli(headers: &HeaderMap) -> bool {
+    let Some(accept) = headers
+        .get(header::ACCEPT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    accept.split(',').any(|entry| {
+        let mut parts = entry.split(';');
+        let token = parts.next().unwrap_or_default().trim();
+        if !(token.eq_ignore_ascii_case("br") || token == "*") {
+            return false;
+        }
+        !parts.any(|param| {
+            let param = param.trim().to_ascii_lowercase();
+            param == "q=0" || param.starts_with("q=0.0")
+        })
+    })
 }
 
 /// `GET /healthz` — is this process actually able to serve.
@@ -161,6 +199,22 @@ fn looks_like_a_file(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accept_encoding_is_a_token_scan_with_the_one_qvalue_that_matters() {
+        let with = |value: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::ACCEPT_ENCODING, value.parse().unwrap());
+            headers
+        };
+        for accepted in ["br", "gzip, br", "gzip, br;q=0.9", "BR", "*"] {
+            assert!(accepts_brotli(&with(accepted)), "for {accepted}");
+        }
+        for refused in ["gzip", "identity", "br;q=0", "br; q=0.000", ""] {
+            assert!(!accepts_brotli(&with(refused)), "for {refused}");
+        }
+        assert!(!accepts_brotli(&HeaderMap::new()), "for absent header");
+    }
 
     /// Client routes may be deep and may contain a uid; none of them is a
     /// file, and a missing asset must not be answered with a document.

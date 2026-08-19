@@ -9,7 +9,7 @@ infrastructure.
 
 | File | What it is |
 |---|---|
-| `Dockerfile` | Multi-stage build: the server binary, the litestream binary, and the pre-built Studio bundle |
+| `Dockerfile` | Multi-stage build: the server binary, the litestream binary, and the pre-built Studio bundle (brotli-precompressed in its own stage — Fly's proxy does not compress, so `scripts/precompress-static.sh` lays `.br` twins the server negotiates; see `page/static_site.rs`) |
 | `entrypoint.sh` | Restore-if-missing, then run the server under `litestream replicate -exec` |
 | `fly.toml` | The deployed shape: region, volume mount, health check, one machine |
 | `litestream.yml` | `/data/cloud.sqlite` → Tigris, prefix `litestream/` |

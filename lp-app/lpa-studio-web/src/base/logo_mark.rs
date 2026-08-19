@@ -178,10 +178,16 @@ pub fn favicon_svg() -> String {
             )
         })
         .collect::<String>();
+    // The comment must be legal STRICT XML, because the file doubles as the
+    // shell loader's `<img>` brand mark and SVG-as-image goes through the
+    // strict XML parser (the favicon `<link>` path is lenient and hid both
+    // sins for a while): nothing may precede `<svg>`, and a literal `--`
+    // (as in the regen command's `-- --ignored`) may not appear inside an
+    // XML comment at all — hence the paraphrased regen instruction.
     format!(
-        "<!-- GENERATED from src/base/logo_mark.rs (favicon_svg) — do not edit by hand.\n     \
-         Regenerate: cargo test -p lpa-studio-web favicon_regen -- --ignored -->\n\
-         <svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\">\n  \
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\">\n  \
+         <!-- GENERATED from src/base/logo_mark.rs (favicon_svg); do not edit by hand.\n       \
+         Regenerate: cargo test -p lpa-studio-web favicon_regen (with the ignored flag) -->\n  \
          <style>\n    \
          .s {{ stroke: #14181d; }} .i {{ fill: #14181d; }}\n    \
          @media (prefers-color-scheme: dark) {{ .s {{ stroke: #fffaf0; }} .i {{ fill: #fffaf0; }} }}\n  \

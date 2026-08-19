@@ -12,7 +12,7 @@ use std::collections::{HashMap, VecDeque};
 
 use lpa_link::providers::browser_worker::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserRuntimeTier, BrowserTickMode,
-    BrowserWorkerHandle, BrowserWorkerOptions, PosterPixelFrame, PreviewPixelFrame,
+    BrowserWorkerHandle, PosterPixelFrame, PreviewPixelFrame, resolved_engine_urls,
 };
 use lpc_wire::OutputFrameEntry;
 
@@ -71,7 +71,9 @@ impl PreviewWorker {
     /// Spawn and boot one explicit-tick worker. The boot runtime idles
     /// (never ticked); preview runtimes are created per lease.
     pub(super) async fn boot(label: &str) -> Result<Self, String> {
-        let options = BrowserWorkerOptions::default().with_tick_mode(BrowserTickMode::Explicit);
+        let options = resolved_engine_urls()
+            .await
+            .with_tick_mode(BrowserTickMode::Explicit);
         let mut handle = BrowserWorkerHandle::new(&options.worker_script_path())
             .map_err(|error| format!("spawn worker: {error}"))?;
         handle

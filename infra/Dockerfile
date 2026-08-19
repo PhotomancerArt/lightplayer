@@ -76,7 +76,24 @@ RUN apt-get update \
     && /usr/local/bin/litestream version
 
 # ---------------------------------------------------------------------------
-# Stage 3 — the runtime.
+# Stage 3 — the web artifact, precompressed.
+# ---------------------------------------------------------------------------
+# Brotli twins (`<file>.br`) beside the large assets, compressed once here
+# so the server can answer `Accept-Encoding: br` from bytes that cost
+# nothing at request time (Fly's proxy does not compress; q11 at runtime
+# would be absurd for an 11 MB wasm). See scripts/precompress-static.sh.
+FROM debian:bookworm-slim AS webcompress
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends brotli \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY scripts/precompress-static.sh /usr/local/bin/precompress-static.sh
+COPY target/pages/studio /web
+RUN bash /usr/local/bin/precompress-static.sh /web
+
+# ---------------------------------------------------------------------------
+# Stage 4 — the runtime.
 # ---------------------------------------------------------------------------
 FROM debian:bookworm-slim
 
@@ -93,10 +110,11 @@ COPY --from=build /build/target/release/lp-cloud-server /usr/local/bin/lp-cloud-
 COPY infra/litestream.yml /etc/litestream.yml
 COPY infra/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# The Studio bundle, staged by CI at target/pages/studio. `LP_CLOUD_STATIC_DIR`
-# below points the server at it; without it the server serves a placeholder
-# page and the deploy would look "fine" while shipping no app.
-COPY target/pages/studio /app/web
+# The Studio bundle, staged by CI at target/pages/studio and precompressed
+# in the webcompress stage. `LP_CLOUD_STATIC_DIR` below points the server at
+# it; without it the server serves a placeholder page and the deploy would
+# look "fine" while shipping no app.
+COPY --from=webcompress /web /app/web
 
 # Container-shape defaults only. Everything deployment-shaped — base URL,
 # bucket, endpoint — lives in infra/fly.toml's [env] so it can be read and
