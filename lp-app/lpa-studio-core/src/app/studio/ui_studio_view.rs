@@ -29,37 +29,8 @@ pub enum UiLensRuntime {
     Device { uid: Option<String> },
 }
 
-/// One LIVE runtime session, projected for the chrome's session strip
-/// (vision D15/D16): running sessions are *places*, and the strip is
-/// their wayfinding. Chip existence = session existence (D36) — the sim
-/// while its session lives, each attached device with live evidence;
-/// registry rows without a session never appear. Derived from the SAME
-/// card assembly the gallery roster uses (never a second status
-/// vocabulary), then projected down to name + status only — chips carry
-/// no controls and no thumbnails (D43: the grown card stays the only
-/// device surface).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UiChromeSession {
-    /// Stable render key: the underlying card's identity key.
-    pub key: String,
-    /// Display name (registry name, "Simulator" for the sim).
-    pub name: String,
-    /// The sim session (violet sim glyph); devices wear their transport.
-    pub sim: bool,
-    /// Transport label ("USB" today); empty while a connect is still
-    /// resolving the provider, and always empty for the sim.
-    pub transport: String,
-    /// The chip's status dot, collapsed from the roster vocabulary.
-    pub status: UiChromeSessionStatus,
-    /// This session holds the editor lens.
-    pub lensed: bool,
-    /// What a chip click addresses. `None` inside means no honest route
-    /// exists yet (pre-identity device, project-less sim) — the web edge
-    /// renders those chips inert rather than minting a fake URL.
-    pub target: UiChromeSessionTarget,
-}
-
-/// The strip's three-dot status vocabulary (D16), collapsed from
+/// The header session·project control's three-dot status vocabulary
+/// (D16), collapsed from
 /// [`crate::app::roster::RosterCardState`]: accent = running clean,
 /// amber = anything needing attention, hollow = connected with nothing
 /// running.
@@ -68,7 +39,7 @@ pub enum UiChromeSessionStatus {
     /// Running the project cleanly (accent dot).
     Run,
     /// Behind / edited-on-device / connecting / any attention state
-    /// (amber dot). The chip only marks that attention is due — the
+    /// (amber dot). The dot only marks that attention is due — the
     /// card carries the story.
     Attention,
     /// Connected with nothing running (hollow dot).
@@ -76,14 +47,12 @@ pub enum UiChromeSessionStatus {
 }
 
 /// The tab's ONE runtime session, projected for the header
-/// session·project control (single-session web policy — the strip's
-/// [`UiChromeSession`] successor; that Vec dies once the strip retires).
-///
-/// Same card derivation as [`UiChromeSession`], so the control, the strip
-/// and the gallery can never disagree about a session — but a different
-/// projection: the control is a CONTROL, not wayfinding, so it carries
-/// the facts its panel needs (the board it runs, whether an operation is
-/// in flight, the device-zone stat line) instead of a route target.
+/// session·project control (single-session web policy). Same card
+/// derivation as the gallery roster, so the control and the gallery can
+/// never disagree about a session — but a CONTROL's projection, not
+/// wayfinding: it carries the facts its panel needs (the board it runs,
+/// whether an operation is in flight, the device-zone stat line) instead
+/// of a route target.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiChromeSessionControl {
     /// The underlying card's identity key
@@ -106,7 +75,7 @@ pub struct UiChromeSessionControl {
     /// sim only, `None` when the project names no board (the control
     /// shows a bare "Sim").
     pub board: Option<String>,
-    /// The same three-dot vocabulary the strip collapses to.
+    /// The same three-dot vocabulary [`UiChromeSessionStatus`] defines.
     pub status: UiChromeSessionStatus,
     /// The in-flight operation's label, the nav guard's evidence: while
     /// this is `Some`, leaving (or opening anything else) is refused
@@ -117,19 +86,6 @@ pub struct UiChromeSessionControl {
     /// has published no frame and named no transport has nothing honest
     /// to say here.
     pub stat_line: Option<String>,
-}
-
-/// The document a session chip addresses — mirrors [`UiLensRuntime`]'s
-/// route keys so a chip click and the URL agree on identity.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum UiChromeSessionTarget {
-    /// THE sim session; `project_key` is the loaded project's `prj…`
-    /// uid (a valid `/p/<uid>` route key), `None` while nothing
-    /// library-backed is loaded.
-    Sim { project_key: Option<String> },
-    /// A device session; `uid` is the stamped `dev…` identity, `None`
-    /// before identity lands.
-    Device { uid: Option<String> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -163,15 +119,8 @@ pub struct UiStudioView {
     /// as the gallery roster's live cards; `None` while no lens session
     /// exists (the shell falls back to the device pane surface).
     pub lens_card: Option<Box<crate::app::home::UiDeviceCard>>,
-    /// The chrome's session strip (D15/D16): every live runtime session,
-    /// in roster order (sim pinned first). Present in BOTH the gallery
-    /// and editor arms — the strip renders wherever the chrome does.
-    pub sessions: Vec<UiChromeSession>,
     /// THE session this tab runs, for the header session·project control
-    /// (single-session web policy). `None` with nothing attached. Built
-    /// from the same derivation as [`Self::sessions`], which it replaces
-    /// once the strip retires; both are published meanwhile so the strip
-    /// keeps working while the control lands.
+    /// (single-session web policy). `None` with nothing attached.
     pub session: Option<UiChromeSessionControl>,
     /// The layered-settings slice (effective values, provenance, override
     /// state) for the shell's settings popover.
@@ -195,7 +144,6 @@ impl UiStudioView {
             open_project_name: None,
             device_sync: None,
             lens_card: None,
-            sessions: Vec::new(),
             session: None,
             settings: crate::app::settings::UiSettingsView::default(),
             dirty: crate::DirtySummary::clean(),
@@ -228,11 +176,6 @@ impl UiStudioView {
 
     pub fn with_lens_card(mut self, card: Option<crate::app::home::UiDeviceCard>) -> Self {
         self.lens_card = card.map(Box::new);
-        self
-    }
-
-    pub fn with_sessions(mut self, sessions: Vec<UiChromeSession>) -> Self {
-        self.sessions = sessions;
         self
     }
 

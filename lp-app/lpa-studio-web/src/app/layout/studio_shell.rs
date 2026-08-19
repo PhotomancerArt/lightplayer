@@ -64,16 +64,13 @@ pub fn StudioShell(
         // consumed by the web shell's URL sync, not the layout
         lens: _,
         open_project_uid: _,
-        // the chrome renders the header project chip (web_app builds it
-        // from the editor pane's own view — see `ChromeProjectChip`)
+        // the chrome renders the header session·project control (web_app
+        // builds it from the editor pane's own view and this field)
         open_project_name: _,
         // the lens card renders the sync facts (D43)
         device_sync: _,
         lens_card,
-        // the chrome renders the session strip (web_app passes it through)
-        sessions: _,
-        // the header session·project control's session, for the chrome —
-        // built core-side already, mounted when the control lands
+        // the header session·project control's session, for the chrome
         session: _,
         // the chrome renders the settings surface (web_app owns both)
         settings: _,

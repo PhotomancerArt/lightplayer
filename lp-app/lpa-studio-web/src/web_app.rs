@@ -941,9 +941,10 @@ pub fn App() -> Element {
         // Like Session: no tab lights. The avatar in the right cluster is
         // the account page's current-place marker.
         StudioRoute::Account => SiteSection::Account,
-        // Lens routes light NO tab — the active session chip is the
-        // current-place marker (D15). The other catch-all routes
-        // (stories, the standalone editors) never render this chrome.
+        // Lens routes light NO tab — the header session·project control is
+        // the current-place marker (single-session policy). The other
+        // catch-all routes (stories, the standalone editors) never render
+        // this chrome.
         _ => SiteSection::Session,
     };
     let settings = current_view.settings.clone();
@@ -964,8 +965,6 @@ pub fn App() -> Element {
         main { class: "{main_class}",
             SiteChrome {
                 section,
-                sessions: current_view.sessions.clone(),
-                on_editor: current_route.is_lens(),
                 project_menu,
                 session_control,
                 tight: workbench_route,

@@ -48,9 +48,9 @@ use crate::base::{DetailPopover, IconMenuTone, PopoverPlacement, StudioIcon, Stu
 /// at all — a connected board with nothing loaded is a real state, and the
 /// project segment says so rather than inventing a name.
 ///
-/// This is the [`ChromeProjectChip`](super::ChromeProjectChip) successor:
-/// same `content` + `on_action` pair, now paired with the session the
-/// project runs on.
+/// This is the header project chip's successor (P4-retired): same
+/// `content` + `on_action` pair, now paired with the session the project
+/// runs on.
 #[derive(Clone, PartialEq)]
 pub struct ChromeSessionControl {
     /// THE session this tab runs.

@@ -3458,6 +3458,58 @@ fn the_session_control_names_the_board_it_is_a_session_on() {
     );
 }
 
+/// Live-sessions-only filtering (D36 — chip/control existence = session
+/// existence; this fact used to be covered by the retired chrome strip's
+/// own `chrome_sessions_project_live_sessions_only` test, P4): a
+/// disconnected board becomes a REGISTRY row — remembered, not live — and
+/// the header control must never surface it as the tab's session.
+#[test]
+fn the_session_control_never_surfaces_a_disconnected_registry_row() {
+    let (_store, host) = library();
+    let (mut studio, _devices, first_id, second_id) = studio_with_two_fake_devices(
+        FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new()
+                .with_identity(FakeDeviceIdentity::new("devaaaaaaaaaaaaaaaa", "Board A")),
+        )),
+        FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new()
+                .with_identity(FakeDeviceIdentity::new("devbbbbbbbbbbbbbbbb", "Board B")),
+        )),
+    );
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &first_id).expect("board A connects");
+    connect_through_link(&mut studio, &second_id).expect("board B connects");
+
+    let home = studio.view().home.expect("gallery shows");
+    let live: Vec<(String, String)> = home
+        .devices
+        .iter()
+        .filter(|card| !card.sim)
+        .filter_map(|card| card.session_key.clone().map(|key| (card.name.clone(), key)))
+        .collect();
+    assert_eq!(live.len(), 2, "two live boards to start");
+    let board_b_key = live
+        .iter()
+        .find(|(name, _)| name == "Board B")
+        .map(|(_, key)| key.clone())
+        .expect("board B connected");
+
+    drive(studio.dispatch(device_action(DeviceOp::DisconnectDevice {
+        target: crate::DeviceTarget::card(board_b_key),
+    })))
+    .expect("disconnect dispatches");
+
+    let control = studio
+        .view()
+        .session
+        .expect("board A is still a live session");
+    assert_eq!(
+        control.name, "Board A",
+        "the disconnected board's registry row must never win the control's slot"
+    );
+}
+
 /// A scripted board ("Bench board", "Porch" idle on its flash) plus a
 /// library holding "Sign" — the edit-e2e graph the sim opens. Every
 /// single-session row needs both a board to connect and a project to

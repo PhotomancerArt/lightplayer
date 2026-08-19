@@ -403,68 +403,13 @@ fn assemble_roster(
     (connections, devices)
 }
 
-/// The chrome session strip (vision D15/D16): every LIVE runtime
-/// session, in roster order (sim pinned first). Registry rows without a
-/// live session never appear (D36: chip existence = session existence).
-///
-/// Reuses [`assemble_roster`]'s card derivation — the strip and the
-/// gallery must never disagree on a session's status — then projects
-/// each live card down to wayfinding facts (D43: name and status only,
-/// no controls, no thumbnails).
-pub fn chrome_sessions(
-    registry_cards: &[UiDeviceCard],
-    pool: &HomePoolEvidence,
-    lens: Option<&crate::UiLensRuntime>,
-) -> Vec<crate::UiChromeSession> {
-    live_session_cards(registry_cards, pool)
-        .into_iter()
-        .map(|card| {
-            let target = if card.sim {
-                crate::UiChromeSessionTarget::Sim {
-                    project_key: card.project.as_ref().map(|chip| chip.uid.clone()),
-                }
-            } else {
-                crate::UiChromeSessionTarget::Device {
-                    uid: card.uid.clone(),
-                }
-            };
-            let lensed = match (lens, card.sim) {
-                (Some(crate::UiLensRuntime::Sim { .. }), true) => true,
-                (Some(crate::UiLensRuntime::Device { uid }), false) => {
-                    // An unidentified lens device matches the (single)
-                    // live card that has no uid yet — same no-honest-
-                    // address window as the URL rule.
-                    match uid {
-                        Some(uid) => card.uid.as_deref() == Some(uid.as_str()),
-                        None => card.uid.is_none(),
-                    }
-                }
-                _ => false,
-            };
-            crate::UiChromeSession {
-                key: card.identity_key().to_string(),
-                name: card.name.clone(),
-                sim: card.sim,
-                transport: if card.sim {
-                    String::new()
-                } else {
-                    card.transport.clone()
-                },
-                status: chip_status(&card.state),
-                lensed,
-                target,
-            }
-        })
-        .collect()
-}
-
 /// The cards a LIVE runtime session backs, in roster order (sim pinned
 /// first) — [`assemble_roster`]'s derivation with the registry-only rows
 /// filtered out.
 ///
-/// Shared by every session projection (the strip's [`chrome_sessions`]
-/// and the header control's), so none of them can invent a status the
-/// gallery would contradict.
+/// Shared by every session projection (the header control's — see
+/// [`crate::app::studio::StudioController::session_control`]), so none
+/// of them can invent a status the gallery would contradict.
 pub(crate) fn live_session_cards(
     registry_cards: &[UiDeviceCard],
     pool: &HomePoolEvidence,
@@ -479,10 +424,10 @@ pub(crate) fn live_session_cards(
         .collect()
 }
 
-/// Collapse the roster's honest vocabulary to the strip's three dots
-/// (D16). Offline never reaches here (live-filtered above); everything
-/// that is neither running-clean nor connected-empty reads as attention
-/// — the chip only flags it, the card tells the story.
+/// Collapse the roster's honest vocabulary to the header control's three
+/// dots (D16). Offline never reaches here (live-filtered above);
+/// everything that is neither running-clean nor connected-empty reads as
+/// attention — the dot only flags it, the card tells the story.
 pub(crate) fn chip_status(state: &RosterCardState) -> crate::UiChromeSessionStatus {
     match state {
         RosterCardState::RunningUpToDate => crate::UiChromeSessionStatus::Run,
@@ -1084,73 +1029,6 @@ mod tests {
             transport: Some("USB".to_string()),
             ..HomeDeviceEvidence::default()
         }
-    }
-
-    #[test]
-    fn chrome_sessions_project_live_sessions_only() {
-        // One live identified device, one registry-only (offline) row, and
-        // the sim: the strip shows sim (pinned first) + the live device;
-        // the registry row never appears (D36: chip = session).
-        let mut evidence = live(DeviceSyncState {
-            identity: Some(DeviceIdentity {
-                uid: "devaaaaaaaaaaaaaaaa".to_string(),
-                name: "Desk C6".to_string(),
-            }),
-            content: DeviceContent::Empty,
-        });
-        evidence.session_key = Some("session-1".to_string());
-        let mut offline_card = device_card_from_live_evidence(&HomeDeviceEvidence::default());
-        offline_card.uid = Some("devbbbbbbbbbbbbbbbb".to_string());
-        offline_card.name = "Shelf sign".to_string();
-        let pool = HomePoolEvidence {
-            devices: vec![evidence],
-            sim: Some(HomeSimEvidence {
-                project: Some(UiDeviceProjectChip {
-                    uid: "prjcccccccccccccccc".to_string(),
-                    name: "zook-dome".to_string(),
-                }),
-                ..HomeSimEvidence::default()
-            }),
-        };
-
-        let sessions = chrome_sessions(
-            std::slice::from_ref(&offline_card),
-            &pool,
-            Some(&crate::UiLensRuntime::Device {
-                uid: Some("devaaaaaaaaaaaaaaaa".to_string()),
-            }),
-        );
-
-        assert_eq!(
-            sessions.len(),
-            2,
-            "sim + live device, never the registry row"
-        );
-        assert!(sessions[0].sim, "the sim is pinned first");
-        assert_eq!(
-            sessions[0].target,
-            crate::UiChromeSessionTarget::Sim {
-                project_key: Some("prjcccccccccccccccc".to_string())
-            }
-        );
-        assert!(!sessions[0].lensed);
-        // a project-less sim would read Empty; loaded = running clean
-        assert_eq!(sessions[0].status, crate::UiChromeSessionStatus::Run);
-        let device = &sessions[1];
-        assert_eq!(device.name, "Desk C6");
-        assert!(device.lensed, "the lens uid matches the live device");
-        assert_eq!(device.transport, "USB");
-        assert_eq!(
-            device.status,
-            crate::UiChromeSessionStatus::Empty,
-            "connected with nothing running reads hollow"
-        );
-        assert_eq!(
-            device.target,
-            crate::UiChromeSessionTarget::Device {
-                uid: Some("devaaaaaaaaaaaaaaaa".to_string())
-            }
-        );
     }
 
     #[test]

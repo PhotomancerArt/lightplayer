@@ -1224,7 +1224,6 @@ impl StudioController {
                 .with_home(Some(home))
                 .with_lens(self.lens_runtime())
                 .with_device_sync(self.ambient_device_sync().cloned())
-                .with_sessions(self.chrome_sessions())
                 .with_session(self.session_control())
                 .with_settings(self.settings.ui_view());
         }
@@ -1269,34 +1268,21 @@ impl StudioController {
             )
             .with_device_sync(self.ambient_device_sync().cloned())
             .with_lens_card(self.lens_device_card())
-            .with_sessions(self.chrome_sessions())
             .with_session(self.session_control())
             .with_settings(self.settings.ui_view())
             .with_dirty(dirty)
     }
 
-    /// The chrome strip's session projection (D15/D16), built in BOTH
-    /// view arms — the strip renders wherever the chrome does. Same
-    /// registry + pool evidence the gallery roster consumes.
-    fn chrome_sessions(&self) -> Vec<crate::UiChromeSession> {
-        home_view_builder::chrome_sessions(
-            self.registry_cards(),
-            &self.home_pool_evidence(),
-            self.lens_runtime().as_ref(),
-        )
-    }
-
     /// The header session·project control's ONE session (single-session
-    /// policy, module doc), built beside [`Self::chrome_sessions`] from
-    /// the very same live cards — status included, so the control can
-    /// never wear a state the gallery would deny.
+    /// policy, module doc), built from the live cards the gallery roster
+    /// itself derives — status included, so the control can never wear a
+    /// state the gallery would deny.
     ///
     /// The pool can still be holding two sessions while the policy's
     /// other half lands (and in fixtures that install straight into the
-    /// pool); roster order decides, which pins the sim first exactly as
-    /// the strip does. Deliberately NOT coupled to the lens: a session
-    /// the editor has detached from is still the session this tab runs,
-    /// and the control is what says so.
+    /// pool); roster order decides, which pins the sim first. Deliberately
+    /// NOT coupled to the lens: a session the editor has detached from is
+    /// still the session this tab runs, and the control is what says so.
     fn session_control(&self) -> Option<crate::UiChromeSessionControl> {
         let card = home_view_builder::live_session_cards(
             self.registry_cards(),
