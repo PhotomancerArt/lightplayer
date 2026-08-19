@@ -25,8 +25,8 @@ use std::rc::Rc;
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
 use crate::app::layout::{
-    ChromeProjectChip, ChromeProjectMenu, CloudAccountControl, PatchToggle, PlayToggle, SiteChrome,
-    SiteSection, StudioSettingsPopover, VersionBadge,
+    ChromeProjectMenu, ChromeSessionControl, CloudAccountControl, PatchToggle, PlayToggle,
+    SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge,
 };
 use crate::app::project::ProjectDetailContent;
 use crate::app::share::{
@@ -906,23 +906,27 @@ pub fn App() -> Element {
     // Shared by the chrome and the section body below: an EventHandler is
     // Copy, the raw closure is not.
     let on_action = EventHandler::new(on_action);
-    // The header project chip (D8): the SAME detail content the pane's
-    // [i] renders, threaded to the chrome so project state (unsaved /
-    // failed / syncing) is visible on every view at every width.
-    // Presentation only — zero new state; `None` off the lens routes.
-    let project_chip = current_route
+    // THE session·project control: this tab's ONE session (core's control
+    // projection) paired with the SAME detail content the pane's [i]
+    // renders, so device state and project state (unsaved / failed /
+    // syncing) are visible on every view at every width. Presentation only
+    // — zero new state; `None` off the lens routes, and `project` stays
+    // `None` for a session with nothing open (the honest-empty segment).
+    let session_control = current_route
         .is_lens()
-        .then(|| {
-            current_view.panes.iter().find_map(|pane| match &pane.body {
-                lpa_studio_core::UiViewContent::ProjectEditor(editor) => Some(ChromeProjectChip {
-                    content: ProjectDetailContent::new(editor, pane.status.clone()),
-                    on_action,
-                    initially_open: false,
-                }),
+        .then(|| current_view.session.clone())
+        .flatten()
+        .map(|session| ChromeSessionControl {
+            session,
+            project: current_view.panes.iter().find_map(|pane| match &pane.body {
+                lpa_studio_core::UiViewContent::ProjectEditor(editor) => {
+                    Some(ProjectDetailContent::new(editor, pane.status.clone()))
+                }
                 _ => None,
-            })
-        })
-        .flatten();
+            }),
+            on_action,
+            initially_open: false,
+        });
     let section = match &current_route {
         // `/` is Home: no tab lights — the logo wears the underline.
         StudioRoute::Home => SiteSection::Home,
@@ -963,7 +967,7 @@ pub fn App() -> Element {
                 sessions: current_view.sessions.clone(),
                 on_editor: current_route.is_lens(),
                 project_menu,
-                project_chip,
+                session_control,
                 tight: workbench_route,
                 if let Some(href) = patch_toggle {
                     // Same-session zoom like play: the route listener sees

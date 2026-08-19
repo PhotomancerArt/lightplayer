@@ -32,7 +32,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, DirtySummary, ProjectController, ProjectEditorView, ProjectOp, ProjectSyncPhase,
-    UiAction, UiAffordance, UiConfigSlot, UiMetric, UiPendingEdit, UiStatus,
+    UiAction, UiAffordance, UiConfigSlot, UiMetric, UiPaneAction, UiPendingEdit, UiStatus,
 };
 
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
@@ -61,6 +61,12 @@ pub struct ProjectDetailContent {
     root_slots: Vec<UiConfigSlot>,
     manifest: Option<lpa_studio_core::UiProjectManifest>,
     library_identity: Option<(String, String)>,
+    /// The controller's contextual Save / Revert-to-saved pair (present
+    /// only while persisted edits are pending). The SECTIONS do not render
+    /// them — the pane header and the header session·project control do —
+    /// but they ride this value so every home dispatches the controller's
+    /// own actions instead of minting a second save verb.
+    header_actions: Vec<UiPaneAction>,
 }
 
 impl ProjectDetailContent {
@@ -79,6 +85,13 @@ impl ProjectDetailContent {
         self.dirty.persisted
     }
 
+    /// The controller's contextual header actions (Save / Revert-to-saved),
+    /// empty while the project is clean — the header session·project
+    /// control's trailing segments read them.
+    pub fn header_actions(&self) -> &[UiPaneAction] {
+        &self.header_actions
+    }
+
     /// Gather the popup's content from the editor view and the pane status
     /// (the same merge the pane header's affordance uses).
     pub fn new(view: &ProjectEditorView, status: UiStatus) -> Self {
@@ -94,6 +107,7 @@ impl ProjectDetailContent {
             root_slots: view.root_slots.clone(),
             manifest: view.manifest.clone(),
             library_identity: view.library_identity.clone(),
+            header_actions: view.header_actions.clone(),
         }
     }
 }
@@ -305,6 +319,10 @@ pub fn ProjectDetailSections(
         root_slots,
         manifest,
         library_identity,
+        // The Save/Revert pair rides the content value for the header
+        // control's sake; the sections deliberately do not render it (the
+        // popup lists the edits, the control carries the verbs).
+        header_actions: _,
     } = content;
     let status_class = node_status_label_class(status.kind);
     let unsaved_entries = entries_in(&pending_edits, PendingEditBucket::Persisted);

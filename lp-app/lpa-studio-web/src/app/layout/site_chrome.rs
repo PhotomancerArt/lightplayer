@@ -48,6 +48,7 @@ use dioxus_icons::lucide::{Archive, UserRound};
 use lpa_studio_core::{UiAction, UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget};
 
 use crate::app::affordance::{affordance_chip_class, affordance_trigger_style};
+use crate::app::layout::session_control::{ChromeSessionControl, SessionProjectControl};
 use crate::app::project::project_pane::trigger_label;
 use crate::app::project::{ProjectDetailContent, ProjectDetailSections};
 use crate::base::{
@@ -128,11 +129,12 @@ pub fn SiteChrome(
     /// everywhere else (the menu then reads exactly as it always has).
     #[props(default)]
     project_menu: Option<ChromeProjectMenu>,
-    /// The open project's chip (D8); `None` off the editor routes. Mounted
-    /// UNGATED — no `tw:@min-*` — so it is present at every header width
-    /// (Q10 ruling: one mount, no top-layer/container-query workaround).
+    /// THE session·project control (the B lockup); `None` off the lens
+    /// routes. Mounted UNGATED — no `tw:@min-*` — so it is present at every
+    /// header width (Q10 ruling: one mount, no top-layer/container-query
+    /// workaround); the FOLDS live inside the control.
     #[props(default)]
-    project_chip: Option<ChromeProjectChip>,
+    session_control: Option<ChromeSessionControl>,
     /// The workbench routes' spacing (Final-gate ruling): the header's
     /// gap below shrinks so the full-height frame starts close under the
     /// chrome. Document routes keep the roomy default.
@@ -173,11 +175,12 @@ pub fn SiteChrome(
                     active: section == SiteSection::Projects,
                 }
             }
-            if let Some(chip) = project_chip {
-                // The project chip (D8): after the primary family, ahead
-                // of the session strip's divider — the open project is
-                // the most local thing in the bar.
-                ProjectHeaderChip { chip }
+            if let Some(control) = session_control {
+                // THE control: after the primary family, ahead of the
+                // strip's divider — this tab's session and the project on
+                // it are the most local things in the bar. It replaces the
+                // project chip's slot (the chip is retired in P4).
+                SessionProjectControl { control }
             }
             if !sessions.is_empty() {
                 // Hairline divider + the strip (concept A dock) — wide
@@ -245,6 +248,12 @@ pub fn SiteChrome(
 
 /// The header project chip (D8): state glyph + project name + amber
 /// unsaved count, opening the project detail popup
+///
+/// **Superseded** by
+/// [`SessionProjectControl`](super::session_control::SessionProjectControl),
+/// which took over this slot: the chip answered half the question ("what am
+/// I editing?") and the single-session control answers both halves. Kept
+/// unmounted for one phase so the retirement lands as its own commit (P4).
 /// ([`ProjectDetailSections`] — Save/Revert/per-entry revert/Share/
 /// stats, mounted AS-IS). Project state is visible on every view at
 /// every width; dragging a fixture on the Map canvas makes the
@@ -252,7 +261,7 @@ pub fn SiteChrome(
 /// `dirty.persisted` — this is presentation only.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProjectHeaderChip(chip: ChromeProjectChip) -> Element {
+pub fn ProjectHeaderChip(chip: ChromeProjectChip) -> Element {
     let ChromeProjectChip {
         content,
         on_action,

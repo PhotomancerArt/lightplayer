@@ -6,6 +6,7 @@ pub mod local_store_banner;
 pub(crate) mod local_store_banner_stories;
 pub mod pane_frame;
 pub mod rich_object_pane;
+pub mod session_control;
 pub mod site_chrome;
 #[cfg(feature = "stories")]
 pub(crate) mod site_chrome_stories;
@@ -24,6 +25,7 @@ pub use cloud_account::CloudAccountControl;
 pub use local_store_banner::LocalStoreBanner;
 pub use pane_frame::PaneFrame;
 pub use rich_object_pane::RichObjectPane;
+pub use session_control::{ChromeSessionControl, SessionPanel, SessionProjectControl};
 pub use site_chrome::{
     ChromeProjectChip, ChromeProjectMenu, PatchToggle, PlayToggle, SiteChrome, SiteSection,
 };

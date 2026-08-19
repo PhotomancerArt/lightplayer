@@ -10,14 +10,13 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, ProjectSyncPhase, UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget,
-    UiStatus,
+    DirtySummary, ProjectSyncPhase, UiChromeSession, UiChromeSessionControl, UiChromeSessionStatus,
+    UiChromeSessionTarget, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 
-use crate::app::layout::site_chrome::{
-    ChromeProjectChip, ChromeProjectMenu, SiteChrome, SiteSection,
-};
+use crate::app::layout::session_control::ChromeSessionControl;
+use crate::app::layout::site_chrome::{ChromeProjectMenu, SiteChrome, SiteSection};
 use crate::app::layout::version_badge::{BuildChip, VersionChipPreview};
 use crate::app::project::ProjectDetailContent;
 use crate::app::story_fixtures::project_editor_fixture;
@@ -281,14 +280,30 @@ fn chip_frame(width: u32, content: ProjectDetailContent, popover_open: bool) -> 
                 section: SiteSection::Session,
                 on_editor: true,
                 sessions: vec![sim_session("mini-dome", true, UiChromeSessionStatus::Run)],
-                project_chip: Some(ChromeProjectChip {
-                    content,
+                session_control: Some(ChromeSessionControl {
+                    session: sim_control(),
+                    project: Some(content),
                     on_action: EventHandler::new(|_| {}),
                     initially_open: popover_open,
                 }),
                 VersionChipPreview { chip: branch_chip() }
             }
         }
+    }
+}
+
+/// The control stories' session: THE sim, naming the board it simulates
+/// (ruling 8.1). P5 grows the full state matrix — this keeps the existing
+/// chip stories rendering the control that replaced the chip.
+fn sim_control() -> UiChromeSessionControl {
+    UiChromeSessionControl {
+        key: "sim".to_string(),
+        sim: true,
+        name: "Sim".to_string(),
+        board: Some("ESP32-C6".to_string()),
+        status: UiChromeSessionStatus::Run,
+        busy: None,
+        stat_line: Some("60 fps · 217 lamps".to_string()),
     }
 }
 
