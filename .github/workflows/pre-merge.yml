@@ -227,6 +227,9 @@ jobs:
               - '!docs/**'
               - '!docs-archive/**'
               - '!**/*.md'
+              # Planning/agent config; read only by agent tooling
+              # (scripts/agent-context.sh, yona-* skills), never by a build.
+              - '!agent-context.toml'
               - '!.gitignore'
               - '!LICENSE*'
 
