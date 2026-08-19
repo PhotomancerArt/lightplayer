@@ -75,6 +75,40 @@ pub enum UiChromeSessionStatus {
     Empty,
 }
 
+/// The tab's ONE runtime session, projected for the header
+/// session·project control (single-session web policy — the strip's
+/// [`UiChromeSession`] successor; that Vec dies once the strip retires).
+///
+/// Same card derivation as [`UiChromeSession`], so the control, the strip
+/// and the gallery can never disagree about a session — but a different
+/// projection: the control is a CONTROL, not wayfinding, so it carries
+/// the facts its panel needs (the board it runs, whether an operation is
+/// in flight, the device-zone stat line) instead of a route target.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UiChromeSessionControl {
+    /// The sim session (violet sim glyph); hardware wears its own.
+    pub sim: bool,
+    /// "Sim" for the simulator (the control renders the board as a
+    /// suffix), the registry name for hardware.
+    pub name: String,
+    /// Human board name via
+    /// [`board_display_name`](crate::app::roster::board_display_name) —
+    /// sim only, `None` when the project names no board (the control
+    /// shows a bare "Sim").
+    pub board: Option<String>,
+    /// The same three-dot vocabulary the strip collapses to.
+    pub status: UiChromeSessionStatus,
+    /// The in-flight operation's label, the nav guard's evidence: while
+    /// this is `Some`, leaving (or opening anything else) is refused
+    /// rather than silently tearing the work down.
+    pub busy: Option<String>,
+    /// The panel's device-zone stat line, assembled core-side (e.g.
+    /// "60 fps · USB"); `None` while nothing is known — a session that
+    /// has published no frame and named no transport has nothing honest
+    /// to say here.
+    pub stat_line: Option<String>,
+}
+
 /// The document a session chip addresses — mirrors [`UiLensRuntime`]'s
 /// route keys so a chip click and the URL agree on identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -123,6 +157,12 @@ pub struct UiStudioView {
     /// in roster order (sim pinned first). Present in BOTH the gallery
     /// and editor arms — the strip renders wherever the chrome does.
     pub sessions: Vec<UiChromeSession>,
+    /// THE session this tab runs, for the header session·project control
+    /// (single-session web policy). `None` with nothing attached. Built
+    /// from the same derivation as [`Self::sessions`], which it replaces
+    /// once the strip retires; both are published meanwhile so the strip
+    /// keeps working while the control lands.
+    pub session: Option<UiChromeSessionControl>,
     /// The layered-settings slice (effective values, provenance, override
     /// state) for the shell's settings popover.
     pub settings: crate::app::settings::UiSettingsView,
@@ -146,6 +186,7 @@ impl UiStudioView {
             device_sync: None,
             lens_card: None,
             sessions: Vec::new(),
+            session: None,
             settings: crate::app::settings::UiSettingsView::default(),
             dirty: crate::DirtySummary::clean(),
         }
@@ -182,6 +223,11 @@ impl UiStudioView {
 
     pub fn with_sessions(mut self, sessions: Vec<UiChromeSession>) -> Self {
         self.sessions = sessions;
+        self
+    }
+
+    pub fn with_session(mut self, session: Option<UiChromeSessionControl>) -> Self {
+        self.session = session;
         self
     }
 

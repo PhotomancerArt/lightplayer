@@ -416,13 +416,8 @@ pub fn chrome_sessions(
     pool: &HomePoolEvidence,
     lens: Option<&crate::UiLensRuntime>,
 ) -> Vec<crate::UiChromeSession> {
-    let (_, devices) = assemble_roster(registry_cards, pool);
-    devices
+    live_session_cards(registry_cards, pool)
         .into_iter()
-        // Live = the sim (its card exists only while the session does)
-        // or a device with pool-session evidence; registry-only rows
-        // have no session_key.
-        .filter(|card| card.sim || card.session_key.is_some())
         .map(|card| {
             let target = if card.sim {
                 crate::UiChromeSessionTarget::Sim {
@@ -463,11 +458,32 @@ pub fn chrome_sessions(
         .collect()
 }
 
+/// The cards a LIVE runtime session backs, in roster order (sim pinned
+/// first) — [`assemble_roster`]'s derivation with the registry-only rows
+/// filtered out.
+///
+/// Shared by every session projection (the strip's [`chrome_sessions`]
+/// and the header control's), so none of them can invent a status the
+/// gallery would contradict.
+pub(crate) fn live_session_cards(
+    registry_cards: &[UiDeviceCard],
+    pool: &HomePoolEvidence,
+) -> Vec<UiDeviceCard> {
+    let (_, devices) = assemble_roster(registry_cards, pool);
+    devices
+        .into_iter()
+        // Live = the sim (its card exists only while the session does)
+        // or a device with pool-session evidence; registry-only rows
+        // have no session_key.
+        .filter(|card| card.sim || card.session_key.is_some())
+        .collect()
+}
+
 /// Collapse the roster's honest vocabulary to the strip's three dots
 /// (D16). Offline never reaches here (live-filtered above); everything
 /// that is neither running-clean nor connected-empty reads as attention
 /// — the chip only flags it, the card tells the story.
-fn chip_status(state: &RosterCardState) -> crate::UiChromeSessionStatus {
+pub(crate) fn chip_status(state: &RosterCardState) -> crate::UiChromeSessionStatus {
     match state {
         RosterCardState::RunningUpToDate => crate::UiChromeSessionStatus::Run,
         RosterCardState::ConnectedEmpty | RosterCardState::ReadyToSetUp => {

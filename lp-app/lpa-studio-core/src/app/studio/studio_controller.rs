@@ -1,3 +1,24 @@
+//! The studio's top controller: one dispatch surface over the runtime
+//! pool, the project mirror, the device flows and the library.
+//!
+//! # The single-session web policy
+//!
+//! Pool capacity is a POLICY, not a shape (ADR
+//! `2026-08-03-studio-runs-n-device-sessions`): [`RuntimePool`] admits a
+//! sim and several boards at once, and the app on top decides how many
+//! it actually runs. The WEB app runs exactly ONE — a sim or a board,
+//! never both, one per browser tab — so that decision lives here, at
+//! [`StudioController::install_session`] and the sim-reuse open, and
+//! never in the pool (a desktop shell with real session wayfinding is
+//! meant to inherit the N-session shape unchanged).
+//!
+//! The rule: opening a project or connecting a board tears the tab's
+//! other session down first, and is refused only while an operation is
+//! in flight — a flash or a deploy is the one thing teardown cannot end
+//! honestly, so the refusal names it instead. Recorded in the
+//! forthcoming session·project-control ADR (single-session web policy +
+//! studio-or-site navigation).
+
 use core::future::Future;
 use core::time::Duration;
 use std::cell::RefCell;
@@ -62,14 +83,40 @@ fn sim_crash_reboot_allowed(last_reboot_at: Option<f64>, now: f64, guard_secs: f
     }
 }
 
+/// Close a payload the pool never took (a refused install — capacity or
+/// the single-session policy): the provider already minted a live
+/// session for it, so refusing without closing would leak a worker or
+/// hold a serial port the user cannot see.
+async fn close_runtime_payload(payload: crate::RuntimePayload) {
+    match payload {
+        crate::RuntimePayload::Sim(sim) => {
+            let _ = sim.connector.close(&sim.session.id).await;
+        }
+        crate::RuntimePayload::Device(handle) => {
+            let _ = handle.close().await;
+        }
+    }
+}
+
 pub struct StudioController {
     device: DeviceController,
     /// The runtime sessions the studio is attached to, plus the editor
-    /// lens. P2 of the runtime-pool milestone: one sim AND one device
-    /// session coexist under the capacity policy; every network op
-    /// resolves its wire client through one of the pool's two named seams
-    /// (lens-bound editor ops vs device-targeted deploy/reconcile ops).
+    /// lens. The pool ADMITS a sim and several boards at once (P2 of the
+    /// runtime-pool milestone); what this app actually runs in one is
+    /// the single-session policy above. Every network op resolves its
+    /// wire client through one of the pool's two named seams (lens-bound
+    /// editor ops vs device-targeted deploy/reconcile ops).
     pool: RuntimePool,
+    /// Test-only escape from the single-session policy (module doc).
+    ///
+    /// The POOL still runs N sessions and the model still supports them —
+    /// two boards attached at once (the multi-device roadmap's substitute
+    /// for physically plugging in two boards), a board beside an open sim
+    /// project — so the tests that prove that need a controller that
+    /// admits them. Nothing in production clears the policy: the browser
+    /// app is the only shell today, and it runs one session per tab.
+    #[cfg(test)]
+    multi_session_for_test: bool,
     project: ProjectController,
     /// Bounded, chronological log buffer. Capped in core (P3/Q5) rather than in
     /// the web crate's retired 80-entry mirror.
@@ -274,6 +321,8 @@ impl StudioController {
         Self {
             device,
             pool: RuntimePool::new(),
+            #[cfg(test)]
+            multi_session_for_test: false,
             project: ProjectController::new(),
             logs: LogRing::new(),
             log_filter: LogFilter::default(),
@@ -1176,6 +1225,7 @@ impl StudioController {
                 .with_lens(self.lens_runtime())
                 .with_device_sync(self.ambient_device_sync().cloned())
                 .with_sessions(self.chrome_sessions())
+                .with_session(self.session_control())
                 .with_settings(self.settings.ui_view());
         }
         // gallery-always (D24): home covers every no-project state, so the
@@ -1220,6 +1270,7 @@ impl StudioController {
             .with_device_sync(self.ambient_device_sync().cloned())
             .with_lens_card(self.lens_device_card())
             .with_sessions(self.chrome_sessions())
+            .with_session(self.session_control())
             .with_settings(self.settings.ui_view())
             .with_dirty(dirty)
     }
@@ -1228,16 +1279,98 @@ impl StudioController {
     /// view arms — the strip renders wherever the chrome does. Same
     /// registry + pool evidence the gallery roster consumes.
     fn chrome_sessions(&self) -> Vec<crate::UiChromeSession> {
-        let registry_cards = self
-            .home_inputs
-            .as_ref()
-            .map(|inputs| inputs.devices.as_slice())
-            .unwrap_or(&[]);
         home_view_builder::chrome_sessions(
-            registry_cards,
+            self.registry_cards(),
             &self.home_pool_evidence(),
             self.lens_runtime().as_ref(),
         )
+    }
+
+    /// The header session·project control's ONE session (single-session
+    /// policy, module doc), built beside [`Self::chrome_sessions`] from
+    /// the very same live cards — status included, so the control can
+    /// never wear a state the gallery would deny.
+    ///
+    /// The pool can still be holding two sessions while the policy's
+    /// other half lands (and in fixtures that install straight into the
+    /// pool); roster order decides, which pins the sim first exactly as
+    /// the strip does. Deliberately NOT coupled to the lens: a session
+    /// the editor has detached from is still the session this tab runs,
+    /// and the control is what says so.
+    fn session_control(&self) -> Option<crate::UiChromeSessionControl> {
+        let card = home_view_builder::live_session_cards(
+            self.registry_cards(),
+            &self.home_pool_evidence(),
+        )
+        .into_iter()
+        .next()?;
+        let session = if card.sim {
+            self.pool.sim_session()
+        } else {
+            card.session_key.as_deref().and_then(|key| {
+                self.pool
+                    .sessions()
+                    .find(|session| session.id().to_string() == key)
+            })
+        };
+        // Two sources, the same two the card's own narration reads
+        // (`device_evidence`): the session's in-flight operation (deploy,
+        // flash, upgrade) and the card-owned op flow, which outlives it
+        // while a recovery write waits for its replug.
+        let busy = session.and_then(|session| {
+            session
+                .operation_label()
+                .map(str::to_string)
+                .or_else(|| self.card_op_label(session.id()))
+        });
+        // Best-effort, and honestly absent when nothing is known: the
+        // engine's rate once it publishes frames, the transport for
+        // hardware. The lamp extent the spike sketched ("… · 217 lamps")
+        // has no honest source for the SIM yet — `total_led_budget` is a
+        // device hello field — so it waits for one instead of being
+        // invented here.
+        let mut facts: Vec<String> = Vec::new();
+        if let Some(fps) = card.frame_fps {
+            facts.push(format!("{} fps", fps.round() as i64));
+        }
+        if !card.transport.is_empty() {
+            facts.push(card.transport.clone());
+        }
+        Some(crate::UiChromeSessionControl {
+            sim: card.sim,
+            // The control renders the sim's board as a suffix, so the
+            // name stays the kind; hardware wears its registry name.
+            name: if card.sim {
+                "Sim".to_string()
+            } else {
+                card.name.clone()
+            },
+            // D4: the sim's board is the one it inherited from the
+            // project it runs — a device's board is already in its name.
+            board: card
+                .sim
+                .then(|| card.board_id.as_deref().map(crate::board_display_name))
+                .flatten(),
+            status: home_view_builder::chip_status(&card.state),
+            busy,
+            stat_line: (!facts.is_empty()).then(|| facts.join(" · ")),
+        })
+    }
+
+    /// The card-owned op flow's label for a session, when one is running
+    /// on it (the flow outlives `operation_label` across the replug an
+    /// awaiting op is waiting for).
+    fn card_op_label(&self, id: crate::RuntimeId) -> Option<String> {
+        Some(self.device_card_ops.get(&id)?.borrow().label.clone())
+    }
+
+    /// The gallery's registry rows as cards — the roster derivation's
+    /// other input, empty until the library hydrates.
+    fn registry_cards(&self) -> &[crate::app::home::UiDeviceCard] {
+        self.home_inputs
+            .as_ref()
+            .map(|inputs| inputs.devices.as_slice())
+            .unwrap_or(&[])
     }
 
     /// The board the LENS runtime is known to be — for a device,
@@ -3902,10 +4035,6 @@ impl StudioController {
         &mut self,
         payload: crate::RuntimePayload,
     ) -> Result<crate::RuntimeId, UiError> {
-        let lens_replaced = self
-            .pool
-            .lens_session()
-            .is_some_and(|session| session.kind() == payload.kind());
         let install_detail = format!("{:?}", payload.kind());
         let install_endpoint = payload
             .link_session()
@@ -3917,6 +4046,24 @@ impl StudioController {
         let replaced = payload
             .link_session()
             .and_then(|link| self.pool.endpoint_session(&link.endpoint_id));
+        // The single-session policy (module doc), at the funnel every
+        // open and connect converges on: everything except the session
+        // the pool is about to replace at this endpoint goes first, and
+        // an operation in flight refuses the whole install — ending the
+        // same way the pool's own refusal does, with the fresh payload
+        // closed rather than leaked.
+        if let Err(error) = self.enforce_single_session(replaced).await {
+            close_runtime_payload(payload).await;
+            return Err(error);
+        }
+        // Read AFTER the teardown: the question is whether THIS install
+        // replaces the session the editor is a lens on, and the policy
+        // may just have taken that session away (in which case the
+        // teardown already reset the mirror).
+        let lens_replaced = self
+            .pool
+            .lens_session()
+            .is_some_and(|session| session.kind() == payload.kind());
         match self.pool.install(payload) {
             Ok(id) => {
                 self.migrate_card_op(replaced, id);
@@ -3935,17 +4082,153 @@ impl StudioController {
             }
             Err(refusal) => {
                 let message = refusal.message;
-                match refusal.payload {
-                    crate::RuntimePayload::Sim(sim) => {
-                        let _ = sim.connector.close(&sim.session.id).await;
-                    }
-                    crate::RuntimePayload::Device(handle) => {
-                        let _ = handle.close().await;
-                    }
-                }
+                close_runtime_payload(refusal.payload).await;
                 Err(UiError::UnsupportedAction(message))
             }
         }
+    }
+
+    /// The single-session policy's gate (module doc), run at every seam
+    /// that would otherwise leave the tab with a second runtime: the
+    /// install funnel above, and the sim-reuse open that never reaches
+    /// it.
+    ///
+    /// `keep` is the session this gesture means to END UP on — the sim
+    /// an open is about to reuse, or the same-endpoint session the pool
+    /// itself is about to replace. That second case is why the pool's
+    /// replace is left alone rather than pre-empted here: a replug comes
+    /// back on its own endpoint carrying a card-owned op flow that has
+    /// to ride across (`migrate_card_op`), and closing the outgoing
+    /// session ourselves would drop the "plug it back in" instruction at
+    /// the moment the user obeyed it.
+    ///
+    /// An operation in flight anywhere refuses the whole gesture and
+    /// names it: teardown mid-flash is not a thing that can be done
+    /// honestly, so the user finishes or cancels it first.
+    async fn enforce_single_session(
+        &mut self,
+        keep: Option<crate::RuntimeId>,
+    ) -> Result<(), UiError> {
+        if self.multi_session_allowed() {
+            return Ok(());
+        }
+        if let Some(session) = self.pool.sessions().find(|session| session.op_in_flight()) {
+            let label = session
+                .operation_label()
+                .unwrap_or("A device operation")
+                .to_string();
+            let name = self.session_display_name(session);
+            return Err(UiError::UnsupportedAction(format!(
+                "{label} in progress on {name} — finish or cancel it first."
+            )));
+        }
+        let doomed: Vec<crate::RuntimeId> = self
+            .pool
+            .sessions()
+            .map(crate::RuntimeSession::id)
+            .filter(|id| Some(*id) != keep)
+            .collect();
+        for id in doomed {
+            self.close_session_for_policy(id).await;
+        }
+        Ok(())
+    }
+
+    /// Whether this controller may hold several sessions at once. Never,
+    /// in the shipped app — see [`Self::multi_session_for_test`].
+    #[cfg(not(test))]
+    fn multi_session_allowed(&self) -> bool {
+        false
+    }
+
+    #[cfg(test)]
+    fn multi_session_allowed(&self) -> bool {
+        self.multi_session_for_test
+    }
+
+    /// Tear ONE session down for the policy above: the teardown halves of
+    /// [`Self::stop_simulator`] and [`Self::disconnect_device`] without
+    /// their connect-flow epilogue.
+    ///
+    /// That epilogue is why this is a helper rather than a call to either
+    /// verb. Both hand the connect flow back to the provider catalog when
+    /// they leave the pool empty, and this teardown runs INSIDE an
+    /// arriving connect whose flow is already `Connected`
+    /// (`DeviceController::connect_endpoint` sets it before the payload
+    /// ever reaches the pool) — resetting the catalog here would throw
+    /// the arriving session's own connect state away and leave the
+    /// gallery showing a provider picker over a live board.
+    async fn close_session_for_policy(&mut self, id: crate::RuntimeId) {
+        // The mirror quiesces when the editor was a lens on this session:
+        // pending logs drained onto it, project reset, lens released.
+        if self.pool.lens() == Some(id) {
+            self.quiesce_lens();
+        }
+        let Some(mut session) = self.pool.remove_session(id) else {
+            return;
+        };
+        let kind = session.kind();
+        let pending = session.take_pending_logs();
+        self.record_logs(pending);
+        self.record_device_event(
+            Some(&id.to_string()),
+            None,
+            DeviceEventKind::Pool {
+                action: "single-session".to_string(),
+                detail: format!("{kind:?}"),
+            },
+        );
+        // A failed close still loses the session — the pool is the truth
+        // about attachment — and the failure lands in the ring as a
+        // warning, exactly as stop-sim's does.
+        match session.into_payload() {
+            crate::RuntimePayload::Sim(sim) => {
+                if let Err(error) = sim.connector.close(&sim.session.id).await {
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Studio,
+                        format!("simulator session close reported: {error}"),
+                    ));
+                }
+            }
+            crate::RuntimePayload::Device(handle) => {
+                if let Err(error) = handle.close().await {
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Link,
+                        format!("device session close reported: {}", error.message()),
+                    ));
+                }
+            }
+        }
+        self.mark_dirty();
+    }
+
+    /// A session's human name for policy copy: the simulator says so, a
+    /// board wears its stamped name, then its registry row's — and a
+    /// board nobody has named yet is still a board, so the fallback is a
+    /// noun rather than an id the user has never seen.
+    fn session_display_name(&self, session: &crate::RuntimeSession) -> String {
+        if session.is_sim() {
+            return "the simulator".to_string();
+        }
+        let stamped = session
+            .device_sync()
+            .and_then(|sync| sync.identity.as_ref())
+            .map(|identity| identity.name.clone())
+            .filter(|name| !name.is_empty());
+        stamped
+            .or_else(|| {
+                let uid = session.device_uid()?;
+                self.home_inputs
+                    .as_ref()?
+                    .registered
+                    .iter()
+                    .find(|device| device.uid == uid)
+                    .map(|device| device.name.clone())
+                    .filter(|name| !name.is_empty())
+            })
+            .unwrap_or_else(|| "the connected board".to_string())
     }
 
     async fn execute_home_op(&mut self, op: HomeOp, updates: UxUpdateSink) -> UiResult {
@@ -5087,6 +5370,14 @@ impl StudioController {
         // the teardown it did was work the newer open wanted anyway.
         if crate::app::open_progress::open_superseded() {
             return Ok(UiNotices::new());
+        }
+        // Single-session policy (module doc): a reuse is an open like any
+        // other, so a board attached to this tab goes first. The install
+        // funnel's gate never runs on this path — the sim is already in
+        // the pool — which would have left the reuse branch as the one
+        // door the policy did not close.
+        if let Some(sim_id) = self.pool.sim_session().map(crate::RuntimeSession::id) {
+            self.enforce_single_session(Some(sim_id)).await?;
         }
         // The open targets THE sim session: reuse it when it exists — the
         // lens moves onto it (the editor mirror opens on the sim) — and
@@ -7502,6 +7793,39 @@ impl StudioController {
     /// The runtime pool, for e2e assertions about session coexistence.
     pub(crate) fn runtime_pool_for_test(&self) -> &RuntimePool {
         &self.pool
+    }
+
+    /// Lift the single-session policy (module doc) for tests whose
+    /// subject is the POOL's N-session behavior rather than the web
+    /// app's policy on top of it: two boards attached at once, a board
+    /// beside an open sim project. The policy's own behavior — the
+    /// teardown and the in-flight refusal — is covered against a
+    /// controller that keeps it, in `studio_link_e2e_tests`.
+    pub(crate) fn allow_multi_session_for_test(&mut self) {
+        self.multi_session_for_test = true;
+    }
+
+    /// Mark an operation in flight on a session, as a deploy or a flash
+    /// does — the single-session policy's refusal evidence, without
+    /// scripting a whole long-running op.
+    pub(crate) fn set_session_operation_for_test(
+        &mut self,
+        id: crate::RuntimeId,
+        label: Option<&str>,
+    ) {
+        self.pool
+            .session_mut(id)
+            .expect("a session to mark busy")
+            .set_operation(label.map(str::to_string));
+    }
+
+    /// The sim session's advisory board (D4), for control-DTO
+    /// projections — the board a project normally stamps at open.
+    pub(crate) fn set_sim_board_for_test(&mut self, board_id: &str) {
+        self.pool
+            .sim_session_mut()
+            .expect("a sim session is installed")
+            .set_sim_board_id(Some(board_id.to_string()));
     }
 
     /// The storage dir library sync targets, for the save-as-pull

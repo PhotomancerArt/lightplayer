@@ -72,6 +72,9 @@ pub fn StudioShell(
         lens_card,
         // the chrome renders the session strip (web_app passes it through)
         sessions: _,
+        // the header session·project control's session, for the chrome —
+        // built core-side already, mounted when the control lands
+        session: _,
         // the chrome renders the settings surface (web_app owns both)
         settings: _,
         // consumed by the web shell's unload gate; the project pane

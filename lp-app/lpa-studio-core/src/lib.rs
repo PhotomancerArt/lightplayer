@@ -151,10 +151,11 @@ pub use app::studio::{
     PASSIVE_PREEMPTIONS_BEFORE_PROMOTION, RefreshCadence, SIMULATOR_REFRESH_INTERVAL,
     STUDIO_LOG_SINK, StudioActor, StudioActorOptions, StudioCommand, StudioController,
     StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver, StudioViewSender,
-    UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget, UiConsoleView, UiError,
-    UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice,
-    UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL,
-    VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work, studio_view_channel,
+    UiChromeSession, UiChromeSessionControl, UiChromeSessionStatus, UiChromeSessionTarget,
+    UiConsoleView, UiError, UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
+    UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
+    VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work,
+    studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;
