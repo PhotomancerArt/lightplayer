@@ -1337,6 +1337,7 @@ impl StudioController {
             facts.push(card.transport.clone());
         }
         Some(crate::UiChromeSessionControl {
+            key: card.identity_key().to_string(),
             sim: card.sim,
             // The control renders the sim's board as a suffix, so the
             // name stays the kind; hardware wears its registry name.

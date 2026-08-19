@@ -25,9 +25,16 @@
 //!   after the primary family (wide bars — narrow bars list sessions in
 //!   the ⋯ menu instead). Chips are wayfinding only — name, glyph,
 //!   status dot — never controls or thumbnails (D43). The active chip is
-//!   the editor's representation in the nav; no nav tab detaches the
-//!   lens (navigation does, through the route listener, same as the back
-//!   button).
+//!   the editor's representation in the nav; no nav tab ends the session
+//!   (navigation does, through the route listener, same as the back
+//!   button — see below).
+//! - **Navigation is studio OR site** (single-session policy): from a
+//!   lens route, going anywhere else ENDS the tab's session. Docs and
+//!   Boards are the exception, and they earn it by not going anywhere —
+//!   in studio mode they open a NEW tab, so reference material never
+//!   costs you the thing you were building. Explore is a plain exit: it
+//!   is a gallery of live projects, a real section of the app (ruling
+//!   R8-3, amended 8.1).
 //! - **The editors are tools, not sections.** The mapping editor and
 //!   board editor stay outside the tab row, in the ⋯ menu's Tools group.
 //!
@@ -134,6 +141,14 @@ pub fn SiteChrome(
     children: Element,
 ) -> Element {
     let margin = if tight { "tw:mb-1.5" } else { "tw:mb-[18px]" };
+    // Studio mode: a lens route is fronted, so the tab IS a running
+    // session (single-session policy — leaving ends it). Docs and Boards
+    // are reference material you read WHILE building, so from here they
+    // open a new tab and the session behind them keeps running (ruling
+    // R8-3, amended 8.1). Explore deliberately does not: it is a gallery
+    // of live projects — a real section of the app, and going there is
+    // going somewhere.
+    let studio_mode = section == SiteSection::Session;
     rsx! {
         // `tw:@container`: the collapse below responds to the BAR's own
         // width, not the viewport, so an embedded/narrow mount behaves.
@@ -188,12 +203,14 @@ pub fn SiteChrome(
                         href: "/boards",
                         active: section == SiteSection::Boards,
                         secondary: true,
+                        new_tab: studio_mode,
                     }
                     NavTab {
                         label: "Docs",
                         href: "/docs",
                         active: section == SiteSection::Docs,
-                    secondary: true,
+                        secondary: true,
+                        new_tab: studio_mode,
                     }
                 }
                 {children}
@@ -293,6 +310,8 @@ fn ChromeOverflowMenu(
     #[props(default = false)] initially_open: bool,
     #[props(default)] project_menu: Option<ChromeProjectMenu>,
 ) -> Element {
+    // Same derivation, same promise as the inline tabs (see [`SiteChrome`]).
+    let studio_mode = section == SiteSection::Session;
     rsx! {
         IconMenuButton {
             icon: StudioIconName::More,
@@ -316,8 +335,18 @@ fn ChromeOverflowMenu(
                 if include_sections {
                     span { class: GROUP_HEADER_CLASS, "Sections" }
                     NavMenuItem { label: "Explore", href: "/explore", active: section == SiteSection::Explore }
-                    NavMenuItem { label: "Boards", href: "/boards", active: section == SiteSection::Boards }
-                    NavMenuItem { label: "Docs", href: "/docs", active: section == SiteSection::Docs }
+                    NavMenuItem {
+                        label: "Boards",
+                        href: "/boards",
+                        active: section == SiteSection::Boards,
+                        new_tab: studio_mode,
+                    }
+                    NavMenuItem {
+                        label: "Docs",
+                        href: "/docs",
+                        active: section == SiteSection::Docs,
+                        new_tab: studio_mode,
+                    }
                 }
                 if !sessions.is_empty() {
                     span { class: GROUP_HEADER_CLASS, "Sessions" }
@@ -346,26 +375,44 @@ fn ChromeOverflowMenu(
 /// One section row of the ⋯ menu: a plain hash link that closes the menu
 /// as it navigates (sections swap in place — without the close the
 /// popover would linger over the new body).
+///
+/// `new_tab` mirrors [`NavTab`]'s: the narrow bar's Docs and Boards rows
+/// have to make the same promise the inline tabs do, or the same click
+/// would mean two different things at two widths.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NavMenuItem(label: &'static str, href: &'static str, active: bool) -> Element {
+fn NavMenuItem(
+    label: &'static str,
+    href: &'static str,
+    active: bool,
+    #[props(default = false)] new_tab: bool,
+) -> Element {
     let close = try_consume_context::<PopoverCloseHandle>();
     let class = if active {
         NAV_MENU_ITEM_ACTIVE
     } else {
         NAV_MENU_ITEM_IDLE
     };
+    let target = new_tab.then_some("_blank");
+    let rel = new_tab.then_some("noopener noreferrer");
     rsx! {
         a {
-            class: "{class}",
+            class: if new_tab { "{class} tw:flex tw:items-center tw:gap-1.5" } else { "{class}" },
             href: "{href}",
             aria_current: if active { "page" } else { "false" },
+            target,
+            rel,
             onclick: move |_| {
                 if let Some(mut close) = close {
                     close.close();
                 }
             },
             "{label}"
+            if new_tab {
+                span { class: "tw:flex-none tw:text-subtle-foreground/70",
+                    StudioIcon { name: StudioIconName::ExternalLink, size: 11 }
+                }
+            }
         }
     }
 }
@@ -477,12 +524,12 @@ pub fn PatchToggle(href: String, patching: bool) -> Element {
 /// hover/active — the spike's `.secondary`).
 ///
 /// Tabs are PLAIN links on purpose (P12): no tab dispatches a lens
-/// detach anymore — navigation to a gallery route detaches through the
-/// route listener, the same path as the back button, and returning to
-/// the editor is the active session chip's job. (The old Studio-tab
-/// direct dispatch existed for the URL-less D29 device editor on the
-/// gallery route;
-/// identity-at-probe made device lenses addressable, closing that gap.)
+/// detach anymore — navigation to a gallery route ENDS the tab's session
+/// through the route listener, the same path as the back button.
+///
+/// `new_tab` is the studio-mode exit (ruling R8-3, amended 8.1): see
+/// [`SiteChrome`]'s Docs/Boards mounts for why those two leave the tab
+/// rather than the session.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NavTab(
@@ -490,6 +537,11 @@ fn NavTab(
     href: &'static str,
     active: bool,
     #[props(default = false)] secondary: bool,
+    /// Open in a new tab (`_blank` + `noopener noreferrer`) and wear the
+    /// leaves-this-tab marker. The router's click interceptor skips any
+    /// link with a `target`, so this needs no routing support at all.
+    #[props(default = false)]
+    new_tab: bool,
 ) -> Element {
     let class = match (secondary, active) {
         (false, true) => NAV_TAB_ACTIVE,
@@ -497,12 +549,26 @@ fn NavTab(
         (true, true) => NAV_TAB_SECONDARY_ACTIVE,
         (true, false) => NAV_TAB_SECONDARY_IDLE,
     };
+    // `None` omits the attribute entirely, which is what the click
+    // interceptor reads as "in-app" — an empty `target=""` would work
+    // too, but only by accident.
+    let target = new_tab.then_some("_blank");
+    let rel = new_tab.then_some("noopener noreferrer");
     rsx! {
         a {
-            class: "{class}",
+            class: if new_tab { "{class} tw:inline-flex tw:items-center tw:gap-1" } else { "{class}" },
             href: "{href}",
             aria_current: if active { "page" } else { "false" },
+            target,
+            rel,
             "{label}"
+            if new_tab {
+                // Sized to the tab's own 12px text, and quiet: the mark
+                // says where the click goes, it is not a second label.
+                span { class: "tw:flex-none tw:text-subtle-foreground/70",
+                    StudioIcon { name: StudioIconName::ExternalLink, size: 11 }
+                }
+            }
         }
     }
 }

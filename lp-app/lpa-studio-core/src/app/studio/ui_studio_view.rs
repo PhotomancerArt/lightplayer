@@ -86,6 +86,16 @@ pub enum UiChromeSessionStatus {
 /// in flight, the device-zone stat line) instead of a route target.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiChromeSessionControl {
+    /// The underlying card's identity key
+    /// ([`UiDeviceCard::identity_key`](crate::UiDeviceCard::identity_key)),
+    /// which is also what a teardown of THIS session has to name:
+    /// hardware disconnects through
+    /// [`DeviceTarget::card`](crate::DeviceTarget::card), exactly as the
+    /// card's own danger-zone row does, so the header's leave-the-studio
+    /// teardown and the card can never end up pointing at different
+    /// boards. (The sim needs no target — `StopSimulator` is unique by
+    /// construction — so for it this is only the render key.)
+    pub key: String,
     /// The sim session (violet sim glyph); hardware wears its own.
     pub sim: bool,
     /// "Sim" for the simulator (the control renders the board as a

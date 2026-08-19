@@ -78,9 +78,16 @@ impl Drop for UnsavedGate {
 /// sim, discarding its unsaved edits.
 ///
 /// The three gallery opens all land on the same `open_from_home` path in
-/// the controller and all swap the sim's loaded project. Detaching the lens
-/// is deliberately absent: it keeps every runtime session running, so
-/// nothing is lost.
+/// the controller and all swap the sim's loaded project.
+///
+/// **Ending a session is deliberately absent.** Detaching the lens never
+/// lost anything (every runtime kept running), and the studio-or-site
+/// teardown that replaced it (`web_app::nav_session_plan` — leaving a
+/// lens route stops the sim or disconnects the board) loses nothing
+/// either: the draft overlay is persisted, so what ends is the RUN and
+/// reopening the project brings the work back. Prompting there would
+/// teach people to fear a safe act — and the toast the teardown raises
+/// already tells them the draft is held.
 pub(crate) fn action_replaces_loaded_project(action: &lpa_studio_core::UiAction) -> bool {
     use lpa_studio_core::HomeOp;
 
@@ -111,7 +118,10 @@ pub(crate) fn confirm_discarding_unsaved(_message: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::{HOME_NODE_ID, HomeOp, ProjectController, ProjectOp, UiAction};
+    use lpa_studio_core::{
+        DeviceController, DeviceOp, DeviceTarget, HOME_NODE_ID, HomeOp, ProjectController,
+        ProjectOp, UiAction,
+    };
 
     use super::action_replaces_loaded_project;
 
@@ -148,6 +158,26 @@ mod tests {
         // never raise the discard prompt.
         let detach = UiAction::from_op(ProjectController::NODE_ID, ProjectOp::DetachLens);
         assert!(!action_replaces_loaded_project(&detach));
+    }
+
+    /// Leaving the studio now ENDS the session (studio-or-site
+    /// navigation) instead of detaching the lens — and it must inherit
+    /// the detach's property exactly: the draft overlay is durable, so
+    /// neither teardown verb may raise the discard prompt. This is the
+    /// regression guard for someone widening the gate to "anything that
+    /// closes a runtime".
+    #[test]
+    fn ending_the_session_is_not_a_replacement() {
+        let stop = UiAction::from_op(DeviceController::NODE_ID, DeviceOp::StopSimulator);
+        assert!(!action_replaces_loaded_project(&stop));
+
+        let disconnect = UiAction::from_op(
+            DeviceController::NODE_ID,
+            DeviceOp::DisconnectDevice {
+                target: DeviceTarget::card("dev7k2"),
+            },
+        );
+        assert!(!action_replaces_loaded_project(&disconnect));
     }
 
     #[test]

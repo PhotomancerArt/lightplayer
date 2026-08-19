@@ -766,10 +766,16 @@ fn install_story_route_listener(
     mut selected_story_id: Signal<String>,
     mut viewport: Signal<StoryViewport>,
 ) -> Option<std::rc::Rc<crate::router::RouteListener>> {
-    crate::router::install_route_listener(move || {
+    crate::router::install_route_listener(move |event| {
+        // The book has no session to guard, so every click intent is
+        // permitted and only the completed move is acted on.
+        if matches!(event, crate::router::NavEvent::ClickIntent(_)) {
+            return true;
+        }
         let route = selected_story_route_from_url();
         selected_story_id.set(route.story_id);
         viewport.set(route.viewport);
+        true
     })
 }
 
