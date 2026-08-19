@@ -401,23 +401,32 @@ installed anywhere, it is stale; use `yona-*`.
 - Use `yona-implement` to execute an existing `plan.md`. It runs to the first
   declared review gate, or to a pull request when the plan declares none, and
   it opens and drives that PR itself.
-- Use `yona-review` for durable review artifacts.
-- Use `yona-push` only for a branch that already has the work on it but no PR.
-  `yona-implement` does not hand off to it.
+- Use `yona-ship` to take a finished PR through merge and deploy. It presents
+  a ship report — evidence with links, not a diff — and stops at the ship gate
+  when the plan declared `ship_gate: required` or the work escalated (ADRs
+  created, migrations or data formats touched, deviations, defects filed).
+  Then it merges, watches the post-merge deploy chain, verifies, and archives
+  the plan. It also covers the standalone case of a branch that has the work
+  but no PR yet.
+- `yona-review` and `yona-push` are retired. Review happens on ship-report
+  evidence, not diffs; the push case is `yona-ship`'s front half. A stale
+  installed copy means the skills repo's `install.sh` needs a re-run.
 - Resolve context from `agent-context.toml`; the repo slug is `lp2025` and
   `planning_root` is `~/.photomancer/planning`. `PHOTOMANCER_PLANNING_ROOT`
   overrides it when set.
 - Store new active artifacts under
   `<planning-root>/lp2025/<YYYY-MM-DD-HHMM>-<name>/`.
 - Store completed artifacts under `<planning-root>/lp2025/_archive/`.
-- Store review artifacts under `<planning-root>/lp2025/_reviews/`.
+  Archiving happens at ship time (when the work lands), not at PR time.
+- `<planning-root>/lp2025/_reviews/` is historical — read old review
+  artifacts there, but do not create new ones.
 
 Many existing planning directories are date-only (`2026-07-28-fw-esp32-prep`)
 and some phase files use the legacy `01-*.md` naming instead of `p1-*.md`.
 Read both; only new artifacts follow the current convention. Never rename an
 existing planning directory or phase file to match it.
 
-The skills live in `github.com/Yona-Appletree/2026-ai-teaching`, symlinked into
+The skills live in `github.com/Yona-Appletree/2026-agentic-coding`, symlinked into
 `~/.claude/skills` by that repo's `install.sh`. There is one editable copy of
 each skill: the one in that repo. Never edit the installed path — you would be
 editing the checkout, and a process fix that lands only in an installed copy is
@@ -440,10 +449,19 @@ written, shall I push?".
 The pull request is part of the pipeline, not a follow-up. Open it as a draft
 at the first commit — before validation passes — so the path-gated CI in
 `.github/workflows/pre-merge.yml` starts giving signal while there is still
-time to react. It goes ready for review when the work is complete, CI is green,
-and no gate is pending; a plan that ends at a review gate keeps its PR in
-draft. Title it `<type>: <plan title>` from the plan's H1 and open the body
-with `Plan: lp2025/<planning-dir>` so PRs correlate to the planning workspace.
+time to react. It goes ready for review when the work is complete and no gate
+is pending, *whether or not CI is green* — draft tracks how complete the work
+is, not how the build is doing; keep watching and fixing CI on the ready PR.
+A plan that ends at a review gate keeps its PR in draft. Title it
+`<type>: <plan title>` from the plan's H1 and open the body with
+`Plan: lp2025/<planning-dir>` so PRs correlate to the planning workspace.
+
+The pipeline does not end at the PR. `yona-ship` takes the green PR through
+merge and deploy: merging to `main` runs "Main push" (tag + release), and a
+green run triggers "Deploy Cloud Service" to fly.io. Ship watches both runs
+and verifies the deployed build at `https://lightplayer.app/healthz` — its
+`build` field must equal the merge sha. Deploy configuration lives in
+`agent-context.toml` under `[ship]`.
 
 This applies to every session, not just delegated ones. See
 `docs/process/review-gates.md`.
