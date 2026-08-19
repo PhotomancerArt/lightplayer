@@ -215,10 +215,7 @@ jobs:
       # predicate-quantifier: every, a changed file counts only if it matches
       # ALL patterns below — i.e. it is none of the ignorable kinds. So the
       # filter is true iff the PR touches at least one file that could affect
-      # a build or test. story-images are excluded here but still inside the
-      # `studio` filter above: a baseline-refresh PR runs validate-stories
-      # (which is the job that validates baselines) without paying for
-      # lint/validate.
+      # a build or test.
       - name: Filter changed paths (core negative gate)
         id: core
         if: github.event_name == 'pull_request'
@@ -232,7 +229,6 @@ jobs:
               - '!**/*.md'
               - '!.gitignore'
               - '!LICENSE*'
-              - '!lp-app/lpa-studio-web/story-images/**'
 
   # fmt + clippy + repo lint scripts, split out of the old serial
   # `check build-ci test` chain so the ~13 min of clippy runs PARALLEL to

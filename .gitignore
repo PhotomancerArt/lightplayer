@@ -55,8 +55,10 @@ lp-app/lpa-studio-web/public/fw-browser-worker.js
 # still resolves `asset!()` on a fresh clone.
 lp-app/lpa-studio-web/assets/tailwind.css
 lp-app/lpa-studio-web/dist/
-lp-app/lpa-studio-web/story-images/.new/
-lp-app/lpa-studio-web/story-images/.scratch/
+# Local story capture area only — baselines are never committed. They live
+# in the companion stories repo (PhotomancerArt/lightplayer-stories), one
+# snapshot per captured main commit; merging a PR is acceptance.
+lp-app/lpa-studio-web/story-images/
 
 # lp-xt fixture build artifacts (regenerable via lp-xt/fixtures/build.sh, esp toolchain)
 lp-xt/fixtures/elf/

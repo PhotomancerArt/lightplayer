@@ -1,5 +1,8 @@
+<!-- README images track the newest captured main snapshot via the stories
+     repo's GC-exempt `latest` ref. A renamed hero story 404s here until this
+     README is updated; GitHub's camo cache can lag a refresh by a while. -->
 <p align="center">
-  <img src="lp-app/lpa-studio-web/story-images/base__logo-mark__lockup__lg.png" alt="LightPlayer" width="720">
+  <img src="https://raw.githubusercontent.com/PhotomancerArt/lightplayer-stories/latest/images/base__logo-mark__lockup__lg.png" alt="LightPlayer" width="720">
 </p>
 
 <p align="center"><em>Friendly shaders, everywhere.</em></p>
@@ -11,9 +14,9 @@ to native code on the device itself.
 **Try it now at [lightplayer.app](https://lightplayer.app)** — the Studio runs entirely in your
 browser, and the built-in simulator means you don't need any hardware to start playing.
 
-![LightPlayer Studio — editing a show with live node previews, shader knobs, and the built-in simulator](lp-app/lpa-studio-web/story-images/studio__readme__studio-hero__lg.png)
+![LightPlayer Studio — editing a show with live node previews, shader knobs, and the built-in simulator](https://raw.githubusercontent.com/PhotomancerArt/lightplayer-stories/latest/images/studio__readme__studio-hero__lg.png)
 
-![Studio home — the simulator and devices running projects, your library, and examples](lp-app/lpa-studio-web/story-images/studio__readme__home-gallery__lg.png)
+![Studio home — the simulator and devices running projects, your library, and examples](https://raw.githubusercontent.com/PhotomancerArt/lightplayer-stories/latest/images/studio__readme__home-gallery__lg.png)
 
 **What makes it different:**
 
@@ -27,7 +30,7 @@ browser, and the built-in simulator means you don't need any hardware to start p
 - **Self-contained, open projects.** A project is a folder of JSON and GLSL files. Open format,
   AGPL-licensed platform.
 
-![Node cards — playlist, shader, and fixture with live previews](lp-app/lpa-studio-web/story-images/studio__readme__node-cards__lg.png)
+![Node cards — playlist, shader, and fixture with live previews](https://raw.githubusercontent.com/PhotomancerArt/lightplayer-stories/latest/images/studio__readme__node-cards__lg.png)
 
 # Status: alpha
 
@@ -111,7 +114,7 @@ For an empty flash and firmware only (no project push), use `just demo-esp32c6-s
 2. **Required tools:**
    - Rust toolchain (1.90.0 or later) - [Install Rust](https://rustup.rs/)
    - `just` - Task runner: `cargo install just` or via package manager
-   - `oxipng` - Lossless PNG optimizer for Studio story image baselines:
+   - `oxipng` - Lossless PNG optimizer for Studio story captures:
      `cargo install oxipng` or `brew install oxipng`
 
 3. **Common development commands:**
