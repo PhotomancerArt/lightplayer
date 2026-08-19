@@ -46,7 +46,9 @@ pub fn VisitorSharePopover(
                 span { class: "tw:flex tw:flex-none tw:text-accent",
                     UserRound { size: 13 }
                 }
-                span { class: "tw:text-[11.5px] tw:font-bold", "Share" }
+                // Folds with the crowded bar's <900 rung, like the member
+                // pill (site_chrome's narrow ladder).
+                span { class: "tw:hidden tw:text-[11.5px] tw:font-bold tw:@min-[900px]:inline", "Share" }
             },
             label: "Share".to_string(),
             title: format!("\"{name}\" — shared with you"),

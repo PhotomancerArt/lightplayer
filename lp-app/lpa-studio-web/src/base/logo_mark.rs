@@ -102,6 +102,10 @@ pub fn LogoLockup(
     #[props(default = false)] compact: bool,
     #[props(default = false)] mono: bool,
     #[props(default)] href: Option<String>,
+    /// A crowded host (the site chrome while it carries a session control)
+    /// gives the word up a rung early — the mark alone is the brand there.
+    #[props(default = false)]
+    early_word_yield: bool,
 ) -> Element {
     // Optical norm: mark→word gap ≈ 0.5× wordmark cap height measured from
     // the mark's visual edge; the viewBox carries ~9% right-side air (pad
@@ -109,13 +113,18 @@ pub fn LogoLockup(
     let gap = ((size as f32) * 0.12).round().max(2.0) as u32;
     let word_px = ((size as f32) * 0.61).round() as u32;
     let tone = if mono { "" } else { "tw:text-strong" };
+    // The word yields at narrow widths; the mark stays. Container query
+    // when a container encloses the lockup (the site chrome bar), viewport
+    // fallback everywhere else.
+    let word_wrap = if early_word_yield {
+        "tw:max-[680px]:hidden tw:@max-[680px]:hidden tw:flex"
+    } else {
+        "tw:max-[560px]:hidden tw:@max-[560px]:hidden tw:flex"
+    };
     let body = rsx! {
         LogoMark { size, animated: compact && !mono }
         if !compact {
-            // The word yields at narrow widths; the mark stays. Container
-            // query when a container encloses the lockup (the site chrome
-            // bar), viewport fallback everywhere else.
-            span { class: "tw:max-[560px]:hidden tw:@max-[560px]:hidden tw:flex",
+            span { class: "{word_wrap}",
                 BrandWord { word_px, mono }
             }
         }
