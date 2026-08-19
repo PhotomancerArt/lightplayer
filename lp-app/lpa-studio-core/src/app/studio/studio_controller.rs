@@ -5024,7 +5024,18 @@ impl StudioController {
         let result = match self.library_host() {
             Ok(_) => {
                 self.pending_open = Some(pending);
-                let result = self.open_from_home_inner(updates).await;
+                // The card's whole "opening" treatment — the dim, the busy
+                // cursor, and the pipeline line that narrates the engine
+                // download — rides `home.opening`, which reaches the DOM
+                // only inside a published VIEW. The actor is about to park
+                // inside this open until it settles, and the dispatch
+                // wrapper's snapshots bracket the action (before has no
+                // pending open yet; after, it is already over): without
+                // this emit, a slow open runs to completion behind a
+                // gallery that never acknowledged the click at all (the
+                // G1 Q1 residual).
+                updates.emit(UxUpdate::View(self.view()));
+                let result = self.open_from_home_inner(updates.clone()).await;
                 self.pending_open = None;
                 result
             }

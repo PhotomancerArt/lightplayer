@@ -12,6 +12,8 @@ pub use crate::providers::browser_worker_boot_wait::{
     STUDIO_RUNTIME_WORKER_LABEL, WorkerBootPhase, worker_boot_phase,
 };
 pub use browser_worker_options::BrowserWorkerOptions;
+#[cfg(target_arch = "wasm32")]
+pub use browser_worker_options::resolved_engine_urls;
 pub use engine_cache::{EngineAssetPhase, engine_asset_phase, warm_engine_cache};
 pub use provider::{BrowserWorkerProvider, descriptor};
 pub use worker_envelope::{

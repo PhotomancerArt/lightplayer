@@ -104,6 +104,13 @@ pub fn App() -> Element {
     #[cfg(target_arch = "wasm32")]
     use_hook(preload_engine_assets);
 
+    // The shell loader's dismissal (index.html `__lpShell`): the first
+    // effect after the first committed render, i.e. the moment real chrome
+    // exists to look at. An effect, not a hook — a hook runs before the DOM
+    // insert and would drop the overlay onto a still-empty page.
+    #[cfg(target_arch = "wasm32")]
+    use_effect(dismiss_shell_loader);
+
     let mut view = use_signal(UiStudioView::empty);
     // The OpenRouter connect return leg (`?code=…`): consumed synchronously
     // BEFORE the router reads the URL — it scrubs the query and restores the
@@ -1127,14 +1134,22 @@ pub(crate) fn make_device_timers() -> DeviceTimers {
 /// pool member's — fetches the SAME multi-MB `fw_browser` wasm. Left to the
 /// first boot, that download starts only once the user has already clicked,
 /// and on a cold, throttled connection it is most of what a boot spends its
-/// budget on. One fire-and-forget fetch at load puts the bytes in the HTTP
-/// cache first, where Chrome also parks the compiled code for a streaming
-/// instantiation of the same URL, so the boot that follows pays for neither.
+/// budget on.
+///
+/// The shell loader (index.html) usually starts the wasm's download even
+/// earlier — the moment the APP wasm's bytes finish, before this app exists
+/// to run anything — and `engine_cache` adopts that in-flight response
+/// rather than fetching twice. This preload is the demand that makes the
+/// adoption happen at page load (and the whole story, shell absent): one
+/// fire-and-forget compile into the page cache, so the first click's boot
+/// pays for nothing.
 ///
 /// Fire-and-forget by design: a failure here is silent and costs nothing —
 /// the boot demands the same asset again through the same cache. The URLs
-/// come from `BrowserWorkerOptions`'s defaults, the same source the workers
-/// boot from, so there is one place to change them.
+/// come from `resolved_engine_urls`, the same pre-boot manifest resolution
+/// the workers boot from (falling back to `BrowserWorkerOptions`'s unhashed
+/// defaults when the manifest fetch in `index.html` hasn't landed or
+/// failed), so there is one place to change them.
 ///
 /// The wasm goes through `warm_engine_cache` (boot protocol v2): one
 /// streaming fetch with byte progress, one `WebAssembly.compile`, and the
@@ -1142,14 +1157,36 @@ pub(crate) fn make_device_timers() -> DeviceTimers {
 /// still `import()`ed per worker, so for it a plain read into the HTTP
 /// cache is the whole job. (Dev caveat: a `dx serve` rebuild invalidates
 /// the cache entries mid-session — harmless, the next demand re-fetches.)
+/// Tell the shell loader (index.html) the app has rendered: call
+/// `window.__lpShell.done()` if it is there. Tolerant of its absence —
+/// stories, tests, and any document predating the shell script have no
+/// overlay to dismiss (and the shell's own MutationObserver on `#main`
+/// backstops surfaces that never get here).
+#[cfg(target_arch = "wasm32")]
+fn dismiss_shell_loader() {
+    use wasm_bindgen::{JsCast, JsValue};
+
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Ok(shell) = js_sys::Reflect::get(&window, &JsValue::from_str("__lpShell")) else {
+        return;
+    };
+    if let Ok(done) = js_sys::Reflect::get(&shell, &JsValue::from_str("done"))
+        && let Some(done) = done.dyn_ref::<js_sys::Function>()
+    {
+        let _ = done.call0(&shell);
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn preload_engine_assets() {
-    use lpa_link::providers::browser_worker::{BrowserWorkerOptions, warm_engine_cache};
+    use lpa_link::providers::browser_worker::{resolved_engine_urls, warm_engine_cache};
 
-    let options = BrowserWorkerOptions::default();
-    warm_engine_cache(&options.fw_browser_wasm_path);
-    let module_url = options.fw_browser_module_path;
     wasm_bindgen_futures::spawn_local(async move {
+        let options = resolved_engine_urls().await;
+        warm_engine_cache(&options.fw_browser_wasm_path);
+        let module_url = options.fw_browser_module_path;
         // The body has to be consumed for the response to land in the
         // cache — a `Response` whose stream is never read warms nothing.
         match gloo_net::http::Request::get(&module_url).send().await {

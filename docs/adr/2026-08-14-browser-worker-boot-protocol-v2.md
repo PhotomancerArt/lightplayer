@@ -117,3 +117,13 @@ the fetch at page load, before any worker exists.
   each attempt fails only on genuine inactivity, so ladder worst case
   is attempts × phase budget. Acceptable: quiet means dead, and honest
   progress never burns the ladder.
+
+## Amendment (2026-08-18)
+
+The page-side fetch may now be SHELL-initiated: index.html's loader
+starts the engine download when the app wasm's bytes finish, and
+`engine_cache` adopts that in-flight response (`__lpShell.engineFetch`)
+instead of fetching its own. Module compile/ownership and the boot
+protocol are unchanged; progress totals now prefer the server's
+`x-uncompressed-length` header so percentages survive brotli. See
+2026-08-18-static-asset-serving-and-shell-loader.md.

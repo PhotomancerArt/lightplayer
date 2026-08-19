@@ -51,8 +51,12 @@ const configs = {
       { prefix: "assets/tailwind-", suffix: ".css", minBytes: 8 * 1024 },
       { prefix: "assets/lpa-studio-web-", suffix: ".js" },
       { prefix: "assets/lpa-studio-web_bg-", suffix: ".wasm" },
-      "pkg/fw_browser.js",
-      "pkg/fw_browser_bg.wasm",
+      // Hashed engine sidecar (P2) — named by scripts/sync-engine-sidecar.sh,
+      // not the wasm-bindgen originals (fw_browser.js / fw_browser_bg.wasm),
+      // which a served build no longer carries at all.
+      { prefix: "pkg/fw_browser-", suffix: ".js" },
+      { prefix: "pkg/fw_browser_bg-", suffix: ".wasm" },
+      "pkg/engine-manifest.json",
       "lpa-link/browser_esp32_device_controller.js",
       "firmware/esp32c6-4mb/manifest.json",
       // The committed CodeMirror bundle (the code editor hard-fails without
