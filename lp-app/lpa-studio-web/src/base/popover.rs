@@ -1539,6 +1539,19 @@ impl PopoverAnimation {
     }
 
     fn retarget(&self, from: f64, target: f64) {
+        // A re-run aiming at the SAME destination while a frame is already
+        // scheduled must be a no-op. The open effect re-fires on every
+        // measurement signal (position, panel size, stabilization), and a
+        // panel whose content re-measures during the entrance — the session
+        // panel's live stat line — would otherwise reset `start` every
+        // frame: progress re-lerps from a fresh origin each tick and creeps
+        // asymptotically instead of arriving (the blank-panel-at-opacity-
+        // 0.004 defect, G1 2026-08-19).
+        if self.timeline.raf_id.get().is_some()
+            && (self.timeline.target.get() - target).abs() < 1e-6
+        {
+            return;
+        }
         let base = if target > from {
             OPEN_ANIM_MS
         } else {

@@ -1,10 +1,11 @@
 //! The header **session·project control** and its panel — the one piece of
 //! session UI the chrome carries under the single-session web policy.
 //!
-//! `❖ Sim · ESP32-C6 │ ✎ mini dome ② │ Save ↺` — one segmented lockup
-//! (spike `spikes/studio-chrome/` concept **B**, ruled round 7): the tab's
-//! session on the left, its open project next to it, and the save moment
-//! materializing as trailing segments the instant persisted edits exist.
+//! `❖ Sim · ESP32-C6 │ ✎ mini dome ②   [Save] [↺]` — one segmented lockup
+//! (spike `spikes/studio-chrome/` concept **B**, ruled round 7) with the
+//! save moment materializing BESIDE it the instant persisted edits exist
+//! (G1 round-2, 2026-08-19: inspect and act are different surfaces — the
+//! actions left the box).
 //!
 //! **Why a lockup and not two chips.** With one session per tab the device
 //! and the project are not two things you switch between — they are the two
@@ -13,13 +14,14 @@
 //! left is a control, so it reads as one object with internal seams rather
 //! than a row of independent pills.
 //!
-//! **Click grammar (R8-2).** Every segment opens the panel — with one
-//! session per tab the device segment has nothing to navigate *to*, you are
-//! always here — and Save/↺ are direct actions that never open it. The
-//! whole lockup is therefore ONE popover trigger (the base engine gives a
-//! popover exactly one trigger button; see [`SessionProjectControl`] for the
-//! consequences), with the two action segments as inner buttons that stop
-//! propagation.
+//! **Click grammar (R8-2, amended at G1).** Every segment of the lockup
+//! opens the panel — with one session per tab the device segment has
+//! nothing to navigate *to*, you are always here. Save/↺ are direct
+//! actions and live OUTSIDE the lockup as ordinary sibling buttons: the
+//! first cut carried them as trailing segments, and the gate found a box
+//! that half-inspects and half-acts reads as odd (it also forced invalid
+//! button-in-button nesting through the popover trigger). The lockup is
+//! now purely the popover trigger.
 //!
 //! **One ungated mount** (Q10 lesson, #426): the control is never wrapped in
 //! a `tw:@min-*` container. A top-layer popover cannot answer a container
@@ -63,25 +65,15 @@ pub struct ChromeSessionControl {
     pub initially_open: bool,
 }
 
-/// The B lockup: device segment · project segment · Save/↺ when dirty.
+/// The B lockup (device segment · project segment — one popover trigger)
+/// with Save/↺ standing beside it while the project is dirty.
 ///
-/// **Trigger shape.** [`DetailPopover`]/`PopoverButton` owns exactly one
-/// trigger `<button>`, so "three trigger segments, one panel" is expressed
-/// as one trigger wrapping all the segments; Save and ↺ are inner buttons
-/// that `stop_propagation`, which is what keeps them direct actions instead
-/// of panel openers. The consequence to know: while the popover is open the
-/// trigger's subtree renders TWICE (the in-flow placeholder plus the
-/// top-layer copy that paints above the merged outline), so both copies
-/// carry a Save button. They dispatch the same action, so a click on either
-/// is the same save — but nothing stateful may ever live in this subtree.
-///
-/// The cost is a `<button>` nested inside a `<button>`: the DOM is built
-/// node-by-node (`create_element`, never parsed HTML), so it renders and
-/// clicks exactly as authored, but assistive technology sees one control
-/// with two others inside it. The alternative — the popover's ANCHORED mode
-/// with the lockup as the anchor and Save/↺ as siblings of the trigger —
-/// buys valid nesting for a live top-layer copy of the whole lockup; worth
-/// revisiting if the gate finds the nesting reads badly.
+/// **Trigger shape.** The lockup alone is the [`DetailPopover`] trigger;
+/// Save/↺ are ordinary sibling buttons in the same flex row (G1 round-2
+/// ruling). While the popover is open the trigger's subtree renders TWICE
+/// (the in-flow placeholder plus the top-layer copy above the merged
+/// outline), so nothing stateful may ever live inside the lockup — but the
+/// action buttons sit outside that subtree and render once.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
@@ -155,55 +147,56 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
                 span { class: "tw:text-[11px] tw:italic tw:text-dim-foreground", "no project" }
             }
         }
-        // Save / ↺: DIRECT actions (R8-2). They stop propagation, so the
-        // panel neither opens nor closes underneath them.
-        if let Some(save) = save.clone() {
-            span { class: DIVIDER_CLASS }
-            button {
-                class: SAVE_SEGMENT_CLASS,
-                r#type: "button",
-                title: "{save.meta().summary}",
-                onclick: move |event| {
-                    event.stop_propagation();
-                    on_action.call(save.clone());
-                },
-                span { class: "tw:text-[11px] tw:font-semibold tw:text-status-warning-foreground",
-                    "Save"
-                }
-            }
-        }
-        if let Some(revert) = revert.clone() {
-            // The sm fold: ↺ retreats into the panel's per-entry reverts —
-            // the destructive half of the pair is the one to lose first.
-            span { class: "{DIVIDER_CLASS} tw:hidden tw:@min-[680px]:block" }
-            button {
-                class: "{REVERT_SEGMENT_CLASS} tw:hidden tw:@min-[680px]:inline-flex",
-                r#type: "button",
-                title: "{revert.meta().summary}",
-                onclick: move |event| {
-                    event.stop_propagation();
-                    on_action.call(revert.clone());
-                },
-                span { class: "tw:inline-flex tw:items-center tw:text-dim-foreground",
-                    StudioIcon { name: StudioIconName::Revert, size: 13 }
-                }
-            }
-        }
     };
 
     rsx! {
-        DetailPopover {
-            icon,
-            label: label.clone(),
-            title: label,
-            tone,
-            placement: PopoverPlacement::BottomStart,
-            trigger,
-            trigger_class: LOCKUP_CLASS.to_string(),
-            trigger_open_class: LOCKUP_OPEN_CLASS.to_string(),
-            layer_keeps_layout: true,
-            initially_open,
-            SessionPanel { session, project, on_action }
+        // The lockup and its actions are SIBLINGS (G1 round-2 ruling,
+        // 2026-08-19): one box that half-opens a panel and half-acts read
+        // as odd, so the trigger is purely "inspect" and Save/↺ stand
+        // apart as plain buttons. This also retires the nested-button
+        // fallback the first cut shipped — the buttons are ordinary
+        // top-level controls now, honest to assistive tech.
+        div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
+            DetailPopover {
+                icon,
+                label: label.clone(),
+                title: label,
+                tone,
+                placement: PopoverPlacement::BottomStart,
+                trigger,
+                trigger_class: LOCKUP_CLASS.to_string(),
+                trigger_open_class: LOCKUP_OPEN_CLASS.to_string(),
+                layer_keeps_layout: true,
+                initially_open,
+                SessionPanel { session, project, on_action }
+            }
+            // Save / ↺: DIRECT actions (R8-2), appearing exactly while the
+            // editor publishes them (the dirty window).
+            if let Some(save) = save.clone() {
+                button {
+                    class: SAVE_BUTTON_CLASS,
+                    r#type: "button",
+                    title: "{save.meta().summary}",
+                    onclick: move |_| on_action.call(save.clone()),
+                    span { class: "tw:text-[11px] tw:font-semibold tw:text-status-warning-foreground",
+                        "Save"
+                    }
+                }
+            }
+            if let Some(revert) = revert.clone() {
+                // The sm fold: ↺ retreats into the panel's per-entry
+                // reverts — the destructive half of the pair is the one
+                // to lose first.
+                button {
+                    class: "{REVERT_BUTTON_CLASS} tw:hidden tw:@min-[680px]:inline-flex",
+                    r#type: "button",
+                    title: "{revert.meta().summary}",
+                    onclick: move |_| on_action.call(revert.clone()),
+                    span { class: "tw:inline-flex tw:items-center tw:text-dim-foreground",
+                        StudioIcon { name: StudioIconName::Revert, size: 13 }
+                    }
+                }
+            }
         }
     }
 }
@@ -446,11 +439,12 @@ const SEGMENT_CLASS: &str =
 /// The internal hairline between segments — a drawn divider rather than a
 /// per-segment border, so no segment has to fight the UA button border.
 const DIVIDER_CLASS: &str = "tw:w-px tw:flex-none tw:self-stretch tw:bg-border-subtle";
-/// The amber Save segment: the save moment's own weight, inside the group
-/// (R7-2 — "at least to try it out").
-const SAVE_SEGMENT_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:border-none tw:bg-transparent tw:px-2.5 tw:py-1 tw:transition-colors tw:hover:bg-status-warning-bg";
-/// The quiet ↺ segment beside it: revert never competes with save.
-const REVERT_SEGMENT_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:items-center tw:border-none tw:bg-transparent tw:px-2 tw:py-1 tw:transition-colors tw:hover:bg-background-wash";
+/// The standalone amber Save button (G1 round-2: apart from the lockup —
+/// the inspect surface and the act surface are different things). No
+/// preflight, so border and background are named explicitly.
+const SAVE_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:rounded-md tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2.5 tw:py-[3px] tw:transition-colors tw:hover:border-status-warning-foreground";
+/// The quiet ↺ button beside it: revert never competes with save.
+const REVERT_BUTTON_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:items-center tw:rounded-md tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-[3px] tw:transition-colors tw:hover:border-border-strong tw:hover:bg-background-wash";
 /// The unsaved count, the header chip's pill verbatim (D8): mono, amber,
 /// pill-shaped — the same badge the pane's own affordances wear.
 const COUNT_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:font-mono tw:text-[9.5px] tw:font-semibold tw:text-status-warning-foreground";
