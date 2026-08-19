@@ -1,9 +1,9 @@
-# Where agent planning artifacts for this repo live.
+# Where agent planning artifacts for this repo live, and how the repo ships.
 # Read by the yona-* skills; see AGENTS.md "Personal planning workflow".
 #
 # Plans:    <planning_root>/<repo_slug>/<YYYY-MM-DD-HHMM>-<name>/
 # Archive:  <planning_root>/<repo_slug>/_archive/
-# Reviews:  <planning_root>/<repo_slug>/_reviews/
+# Reviews:  <planning_root>/<repo_slug>/_reviews/  (historical; yona-review is retired)
 
 [agent]
 repo_slug = "lp2025"
@@ -12,3 +12,13 @@ repo_slug = "lp2025"
 # variable is set and non-empty.
 planning_root = "~/.photomancer/planning"
 planning_root_env = "PHOTOMANCER_PLANNING_ROOT"
+
+# How this repo deploys, read by yona-ship after merge.
+[ship]
+# Deploys ride CI: merging to main runs "Main push" (tag + release), and a
+# green run triggers "Deploy Cloud Service" (fly.io, lightplayer.app). There
+# is no local deploy command — after merging, watch both runs.
+deploy_via_ci = true
+# /healthz reports the deployed build sha (LP_CLOUD_BUILD_SHA); once the
+# deploy run is green, `build` must equal the merge commit sha.
+verify = "curl -fsS --max-time 10 https://lightplayer.app/healthz"
