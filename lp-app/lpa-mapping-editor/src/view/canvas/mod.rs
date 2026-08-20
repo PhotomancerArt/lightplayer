@@ -770,7 +770,18 @@ pub fn EditorCanvas(
                     width: "28",
                     height: "28",
                     pattern_units: "userSpaceOnUse",
-                    circle { cx: "1", cy: "1", r: "1", fill: "rgba(255, 255, 255, 0.06)" }
+                    // Tile spacing is project space (scales with the camera
+                    // by design), but userSpaceOnUse pattern *content*
+                    // inherits that same scale — left alone, the dots would
+                    // grow with zoom right along with the spacing. Counter
+                    // the camera scale so the rendered dot stays
+                    // screen-constant, same idiom as the fixture layer.
+                    circle {
+                        cx: "1",
+                        cy: "1",
+                        r: "{1.0 / cam.scale}",
+                        fill: "rgba(255, 255, 255, 0.06)",
+                    }
                 }
                 marker {
                     id: "lpme-arrow-head",
