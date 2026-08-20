@@ -798,7 +798,7 @@ type MappingAssets = (
     BTreeMap<ArtifactLocation, UiAssetEditor>,
 );
 
-fn mapping_assets(project_editor: &ProjectEditorView) -> MappingAssets {
+pub(crate) fn mapping_assets(project_editor: &ProjectEditorView) -> MappingAssets {
     let mut assets = MappingAssets::default();
     fn face(assets: &mut MappingAssets, face: &Option<UiNodeFace>) {
         if let Some(UiNodeFace::Fixture(fixture)) = face

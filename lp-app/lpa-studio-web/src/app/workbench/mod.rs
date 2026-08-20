@@ -50,7 +50,7 @@ use lpa_studio_core::{
 
 use crate::app::{ProjectNodeWorkspace, ProjectPane};
 use crate::core::PaneView;
-use panels::{FixturesPanel, OutputsPanel};
+use panels::{FixturesPanel, OutputsPanel, TreeGrain};
 
 /// Which center the workbench renders — the route's view suffix
 /// ([`crate::router::ProjectView`]), narrowed to the views the workbench
@@ -832,13 +832,26 @@ fn PanelBody(
         (PanelId::Tree, WorkbenchView::Mapping) => rsx! {
             div { class: "tw:grid tw:content-start tw:gap-2.5",
                 TreePanelActions { panes: panes.clone(), on_action }
-                // Today's fixture tree, re-housed whole: mixed grain
-                // (effective instances + the dive's authored objects) is
-                // DELIBERATE until the R5 patching plan splits the grains
-                // (grain-follows-activity ruling).
+                // The AUTHORED tree, uniformly (grain-follows-activity,
+                // R5): objects and repeat interiors for every fixture —
+                // the dived one through the live session, the rest from
+                // their loaded bodies. Wire chips live in the Patching
+                // view now.
                 FixturesPanel {
                     surface,
                     selection: patch_selection,
+                    grain: TreeGrain::Authored,
+                    bodies: std::rc::Rc::new(
+                        panes
+                            .iter()
+                            .find_map(|pane| match &pane.body {
+                                UiViewContent::ProjectEditor(editor) => {
+                                    Some(crate::app::editor_shell::mapping_assets(editor).0)
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or_default(),
+                    ),
                     dive: (*dive_focused.read()).map(|node| (node, dive_session)),
                     on_action,
                 }
@@ -847,12 +860,14 @@ fn PanelBody(
         (PanelId::Tree, WorkbenchView::Patching) => rsx! {
             div { class: "tw:grid tw:content-start tw:gap-2.5",
                 TreePanelActions { panes: panes.clone(), on_action }
-                // The resolved tree: never dive-driven — Patching reads
-                // effective instances/ranges regardless of any dive left
-                // armed in the Mapping view (grain follows activity).
+                // The RESOLVED tree: instances/ranges with their wire
+                // chips, never dive-driven — Patching reads effective
+                // grain regardless of any dive left armed in Mapping
+                // (grain follows activity).
                 FixturesPanel {
                     surface,
                     selection: patch_selection,
+                    grain: TreeGrain::Resolved,
                     dive: None,
                     on_action,
                 }

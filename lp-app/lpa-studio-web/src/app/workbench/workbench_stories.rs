@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use lpa_mapping_editor::{Map2dDoc, MapEditorSession, ShapePath};
 use lpa_studio_web_story_macros::story;
 
-use super::panels::{FixturesPanel, OutputsPanel, PropsPanel};
+use super::panels::{FixturesPanel, OutputsPanel, PropsPanel, TreeGrain};
 use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchHrefs, WorkbenchView};
 use crate::app::StudioShell;
 use crate::app::patch::patch_surface_stories::{mini_dome_surface, peach_surface};
@@ -58,6 +58,42 @@ fn labelled(mut surface: UiPatchSurface) -> UiPatchSurface {
     surface
 }
 
+/// One embedded mini-dome file's text, by example-relative path.
+fn mini_dome_text(path: &str) -> String {
+    let example = lpa_studio_core::app::home::embedded_example("examples/mini-dome")
+        .expect("mini-dome embedded");
+    let bytes = example
+        .files
+        .iter()
+        .find(|(file, _)| *file == path)
+        .map(|(_, bytes)| *bytes)
+        .unwrap_or_else(|| panic!("mini-dome file {path}"));
+    std::str::from_utf8(bytes).expect("utf8 body").to_string()
+}
+
+/// The mini-dome surface with fixture map2d ARTIFACTS stamped (the shared
+/// builder leaves them `None`), plus the bodies map the authored grain
+/// reads — the Mapping tree's undived source.
+fn mini_dome_with_bodies() -> (
+    UiPatchSurface,
+    std::rc::Rc<std::collections::BTreeMap<ArtifactLocation, String>>,
+) {
+    let mut surface = labelled(mini_dome_surface(false));
+    let dome = ArtifactLocation::file("/dome/dome.map2d.json");
+    let doors = ArtifactLocation::file("/doors/doors.map2d.json");
+    let mut bodies = std::collections::BTreeMap::new();
+    bodies.insert(dome.clone(), mini_dome_text("dome/dome.map2d.json"));
+    bodies.insert(doors.clone(), mini_dome_text("doors/doors.map2d.json"));
+    for fixture in &mut surface.fixtures {
+        fixture.mapping_artifact = Some(if fixture.label == "dome" {
+            dome.clone()
+        } else {
+            doors.clone()
+        });
+    }
+    (surface, std::rc::Rc::new(bodies))
+}
+
 /// The ready-project studio view with the mini-dome patch surface on its
 /// editor pane, so the workbench's Fixtures/Outputs docks render real.
 fn view_with_surface(selection: Option<UiPatchTarget>) -> UiStudioView {
@@ -101,7 +137,7 @@ fn dock_frame(body: Element) -> Element {
 }
 
 #[story(
-    description = "The Fixtures panel on the mini-dome: fixture rows with object-colour swatches, instance rows with mapped dots and port-named channel chips (text + position — the one colour language leaves ports uncoloured). Sector 2 selected."
+    description = "The Tree panel at RESOLVED grain (the Patching view's tree, grain-follows-activity): fixture rows with object-colour swatches, instance rows with mapped dots and port-named channel chips (text + position — the one colour language leaves ports uncoloured). Sector 2 selected."
 )]
 fn fixtures_panel_mini_dome() -> Element {
     dock_frame(rsx! {
@@ -111,25 +147,36 @@ fn fixtures_panel_mini_dome() -> Element {
                 node: NodeId::new(2),
                 path: "/sector/2".to_string(),
             }),
+            grain: TreeGrain::Resolved,
             on_action: move |_| {},
         }
     })
 }
 
 #[story(
-    description = "The Fixtures panel while DIVED into the dome fixture (G1): the module row is the tree level above the fixtures, and the dived fixture grows its FULL shape tree — the sector repeat group (×5) with its inner path as a nested child row, the inner item selected by its exact ShapePath. Rows select through the shared editor session; the doors fixture keeps its instance rows beside the dive."
+    description = "The Tree panel at AUTHORED grain, UNDIVED (the Mapping view's tree): every fixture shows its authored structure from its loaded body — objects with repeat interiors as static rows, no wire chips (those are Patching information now). The shared patch selection /sector/2 highlights the sector object by its sticky id — the derived authored↔resolved bridge, not a second selection."
+)]
+fn fixtures_panel_mapping_authored() -> Element {
+    let (surface, bodies) = mini_dome_with_bodies();
+    dock_frame(rsx! {
+        FixturesPanel {
+            surface: Some(surface),
+            selection: Some(UiPatchTarget::Instance {
+                node: NodeId::new(2),
+                path: "/sector/2".to_string(),
+            }),
+            grain: TreeGrain::Authored,
+            bodies,
+            on_action: move |_| {},
+        }
+    })
+}
+
+#[story(
+    description = "The Tree panel at AUTHORED grain while DIVED into the dome fixture (G1): the module row is the tree level above the fixtures, and the dived fixture grows its FULL shape tree — the sector repeat group (×5) with its inner path as a nested child row, the inner item selected by its exact ShapePath. Rows select through the shared editor session; the undived doors fixture shows its own authored structure statically from its body."
 )]
 fn fixtures_panel_dived_dome_tree() -> Element {
-    let example = lpa_studio_core::app::home::embedded_example("examples/mini-dome")
-        .expect("mini-dome embedded");
-    let bytes = example
-        .files
-        .iter()
-        .find(|(path, _)| *path == "dome/dome.map2d.json")
-        .map(|(_, bytes)| *bytes)
-        .expect("dome map2d");
-    let doc =
-        Map2dDoc::from_json(std::str::from_utf8(bytes).expect("utf8 map2d")).expect("dome parses");
+    let doc = Map2dDoc::from_json(&mini_dome_text("dome/dome.map2d.json")).expect("dome parses");
     let session = use_signal(move || {
         let mut session = MapEditorSession::new(doc.clone());
         // The repeat's inner path — the row the flat tree used to hide.
@@ -138,10 +185,13 @@ fn fixtures_panel_dived_dome_tree() -> Element {
             .select_only_path(ShapePath::root(0).child(0));
         session
     });
+    let (surface, bodies) = mini_dome_with_bodies();
     dock_frame(rsx! {
         FixturesPanel {
-            surface: Some(labelled(mini_dome_surface(false))),
+            surface: Some(surface),
             selection: None,
+            grain: TreeGrain::Authored,
+            bodies,
             dive: Some((NodeId::new(2), session)),
             on_action: move |_| {},
         }
@@ -149,13 +199,14 @@ fn fixtures_panel_dived_dome_tree() -> Element {
 }
 
 #[story(
-    description = "The Fixtures panel at range grain (the peach): no instance rows — one honest 0..N range row per fixture with its wire-window chips, the reversed half wearing ‹rev."
+    description = "The Tree panel at range grain (the peach, RESOLVED): no instance rows — one honest 0..N range row per fixture with its wire-window chips, the reversed half wearing ‹rev."
 )]
 fn fixtures_panel_peach_range() -> Element {
     dock_frame(rsx! {
         FixturesPanel {
             surface: Some(labelled(peach_surface())),
             selection: None,
+            grain: TreeGrain::Resolved,
             on_action: move |_| {},
         }
     })

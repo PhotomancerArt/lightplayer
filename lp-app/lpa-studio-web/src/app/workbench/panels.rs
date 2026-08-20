@@ -38,6 +38,18 @@ fn object_color(index: usize) -> &'static str {
     OBJECT_COLORS[index % OBJECT_COLORS.len()]
 }
 
+/// Which tree the Fixtures panel shows — **grain follows activity,
+/// never dive state** (the `_features/patching.md` ruling, R5): the
+/// Mapping view reads the AUTHORED tree (objects, repeat interiors —
+/// what mapping edits), the Patching view the RESOLVED one (instances /
+/// ranges with their wire chips — what patching assigns). The naming
+/// pair matches `lpc_mapping::resolve`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TreeGrain {
+    Authored,
+    Resolved,
+}
+
 /// Dispatch a selection change to the core — the same op the patch
 /// surface and (later) the arrange canvas dispatch: one selection.
 fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
@@ -112,6 +124,10 @@ fn chip_text(cell: &UiPatchCell) -> String {
 const CHIP: &str = "tw:whitespace-nowrap tw:rounded tw:border tw:border-border-strong tw:bg-card-muted tw:px-1 tw:font-mono tw:text-[9.5px] tw:text-subtle-foreground";
 const ROW_IDLE: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash";
 const ROW_SELECTED: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1";
+// The undived authored rows are structure, not selection targets (the
+// authored tree is edited through the dive) — same look, no affordance.
+const ROW_STATIC: &str = "tw:flex tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1";
+const ROW_STATIC_SELECTED: &str = "tw:flex tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1";
 
 /// Indent per tree level as an inline style — arbitrary depth (nested
 /// modules, nested repeats) must never outrun a generated tailwind class.
@@ -177,6 +193,14 @@ fn ModuleRow(
 pub fn FixturesPanel(
     surface: Option<UiPatchSurface>,
     selection: Option<UiPatchTarget>,
+    /// Which tree this view reads (grain follows activity): the Mapping
+    /// view passes `Authored`, the Patching view `Resolved`.
+    grain: TreeGrain,
+    /// Fixture map2d bodies by artifact — the authored grain's source for
+    /// UNDIVED fixtures (a fixture whose body hasn't loaded shows its
+    /// flat row until the panel's fetch-on-open lands it).
+    #[props(default)]
+    bodies: std::rc::Rc<std::collections::BTreeMap<lpa_studio_core::ArtifactLocation, String>>,
     /// The dive, when one is live: `(focused node, shared session)` — the
     /// focused fixture's row grows its OBJECT tree (the editor's old
     /// wiring-order rail, unified here; one tree, one selection).
@@ -234,6 +258,11 @@ pub fn FixturesPanel(
                     dive_session: dive
                         .filter(|(node, _)| *node == fixture.node)
                         .map(|(_, session)| session),
+                    grain,
+                    body: fixture
+                        .mapping_artifact
+                        .as_ref()
+                        .and_then(|artifact| bodies.get(artifact).cloned()),
                     fixture,
                     color: object_color(index),
                     indent: 0,
@@ -254,6 +283,11 @@ pub fn FixturesPanel(
                         dive_session: dive
                             .filter(|(node, _)| *node == fixture.node)
                             .map(|(_, session)| session),
+                        grain,
+                        body: fixture
+                            .mapping_artifact
+                            .as_ref()
+                            .and_then(|artifact| bodies.get(artifact).cloned()),
                         fixture,
                         color: object_color(index),
                         indent: module.depth + 1,
@@ -287,18 +321,21 @@ fn shape_row_text(shape: &Map2dShape) -> String {
     }
 }
 
-/// Flatten the dived document's shape tree in wiring order: each object's
-/// root row, then its structural descendants (a repeat's inner item, at
-/// any nesting) — the full depth the G1 feedback asked for. Selection is
-/// the EXACT path, so a group and its inner item highlight distinctly.
-fn dive_rows(doc: &Map2dDoc, selection: &MapSelection) -> Vec<DiveRow> {
+/// Flatten a document's shape tree in wiring order: each object's root
+/// row, then its structural descendants (a repeat's inner item, at any
+/// nesting) — the full depth the G1 feedback asked for. `selected`
+/// judges the EXACT path, so a group and its inner item highlight
+/// distinctly. Serves both authored renders: the dive (live session
+/// selection) and the undived Mapping tree (derived patch-selection
+/// highlight).
+fn authored_rows(doc: &Map2dDoc, selected: &dyn Fn(&ShapePath) -> bool) -> Vec<DiveRow> {
     fn descend(
         rows: &mut Vec<DiveRow>,
         doc: &Map2dDoc,
         path: &ShapePath,
         depth: usize,
         object_index: usize,
-        selection: &MapSelection,
+        selected: &dyn Fn(&ShapePath) -> bool,
     ) {
         let Some(shape) = path.resolve(doc) else {
             return;
@@ -313,10 +350,10 @@ fn dive_rows(doc: &Map2dDoc, selection: &MapSelection) -> Vec<DiveRow> {
                 depth,
                 label: shape_row_text(child),
                 trail: String::new(),
-                selected: selection.contains(&child_path),
+                selected: selected(&child_path),
                 object_index,
             });
-            descend(rows, doc, &child_path, depth + 1, object_index, selection);
+            descend(rows, doc, &child_path, depth + 1, object_index, selected);
         }
     }
     let mut rows = Vec::new();
@@ -327,12 +364,34 @@ fn dive_rows(doc: &Map2dDoc, selection: &MapSelection) -> Vec<DiveRow> {
             depth: 0,
             label: object.name.clone(),
             trail: shape_row_text(&object.shape),
-            selected: selection.contains(&path),
+            selected: selected(&path),
             object_index,
         });
-        descend(&mut rows, doc, &path, 1, object_index, selection);
+        descend(&mut rows, doc, &path, 1, object_index, selected);
     }
     rows
+}
+
+fn dive_rows(doc: &Map2dDoc, selection: &MapSelection) -> Vec<DiveRow> {
+    authored_rows(doc, &|path| selection.contains(path))
+}
+
+/// The authored↔resolved selection bridge (`/sector/2`, D46): a resolved
+/// instance path is an object-id segment plus integer instance steps, so
+/// the authored row it names is DERIVED — the object whose sticky id
+/// matches the first segment — never a second selection store. The
+/// instance number stays implied (the authored tree has one row per
+/// repeat interior, not per instance).
+fn authored_object_for_instance_path(doc: &Map2dDoc, instance_path: &str) -> Option<usize> {
+    let first = instance_path
+        .split('/')
+        .find(|segment| !segment.is_empty())?;
+    doc.objects.iter().position(|object| {
+        object
+            .id
+            .as_ref()
+            .is_some_and(|id| id.as_str() == first)
+    })
 }
 
 /// One fixture's row plus its instance (or range-grain) children.
@@ -344,6 +403,13 @@ fn FixtureRows(
     /// Tree level under the module rows (0 = no enclosing module).
     indent: usize,
     selection: Option<UiPatchTarget>,
+    /// Which tree this fixture's children render (grain follows
+    /// activity — see [`TreeGrain`]).
+    grain: TreeGrain,
+    /// The fixture's map2d body, when loaded — the authored grain's
+    /// undived source.
+    #[props(default)]
+    body: Option<String>,
     /// Present while this fixture is the dive: its object tree renders
     /// from (and selects through) the shared session.
     #[props(default)]
@@ -358,6 +424,13 @@ fn FixtureRows(
     };
     let range_grain = fixture.instances.is_empty();
     let kind = if range_grain { "range" } else { "2d map" };
+    // The undived authored tree (Mapping grain): the loaded body, parsed;
+    // a fixture with no loaded body keeps its flat row until the panel's
+    // fetch-on-open lands it. Component memoization (props PartialEq)
+    // bounds the re-parse to actual body changes.
+    let authored_doc = (grain == TreeGrain::Authored && dive_session.is_none())
+        .then(|| body.as_deref().and_then(|text| Map2dDoc::from_json(text).ok()))
+        .flatten();
     rsx! {
         div {
             class: "{row_class}",
@@ -376,7 +449,7 @@ fn FixtureRows(
                 "{fixture.patch.lamps} · {kind}"
             }
         }
-        if let Some(mut session) = dive_session {
+        if grain == TreeGrain::Authored && let Some(mut session) = dive_session {
             // The DIVE's object tree (one tree, one selection): the edited
             // document's FULL shape tree in wiring order — objects, and
             // inside each the structural descent (a repeat's inner item at
@@ -420,9 +493,59 @@ fn FixtureRows(
                     }
                 }
             }
+        } else if grain == TreeGrain::Authored {
+            // The UNDIVED authored tree (Mapping grain): structure from the
+            // loaded body — display rows, not selection targets (authored
+            // editing goes through the dive). The one highlight is DERIVED
+            // from the shared patch selection (`/sector/2` → the object
+            // whose sticky id matches — the D46 bridge, never a second
+            // selection store).
+            if let Some(doc) = authored_doc {
+                {
+                    let highlighted = selection.as_ref().and_then(|target| match target {
+                        UiPatchTarget::Instance { node, path } if *node == fixture.node => {
+                            authored_object_for_instance_path(&doc, path)
+                        }
+                        _ => None,
+                    });
+                    let mut rows = authored_rows(&doc, &|_| false);
+                    if let Some(object) = highlighted {
+                        for row in &mut rows {
+                            if row.object_index == object && row.path.is_root() {
+                                row.selected = true;
+                            }
+                        }
+                    }
+                    rsx! {
+                        for row in rows {
+                            div {
+                                key: "auth-{row.object_index}-{row.path.descent:?}",
+                                class: if row.selected { "{ROW_STATIC_SELECTED} tw:py-0.5" } else { "{ROW_STATIC} tw:py-0.5" },
+                                style: indent_style(indent + 1 + row.depth),
+                                if row.path.is_root() {
+                                    span {
+                                        class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-[2px]",
+                                        style: "background: {editor_object_color(row.object_index)};",
+                                    }
+                                } else {
+                                    span {
+                                        class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-[2px] tw:border",
+                                        style: "border-color: {editor_object_color(row.object_index)};",
+                                    }
+                                }
+                                span { class: "tw:truncate tw:text-[12px] tw:text-muted-foreground", "{row.label}" }
+                                span { class: "tw:ml-auto tw:flex-none tw:font-mono tw:text-[9.5px] tw:text-dim-foreground",
+                                    "{row.trail}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         } else if range_grain {
-            // The peach case: no instance grain — one honest row for the
-            // fixture's whole channel range, chips from its cells.
+            // The peach case (Resolved grain): no instance grain — one
+            // honest row for the fixture's whole channel range, chips from
+            // its cells.
             div {
                 class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1 tw:px-1.5 tw:py-0.5",
                 style: indent_style(indent + 1),
@@ -1180,5 +1303,46 @@ mod tests {
         assert_eq!(names(4), ["root", "spare"]);
         assert_eq!(names(1), ["root"]);
         assert!(names(99).is_empty(), "unknown leaf yields no chain");
+    }
+
+    /// The D46 bridge: a resolved instance path (`/sector/2`) names the
+    /// authored object by its STICKY ID segment — never by name, never by
+    /// position — and nested instance steps don't confuse it.
+    #[test]
+    fn instance_paths_derive_their_authored_object() {
+        use lpc_mapping::{Map2dObject, Map2dObjectId, Map2dShape, PathShape};
+        let object = |name: &str, id: Option<&str>| Map2dObject {
+            name: name.to_string(),
+            id: id.map(|id| Map2dObjectId::new(id).expect("test id")),
+            stride: None,
+            shape: Map2dShape::Path(PathShape {
+                points: vec![[0.0, 0.0], [1.0, 0.0]],
+                count: 10,
+                gaps: Vec::new(),
+                reversed: false,
+            }),
+        };
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(object("Renamed Sector", Some("sector")));
+        doc.objects.push(object("door", Some("door")));
+        doc.objects.push(object("no id yet", None));
+
+        assert_eq!(authored_object_for_instance_path(&doc, "/sector/2"), Some(0));
+        assert_eq!(authored_object_for_instance_path(&doc, "/door"), Some(1));
+        assert_eq!(
+            authored_object_for_instance_path(&doc, "/panels/3/2"),
+            None,
+            "unknown id segment derives nothing"
+        );
+        assert_eq!(
+            authored_object_for_instance_path(&doc, ""),
+            None,
+            "an empty path derives nothing"
+        );
+        assert_eq!(
+            authored_object_for_instance_path(&doc, "/no id yet"),
+            None,
+            "names never stand in for ids"
+        );
     }
 }
