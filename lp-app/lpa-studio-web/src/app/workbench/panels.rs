@@ -563,7 +563,9 @@ fn FixtureRows(
         } else {
             for instance in fixture.instances.clone() {
                 InstanceRow {
-                    key: "{fixture.node.0}-{instance.path}",
+                    // Keyed by START, not path: id-less display rows all
+                    // carry the empty path, and start is unique per strand.
+                    key: "{fixture.node.0}-{instance.start}",
                     cells: instance_cells(&fixture, &instance)
                         .into_iter()
                         .cloned()
@@ -591,9 +593,20 @@ fn InstanceRow(
     selection: Option<UiPatchTarget>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let target = UiPatchTarget::Instance {
-        node,
-        path: instance.path.clone(),
+    // An id-less display row (empty path — the doc hasn't been through
+    // ensure-ids) selects at RANGE grain: same lamps, same pulse, honest
+    // about not being path-addressable (grain-robustness ruling, G1 R2).
+    let target = if instance.path.is_empty() {
+        UiPatchTarget::Range {
+            node,
+            start: instance.start,
+            count: Some(instance.lamps),
+        }
+    } else {
+        UiPatchTarget::Instance {
+            node,
+            path: instance.path.clone(),
+        }
     };
     let row_class = if is_selected(&selection, &target) {
         ROW_SELECTED

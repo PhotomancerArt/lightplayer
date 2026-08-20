@@ -159,6 +159,9 @@ pub struct UiPatchSurfaceFixture {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UiPatchInstance {
     /// The D46 path (`/sector/2`) — the patch entry's `from`, verbatim.
+    /// EMPTY when the owning object has no sticky id yet: the strand still
+    /// displays and selects (at range grain, `UiPatchTarget::Range`), but
+    /// no patch entry can address it until ensure-ids stamps the document.
     pub path: String,
     /// Display label (`sector 2`).
     pub label: String,
@@ -248,11 +251,13 @@ pub enum UiPatchTarget {
 
 /// Parse a fixture's map2d body into its instance table.
 ///
-/// Only strands whose object carries a stable id are addressable —
-/// nameless strands are unpatchable by path and simply absent (range-grain
-/// entries still reach them). Repeat instances get one row each
-/// (`/sector/2`); a plain identified object gets its whole-object row
-/// (`/door`) — for a single-strand object the two coincide.
+/// The resolver expands EVERY object — repeats and all — so the effective
+/// tree always displays, whatever the document's format age (grain
+/// robustness: old data must never collapse the Patch view). The sticky id
+/// gates only ADDRESSABILITY: an id-bearing strand gets its D46 path
+/// (`/sector/2`, what patch entries key on); an id-less strand gets an
+/// empty path — it displays, selects, and pulses at range grain, and
+/// becomes path-addressable the moment ensure-ids stamps the document.
 pub(crate) fn instances_from_map2d(text: &str) -> Vec<UiPatchInstance> {
     let Ok(doc) = lpc_mapping::Map2dDoc::from_json(text) else {
         return Vec::new();
@@ -264,18 +269,21 @@ pub(crate) fn instances_from_map2d(text: &str) -> Vec<UiPatchInstance> {
     spans
         .iter()
         .filter_map(|span| {
-            let id = span.id.as_ref()?;
-            let path = lpc_mapping::MapObjectPath {
-                id: id.clone(),
-                instances: span.instances.clone(),
-            };
+            let object = doc.objects.get(span.object)?;
+            let path = span
+                .id
+                .as_ref()
+                .map(|id| {
+                    lpc_mapping::MapObjectPath {
+                        id: id.clone(),
+                        instances: span.instances.clone(),
+                    }
+                    .to_text()
+                })
+                .unwrap_or_default();
             // The stride of the ADDRESSED node: descend the object's shape
             // through the instance steps (a door instance's stride is the
             // polygon's side, not the repeat's whole inner count).
-            let object = doc
-                .objects
-                .iter()
-                .find(|object| object.id.as_ref() == Some(id))?;
             let mut shape = &object.shape;
             for _ in &span.instances {
                 if let lpc_mapping::Map2dShape::Repeat(repeat) = shape {
@@ -286,12 +294,21 @@ pub(crate) fn instances_from_map2d(text: &str) -> Vec<UiPatchInstance> {
                 .stride
                 .filter(|stride| *stride > 0)
                 .unwrap_or_else(|| lpc_mapping::shape_stride(shape));
+            // Display name: the id when there is one, else the authored
+            // name, else an honest positional fallback.
+            let base = span
+                .id
+                .as_ref()
+                .map(|id| id.as_str().to_string())
+                .filter(|base| !base.is_empty())
+                .or_else(|| Some(object.name.clone()).filter(|name| !name.is_empty()))
+                .unwrap_or_else(|| format!("object {}", span.object + 1));
             let label = if span.instances.is_empty() {
-                id.as_str().to_string()
+                base
             } else {
                 format!(
                     "{} {}",
-                    id.as_str(),
+                    base,
                     span.instances
                         .iter()
                         .map(|instance| instance.to_string())
@@ -300,7 +317,7 @@ pub(crate) fn instances_from_map2d(text: &str) -> Vec<UiPatchInstance> {
                 )
             };
             Some(UiPatchInstance {
-                path: path.to_text(),
+                path,
                 label,
                 start: span.start,
                 lamps: span.count,
@@ -338,18 +355,29 @@ mod tests {
         assert_eq!(instances[1].stride, 3, "one polygon side, not 9");
     }
 
-    /// A document without ids (the peach) yields NO instances — the
-    /// fixture patches at range grain, and the surface must not invent an
-    /// address grain the format cannot store.
+    /// A document without ids still DISPLAYS its effective expansion —
+    /// old-format data must never collapse the Patch tree (G1 R2, the
+    /// zook lesson) — but the rows carry EMPTY paths: no address grain is
+    /// invented that the patch format cannot store, so they select and
+    /// pulse as ranges until ensure-ids stamps the document.
     #[test]
-    fn documents_without_ids_have_no_instance_grain() {
+    fn documents_without_ids_display_but_are_not_addressable() {
         let doc = r#"{
   "format": 1,
   "objects": [
-    { "name": "strand", "shape": { "grid": { "origin": [0.5,0.5], "cols": 8, "rows": 1, "pitch": 1 } } }
+    { "name": "sector", "shape": { "repeat": {
+        "shape": { "grid": { "origin": [0.5,0.5], "cols": 8, "rows": 1, "pitch": 1 } },
+        "center": [60.0,60.0], "count": 5 } } }
   ]
 }"#;
-        assert!(instances_from_map2d(doc).is_empty());
+        let instances = instances_from_map2d(doc);
+        assert_eq!(instances.len(), 5, "the repeat expands for display");
+        assert_eq!(instances[2].label, "sector 2");
+        assert_eq!(
+            instances[2].path, "",
+            "no id, no address — range grain until ensure-ids"
+        );
+        assert_eq!((instances[2].start, instances[2].lamps), (16, 8));
     }
 
     /// An explicit object-level stride override beats the derivation.

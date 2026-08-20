@@ -3671,12 +3671,17 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
             // The peach: one unnamed output; fixtures patch at range grain.
             assert_eq!(surface.outputs.len(), 1, "{id}");
             assert_eq!(surface.outputs[0].name, None, "{id}: unnamed output");
+            // Id-less documents still DISPLAY their effective expansion
+            // (grain robustness, G1 R2) — but with EMPTY paths: no address
+            // grain is invented that the patch format cannot store, so the
+            // fixtures keep patching at range grain.
             assert!(
                 surface
                     .fixtures
                     .iter()
-                    .all(|fixture| fixture.instances.is_empty()),
-                "{id}: no ids, no instance grain"
+                    .flat_map(|fixture| &fixture.instances)
+                    .all(|instance| instance.path.is_empty()),
+                "{id}: no ids, no path addresses — range grain holds"
             );
             assert!(
                 !surface.fixtures.is_empty(),
