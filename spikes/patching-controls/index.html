@@ -178,10 +178,11 @@
   output below); the chase paints <b>the lamps themselves</b> on every representation
   (strips show actual output, so blue/red/sweep live in the lamp values — head/tail size
   = clamp(1, 10, count/10)); and the selection model is <b>ONE selection at a time</b> —
-  a fixture object or an output port <i>segment</i> — where <b>order matters</b>: clicking
-  the unmapped counterpart of an unmapped selection IS the assignment (immediate write,
-  ⌘Z undoes), clicking anything mapped just re-selects. The panel's other section carries
-  the counterpart: the derived mapping, or the invitation.
+  a fixture object or an output port <i>segment</i> (WLED's own word) — and <b>plain
+  clicks never write</b>. Linking takes the explicit <b>assign arm</b> (a, or the button
+  in the invitation — the swap-arm grammar): armed, the next counterpart click completes
+  the pairing; <b>m</b> advances the walk-up loop and keeps the arm. The panel's other
+  section carries the counterpart: the derived mapping, or the invitation.
 </p>
 
 <div class="xstrip">
@@ -249,7 +250,7 @@
       </div>
       <div class="keysrow">
         <span><b>r</b> flip</span><span><b>; '</b> rotate coarse</span><span><b>k l</b> rotate fine</span>
-        <span><b>[ ]</b> shift on wire</span><span><b>u</b> unmap</span><span><b>s</b> swap</span>
+        <span><b>[ ]</b> shift on wire</span><span><b>a</b> assign (arm)</span><span><b>u</b> unmap</span><span><b>s</b> swap</span>
         <span><b>m</b> next free segment</span><span><b>esc</b> deselect</span><span><b>⌘Z</b> undo</span>
       </div>
     </div>
@@ -269,9 +270,10 @@
 <div class="simrow">
   <span class="lbl">segment-first:</span>
   <button onclick="flowSeg(0)">1 · click free space</button>
-  <button onclick="flowSeg(1)">2 · click the pulsing object</button>
-  <button onclick="flowSeg(2)">3 · adjust</button>
-  <button onclick="flowSeg(3)">4 · m → next</button>
+  <button onclick="flowSeg(4)">2 · arm (a)</button>
+  <button onclick="flowSeg(1)">3 · click the pulsing object</button>
+  <button onclick="flowSeg(2)">4 · adjust</button>
+  <button onclick="flowSeg(3)">5 · m → next (stays armed)</button>
   <span class="lbl" style="margin-left:14px">object-first:</span>
   <button onclick="flowObj(0)">1 · click unmapped object</button>
   <button onclick="flowObj(1)">2 · click a port</button>
@@ -353,6 +355,7 @@ const SCEN = {
 const scen = () => SCEN[S.scenario];
 /* selection: null | {kind:'object', i} | {kind:'segment', start, len, owner:i|null} */
 let sel = null;
+let armed = false;  /* the assign arm — explicit, like the swap arm */
 
 /* ================= helpers ================= */
 const heads = n => Math.max(1, Math.min(10, Math.round(n / 10)));
@@ -536,7 +539,8 @@ function renderPanel(t) {
     const opts = sc.objects.map((o, i) => !o.mapped
       ? `<option value="${i}">${o.name} · ${o.count}</option>` : '').join('');
     poBody.innerHTML = `<div class="prompt">Not mapped to any object.
-      <b>Click an unmapped object</b> to assign it to this segment
+      <button class="kbtn primary" onclick="armAssign()" ${armed ? 'disabled' : ''}>
+        ${armed ? 'armed — click the object' : 'assign'}<small>a · next click links</small></button>
       <select onchange="assignFromPicker(this.value)"><option value="">or pick…</option>${opts}</select></div>`;
   } else {
     poName.textContent = '—'; poFacts.textContent = '';
@@ -589,7 +593,8 @@ function renderPanel(t) {
   } else if (sel?.kind === 'object') {
     ppName.textContent = '—'; ppFacts.textContent = '';
     ppBody.innerHTML = `<div class="prompt">This object isn't mapped to any port segment.
-      <b>Click a port</b> to map it
+      <button class="kbtn primary" onclick="armAssign()" ${armed ? 'disabled' : ''}>
+        ${armed ? 'armed — click a port' : 'assign'}<small>a · next click links</small></button>
       <select onchange="mapFromPicker(this.value)"><option value="">or pick…</option>
         <option value="0">${sc.portName} · next free</option>
         <option value="1">IO13 · port 1 · next free</option></select></div>`;
@@ -620,32 +625,48 @@ function badge() {
     b.textContent = `object: ${sc.objects[sel.i].name} (${sc.objects[sel.i].mapped ? 'mapped' : 'unmapped'})`;
   else b.textContent = `segment: ${sel.start + 1}-${sel.start + sel.len}` +
     (sel.owner != null ? ` (owner ${sc.objects[sel.owner].name})` : ' (free)');
+  if (armed) b.textContent += ' · ASSIGN ARMED';
 }
 function caption(html) { document.getElementById('p-caption').innerHTML = html; }
 function act(what) {
   const sc = scen();
-  if (what === 'esc') { sel = null; caption('Deselected — the panel returns to its empty states.'); }
+  if (what === 'esc') {
+    if (armed) { armed = false; caption('<b>Disarmed</b> — esc’s first rung. Selection kept.'); badge(); renderAll(); return; }
+    sel = null; caption('Deselected — the panel returns to its empty states.');
+  }
   else if (what === 'freeport') {
+    if (armed && sel?.kind === 'object' && !sc.objects[sel.i].mapped) {
+      const i = sel.i;
+      sc.objects[i].mapped = { start: nextFree(sc.objects[i].count) };
+      armed = false;
+      caption(`<b>Armed port click completes the pairing</b> — ${sc.objects[i].name} lands at the
+        port's next free lamp. Plain port clicks would only have selected.`);
+      badge(); renderAll(); return;
+    }
     const fu = firstUnmapped();
     const len = fu >= 0 ? sc.objects[fu].count : 30;
     sel = { kind: 'segment', start: nextFree(len), len, owner: null };
-    caption(`<b>Free port space clicked.</b> A segment auto-sizes to the next unmapped object
-      (${fu >= 0 ? sc.objects[fu].name : '30 lamps'}) — it BREATHES on the piece and the strip;
-      the object section invites the pairing.`);
+    armed = false;
+    caption(`<b>Free port space clicked — selection only, nothing writes.</b> The segment
+      auto-sizes to the next unmapped object and BREATHES; the object section offers the
+      <b>assign</b> arm (a).`);
   }
   else if (what === 'unmapped-object') {
     const fu = firstUnmapped();
     if (fu < 0) { caption('Everything is mapped — unmap something first (select it, then unmap).'); return; }
-    if (sel?.kind === 'segment' && sel.owner == null) {
+    if (armed && sel?.kind === 'segment' && sel.owner == null) {
       sc.objects[fu].mapped = { start: sel.start };
       sel = { kind: 'object', i: fu };
-      caption(`<b>The click IS the assignment.</b> ${sc.objects[fu].name} mapped to the armed
-        segment (a real write — ⌘Z undoes) and became the selection. The output section
-        didn't change: it was already showing this window. Both sides now run the CHASE.`);
+      armed = false;
+      caption(`<b>Armed click completes the pairing.</b> ${sc.objects[fu].name} mapped to the
+        segment (a real write — ⌘Z undoes) and became the selection; the output section
+        didn't change. Both sides now run the CHASE.`);
     } else {
       sel = { kind: 'object', i: fu };
-      caption(`<b>Unmapped object selected.</b> The chase runs on the object (its own order);
-        the output section invites: click a port to map it.`);
+      armed = false;
+      caption(`<b>Unmapped object selected — selection only.</b> Looking is always free: a
+        plain click never writes, whatever was selected before. The output section offers
+        the <b>assign</b> arm.`);
     }
   }
   else if (what === 'mapped-object') {
@@ -694,15 +715,22 @@ function segShift(d) { const sc = scen();
   badge(); renderAll(); }
 function segGrow(d) { if (sel?.kind === 'segment' && sel.owner == null)
   { sel.len = Math.max(1, sel.len + d); badge(); renderAll(); } }
+function armAssign() { if (sel && !armed) { armed = true;
+  caption('<b>Assign armed (a)</b> — the NEXT counterpart click links. Esc disarms; plain grammar is untouched.');
+  badge(); renderAll(); } }
 function advance() { const sc = scen(), fu = firstUnmapped();
   const len = fu >= 0 ? sc.objects[fu].count : 30;
   sel = { kind: 'segment', start: nextFree(len), len, owner: null };
-  caption(`<b>m</b> — advanced to the next free segment (${len} lamps, the next unmapped object's count).`);
+  armed = true;  /* the walk-up loop keeps the arm the user started */
+  caption(`<b>m</b> — advanced to the next free segment (${len} lamps) and KEPT the arm:
+    the loop the user started stays one-key-one-click per panel.`);
   badge(); renderAll(); }
 
 /* flows */
 function flowSeg(i) {
   const cap = document.getElementById('flow-caption');
+  if (i === 4) { armAssign();
+    cap.innerHTML = '<b>Walk-up 2.</b> The explicit arm — one key. From here the loop is one click per panel; m keeps it armed.'; return; }
   if (i === 0) { act('freeport');
     cap.innerHTML = '<b>Walk-up 1.</b> The chunk breathes on the piece — the canvas makes no claim about objects; the human supplies that fact.'; }
   if (i === 1) { act('unmapped-object');
@@ -753,8 +781,8 @@ function tick(ms) {
 badge();
 caption('Click a simulate button — the machine is live.');
 switch (location.hash) {
-  case '#armed': act('freeport'); break;
-  case '#paired': act('freeport'); act('unmapped-object'); break;
+  case '#armed': act('freeport'); armAssign(); break;
+  case '#paired': act('freeport'); armAssign(); act('unmapped-object'); break;
   case '#derived': act('mapped-object'); break;
   case '#objfirst': act('unmapped-object'); break;
 }
