@@ -10,9 +10,10 @@ panels (Tree | Device · Outputs · Props), radio per side with per-view
 memory; a collapsed side keeps its tab row as the reopen affordance;
 the Tree's body is view-keyed (node tree on Nodes, fixture tree on
 Map). Below 820px it folds to a summon toolbar; the open project's
-state lives on the site header's project chip. See
+state lives on the site header's session·project control. See
 `docs/adr/2026-08-12-studio-workbench-panel-dock.md` (amended
-2026-08-14).
+2026-08-14) and
+`docs/adr/2026-08-19-single-session-web-and-session-control.md`.
 
 The web app owns Dioxus presentation. It renders `StudioView` panes and
 contextual `UiAction` controls, then dispatches those actions back into

@@ -527,9 +527,9 @@ pub(crate) struct PendingSharedProject(pub(crate) Option<PrefixedUid>);
 /// The canonical share path for a project: cosmetic slug, load-bearing uid.
 /// Callers hand it the slug once the project's meta is known.
 ///
-/// `uid` is a `&str` here because its callers (the gallery card's `<a
-/// href>`, the chrome's session chip) carry uids the way their view models
-/// do — as strings straight off a card. Every one of them is an
+/// `uid` is a `&str` here because its caller (the gallery card's `<a
+/// href>`) carries uids the way its view model does — as a string straight
+/// off a card. Every one of them is an
 /// already-valid project uid, so this delegates to
 /// [`share_link::canonical_path`] and falls back to the bare shape only
 /// for a malformed uid, which never happens in practice.

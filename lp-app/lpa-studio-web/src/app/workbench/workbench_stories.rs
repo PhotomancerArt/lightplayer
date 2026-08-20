@@ -177,7 +177,7 @@ fn outputs_panel_mini_dome() -> Element {
 }
 
 #[story(
-    description = "The workbench's Nodes view under the ONE band (D7): the Tree's attached tab over the left dock, Nodes · Map centered, Device · Outputs over the right — the active panel tab shares its dock's fill and breaks the band's bottom hairline, so it reads as the panel's own. The Tree carries the shared Save row and the embedded project tree; its popup lives on the header project chip."
+    description = "The workbench's Nodes view under the ONE band (D7): the Tree's attached tab over the left dock, Nodes · Map centered, Device · Outputs over the right — the active panel tab shares its dock's fill and breaks the band's bottom hairline, so it reads as the panel's own. The Tree carries the embedded project tree (the Debug chip only, while overrides are set); Save/Revert and the project popup moved to the header session·project control (single-session policy, P4 retirement)."
 )]
 fn workbench_nodes_view() -> Element {
     workbench_story(ProjectView::Workspace)

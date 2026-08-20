@@ -9,9 +9,9 @@ use crate::app::node::{
 /// node. The sidebar column is the [`ProjectPane`](super::ProjectPane) —
 /// one `StudioPane` carrying the project header and the node tree.
 ///
-/// The project's detail popup lives on the site header's project chip
-/// (D8/D5 — the root card's [i] mount retired with it); the cards here
-/// carry only their own node popups.
+/// The project's detail popup lives on the site header's session·project
+/// control (D8/D5 — the root card's [i] mount retired with it); the cards
+/// here carry only their own node popups.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProjectNodeWorkspace(view: ProjectEditorView, on_action: EventHandler<UiAction>) -> Element {

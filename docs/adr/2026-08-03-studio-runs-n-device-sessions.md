@@ -114,6 +114,20 @@ HEADER's "Flash firmware…" has no card at all — it acts directly only
 when exactly ONE board is live, and otherwise opens the recovery chooser,
 which asks.
 
+## Amendment 2026-08-19 — web session-capacity policy = 1 (shape unchanged)
+
+`2026-08-19-single-session-web-and-session-control.md` layers a WEB UX
+policy on top of this ADR's model: the browser shell runs at most one
+runtime session at a time (one sim OR one device), enforced at the install
+funnel this ADR's M4 amendment already made the one place to enforce
+cross-session rules. **The shape recorded above is untouched** —
+`RuntimePool` still models N device sessions, `DEVICE_SESSION_CAPACITY`
+stays 4 — this is a policy choice the web shell makes about how many of
+those N sessions its own UI will show at once, exactly the "capacity is a
+policy, never a shape" posture this ADR opened with. A desktop-app shell
+is free to lift the policy and show more than one session again without
+any change here.
+
 ## Consequences
 
 - Two unprovisioned boards render as two distinct, chip-titled cards; the

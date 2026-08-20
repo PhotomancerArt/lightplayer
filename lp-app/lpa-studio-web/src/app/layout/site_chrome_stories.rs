@@ -10,9 +10,10 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ControllerId, DirtySummary, ProjectController, ProjectEditorView, ProjectNodeTreeView,
-    ProjectOp, ProjectSyncPhase, UiAction, UiChromeSessionControl, UiChromeSessionStatus,
-    UiPaneAction, UiStatus,
+    ControllerId, DirtySummary, ProjectController, ProjectNodeAddress, ProjectOp,
+    ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotEditOp, SlotPath, UiAction,
+    UiChromeSessionControl, UiChromeSessionStatus, UiPaneAction, UiPendingEdit, UiPendingEditKind,
+    UiPendingEditPhase, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -22,7 +23,7 @@ use crate::app::layout::site_chrome::{
 };
 use crate::app::layout::version_badge::{BuildChip, VersionChipPreview};
 use crate::app::project::ProjectDetailContent;
-use crate::app::story_fixtures::{project_editor_summary, project_synced_metrics};
+use crate::app::story_fixtures::project_editor_fixture;
 use crate::base::{LogoLockup, LogoMark};
 
 #[story(
@@ -116,6 +117,103 @@ pub(crate) fn overflow_menu_project_group() -> Element {
 }
 
 #[story(
+    description = "The header session·project control (spike concept B) across every project state — saved / unsaved / failed / syncing — crossed with device kind: the sim naming its board, a boardless sim (bare \"Sim\", ruling Q6), and hardware (the device name IS the board, no suffix). Unsaved wears the amber wash with Save/↺ standing beside the lockup as SIBLING buttons (G1 round-2: inspect and act are different surfaces); failed here is the failed-ONLY edge (persisted=0, failed>0) — red wash, no count pill, no Save/↺, because the header only offers actions while persisted edits are pending (see docs/debt/failed-only-asset-edit-header-blindness.md); syncing shows the busy dot with nothing dirty."
+)]
+pub(crate) fn control_states() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:gap-2",
+            for (kind_label, control) in [
+                ("Sim · board", sim_control(Some("ESP32-C6"))),
+                ("Sim · bare", sim_control(None)),
+                ("Hardware", hardware_control()),
+            ]
+            {
+                div { class: "tw:grid tw:gap-1",
+                    span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-wide tw:text-dim-foreground",
+                        "{kind_label}"
+                    }
+                    {control_row(1000, control.clone(), Some(control_content(0, 0, UiStatus::good("Ready"))), false)}
+                    {control_row(1000, control.clone(), Some(control_content(3, 0, UiStatus::good("Ready"))), false)}
+                    {control_row(1000, control.clone(), Some(control_content(0, 2, UiStatus::error("Sync issue"))), false)}
+                    {control_row(1000, control, Some(control_content(0, 0, UiStatus::working("Syncing"))), false)}
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Panel open — sim with board",
+    description = "The panel open on a clean sim session: the device zone (kind glyph, name, run word, \"simulating ESP32-C6\" stat line) over the project zone's sections, then the \"this tab is the session\" hint. No switcher (R8-1 ruling) — there is nothing to switch to."
+)]
+pub(crate) fn control_panel_open_sim() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[560px]",
+            {control_row(700, sim_control(Some("ESP32-C6")), Some(control_content(0, 0, UiStatus::good("Ready"))), true)}
+        }
+    }
+}
+
+#[story(
+    label = "Panel open — dirty (hardware, unsaved)",
+    description = "The panel open on a dirty HARDWARE session — the header control's unsaved-list edge case and the hardware-unsaved edge state at once: the project zone's \"Unsaved (persisted)\" section lists the pending edits with per-entry revert, matching the amber count the closed lockup shows."
+)]
+pub(crate) fn control_panel_open_dirty() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[680px]",
+            {control_row(700, hardware_control(), Some(dirty_content()), true)}
+        }
+    }
+}
+
+#[story(
+    label = "Fold — md (820px, device name folds)",
+    description = "Below the 900px cut the device segment keeps only its kind glyph and status dot — the name and board suffix (which ride together) drop first because the glyph+dot pair is the two facts that survive a squeeze; Save/↺ still fit at this width."
+)]
+pub(crate) fn control_fold_md() -> Element {
+    control_row(
+        820,
+        sim_control(Some("ESP32-C6")),
+        Some(control_content(3, 0, UiStatus::good("Ready"))),
+        false,
+    )
+}
+
+#[story(
+    label = "Fold — sm (600px, no ↺)",
+    description = "Below the 680px cut ↺ retreats into the panel's per-entry reverts — the destructive half of the pair is the one to lose first (Save stays, it is the safe click). The device name is long since gone at this width too."
+)]
+pub(crate) fn control_fold_sm() -> Element {
+    control_row(
+        600,
+        sim_control(Some("ESP32-C6")),
+        Some(control_content(3, 0, UiStatus::good("Ready"))),
+        false,
+    )
+}
+
+#[story(
+    label = "Studio mode — Docs/Boards \u{2197}",
+    description = "A lens route fronted (single-session policy): Boards and Docs carry the \u{2197} new-tab mark in the secondary family, because from here they open a NEW tab rather than ending the session (ruling R8-3, amended 8.1) — Explore stays a plain link, a real exit."
+)]
+pub(crate) fn studio_mode_bar() -> Element {
+    control_row(
+        1000,
+        sim_control(Some("ESP32-C6")),
+        Some(control_content(0, 0, UiStatus::good("Ready"))),
+        false,
+    )
+}
+
+#[story(
+    label = "Edge — connected, no project",
+    description = "A connected session with nothing loaded (spike \u{a7}5): the project segment reads an honest \"no project\" in italics — no invented name, no state glyph to read a state off — and the device dot is hollow (D16 connected-empty)."
+)]
+pub(crate) fn control_connected_empty() -> Element {
+    control_row(700, hardware_empty_control(), None, false)
+}
+
+#[story(
     description = "The brand: wide lockup, small mark-only form, and the mark at favicon/bar/hero sizes."
 )]
 pub(crate) fn logo_sizes() -> Element {
@@ -170,7 +268,14 @@ fn lens_frame(width: u32, menu_open: bool) -> Element {
             SiteChrome {
                 section: SiteSection::Session,
                 overflow_menu_open: menu_open,
-                session_control: Some(story_session_control()),
+                // The shared P5 fixtures: the board-naming sim with one
+                // unsaved persisted edit, so Save/↺ are aboard.
+                session_control: Some(ChromeSessionControl {
+                    session: sim_control(Some("ESP32-C6")),
+                    project: Some(control_content(1, 0, UiStatus::good("Ready"))),
+                    on_action: EventHandler::new(|_| {}),
+                    initially_open: false,
+                }),
                 patch_toggle: Some(ChromeModeToggle { href: "#patch".to_string(), active: false }),
                 play_toggle: Some(ChromeModeToggle { href: "#play".to_string(), active: false }),
                 project_menu: Some(ChromeProjectMenu {
@@ -184,51 +289,6 @@ fn lens_frame(width: u32, menu_open: bool) -> Element {
                 }
             }
         }
-    }
-}
-
-/// THE session with a dirty project on it: the sim (board suffix per
-/// ruling 8.1) running "Mini Dome" with one unsaved arrange edit, so the
-/// control shows the full anatomy — glyph, dot, name·board, amber project
-/// segment, count pill, and the Save/↺ pair beside it.
-fn story_session_control() -> ChromeSessionControl {
-    let session = UiChromeSessionControl {
-        key: "story-sim".to_string(),
-        sim: true,
-        name: "Sim".to_string(),
-        board: Some("ESP32-C6".to_string()),
-        status: UiChromeSessionStatus::Run,
-        busy: None,
-        stat_line: Some("60 fps · 177 lamps".to_string()),
-    };
-    let action = |icon: &str, op: ProjectOp| {
-        UiPaneAction::new(
-            icon,
-            UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op),
-        )
-    };
-    let view = ProjectEditorView::new(
-        "mini-dome",
-        1,
-        project_editor_summary(ProjectSyncPhase::Ready),
-        project_synced_metrics(),
-        ProjectNodeTreeView::new(Vec::new(), 0),
-        Vec::new(),
-    )
-    .with_project_name("Mini Dome")
-    .with_dirty(DirtySummary {
-        persisted: 1,
-        failed: 0,
-    })
-    .with_header_actions(vec![
-        action("save", ProjectOp::SaveOverlay),
-        action("revert", ProjectOp::RevertAllEdits),
-    ]);
-    ChromeSessionControl {
-        session,
-        project: Some(ProjectDetailContent::new(&view, UiStatus::good("Project"))),
-        on_action: EventHandler::new(|_| {}),
-        initially_open: false,
     }
 }
 
@@ -249,4 +309,148 @@ fn frame(width: u32, section: SiteSection, chip: BuildChip, menu_open: bool) -> 
             }
         }
     }
+}
+
+/// One control frame: `SectionSession` (studio mode) at a fixed width, so
+/// the folds trigger off the FRAME rather than the story viewport — the
+/// same technique `frame`/`chip_frame` used for the retired session strip
+/// and project-chip stories.
+fn control_row(
+    width: u32,
+    session: UiChromeSessionControl,
+    project: Option<ProjectDetailContent>,
+    initially_open: bool,
+) -> Element {
+    rsx! {
+        div {
+            class: "tw:border tw:border-dashed tw:border-border-muted tw:px-4 tw:pt-3",
+            style: "max-width: {width}px;",
+            SiteChrome {
+                section: SiteSection::Session,
+                session_control: Some(ChromeSessionControl {
+                    session,
+                    project,
+                    on_action: EventHandler::new(|_| {}),
+                    initially_open,
+                }),
+                VersionChipPreview { chip: branch_chip() }
+            }
+        }
+    }
+}
+
+/// THE sim session, naming the board it simulates (ruling 8.1) — or bare
+/// "Sim" when the project names no board (ruling Q6).
+fn sim_control(board: Option<&str>) -> UiChromeSessionControl {
+    UiChromeSessionControl {
+        key: "sim".to_string(),
+        sim: true,
+        name: "Sim".to_string(),
+        board: board.map(str::to_string),
+        status: UiChromeSessionStatus::Run,
+        busy: None,
+        stat_line: board.map(|_| "60 fps · 217 lamps".to_string()),
+    }
+}
+
+/// A connected, running hardware session — the device's own name IS the
+/// board, so it never wears a suffix (only the sim does, ruling 8.1).
+fn hardware_control() -> UiChromeSessionControl {
+    UiChromeSessionControl {
+        key: "dev_c6f0".to_string(),
+        sim: false,
+        name: "Garage dome".to_string(),
+        board: None,
+        status: UiChromeSessionStatus::Run,
+        busy: None,
+        stat_line: Some("USB · 217 lamps".to_string()),
+    }
+}
+
+/// A connected hardware session with nothing loaded — the honest-empty
+/// project edge (spike §5): hollow dot, no project segment content beyond
+/// "no project".
+fn hardware_empty_control() -> UiChromeSessionControl {
+    UiChromeSessionControl {
+        status: UiChromeSessionStatus::Empty,
+        stat_line: None,
+        ..hardware_control()
+    }
+}
+
+/// The control stories' project content: the shared editor fixture with the
+/// dirty counts and the matching header actions stamped — the SAME gate the
+/// controller's `project_header_actions` applies (persisted > 0, never
+/// failed alone), so a failed-only row here renders exactly the header's
+/// real blind spot
+/// (`docs/debt/failed-only-asset-edit-header-blindness.md`).
+fn control_content(persisted: usize, failed: usize, status: UiStatus) -> ProjectDetailContent {
+    let mut editor = project_editor_fixture(ProjectSyncPhase::Ready);
+    editor.dirty = DirtySummary { persisted, failed };
+    editor.header_actions = save_revert_actions(persisted);
+    ProjectDetailContent::new(&editor, status)
+}
+
+/// The dirty-list-open story's content: two persisted edits, both listed
+/// (not just counted) so the popover's "Unsaved (persisted)" section shows
+/// real rows with per-entry revert, matching the closed lockup's count.
+fn dirty_content() -> ProjectDetailContent {
+    let mut editor = project_editor_fixture(ProjectSyncPhase::Ready);
+    editor.dirty = DirtySummary {
+        persisted: 2,
+        failed: 0,
+    };
+    editor.header_actions = save_revert_actions(2);
+    editor.pending_edits = vec![
+        pending_edit("Orbit shader", "brightness", "0.82"),
+        pending_edit("Sunrise palette", "entries[dusk]", "#ff7a3d"),
+    ];
+    ProjectDetailContent::new(&editor, UiStatus::good("Ready"))
+}
+
+/// Save / Revert-to-saved, exactly as the controller's `project_header_actions`
+/// mints them — present only while persisted edits are pending, never for a
+/// failed-only project (the header blindness this control inherited).
+fn save_revert_actions(persisted: usize) -> Vec<UiPaneAction> {
+    if persisted == 0 {
+        return Vec::new();
+    }
+    vec![
+        UiPaneAction::new("save", project_action(ProjectOp::SaveOverlay)),
+        UiPaneAction::new(
+            "revert",
+            project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
+        ),
+    ]
+}
+
+/// One change-list entry with the same per-entry revert action the project
+/// controller produces (mirrors `project_pane_stories::pending_edit`).
+fn pending_edit(node_label: &str, path: &str, value_display: &str) -> UiPendingEdit {
+    let address = ProjectSlotAddress::new(
+        ProjectNodeAddress::parse("/demo.module/orbit.shader").expect("valid story node address"),
+        ProjectSlotRoot::def(),
+        SlotPath::parse(path).expect("valid story slot path"),
+    );
+    let node_path = address.node.to_string();
+    UiPendingEdit {
+        node_label: node_label.to_string(),
+        node_path,
+        slot_path_display: path.to_string(),
+        kind: UiPendingEditKind::Assign {
+            value_display: value_display.to_string(),
+        },
+        old_value: None,
+        phase: UiPendingEditPhase::Persisted,
+        revert: Some(UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            SlotEditOp::Revert { address },
+        )),
+    }
+}
+
+/// An action dispatched to the project controller itself — the same helper
+/// `ProjectController::project_header_actions` uses internally.
+fn project_action(op: ProjectOp) -> UiAction {
+    UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op)
 }

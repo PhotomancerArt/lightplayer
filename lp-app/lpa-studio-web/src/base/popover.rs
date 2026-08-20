@@ -305,8 +305,9 @@ pub fn PopoverButton(
             // The closed VDOM style string carries no pin, so Dioxus never
             // rewrites it — the stale pin would freeze the trigger at its
             // open-state size, truncating any trigger whose content grows
-            // while closed (the header project chip's pencil+count). Queue a
-            // clear behind the stale rAF.
+            // while closed (the header session·project control's project
+            // segment growing its pencil+count). Queue a clear behind the
+            // stale rAF.
             clear_trigger_pin_after_detach(&measured_id_for_effect);
         }
         // The layer unmounts only when the close animation lands at 0.
