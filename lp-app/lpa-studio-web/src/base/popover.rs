@@ -18,6 +18,11 @@ const MEASURE_RETRY_LIMIT: u8 = 3;
 const STABILIZE_MEASURE_DELAYS_MS: [i32; 2] = [50, 250];
 const OPEN_ANIM_MS: f64 = 160.0;
 const CLOSE_ANIM_MS: f64 = 120.0;
+/// The settle deadline fires this long after the animation SHOULD have
+/// landed (see [`AnimationTimeline::deadline_id`]). Generous enough that a
+/// healthy rAF-driven run always lands first, tight enough that a stalled
+/// entrance can't be seen parked.
+const SETTLE_DEADLINE_SLACK_MS: f64 = 200.0;
 /// The outline swells this much around the trigger while open ("diving in").
 const TRIGGER_INFLATE_PX: f64 = 3.0;
 /// Paint-only override on the in-flow placeholder while attached. Also the
@@ -1331,18 +1336,28 @@ fn animated_outline(
         POPOVER_CORNER_RADIUS_PX,
         device_pixel_ratio(),
     );
-    let clip = if t >= 1.0 {
-        String::new()
-    } else {
-        let top = (panel_rect.y - final_rect.y).max(0.0);
-        let right = ((final_rect.x + final_rect.w) - (panel_rect.x + panel_rect.w)).max(0.0);
-        let bottom = ((final_rect.y + final_rect.h) - (panel_rect.y + panel_rect.h)).max(0.0);
-        let left = (panel_rect.x - final_rect.x).max(0.0);
-        format!(
-            "clip-path: inset({top:.1}px {right:.1}px {bottom:.1}px {left:.1}px round {POPOVER_CORNER_RADIUS_PX}px);"
-        )
-    };
-    (path, clip)
+    (path, panel_clip_style(t, panel_rect, final_rect))
+}
+
+/// The panel's `clip-path` at animation time `t`: an inset revealing exactly
+/// the animated box, `none` once settled.
+///
+/// EXPLICITLY `none`, never an empty string: Dioxus's style-attribute writes
+/// preserve properties missing from the new string (see
+/// [`panel_content_style`]), so a shrunk string cannot REMOVE the animation's
+/// clip — a settled panel would keep whatever inset last painted, holding its
+/// lower rows cut off.
+fn panel_clip_style(t: f64, panel_rect: OutlineRect, final_rect: OutlineRect) -> String {
+    if t >= 1.0 {
+        return "clip-path: none;".to_string();
+    }
+    let top = (panel_rect.y - final_rect.y).max(0.0);
+    let right = ((final_rect.x + final_rect.w) - (panel_rect.x + panel_rect.w)).max(0.0);
+    let bottom = ((final_rect.y + final_rect.h) - (panel_rect.y + panel_rect.h)).max(0.0);
+    let left = (panel_rect.x - final_rect.x).max(0.0);
+    format!(
+        "clip-path: inset({top:.1}px {right:.1}px {bottom:.1}px {left:.1}px round {POPOVER_CORNER_RADIUS_PX}px);"
+    )
 }
 
 /// The panel's input rect at animation time `t`: a sliver at the trigger's
@@ -1386,11 +1401,23 @@ fn panel_rect_at(t: f64, anchor: OutlineRect, fin: OutlineRect, side: PopoverSid
 }
 
 /// Fade/slide for the panel's content, delayed slightly behind the shape.
+///
+/// The settled state names every animated property EXPLICITLY (`opacity: 1;
+/// transform: none;`), never an empty string. Dioxus's whole-string style
+/// writes PRESERVE properties the new string doesn't mention (the
+/// interpreter snapshots existing properties and re-adds the missing ones,
+/// so per-property style attributes survive them) — a property can only be
+/// overwritten, never removed, by shrinking this string. With the empty
+/// settled string, whatever opacity/transform last painted stayed on the
+/// content forever; a healthy entrance parks an invisible `opacity: 0.99x`,
+/// but an entrance whose frames were interrupted mid-flight settles with the
+/// content stuck ghost-faint (defect
+/// `docs/defects/2026-08-19-popover-entrance-parks-without-frames.md`).
 fn panel_content_style(t: f64) -> String {
     let eased =
         ease_out_cubic(((t - CONTENT_FADE_DELAY) / (1.0 - CONTENT_FADE_DELAY)).clamp(0.0, 1.0));
     if eased >= 1.0 {
-        return String::new();
+        return "opacity: 1; transform: none;".to_string();
     }
     format!(
         "opacity: {eased:.3}; transform: translateY({:.1}px);",
@@ -1468,15 +1495,29 @@ struct AnimationTimeline {
     duration_ms: Cell<f64>,
     raf_id: Cell<Option<i32>>,
     tick: RefCell<Option<web_sys::js_sys::Function>>,
+    /// The settle deadline: a timeout armed at every retarget for the leg's
+    /// duration plus slack, cleared when a frame lands the animation. rAF
+    /// delivery is NOT guaranteed — a hidden or occluded page suspends it
+    /// entirely, and long main-thread stalls starve it — and a timeline that
+    /// only ever advances on frames parks the popover at whatever
+    /// mid-entrance styles last painted (near-full-size chrome, ghost
+    /// content, half-open clip) for as long as frames stay away. Timers keep
+    /// firing where frames don't (hidden pages clamp them to ~1s), so the
+    /// deadline jumps a stranded timeline straight to its target. Defect:
+    /// `docs/defects/2026-08-19-popover-entrance-parks-without-frames.md`.
+    deadline_id: Cell<Option<i32>>,
 }
 
 /// The per-popover animation driver: one long-lived rAF closure plus the
-/// timeline state it reads. Dropped (and any pending frame cancelled) with the
-/// component.
+/// timeline state it reads, and the settle-deadline closure that lands the
+/// animation when frames stop being delivered. Dropped (and any pending
+/// frame/deadline cancelled) with the component.
 struct PopoverAnimation {
     window: web_sys::Window,
     timeline: Rc<AnimationTimeline>,
+    deadline: web_sys::js_sys::Function,
     _closure: Closure<dyn FnMut(f64)>,
+    _deadline_closure: Closure<dyn FnMut()>,
 }
 
 impl PopoverAnimation {
@@ -1492,6 +1533,7 @@ impl PopoverAnimation {
             duration_ms: Cell::new(1.0),
             raf_id: Cell::new(None),
             tick: RefCell::new(None),
+            deadline_id: Cell::new(None),
         });
 
         let timeline_for_frames = timeline.clone();
@@ -1516,14 +1558,20 @@ impl PopoverAnimation {
                 match scheduled {
                     Some(id) => timeline.raf_id.set(Some(id)),
                     None => {
+                        clear_deadline(&window_for_frames, timeline);
                         progress.set(target);
                         if target <= 0.0 {
                             render_open.set(false);
                         }
                     }
                 }
-            } else if target <= 0.0 {
-                render_open.set(false);
+            } else {
+                // Landed on a frame: the settle deadline is watching for the
+                // chain to die mid-flight, and this leg's chain just arrived.
+                clear_deadline(&window_for_frames, timeline);
+                if target <= 0.0 {
+                    render_open.set(false);
+                }
             }
         }) as Box<dyn FnMut(f64)>);
         let tick: web_sys::js_sys::Function = closure
@@ -1532,10 +1580,40 @@ impl PopoverAnimation {
             .clone();
         *timeline.tick.borrow_mut() = Some(tick);
 
+        // The settle deadline's body: the rAF chain did not land within the
+        // leg's duration plus slack — frames stopped being delivered — so
+        // jump straight to the target (cancelling the stranded frame; if it
+        // ever fires anyway, its wall-clock t clamps to 1 and re-lands the
+        // same value).
+        let timeline_for_deadline = timeline.clone();
+        let window_for_deadline = window.clone();
+        let mut progress_for_deadline = progress;
+        let mut render_open_for_deadline = render_open;
+        let deadline_closure = Closure::wrap(Box::new(move || {
+            let timeline = &timeline_for_deadline;
+            timeline.deadline_id.set(None);
+            if let Some(id) = timeline.raf_id.take() {
+                let _ = window_for_deadline.cancel_animation_frame(id);
+            }
+            let target = timeline.target.get();
+            if *progress_for_deadline.peek() != target {
+                progress_for_deadline.set(target);
+            }
+            if target <= 0.0 && *render_open_for_deadline.peek() {
+                render_open_for_deadline.set(false);
+            }
+        }) as Box<dyn FnMut()>);
+        let deadline: web_sys::js_sys::Function = deadline_closure
+            .as_ref()
+            .unchecked_ref::<web_sys::js_sys::Function>()
+            .clone();
+
         Some(Self {
             window,
             timeline,
+            deadline,
             _closure: closure,
+            _deadline_closure: deadline_closure,
         })
     }
 
@@ -1572,6 +1650,15 @@ impl PopoverAnimation {
             });
             self.timeline.raf_id.set(scheduled);
         }
+        // Every retargeted leg gets a fresh settle deadline; the tick that
+        // lands the leg clears it (see `AnimationTimeline::deadline_id`).
+        clear_deadline(&self.window, &self.timeline);
+        let delay_ms = (self.timeline.duration_ms.get() + SETTLE_DEADLINE_SLACK_MS) as i32;
+        let armed = self
+            .window
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&self.deadline, delay_ms)
+            .ok();
+        self.timeline.deadline_id.set(armed);
     }
 }
 
@@ -1580,6 +1667,15 @@ impl Drop for PopoverAnimation {
         if let Some(id) = self.timeline.raf_id.take() {
             let _ = self.window.cancel_animation_frame(id);
         }
+        clear_deadline(&self.window, &self.timeline);
+    }
+}
+
+/// Disarm the settle deadline (armed per retargeted leg in
+/// [`PopoverAnimation::retarget`]).
+fn clear_deadline(window: &web_sys::Window, timeline: &AnimationTimeline) {
+    if let Some(id) = timeline.deadline_id.take() {
+        window.clear_timeout_with_handle(id);
     }
 }
 
@@ -2102,6 +2198,40 @@ mod tests {
         assert_eq!(class, "open ux-popover-trigger-placeholder");
         assert_eq!(popover_button_class(true, false, "rest", "open"), "open");
         assert_eq!(popover_button_class(false, false, "rest", "open"), "rest");
+    }
+
+    #[test]
+    fn settled_styles_name_every_animated_property() {
+        // Dioxus's whole-string style writes cannot REMOVE a property (ones
+        // missing from the new string are re-added from the element's live
+        // style), so the settled state must OVERWRITE each animated property
+        // explicitly. The empty settled strings left an interrupted
+        // entrance's mid-animation opacity/clip on the panel forever —
+        // full-size chrome with ghost content (defect
+        // 2026-08-19-popover-entrance-parks-without-frames).
+        let settled = panel_content_style(1.0);
+        assert!(settled.contains("opacity: 1"), "settled: {settled}");
+        assert!(settled.contains("transform: none"), "settled: {settled}");
+        // Mid-flight keeps its real interpolated values.
+        let mid = panel_content_style(0.5);
+        assert!(mid.contains("opacity: 0."), "mid: {mid}");
+
+        let final_rect = OutlineRect {
+            x: 100.0,
+            y: 123.0,
+            w: 300.0,
+            h: 200.0,
+        };
+        let mid_rect = OutlineRect {
+            x: 100.0,
+            y: 123.0,
+            w: 300.0,
+            h: 90.0,
+        };
+        let settled_clip = panel_clip_style(1.0, final_rect, final_rect);
+        assert_eq!(settled_clip, "clip-path: none;");
+        let mid_clip = panel_clip_style(0.5, mid_rect, final_rect);
+        assert!(mid_clip.starts_with("clip-path: inset("), "mid: {mid_clip}");
     }
 
     #[test]
