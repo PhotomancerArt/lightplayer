@@ -347,12 +347,9 @@ fn ChromeOverflowMenu(
                     }
                 }
                 span { class: GROUP_HEADER_CLASS, "Tools" }
-                ToolCard {
-                    icon: StudioIconName::MapArrows,
-                    title: "Mapping editor",
-                    detail: "Lay out where each LED sits in 2D, so shaders land where you expect.",
-                    href: "/mapping",
-                }
+                // (The standalone mapping-editor card is gone: bare
+                // `/mapping` died with the standalone page — mapping and
+                // patching live in the project workbench's view tabs now.)
                 ToolCard {
                     icon: StudioIconName::NodeKind(crate::base::NodeKindIcon::Compute),
                     title: "Board editor",

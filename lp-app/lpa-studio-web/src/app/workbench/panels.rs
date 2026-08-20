@@ -1,10 +1,10 @@
-//! The Fixtures and Outputs panels — the project tree's "multi-node
-//! custom faces" (spike round-2 ruling): derived slices over the #409
+//! The Tree (fixtures) and Outputs panels — derived slices over the
 //! patch-surface DTOs, sharing the surface's ONE core-owned selection
-//! (`ProjectEditorOp::PatchSelect`). Read-only in this pass: rows and
-//! cells SELECT; the verbs stay on the interim `/patch` page until the
-//! unified-editor plan re-houses them as the Mapping view's patching
-//! mode.
+//! (`ProjectEditorOp::PatchSelect`). The Tree's grain follows the VIEW
+//! ([`TreeGrain`]): authored in Mapping, resolved in Patching. Rows and
+//! cells select everywhere; in the Patching view the Outputs panel's
+//! port clicks additionally carry the patch grammar (armed swap /
+//! assign — see `OutputsPanel::patch_verbs`).
 //!
 //! Density rules (spike §3, ratified): the Fixtures panel is
 //! fixture → instance rows with text channel chips (port identity is

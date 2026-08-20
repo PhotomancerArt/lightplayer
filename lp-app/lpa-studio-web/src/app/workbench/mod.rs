@@ -96,9 +96,9 @@ pub const VIEWS: &[ViewSpec] = &[
     },
     ViewSpec {
         view: WorkbenchView::Patching,
-        // Short-noun posture like "Map"; the canonical name is still
-        // open (patching-view plan G1) — label and route emission move
-        // together if the gerund wins.
+        // Short-noun posture like "Map" — RULED at the patching-view G1
+        // ("/patch. keep it short and simple"); `/patching` stays a
+        // parse alias.
         label: "Patch",
         route_view: crate::router::ProjectView::Patch,
     },

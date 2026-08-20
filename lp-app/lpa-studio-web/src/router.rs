@@ -284,10 +284,9 @@ impl StudioRoute {
                 (Some(link), None, _) => project_route(link, ProjectView::Workspace),
                 (Some(link), Some("play"), None) => project_route(link, ProjectView::Play),
                 // Both spellings parse; `path()` emits the canonical one
-                // (`patch`, `mapping`) and navigation heals an aliased
-                // address. The canonical naming call is still open (G1 of
-                // the patching-view plan) — flipping it is an emit-side
-                // change only.
+                // (`patch`, `mapping` — RULED at the patching-view G1:
+                // "keep it short and simple") and navigation heals an
+                // aliased address.
                 (Some(link), Some("patch" | "patching"), None) => {
                     project_route(link, ProjectView::Patch)
                 }
