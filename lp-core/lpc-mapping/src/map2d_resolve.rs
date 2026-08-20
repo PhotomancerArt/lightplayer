@@ -38,7 +38,8 @@ pub struct ResolvedLamp {
 /// is its own strand of wire. Consumers that mean "this object's whole lamp
 /// range" want [`ResolvedMap2d::object_span`]; consumers that mean "the
 /// physical runs" (the fixture's honest spans, the output face's strip
-/// boundaries, wiring-arrow chain hops) want the span list itself.
+/// boundaries) want the span list itself; the Mapping editor's wiring
+/// annotations keep the AUTHORED grain — each object's first span only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectSpan {
     pub object: u32,

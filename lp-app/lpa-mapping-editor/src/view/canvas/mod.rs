@@ -38,7 +38,7 @@ use crate::editor_core::view_geometry::{ArrowInput, wiring_arrows};
 use crate::view::view_options::EditorViewOptions;
 
 pub use canvas_anchor::{CanvasAnchor, capture_pointer};
-pub use lamp_metrics::{fit_region, lamp_display_radius};
+pub use lamp_metrics::{authored_spans, fit_region, lamp_display_radius};
 pub use palette::object_color;
 
 pub use layers::fixtures::{FixtureBody, FixtureEvent, FixtureSprite};
@@ -350,16 +350,16 @@ pub fn EditorCanvas(
             });
         fit_region(frame, 1.0)
     });
-    let spans: Vec<(u32, u32)> = resolved
-        .spans
-        .iter()
-        .map(|span| (span.start, span.count))
-        .collect();
+    // Wiring annotations follow the Mapping view's AUTHORED grain: arrows
+    // and numbers cover each object's authored strand only, so a repeat's
+    // expanded instances keep their lamp dots without per-instance chrome
+    // (and a dome-scale document doesn't pay for N sets of arrows).
+    let annotation_spans = authored_spans(&resolved);
     let positions = resolved.positions();
     let arrows = opts.arrows.then(|| {
         wiring_arrows(&ArrowInput {
             positions: &positions,
-            spans: &spans,
+            spans: &annotation_spans,
             view_width: 0.0,
             view_height: 0.0,
             end_gap: radius * 1.05,
@@ -812,6 +812,7 @@ pub fn EditorCanvas(
                         gap_segments: &gap_segments,
                         path_objects: &path_objects,
                         resolved: &resolved,
+                        annotation_spans: &annotation_spans,
                         selection: &selection,
                         tessellating: &tessellating,
                         scoped_object,
