@@ -367,6 +367,10 @@ pub fn PatchingShellCenter(
                         bodies,
                         selection: selection.clone(),
                         pack,
+                        // The guide invariant, default-on: every sprite
+                        // glows with its live output colors (D2=b —
+                        // patched vs unpatched at a glance).
+                        live_sprites: true,
                         on_action,
                     }
                 }

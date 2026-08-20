@@ -73,6 +73,28 @@ pub enum FixtureEvent {
     Dive(String),
 }
 
+/// The display-subsample stride: with `total` true lamps drawn as `drawn`
+/// points, drawn point `i` stands for true lamp `i * stride`. Never 0.
+pub(crate) fn display_stride(total: u32, drawn: usize) -> usize {
+    (total as usize).div_ceil(drawn.max(1)).max(1)
+}
+
+#[cfg(test)]
+mod stride_tests {
+    use super::display_stride;
+
+    /// The true-index mapping under subsampling — the off-by-stride trap
+    /// the sprite live colors (and the instance rings) both step around.
+    #[test]
+    fn display_stride_maps_drawn_points_to_true_lamps() {
+        assert_eq!(display_stride(150, 150), 1, "no subsample = identity");
+        assert_eq!(display_stride(4000, 2000), 2);
+        assert_eq!(display_stride(4001, 2000), 3, "ceil, never floor");
+        assert_eq!(display_stride(10, 0), 10, "empty draw never divides by zero");
+        assert_eq!(display_stride(0, 0), 1, "degenerate stays a valid stride");
+    }
+}
+
 /// Topmost sprite whose (padded) placed frame contains the project-space
 /// point — inverse-transform containment in the sprite's own space.
 pub(crate) fn hit_fixture<'a>(
@@ -157,6 +179,13 @@ fn FixtureGroup(
 ) -> Element {
     let [bx, by, bw, bh] = sprite.bounds;
     let selected = sprite.selected;
+    // The display-subsample stride: drawn lamp `index` is TRUE lamp
+    // `index * stride` — the ring windows and the sprite live-color
+    // attributes both need the real index.
+    let lamp_stride = match &sprite.body {
+        FixtureBody::Lamps { points, total } => display_stride(*total, points.len()),
+        _ => 1,
+    };
     // Screen-constant strokes/text inside a scaled group: counter the
     // group scale on top of the camera scale.
     let upp = units_per_px / sprite.placement.s.max(1e-6);
@@ -200,7 +229,7 @@ fn FixtureGroup(
             }
             if !body_hidden {
                 match &sprite.body {
-                    FixtureBody::Lamps { points, total } => rsx! {
+                    FixtureBody::Lamps { points, .. } => rsx! {
                         for (index, point) in points.iter().enumerate() {
                             circle {
                                 key: "{index}",
@@ -209,13 +238,17 @@ fn FixtureGroup(
                                 r: "{lamp_r}",
                                 fill: "{sprite.color}",
                                 fill_opacity: "0.9",
+                                // The live-fill hooks (host sprite feed):
+                                // sprite key + TRUE lamp index.
+                                "data-sprite-fixture": "{sprite.key}",
+                                "data-sprite-lamp": "{index * lamp_stride}",
                             }
                         }
                         if let Some((start, lamps)) = sprite.selected_range {
                             // Ring the selected instance's lamps (subsample-aware:
                             // ring what is drawn).
                             {
-                                let stride = (*total as usize).div_ceil(points.len().max(1)).max(1);
+                                let stride = lamp_stride;
                                 rsx! {
                                     for (index, point) in points.iter().enumerate() {
                                         if (index * stride) as u32 >= start && ((index * stride) as u32) < start + lamps {
