@@ -218,12 +218,13 @@ pub(crate) enum StudioRoute {
 }
 
 /// Which surface a [`StudioRoute::Project`] renders. The workbench's view
-/// tabs (Nodes · Mapping) and the play/patch zooms are all suffixes on the
+/// tabs (Nodes · Mapping · Patch) and the play zoom are all suffixes on the
 /// ONE project address — mutually exclusive, and never a session boundary.
 ///
 /// `Workspace` is the suffix-less default: the Nodes view (today's node
-/// workspace). `Mapping` is the workbench's Mapping view (`/mapping`).
-/// `Play` and `Patch` are the existing full-page zooms.
+/// workspace). `Mapping` and `Patch` are workbench views (`/mapping`,
+/// `/patch`; `/map` and `/patching` parse as aliases). `Play` is the
+/// full-page zoom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ProjectView {
     #[default]
@@ -282,8 +283,17 @@ impl StudioRoute {
             Some("p") => match (segments.next(), segments.next(), segments.next()) {
                 (Some(link), None, _) => project_route(link, ProjectView::Workspace),
                 (Some(link), Some("play"), None) => project_route(link, ProjectView::Play),
-                (Some(link), Some("patch"), None) => project_route(link, ProjectView::Patch),
-                (Some(link), Some("mapping"), None) => project_route(link, ProjectView::Mapping),
+                // Both spellings parse; `path()` emits the canonical one
+                // (`patch`, `mapping`) and navigation heals an aliased
+                // address. The canonical naming call is still open (G1 of
+                // the patching-view plan) — flipping it is an emit-side
+                // change only.
+                (Some(link), Some("patch" | "patching"), None) => {
+                    project_route(link, ProjectView::Patch)
+                }
+                (Some(link), Some("mapping" | "map"), None) => {
+                    project_route(link, ProjectView::Mapping)
+                }
                 _ => StudioRoute::Home,
             },
             // `/home` is a kept alias for the root — old links stay
@@ -1246,6 +1256,32 @@ mod tests {
         // project segment) is user input like any unknown path — Home,
         // never a project guess
         assert_eq!(StudioRoute::parse("/mapping"), StudioRoute::Home);
+    }
+
+    /// Both view-suffix spellings parse — `/map` for `/mapping`, `/patching`
+    /// for `/patch` — and heal to the canonical emission on the next
+    /// `path()`. The canonical naming call is open (patching-view plan G1);
+    /// only the emit side moves when it's ruled.
+    #[test]
+    fn view_suffix_aliases_parse_and_heal_to_canonical() {
+        let map_alias = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/map"));
+        assert_eq!(map_alias.project_view(), ProjectView::Mapping);
+        assert_eq!(
+            map_alias.path(),
+            format!("/p/zook-dome-{SHARE_UID}/mapping"),
+            "aliased address heals to the canonical spelling"
+        );
+
+        let patching_alias = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/patching"));
+        assert_eq!(patching_alias.project_view(), ProjectView::Patch);
+        assert_eq!(
+            patching_alias.path(),
+            format!("/p/zook-dome-{SHARE_UID}/patch")
+        );
+
+        // Aliases are view suffixes only — never standalone routes.
+        assert_eq!(StudioRoute::parse("/map"), StudioRoute::Home);
+        assert_eq!(StudioRoute::parse("/patching"), StudioRoute::Home);
     }
 
     // -----------------------------------------------------------------

@@ -877,7 +877,9 @@ pub fn App() -> Element {
         .panes
         .iter()
         .any(|pane| matches!(&pane.body, lpa_studio_core::UiViewContent::ProjectEditor(_)));
-    let workbench_route = current_route.is_lens() && !play && !patch && editor_open;
+    // Patch is a workbench view (R5), so it gets the app frame too; only
+    // play still zooms out of the workbench.
+    let workbench_route = current_route.is_lens() && !play && editor_open;
 
     // Sharing administers THE project in the address bar (D1 — the address
     // bar IS the link), so both its doors exist only on a project route.
