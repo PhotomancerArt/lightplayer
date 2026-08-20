@@ -20,6 +20,17 @@
 //!   container; the cut is where three secondary tabs stop fitting, not
 //!   a viewport magic number). The brand word yields at narrow too — the
 //!   mark stays.
+//! - **The narrow ladder is conditional on load.** A bar carrying the
+//!   session control and its mode toggles stops fitting ~220px sooner
+//!   than a plain one, so the crowded bar folds earlier (G1 of the
+//!   session·project control, 2026-08-19 — the squished phone bar):
+//!   <900 the world nav retreats to ⋯, the toggles and the Share pill go
+//!   icon-only, and the version chip hides (the device name already
+//!   folds there); <680 the brand word yields with the ↺; <560 the phone
+//!   bar — Devices/Projects become ⋯ rows, Patch becomes a mode row, and
+//!   gaps tighten. What never folds: the control, Save, Play, settings,
+//!   the account slot, and ⋯ — the phone bar is the session, the one
+//!   action on it, and the doors.
 //! - **One session per tab, and the tab IS the session** (single-session
 //!   web policy): opening a project or connecting a device tears the
 //!   other kind of session down first, so there is never a strip or a
@@ -44,12 +55,25 @@
 //! any open sim/device session. Nothing here reloads the page.
 
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{Archive, UserRound};
+use dioxus_icons::lucide::{Archive, Cable, Play, UserRound};
 
 use crate::app::layout::session_control::{ChromeSessionControl, SessionProjectControl};
 use crate::base::{
     IconMenuButton, IconMenuTone, LogoLockup, PopoverCloseHandle, StudioIcon, StudioIconName,
 };
+
+/// One of the lens routes' mode toggles (Patch / Play): the target of the
+/// plain hash link and whether the mode is currently on. Props rather than
+/// children so the chrome can fold the toggle into the phone bar's ⋯ menu —
+/// a child is opaque to the menu.
+#[derive(Clone, PartialEq)]
+pub struct ChromeModeToggle {
+    /// The mode's variant of the CURRENT route (same session, other zoom).
+    pub href: String,
+    /// The mode is on — the toggle wears the active treatment and reads
+    /// "Exit …".
+    pub active: bool,
+}
 
 /// The project-scoped rows the ⋯ menu grows while a project route is open
 /// (spike `project-share` §5, ruling G4).
@@ -109,6 +133,14 @@ pub fn SiteChrome(
     /// workaround); the FOLDS live inside the control.
     #[props(default)]
     session_control: Option<ChromeSessionControl>,
+    /// The patch-mode toggle (D36); lens routes only. Inline down to the
+    /// phone cut, a ⋯ menu row below it.
+    #[props(default)]
+    patch_toggle: Option<ChromeModeToggle>,
+    /// The play-mode toggle (P12); lens routes only. Inline at every width
+    /// (a phone is where play mode earns its keep).
+    #[props(default)]
+    play_toggle: Option<ChromeModeToggle>,
     /// The workbench routes' spacing (Final-gate ruling): the header's
     /// gap below shrinks so the full-height frame starts close under the
     /// chrome. Document routes keep the roomy default.
@@ -125,19 +157,72 @@ pub fn SiteChrome(
     // of live projects — a real section of the app, and going there is
     // going somewhere.
     let studio_mode = section == SiteSection::Session;
+    // The narrow ladder's rungs. "The cut is where things stop fitting"
+    // (module docs) — and a bar carrying the session control plus its
+    // toggles stops fitting ~220px sooner than a plain one, so the world
+    // nav's cut is CONDITIONAL on that load, not a second magic number:
+    //   crowded <900 — the world's tabs retreat to ⋯ where the device
+    //     name already folds; the brand word yields at <680 with the ↺.
+    //   crowded <560 — the phone bar: Devices/Projects join the ⋯ menu's
+    //     sections (all five), Patch becomes a menu row, gaps tighten.
+    //   plain  <680 — the original ladder, unchanged.
+    let crowded = session_control.is_some();
+    let bar_gap = if crowded {
+        "tw:gap-4 tw:@max-[560px]:gap-2"
+    } else {
+        "tw:gap-4"
+    };
+    let primary_nav = if crowded {
+        "tw:hidden tw:items-center tw:gap-1 tw:@min-[560px]:flex"
+    } else {
+        "tw:flex tw:items-center tw:gap-1"
+    };
+    let secondary_nav = if crowded {
+        "tw:hidden tw:items-center tw:gap-1 tw:@min-[900px]:flex"
+    } else {
+        "tw:hidden tw:items-center tw:gap-1 tw:@min-[680px]:flex"
+    };
+    let cluster_gap = if crowded {
+        "tw:ml-auto tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:@max-[560px]:gap-1.5"
+    } else {
+        "tw:ml-auto tw:flex tw:min-w-0 tw:items-center tw:gap-2"
+    };
+    // The ⋯ mount ladder (a top-layer popup cannot answer the header's
+    // container query, so each rung is its own mount — Q10): the widest
+    // carries no section rows, the middle mirrors the folded secondary
+    // family, and the crowded bar's phone mount adds the primary family
+    // and the Patch row. `overflow_menu_open` (stories) rides the
+    // narrowest mount, matching the narrow captures it exists for.
+    let menu_mounts: &[(&'static str, bool, bool)] = if crowded {
+        &[
+            ("tw:hidden tw:@min-[900px]:block", false, false),
+            (
+                "tw:hidden tw:@min-[560px]:block tw:@min-[900px]:hidden",
+                true,
+                false,
+            ),
+            ("tw:block tw:@min-[560px]:hidden", true, true),
+        ]
+    } else {
+        &[
+            ("tw:hidden tw:@min-[680px]:block", false, false),
+            ("tw:block tw:@min-[680px]:hidden", true, false),
+        ]
+    };
     rsx! {
         // `tw:@container`: the collapse below responds to the BAR's own
         // width, not the viewport, so an embedded/narrow mount behaves.
-        header { class: "tw:@container {margin} tw:flex tw:min-h-[46px] tw:items-center tw:gap-4 tw:border-b tw:border-border-subtle tw:pb-2.5",
+        header { class: "tw:@container {margin} tw:flex tw:min-h-[46px] tw:items-center {bar_gap} tw:border-b tw:border-border-subtle tw:pb-2.5",
             // Brand lockup — the way to Home (see module docs). At Home it
             // wears the tabs' you're-here underline (G3 feedback: the logo
             // IS Home's tab, so it marks the place like one).
             span {
                 class: if section == SiteSection::Home { LOGO_HOME_ACTIVE_WRAP } else { "tw:flex tw:flex-none" },
-                LogoLockup { href: "/".to_string() }
+                LogoLockup { href: "/".to_string(), early_word_yield: crowded }
             }
-            // Primary family: your things, by the brand, full weight.
-            nav { class: "tw:flex tw:items-center tw:gap-1",
+            // Primary family: your things, by the brand, full weight —
+            // inline while they fit; rows in the phone bar's ⋯ menu.
+            nav { class: "{primary_nav}",
                 NavTab {
                     label: "Devices",
                     href: "/devices",
@@ -156,11 +241,11 @@ pub fn SiteChrome(
                 // carries (single-session policy).
                 SessionProjectControl { control }
             }
-            div { class: "tw:ml-auto tw:flex tw:min-w-0 tw:items-center tw:gap-2",
+            div { class: "{cluster_gap}",
                 // Secondary family: lighter, right cluster, no divider —
                 // inline while three tabs fit the bar; in the ⋯ below
                 // when they don't.
-                nav { class: "tw:hidden tw:items-center tw:gap-1 tw:@min-[680px]:flex",
+                nav { class: "{secondary_nav}",
                     NavTab {
                         label: "Explore",
                         href: "/explore",
@@ -182,25 +267,30 @@ pub fn SiteChrome(
                         new_tab: studio_mode,
                     }
                 }
-                {children}
-                // THE overflow menu — one ⋯ at every width (G3 ruling).
-                // Two mounts because a top-layer popup cannot answer the
-                // header's container query: the wide form (no section
-                // rows) and the narrow form (sections included) swap by
-                // the same breakpoint as the tabs they mirror.
-                div { class: "tw:hidden tw:@min-[680px]:block",
-                    ChromeOverflowMenu {
-                        section,
-                        include_sections: false,
-                        project_menu: project_menu.clone(),
+                if let Some(toggle) = patch_toggle.clone() {
+                    // Inline down to the phone cut; below it the ⋯ menu's
+                    // Patch row carries the mode (patching ports on a
+                    // 375px screen is the rarer trip).
+                    span { class: "tw:hidden tw:@min-[560px]:flex",
+                        PatchToggle { href: toggle.href, patching: toggle.active }
                     }
                 }
-                div { class: "tw:@min-[680px]:hidden",
-                    ChromeOverflowMenu {
-                        section,
-                        include_sections: true,
-                        initially_open: overflow_menu_open,
-                        project_menu,
+                if let Some(toggle) = play_toggle.clone() {
+                    PlayToggle { href: toggle.href, playing: toggle.active }
+                }
+                {children}
+                // THE overflow menu — one ⋯ at every width (G3 ruling),
+                // one mount per rung (see `menu_mounts`).
+                for (index , (wrap , sections , primary)) in menu_mounts.iter().enumerate() {
+                    div { key: "{wrap}", class: "{wrap}",
+                        ChromeOverflowMenu {
+                            section,
+                            include_sections: *sections,
+                            include_primary: *primary,
+                            initially_open: overflow_menu_open && index == menu_mounts.len() - 1,
+                            project_menu: project_menu.clone(),
+                            patch_toggle: primary.then(|| patch_toggle.clone()).flatten(),
+                        }
                     }
                 }
             }
@@ -212,13 +302,22 @@ pub fn SiteChrome(
 /// inline tabs while they fit) and the tools, in one place. Groups wear
 /// mini-headers; rows keep their own grammars — section rows navigate
 /// this tab and close the menu, tool cards open a new one.
+///
+/// `include_primary` is the phone rung (crowded bars <560): Devices and
+/// Projects join the Sections group ahead of the world's three, and the
+/// folded Patch toggle rides in as a mode row.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ChromeOverflowMenu(
     section: SiteSection,
     include_sections: bool,
+    #[props(default = false)] include_primary: bool,
     #[props(default = false)] initially_open: bool,
     #[props(default)] project_menu: Option<ChromeProjectMenu>,
+    /// The folded patch toggle (phone rung only): a mode row under the
+    /// Project group, same hash-link grammar as the inline toggle.
+    #[props(default)]
+    patch_toggle: Option<ChromeModeToggle>,
 ) -> Element {
     // Same derivation, same promise as the inline tabs (see [`SiteChrome`]).
     let studio_mode = section == SiteSection::Session;
@@ -242,8 +341,22 @@ fn ChromeOverflowMenu(
                     span { class: GROUP_HEADER_CLASS, "Project" }
                     ProjectMenuRows { menu: project_menu }
                 }
+                if let Some(toggle) = patch_toggle {
+                    // The phone bar's Patch home: the same link the inline
+                    // toggle is, spelled as a row. Active while patching,
+                    // like a section row on its section.
+                    NavMenuItem {
+                        label: if toggle.active { "Exit patch mode".to_string() } else { "Patch mode".to_string() },
+                        href: toggle.href,
+                        active: toggle.active,
+                    }
+                }
                 if include_sections {
                     span { class: GROUP_HEADER_CLASS, "Sections" }
+                    if include_primary {
+                        NavMenuItem { label: "Devices", href: "/devices", active: section == SiteSection::Devices }
+                        NavMenuItem { label: "Projects", href: "/projects", active: section == SiteSection::Projects }
+                    }
                     NavMenuItem { label: "Explore", href: "/explore", active: section == SiteSection::Explore }
                     NavMenuItem {
                         label: "Boards",
@@ -286,8 +399,8 @@ fn ChromeOverflowMenu(
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NavMenuItem(
-    label: &'static str,
-    href: &'static str,
+    label: String,
+    href: String,
     active: bool,
     #[props(default = false)] new_tab: bool,
 ) -> Element {
@@ -392,10 +505,15 @@ pub fn PlayToggle(href: String, playing: bool) -> Element {
     let label = if playing { "Exit play" } else { "Play" };
     rsx! {
         a {
-            class: "{class}",
+            class: "{class} tw:inline-flex tw:items-center",
             href: "{href}",
             title: if playing { "Back to the editor" } else { "Play mode: the panel, full screen" },
-            "{label}"
+            // Word above the utility cut, glyph below it (the crowded
+            // ladder's <900 rung): the mode keeps its one-tap home on the
+            // phone bar, at glyph cost. The active underline carries the
+            // on-state either way.
+            span { class: "tw:hidden tw:@min-[900px]:inline", "{label}" }
+            span { class: "tw:inline-flex tw:@min-[900px]:hidden", Play { size: 14 } }
         }
     }
 }
@@ -414,10 +532,13 @@ pub fn PatchToggle(href: String, patching: bool) -> Element {
     let label = if patching { "Exit patch" } else { "Patch" };
     rsx! {
         a {
-            class: "{class}",
+            class: "{class} tw:inline-flex tw:items-center",
             href: "{href}",
             title: if patching { "Back to the editor" } else { "Patch mode: ports, cells, instances" },
-            "{label}"
+            // Same word→glyph fold as [`PlayToggle`]; the cable is the
+            // wiring surface's own metaphor.
+            span { class: "tw:hidden tw:@min-[900px]:inline", "{label}" }
+            span { class: "tw:inline-flex tw:@min-[900px]:hidden", Cable { size: 14 } }
         }
     }
 }

@@ -433,16 +433,18 @@ const LOCKUP_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:cursor-pointer tw:items
 /// Open: the same geometry with a brighter rim, so the group reads as the
 /// thing the panel grew out of (the merged outline draws the rest).
 const LOCKUP_OPEN_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:cursor-pointer tw:items-stretch tw:overflow-hidden tw:rounded-[7px] tw:border tw:border-subtle-foreground tw:bg-card-subtle tw:p-0 tw:text-left";
-/// One segment of the lockup.
+/// One segment of the lockup. Below the phone cut the padding tightens —
+/// on a 375px bar every horizontal pixel the chrome keeps is a pixel the
+/// project name loses.
 const SEGMENT_CLASS: &str =
-    "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:px-2.5 tw:py-1";
+    "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:px-2.5 tw:py-1 tw:@max-[560px]:px-1.5";
 /// The internal hairline between segments — a drawn divider rather than a
 /// per-segment border, so no segment has to fight the UA button border.
 const DIVIDER_CLASS: &str = "tw:w-px tw:flex-none tw:self-stretch tw:bg-border-subtle";
 /// The standalone amber Save button (G1 round-2: apart from the lockup —
 /// the inspect surface and the act surface are different things). No
 /// preflight, so border and background are named explicitly.
-const SAVE_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:rounded-md tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2.5 tw:py-[3px] tw:transition-colors tw:hover:border-status-warning-foreground";
+const SAVE_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:rounded-md tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2.5 tw:py-[3px] tw:transition-colors tw:hover:border-status-warning-foreground tw:@max-[560px]:px-2";
 /// The quiet ↺ button beside it: revert never competes with save.
 const REVERT_BUTTON_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:items-center tw:rounded-md tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-[3px] tw:transition-colors tw:hover:border-border-strong tw:hover:bg-background-wash";
 /// The unsaved count, the header chip's pill verbatim (D8): mono, amber,

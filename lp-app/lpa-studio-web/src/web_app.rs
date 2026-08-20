@@ -25,8 +25,8 @@ use std::rc::Rc;
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
 use crate::app::layout::{
-    ChromeProjectMenu, ChromeSessionControl, CloudAccountControl, PatchToggle, PlayToggle,
-    SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge,
+    ChromeModeToggle, ChromeProjectMenu, ChromeSessionControl, CloudAccountControl, SiteChrome,
+    SiteSection, StudioSettingsPopover, VersionBadge,
 };
 use crate::app::project::ProjectDetailContent;
 use crate::app::share::{
@@ -936,6 +936,10 @@ pub fn App() -> Element {
             on_action,
             initially_open: false,
         });
+    // The chrome's narrow ladder keys off the control's presence (a bar
+    // carrying it stops fitting sooner); the version chip's fold below
+    // follows the same rung.
+    let session_control_present = session_control.is_some();
     let section = match &current_route {
         // `/` is Home: no tab lights — the logo wears the underline.
         StudioRoute::Home => SiteSection::Home,
@@ -976,18 +980,14 @@ pub fn App() -> Element {
                 section,
                 project_menu,
                 session_control,
+                // Same-session zooms, plain hash links (the route listener
+                // sees no new document): props rather than children so the
+                // chrome's narrow ladder can fold Patch into the ⋯ menu.
+                patch_toggle: patch_toggle
+                    .map(|href| ChromeModeToggle { href, active: patch }),
+                play_toggle: play_toggle
+                    .map(|href| ChromeModeToggle { href, active: play }),
                 tight: workbench_route,
-                if let Some(href) = patch_toggle {
-                    // Same-session zoom like play: the route listener sees
-                    // no new document and only the shell swap happens.
-                    PatchToggle { href, patching: patch }
-                }
-                if let Some(href) = play_toggle {
-                    // A plain hash link, like the nav tabs: the route
-                    // listener picks it up, sees the same session, and
-                    // swaps only what the shell renders.
-                    PlayToggle { href, playing: play }
-                }
                 if let Some(uid) = project_uid {
                     // First in the right cluster, ahead of the gear and
                     // the avatar (spike §1-A). Re-keyed on the request
@@ -1005,7 +1005,13 @@ pub fn App() -> Element {
                     // one, and never both.
                     VisitorShareSlot {}
                 }
-                VersionBadge {}
+                // The build chip is an inspector, not a control: it is the
+                // first utility to fold — with the crowded bar's <900 rung
+                // on lens routes, with the phone rung elsewhere.
+                span {
+                    class: if session_control_present { "tw:hidden tw:@min-[900px]:flex" } else { "tw:hidden tw:@min-[560px]:flex" },
+                    VersionBadge {}
+                }
                 StudioSettingsPopover { settings, on_settings }
                 // Last of the chrome's children, so the account slot sits
                 // exactly where the spike puts it: after the settings
