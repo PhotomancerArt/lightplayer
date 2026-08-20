@@ -15,19 +15,26 @@
 //!   replaced it).
 //! - **One overflow menu** (G3 ruling, 2026-08-05: a row of separate
 //!   menus read as clutter — merge them ALL). The single ⋯ at the bar's
-//!   end always holds the tools and the full session list, and grows the
-//!   secondary sections at narrow widths when the inline tabs collapse
-//!   (the bar is a container; the cut is where three secondary tabs stop
-//!   fitting, not a viewport magic number). The brand word yields at
-//!   narrow too — the mark stays.
-//! - **Running sessions are places** (vision D15/D16): the session strip
-//!   docks one chip per live runtime session behind a hairline divider
-//!   after the primary family (wide bars — narrow bars list sessions in
-//!   the ⋯ menu instead). Chips are wayfinding only — name, glyph,
-//!   status dot — never controls or thumbnails (D43). The active chip is
-//!   the editor's representation in the nav; no nav tab detaches the
-//!   lens (navigation does, through the route listener, same as the back
-//!   button).
+//!   end always holds the tools, and grows the secondary sections at
+//!   narrow widths when the inline tabs collapse (the bar is a
+//!   container; the cut is where three secondary tabs stop fitting, not
+//!   a viewport magic number). The brand word yields at narrow too — the
+//!   mark stays.
+//! - **One session per tab, and the tab IS the session** (single-session
+//!   web policy): opening a project or connecting a device tears the
+//!   other kind of session down first, so there is never a strip or a
+//!   session list to navigate — the header session·project control
+//!   ([`SessionProjectControl`]) is the ONE piece of session UI the
+//!   chrome carries, standing for the tab's session and the project on
+//!   it together. No nav tab ends the session either; navigation does,
+//!   through the route listener, same as the back button (see below).
+//! - **Navigation is studio OR site** (single-session policy): from a
+//!   lens route, going anywhere else ENDS the tab's session. Docs and
+//!   Boards are the exception, and they earn it by not going anywhere —
+//!   in studio mode they open a NEW tab, so reference material never
+//!   costs you the thing you were building. Explore is a plain exit: it
+//!   is a gallery of live projects, a real section of the app (ruling
+//!   R8-3, amended 8.1).
 //! - **The editors are tools, not sections.** The mapping editor and
 //!   board editor stay outside the tab row, in the ⋯ menu's Tools group.
 //!
@@ -38,16 +45,11 @@
 
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{Archive, UserRound};
-use lpa_studio_core::{UiAction, UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget};
 
-use crate::app::affordance::{affordance_chip_class, affordance_trigger_style};
-use crate::app::project::project_pane::trigger_label;
-use crate::app::project::{ProjectDetailContent, ProjectDetailSections};
+use crate::app::layout::session_control::{ChromeSessionControl, SessionProjectControl};
 use crate::base::{
-    DetailPopover, IconMenuButton, IconMenuTone, LogoLockup, PopoverCloseHandle, PopoverPlacement,
-    StudioIcon, StudioIconName,
+    IconMenuButton, IconMenuTone, LogoLockup, PopoverCloseHandle, StudioIcon, StudioIconName,
 };
-use crate::router::StudioRoute;
 
 /// The project-scoped rows the ⋯ menu grows while a project route is open
 /// (spike `project-share` §5, ruling G4).
@@ -66,27 +68,15 @@ pub struct ChromeProjectMenu {
     pub on_archive: EventHandler<()>,
 }
 
-/// The header project chip's data (D8, Google-Docs pattern): the open
-/// project's identity and state, always visible in the chrome — state
-/// glyph + name + amber unsaved count, opening the SAME
-/// [`ProjectDetailSections`] popup the pane's [i] renders (one content
-/// value, two homes; presentation only, zero new state).
-#[derive(Clone, PartialEq)]
-pub struct ChromeProjectChip {
-    pub content: ProjectDetailContent,
-    pub on_action: EventHandler<UiAction>,
-    /// Open the detail popup immediately (stories only).
-    pub initially_open: bool,
-}
-
 /// Which nav tab renders as the current section. Home has no tab — the
 /// LOGO is its affordance, and at Home the logo wears the you're-here
 /// underline in a tab's stead (G3 feedback). Session is the editor lens
-/// fronted: no tab lights, because the active session CHIP is the
-/// current-place marker there (D15 — the chip is the editor's
-/// representation in the nav). Account lights no tab either: `/account` is
-/// reached from the identity dropdown, and the AVATAR is its marker — the
-/// same argument as Session's, one cluster to the right.
+/// fronted: no tab lights, because the header session·project control is
+/// the current-place marker there (single-session policy — the control
+/// is the editor's representation in the nav). Account lights no tab
+/// either: `/account` is reached from the identity dropdown, and the
+/// AVATAR is its marker — the same argument as Session's, one cluster to
+/// the right.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SiteSection {
     Home,
@@ -106,14 +96,6 @@ pub enum SiteSection {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn SiteChrome(
     section: SiteSection,
-    /// The session strip's live sessions (D15); empty renders no strip
-    /// and no divider. Stories and chrome-only mounts default to none.
-    #[props(default)]
-    sessions: Vec<UiChromeSession>,
-    /// A lens route is the current route — the lensed chip reads *here*
-    /// (accent); with it false the lensed chip reads *open* (washed).
-    #[props(default = false)]
-    on_editor: bool,
     /// Stories only: mount the narrow ⋯ menu open (capture can't hover).
     #[props(default = false)]
     overflow_menu_open: bool,
@@ -121,11 +103,12 @@ pub fn SiteChrome(
     /// everywhere else (the menu then reads exactly as it always has).
     #[props(default)]
     project_menu: Option<ChromeProjectMenu>,
-    /// The open project's chip (D8); `None` off the editor routes. Mounted
-    /// UNGATED — no `tw:@min-*` — so it is present at every header width
-    /// (Q10 ruling: one mount, no top-layer/container-query workaround).
+    /// THE session·project control (the B lockup); `None` off the lens
+    /// routes. Mounted UNGATED — no `tw:@min-*` — so it is present at every
+    /// header width (Q10 ruling: one mount, no top-layer/container-query
+    /// workaround); the FOLDS live inside the control.
     #[props(default)]
-    project_chip: Option<ChromeProjectChip>,
+    session_control: Option<ChromeSessionControl>,
     /// The workbench routes' spacing (Final-gate ruling): the header's
     /// gap below shrinks so the full-height frame starts close under the
     /// chrome. Document routes keep the roomy default.
@@ -134,6 +117,14 @@ pub fn SiteChrome(
     children: Element,
 ) -> Element {
     let margin = if tight { "tw:mb-1.5" } else { "tw:mb-[18px]" };
+    // Studio mode: a lens route is fronted, so the tab IS a running
+    // session (single-session policy — leaving ends it). Docs and Boards
+    // are reference material you read WHILE building, so from here they
+    // open a new tab and the session behind them keeps running (ruling
+    // R8-3, amended 8.1). Explore deliberately does not: it is a gallery
+    // of live projects — a real section of the app, and going there is
+    // going somewhere.
+    let studio_mode = section == SiteSection::Session;
     rsx! {
         // `tw:@container`: the collapse below responds to the BAR's own
         // width, not the viewport, so an embedded/narrow mount behaves.
@@ -158,19 +149,12 @@ pub fn SiteChrome(
                     active: section == SiteSection::Projects,
                 }
             }
-            if let Some(chip) = project_chip {
-                // The project chip (D8): after the primary family, ahead
-                // of the session strip's divider — the open project is
-                // the most local thing in the bar.
-                ProjectHeaderChip { chip }
-            }
-            if !sessions.is_empty() {
-                // Hairline divider + the strip (concept A dock) — wide
-                // bars only; narrow bars carry sessions in the ⋯ menu.
-                div { class: "tw:hidden tw:min-w-0 tw:items-center tw:gap-4 tw:@min-[680px]:flex",
-                    span { class: "tw:h-5 tw:w-px tw:flex-none tw:self-center tw:bg-border-subtle" }
-                    SessionStrip { sessions: sessions.clone(), on_editor }
-                }
+            if let Some(control) = session_control {
+                // THE control: after the primary family — this tab's
+                // session and the project on it are the most local things
+                // in the bar. It is the ONE piece of session UI the chrome
+                // carries (single-session policy).
+                SessionProjectControl { control }
             }
             div { class: "tw:ml-auto tw:flex tw:min-w-0 tw:items-center tw:gap-2",
                 // Secondary family: lighter, right cluster, no divider —
@@ -188,12 +172,14 @@ pub fn SiteChrome(
                         href: "/boards",
                         active: section == SiteSection::Boards,
                         secondary: true,
+                        new_tab: studio_mode,
                     }
                     NavTab {
                         label: "Docs",
                         href: "/docs",
                         active: section == SiteSection::Docs,
-                    secondary: true,
+                        secondary: true,
+                        new_tab: studio_mode,
                     }
                 }
                 {children}
@@ -205,8 +191,6 @@ pub fn SiteChrome(
                 div { class: "tw:hidden tw:@min-[680px]:block",
                     ChromeOverflowMenu {
                         section,
-                        sessions: sessions.clone(),
-                        on_editor,
                         include_sections: false,
                         project_menu: project_menu.clone(),
                     }
@@ -214,8 +198,6 @@ pub fn SiteChrome(
                 div { class: "tw:@min-[680px]:hidden",
                     ChromeOverflowMenu {
                         section,
-                        sessions,
-                        on_editor,
                         include_sections: true,
                         initially_open: overflow_menu_open,
                         project_menu,
@@ -226,79 +208,26 @@ pub fn SiteChrome(
     }
 }
 
-/// The header project chip (D8): state glyph + project name + amber
-/// unsaved count, opening the project detail popup
-/// ([`ProjectDetailSections`] — Save/Revert/per-entry revert/Share/
-/// stats, mounted AS-IS). Project state is visible on every view at
-/// every width; dragging a fixture on the Map canvas makes the
-/// pencil+count appear because arrange edits already flow into
-/// `dirty.persisted` — this is presentation only.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProjectHeaderChip(chip: ChromeProjectChip) -> Element {
-    let ChromeProjectChip {
-        content,
-        on_action,
-        initially_open,
-    } = chip;
-    let affordance = content.affordance();
-    let style = affordance_trigger_style(affordance);
-    let name = content.project_name().to_string();
-    let unsaved = content.unsaved_count();
-    let trigger = rsx! {
-        // Glyph and label inherit the toned button's color (the chip
-        // itself wears the state, G1 ruling).
-        span { class: "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:flex-none tw:items-center tw:justify-center",
-            StudioIcon { name: style.icon, size: 13 }
-        }
-        // The unlayered `font: inherit` reset beats tw:font-*/tw:text-*
-        // on the button itself, so every text utility rides the spans.
-        span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-[11px] tw:font-semibold",
-            "{name}"
-        }
-        if unsaved > 0 {
-            span { class: "tw:flex-none tw:rounded-full tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:font-mono tw:text-[9.5px] tw:font-semibold tw:text-status-warning-foreground",
-                "{unsaved}"
-            }
-        }
-    };
-    rsx! {
-        DetailPopover {
-            icon: style.icon,
-            label: trigger_label(affordance).to_string(),
-            tone: style.tone,
-            placement: PopoverPlacement::BottomStart,
-            trigger,
-            trigger_class: affordance_chip_class(affordance, false).to_string(),
-            trigger_open_class: affordance_chip_class(affordance, true).to_string(),
-            layer_keeps_layout: true,
-            initially_open,
-            ProjectDetailSections { content, on_action }
-        }
-    }
-}
-
 /// THE ⋯ menu (G3 ruling, 2026-08-05): sections (narrow only — they are
-/// inline tabs while they fit), the full session list, and the tools, in
-/// one place. Groups wear mini-headers; rows keep their own grammars —
-/// section/session rows navigate this tab and close the menu, tool cards
-/// open a new one.
+/// inline tabs while they fit) and the tools, in one place. Groups wear
+/// mini-headers; rows keep their own grammars — section rows navigate
+/// this tab and close the menu, tool cards open a new one.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ChromeOverflowMenu(
     section: SiteSection,
-    sessions: Vec<UiChromeSession>,
-    on_editor: bool,
     include_sections: bool,
     #[props(default = false)] initially_open: bool,
     #[props(default)] project_menu: Option<ChromeProjectMenu>,
 ) -> Element {
+    // Same derivation, same promise as the inline tabs (see [`SiteChrome`]).
+    let studio_mode = section == SiteSection::Session;
     rsx! {
         IconMenuButton {
             icon: StudioIconName::More,
             icon_size: 15,
             label: "More".to_string(),
-            title: "Sections, sessions, and tools".to_string(),
+            title: "Sections and tools".to_string(),
             tone: IconMenuTone::Quiet,
             initially_open,
             popup_class: OVERFLOW_POPUP_CLASS.to_string(),
@@ -316,13 +245,17 @@ fn ChromeOverflowMenu(
                 if include_sections {
                     span { class: GROUP_HEADER_CLASS, "Sections" }
                     NavMenuItem { label: "Explore", href: "/explore", active: section == SiteSection::Explore }
-                    NavMenuItem { label: "Boards", href: "/boards", active: section == SiteSection::Boards }
-                    NavMenuItem { label: "Docs", href: "/docs", active: section == SiteSection::Docs }
-                }
-                if !sessions.is_empty() {
-                    span { class: GROUP_HEADER_CLASS, "Sessions" }
-                    for session in sessions.iter() {
-                        SessionMenuRow { key: "{session.key}", session: session.clone(), on_editor }
+                    NavMenuItem {
+                        label: "Boards",
+                        href: "/boards",
+                        active: section == SiteSection::Boards,
+                        new_tab: studio_mode,
+                    }
+                    NavMenuItem {
+                        label: "Docs",
+                        href: "/docs",
+                        active: section == SiteSection::Docs,
+                        new_tab: studio_mode,
                     }
                 }
                 span { class: GROUP_HEADER_CLASS, "Tools" }
@@ -346,26 +279,44 @@ fn ChromeOverflowMenu(
 /// One section row of the ⋯ menu: a plain hash link that closes the menu
 /// as it navigates (sections swap in place — without the close the
 /// popover would linger over the new body).
+///
+/// `new_tab` mirrors [`NavTab`]'s: the narrow bar's Docs and Boards rows
+/// have to make the same promise the inline tabs do, or the same click
+/// would mean two different things at two widths.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NavMenuItem(label: &'static str, href: &'static str, active: bool) -> Element {
+fn NavMenuItem(
+    label: &'static str,
+    href: &'static str,
+    active: bool,
+    #[props(default = false)] new_tab: bool,
+) -> Element {
     let close = try_consume_context::<PopoverCloseHandle>();
     let class = if active {
         NAV_MENU_ITEM_ACTIVE
     } else {
         NAV_MENU_ITEM_IDLE
     };
+    let target = new_tab.then_some("_blank");
+    let rel = new_tab.then_some("noopener noreferrer");
     rsx! {
         a {
-            class: "{class}",
+            class: if new_tab { "{class} tw:flex tw:items-center tw:gap-1.5" } else { "{class}" },
             href: "{href}",
             aria_current: if active { "page" } else { "false" },
+            target,
+            rel,
             onclick: move |_| {
                 if let Some(mut close) = close {
                     close.close();
                 }
             },
             "{label}"
+            if new_tab {
+                span { class: "tw:flex-none tw:text-subtle-foreground/70",
+                    StudioIcon { name: StudioIconName::ExternalLink, size: 11 }
+                }
+            }
         }
     }
 }
@@ -477,12 +428,12 @@ pub fn PatchToggle(href: String, patching: bool) -> Element {
 /// hover/active — the spike's `.secondary`).
 ///
 /// Tabs are PLAIN links on purpose (P12): no tab dispatches a lens
-/// detach anymore — navigation to a gallery route detaches through the
-/// route listener, the same path as the back button, and returning to
-/// the editor is the active session chip's job. (The old Studio-tab
-/// direct dispatch existed for the URL-less D29 device editor on the
-/// gallery route;
-/// identity-at-probe made device lenses addressable, closing that gap.)
+/// detach anymore — navigation to a gallery route ENDS the tab's session
+/// through the route listener, the same path as the back button.
+///
+/// `new_tab` is the studio-mode exit (ruling R8-3, amended 8.1): see
+/// [`SiteChrome`]'s Docs/Boards mounts for why those two leave the tab
+/// rather than the session.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NavTab(
@@ -490,6 +441,11 @@ fn NavTab(
     href: &'static str,
     active: bool,
     #[props(default = false)] secondary: bool,
+    /// Open in a new tab (`_blank` + `noopener noreferrer`) and wear the
+    /// leaves-this-tab marker. The router's click interceptor skips any
+    /// link with a `target`, so this needs no routing support at all.
+    #[props(default = false)]
+    new_tab: bool,
 ) -> Element {
     let class = match (secondary, active) {
         (false, true) => NAV_TAB_ACTIVE,
@@ -497,176 +453,27 @@ fn NavTab(
         (true, true) => NAV_TAB_SECONDARY_ACTIVE,
         (true, false) => NAV_TAB_SECONDARY_IDLE,
     };
+    // `None` omits the attribute entirely, which is what the click
+    // interceptor reads as "in-app" — an empty `target=""` would work
+    // too, but only by accident.
+    let target = new_tab.then_some("_blank");
+    let rel = new_tab.then_some("noopener noreferrer");
     rsx! {
         a {
-            class: "{class}",
+            class: if new_tab { "{class} tw:inline-flex tw:items-center tw:gap-1" } else { "{class}" },
             href: "{href}",
             aria_current: if active { "page" } else { "false" },
+            target,
+            rel,
             "{label}"
-        }
-    }
-}
-
-/// The session strip (D15/D16): squared tab-chips for live sessions on
-/// wide bars — up to four inline (two on middling bars); the rest, and
-/// every session at narrow widths, live in the ⋯ menu's Sessions group.
-/// All width variants render and container queries pick, so the strip
-/// needs no measurement code.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SessionStrip(sessions: Vec<UiChromeSession>, on_editor: bool) -> Element {
-    rsx! {
-        div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
-            for (index , session) in sessions.iter().take(4).enumerate() {
-                span {
-                    key: "{session.key}",
-                    // Chips 0-1 appear whenever the strip does; 2-3 need
-                    // a wide bar. Everything else is ⋯-menu material.
-                    class: if index < 2 { "tw:flex tw:min-w-0" } else { "tw:hidden tw:min-w-0 tw:@min-[900px]:flex" },
-                    SessionChip { session: session.clone(), on_editor }
+            if new_tab {
+                // Sized to the tab's own 12px text, and quiet: the mark
+                // says where the click goes, it is not a second label.
+                span { class: "tw:flex-none tw:text-subtle-foreground/70",
+                    StudioIcon { name: StudioIconName::ExternalLink, size: 11 }
                 }
             }
         }
-    }
-}
-
-/// One session chip: transport glyph, status dot, ellipsized name.
-/// States: *here* (accent — lensed and the editor is fronted), *open*
-/// (washed — lensed, another section fronted), idle. A session without
-/// an honest route renders inert (no fake URLs — the same rule the URL
-/// bar follows).
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SessionChip(session: UiChromeSession, on_editor: bool) -> Element {
-    let class = chip_state_class(&session, on_editor);
-    let body = rsx! {
-        SessionGlyph { sim: session.sim }
-        SessionDot { status: session.status }
-        span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap",
-            "{session.name}"
-        }
-    };
-    match session_href(&session) {
-        Some(href) => rsx! {
-            a {
-                class: "{class}",
-                href: "{href}",
-                aria_current: if session.lensed && on_editor { "page" } else { "false" },
-                title: "{session.name}",
-                {body}
-            }
-        },
-        None => rsx! {
-            span { class: "{class}", title: "{session.name}", {body} }
-        },
-    }
-}
-
-/// The chip's route (D37 keys): `/p/<project-uid>` for the sim,
-/// `/device/<dev-uid>` for hardware; `None` while no honest address
-/// exists.
-///
-/// The sim's link is the BARE uid: the chip knows the session, not the
-/// project's display name, and inventing a slug here would put a second
-/// spelling of the link in circulation. The address bar heals to the
-/// canonical `/p/<slug>-<uid>` on arrival (D10, `web_app.rs`).
-fn session_href(session: &UiChromeSession) -> Option<String> {
-    match &session.target {
-        UiChromeSessionTarget::Sim { project_key } => project_key
-            .as_ref()
-            .map(|uid| crate::router::canonical_share_path("", uid)),
-        UiChromeSessionTarget::Device { uid } => uid.as_ref().map(|uid| {
-            StudioRoute::Device {
-                uid: uid.clone(),
-                play: false,
-            }
-            .path()
-        }),
-    }
-}
-
-fn chip_state_class(session: &UiChromeSession, on_editor: bool) -> &'static str {
-    match (session.lensed, on_editor) {
-        (true, true) => SESSION_CHIP_HERE,
-        (true, false) => SESSION_CHIP_OPEN,
-        (false, _) => SESSION_CHIP_IDLE,
-    }
-}
-
-/// The session's kind glyph: violet sim mark for the simulator (the
-/// bound-family convention the sim card wears), transport icon for
-/// hardware — USB today; the slot grows network/BT glyphs with those
-/// transports.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SessionGlyph(sim: bool) -> Element {
-    if sim {
-        rsx! {
-            span { class: "tw:flex-none tw:text-status-bound-foreground",
-                StudioIcon { name: StudioIconName::Simulator, size: 12 }
-            }
-        }
-    } else {
-        rsx! {
-            span { class: "tw:flex-none",
-                StudioIcon { name: StudioIconName::Usb, size: 12 }
-            }
-        }
-    }
-}
-
-/// The chip's status dot (D16): accent run / amber attention / hollow
-/// connected-empty.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SessionDot(status: UiChromeSessionStatus) -> Element {
-    let class = match status {
-        UiChromeSessionStatus::Run => "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-accent",
-        UiChromeSessionStatus::Attention => {
-            "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-attention-foreground"
-        }
-        UiChromeSessionStatus::Empty => {
-            "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:border tw:border-border-strong tw:bg-transparent"
-        }
-    };
-    rsx! {
-        span { class: "{class}" }
-    }
-}
-
-/// One session row of the ⋯ menu: the chip anatomy at menu width,
-/// closing the menu as it navigates. *Here* rows read heading-bold.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SessionMenuRow(session: UiChromeSession, on_editor: bool) -> Element {
-    let close = try_consume_context::<PopoverCloseHandle>();
-    let class = match (session.lensed, on_editor) {
-        (true, true) => NAV_MENU_ITEM_ACTIVE,
-        _ => NAV_MENU_ITEM_IDLE,
-    };
-    let body = rsx! {
-        SessionGlyph { sim: session.sim }
-        SessionDot { status: session.status }
-        span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap",
-            "{session.name}"
-        }
-    };
-    match session_href(&session) {
-        Some(href) => rsx! {
-            a {
-                class: "{class} tw:flex tw:items-center tw:gap-1.5",
-                href: "{href}",
-                onclick: move |_| {
-                    if let Some(mut close) = close {
-                        close.close();
-                    }
-                },
-                {body}
-            }
-        },
-        None => rsx! {
-            span { class: "{class} tw:flex tw:items-center tw:gap-1.5", {body} }
-        },
     }
 }
 
@@ -719,9 +526,9 @@ pub(crate) const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1
 /// shorter; both land the bar on the header's border line.
 const LOGO_HOME_ACTIVE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[14px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']";
 
-/// ⋯ menu section/session row, idle.
+/// ⋯ menu section row, idle.
 pub(crate) const NAV_MENU_ITEM_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
-/// ⋯ menu section/session row, current place.
+/// ⋯ menu section row, current place.
 const NAV_MENU_ITEM_ACTIVE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:transition-colors tw:hover:bg-card-raised";
 /// ⋯ menu PROJECT row. A `<button>`, so it must name its own background
 /// and border explicitly — this build ships Tailwind without preflight, and
@@ -731,18 +538,8 @@ const PROJECT_MENU_ROW: &str = "tw:flex tw:w-full tw:cursor-pointer tw:items-cen
 /// the one above it, and never destructive.
 const PROJECT_MENU_ROW_QUIET: &str = "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2.5 tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-left tw:text-subtle-foreground tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
 
-// Session chips (D16): squared tab-chips in the entity grammar — never
-// status pills. One shared geometry, three states.
-/// *Here*: lensed and the editor is the fronted route — the chip IS the
-/// current-place marker (no nav tab lights during a lens route).
-const SESSION_CHIP_HERE: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-accent-border tw:px-2 tw:py-1 tw:text-[11px] tw:font-bold tw:text-heading tw:no-underline";
-/// *Open*: lensed, but another section is fronted — washed presence.
-const SESSION_CHIP_OPEN: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border tw:bg-background-wash tw:px-2 tw:py-1 tw:text-[11px] tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:text-strong-foreground";
-/// Idle: a live session the lens is not on.
-const SESSION_CHIP_IDLE: &str = "tw:inline-flex tw:max-w-[148px] tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1 tw:text-[11px] tw:font-semibold tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground";
-
-/// The one ⋯ menu popup: wide enough for tool cards; section and session
-/// rows ride the same width.
+/// The one ⋯ menu popup: wide enough for tool cards; section rows ride
+/// the same width.
 const OVERFLOW_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:gap-1 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
 /// Mini-header labelling each group of the ⋯ menu.
 pub(crate) const GROUP_HEADER_CLASS: &str = "tw:px-1.5 tw:pt-1.5 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground tw:first:pt-0.5";

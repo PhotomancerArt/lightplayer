@@ -176,6 +176,7 @@ holds the full context.
 | `declare_space` agent tool: the shader agent can stage a `render_1d` body but cannot write `ShaderDef::space`, and its prompt asserts the 2D entry unconditionally | `2026-08-09-dimensionality-authoring-surface` | Next shader-agent work; must reuse the dimensionality section's write path |
 | Fixture paste-guidedness is a heuristic (no mapping and height ≠ 1) for want of a model-level "declared" marker | `2026-08-09-dimensionality-authoring-surface` | The mapping/patching work's D15 declared fixture space lands |
 | `wire_reversed` is an interim fixture-level bit; the patching work's per-range `reversed` supersedes it, and D15 may absorb `strip_order_meaningful` entirely | `2026-08-09-dimensionality-authoring-surface` | Mapping/patching slice 1 |
+| Desktop-app multi-session UX (the web shell's install funnel caps the tab at one session; the N-session pool and per-session projections stay) | `2026-08-19-single-session-web-and-session-control` | A desktop-app shell is built and wants to show more than one session at once |
 
 ## Relationship To Shared Planning
 

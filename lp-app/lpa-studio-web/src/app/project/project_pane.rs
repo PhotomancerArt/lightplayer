@@ -25,14 +25,15 @@
 //! this pane FLAT — no card chrome, no project-name/[i] header, just the save
 //! affordances, any sync issue, and the tree on the panel's own background.
 //! The dock is already titled "Nodes", so a card inside it was box-in-box; and
-//! the popup that used to hang off this header now lives on the ROOT NODE
-//! CARD's [i] in the center ([`ProjectDetailSections`], re-housed whole).
-//! Every other mount keeps the card, header, and popup exactly as before.
+//! the popup that used to hang off this header lives on the header
+//! session·project control's panel instead ([`ProjectDetailSections`],
+//! re-housed whole — single-session policy). Every other mount keeps the
+//! card, header, and popup exactly as before.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, DirtySummary, ProjectController, ProjectEditorView, ProjectOp, ProjectSyncPhase,
-    UiAction, UiAffordance, UiConfigSlot, UiMetric, UiPendingEdit, UiStatus,
+    UiAction, UiAffordance, UiConfigSlot, UiMetric, UiPaneAction, UiPendingEdit, UiStatus,
 };
 
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
@@ -47,7 +48,8 @@ use crate::base::{DetailPopover, DetailSection, PopoverPlacement};
 /// Everything the project's detail popup shows, gathered from the editor view
 /// plus the pane-level status — one value so the SAME sections can render in
 /// two homes: the project pane's own [i] (every non-workbench mount) and the
-/// workspace ROOT NODE card's [i] (the workbench's center, ruling 2).
+/// header session·project control's panel (every mount — single-session
+/// policy).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProjectDetailContent {
     affordance: UiAffordance,
@@ -61,22 +63,36 @@ pub struct ProjectDetailContent {
     root_slots: Vec<UiConfigSlot>,
     manifest: Option<lpa_studio_core::UiProjectManifest>,
     library_identity: Option<(String, String)>,
+    /// The controller's contextual Save / Revert-to-saved pair (present
+    /// only while persisted edits are pending). The SECTIONS do not render
+    /// them — the pane header and the header session·project control do —
+    /// but they ride this value so every home dispatches the controller's
+    /// own actions instead of minting a second save verb.
+    header_actions: Vec<UiPaneAction>,
 }
 
 impl ProjectDetailContent {
-    /// The merged affordance — the header chip's state glyph reads it.
+    /// The merged affordance — the header control's state glyph reads it.
     pub fn affordance(&self) -> UiAffordance {
         self.affordance
     }
 
-    /// The project's display name — the header chip's text.
+    /// The project's display name — the header control's project segment
+    /// text.
     pub fn project_name(&self) -> &str {
         &self.project_name
     }
 
-    /// Unsaved persisted edits — the header chip's amber count.
+    /// Unsaved persisted edits — the header control's amber count.
     pub fn unsaved_count(&self) -> usize {
         self.dirty.persisted
+    }
+
+    /// The controller's contextual header actions (Save / Revert-to-saved),
+    /// empty while the project is clean — the header session·project
+    /// control's trailing segments read them.
+    pub fn header_actions(&self) -> &[UiPaneAction] {
+        &self.header_actions
     }
 
     /// Gather the popup's content from the editor view and the pane status
@@ -94,6 +110,7 @@ impl ProjectDetailContent {
             root_slots: view.root_slots.clone(),
             manifest: view.manifest.clone(),
             library_identity: view.library_identity.clone(),
+            header_actions: view.header_actions.clone(),
         }
     }
 }
@@ -141,10 +158,9 @@ pub fn ProjectPane(
 
     if embedded {
         // Flat on the dock's background: the sync issue and the tree. No
-        // card, no title row, no [i] — the dock's tab names this, the popup
-        // lives on the header project chip, and the Save/Revert row rides
-        // the TREE PANEL itself (`workbench::TreePanelActions`) so every
-        // view's Tree body shares the one affordance row.
+        // card, no title row, no [i] — the dock's tab names this, and the
+        // popup plus the Save/Revert pair both live on the header
+        // session·project control now (R7-2: the save moment's one home).
         return rsx! {
             div { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-2.5",
                 if let Some(issue) = sync_issue.as_ref() {
@@ -284,9 +300,10 @@ fn ProjectDetailPopover(
 
 /// The project popup's SECTIONS, without the popover around them — the
 /// re-housable unit (ruling 2). Rendered inside the project pane's own [i]
-/// on every non-workbench mount, and inside the workspace ROOT NODE card's
-/// [i] in the workbench's center, where the flat Nodes dock has no header of
-/// its own to hang a popup from.
+/// on every non-workbench mount, and inside the header session·project
+/// control's panel on every mount (single-session policy) — the workbench's
+/// flat Nodes dock has no header of its own to hang a popup from, so that
+/// mount is the ONLY place its project state shows.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProjectDetailSections(
@@ -305,6 +322,10 @@ pub fn ProjectDetailSections(
         root_slots,
         manifest,
         library_identity,
+        // The Save/Revert pair rides the content value for the header
+        // control's sake; the sections deliberately do not render it (the
+        // popup lists the edits, the control carries the verbs).
+        header_actions: _,
     } = content;
     let status_class = node_status_label_class(status.kind);
     let unsaved_entries = entries_in(&pending_edits, PendingEditBucket::Persisted);
@@ -381,7 +402,8 @@ fn ProjectDetailRow(label: String, value: String) -> Element {
 }
 
 /// Accessible trigger label for the pane's merged affordance — shared
-/// with the site header's project chip (D8), which opens the same popup.
+/// with the site header's session·project control, which opens the same
+/// panel.
 pub(crate) fn trigger_label(affordance: UiAffordance) -> &'static str {
     match affordance {
         UiAffordance::Info => "Project details — no unsaved changes",

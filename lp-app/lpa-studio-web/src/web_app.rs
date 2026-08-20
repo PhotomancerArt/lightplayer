@@ -25,8 +25,8 @@ use std::rc::Rc;
 use crate::app::StudioShell;
 use crate::app::layout::LocalStoreBanner;
 use crate::app::layout::{
-    ChromeProjectChip, ChromeProjectMenu, CloudAccountControl, PatchToggle, PlayToggle, SiteChrome,
-    SiteSection, StudioSettingsPopover, VersionBadge,
+    ChromeProjectMenu, ChromeSessionControl, CloudAccountControl, PatchToggle, PlayToggle,
+    SiteChrome, SiteSection, StudioSettingsPopover, VersionBadge,
 };
 use crate::app::project::ProjectDetailContent;
 use crate::app::share::{
@@ -43,8 +43,8 @@ use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
     DeviceTimers, HOME_NODE_ID, HomeOp, ProjectController, ProjectOp, STUDIO_LOG_SINK,
-    SettingsCommand, StudioActor, StudioCommand, StudioController, UiAction, UiLogEntry,
-    UiLogLevel, UiStudioView, has_unsaved_work,
+    SettingsCommand, StudioActor, StudioCommand, StudioController, UiAction,
+    UiChromeSessionControl, UiLogEntry, UiLogLevel, UiStudioView, has_unsaved_work,
 };
 use lpc_cloud_api::share_link;
 use lpc_history::PrefixedUid;
@@ -177,12 +177,25 @@ pub fn App() -> Element {
         }
     });
     // What the view currently shows, for the navigation listener: the
-    // open project's (uid, slug), whether the editor is showing, and the
+    // open project's (uid, slug), the tab's one runtime session, and the
     // route the lens binds. `saw_opening` guards the go-home fallback (the
     // boot-time home flash must not rewrite the URL that requested a
     // startup reopen).
     let open_ids_now = use_hook(|| Rc::new(RefCell::new(None::<(String, String)>)));
-    let editor_open_now = use_hook(|| Rc::new(Cell::new(false)));
+    // THE session (single-session web policy): navigation is studio OR
+    // site, so leaving is a teardown, and the listener needs the
+    // session's kind, name, teardown target and in-flight operation to
+    // carry it out. This is the same bridge the editor-open flag used to
+    // be — the listener runs outside the render body, so the facts it
+    // judges by are latched here by the view loop rather than read from
+    // the view signal.
+    let session_now = use_hook(|| Rc::new(RefCell::new(None::<UiChromeSessionControl>)));
+    // A nav-initiated teardown the actor hasn't finished yet. The
+    // view→route reconciliation below must not rewrite the URL back to
+    // the lens while it is set: the user CHOSE the site route, and the
+    // session the teardown is ending is still in the snapshot the loop is
+    // looking at.
+    let leaving_session = use_hook(|| Rc::new(Cell::new(false)));
     let bound_route_now = use_hook(|| Rc::new(RefCell::new(None::<StudioRoute>)));
     let saw_opening = use_hook(|| Rc::new(Cell::new(false)));
     // A route-driven open we dispatched (startup / back-forward / hash nav)
@@ -202,7 +215,8 @@ pub fn App() -> Element {
     // spawn the actor once and drive the view signal from its change-gated
     // channel.
     let loop_open_ids = Rc::clone(&open_ids_now);
-    let loop_editor_open = Rc::clone(&editor_open_now);
+    let loop_session = Rc::clone(&session_now);
+    let loop_leaving = Rc::clone(&leaving_session);
     let loop_bound_route = Rc::clone(&bound_route_now);
     let loop_saw_opening = Rc::clone(&saw_opening);
     let loop_pending_route_open = Rc::clone(&pending_route_open);
@@ -321,12 +335,20 @@ pub fn App() -> Element {
                 {
                     *loop_pending_project.borrow_mut() = None;
                 }
+                // The tab's one session, for the navigation listener's
+                // studio-or-site policy.
+                *loop_session.borrow_mut() = next.session.clone();
                 // The editor is showing exactly when the view built the
                 // pane layout (device-opened projects carry no library
                 // uid, so pane presence — not project identity — is the
                 // gate).
                 let editor_showing = !next.panes.is_empty();
-                loop_editor_open.set(editor_showing);
+                // The nav teardown has landed the moment the editor it
+                // was tearing down is gone; from here the reconciliation
+                // below is free to speak about the URL again.
+                if !editor_showing {
+                    loop_leaving.set(false);
+                }
                 let bound = editor_showing.then(|| router::lens_route(&next)).flatten();
                 // A NEW document took the lens this emission (none → some,
                 // or a different session): that is a navigation the user
@@ -369,7 +391,15 @@ pub fn App() -> Element {
                         | StudioRoute::Project { .. }
                         | StudioRoute::Device { .. }
                 );
-                if editor_showing && (on_shell_route || bound_changed) {
+                // …and never while a nav teardown is in flight. Leaving
+                // the studio is initiated BY navigation to a site route
+                // (single-session policy), so between the dispatch and
+                // the session actually ending there is an emission whose
+                // lens still says "editor", on a route the user chose
+                // deliberately — `/projects` is a shell route, so without
+                // this the loop would push the user straight back into
+                // the editor they just left.
+                if editor_showing && !loop_leaving.get() && (on_shell_route || bound_changed) {
                     // `same_session`, not `!=`: play is a lens ZOOM on the
                     // same document, and the lens's own route always reads
                     // non-play — comparing by equality would rewrite the
@@ -501,36 +531,82 @@ pub fn App() -> Element {
     // route → actor: back/forward, in-app link clicks and manual URL edits
     // dispatch the matching action. Programmatic navigate/replace calls fire
     // no browser event, so everything arriving here is real user navigation.
+    //
+    // It is also where the single-session policy's other half lives:
+    // navigation is studio OR site, so an arrival anywhere but a lens
+    // route ENDS the tab's session ([`nav_session_plan`]) — silently,
+    // with one line, never a prompt — and an operation in flight refuses
+    // the move instead.
     let nav_bridge = bridge.clone();
     let nav_open_ids = Rc::clone(&open_ids_now);
-    let nav_editor_open = Rc::clone(&editor_open_now);
+    let nav_session = Rc::clone(&session_now);
+    let nav_leaving = Rc::clone(&leaving_session);
+    let nav_unsaved = Rc::clone(&unsaved);
     let nav_bound_route = Rc::clone(&bound_route_now);
     let nav_pending_route_open = Rc::clone(&pending_route_open);
     let nav_library_uids = Rc::clone(&library_uids);
     let nav_pending_project = Rc::clone(&pending_project_route);
+    let mut nav_toasts = toasts;
     let _route_listener = use_hook(move || {
-        router::install_route_listener(move || {
-            let new_route = router::current_route();
+        router::install_route_listener(move |event| {
+            // One decision, two moments: a click asks BEFORE the history
+            // entry is written (a refusal there is invisible), a move
+            // reports after the URL already changed (a refusal there has
+            // to put it back).
+            let target = match &event {
+                router::NavEvent::ClickIntent(target) => target.clone(),
+                router::NavEvent::Moved => router::current_route(),
+            };
+            let plan = nav_session_plan(nav_session.borrow().as_ref(), &target, nav_unsaved.get());
+            if let router::NavEvent::ClickIntent(_) = event {
+                return match plan {
+                    NavSessionPlan::Refuse(line) => {
+                        nav_toasts.warn(line);
+                        false
+                    }
+                    // Everything else is settled on arrival, below: the
+                    // click's own history write happens between the two
+                    // calls, and acting twice would tear down twice.
+                    _ => true,
+                };
+            }
+            let new_route = target;
             let old = route.peek().clone();
             if new_route == old {
-                return;
+                return true;
+            }
+            match plan {
+                NavSessionPlan::Refuse(line) => {
+                    // Back/forward (or a manual edit) has already spent
+                    // the entry, so nav is refused by putting the URL
+                    // back. A PUSH, not a replace: after a back, pushing
+                    // the entry the back consumed leaves history exactly
+                    // as it was, and the forward stack it truncates is
+                    // the one the back created.
+                    router::navigate(&old);
+                    nav_toasts.warn(line);
+                    return true;
+                }
+                NavSessionPlan::Leave { teardown, said } => {
+                    // The studio is being left: end the session. No
+                    // prompt, on dirty or otherwise — the draft overlay
+                    // is durable, so what is ending is the RUN, and the
+                    // line below says so.
+                    nav_leaving.set(true);
+                    nav_bridge.tx.send(StudioCommand::Action(teardown));
+                    nav_toasts.say(said);
+                }
+                NavSessionPlan::Keep => {
+                    // This navigation supersedes any teardown still
+                    // outstanding: the user is back in the studio (or
+                    // never had a session), and the reconciliation below
+                    // must be free to speak about the URL again even if
+                    // the previous teardown never reported.
+                    nav_leaving.set(false);
+                }
             }
             route.set(new_route.clone());
             match &new_route {
-                StudioRoute::Devices | StudioRoute::Projects => {
-                    if nav_editor_open.get() {
-                        // back to the gallery = lens detach (runtime-pool
-                        // P3): the editor closes, every runtime session
-                        // keeps running — the sim stays live (self-ticking
-                        // worker, client attached) and the device stays
-                        // attached. Explicit disconnect affordances keep
-                        // full teardown.
-                        nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
-                            ProjectController::NODE_ID,
-                            ProjectOp::DetachLens,
-                        )));
-                    }
-                }
                 StudioRoute::Project { uid, .. } => {
                     // already the focused document? The uid is the whole
                     // comparison — a stale slug in the pasted link is the
@@ -578,19 +654,21 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Home
+                StudioRoute::Devices
+                | StudioRoute::Projects
+                | StudioRoute::Home
                 | StudioRoute::Explore
                 | StudioRoute::Account
                 | StudioRoute::Boards { .. }
                 | StudioRoute::Docs { .. } => {
-                    // In-app sections: setting the route signal above already
-                    // re-rendered the body. Nothing unloads — the runtime
-                    // pool, sims, and device sessions keep running while the
-                    // user reads docs or browses boards. (Home and Explore
-                    // don't render the shell, so an attached lens survives
-                    // a visit; Devices/Projects above DO detach — they
-                    // render the shell, and the shell shows the editor
-                    // whenever a lens is attached.)
+                    // The site sections. Setting the route signal above
+                    // already re-rendered the body, and the session (if
+                    // there was one) has just been told to end by the
+                    // plan — there is nothing else a site route asks of
+                    // the actor. Docs and Boards reached from studio mode
+                    // don't even come through here: they open a new tab,
+                    // which is how the session behind them keeps running
+                    // (`site_chrome.rs`).
                 }
                 StudioRoute::Stories { .. } | StudioRoute::BoardEditor => {
                     // the story book and board editor mount
@@ -600,6 +678,9 @@ pub fn App() -> Element {
                     router::hard_reload();
                 }
             }
+            // Only the click intent above can refuse; a move that has
+            // already happened is never undone by a return value.
+            true
         })
     });
 
@@ -832,23 +913,27 @@ pub fn App() -> Element {
     // Shared by the chrome and the section body below: an EventHandler is
     // Copy, the raw closure is not.
     let on_action = EventHandler::new(on_action);
-    // The header project chip (D8): the SAME detail content the pane's
-    // [i] renders, threaded to the chrome so project state (unsaved /
-    // failed / syncing) is visible on every view at every width.
-    // Presentation only — zero new state; `None` off the lens routes.
-    let project_chip = current_route
+    // THE session·project control: this tab's ONE session (core's control
+    // projection) paired with the SAME detail content the pane's [i]
+    // renders, so device state and project state (unsaved / failed /
+    // syncing) are visible on every view at every width. Presentation only
+    // — zero new state; `None` off the lens routes, and `project` stays
+    // `None` for a session with nothing open (the honest-empty segment).
+    let session_control = current_route
         .is_lens()
-        .then(|| {
-            current_view.panes.iter().find_map(|pane| match &pane.body {
-                lpa_studio_core::UiViewContent::ProjectEditor(editor) => Some(ChromeProjectChip {
-                    content: ProjectDetailContent::new(editor, pane.status.clone()),
-                    on_action,
-                    initially_open: false,
-                }),
+        .then(|| current_view.session.clone())
+        .flatten()
+        .map(|session| ChromeSessionControl {
+            session,
+            project: current_view.panes.iter().find_map(|pane| match &pane.body {
+                lpa_studio_core::UiViewContent::ProjectEditor(editor) => {
+                    Some(ProjectDetailContent::new(editor, pane.status.clone()))
+                }
                 _ => None,
-            })
-        })
-        .flatten();
+            }),
+            on_action,
+            initially_open: false,
+        });
     let section = match &current_route {
         // `/` is Home: no tab lights — the logo wears the underline.
         StudioRoute::Home => SiteSection::Home,
@@ -863,9 +948,10 @@ pub fn App() -> Element {
         // Like Session: no tab lights. The avatar in the right cluster is
         // the account page's current-place marker.
         StudioRoute::Account => SiteSection::Account,
-        // Lens routes light NO tab — the active session chip is the
-        // current-place marker (D15). The other catch-all routes
-        // (stories, the standalone editors) never render this chrome.
+        // Lens routes light NO tab — the header session·project control is
+        // the current-place marker (single-session policy). The other
+        // catch-all routes (stories, the standalone editors) never render
+        // this chrome.
         _ => SiteSection::Session,
     };
     let settings = current_view.settings.clone();
@@ -886,10 +972,8 @@ pub fn App() -> Element {
         main { class: "{main_class}",
             SiteChrome {
                 section,
-                sessions: current_view.sessions.clone(),
-                on_editor: current_route.is_lens(),
                 project_menu,
-                project_chip,
+                session_control,
                 tight: workbench_route,
                 if let Some(href) = patch_toggle {
                     // Same-session zoom like play: the route listener sees
@@ -994,6 +1078,108 @@ pub fn App() -> Element {
             // the clipboard, an access level flipped, a project archived).
             ToastHost {}
         }
+    }
+}
+
+/// What a navigation does to the tab's ONE runtime session.
+///
+/// The whole studio-or-site policy, as a value: the route listener turns
+/// it into dispatches and toasts, and the tests below read it directly.
+enum NavSessionPlan {
+    /// The session (if any) survives this arrival.
+    Keep,
+    /// Refused — an operation is in flight, and this line names it.
+    Refuse(String),
+    /// The studio is being left: run `teardown`, then say `said`.
+    Leave { teardown: UiAction, said: String },
+}
+
+/// Decide what arriving at `target` does to `session` (ruling R8-4).
+///
+/// **Leaving a lens route ends the session.** With one session per tab,
+/// the running sim or attached board IS the studio; a site section is
+/// somewhere else, and a session nobody is looking at is a worker (or a
+/// held serial port) burning down a laptop battery behind a docs page.
+/// So navigation is studio OR site, and this is the seam that enforces
+/// it.
+///
+/// **It never prompts.** The draft overlay is durable — what ends is the
+/// RUN, not the work — so a dirty project is not a reason to interrogate
+/// anyone (the same property `unsaved_gate::action_replaces_loaded_project`
+/// establishes for the lens-detach family, which this replaces). `dirty`
+/// only decides whether the line PROMISES the draft; promising one that
+/// was never written would be its own small lie.
+///
+/// **The one refusal is an operation in flight.** A deploy or a flash
+/// cannot be torn down honestly halfway, so the move is refused with the
+/// operation named — the same shape as the install funnel's refusal
+/// (P1's `enforce_single_session`), so the two places the policy bites
+/// speak with one voice.
+fn nav_session_plan(
+    session: Option<&UiChromeSessionControl>,
+    target: &StudioRoute,
+    dirty: bool,
+) -> NavSessionPlan {
+    let Some(session) = session else {
+        return NavSessionPlan::Keep;
+    };
+    // Every lens route is the studio, including the zooms (play, patch,
+    // mapping) and another document entirely: moving the lens between
+    // documents is the install funnel's business, and P1 already refuses
+    // THAT with the operation named.
+    if target.is_lens() {
+        return NavSessionPlan::Keep;
+    }
+    // The story book and the standalone board editor reload the page
+    // (their early returns in `App` run before any hooks), so the session
+    // dies with the document whatever we dispatch here.
+    if matches!(
+        target,
+        StudioRoute::Stories { .. } | StudioRoute::BoardEditor
+    ) {
+        return NavSessionPlan::Keep;
+    }
+    if let Some(operation) = session.busy.as_deref() {
+        return NavSessionPlan::Refuse(format!(
+            "{operation} in progress — finish or cancel it before leaving"
+        ));
+    }
+    NavSessionPlan::Leave {
+        teardown: session_teardown(session),
+        said: session_stopped_line(session, dirty),
+    }
+}
+
+/// The action that ends `session`: the sim's own stop verb, or the
+/// board's disconnect aimed by the card key the control carries — the
+/// same op the card's danger-zone row dispatches, so leaving the studio
+/// and clicking Disconnect are literally the same teardown.
+fn session_teardown(session: &UiChromeSessionControl) -> UiAction {
+    let op = if session.sim {
+        lpa_studio_core::DeviceOp::StopSimulator
+    } else {
+        lpa_studio_core::DeviceOp::DisconnectDevice {
+            target: lpa_studio_core::DeviceTarget::card(session.key.clone()),
+        }
+    };
+    UiAction::from_op(lpa_studio_core::DeviceController::NODE_ID, op)
+}
+
+/// The one line a teardown-by-nav leaves behind (ruled copy, R8-4).
+///
+/// The draft clause is conditional: with nothing unsaved there is no
+/// draft to reassure anyone about, and a promise made on every stop is a
+/// promise nobody reads.
+fn session_stopped_line(session: &UiChromeSessionControl, dirty: bool) -> String {
+    let stopped = if session.sim {
+        "Simulator stopped".to_string()
+    } else {
+        format!("{} disconnected", session.name)
+    };
+    if dirty {
+        format!("{stopped} — your edits are saved as a draft")
+    } else {
+        stopped
     }
 }
 
@@ -1384,7 +1570,180 @@ fn console_error(_message: &str) {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpa_studio_core::{UiLogOrigin, UiLogSource};
+    use lpa_studio_core::{UiChromeSessionStatus, UiLogOrigin, UiLogSource};
+
+    /// The tab's session, as the view loop latches it for the listener.
+    fn session(sim: bool, busy: Option<&str>) -> UiChromeSessionControl {
+        UiChromeSessionControl {
+            key: if sim { "sim" } else { "dev7k2" }.to_string(),
+            sim,
+            name: if sim { "Sim" } else { "Attic strip" }.to_string(),
+            board: sim.then(|| "ESP32-C6".to_string()),
+            status: UiChromeSessionStatus::Run,
+            busy: busy.map(str::to_string),
+            stat_line: None,
+        }
+    }
+
+    fn project_route() -> StudioRoute {
+        StudioRoute::Project {
+            uid: "prj0000000000000000".parse().expect("a project uid"),
+            slug: Some("mini-dome".to_string()),
+            view: router::ProjectView::Workspace,
+        }
+    }
+
+    /// The plan's central claim: a site route ENDS the tab's session, and
+    /// the sim's teardown is `StopSimulator` (never a detach).
+    #[test]
+    fn leaving_the_studio_stops_the_sim() {
+        let plan = nav_session_plan(Some(&session(true, None)), &StudioRoute::Projects, false);
+
+        let NavSessionPlan::Leave { teardown, said } = plan else {
+            panic!("a site route must end the session");
+        };
+        assert!(matches!(
+            teardown.op_as::<lpa_studio_core::DeviceOp>(),
+            Some(lpa_studio_core::DeviceOp::StopSimulator)
+        ));
+        // Nothing unsaved: no draft to promise.
+        assert_eq!(said, "Simulator stopped");
+    }
+
+    /// Every site section, not just the galleries the old detach arm
+    /// covered — a session running behind a docs page is exactly the
+    /// thing the single-session policy is for.
+    #[test]
+    fn every_site_route_ends_the_session() {
+        for target in [
+            StudioRoute::Home,
+            StudioRoute::Devices,
+            StudioRoute::Projects,
+            StudioRoute::Explore,
+            StudioRoute::Account,
+            StudioRoute::Boards { board: None },
+            StudioRoute::Docs {
+                page: None,
+                anchor: None,
+            },
+        ] {
+            assert!(
+                matches!(
+                    nav_session_plan(Some(&session(true, None)), &target, false),
+                    NavSessionPlan::Leave { .. }
+                ),
+                "{} kept the session alive",
+                target.path()
+            );
+        }
+    }
+
+    /// The draft clause is evidence, not decoration: it appears only when
+    /// there is unsaved work the draft is holding.
+    #[test]
+    fn the_draft_clause_follows_the_dirty_flag() {
+        let dirty = nav_session_plan(Some(&session(true, None)), &StudioRoute::Home, true);
+        let NavSessionPlan::Leave { said, .. } = dirty else {
+            panic!("leaving");
+        };
+        assert_eq!(said, "Simulator stopped — your edits are saved as a draft");
+
+        let hardware = nav_session_plan(Some(&session(false, None)), &StudioRoute::Home, true);
+        let NavSessionPlan::Leave { said, teardown } = hardware else {
+            panic!("leaving");
+        };
+        assert_eq!(
+            said,
+            "Attic strip disconnected — your edits are saved as a draft"
+        );
+        // The board is named by the card key the control carries — the
+        // same key the card's own Disconnect row hands the op.
+        assert!(matches!(
+            teardown.op_as::<lpa_studio_core::DeviceOp>(),
+            Some(lpa_studio_core::DeviceOp::DisconnectDevice { target })
+                if target.card_key() == Some("dev7k2")
+        ));
+    }
+
+    /// The only refusal (R8-4): an operation in flight, named, with both
+    /// ways out of it.
+    #[test]
+    fn an_operation_in_flight_refuses_the_move() {
+        let plan = nav_session_plan(
+            Some(&session(false, Some("Deploy"))),
+            &StudioRoute::Explore,
+            true,
+        );
+
+        let NavSessionPlan::Refuse(line) = plan else {
+            panic!("a busy session must refuse the move");
+        };
+        assert_eq!(
+            line,
+            "Deploy in progress — finish or cancel it before leaving"
+        );
+    }
+
+    /// A busy session still moves freely INSIDE the studio: play, patch
+    /// and mapping are zooms on the same session, and refusing them would
+    /// lock the user out of watching the very operation they started.
+    #[test]
+    fn the_guard_never_blocks_movement_inside_the_studio() {
+        for target in [
+            project_route(),
+            project_route().with_play(true),
+            project_route().with_patch(true),
+            StudioRoute::Device {
+                uid: "dev7k2".to_string(),
+                play: false,
+            },
+        ] {
+            assert!(
+                matches!(
+                    nav_session_plan(Some(&session(true, Some("Deploy"))), &target, true),
+                    NavSessionPlan::Keep
+                ),
+                "{} was not treated as the studio",
+                target.path()
+            );
+        }
+    }
+
+    /// With nothing running there is nothing to end and nothing to say —
+    /// browsing the site must stay silent.
+    #[test]
+    fn a_tab_with_no_session_navigates_silently() {
+        for target in [
+            StudioRoute::Home,
+            StudioRoute::Projects,
+            StudioRoute::Docs {
+                page: Some("intro".to_string()),
+                anchor: None,
+            },
+            project_route(),
+        ] {
+            assert!(matches!(
+                nav_session_plan(None, &target, true),
+                NavSessionPlan::Keep
+            ));
+        }
+    }
+
+    /// The story book and the board editor reload the page, so the
+    /// session dies with the document — dispatching a teardown into a
+    /// tab that is about to be replaced would only race the reload.
+    #[test]
+    fn the_reloading_routes_are_left_to_the_reload() {
+        for target in [
+            StudioRoute::Stories { story_id: None },
+            StudioRoute::BoardEditor,
+        ] {
+            assert!(matches!(
+                nav_session_plan(Some(&session(true, None)), &target, false),
+                NavSessionPlan::Keep
+            ));
+        }
+    }
 
     #[test]
     fn console_line_renders_origin_label_without_detail() {

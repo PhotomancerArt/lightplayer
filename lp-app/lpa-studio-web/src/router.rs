@@ -527,9 +527,9 @@ pub(crate) struct PendingSharedProject(pub(crate) Option<PrefixedUid>);
 /// The canonical share path for a project: cosmetic slug, load-bearing uid.
 /// Callers hand it the slug once the project's meta is known.
 ///
-/// `uid` is a `&str` here because its callers (the gallery card's `<a
-/// href>`, the chrome's session chip) carry uids the way their view models
-/// do — as strings straight off a card. Every one of them is an
+/// `uid` is a `&str` here because its caller (the gallery card's `<a
+/// href>`) carries uids the way its view model does — as a string straight
+/// off a card. Every one of them is an
 /// already-valid project uid, so this delegates to
 /// [`share_link::canonical_path`] and falls back to the bare shape only
 /// for a malformed uid, which never happens in practice.
@@ -832,9 +832,34 @@ fn current_path() -> Option<String> {
         .and_then(|location| location.pathname().ok())
 }
 
+/// Why the navigation callback is running — and, for a click, whether the
+/// app permits the move at all.
+///
+/// The two cases are genuinely different, and the difference is history:
+/// a `popstate` arrives with the URL **already** moved (the entry is
+/// spent, and refusing means putting the old one back), while a click is
+/// caught BEFORE the entry is written, so a refusal there costs nothing
+/// and leaves no trace. The single-session nav guard needs both halves,
+/// so the interceptor asks first and reports second.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(dead_code, reason = "constructed by the wasm listener only")
+)]
+pub(crate) enum NavEvent {
+    /// A same-origin link click, before any history is written: the
+    /// callback returns whether the move may happen. `false` keeps the
+    /// URL exactly where it is (the callback has already said why).
+    ClickIntent(StudioRoute),
+    /// The URL has moved — back/forward, a manual edit, an accepted
+    /// click, or a programmatic [`navigate_push`]. The return value is
+    /// ignored. Act on the new route.
+    Moved,
+}
+
 /// Install the browser-navigation listener: `on_navigate` runs on every
 /// `popstate` (back/forward, manual URL edits) and on every intercepted
-/// in-app link click. Programmatic [`navigate`]/[`replace`] calls fire no
+/// in-app link click — see [`NavEvent`] for the two shapes and what the
+/// return value means. Programmatic [`navigate`]/[`replace`] calls fire no
 /// event, so this callback always means the user moved. Keep the returned
 /// guard alive for the app's lifetime (a `use_hook`).
 ///
@@ -848,7 +873,7 @@ fn current_path() -> Option<String> {
 /// calls `prevent_default()` (the busy package card) still wins.
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn install_route_listener(
-    on_navigate: impl FnMut() + 'static,
+    on_navigate: impl FnMut(NavEvent) -> bool + 'static,
 ) -> Option<std::rc::Rc<RouteListener>> {
     use core::cell::RefCell;
     use std::rc::Rc;
@@ -860,7 +885,9 @@ pub(crate) fn install_route_listener(
 
     let popstate = {
         let on_navigate = Rc::clone(&on_navigate);
-        Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_| (on_navigate.borrow_mut())()))
+        Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_| {
+            (on_navigate.borrow_mut())(NavEvent::Moved);
+        }))
     };
     window
         .add_event_listener_with_callback("popstate", popstate.as_ref().unchecked_ref())
@@ -877,10 +904,18 @@ pub(crate) fn install_route_listener(
             // not reload the page.
             event.prevent_default();
             let current = current_url(&window);
-            if url != current {
-                write_history(&window, HistoryWrite::Push, &url);
-                (on_navigate.borrow_mut())();
+            if url == current {
+                return;
             }
+            // Ask BEFORE writing history. A refusal here is invisible —
+            // no entry is spent, no forward stack is truncated, and the
+            // URL never flickers through the place we would not go.
+            let intent = StudioRoute::parse(url.split('?').next().unwrap_or(&url));
+            if !(on_navigate.borrow_mut())(NavEvent::ClickIntent(intent)) {
+                return;
+            }
+            write_history(&window, HistoryWrite::Push, &url);
+            (on_navigate.borrow_mut())(NavEvent::Moved);
         }))
     };
     window
@@ -942,7 +977,7 @@ fn current_url(window: &web_sys::Window) -> String {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn install_route_listener(
-    _on_navigate: impl FnMut() + 'static,
+    _on_navigate: impl FnMut(NavEvent) -> bool + 'static,
 ) -> Option<std::rc::Rc<RouteListener>> {
     None
 }

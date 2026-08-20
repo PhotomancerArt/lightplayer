@@ -2576,6 +2576,84 @@ fn shader_asset_editor_fetch_apply_save_and_revert_end_to_end() {
     );
 }
 
+/// The header's dirty state and the shader editor's own "Unsaved" word read
+/// the SAME published snapshot — the editor's persistence word comes from
+/// `UiAssetContent::dirty` and the header control's pencil/count/Save come
+/// from `ProjectEditorView::dirty` + `header_actions`, both built in one
+/// `view()` pass. This locks the pair together across the window where they
+/// could plausibly drift: the verdict-chase refresh ticks an accepted apply
+/// arms, each of which re-reads the project (and, when the revision moved,
+/// the overlay) and rebuilds the mirror wholesale. A refresh that dropped
+/// the `ArtifactOverlay::Asset` entry would leave the header clean with an
+/// unsaved shader on screen — the G1 symptom class (2026-08-19), so it gets
+/// a standing guard rather than a one-shot assertion right after the apply.
+#[test]
+fn an_applied_shader_body_keeps_the_header_dirty_across_the_refresh_ticks() {
+    let server = Rc::new(RefCell::new(asset_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let tab = find_asset_editor(&snapshot);
+    handle.tx.send(StudioCommand::Action(tab.fetch_action()));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("fetch emits a snapshot");
+    let tab = find_asset_editor(&snapshot);
+
+    handle
+        .tx
+        .send(StudioCommand::Action(tab.apply_action(ASSET_SHADER_V2)));
+    drive(actor.run_one_batch_for_test());
+    let mut snapshot = view.try_recv().expect("apply emits a snapshot");
+    assert_eq!(editor_dirty(&snapshot), (1, 0), "right after the apply");
+    // What the header dispatches is the project-level save, not a second
+    // asset-only verb: the control renders `header_actions` as-is.
+    let editor = project_editor(&snapshot);
+    assert_eq!(editor.header_actions.len(), 2);
+    assert_eq!(
+        editor.header_actions[0].action.op_as::<ProjectOp>(),
+        Some(&ProjectOp::SaveOverlay)
+    );
+
+    // A tick that changes nothing publishes nothing; the last snapshot is
+    // still the current one, so the guard re-reads it rather than skipping.
+    for tick in 0..crate::VERDICT_CHASE_TICKS + 1 {
+        handle.tx.send(StudioCommand::RefreshTick);
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = next;
+        }
+        assert_eq!(
+            editor_dirty(&snapshot),
+            (1, 0),
+            "the applied body still counts after refresh tick {tick}"
+        );
+        assert_eq!(
+            project_editor(&snapshot).header_actions.len(),
+            2,
+            "the header keeps Save/Revert across refresh tick {tick}"
+        );
+        let tab = find_asset_editor(&snapshot);
+        let content = tab.content.as_ref().expect("content after a refresh");
+        assert!(
+            content.dirty,
+            "the editor still reads Unsaved on refresh tick {tick}"
+        );
+        assert_eq!(content.text(), Some(ASSET_SHADER_V2));
+    }
+}
+
 #[test]
 fn the_output_card_gets_a_debug_section_for_test_pattern() {
     // P5, over the real wire: `OutputDef.test_pattern` is `SlotRole::Debug`,

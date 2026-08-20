@@ -194,6 +194,19 @@ the `UiViewContent` body types the pane shared with the project and bus
 panes are unaffected. See
 `docs/defects/2026-07-28-retired-device-pane-still-reachable.md`.
 
+**Amendment 2026-08-19.** The D43-era vision boundary "chips are
+wayfinding — name and status only, never controls" is amended for
+exactly the LENSED pairing: the single-session web policy's header
+session·project control
+(`docs/adr/2026-08-19-single-session-web-and-session-control.md`) carries
+Save/Revert directly and opens the rich detail panel this ADR's
+`DetailPopover`/`ProjectDetailSections` grammar already defined — it is a
+`StudioPane`-grammar consumer wearing the D43 device card's old clothes,
+not a new pattern. Non-lensed session chips (the strip, the ⋯-menu
+Sessions group) do not get this exception; they retire instead, because
+with one session per tab there is nothing left for a plain wayfinding
+chip to distinguish.
+
 ## Consequences
 
 - New editing surfaces get chrome by mapping onto slots, not by drawing

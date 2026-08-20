@@ -66,6 +66,19 @@ map key and the value the scene-fork's `view-transition-name:
 card-{key}` consumes (the fork switches its `render_key()`-derived
 `vt_name` over to it).
 
+**Amendment 2026-08-19.** The single-session web policy
+(`docs/adr/2026-08-19-single-session-web-and-session-control.md`) reuses
+this ADR's `identity_key()` as the header session·project control's own
+session key — the same key that names a teardown target
+(`DeviceTarget::card`) now also names which card's `CardUiState` a
+session belongs to, so the header's leave-the-studio teardown and the
+card's own state can never point at different boards. It also extends
+this ADR's D43 boundary the same way `2026-07-05-studio-pane-grammar.md`
+records: the LENSED pairing's one remaining chrome surface (the header
+control) carries Save/Revert and opens a rich panel, where D43's
+original "chips are wayfinding" rule would have forbidden it. Non-lensed
+session chips do not get the exception — they retired instead.
+
 ## Consequences
 
 - **Drivable.** e2e opens a card, dispatches `CardUi(OpenSheet(...))`,

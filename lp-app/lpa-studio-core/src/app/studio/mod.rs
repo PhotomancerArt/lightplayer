@@ -75,7 +75,7 @@ pub use studio_view_channel::{
 };
 pub use ui_console_view::UiConsoleView;
 pub use ui_studio_view::{
-    UiChromeSession, UiChromeSessionStatus, UiChromeSessionTarget, UiLensRuntime, UiStudioView,
+    UiChromeSessionControl, UiChromeSessionStatus, UiLensRuntime, UiStudioView,
 };
 pub use unsaved_changes::has_unsaved_work;
 pub use ux_update::{UxActivityTarget, UxUpdate};

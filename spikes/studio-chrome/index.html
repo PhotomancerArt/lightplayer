@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Studio chrome — header chip + one band + view-keyed Tree (round 6)</title>
+<title>Studio chrome — the session·project control, single-session world (round 8)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
@@ -25,7 +25,6 @@
     --err-bg: #301b1d; --err-border: #874b4b; --err-text: #ffc7c7;
     --warn-text: #f0dc7a;
 
-    /* editor object colours (OBJECT_COLORS in editor_canvas.rs) */
     --obj-0: #5aa9e6; --obj-1: #3fd68e; --obj-2: #e4c065;
     --obj-3: #c792ea; --obj-4: #f0913b; --obj-5: #64d8cb;
     --gap: #3a4149;
@@ -44,18 +43,21 @@
   }
   h1 { font-size: 13px; letter-spacing: .12em; color: var(--heading);
        text-transform: uppercase; margin: 0 0 6px; }
-  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 940px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 980px; }
   p.hint b { color: var(--muted); }
   h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
        text-transform: uppercase; margin: 42px 0 4px; }
-  p.thesis { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 940px; }
+  p.thesis { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 980px; }
   p.thesis b { color: var(--muted); }
   code, kbd.k { font-family: var(--mono); font-size: .92em; color: var(--muted); }
-  .leannote { max-width: 940px; border: 1px solid var(--border); background: var(--surface-muted);
+  .leannote { max-width: 980px; border: 1px solid var(--border); background: var(--surface-muted);
               border-radius: var(--r-md); padding: 9px 13px; font-size: 11.5px; color: var(--subtle);
               margin: 14px 0 0; }
   .leannote b { color: var(--muted); }
-  .secnote { font-size: 10.5px; color: var(--dim); margin-top: 8px; max-width: 940px; }
+  .secnote { font-size: 10.5px; color: var(--dim); margin-top: 8px; max-width: 980px; }
+  .rejrow { display: flex; gap: 8px; align-items: baseline; font-size: 11px; color: var(--dim);
+            padding: 3px 0; max-width: 1080px; }
+  .rejrow b { color: var(--subtle); font-weight: 600; flex: none; }
 
   /* ---- exploration controls ---- */
   .xcontrols {
@@ -78,100 +80,128 @@
   .xcontrols button.on { color: var(--good); border-color: rgba(63,214,142,.4);
                          background: rgba(63,214,142,.1); }
 
-  /* ================= workbench frame ================= */
-  .wb { border: 1px solid var(--border-strong); border-radius: var(--r-md);
-        overflow: hidden; background: var(--bg); margin-top: 10px; }
+  /* ================= header bars ================= */
   .ghead { display: flex; align-items: center; gap: 14px; padding: 6px 14px;
            background: var(--surface-muted); border-bottom: 1px solid var(--border-strong);
-           font-size: 11.5px; color: var(--subtle); position: relative; }
-  .ghead .brand { font-weight: 600; color: var(--subtle); }
+           font-size: 11.5px; color: var(--subtle); position: relative; min-height: 38px; }
+  .ghead .brand { font-weight: 600; color: var(--subtle); white-space: nowrap; }
   .ghead .brand b { color: var(--accent); }
-  .ghead .gnav { display: flex; gap: 14px; }
-  .ghead .gnav span { cursor: pointer; }
+  .ghead .gnav { display: flex; gap: 14px; align-items: center; }
+  .ghead .gnav span { cursor: pointer; white-space: nowrap; }
   .ghead .gnav span:hover { color: var(--strong); }
+  .ghead .gnav span.on { color: var(--strong); box-shadow: 0 2px 0 var(--accent); }
+  .ghead .gnav span sup { color: var(--dim); font-size: 8px; margin-left: 1px; }
   .ghead .sp { flex: 1; }
-  .ghead .sess { font-family: var(--mono); font-size: 10px; color: var(--good);
-                 border: 1px solid rgba(63,214,142,.35); border-radius: 20px; padding: 1px 9px; }
   .ghead .dots { color: var(--dim); letter-spacing: 2px; }
   .ghead .shico { display: inline-flex; align-items: center; justify-content: center;
                   width: 26px; height: 22px; border: 1px solid var(--border-subtle);
                   border-radius: 6px; color: var(--dim); cursor: pointer; font-size: 11px; }
   .ghead .shico:hover { color: var(--strong); border-color: var(--border-strong); }
 
-  .wbbody { display: flex; min-height: 0; height: 520px; background: var(--bg); }
+  /* ---- shared chip anatomy ---- */
+  .st { font-size: 11px; width: 13px; text-align: center; color: var(--dim); flex: none; }
+  .pname { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .cnt { font-family: var(--mono); font-size: 9.5px; color: var(--dirty);
+         border: 1px solid rgba(228,192,101,.45); border-radius: 20px; padding: 0 5px; }
+  .hdot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex: none; }
+  .hdot.hollow { background: none; border: 1px solid var(--dim); }
+  .hdot.attn { background: var(--dirty); }
+  .dglyph { color: var(--dim); font-size: 10.5px; flex: none; }
+  .dglyph.sim { color: var(--obj-3); }
 
-  /* project chip (header-resident in round 6) */
-  .pchip { display: inline-flex; align-items: center; gap: 6px; padding: 2.5px 9px;
-           border: 1px solid var(--border-strong); border-radius: 6px; cursor: pointer;
-           background: var(--surface-subtle); font-size: 11.5px; color: var(--subtle);
-           user-select: none; }
-  .pchip:hover { color: var(--strong); border-color: var(--dim); }
-  .pchip .st { font-size: 11px; width: 13px; text-align: center; color: var(--dim); }
-  .pchip.unsaved { border-color: rgba(228,192,101,.55); }
-  .pchip.unsaved .st { color: var(--dirty); }
-  .pchip.failed { border-color: var(--err-border); background: var(--err-bg); }
-  .pchip.failed .st { color: var(--err-text); }
-  .pchip.syncing .st { color: var(--sel); animation: spin 1.2s linear infinite; }
+  /* ---- THE control: concept B, ruled round 7 ---- */
+  .sgrp { display: inline-flex; align-items: stretch; border: 1px solid var(--border-strong);
+          border-radius: 7px; background: var(--surface-subtle); overflow: hidden;
+          user-select: none; }
+  .sgrp .seg { display: inline-flex; align-items: center; gap: 6px; padding: 3.5px 10px;
+               font-size: 11.5px; color: var(--subtle); cursor: pointer; white-space: nowrap; }
+  .sgrp .seg + .seg { border-left: 1px solid var(--border-subtle); }
+  .sgrp .seg:hover { background: var(--bg-wash); color: var(--strong); }
+  .sgrp .seg b { color: var(--muted); font-weight: 600; }
+  .sgrp .seg .dimtxt { color: var(--dim); font-style: italic; }
+  .sgrp .seg .brd { color: var(--dim); font-size: 10.5px; }
+  .sgrp.unsaved .seg.proj { background: rgba(228,192,101,.07); }
+  .sgrp.unsaved .seg.proj .st { color: var(--dirty); }
+  .sgrp.failed .seg.proj { background: var(--err-bg); }
+  .sgrp.failed .seg.proj .st { color: var(--err-text); }
+  .sgrp.syncing .seg.proj .st { color: var(--sel); animation: spin 1.2s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .pchip .cnt { font-family: var(--mono); font-size: 9.5px; color: var(--dirty); }
-  .pchip .pname { color: var(--muted); font-weight: 600; }
+  .sgrp .seg.act { padding: 3.5px 9px; }
+  .sgrp .seg.act.save { color: var(--dirty); font-weight: 600; font-size: 11px; }
+  .sgrp .seg.act.rvt { color: var(--dim); font-size: 12px; }
+  .sgrp .seg.act:hover { color: var(--strong); }
+  .sgrp.openpanel { border-color: var(--dim); }
 
-  /* chip popover — ProjectDetailSections as-is (D4) */
-  .ppop { position: absolute; top: calc(100% + 6px); left: 210px; width: 292px; z-index: 60;
-          border: 1px solid var(--border-strong); border-radius: var(--r-md);
-          background: var(--surface); box-shadow: 0 12px 30px rgba(0,0,0,.5); overflow: hidden;
-          text-align: left; }
-  .ppop .ph { display: flex; align-items: baseline; gap: 8px; padding: 9px 12px 7px;
-              border-bottom: 1px solid var(--border-subtle); background: var(--surface-muted); }
-  .ppop .ph b { color: var(--strong); font-size: 12.5px; }
-  .ppop .ph .stw { margin-left: auto; font-size: 10px; color: var(--good); }
-  .ppop .ph .stw.dirty { color: var(--dirty); }
-  .ppop .sec { padding: 7px 12px; border-bottom: 1px solid var(--border-subtle); }
-  .ppop .sec:last-child { border-bottom: none; }
-  .ppop .sechead { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
-                   color: var(--dim); margin-bottom: 4px; display: flex; }
-  .ppop .sechead .meta { margin-left: auto; font-family: var(--mono); font-size: 9.5px;
-                         color: var(--dirty); text-transform: none; letter-spacing: 0; }
-  .ppop .acts { display: flex; gap: 7px; }
-  .ppop .acts button { flex: 1; background: var(--surface-muted); border: 1px solid var(--border-strong);
-                       border-radius: 5px; color: var(--muted); font: inherit; font-size: 11px;
-                       padding: 4px 0; cursor: pointer; }
-  .ppop .acts button:hover { color: var(--strong); }
-  .ppop .acts button.primary { border-color: rgba(228,192,101,.5); color: var(--dirty); }
-  .ppop .erow { display: flex; gap: 7px; align-items: center; font-size: 11px;
-                color: var(--subtle); padding: 2.5px 0; }
-  .ppop .erow .eico { color: var(--dirty); font-size: 10px; width: 12px; }
-  .ppop .erow .epath { font-family: var(--mono); font-size: 10px; color: var(--muted);
-                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ppop .erow .rvt { margin-left: auto; font-size: 9.5px; color: var(--dim); cursor: pointer; }
-  .ppop .erow .rvt:hover { color: var(--strong); }
-  .ppop .krow { display: flex; gap: 10px; font-size: 10.5px; padding: 1.5px 0; }
-  .ppop .krow .k { width: 92px; flex: none; color: var(--dim); font-size: 9.5px;
-                   letter-spacing: .07em; text-transform: uppercase; padding-top: 1px; }
-  .ppop .krow .v { font-family: var(--mono); font-size: 10px; color: var(--muted); }
-  .ppop .sharenote { font-size: 10.5px; color: var(--dim); }
-  .ppop .sharenote.blocked { color: var(--warn-text); }
+  /* ---- the detail panel (replaces ProjectDetailSections) ---- */
+  .dpanel { position: absolute; top: calc(100% + 6px); left: 265px; width: 344px; z-index: 60;
+            border: 1px solid var(--border-strong); border-radius: var(--r-md);
+            background: var(--surface); box-shadow: 0 12px 30px rgba(0,0,0,.5);
+            overflow: hidden; text-align: left; font-size: 11.5px; }
+  .dpanel .dz { padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); }
+  .dpanel .dz:last-child { border-bottom: none; }
+  .dpanel .dz.devz { background: var(--surface-muted); }
+  .dpanel .devrow { display: flex; align-items: center; gap: 8px; }
+  .dpanel .devrow b { color: var(--strong); font-size: 12.5px; }
+  .dpanel .devrow .runw { margin-left: auto; font-size: 10px; color: var(--good); }
+  .dpanel .devrow .runw.off { color: var(--dim); }
+  .dpanel .statline { font-family: var(--mono); font-size: 10px; color: var(--dim);
+                      margin-top: 3px; padding-left: 22px; }
+  .dpanel .projrow { display: flex; align-items: baseline; gap: 8px; }
+  .dpanel .projrow b { color: var(--strong); font-size: 12.5px; }
+  .dpanel .projrow .stw { margin-left: auto; font-size: 10px; color: var(--good); }
+  .dpanel .projrow .stw.dirty { color: var(--dirty); }
+  .dpanel .projrow .stw.err { color: var(--err-text); }
+  .dpanel .projrow .stw.sync { color: var(--sel); }
+  .dpanel .sechead { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
+                     color: var(--dim); margin-bottom: 4px; display: flex; }
+  .dpanel .sechead .meta { margin-left: auto; font-family: var(--mono); font-size: 9.5px;
+                           color: var(--dirty); text-transform: none; letter-spacing: 0; }
+  .dpanel .acts { display: flex; gap: 7px; margin-top: 7px; }
+  .dpanel .acts button { flex: 1; background: var(--surface-muted); border: 1px solid var(--border-strong);
+                         border-radius: 5px; color: var(--muted); font: inherit; font-size: 11px;
+                         padding: 4px 0; cursor: pointer; }
+  .dpanel .acts button:hover { color: var(--strong); }
+  .dpanel .acts button.primary { border-color: rgba(228,192,101,.5); color: var(--dirty); }
+  .dpanel .erow { display: flex; gap: 7px; align-items: center; font-size: 11px;
+                  color: var(--subtle); padding: 2.5px 0; }
+  .dpanel .erow .eico { color: var(--dirty); font-size: 10px; width: 12px; }
+  .dpanel .erow .epath { font-family: var(--mono); font-size: 10px; color: var(--muted);
+                         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dpanel .erow .rvt { margin-left: auto; font-size: 9.5px; color: var(--dim); cursor: pointer; }
+  .dpanel .erow .rvt:hover { color: var(--strong); }
+  .dpanel .krow { display: flex; gap: 10px; font-size: 10.5px; padding: 1.5px 0; }
+  .dpanel .krow .k { width: 92px; flex: none; color: var(--dim); font-size: 9.5px;
+                     letter-spacing: .07em; text-transform: uppercase; padding-top: 1px; }
+  .dpanel .krow .v { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .dpanel .sharenote { font-size: 10.5px; color: var(--dim); }
+  .dpanel .sharenote.blocked { color: var(--warn-text); }
+  .dpanel .hintline { font-size: 10px; color: var(--dim); font-style: italic; }
 
-  /* ---- the studio band: [Tree] · view tabs · [right panel tabs] ---- */
+  /* ---- toasts / guard ---- */
+  .toast { display: inline-flex; gap: 9px; align-items: center; border: 1px solid var(--border-strong);
+           background: var(--raised); border-radius: 8px; padding: 7px 13px; font-size: 11.5px;
+           color: var(--muted); box-shadow: 0 8px 22px rgba(0,0,0,.4); }
+  .toast .tico { color: var(--dim); }
+  .toast.warn { border-color: rgba(228,192,101,.5); }
+  .toast.warn .tico { color: var(--dirty); }
+  .toast .tlink { color: var(--sel); cursor: pointer; }
+
+  /* ================= workbench frame (live section) ================= */
+  .wb { border: 1px solid var(--border-strong); border-radius: var(--r-md);
+        overflow: hidden; background: var(--bg); margin-top: 10px; }
+  .wbbody { display: flex; min-height: 0; height: 480px; background: var(--bg); }
   .bband { display: flex; align-items: stretch; background: var(--surface-muted);
            border-bottom: 1px solid var(--border-strong); min-height: 34px; position: relative; }
   .bband .bseg { display: flex; align-items: flex-end; gap: 2px; padding: 4px 6px 0; }
   .bband .bseg.l { width: 262px; flex: none; }
   .bband .bseg.r { width: 300px; flex: none; justify-content: flex-end; }
   .bband .bmid { flex: 1; display: flex; justify-content: center; align-items: stretch; }
-  .bband.md .atab { padding: 4px 8px 5px; font-size: 10.5px; }
-  .bband.md .vtab { padding: 0 9px; font-size: 11.5px; }
-  .bband.md .vtab.future { display: none; }
-
-  /* attached tabs — active shares the panel fill, border breaks under it */
   .atab { padding: 4px 11px 5px; font-size: 11px; color: var(--dim); cursor: pointer;
           user-select: none; border: 1px solid transparent; border-bottom: none;
           border-radius: 6px 6px 0 0; position: relative; top: 1px; white-space: nowrap; }
   .atab:hover { color: var(--strong); }
   .atab.on { background: var(--surface-subtle); border-color: var(--border-strong);
              color: var(--muted); z-index: 1; }
-
-  /* view tabs — underline (Q1a) */
   .vtabs { display: flex; align-items: stretch; gap: 2px; }
   .vtab { display: inline-flex; align-items: center; gap: 7px; padding: 0 13px;
           font-size: 12px; color: var(--subtle); cursor: pointer;
@@ -181,17 +211,6 @@
   .vtab .vico { font-size: 11px; color: var(--dim); }
   .vtab.on .vico { color: var(--accent); }
   .vtab.future { opacity: .45; cursor: default; }
-  .vtab.future:hover { color: var(--subtle); }
-  .vseg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 6px;
-          overflow: hidden; align-self: center; }
-  .vseg button { background: none; border: 0; color: var(--subtle); font: inherit;
-                 font-size: 11.5px; padding: 4px 14px; cursor: pointer;
-                 display: inline-flex; gap: 6px; align-items: center; }
-  .vseg button.on { background: var(--raised-strong); color: var(--strong); }
-  .vseg button .vico { font-size: 10.5px; color: var(--dim); }
-  .vseg button.on .vico { color: var(--accent); }
-
-  /* docks */
   .dock { width: 262px; flex: none; display: flex; flex-direction: column; min-height: 0;
           background: var(--surface-subtle); }
   .dock.l { border-right: 1px solid var(--border-strong); }
@@ -200,10 +219,8 @@
   .pfoot { padding: 3.5px 12px; border-top: 1px solid var(--border-subtle);
            background: var(--surface-muted); font-family: var(--mono); font-size: 9.5px;
            color: var(--dim); flex: none; }
-
   .col.main { flex: 1; min-width: 0; background: var(--bg); display: flex;
               flex-direction: column; min-height: 0; }
-
   .etools { display: flex; align-items: center; gap: 5px; padding: 5px 10px;
             border-bottom: 1px solid var(--border-subtle); background: var(--surface-subtle);
             flex-wrap: wrap; min-height: 34px; flex: none; }
@@ -214,14 +231,10 @@
           font-size: 11.5px; color: var(--subtle); font-family: var(--sans); }
   .tbtn:hover { color: var(--strong); background: var(--bg-wash); }
   .tbtn.on { color: var(--strong); background: var(--raised); border-color: var(--border-strong); }
-  .tbtn kbd { font-family: var(--mono); font-size: 9px; color: var(--dim);
-              border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; }
-
   .mainbody { flex: 1; min-height: 0; overflow: auto; position: relative; }
   .mainbody.canvas { overflow: hidden; background:
       radial-gradient(circle at 30% 20%, rgba(255,255,255,.02), transparent 60%), var(--bg); }
   .mainbody.canvas svg { display: block; width: 100%; height: 100%; }
-
   .wbstatus { display: flex; align-items: center; gap: 14px; padding: 3px 12px;
               border-top: 1px solid var(--border-strong); background: var(--surface-muted);
               font-family: var(--mono); font-size: 10px; color: var(--dim); min-height: 22px; }
@@ -237,94 +250,11 @@
   .trow .tico { width: 15px; text-align: center; color: var(--dim); font-size: 11px; flex: none; }
   .trow .tname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .trow .kind { margin-left: auto; font-size: 9.5px; color: var(--dim); letter-spacing: .05em; flex: none; }
-  .trow .warn { color: var(--warn-text); font-size: 10px; }
-  .trow.child { margin-left: 16px; }
   .trow.leaf { margin-left: 20px; padding: 2.5px 7px; }
-  .trow .mdot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex: none; }
-  .trow .mdot.hollow { background: none; border: 1px solid var(--dim); }
-  .chip { font-family: var(--mono); font-size: 9.5px; color: var(--subtle);
-          border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 5px;
-          background: var(--surface-muted); white-space: nowrap; }
-  .chip.rev { color: var(--warn-text); }
-  .chip.range { color: var(--obj-4); border-color: rgba(240,145,59,.4); }
-  .addrow { margin: 8px 7px 0; padding: 5px 9px; border: 1px dashed var(--border-strong);
-            border-radius: 6px; color: var(--dim); font-size: 11.5px; cursor: pointer; }
-  .addrow:hover { color: var(--muted); }
   .swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
   .swatch.hollow { background: none !important; border: 1.5px solid; }
 
-  /* ---- node cards ---- */
-  .cards { padding: 12px 14px 22px; display: grid; gap: 12px; max-width: 660px; margin: 0 auto; }
-  .ncard { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface);
-           overflow: hidden; }
-  .ncard .nhead { display: flex; align-items: center; gap: 8px; padding: 7px 11px;
-                  border-bottom: 1px solid var(--border-subtle); background: var(--surface-muted); }
-  .ncard .nhead b { font-size: 13px; color: var(--strong); font-weight: 600; }
-  .ncard .nhead .kind { font-size: 10px; color: var(--dim); }
-  .ncard .nhead .sp { flex: 1; }
-  .ncard .nhead .ibtn { border: 1px solid var(--border-strong); border-radius: 5px;
-                        color: var(--subtle); font-size: 10px; padding: 1px 7px; background: none; }
-  .ncard .prev { background: #000; height: 110px; display: flex; align-items: center;
-                 justify-content: center; }
-  .ncard .prow { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
-                 border-top: 1px solid var(--border-subtle); font-size: 11px; color: var(--subtle); }
-  .ncard .prow .lab { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
-                      color: var(--dim); width: 84px; flex: none; }
-  .ncard .slider { flex: 1; height: 4px; border-radius: 2px; background: var(--track);
-                   position: relative; }
-  .ncard .slider .fill { position: absolute; inset: 0 auto 0 0; width: 72%; border-radius: 2px;
-                         background: color-mix(in srgb, var(--heading) 55%, var(--track)); }
-  .ncard .slider .knob { position: absolute; top: 50%; left: 72%; width: 10px; height: 16px;
-                         transform: translate(-50%,-50%); background: var(--raised-strong);
-                         border: 1px solid var(--border-strong); border-radius: 3px; }
-  .ncard .prow .val { font-family: var(--mono); font-size: 11px; color: var(--muted); }
-  .ncard .fold { padding: 6px 12px; border-top: 1px solid var(--border-subtle); font-size: 10.5px;
-                 color: var(--dim); }
-  .ncard .fold b { color: var(--subtle); font-weight: 600; letter-spacing: .08em; font-size: 9.5px; }
-
-  /* ---- device panel ---- */
-  .dev { padding: 10px; display: grid; gap: 10px; align-content: start; }
-  .devcard { border: 1px solid rgba(63,214,142,.45); border-left: 3px solid var(--good);
-             border-radius: var(--r-md); background: var(--surface); overflow: hidden; }
-  .devcard.off { border-color: var(--border); border-left-color: var(--border-strong); opacity: .75; }
-  .devcard .dhead { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
-                    background: var(--surface-muted); border-bottom: 1px solid var(--border-subtle); }
-  .devcard .dhead b { font-size: 12.5px; color: var(--strong); }
-  .devcard .dhead .tag { margin-left: auto; font-size: 9px; letter-spacing: .1em; color: var(--dim); }
-  .devcard .dbody { padding: 8px 11px; font-size: 11px; color: var(--subtle); display: grid; gap: 4px; }
-  .devcard .dbody .run { color: var(--good); font-size: 11.5px; }
-  .devcard .krow { display: flex; gap: 10px; }
-  .devcard .krow .k { width: 74px; flex: none; font-size: 9.5px; letter-spacing: .08em;
-                      text-transform: uppercase; color: var(--dim); padding-top: 1px; }
-  .devcard .krow .v { font-family: var(--mono); font-size: 10.5px; color: var(--muted);
-                      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  /* ---- outputs panel ---- */
-  .outs { padding: 8px 8px 16px; }
-  .obox { margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--r-sm);
-          background: var(--surface); overflow: hidden; }
-  .obox .bhead { display: flex; align-items: center; gap: 7px; padding: 5px 9px;
-                 background: var(--surface-muted); cursor: pointer; font-size: 11px;
-                 color: var(--muted); }
-  .obox .bhead .occ { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
-                      font-family: var(--mono); font-size: 9.5px; color: var(--dim); }
-  .port { padding: 4px 9px 6px; border-top: 1px solid var(--border-subtle); }
-  .port .pline { display: flex; align-items: baseline; gap: 7px; font-family: var(--mono);
-                 font-size: 10.5px; color: var(--muted); }
-  .port .pline .pin { color: var(--strong); font-weight: 600; }
-  .port .pline .use { margin-left: auto; color: var(--dim); font-size: 9.5px; }
-  .cellbar { display: flex; gap: 2px; margin-top: 4px; height: 16px; }
-  .cell { flex: 1; border: 1px solid var(--border-strong); border-radius: 3px;
-          background: var(--raised); font-family: var(--mono); font-size: 8.5px;
-          color: var(--subtle); display: flex; align-items: center; justify-content: center;
-          overflow: hidden; white-space: nowrap; cursor: pointer; min-width: 0; }
-  .cell:hover { border-color: var(--dim); }
-  .cell.sel { border-color: var(--sel); background: var(--sel-bg); color: var(--strong); }
-  .cell.gap { background: none; border-style: dashed; border-color: var(--border-muted);
-              color: var(--border-strong); cursor: default; }
-  .cell.range { border-color: rgba(240,145,59,.4); color: var(--obj-4); }
-
-  /* ---- props panel ---- */
+  /* ---- props panel (live frame) ---- */
   .props { padding: 10px; display: grid; gap: 9px; align-content: start; }
   .pcard { border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface);
            overflow: hidden; }
@@ -340,7 +270,6 @@
   .pcard .pcrow .k { width: 60px; flex: none; font-size: 9px; letter-spacing: .08em;
                      text-transform: uppercase; color: var(--dim); padding-top: 1px; }
   .pcard .pcrow .v { font-family: var(--mono); font-size: 10px; color: var(--muted); }
-  .modline { font-size: 9.5px; color: var(--dim); padding: 2px 4px; }
 
   /* ---- canvas svg ---- */
   .nametag { font: 600 10px var(--sans); fill: var(--muted); }
@@ -351,69 +280,17 @@
   .dragdome { cursor: grab; }
   .dragdome.dragging { cursor: grabbing; }
 
-  /* ---- comparison / rejected strips ---- */
-  .barrow { margin-top: 10px; display: grid; gap: 6px; max-width: 1080px; }
+  /* ---- comparison strips ---- */
+  .barrow { margin-top: 10px; display: grid; gap: 6px; max-width: 1120px; }
   .barrow .cap { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
                  color: var(--dim); margin-top: 8px; }
-  .barframe { border: 1px solid var(--border-strong); border-radius: var(--r-sm); overflow: hidden; }
-  .rejrow { display: flex; gap: 8px; align-items: baseline; font-size: 11px; color: var(--dim);
-            padding: 3px 0; max-width: 1080px; }
-  .rejrow b { color: var(--subtle); font-weight: 600; flex: none; }
-
-  /* ---- Tree-across-views strip (section 3) ---- */
-  .treerow { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; align-items: flex-start; }
-  .treecol { width: 300px; flex: none; }
-  .treecol h3 { font-size: 11px; margin: 0 0 2px; color: var(--muted); font-weight: 600; }
-  .treecol .role { font-size: 10.5px; color: var(--dim); margin: 0 0 8px; min-height: 28px; }
-  .treecol .role b { color: var(--subtle); }
-  .treecol .tframe { border: 1px solid var(--border-strong); border-radius: var(--r-md);
-                     overflow: hidden; background: var(--surface-subtle); height: 340px;
-                     display: flex; flex-direction: column; }
-  .treecol .tframe .atabsrow { display: flex; align-items: flex-end; gap: 2px; padding: 4px 6px 0;
-                               background: var(--surface-muted);
-                               border-bottom: 1px solid var(--border-strong); }
-
-  /* ================= mobile / md frames ================= */
-  .phones { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; margin-top: 10px; }
-  .phone { width: 310px; flex: none; border: 1px solid var(--border-strong); border-radius: 14px;
-           overflow: hidden; background: var(--bg); }
-  .phone.tab { width: 660px; border-radius: 10px; }
-  .phone .pcap { padding: 4px 12px; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase;
-                 color: var(--dim); background: var(--surface-muted);
-                 border-bottom: 1px solid var(--border-subtle); }
-  .phone .pbdy { height: 540px; display: flex; flex-direction: column; min-height: 0; }
-  .phone.tab .pbdy { height: 440px; }
-  .phone.tab .tbody { flex: 1; display: flex; min-height: 0; }
-  .pmain { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
-  .pmain.canvas { overflow: hidden; display: flex; align-items: center; }
-  .pmain.canvas svg { width: 100%; height: 100%; }
-  .pmain .backhead { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
-                     font-size: 11px; color: var(--subtle); background: var(--surface-subtle);
-                     border-bottom: 1px solid var(--border-subtle); position: sticky; top: 0; }
-  .pmain .backhead b { color: var(--muted); font-weight: 600; text-transform: uppercase;
-                       font-size: 10px; letter-spacing: .1em; }
-  .pmain .backhead .bk { cursor: pointer; color: var(--sel); }
-
-  .mghead { display: flex; align-items: center; gap: 8px; padding: 5px 10px;
-            background: var(--surface-muted); border-bottom: 1px solid var(--border-subtle);
-            font-size: 11px; color: var(--subtle); }
-  .mghead .brand { font-weight: 600; color: var(--subtle); }
-  .mghead .brand b { color: var(--accent); }
-  .mghead .sp { flex: 1; }
-  .mghead .sess { font-family: var(--mono); font-size: 9px; color: var(--good);
-                  border: 1px solid rgba(63,214,142,.35); border-radius: 20px; padding: 0 7px; }
-
-  .smbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
-           gap: 3px; padding: 4px 6px; min-height: 32px; background: var(--surface-muted);
-           border-bottom: 1px solid var(--border-strong); }
-  .smbar .bl { display: flex; gap: 3px; align-items: center; justify-self: start; }
-  .smbar .br { display: flex; gap: 3px; align-items: center; justify-self: end; }
-  .smbar .vseg button { padding: 3px 9px; font-size: 10.5px; }
-  .sq { display: inline-flex; align-items: center; justify-content: center; padding: 3px 7px;
-        border: 1px solid transparent; border-radius: 6px; font-size: 11px; color: var(--dim);
-        cursor: pointer; user-select: none; }
-  .sq:hover { color: var(--strong); background: var(--bg-wash); }
-  .sq.on { color: var(--muted); background: var(--raised); border-color: var(--border-strong); }
+  .barrow .cap b { color: var(--subtle); }
+  .barrow .sub { font-size: 10.5px; color: var(--dim); letter-spacing: 0;
+                 text-transform: none; margin: 2px 0 0; max-width: 1040px; }
+  .barframe { border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+              overflow: visible; position: relative; }
+  .barframe .ghead { border-bottom: none; border-radius: var(--r-sm); }
+  .demo-stage { margin-top: 8px; min-height: 46px; display: flex; align-items: flex-start; }
 
   /* decisions table */
   table.dec { border-collapse: collapse; font-size: 12px; margin-top: 12px; max-width: 1080px; }
@@ -428,148 +305,151 @@
 </head>
 <body>
 
-<h1>Studio chrome — header chip · one band · view-keyed Tree (round 6)</h1>
+<h1>Studio chrome — the session·project control, single-session world (round 8)</h1>
 <p class="hint">
-  <b>Round-5 rulings (Yona):</b> <b>B chosen</b> (closer to mobile, less height); A's extras
-  (name, Save, Share) move to the popup / header; <b>Map · Patch</b> over the gerunds
-  (deliberate override of R2-2's "term of art" lean); <b>Nodes + Fixtures panels MERGE into
-  one view-keyed "Tree"</b> — the kind of tree is controlled by the view (this unblocks the
-  R5 patching plan: authored vs effective grain <i>requires</i> view-owned tree content); and
-  <b>project status/share move UP into the site header</b> (Google-Docs/Figma pattern; the
-  header already carries project identity — one home; supersedes vision D3, deliberate
-  reversal). Each hierarchy level now owns exactly one band: header = project · band =
-  views + panels · docks = panel bodies. Rounds 1–5 in git history.
+  <b>Rulings since round 7 (Yona):</b> concept <b>B</b> (segmented lockup); <b>Save/Revert in
+  the group</b> ("at least to try it out"); click grammar confirmed. And the bigger ones:
+  <b>one session per tab</b> — one device OR one sim, "want another? open another tab" (the
+  pool keeps its N-session shape; capacity is policy) — and <b>navigation is studio OR site</b>:
+  leaving the studio ends the session (edits are safe — the dirty overlay is persisted; the
+  session is disposable, the document is durable). Consequences drawn here: the session strip
+  and the ⋯-menu Sessions group <b>retire</b>; the detail popup is <b>reworked</b> into the
+  control's panel (device zone + project zone, no switcher). <b>Round 8.1 rulings:</b> Explore
+  is a gallery of LIVE projects — it stays in the main app (plain exit); <b>Docs and Boards</b>
+  are the new-tab pair; the sim names the board it simulates ("Sim · ESP32-C6" — board_id is
+  already on the session evidence, vision D4). Rounds 1–7 in git history.
 </p>
 
 <div class="xcontrols">
-  <span class="grp"><b>view</b>
-    <button id="xv-nodes" onclick="setView('nodes')">Nodes</button>
-    <button id="xv-map" onclick="setView('map')">Map</button>
-    <button id="xv-patch" onclick="setView('patch')">Patch</button>
-  </span>
-  <span class="grp"><b>project state</b>
+  <span class="grp"><b>project</b>
     <button id="xp-saved" onclick="setProj('saved')">saved</button>
     <button id="xp-unsaved" onclick="setProj('unsaved')">unsaved</button>
     <button id="xp-failed" onclick="setProj('failed')">failed</button>
     <button id="xp-syncing" onclick="setProj('syncing')">syncing</button>
   </span>
-  <span class="grp"><b>chip home</b>
-    <button id="xc-header" onclick="setChipLoc('header')">header</button>
-    <button id="xc-band" onclick="setChipLoc('band')">band</button>
+  <span class="grp"><b>session</b>
+    <button id="xs-sim" onclick="setSession('sim')">simulator</button>
+    <button id="xs-hw" onclick="setSession('hw')">hardware</button>
   </span>
-  <span class="grp"><b>docks</b>
-    <button onclick="preset('both')">both open</button>
-    <button onclick="preset('none')">both collapsed</button>
+  <span class="grp"><b>deploy in flight</b>
+    <button id="xb-on" onclick="setBusy(true)">on</button>
+    <button id="xb-off" onclick="setBusy(false)">off</button>
+  </span>
+  <span class="grp"><b>view</b>
+    <button id="xv-nodes" onclick="setView('nodes')">Nodes</button>
+    <button id="xv-map" onclick="setView('map')">Map</button>
+    <button id="xv-patch" onclick="setView('patch')">Patch</button>
   </span>
   <span id="xstatus" style="font-family:var(--mono); font-size:10.5px; color:var(--dim);"></span>
 </div>
 
 <section id="sec1">
-<h2>1 · B-final (live) — header owns the project, band owns views + panels</h2>
+<h2>1 · The control closed — three widths, one grammar</h2>
 <p class="thesis">
-  Header: brand · nav · <b>project chip</b> (state glyph + name + dirty count → detail popover
-  with Save/Revert/Share) · share icon · sim chip. Band: <b>[Tree] · Nodes Map Patch ·
-  [Props Outputs Device]</b> — attached tabs, persistent when collapsed (B's reopen model).
-  The Tree's content <b>follows the view</b>: assembly in Nodes, authored objects in Map,
-  effective instances + wire chips in Patch — switch views and watch the left panel's grain
-  change. <b>Drag the dome</b> in Map → the pencil lands in the header. Flip <b>chip home</b>
-  above to feel header-vs-band placement live.
+  The only session UI left in the chrome. lg carries the full lockup; md drops the device
+  name (glyph + dot keep the kind and health); sm keeps name + count + Save (revert retreats
+  into the panel). In studio mode <b>Docs and Boards wear the new-tab mark</b>; Devices,
+  Projects, and Explore (live projects — a real app section) are plain exits — leaving ends
+  the session. The sim <b>names the board it simulates</b>. Flip <b>project</b> and
+  <b>session</b> above; click any group to open its panel.
 </p>
-<div class="wb" id="c-main"></div>
-<p class="secnote">
-  Live: chip popover (Save/Revert work), share icon, view switching w/ tree grain swap, panel
-  toggles, dome drag → unsaved. The status word ("Ready"/"Unsaved") stays popup-only — the
-  glyph carries it in chrome.</p>
+<div class="barrow" id="c-widths"></div>
 </section>
 
 <section id="sec2">
-<h2>2 · Chip home — header vs band, stacked for comparison</h2>
+<h2>2 · The panel — device zone + project zone, no switcher</h2>
 <p class="thesis">
-  The same chrome, chip in each home. <b>Header:</b> one identity, one home (the sess chip
-  already put "mini dome" there); band stays pure workbench furniture. <b>Band:</b> closer to
-  the editing action, but duplicates the header's identity 40px below it.
+  One panel replaces <code>ProjectDetailSections</code>: the <b>device zone</b> (kind, name,
+  run state, live stats — the half the old popup never had) over the <b>project zone</b>
+  (name, save state, the unsaved list with per-entry revert, Save/Revert), then share and
+  project facts. Identical at every width — one content, one mount (no container-query
+  double-mount). There is deliberately <b>no session switcher</b>: this tab IS the session.
 </p>
-<div class="barrow" id="c-chiploc"></div>
+<div class="barrow" id="c-panel"></div>
 </section>
 
 <section id="sec3">
-<h2>3 · The Tree across the three views — grain follows the view</h2>
+<h2>3 · Live — drag the dome, watch the control</h2>
 <p class="thesis">
-  One panel, one home, one name — the <b>view supplies the content</b> (the R5 ruling's
-  "grain follows activity", finally with a chrome home). Nodes = assembly (add node, structure).
-  Map = <b>authored</b> tree (fixtures → objects; no wire info). Patch = <b>effective</b> tree
-  (instances/ranges + wire chips). Footers summarize per grain.
+  The full workbench under the new chrome. <b>Drag the dome</b>: the pencil + count light the
+  project segment and <b>Save · ↺ materialize</b> as trailing segments. The Tree panel's
+  Save/Revert row is <b>gone</b> (R7-2: one home — the control; the panel detail is the
+  second read of the same state, not a second home).
 </p>
-<div class="treerow" id="c-trees"></div>
+<div class="wb" id="c-main"></div>
 </section>
 
 <section id="sec4">
-<h2>4 · md and sm — chip rides the (slim) header everywhere</h2>
+<h2>4 · Leaving — the site side, the toast, the guard</h2>
 <p class="thesis">
-  The header exists at every width, so the chip does too — the sm strip drops to
-  <b>[⬡] Nodes Map Patch [☰ ▦ ⌁]</b>, its roomiest form yet (the Tree merge gave back the
-  width the third view tab took). md = band with narrowed docks, same attached tabs.
+  Interactive: in the bar below, <b>click Projects</b> to leave the studio — the session ends,
+  the site header takes over (no group anywhere), and the toast says what happened and what
+  survived. With <b>deploy in flight</b> (toggle above), the same click is <b>refused</b> —
+  the one nav guard; dirty alone never prompts, because the draft is durable.
 </p>
-<div class="phones" id="c-phones"></div>
+<div class="barrow" id="c-leave"></div>
 </section>
 
 <section id="sec5">
-<h2>5 · Rejected along the way</h2>
-<div class="rejrow"><b>R4 one-bar:</b> panel toggles in the top band read disconnected from
-  their panels — putting them up top <i>promoted</i> panels into navigation (the opposite of
-  the goal). md/sm survived into this round.</div>
-<div class="rejrow"><b>R5-A project band:</b> clean ownership, but its identity row duplicates
-  the header's (the sess chip already names the project + sim) — and it costs a full band the
-  header provides for free. Its Save-materializes moment moves to the popup; its corner
-  region toggles die with it (B's persistent tab rows reopen).</div>
-<div class="rejrow"><b>mapping|patching mode segment (R3–R4):</b> Map and Patch are sibling
-  views (shipped /patch route; authored-vs-effective grain needs view-owned trees).</div>
+<h2>5 · Edges the control must survive</h2>
+<div class="barrow" id="c-edges"></div>
 </section>
 
 <section id="sec6">
-<h2>6 · Round-6 questions</h2>
+<h2>6 · Round-8 questions</h2>
 <table class="dec">
   <tr><th></th><th>Question</th><th>Status</th></tr>
-  <tr><td class="q">R6-1</td>
-      <td><b>Chip home</b> — header (one identity, one home; supersedes D3) vs band (closer
-          to the action). §2 stacks them; §1 flips live.</td>
-      <td>GATE — lean header</td></tr>
-  <tr><td class="q">R6-2</td>
-      <td><b>The Tree merge</b> — one view-keyed panel named "Tree": does the grain swap on
-          view-switch feel like the view helping (§1 live, §3 side-by-side), and is "Tree"
-          the right name (vs Structure/Outline)?</td>
+  <tr><td class="q">R8-1</td>
+      <td><b>The panel's zones</b> — device (kind · name · run state · live stats) over
+          project (save state · unsaved list · Save/Revert), then share + facts. Right
+          content? Anything missing — or anything that belongs to the Home card instead
+          (console, deploy, stop)?</td>
       <td>GATE</td></tr>
-  <tr><td class="q">R6-3</td>
-      <td><b>Single left tab</b> — "Tree" alone in the left segment (a tab with no siblings
-          yet; it doubles as the collapse toggle). Acceptable until a second left panel
-          exists?</td>
+  <tr><td class="q">R8-2</td>
+      <td><b>Whole-group-opens-panel.</b> With one session per tab the device segment has
+          nothing to navigate to (you are always here) — so every segment opens the panel,
+          and Save/↺ stay direct actions. OK? (Play/patch zooms still exit via their own
+          toggles.)</td>
       <td>GATE — lean yes</td></tr>
-  <tr><td class="q">R6-4</td>
-      <td><b>Header complexity</b> — chip + share icon added to the real header (container
-          queries; the top-layer-popover gotcha). Keep the header's version minimal: glyph +
-          name + count, everything else in the popup?</td>
-      <td>GATE — lean yes</td></tr>
+  <tr><td class="q">R8-3</td>
+      <td><b>Nav grammar in studio mode</b> — Docs + Boards = new-tab marks (reference
+          surfaces); Devices + Projects + Explore = plain exits that end the session
+          (Explore is a gallery of LIVE projects — a real app section).</td>
+      <td>RULED 8.1</td></tr>
+  <tr><td class="q">R8-4</td>
+      <td><b>The toast + guard pair</b> — leave silently-with-toast when idle or dirty
+          (draft is durable), refuse only while an operation is in flight. Right line?</td>
+      <td>CONFIRM</td></tr>
 </table>
 <p class="leannote">
-  <b>Lean.</b> This is the one. Header = project (Google Docs' title-bar pattern), band =
-  views + panels (GitHub's object tabs, panel tabs attached), docks = bodies. Three bands,
-  three ownership levels, zero duplication — and the Tree merge is the piece that makes the
-  hierarchy true in the data model, not just the pixels, which is exactly what the R5
-  patching plan needs to exist.
+  <b>Lean.</b> This is the payoff of the single-session ruling: the chrome carries exactly one
+  session object, the panel answers "what is this tab?" in one glance, and the leave story is
+  honest because the document outlives the session. The control is rich where richness pays
+  (states, panel, save moment) and the whole switching layer — strip, ⋯ sessions, washed
+  off-editor chip — simply stops existing.
 </p>
+<div style="margin-top:14px">
+  <div class="rejrow"><b>R7 rejected:</b> A plate (box of boxes) · C fused chip (one border,
+    two meanings) · D title stack (second grammar beside the chip world) — see round 7 in git
+    history.</div>
+  <div class="rejrow"><b>R8 deleted by ruling:</b> the "Also running" switcher zone (one
+    session per tab — the browser is the window manager); the washed off-editor group
+    (navigation ends the session, so there is no off-editor session to point back to).</div>
+</div>
 </section>
 
 <script>
 /* ================= state ================= */
 const state = {
-  view: 'map',              // 'nodes' | 'map' | 'patch' — sibling views
+  view: 'map',
   sel: 'dome/2',
-  chipLoc: 'header',        // R6-1: 'header' | 'band'
-  proj: 'saved',
+  proj: 'saved',            // 'saved' | 'unsaved' | 'failed' | 'syncing'
+  session: 'sim',           // 'sim' | 'hw'
+  busy: false,              // deploy in flight (the one nav guard)
   edits: [],
-  popOpen: null,
+  popOpen: null,            // which bar's panel is open
+  leaveMode: 'studio',      // sec4 demo: 'studio' | 'site' | 'refused'
   domeDx: 0, domeDy: 0,
-  phoneView: 'main',
   docks: {
     nodes: { left: 'tree', right: 'device' },
     map:   { left: 'tree', right: 'props' },
@@ -579,10 +459,10 @@ const state = {
 const Q = new URLSearchParams(location.search);
 if (Q.get('view')) state.view = Q.get('view');
 if (Q.get('proj')) state.proj = Q.get('proj');
-if (Q.get('chip')) state.chipLoc = Q.get('chip');
+if (Q.get('session')) state.session = Q.get('session');
+if (Q.get('busy')) state.busy = Q.get('busy') === 'on';
 if (Q.get('pop')) state.popOpen = Q.get('pop');
-if (Q.get('docks') === 'none') state.docks[state.view] = { left: null, right: null };
-if (Q.get('phone')) state.phoneView = Q.get('phone');
+if (Q.get('leave')) state.leaveMode = Q.get('leave');
 if (Q.get('only')) {
   document.querySelectorAll('section').forEach(s => { if (s.id !== Q.get('only')) s.hidden = true; });
   document.querySelector('.xcontrols').style.position = 'static';
@@ -595,47 +475,16 @@ if (state.proj === 'unsaved' && !state.edits.length) {
 /* ================= data (mini-dome world, #409) ================= */
 const FIXTURES = [
   { id: 'dome', lamps: 150, color: 'var(--obj-0)', kind: '2d map',
-    objects: [{ name: 'sector', n: 5, lamps: 30 }],
-    instances: [
-      { path: 'dome/0', chip: 'IO18:1-30' },
-      { path: 'dome/1', chip: 'IO18:31-60' },
-      { path: 'dome/2', chip: 'IO13:1-30' },
-      { path: 'dome/3', chip: 'IO13:31-60', rev: true },
-      { path: 'dome/4', chip: 'IO2:1-30' },
-    ]},
+    objects: [{ name: 'sector', n: 5, lamps: 30 }] },
   { id: 'doors', lamps: 27, color: 'var(--obj-2)', kind: '2d map',
-    objects: [{ name: 'panel', n: 3, lamps: 9 }],
-    instances: [
-      { path: 'doors/0', chip: 'IO14:1-9' },
-      { path: 'doors/1', chip: 'IO14:10-18' },
-      { path: 'doors/2', chip: 'IO14:19-27' },
-    ]},
-  { id: 'peach', lamps: 40, color: 'var(--obj-4)', kind: 'range', range: true,
-    objects: [],
-    instances: [ { path: 'peach 0..40', chip: 'IO16:1-40', range: true } ]},
-];
-const DOME_BOXES = [
-  { name: 'Box 1 · out_a', ports: [
-    { pin: 'IO18', strip: 'ws2812', used: 60, total: 64,
-      cells: [{ label: 'dome/0', w: 30 }, { label: 'dome/1', w: 30 }, { gap: true, w: 4 }] },
-    { pin: 'IO13', strip: 'ws2812', used: 60, total: 64,
-      cells: [{ label: 'dome/2', w: 30 }, { label: 'dome/3 ‹', w: 30 }, { gap: true, w: 4 }] },
-    { pin: 'IO2', strip: 'ws2812', used: 30, total: 64,
-      cells: [{ label: 'dome/4', w: 30 }, { gap: true, w: 34 }] },
-  ]},
-  { name: 'Box 2 · out_b', ports: [
-    { pin: 'IO14', strip: 'ws2812', used: 27, total: 64,
-      cells: [{ label: 'doors/0', w: 9 }, { label: 'doors/1', w: 9 }, { label: 'doors/2', w: 9 },
-              { gap: true, w: 37 }] },
-    { pin: 'IO16', strip: 'sk6812', used: 40, total: 64,
-      cells: [{ label: 'peach', w: 40, range: true }, { gap: true, w: 24 }] },
-  ]},
+    objects: [{ name: 'panel', n: 3, lamps: 9 }] },
+  { id: 'peach', lamps: 40, color: 'var(--obj-4)', kind: 'range', objects: [] },
 ];
 const PANELS = {
-  tree:     { title: 'Tree',     ico: '⬡', side: 'left' },
-  props:    { title: 'Props',    ico: '☰', side: 'right' },
-  outputs:  { title: 'Outputs',  ico: '▦', side: 'right' },
-  device:   { title: 'Device',   ico: '⌁', side: 'right' },
+  tree:     { title: 'Tree',     side: 'left' },
+  props:    { title: 'Props',    side: 'right' },
+  outputs:  { title: 'Outputs',  side: 'right' },
+  device:   { title: 'Device',   side: 'right' },
 };
 function roster(view, side) {
   if (side === 'left') return ['tree'];
@@ -644,30 +493,139 @@ function roster(view, side) {
   return ['device', 'outputs'];
 }
 
-/* ================= the view-keyed Tree ================= */
-function treeNodes() {
-  let h = `<div class="tree">
-    <div class="trow"><span class="tico">▤</span><span class="tname">Mini dome</span>
-      <span class="kind">module</span></div>
-    <div class="trow child"><span class="tico">◔</span><span class="tname">Clock</span>
-      <span class="kind">clock</span></div>
-    <div class="trow child"><span class="tico">✳</span><span class="tname">Sky shader</span>
-      <span class="kind">shader</span></div>
-    <div class="trow child"><span class="tico">◑</span><span class="tname">Sunrise palette</span>
-      <span class="warn">⚠</span><span class="kind">palette</span></div>`;
-  for (const f of FIXTURES) {
-    h += `<div class="trow child ${state.sel === f.id ? 'sel' : ''}" onclick="selectPath('${f.id}')">
-      <span class="tico">⬡</span><span class="swatch" style="background:${f.color}"></span>
-      <span class="tname">${f.id}</span><span class="kind">fixture</span></div>`;
-  }
-  h += `<div class="trow child"><span class="tico">⌁</span><span class="tname">out_a</span>
-      <span class="kind">output</span></div>
-    <div class="trow child"><span class="tico">⌁</span><span class="tname">out_b</span>
-      <span class="kind">output</span></div>`;
-  return h + '<div class="addrow">+ Add node…</div></div>';
+/* ================= chrome pieces ================= */
+function dirty() { return state.proj === 'unsaved' || state.proj === 'failed'; }
+function dirtyN() { return dirty() ? state.edits.length : 0; }
+function devGlyph(kind) {
+  return kind === 'sim' ? '<span class="dglyph sim">❖</span>' : '<span class="dglyph">⌁</span>';
 }
+function devName() { return state.session === 'sim' ? 'Sim' : 'Garage dome'; }
+/* the sim names the board it simulates (8.1; board_id rides the session
+   evidence, inherited from the project — vision D4) */
+function devBoard() { return state.session === 'sim' ? 'ESP32-C6' : null; }
+function hdot(kind) { return `<span class="hdot ${kind}"></span>`; }
+function stGlyph() { return { saved: 'i', unsaved: '✎', failed: '⚠', syncing: '◌' }[state.proj]; }
+function stWord() {
+  return { saved: 'Ready', unsaved: 'Unsaved', failed: 'Failed edits', syncing: 'Syncing' }[state.proj];
+}
+function projBody() {
+  const cnt = dirtyN() ? `<span class="cnt">${dirtyN()}</span>` : '';
+  return `<span class="st">${stGlyph()}</span><span class="pname">mini dome</span>${cnt}`;
+}
+
+/* THE control. size: 'lg' (full) | 'md' (device folds to glyph+dot) | 'sm' (no revert) */
+function control(where, size = 'lg') {
+  const board = devBoard() ? `<span class="brd">· ${devBoard()}</span>` : '';
+  const devseg = size === 'lg'
+    ? `<span class="seg dev" onclick="togglePop('${where}', event)"
+         title="this tab's session — open detail">${devGlyph(state.session)}${hdot('run')}<b>${devName()}</b>${board}</span>`
+    : `<span class="seg dev" style="padding:3.5px 7px" onclick="togglePop('${where}', event)"
+         title="${devName()}">${devGlyph(state.session)}${hdot('run')}</span>`;
+  let acts = '';
+  if (dirty()) {
+    acts = `<span class="seg act save" onclick="saveAll(event)">Save</span>`;
+    if (size !== 'sm') acts += `<span class="seg act rvt" title="Revert to saved"
+      onclick="revertAll(event)">↺</span>`;
+  }
+  return `<span class="sgrp ${state.proj} ${state.popOpen === where ? 'openpanel' : ''}">
+    ${devseg}
+    <span class="seg proj" onclick="togglePop('${where}', event)"
+      title="project — open detail">${projBody()}</span>
+    ${acts}</span>`;
+}
+
+/* the panel — device zone + project zone + share + facts */
+function panelHTML(where, style = '') {
+  if (state.popOpen !== where) return '';
+  const isDirty = dirty();
+  const sim = state.session === 'sim';
+  const stats = sim ? 'simulating ESP32-C6 · 60 fps · 217 lamps · 5 ports'
+                    : 'USB · 217 lamps · 5 ports · v41 on device';
+  let editsHtml = '';
+  if (isDirty && state.edits.length) {
+    editsHtml = `<div class="sechead" style="margin-top:7px">Unsaved (draft — survives this tab)
+        <span class="meta">${state.edits.length}</span></div>` +
+      state.edits.map((e, i) => `<div class="erow"><span class="eico">✎</span>
+        <span class="epath">${e.path}</span><span style="font-size:10px">${e.what}</span>
+        <span class="rvt" onclick="revertOne(${i}, event)">revert</span></div>`).join('') +
+      `<div class="acts">
+        <button class="primary" onclick="saveAll(event)">Save</button>
+        <button onclick="revertAll(event)">Revert to saved</button></div>`;
+  }
+  const stwClass = { saved: '', unsaved: 'dirty', failed: 'err', syncing: 'sync' }[state.proj];
+  return `<div class="dpanel" style="${style}" onclick="event.stopPropagation()">
+    <div class="dz devz">
+      <div class="devrow">${devGlyph(state.session)}<b>${sim ? 'Simulator' : devName()}</b>
+        <span class="runw">${state.busy ? 'deploying…' : 'running'}</span></div>
+      <div class="statline">${stats}</div>
+    </div>
+    <div class="dz">
+      <div class="projrow"><b>mini dome</b><span class="stw ${stwClass}">${stWord()}</span></div>
+      ${editsHtml}
+    </div>
+    <div class="dz"><div class="sechead">Share</div>
+      <div class="sharenote ${isDirty ? 'blocked' : ''}">${isDirty
+        ? 'save before sharing — link reflects saved state'
+        : 'lightplayer.app/p/9f3k2 · view link active'}</div></div>
+    <div class="dz"><div class="sechead">Project</div>
+      <div class="krow"><span class="k">Nodes</span><span class="v">9 · 3 fixtures</span></div>
+      <div class="krow"><span class="k">Lamps</span><span class="v">217 across 5 ports</span></div>
+      <div class="krow"><span class="k">Overlay rev</span><span class="v">v41</span></div></div>
+    <div class="dz"><div class="hintline">this tab is the session — close it or navigate away
+      to stop${sim ? ' the simulator' : ' and disconnect'}</div></div>
+  </div>`;
+}
+
+/* nav: studio mode marks Explore/Docs as new-tab; site mode lights a section */
+function navHTML(mode) {
+  if (mode === 'studio') {
+    return `<span class="gnav"><span onclick="leaveDemo(event)">Devices</span>
+      <span onclick="leaveDemo(event)">Projects</span>
+      <span onclick="leaveDemo(event)">Explore</span>
+      <span title="opens in a new tab — this session keeps running">Docs<sup>↗</sup></span>
+      <span title="opens in a new tab">Boards<sup>↗</sup></span></span>`;
+  }
+  return `<span class="gnav"><span>Devices</span><span class="on">Projects</span>
+    <span>Explore</span><span>Boards</span><span>Docs</span></span>`;
+}
+function studioBar(where, size = 'lg', panelStyle = '') {
+  const brand = size === 'sm' ? '⏵ <b>LP</b>' : '⏵ <b>Light</b>Player';
+  const nav = size === 'sm' ? '' : navHTML('studio');
+  return `<div class="ghead"><span class="brand">${brand}</span>
+    ${nav}${control(where, size)}<span class="sp"></span>
+    <span class="shico" title="Share">⇗</span><span class="dots">···</span>
+    ${panelHTML(where, panelStyle)}</div>`;
+}
+function siteBar() {
+  return `<div class="ghead"><span class="brand">⏵ <b>Light</b>Player</span>
+    ${navHTML('site')}<span class="sp"></span><span class="dots">···</span></div>`;
+}
+
+/* ================= section 1: widths ================= */
+function renderWidths() {
+  document.getElementById('c-widths').innerHTML = `
+    <div class="cap"><b>lg</b> — full lockup: kind · health · device name │ state · project · count │ save</div>
+    <div class="barframe">${studioBar('w-lg', 'lg')}</div>
+    <div class="cap"><b>md</b> — the device name folds; glyph + dot keep kind and health</div>
+    <div class="barframe" style="max-width:760px">${studioBar('w-md', 'md')}</div>
+    <div class="cap"><b>sm</b> — name + count + Save survive; revert retreats into the panel</div>
+    <div class="barframe" style="max-width:400px">${studioBar('w-sm', 'sm', 'left:8px; width:300px;')}</div>`;
+}
+
+/* ================= section 2: the panel ================= */
+function renderPanel() {
+  const saved = state.popOpen;
+  state.popOpen = 'panelx';
+  const html = `
+    <div class="cap"><b>the panel, open</b> — click any segment of any group to move it; this
+      one is pinned open</div>
+    <div class="barframe" style="margin-bottom:${dirty() ? 360 : 300}px">${studioBar('panelx', 'lg')}</div>`;
+  state.popOpen = saved;
+  document.getElementById('c-panel').innerHTML = html;
+}
+
+/* ================= section 3: live workbench ================= */
 function treeAuthored() {
-  /* Map view: AUTHORED grain — fixtures → objects, no wire info */
   let h = `<div class="tree">`;
   for (const f of FIXTURES) {
     h += `<div class="trow ${state.sel === f.id ? 'sel' : ''}" onclick="selectPath('${f.id}')">
@@ -684,73 +642,6 @@ function treeAuthored() {
         <span class="tname" style="font-size:11.5px">strip · along wire</span>
         <span class="kind">${f.lamps} lamps</span></div>`;
     }
-  }
-  return h + '</div>';
-}
-function treeEffective() {
-  /* Patch view: EFFECTIVE grain — instances/ranges + wire chips */
-  let h = `<div class="tree">`;
-  for (const f of FIXTURES) {
-    h += `<div class="trow ${state.sel === f.id ? 'sel' : ''}" onclick="selectPath('${f.id}')">
-      <span class="tico">⬡</span><span class="swatch" style="background:${f.color}"></span>
-      <span class="tname">${f.id}</span><span class="kind">${f.lamps} · ${f.instances.length} inst</span></div>`;
-    for (const i of f.instances) {
-      h += `<div class="trow leaf ${state.sel === i.path.split(' ')[0] ? 'sel' : ''}"
-                 onclick="selectPath('${i.path.split(' ')[0]}')">
-        <span class="mdot"></span><span class="tname" style="font-size:11.5px">${i.path}</span>
-        <span style="margin-left:auto; display:inline-flex; gap:3px;">
-          <span class="chip ${i.range ? 'range' : ''}">${i.chip}</span>
-          ${i.rev ? '<span class="chip rev">‹rev</span>' : ''}
-        </span></div>`;
-    }
-  }
-  return h + '</div>';
-}
-function treePanel() {
-  return { nodes: treeNodes, map: treeAuthored, patch: treeEffective }[state.view]();
-}
-function treeFooter() {
-  return { nodes: '9 nodes · 1 module',
-           map: '3 fixtures · 9 objects · 217 lamps',
-           patch: '9 instances · 217/320 lamps mapped' }[state.view];
-}
-
-/* ================= other panels ================= */
-function devicePanel() {
-  return `<div class="dev">
-    <div class="devcard">
-      <div class="dhead"><b>Simulator</b><span class="tag">SIMULATOR ⤢</span></div>
-      <div class="dbody"><span class="run">Running</span>
-        <div class="krow"><span class="k">Lamps</span><span class="v">217 across 5 ports</span></div>
-        <div class="krow"><span class="k">Frame</span><span class="v">60 fps · 2.1 ms</span></div>
-        <div class="krow"><span class="k">Power</span><span class="v">12% of 10 A budget</span></div>
-      </div>
-    </div>
-    <div class="devcard off">
-      <div class="dhead"><b>Workbench ESP32</b><span class="tag">USB</span></div>
-      <div class="dbody"><div class="krow"><span class="k">State</span>
-        <span class="v">unplugged · last seen 2h</span></div></div>
-    </div>
-  </div>`;
-}
-function outputsPanel() {
-  let h = '<div class="outs">';
-  for (const box of DOME_BOXES) {
-    h += `<div class="obox"><div class="bhead">▾ ${box.name}
-      <span class="occ">${box.ports.reduce((a, p) => a + p.used, 0)} lamps</span></div>`;
-    for (const p of box.ports) {
-      h += `<div class="port"><div class="pline"><span class="pin">${p.pin}</span>
-        <span>${p.strip}</span><span class="use">${p.used}/${p.total}</span></div>
-        <div class="cellbar">`;
-      for (const c of p.cells) {
-        if (c.gap) { h += `<span class="cell gap" style="flex-grow:${c.w}">·</span>`; continue; }
-        const on = state.sel && c.label.startsWith(state.sel);
-        h += `<span class="cell ${on ? 'sel' : ''} ${c.range ? 'range' : ''}"
-              style="flex-grow:${c.w}" onclick="selectPath('${c.label.split(' ')[0]}')">${c.label}</span>`;
-      }
-      h += '</div></div>';
-    }
-    h += '</div>';
   }
   return h + '</div>';
 }
@@ -772,50 +663,29 @@ function propsPanel() {
       <div class="pchead"><b>dome.map2d.json</b><span class="lvl">document</span></div>
       <div class="pcrow"><span class="k">objects</span><span class="v">5 sectors · 150 lamps</span></div>
     </div>
-    <div class="modline">in module: Mini dome › Dome</div>
   </div>`;
 }
-const BODY = { tree: treePanel, outputs: outputsPanel, device: devicePanel, props: propsPanel };
-const FOOTERS = { tree: treeFooter, outputs: () => '2 boxes · 5 ports · 217/320 lamps',
-                  device: () => null, props: () => null };
+function devicePanelBody() {
+  return `<div style="padding:10px; font-size:11px; color:var(--subtle)">
+    <div style="border:1px solid rgba(63,214,142,.45); border-left:3px solid var(--good);
+                border-radius:8px; background:var(--surface); padding:8px 11px;">
+      <b style="color:var(--strong); font-size:12.5px">${devName()}</b>
+      <div style="color:var(--good); margin-top:2px">Running</div>
+      <div style="font-family:var(--mono); font-size:10px; color:var(--dim); margin-top:4px">
+        217 lamps · 60 fps · 12% of 10 A</div>
+    </div></div>`;
+}
+function outputsBody() {
+  return `<div style="padding:10px; font-size:11px; color:var(--dim)">
+    2 boxes · 5 ports · 217/320 lamps</div>`;
+}
+const BODY = { tree: treeAuthored, outputs: outputsBody, device: devicePanelBody, props: propsPanel };
+const FOOTERS = { tree: () => '3 fixtures · 9 objects · 217 lamps',
+                  outputs: () => null, device: () => null, props: () => null };
 
-/* ================= center views ================= */
-function miniRingSVG() {
-  let dots = '';
-  for (let i = 0; i < 14; i++) {
-    const a = (i / 14) * Math.PI * 2 - Math.PI / 2;
-    dots += `<circle cx="${55 + Math.cos(a) * 38}" cy="${52 + Math.sin(a) * 38}" r="4"
-             fill="hsl(${i * 25} 80% 62%)"/>`;
-  }
-  return `<svg viewBox="0 0 110 104" style="height:96px">${dots}</svg>`;
-}
-function nodeCardsView() {
-  return `<div class="cards">
-    <div class="ncard">
-      <div class="nhead"><span style="color:var(--dim)">▾</span><b>dome</b>
-        <span class="kind">fixture</span><span class="sp"></span>
-        <button class="ibtn">i</button></div>
-      <div class="prev">${miniRingSVG()}</div>
-      <div class="prow"><span class="lab">Brightness</span>
-        <span class="slider"><span class="fill"></span><span class="knob"></span></span>
-        <span class="val">184</span></div>
-      <div class="fold">▸ <b>DIMENSIONALITY</b> &nbsp;2d map · 150 lamps</div>
-    </div>
-    <div class="ncard">
-      <div class="nhead"><span style="color:var(--dim)">▸</span><b>Sky shader</b>
-        <span class="kind">shader</span><span class="sp"></span>
-        <button class="ibtn">i</button></div>
-      <div class="prow"><span class="lab">Speed</span>
-        <span class="slider"><span class="fill" style="width:38%"></span>
-        <span class="knob" style="left:38%"></span></span><span class="val">0.4</span></div>
-    </div>
-  </div>`;
-}
 function canvasSVG(idsuffix, draggable) {
-  const patch = state.view === 'patch';
   let dome = '';
   for (let s = 0; s < 5; s++) {
-    const seld = state.sel === `dome/${s}`;
     const a0 = (s / 5) * Math.PI * 2 - Math.PI / 2;
     for (let r = 0; r < 3; r++) {
       for (let i = 0; i < 10; i++) {
@@ -823,8 +693,7 @@ function canvasSVG(idsuffix, draggable) {
         const rad = 52 + r * 26;
         dome += `<circle cx="${(260 + Math.cos(a) * rad).toFixed(1)}"
           cy="${(205 + Math.sin(a) * rad * 0.82).toFixed(1)}" r="3.4"
-          fill="${seld && patch ? 'var(--sel)' : 'var(--obj-0)'}"
-          opacity="${seld || !patch ? .95 : .45}"/>`;
+          fill="var(--obj-0)" opacity=".95"/>`;
       }
     }
   }
@@ -838,7 +707,7 @@ function canvasSVG(idsuffix, draggable) {
   const dg = draggable
     ? `<g class="dragdome" id="dragdome-${idsuffix}" transform="translate(${state.domeDx},${state.domeDy})">`
     : `<g transform="translate(${state.domeDx},${state.domeDy})">`;
-  return `<svg viewBox="0 0 720 420" preserveAspectRatio="xMidYMid meet" id="cv${idsuffix}">
+  return `<svg viewBox="0 0 720 420" preserveAspectRatio="xMidYMid meet">
     ${dg}
     <rect class="fixframe ${state.sel.startsWith('dome') ? 'sel' : ''}" x="140" y="88" width="240" height="238" rx="8"/>
     <rect class="tagframe" x="140" y="70" width="86" height="16" rx="4"/>
@@ -859,14 +728,6 @@ function canvasSVG(idsuffix, draggable) {
   </svg>`;
 }
 function viewToolbar() {
-  if (state.view === 'patch') {
-    return `<div class="etools">
-      <button class="tbtn on">assign</button><button class="tbtn">flip <kbd>r</kbd></button>
-      <button class="tbtn">rotate <kbd>;</kbd><kbd>'</kbd></button>
-      <button class="tbtn">swap <kbd>s</kbd></button><button class="tbtn">clear</button>
-      <span class="sep"></span><button class="tbtn on">⌁ pulse on select</button>
-      <span class="sp"></span><button class="tbtn">show visual</button></div>`;
-  }
   return `<div class="etools">
     <button class="tbtn on">⊙ select</button><button class="tbtn">▦ grid</button>
     <button class="tbtn">◯ ring</button><button class="tbtn">〰 path</button>
@@ -874,91 +735,20 @@ function viewToolbar() {
     <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">100%</span>
     <span class="sp"></span><button class="tbtn">show visual</button></div>`;
 }
-function center(idsuffix, draggable) {
-  return state.view === 'nodes'
-    ? `<div class="mainbody">${nodeCardsView()}</div>`
-    : `${viewToolbar()}<div class="mainbody canvas">${canvasSVG(idsuffix, draggable && state.view === 'map')}</div>`;
-}
-
-/* ================= chrome pieces ================= */
-function chipHTML(where, opts = {}) {
-  const st = { saved: 'i', unsaved: '✎', failed: '⚠', syncing: '◌' }[state.proj];
-  const cnt = state.proj === 'unsaved' && state.edits.length
-    ? `<span class="cnt">${state.edits.length}</span>` : '';
-  const name = opts.name === false ? '' : '<span class="pname">mini dome</span>';
-  const title = { saved: 'Project — saved', unsaved: 'Project has unsaved changes',
-                  failed: 'Project — failed edits', syncing: 'Project — syncing' }[state.proj];
-  return `<span class="pchip ${state.proj}" onclick="togglePop('${where}', event)" title="${title}">
-    <span class="st">${st}</span>${name}${cnt}</span>`;
-}
-function popoverHTML(where, style = '') {
-  if (state.popOpen !== where) return '';
-  const dirty = state.proj === 'unsaved' || state.proj === 'failed';
-  const stw = { saved: 'Ready', unsaved: 'Unsaved', failed: 'Failed edits', syncing: 'Syncing' }[state.proj];
-  let edits = '';
-  if (dirty && state.edits.length) {
-    edits = `<div class="sec">
-      <div class="sechead">Unsaved (persisted)<span class="meta">${state.edits.length}</span></div>` +
-      state.edits.map((e, i) => `<div class="erow"><span class="eico">✎</span>
-        <span class="epath">${e.path}</span><span style="font-size:10px">${e.what}</span>
-        <span class="rvt" onclick="revertOne(${i}, event)">revert</span></div>`).join('') +
-      `</div>
-      <div class="sec"><div class="acts">
-        <button class="primary" onclick="saveAll(event)">Save</button>
-        <button onclick="revertAll(event)">Revert to saved</button></div></div>`;
-  }
-  return `<div class="ppop" style="${style}" onclick="event.stopPropagation()">
-    <div class="ph"><b>mini dome</b><span class="stw ${dirty ? 'dirty' : ''}">${stw}</span></div>
-    ${edits}
-    <div class="sec"><div class="sechead">Share</div>
-      <div class="sharenote ${dirty ? 'blocked' : ''}">${dirty
-        ? 'save before sharing — link reflects saved state'
-        : 'lightplayer.app/p/9f3k2 · view link active'}</div></div>
-    <div class="sec"><div class="sechead">Project</div>
-      <div class="krow"><span class="k">Nodes</span><span class="v">9 · 3 fixtures</span></div>
-      <div class="krow"><span class="k">Lamps</span><span class="v">217 across 5 ports</span></div>
-      <div class="krow"><span class="k">Overlay rev</span><span class="v">v41</span></div></div>
-  </div>`;
-}
-function gheadHTML(where) {
-  const chip = state.chipLoc === 'header'
-    ? `${chipHTML(where)}<span class="shico" title="Share">⇗</span>` : '';
-  return `<div class="ghead"><span class="brand">⏵ <b>Light</b>Player</span>
-    <span class="gnav"><span>Devices</span><span>Projects</span></span>
-    ${chip}<span class="sp"></span>
-    <span class="sess">sim ▸</span><span class="dots">···</span>
-    ${state.chipLoc === 'header' ? popoverHTML(where) : ''}</div>`;
-}
-function viewTabsHTML(seg) {
-  if (seg) {
-    const b = (id, label) => `<button class="${state.view === id ? 'on' : ''}"
-      onclick="setView('${id}')">${label}</button>`;
-    return `<span class="vseg">${b('nodes', 'Nodes')}${b('map', 'Map')}${b('patch', 'Patch')}</span>`;
-  }
+function viewTabsHTML() {
   const t = (id, ico, label) => `<span class="vtab ${state.view === id ? 'on' : ''}"
     onclick="setView('${id}')"><span class="vico">${ico}</span>${label}</span>`;
   return `<span class="vtabs">${t('nodes', '▤', 'Nodes')}${t('map', '⌖', 'Map')}
     ${t('patch', '⌁', 'Patch')}
     <span class="vtab future"><span class="vico">▸</span>Live</span></span>`;
 }
-function bSegment(side, where) {
+function bSegment(side) {
   const ids = roster(state.view, side);
   const open = state.docks[state.view][side];
   const tabs = ids.map(id =>
     `<span class="atab ${open === id ? 'on' : ''}" onclick="toggleDock('${id}')">
       ${PANELS[id].title}</span>`).join('');
-  if (side === 'left') {
-    const chip = state.chipLoc === 'band' ? chipHTML(where, { name: false }) : '';
-    return `<span class="bseg l">${chip}${tabs}</span>`;
-  }
-  return `<span class="bseg r">${tabs}</span>`;
-}
-function bandHTML(where) {
-  return `<div class="bband">
-    ${bSegment('left', where)}
-    <span class="bmid">${viewTabsHTML(false)}</span>
-    ${bSegment('right', where)}
-    ${state.chipLoc === 'band' ? popoverHTML(where, 'left:8px') : ''}</div>`;
+  return `<span class="bseg ${side === 'left' ? 'l' : 'r'}">${tabs}</span>`;
 }
 function dockHTML(side) {
   const open = state.docks[state.view][side];
@@ -970,19 +760,21 @@ function dockHTML(side) {
 }
 function renderMain() {
   document.getElementById('c-main').innerHTML =
-    `${gheadHTML('main')}
-     ${bandHTML('main')}
+    `${studioBar('main', 'lg')}
+     <div class="bband">
+       ${bSegment('left')}
+       <span class="bmid">${viewTabsHTML()}</span>
+       ${bSegment('right')}</div>
      <div class="wbbody">
        ${dockHTML('left')}
-       <div class="col main">${center('main', true)}</div>
+       <div class="col main">${viewToolbar()}
+         <div class="mainbody canvas">${canvasSVG('main', state.view === 'map')}</div></div>
        ${dockHTML('right')}
      </div>
-     <div class="wbstatus"><span class="good">sim ▸ running</span><span>217 lamps</span>
-       <span>60 fps</span><span>view: ${state.view}</span><span class="sp"></span></div>`;
+     <div class="wbstatus"><span class="good">${state.session === 'sim' ? 'sim' : 'usb'} ▸ running</span>
+       <span>217 lamps</span><span>60 fps</span><span>view: ${state.view}</span><span class="sp"></span></div>`;
   wireDrag('main');
 }
-
-/* dome drag → arrange edit → dirty (the #417 moment) */
 function wireDrag(suffix) {
   const g = document.getElementById(`dragdome-${suffix}`);
   if (!g) return;
@@ -1016,117 +808,86 @@ function wireDrag(suffix) {
   });
 }
 
-/* ================= section 2: chip home comparison ================= */
-function renderChipLoc() {
-  const saved = state.chipLoc;
-  let h = '';
-  state.chipLoc = 'header';
-  h += `<div class="cap">chip in the HEADER — one identity, one home (the lean)</div>
-        <div class="barframe">${gheadHTML('x1')}${bandHTML('x1')}</div>`;
-  state.chipLoc = 'band';
-  h += `<div class="cap">chip in the BAND — closer to the action, but "mini dome" appears twice</div>
-        <div class="barframe">
-          <div class="ghead"><span class="brand">⏵ <b>Light</b>Player</span>
-            <span class="gnav"><span>Devices</span><span>Projects</span></span><span class="sp"></span>
-            <span class="sess">mini dome · sim ▸</span><span class="dots">···</span></div>
-          ${bandHTML('x2')}</div>`;
-  state.chipLoc = saved;
-  document.getElementById('c-chiploc').innerHTML = h;
+/* ================= section 4: leaving ================= */
+function leaveDemo(e) {
+  e.stopPropagation();
+  state.leaveMode = state.busy ? 'refused' : 'site';
+  renderAll();
 }
-
-/* ================= section 3: the Tree across views ================= */
-function renderTrees() {
-  const saved = state.view;
-  const col = (view, title, role) => {
-    state.view = view;
-    const foot = treeFooter();
-    const html = `<div class="treecol"><h3>${title}</h3><p class="role">${role}</p>
-      <div class="tframe">
-        <div class="atabsrow"><span class="atab on">Tree</span></div>
-        <div class="pbody">${treePanel()}</div>
-        <div class="pfoot">${foot}</div>
-      </div></div>`;
-    return html;
-  };
-  let h = col('nodes', 'Nodes view — assembly',
-              '<b>Node graph.</b> Everything in the project; add node; structure.');
-  h += col('map', 'Map view — authored',
-           '<b>Authored grain.</b> Fixtures → objects as designed. No wire info here.');
-  h += col('patch', 'Patch view — effective',
-           '<b>Effective grain.</b> Resolved instances/ranges with wire chips.');
-  state.view = saved;
-  document.getElementById('c-trees').innerHTML = h;
-}
-
-/* ================= section 4: md + sm ================= */
-function mgheadHTML() {
-  return `<div class="mghead"><span class="brand">⏵ <b>LP</b></span>
-    ${chipHTML('m', { name: false })}<span class="sp"></span><span class="sess">sim ▸</span></div>`;
-}
-function smBar() {
-  const tg = (side) => roster(state.view, side).map(id => {
-    const on = state.phoneView === id;
-    return `<span class="sq ${on ? 'on' : ''}" onclick="phoneSummon('${id}')"
-      title="${PANELS[id].title}">${PANELS[id].ico}</span>`;
-  }).join('');
-  return `<div class="smbar">
-    <span class="bl">${tg('left')}</span>
-    ${viewTabsHTML(true)}
-    <span class="br">${tg('right')}</span></div>`;
-}
-function phoneMain() {
-  if (state.phoneView !== 'main') {
-    const foot = FOOTERS[state.phoneView]();
-    return `<div class="pmain">
-      <div class="backhead"><span class="bk" onclick="phoneSummon('main')">‹ back</span>
-        <b>${PANELS[state.phoneView].title}</b></div>
-      ${BODY[state.phoneView]()}</div>${foot ? `<div class="pfoot">${foot}</div>` : ''}`;
+function resetLeave(e) { e.stopPropagation(); state.leaveMode = 'studio'; renderAll(); }
+function renderLeave() {
+  let bar, stage = '';
+  if (state.leaveMode === 'site') {
+    bar = siteBar();
+    stage = `<span class="toast"><span class="tico">${state.session === 'sim' ? '❖' : '⌁'}</span>
+      ${state.session === 'sim' ? 'Simulator stopped' : 'Garage dome disconnected'}
+      ${dirtyN() ? ' — your edits are saved as a draft' : ''}
+      <span class="tlink" onclick="resetLeave(event)">Reopen</span></span>`;
+  } else {
+    bar = studioBar('leave', 'lg');
+    if (state.leaveMode === 'refused') {
+      stage = `<span class="toast warn"><span class="tico">⚠</span>
+        Deploy in progress — finish or cancel it before leaving
+        <span class="tlink" onclick="resetLeave(event)">OK</span></span>`;
+    }
   }
-  return state.view === 'nodes'
-    ? `<div class="pmain">${nodeCardsView()}</div>`
-    : `<div class="pmain canvas">${canvasSVG('ph', false)}</div>`;
+  document.getElementById('c-leave').innerHTML = `
+    <div class="cap"><b>${state.leaveMode === 'site' ? 'site mode — the session is over, no group anywhere'
+        : state.leaveMode === 'refused' ? 'nav refused — an operation is in flight'
+        : 'studio mode — click Projects (or Devices) in this bar to leave'}</b>
+      &nbsp; <span style="cursor:pointer; color:var(--sel); text-transform:none"
+        onclick="resetLeave(event)">reset demo</span></div>
+    <div class="barframe">${bar}</div>
+    <div class="demo-stage">${stage}</div>`;
 }
-function renderPhones() {
-  const live = `<div class="phone"><div class="pcap">sm · live — chip in the slim header</div>
-    <div class="pbdy">${mgheadHTML()}${smBar()}${phoneMain()}</div></div>`;
-  const saved = { view: state.view, phoneView: state.phoneView };
-  state.view = 'patch'; state.phoneView = 'tree';
-  const summoned = `<div class="phone"><div class="pcap">sm · Patch view, Tree summoned (effective)</div>
-    <div class="pbdy">${mgheadHTML()}${smBar()}${phoneMain()}</div></div>`;
-  state.view = saved.view; state.phoneView = saved.phoneView;
-  const mdLeft = state.docks[state.view].left;
-  const md = `<div class="phone tab"><div class="pcap">md · same chrome, docks narrow</div>
-    <div class="pbdy">${mgheadHTML()}
-      <div class="bband md">
-        <span class="bseg l" style="width:210px">${roster(state.view, 'left').map(id =>
-          `<span class="atab ${mdLeft === id ? 'on' : ''}" onclick="toggleDock('${id}')">${PANELS[id].title}</span>`).join('')}</span>
-        <span class="bmid">${viewTabsHTML(false)}</span>
-        <span class="bseg r" style="width:auto">${roster(state.view, 'right').map(id =>
-          `<span class="atab ${state.docks[state.view].right === id ? 'on' : ''}"
-             onclick="toggleDock('${id}')">${PANELS[id].title}</span>`).join('')}</span>
-      </div>
-      <div class="tbody">
-        ${mdLeft ? `<div class="dock l" style="width:210px">
-          <div class="pbody">${BODY[mdLeft]()}</div>
-          ${FOOTERS[mdLeft]() ? `<div class="pfoot">${FOOTERS[mdLeft]()}</div>` : ''}</div>` : ''}
-        <div class="col main">${center('md', false)}</div>
-      </div></div></div>`;
-  document.getElementById('c-phones').innerHTML = live + summoned + md;
+
+/* ================= section 5: edges ================= */
+function withState(patch, fn) {
+  const saved = {};
+  for (const k of Object.keys(patch)) { saved[k] = state[k]; state[k] = patch[k]; }
+  const out = fn();
+  Object.assign(state, saved);
+  return out;
+}
+function renderEdges() {
+  let h = '';
+  h += `<div class="cap"><b>connected, nothing running</b> — a board with no project yet</div>
+    <div class="sub">The project segment goes honest-empty: no fake name, an open door instead.</div>
+    <div class="barframe"><div class="ghead"><span class="brand">⏵ <b>Light</b>Player</span>
+      ${navHTML('studio')}
+      <span class="sgrp">
+        <span class="seg dev"><span class="dglyph">⌁</span><span class="hdot hollow"></span><b>Garage dome</b></span>
+        <span class="seg proj"><span class="dimtxt">no project — open one…</span></span></span>
+      <span class="sp"></span><span class="dots">···</span></div></div>`;
+  h += `<div class="cap"><b>identifying</b> — connect ceremony still resolving (no honest name yet)</div>
+    <div class="barframe"><div class="ghead"><span class="brand">⏵ <b>Light</b>Player</span>
+      ${navHTML('studio')}
+      <span class="sgrp">
+        <span class="seg dev"><span class="dglyph">⌁</span><span class="hdot attn"></span>
+          <span class="dimtxt">connecting…</span></span></span>
+      <span class="sp"></span><span class="dots">···</span></div></div>`;
+  h += withState({ session: 'hw', proj: 'unsaved',
+                   edits: [{ path: 'editor.json', what: 'arrange dome' }] }, () =>
+    `<div class="cap"><b>hardware, unsaved</b> — same grammar, device name carries the weight</div>
+     <div class="barframe">${studioBar('edge-hw', 'lg')}</div>`);
+  document.getElementById('c-edges').innerHTML = h;
 }
 
 /* ================= state changes ================= */
 function renderAll() {
-  renderMain(); renderChipLoc(); renderTrees(); renderPhones();
+  renderWidths(); renderPanel(); renderMain(); renderLeave(); renderEdges();
   const B2 = (id, on) => { const el = document.getElementById(id); if (el) el.classList.toggle('on', on); };
-  B2('xv-nodes', state.view === 'nodes'); B2('xv-map', state.view === 'map');
-  B2('xv-patch', state.view === 'patch');
   B2('xp-saved', state.proj === 'saved'); B2('xp-unsaved', state.proj === 'unsaved');
   B2('xp-failed', state.proj === 'failed'); B2('xp-syncing', state.proj === 'syncing');
-  B2('xc-header', state.chipLoc === 'header'); B2('xc-band', state.chipLoc === 'band');
+  B2('xs-sim', state.session === 'sim'); B2('xs-hw', state.session === 'hw');
+  B2('xb-on', state.busy); B2('xb-off', !state.busy);
+  B2('xv-nodes', state.view === 'nodes'); B2('xv-map', state.view === 'map');
+  B2('xv-patch', state.view === 'patch');
   document.getElementById('xstatus').textContent =
-    `view=${state.view} · proj=${state.proj} · chip=${state.chipLoc} · edits=${state.edits.length}`;
+    `proj=${state.proj} · session=${state.session} · busy=${state.busy ? 'yes' : 'no'}` +
+    ` · edits=${state.edits.length}`;
 }
-function setView(v) { state.view = v; state.phoneView = 'main'; renderAll(); }
+function setView(v) { state.view = v; renderAll(); }
 function setProj(p) {
   state.proj = p;
   if (p === 'unsaved' && !state.edits.length)
@@ -1135,13 +896,8 @@ function setProj(p) {
   if (p === 'saved') { state.edits = []; state.domeDx = 0; state.domeDy = 0; }
   renderAll();
 }
-function setChipLoc(c) { state.chipLoc = c; renderAll(); }
-function preset(p) {
-  const d = state.docks[state.view];
-  if (p === 'both') { d.left = 'tree'; d.right = roster(state.view, 'right')[0]; }
-  if (p === 'none') { d.left = null; d.right = null; }
-  renderAll();
-}
+function setSession(s) { state.session = s; renderAll(); }
+function setBusy(b) { state.busy = b; renderAll(); }
 function toggleDock(id) {
   const side = PANELS[id].side;
   const d = state.docks[state.view];
@@ -1152,7 +908,8 @@ function togglePop(w, e) { e.stopPropagation(); state.popOpen = state.popOpen ==
 document.addEventListener('click', () => {
   if (state.popOpen) { state.popOpen = null; renderAll(); }
 });
-function saveAll(e) { e.stopPropagation(); state.edits = []; state.proj = 'saved'; renderAll(); }
+function saveAll(e) { e.stopPropagation(); state.edits = []; state.proj = 'saved';
+  state.domeDx = 0; state.domeDy = 0; renderAll(); }
 function revertAll(e) { e.stopPropagation(); state.edits = []; state.proj = 'saved';
   state.domeDx = 0; state.domeDy = 0; renderAll(); }
 function revertOne(i, e) { e.stopPropagation();
@@ -1161,7 +918,6 @@ function revertOne(i, e) { e.stopPropagation();
   if (!state.edits.length) state.proj = 'saved';
   renderAll(); }
 function selectPath(p) { state.sel = p; renderAll(); }
-function phoneSummon(v) { state.phoneView = v === state.phoneView ? 'main' : v; renderAll(); }
 
 renderAll();
 </script>

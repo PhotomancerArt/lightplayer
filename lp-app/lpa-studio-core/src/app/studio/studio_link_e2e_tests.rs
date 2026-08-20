@@ -1105,17 +1105,22 @@ fn fake_forgotten_endpoints(connector: &lpa_link::LinkConnector) -> Vec<LinkEndp
 
 /// Row 12 (P2 coexistence): a fake device connected through the real link
 /// AND a project opened on the sim — both sessions live in the pool at
-/// once. The old `open_from_home` hardware refusal is gone: the open
-/// succeeds, the editor mirror lands on the SIM session (lens), the device
-/// session keeps its connect-time classification (`device_sync` intact), a
-/// slot-edit round-trips over the sim's wire, and the device's slow status
-/// heartbeat drains a buffered console line into the ring.
+/// once. The open succeeds, the editor mirror lands on the SIM session
+/// (lens), the device session keeps its connect-time classification
+/// (`device_sync` intact), a slot-edit round-trips over the sim's wire,
+/// and the device's slow status heartbeat drains a buffered console line
+/// into the ring.
+///
+/// This is the MODEL's behavior, which the desktop future inherits — the
+/// web app now runs one session per tab and would end the device session
+/// at the open (see the single-session rows), so the row asks for the
+/// N-session policy explicitly.
 ///
 /// Host builds have no browser-worker provider, so the sim session is
 /// installed through the stub seam with an in-process server client; the
 /// open itself still runs the REAL `open_from_home` reuse path.
 #[test]
-fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
+fn sim_and_device_sessions_coexist_under_the_n_session_model() {
     use super::studio_edit_e2e_tests::{
         InProcessServerIo, clock_transport_block, edit_e2e_files, edit_e2e_server,
     };
@@ -1157,6 +1162,7 @@ fn sim_and_device_sessions_coexist_and_the_open_guard_is_gone() {
             )),
     ));
     let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.allow_multi_session_for_test();
     studio.attach_library(host);
     connect_through_link(&mut studio, &endpoint_id).expect("device connect succeeds");
     assert!(
@@ -2209,7 +2215,9 @@ fn card_tab_and_sheet_drive_through_core_ops() {
 /// Journey B (state-flow model §1-B, contrast): erasing a DIFFERENT
 /// device leaves the editor alone — the sever is specific to the lens's
 /// own device. A sim-lens editor stays open and bound through a hardware
-/// erase running in the background.
+/// erase running in the background. Two live sessions is the N-session
+/// model (the web app's single-session policy keeps one), so the row asks
+/// for it.
 #[test]
 fn erasing_the_device_leaves_a_sim_lens_editor_alone() {
     use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_files, edit_e2e_server};
@@ -2237,6 +2245,7 @@ fn erasing_the_device_leaves_a_sim_lens_editor_alone() {
         )),
     ));
     let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.allow_multi_session_for_test();
     studio.attach_library(host);
 
     // The editor opens on the SIM…
@@ -2367,7 +2376,10 @@ fn d29_click_with_a_sim_project_open_moves_the_lens_and_keeps_the_sim() {
 
 /// Row P3-e (the P2 interim is gone): connecting hardware while a project
 /// is open on the sim leaves the lens on the sim — attaching observes —
-/// while the device reconciles in the background on its own client.
+/// while the device reconciles in the background on its own client. The
+/// MODEL's rule, which the desktop future inherits: the web app's
+/// single-session policy ends the sim at this connect instead (see the
+/// single-session rows), so the row asks for the N-session policy.
 #[test]
 fn device_connect_while_a_sim_project_is_open_leaves_the_lens_on_the_sim() {
     use super::studio_edit_e2e_tests::{
@@ -2408,6 +2420,7 @@ fn device_connect_while_a_sim_project_is_open_leaves_the_lens_on_the_sim() {
             )),
     ));
     let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.allow_multi_session_for_test();
     studio.attach_library(host);
 
     // The sim project opens FIRST.
@@ -3229,6 +3242,350 @@ fn connect_keeps_a_true_fork_for_the_user() {
 }
 
 // ---------------------------------------------------------------------------
+// The single-session web policy
+//
+// One runtime per browser tab (`StudioController`'s module doc): opening
+// a project or connecting a board ends the tab's other session, and only
+// an operation in flight refuses. The rows above that need two live
+// sessions ask for the model's N-session policy explicitly; these run
+// against the shipped default.
+// ---------------------------------------------------------------------------
+
+/// Connecting a board while the sim runs ends the sim: the tab's one
+/// session becomes the board, and the mirror the sim held returns to the
+/// gallery rather than pointing at a session that no longer exists.
+#[test]
+fn connecting_a_board_ends_the_sim_session() {
+    let (mut studio, endpoint_id, sign) = board_and_a_project_to_open();
+    let sim_id = install_sim_stub(&mut studio);
+    open_package(&mut studio, &sign).expect("open on the sim succeeds");
+    assert_eq!(studio.runtime_pool_for_test().lens(), Some(sim_id));
+
+    connect_through_link(&mut studio, &endpoint_id).expect("the board connects");
+
+    let pool = studio.runtime_pool_for_test();
+    assert!(pool.sim_session().is_none(), "the sim session ended");
+    assert_eq!(
+        pool.sessions().count(),
+        1,
+        "exactly one session survives the connect"
+    );
+    assert!(
+        pool.oldest_device_session().is_some(),
+        "and it is the board that arrived"
+    );
+    assert!(
+        studio.view().home.is_some(),
+        "the editor mirror went with the sim — the gallery is back"
+    );
+}
+
+/// The other direction: opening a project ends the attached board.
+///
+/// This is the REUSE path — the sim session already exists, so the open
+/// never reaches the install funnel's gate. Host builds cannot start a
+/// real browser worker, and the reuse branch is the door the funnel does
+/// not cover, which makes it the one worth holding shut here.
+#[test]
+fn opening_a_project_ends_the_board_session() {
+    let (mut studio, endpoint_id, sign) = board_and_a_project_to_open();
+    connect_through_link(&mut studio, &endpoint_id).expect("the board connects");
+    let sim_id = install_sim_stub(&mut studio);
+
+    open_package(&mut studio, &sign).expect("open on the sim succeeds");
+
+    let pool = studio.runtime_pool_for_test();
+    assert!(
+        pool.oldest_device_session().is_none(),
+        "the board's session ended"
+    );
+    assert_eq!(pool.sessions().count(), 1, "one session, and it is the sim");
+    assert_eq!(pool.lens(), Some(sim_id), "the editor is a lens on the sim");
+    assert!(studio.view().home.is_none(), "the project is open");
+}
+
+/// An operation in flight is the one thing teardown cannot end honestly,
+/// so the arriving connect is refused instead — and the refusal names the
+/// operation, because "something is running" is not an instruction.
+#[test]
+fn an_operation_in_flight_refuses_the_connect_and_names_it() {
+    let (mut studio, endpoint_id, sign) = board_and_a_project_to_open();
+    let sim_id = install_sim_stub(&mut studio);
+    open_package(&mut studio, &sign).expect("open on the sim succeeds");
+    studio.set_session_operation_for_test(sim_id, Some("Pushing v3"));
+
+    let error =
+        connect_through_link(&mut studio, &endpoint_id).expect_err("the connect is refused");
+
+    assert!(
+        error.message().contains("Pushing v3"),
+        "the refusal names the operation: {}",
+        error.message()
+    );
+    assert!(
+        error.message().contains("the simulator"),
+        "…and where it is running: {}",
+        error.message()
+    );
+    let pool = studio.runtime_pool_for_test();
+    assert!(
+        pool.sim_session().is_some(),
+        "the session running the operation is untouched"
+    );
+    assert_eq!(
+        pool.sessions().count(),
+        1,
+        "and the refused payload never became a session"
+    );
+}
+
+/// The same refusal from the open side, naming the BOARD the operation is
+/// running on — the flash the user would otherwise have interrupted by
+/// clicking a project card.
+#[test]
+fn an_operation_in_flight_refuses_the_open_and_names_the_board() {
+    let (mut studio, endpoint_id, sign) = board_and_a_project_to_open();
+    connect_through_link(&mut studio, &endpoint_id).expect("the board connects");
+    let device_id = studio.the_device_for_test();
+    install_sim_stub(&mut studio);
+    studio.set_session_operation_for_test(device_id, Some("Installing firmware"));
+
+    let error = open_package(&mut studio, &sign).expect_err("the open is refused");
+
+    assert!(
+        error.message().contains("Installing firmware"),
+        "the refusal names the operation: {}",
+        error.message()
+    );
+    assert!(
+        error.message().contains("Bench board"),
+        "…and the board it is running on: {}",
+        error.message()
+    );
+    let pool = studio.runtime_pool_for_test();
+    assert!(
+        pool.oldest_device_session().is_some(),
+        "the board keeps its session"
+    );
+    assert!(
+        pool.sim_session().is_some(),
+        "a refusal tears nothing down — the sim it would have reused stays too"
+    );
+}
+
+/// The header control's DTO (`UiStudioView::session`): the tab's one
+/// session, projected once — kind, name, the board a sim inherited from
+/// its project, the roster's own status, and the operation the nav guard
+/// refuses on. No session, no control.
+#[test]
+fn the_session_control_projects_the_sim_and_its_board() {
+    let (mut studio, _endpoint_id, sign) = board_and_a_project_to_open();
+    assert!(
+        studio.view().session.is_none(),
+        "nothing attached — there is no session to control"
+    );
+
+    let sim_id = install_sim_stub(&mut studio);
+    open_package(&mut studio, &sign).expect("open on the sim succeeds");
+
+    let control = studio
+        .view()
+        .session
+        .expect("the sim session is the tab's one session");
+    assert!(control.sim);
+    assert_eq!(
+        control.name, "Sim",
+        "the control renders the kind, not \"Simulator\""
+    );
+    assert_eq!(
+        control.board, None,
+        "an untargeted project names no board — a bare \"Sim\" is the honest read"
+    );
+    assert_eq!(
+        control.status,
+        crate::UiChromeSessionStatus::Run,
+        "the same vocabulary the roster card wears"
+    );
+    assert_eq!(control.busy, None, "nothing is running on it");
+
+    // D4: the board the sim inherits from the project it runs, as a human
+    // name — the control must never show a `vendor/product` id.
+    studio.set_sim_board_for_test("seeed/xiao-esp32-c6");
+    assert_eq!(
+        studio
+            .view()
+            .session
+            .expect("still the sim")
+            .board
+            .as_deref(),
+        Some("XIAO ESP32-C6")
+    );
+
+    studio.set_session_operation_for_test(sim_id, Some("Pushing v3"));
+    assert_eq!(
+        studio
+            .view()
+            .session
+            .and_then(|control| control.busy)
+            .as_deref(),
+        Some("Pushing v3"),
+        "the busy label is the nav guard's evidence"
+    );
+}
+
+/// The hardware projection: a board wears its registry name (its board is
+/// already part of that identity — the suffix is the sim's), and the stat
+/// line carries what the session can honestly say about itself.
+#[test]
+fn the_session_control_names_the_board_it_is_a_session_on() {
+    let (mut studio, endpoint_id, _sign) = board_and_a_project_to_open();
+    connect_through_link(&mut studio, &endpoint_id).expect("the board connects");
+
+    let control = studio
+        .view()
+        .session
+        .expect("the board is the tab's one session");
+    assert!(!control.sim);
+    assert_eq!(control.name, "Bench board");
+    assert_eq!(control.board, None, "the board suffix belongs to the sim");
+    assert!(
+        control
+            .stat_line
+            .as_deref()
+            .is_some_and(|line| line.contains("USB")),
+        "the transport reaches the panel's device zone: {:?}",
+        control.stat_line
+    );
+}
+
+/// Live-sessions-only filtering (D36 — chip/control existence = session
+/// existence; this fact used to be covered by the retired chrome strip's
+/// own `chrome_sessions_project_live_sessions_only` test, P4): a
+/// disconnected board becomes a REGISTRY row — remembered, not live — and
+/// the header control must never surface it as the tab's session.
+#[test]
+fn the_session_control_never_surfaces_a_disconnected_registry_row() {
+    let (_store, host) = library();
+    let (mut studio, _devices, first_id, second_id) = studio_with_two_fake_devices(
+        FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new()
+                .with_identity(FakeDeviceIdentity::new("devaaaaaaaaaaaaaaaa", "Board A")),
+        )),
+        FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new()
+                .with_identity(FakeDeviceIdentity::new("devbbbbbbbbbbbbbbbb", "Board B")),
+        )),
+    );
+    studio.attach_library(host);
+    drive(studio.settle_library());
+    connect_through_link(&mut studio, &first_id).expect("board A connects");
+    connect_through_link(&mut studio, &second_id).expect("board B connects");
+
+    let home = studio.view().home.expect("gallery shows");
+    let live: Vec<(String, String)> = home
+        .devices
+        .iter()
+        .filter(|card| !card.sim)
+        .filter_map(|card| card.session_key.clone().map(|key| (card.name.clone(), key)))
+        .collect();
+    assert_eq!(live.len(), 2, "two live boards to start");
+    let board_b_key = live
+        .iter()
+        .find(|(name, _)| name == "Board B")
+        .map(|(_, key)| key.clone())
+        .expect("board B connected");
+
+    drive(studio.dispatch(device_action(DeviceOp::DisconnectDevice {
+        target: crate::DeviceTarget::card(board_b_key),
+    })))
+    .expect("disconnect dispatches");
+
+    let control = studio
+        .view()
+        .session
+        .expect("board A is still a live session");
+    assert_eq!(
+        control.name, "Board A",
+        "the disconnected board's registry row must never win the control's slot"
+    );
+}
+
+/// A scripted board ("Bench board", "Porch" idle on its flash) plus a
+/// library holding "Sign" — the edit-e2e graph the sim opens. Every
+/// single-session row needs both a board to connect and a project to
+/// open, because the policy is about what happens when it has to choose.
+fn board_and_a_project_to_open() -> (StudioController, LinkEndpointId, String) {
+    use super::studio_edit_e2e_tests::edit_e2e_files;
+
+    let (store, host) = library();
+    let porch = store
+        .install_package(
+            "Porch",
+            &project_files("v1"),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+    let porch_files = store.open(porch.uid).unwrap().read_all_files().unwrap();
+    let sign = store
+        .install_package(
+            "Sign",
+            &edit_e2e_files()
+                .iter()
+                .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
+                .collect::<Vec<_>>(),
+            PackageProvenance::Created,
+            1.0,
+        )
+        .unwrap();
+
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_project_files(porch_files)
+            .with_identity(FakeDeviceIdentity::new(
+                "devaaaaaaaaaaaaaaaa",
+                "Bench board",
+            )),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    studio.attach_library(host);
+    (studio, endpoint_id, sign.uid.to_string())
+}
+
+/// THE sim session, installed straight into the pool with an in-process
+/// server behind it — host builds have no browser-worker provider. The
+/// stub seam bypasses the install funnel on purpose: the fixture's own
+/// setup must not run through the policy the row is about to test.
+fn install_sim_stub(studio: &mut StudioController) -> crate::RuntimeId {
+    use super::studio_edit_e2e_tests::{InProcessServerIo, edit_e2e_server};
+    use crate::StudioServerClient;
+    use std::collections::VecDeque;
+
+    studio.install_stub_sim_with_client_for_test(StudioServerClient::from_io_for_test(
+        "in-process",
+        Box::new(InProcessServerIo {
+            server: Rc::new(RefCell::new(edit_e2e_server())),
+            inbox: Rc::new(RefCell::new(VecDeque::new())),
+            sent: Rc::new(RefCell::new(Vec::new())),
+        }),
+    ))
+}
+
+/// The project-card click (`HomeOp::OpenPackage`), returning its verdict
+/// so a row can assert the refusal instead of the open.
+fn open_package(studio: &mut StudioController, uid: &str) -> Result<UiNotices, UiError> {
+    use crate::HomeOp;
+    use crate::app::home::HOME_NODE_ID;
+
+    drive(studio.dispatch(UiAction::from_op(
+        ControllerId::new(HOME_NODE_ID),
+        HomeOp::OpenPackage {
+            key: uid.to_string(),
+        },
+    )))
+}
+
+// ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
 
@@ -3314,6 +3671,13 @@ fn coexisting_fixture_with_sim_server(
     }
     let script = FakeDeviceScript::new(FakeBootState::LightPlayer(device_state));
     let (mut studio, device, endpoint_id) = studio_with_fake_device(script);
+    // A board beside a sim project is a POOL fact the desktop future
+    // keeps; the web app's single-session policy would end one of them
+    // at the open below. These rows are about what happens to two live
+    // sessions, so they ask for the N-session model explicitly — the
+    // policy's own teardown and refusal are covered in the
+    // single-session rows.
+    studio.allow_multi_session_for_test();
     studio.attach_library(host);
     connect_through_link(&mut studio, &endpoint_id).expect("device connect succeeds");
 
@@ -4663,7 +5027,12 @@ fn studio_with_two_fake_devices(
         .expect("second device registered");
     let mut registry = LinkProviderRegistry::new();
     registry.insert(provider);
-    let studio = StudioController::with_link_registry_for_test(|| 1.0, registry);
+    let mut studio = StudioController::with_link_registry_for_test(|| 1.0, registry);
+    // Two boards at once is a POOL fact (multi-device M3), and the web
+    // app's single-session policy would tear the first one down as the
+    // second attached — so these fixtures ask for the model's N-session
+    // behavior explicitly. The policy has its own tests.
+    studio.allow_multi_session_for_test();
     (studio, (first_device, second_device), first_id, second_id)
 }
 

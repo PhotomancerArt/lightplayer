@@ -238,9 +238,15 @@ impl ControllerOp for DeviceOp {
                 "Close this board's session. The board keeps running; connecting it again adds it back.",
                 ActionPriority::Tertiary,
             ),
+            // This used to say unsaved editor changes are "discarded".
+            // Since the durable draft overlay that is false: edits live in
+            // the project's draft, not in the running worker, so stopping
+            // the sim ends the RUN and reopening the project brings the
+            // work back exactly as it was.
             Self::StopSimulator => ActionMeta::new(
                 "Stop simulator",
-                "Shut the simulator down; unsaved editor changes are discarded.",
+                "Shut the simulator down. Unsaved edits are kept — reopening the \
+                 project restores them.",
                 ActionPriority::Tertiary,
             )
             .destructive(),
