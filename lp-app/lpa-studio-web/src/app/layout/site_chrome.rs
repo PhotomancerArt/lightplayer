@@ -21,16 +21,18 @@
 //!   a viewport magic number). The brand word yields at narrow too — the
 //!   mark stays.
 //! - **The narrow ladder is conditional on load.** A bar carrying the
-//!   session control and its mode toggles stops fitting ~220px sooner
+//!   session control and its Play toggle stops fitting ~220px sooner
 //!   than a plain one, so the crowded bar folds earlier (G1 of the
 //!   session·project control, 2026-08-19 — the squished phone bar):
-//!   <900 the world nav retreats to ⋯, the toggles and the Share pill go
+//!   <900 the world nav retreats to ⋯, the toggle and the Share pill go
 //!   icon-only, and the version chip hides (the device name already
 //!   folds there); <680 the brand word yields with the ↺; <560 the phone
-//!   bar — Devices/Projects become ⋯ rows, Patch becomes a mode row, and
-//!   gaps tighten. What never folds: the control, Save, Play, settings,
-//!   the account slot, and ⋯ — the phone bar is the session, the one
-//!   action on it, and the doors.
+//!   bar — Devices/Projects become ⋯ rows and gaps tighten. What never
+//!   folds: the control, Save, Play, settings, the account slot, and ⋯ —
+//!   the phone bar is the session, the one action on it, and the doors.
+//!   (Patch stopped being a chrome mode in R5 — the workbench band tab
+//!   and the ≤820px summon strip carry the Patching view at every width,
+//!   so the ladder has no Patch rungs.)
 //! - **One session per tab, and the tab IS the session** (single-session
 //!   web policy): opening a project or connecting a device tears the
 //!   other kind of session down first, so there is never a strip or a
@@ -55,17 +57,18 @@
 //! any open sim/device session. Nothing here reloads the page.
 
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{Archive, Cable, Play, UserRound};
+use dioxus_icons::lucide::{Archive, Play, UserRound};
 
 use crate::app::layout::session_control::{ChromeSessionControl, SessionProjectControl};
 use crate::base::{
     IconMenuButton, IconMenuTone, LogoLockup, PopoverCloseHandle, StudioIcon, StudioIconName,
 };
 
-/// One of the lens routes' mode toggles (Patch / Play): the target of the
-/// plain hash link and whether the mode is currently on. Props rather than
-/// children so the chrome can fold the toggle into the phone bar's ⋯ menu —
-/// a child is opaque to the menu.
+/// The lens routes' mode toggle (Play): the target of the plain hash link
+/// and whether the mode is currently on. A prop rather than a child so
+/// the chrome's narrow ladder can reason about it. (Patch's toggle is
+/// gone — R5 made patching a workbench view, carried by the band tab and
+/// the summon strip at every width.)
 #[derive(Clone, PartialEq)]
 pub struct ChromeModeToggle {
     /// The mode's variant of the CURRENT route (same session, other zoom).
@@ -133,10 +136,6 @@ pub fn SiteChrome(
     /// workaround); the FOLDS live inside the control.
     #[props(default)]
     session_control: Option<ChromeSessionControl>,
-    /// The patch-mode toggle (D36); lens routes only. Inline down to the
-    /// phone cut, a ⋯ menu row below it.
-    #[props(default)]
-    patch_toggle: Option<ChromeModeToggle>,
     /// The play-mode toggle (P12); lens routes only. Inline at every width
     /// (a phone is where play mode earns its keep).
     #[props(default)]
@@ -267,14 +266,6 @@ pub fn SiteChrome(
                         new_tab: studio_mode,
                     }
                 }
-                if let Some(toggle) = patch_toggle.clone() {
-                    // Inline down to the phone cut; below it the ⋯ menu's
-                    // Patch row carries the mode (patching ports on a
-                    // 375px screen is the rarer trip).
-                    span { class: "tw:hidden tw:@min-[560px]:flex",
-                        PatchToggle { href: toggle.href, patching: toggle.active }
-                    }
-                }
                 if let Some(toggle) = play_toggle.clone() {
                     PlayToggle { href: toggle.href, playing: toggle.active }
                 }
@@ -289,7 +280,6 @@ pub fn SiteChrome(
                             include_primary: *primary,
                             initially_open: overflow_menu_open && index == menu_mounts.len() - 1,
                             project_menu: project_menu.clone(),
-                            patch_toggle: primary.then(|| patch_toggle.clone()).flatten(),
                         }
                     }
                 }
@@ -304,8 +294,7 @@ pub fn SiteChrome(
 /// this tab and close the menu, tool cards open a new one.
 ///
 /// `include_primary` is the phone rung (crowded bars <560): Devices and
-/// Projects join the Sections group ahead of the world's three, and the
-/// folded Patch toggle rides in as a mode row.
+/// Projects join the Sections group ahead of the world's three.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ChromeOverflowMenu(
@@ -314,10 +303,6 @@ fn ChromeOverflowMenu(
     #[props(default = false)] include_primary: bool,
     #[props(default = false)] initially_open: bool,
     #[props(default)] project_menu: Option<ChromeProjectMenu>,
-    /// The folded patch toggle (phone rung only): a mode row under the
-    /// Project group, same hash-link grammar as the inline toggle.
-    #[props(default)]
-    patch_toggle: Option<ChromeModeToggle>,
 ) -> Element {
     // Same derivation, same promise as the inline tabs (see [`SiteChrome`]).
     let studio_mode = section == SiteSection::Session;
@@ -340,16 +325,6 @@ fn ChromeOverflowMenu(
                 if let Some(project_menu) = project_menu {
                     span { class: GROUP_HEADER_CLASS, "Project" }
                     ProjectMenuRows { menu: project_menu }
-                }
-                if let Some(toggle) = patch_toggle {
-                    // The phone bar's Patch home: the same link the inline
-                    // toggle is, spelled as a row. Active while patching,
-                    // like a section row on its section.
-                    NavMenuItem {
-                        label: if toggle.active { "Exit patch mode".to_string() } else { "Patch mode".to_string() },
-                        href: toggle.href,
-                        active: toggle.active,
-                    }
                 }
                 if include_sections {
                     span { class: GROUP_HEADER_CLASS, "Sections" }
@@ -514,31 +489,6 @@ pub fn PlayToggle(href: String, playing: bool) -> Element {
             // on-state either way.
             span { class: "tw:hidden tw:@min-[900px]:inline", "{label}" }
             span { class: "tw:inline-flex tw:@min-[900px]:hidden", Play { size: 14 } }
-        }
-    }
-}
-
-/// The patch-surface toggle (D36, slice 2): a plain link to the `/patch`
-/// variant of the current project route — the same session, the patching
-/// zoom. Same non-tab treatment as [`PlayToggle`], for the same reason.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn PatchToggle(href: String, patching: bool) -> Element {
-    let class = if patching {
-        NAV_TAB_ACTIVE
-    } else {
-        NAV_TAB_IDLE
-    };
-    let label = if patching { "Exit patch" } else { "Patch" };
-    rsx! {
-        a {
-            class: "{class} tw:inline-flex tw:items-center",
-            href: "{href}",
-            title: if patching { "Back to the editor" } else { "Patch mode: ports, cells, instances" },
-            // Same word→glyph fold as [`PlayToggle`]; the cable is the
-            // wiring surface's own metaphor.
-            span { class: "tw:hidden tw:@min-[900px]:inline", "{label}" }
-            span { class: "tw:inline-flex tw:@min-[900px]:hidden", Cable { size: 14 } }
         }
     }
 }

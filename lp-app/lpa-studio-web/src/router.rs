@@ -429,18 +429,6 @@ impl StudioRoute {
         }
     }
 
-    /// This route with play mode on/off; anything but a lens route is
-    /// returned unchanged (nothing else has a play zoom).
-    /// This route with the patch surface on/off (project lens only — the
-    /// surface is project-scoped, so a device route returns unchanged).
-    pub(crate) fn with_patch(&self, patch: bool) -> StudioRoute {
-        self.with_view(if patch {
-            ProjectView::Patch
-        } else {
-            ProjectView::Workspace
-        })
-    }
-
     /// This route rendering the given project view; the views are
     /// mutually exclusive suffixes on one address, so setting any view
     /// leaves every other one. Non-project routes return unchanged.
@@ -455,6 +443,8 @@ impl StudioRoute {
         }
     }
 
+    /// This route with play mode on/off; anything but a lens route is
+    /// returned unchanged (nothing else has a play zoom).
     pub(crate) fn with_play(&self, play: bool) -> StudioRoute {
         match self {
             // Entering or leaving play exits every other view — they are

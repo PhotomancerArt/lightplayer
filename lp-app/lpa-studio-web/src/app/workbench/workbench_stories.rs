@@ -10,7 +10,7 @@ use lpa_studio_web_story_macros::story;
 use super::panels::{FixturesPanel, OutputsPanel, PropsPanel, TreeGrain};
 use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchHrefs, WorkbenchView};
 use crate::app::StudioShell;
-use crate::app::patch::patch_surface_stories::{mini_dome_surface, peach_surface};
+use crate::app::patch::patch_story_fixtures::{mini_dome_surface, peach_surface};
 use crate::app::story_fixtures::{
     project_editor_fixture, project_ready_view, project_synced_pane_view, simulator_lens_card,
 };

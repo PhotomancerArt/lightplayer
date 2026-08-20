@@ -27,7 +27,7 @@ pub use pane_frame::PaneFrame;
 pub use rich_object_pane::RichObjectPane;
 pub use session_control::{ChromeSessionControl, SessionPanel, SessionProjectControl};
 pub use site_chrome::{
-    ChromeModeToggle, ChromeProjectMenu, PatchToggle, PlayToggle, SiteChrome, SiteSection,
+    ChromeModeToggle, ChromeProjectMenu, PlayToggle, SiteChrome, SiteSection,
 };
 pub use studio_pane::{PaneChip, PaneChrome, PaneCollapse, PaneTone, StudioPane};
 pub use studio_settings_popover::StudioSettingsPopover;
