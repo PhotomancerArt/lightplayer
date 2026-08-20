@@ -1,0 +1,781 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike · patching selection &amp; controls</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #101317;            --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;       --surface-subtle: #14181d;
+    --surface-muted: #11161b; --raised: #20272e;   --raised-strong: #26313a;
+    --terminal: #0c1114;      --track: #10151a;
+
+    --border: #2a3138;        --border-muted: #252d34;
+    --border-subtle: #293039; --border-strong: #3e4852;
+
+    --text: #f2f0e8;   --strong: #fffaf0;  --muted: #c7cbd0;
+    --subtle: #99a2ad; --dim: #9ba4ad;
+    --heading: #94b8aa; --accent: #7be0b2; --accent-border: #65bd96;
+
+    --sel: #4c9ffe;    --sel-bg: rgba(76,159,254,.12);
+    --good: #3fd68e;   --dirty: #e4c065;
+    --err-bg: #301b1d; --err-border: #874b4b; --err-text: #ffc7c7;
+    --warn-text: #f0dc7a;
+
+    /* editor object colours (OBJECT_COLORS) */
+    --obj-0: #5aa9e6; --obj-1: #3fd68e; --obj-2: #e4c065;
+    --obj-3: #c792ea; --obj-4: #f0913b; --obj-5: #64d8cb;
+    --gap: #3a4149;
+
+    /* wiring-order endpoint colours — PURE rgb on purpose (D2): the
+       physical-truth channel, distinct from the soft UI palette. */
+    --wire-start: #0000ff; --wire-end: #ff0000;
+
+    --sans: Inter, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    --r-xs: 5px; --r-sm: 6px; --r-md: 8px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 26px 30px 140px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 13.5px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--heading);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 940px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
+       text-transform: uppercase; margin: 34px 0 4px; }
+  h2 .num { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--subtle); font-size: 12px; margin: 0 0 12px; max-width: 940px; }
+
+  /* ---- exploration controls strip ---- */
+  .xstrip {
+    display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+    border: 1px dashed var(--border-strong); border-radius: var(--r-md);
+    padding: 10px 12px; margin: 0 0 8px; background: var(--surface-subtle);
+    position: sticky; top: 8px; z-index: 40;
+  }
+  .xstrip .lbl { font: 10px var(--mono); letter-spacing: .1em; color: var(--dim);
+                 text-transform: uppercase; margin-right: -6px; }
+  button, select {
+    font: 11px var(--mono); color: var(--muted);
+    background: var(--raised); border: 1px solid var(--border-strong);
+    border-radius: var(--r-xs); padding: 3px 9px; cursor: pointer;
+  }
+  button:hover { color: var(--strong); }
+  button.on { color: var(--sel); border-color: var(--sel); background: var(--sel-bg); }
+  button.primary { color: var(--accent); border-color: var(--accent-border); }
+  input[type=range] { accent-color: var(--accent); }
+
+  /* ---- shared chrome sketch ---- */
+  .frame {
+    border: 1px solid var(--border); border-radius: var(--r-md);
+    background: var(--surface); overflow: hidden; margin: 10px 0 6px;
+  }
+  .frame .bar {
+    display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--border-subtle); background: var(--surface-muted);
+    padding: 5px 10px; font: 10.5px var(--mono); color: var(--subtle);
+  }
+  .frame .bar .grp { display: flex; gap: 5px; align-items: center; }
+  .frame .bar .divider { width: 1px; height: 14px; background: var(--border-strong); }
+  .frame .bar .lbl2 { font-size: 10px; letter-spacing: .13em; color: var(--dim);
+                      text-transform: uppercase; font-weight: 600; }
+  .frame .bar .push { margin-left: auto; }
+  .tbtn { font: 10.5px var(--mono); color: var(--subtle); background: var(--surface);
+          border: 1px solid var(--border-strong); border-radius: var(--r-xs);
+          padding: 2px 7px; }
+  .tbtn b { color: var(--muted); font-weight: 600; }
+  .tbtn.off { opacity: .38; }
+
+  .canvas-wrap { position: relative; background:
+      radial-gradient(circle at 1px 1px, rgba(255,255,255,.05) 1px, transparent 1px) 0 0/26px 26px,
+      var(--terminal); }
+  svg.piece { display: block; margin: 0 auto; }
+
+  /* ---- lamp strips ---- */
+  .stripblock { padding: 9px 12px 11px; }
+  .stripblock + .stripblock { border-top: 1px solid var(--border-subtle); }
+  .striphead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .striphead .name { font-size: 12px; font-weight: 600; color: var(--strong); }
+  .striphead .kind { font: 9.5px var(--mono); letter-spacing: .1em;
+                     text-transform: uppercase; color: var(--dim); }
+  .striphead .facts { margin-left: auto; font: 10px var(--mono); color: var(--dim); }
+  .striphead .facts b { color: var(--muted); font-weight: 600; }
+  .lampstrip { position: relative; height: 22px; border-radius: 4px;
+               background: var(--track); overflow: visible; }
+  .lampstrip .bulbs { position: absolute; inset: 0; display: flex; gap: 2px;
+                      padding: 3px 2px; }
+  .lampstrip .bulbs i { flex: 1; border-radius: 3px; min-width: 3px; }
+  .lampstrip .grad { position: absolute; inset: 3px 2px; border-radius: 3px; }
+  .lampstrip .cap { position: absolute; top: -3px; bottom: -3px; width: 4px;
+                    border-radius: 2px; z-index: 3; }
+  .lampstrip .cap.start { background: var(--wire-start); box-shadow: 0 0 6px #00f8; }
+  .lampstrip .cap.end   { background: var(--wire-end);   box-shadow: 0 0 6px #f008; }
+  .lampstrip .dot { position: absolute; top: 50%; width: 9px; height: 9px; margin: -4.5px;
+                    border-radius: 50%; background: #fff; box-shadow: 0 0 8px #fff;
+                    z-index: 4; }
+  .lampstrip .span { position: absolute; top: -2px; bottom: -2px; border: 1px solid var(--sel);
+                     border-radius: 4px; background: var(--sel-bg); z-index: 2; }
+  .lampstrip .span.breath { border-color: #fff; background: rgba(255,255,255,.18); }
+  .lampstrip .marks { position: absolute; inset: 0; z-index: 1; }
+  .lampstrip .marks i { position: absolute; top: 0; bottom: 0; width: 1px;
+                        background: rgba(255,255,255,.14); }
+  .under { display: flex; gap: 10px; margin-top: 5px; align-items: center;
+           font: 10px var(--mono); color: var(--dim); }
+  .under .flag { color: var(--warn-text); }
+
+  /* transport rows */
+  .transport { display: flex; gap: 5px; align-items: center; margin-top: 7px; }
+  .transport .sep { width: 10px; }
+  .kbtn { font: 11px var(--mono); color: var(--muted); background: var(--raised);
+          border: 1px solid var(--border-strong); border-radius: var(--r-xs);
+          padding: 2px 8px; min-width: 30px; }
+  .kbtn small { display: block; font-size: 8.5px; color: var(--dim); letter-spacing: .05em; }
+  .kbtn.future { border-style: dashed; color: var(--dim); }
+  .keysrow { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 12px;
+             border-top: 1px solid var(--border-subtle); background: var(--surface-muted);
+             font: 10px var(--mono); color: var(--dim); }
+  .keysrow b { color: var(--subtle); font-weight: 600; }
+
+  /* layout skeletons for concepts */
+  .skel { display: grid; grid-template-columns: 150px 1fr 170px; min-height: 240px; }
+  .skel .dock { border-right: 1px solid var(--border-subtle); background: var(--surface-subtle);
+                padding: 8px; font: 10px var(--mono); color: var(--dim); }
+  .skel .dock.right { border-right: 0; border-left: 1px solid var(--border-subtle); }
+  .skel .dock .row { padding: 2px 4px; border-radius: 4px; }
+  .skel .dock .row.sel { color: var(--sel); background: var(--sel-bg);
+                         border: 1px solid var(--sel); }
+  .concept-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 1100px) { .concept-grid { grid-template-columns: 1fr; } }
+  .verdict { font-size: 11px; color: var(--dim); margin: 4px 0 0; }
+  .verdict b { color: var(--muted); }
+
+  /* matrix table */
+  table.matrix { border-collapse: collapse; width: 100%; font-size: 11.5px; margin-top: 8px; }
+  .matrix th { font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+               color: var(--dim); text-align: left; padding: 5px 10px;
+               border-bottom: 1px solid var(--border-strong); }
+  .matrix td { padding: 6px 10px; border-bottom: 1px solid var(--border-muted);
+               color: var(--muted); vertical-align: top; }
+  .matrix td:first-child { font-family: var(--mono); font-size: 11px; color: var(--strong);
+                           white-space: nowrap; }
+  .matrix tr.cur td { background: var(--sel-bg); }
+  .matrix .lang { font-family: var(--mono); font-size: 10.5px; }
+  .matrix .lang.chase { color: #9db9ff; }
+  .matrix .lang.fade { color: #ddd; }
+  .matrix .lang.none { color: var(--dim); }
+
+  /* walkthrough */
+  .steps { display: flex; gap: 6px; margin: 8px 0; }
+  .caption { font-size: 12px; color: var(--muted); margin: 6px 0 0; min-height: 34px; }
+  .caption b { color: var(--strong); }
+</style>
+
+<h1>Patching selection &amp; controls — R3 spike</h1>
+<p class="hint">
+  Patching maps <b>object space</b> (lamps with 2D position) onto <b>output-port space</b>
+  (linear lamps). This playground explores the two light languages
+  (<b>chase</b> = blue start / red end / sweeping dot, for "is this mapped correctly";
+  <b>breath</b> = white fade + dimmed field, for "which lamps are these"), the
+  <b>unwrapped lamp strip</b> that represents both spaces on screen, and where the
+  patching controls live — the toolbar stays Mapping-parity; the adjust surface grows
+  elsewhere. Everything animates; drive it from the strip below.
+</p>
+
+<div class="xstrip">
+  <span class="lbl">scenario</span>
+  <button id="x-zook" class="on" onclick="setScenario('zook')">zook dome</button>
+  <button id="x-fyeah" onclick="setScenario('fyeah')">fyeah sign</button>
+  <span class="lbl">select</span>
+  <button id="x-selobj" class="on" onclick="setSel('object')">object</button>
+  <button id="x-selport" onclick="setSel('port')">port span</button>
+  <button id="x-selnone" onclick="setSel('none')">nothing</button>
+  <span class="lbl">state</span>
+  <button id="x-flip" onclick="doFlip()">flip</button>
+  <button id="x-off-l" onclick="nudge(-1)">offset −</button>
+  <button id="x-off-r" onclick="nudge(1)">offset +</button>
+  <button id="x-live" class="on" onclick="toggleLive()">live values</button>
+  <span class="lbl" style="margin-left:auto">motion</span>
+  <button id="x-anim" class="on" onclick="toggleAnim()">animate</button>
+</div>
+
+<!-- ================================================================ -->
+<h2><span class="num">1</span>The two spaces, the two languages</h2>
+<p class="sub">
+  One selected object (left: its true 2D shape; middle: the same lamps <b>unwrapped</b>)
+  landing on one output port (right rail + bottom strip). Selecting the <b>object</b>
+  runs the chase in <b>object lamp order</b> on every representation at once — direction
+  and endpoints legible everywhere. Selecting a <b>port span</b> breathes white and dims
+  the rest — pure "find these lamps". The table is the ruling surface: one row per
+  selection kind; <b>try</b> drives this demo.
+</p>
+<div class="frame">
+  <div class="bar">
+    <span class="lbl2">Patching</span><span class="divider"></span>
+    <span id="s1-what" style="color:var(--muted)">sector 2 selected</span>
+    <span class="push mono" id="s1-lang" style="font-family:var(--mono);color:var(--dim)"></span>
+  </div>
+  <div style="display:grid;grid-template-columns:290px 1fr;gap:0">
+    <div class="canvas-wrap" style="border-right:1px solid var(--border-subtle)">
+      <svg class="piece" id="s1-svg" width="288" height="216" viewBox="0 0 288 216"></svg>
+    </div>
+    <div>
+      <div class="stripblock">
+        <div class="striphead">
+          <span class="name" id="s1-objname">sector 2</span><span class="kind">object · unwrapped</span>
+          <span class="facts" id="s1-objfacts"></span>
+        </div>
+        <div class="lampstrip" id="s1-objstrip"></div>
+        <div class="under"><span>lamp 0</span><span style="margin-left:auto" id="s1-objend">lamp 59</span></div>
+      </div>
+      <div class="stripblock">
+        <div class="striphead">
+          <span class="name" id="s1-portname">IO18 · port 0</span><span class="kind">output port</span>
+          <span class="facts" id="s1-portfacts"></span>
+        </div>
+        <div class="lampstrip" id="s1-portstrip"></div>
+        <div class="under">
+          <span>wire 1</span>
+          <span class="flag" id="s1-decode">decoded as GRB (this fixture's lamp type)</span>
+          <span style="margin-left:auto" id="s1-portend">wire 300</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<table class="matrix" id="matrix">
+  <tr><th>selection</th><th>purpose (why you select it)</th><th>on the piece / canvas</th><th>on the strips</th><th></th></tr>
+  <tr data-k="object">
+    <td>object / instance</td>
+    <td>verify the mapping: shape matches space, direction right, rotation right, count right</td>
+    <td><span class="lang chase">CHASE</span> — blue start · red end · sweeping dot, in object order</td>
+    <td>object strip chases; port strip chases the object's span in place</td>
+    <td><button onclick="setSel('object')">try</button></td></tr>
+  <tr data-k="range">
+    <td>range (id-less)</td>
+    <td>same purpose, degraded address — object grain without a sticky id yet</td>
+    <td><span class="lang chase">CHASE</span> — identical; the id gates entries, not light</td>
+    <td>same as object</td>
+    <td><button onclick="setSel('object')">try</button></td></tr>
+  <tr data-k="port">
+    <td>port / port span</td>
+    <td>physically identify lamps: "what lights when I drive port 5 ch 7–10"</td>
+    <td><span class="lang fade">BREATH</span> — white fade, rest of the output dims</td>
+    <td>port strip breathes the span; object strip dims (no claim about objects)</td>
+    <td><button onclick="setSel('port')">try</button></td></tr>
+  <tr data-k="output">
+    <td>output</td>
+    <td>identify a whole box's wire</td>
+    <td><span class="lang fade">BREATH</span> — whole wire</td>
+    <td>port strip breathes fully</td>
+    <td><button onclick="setSel('port')">try</button></td></tr>
+  <tr data-k="cell">
+    <td>cell (object ∩ port)</td>
+    <td>inspect one landed assignment — both sides of one window</td>
+    <td><span class="lang chase">CHASE</span> — it names an object's lamps, so it verifies like one</td>
+    <td>both strips chase the window only</td>
+    <td><button onclick="setSel('object')">try</button></td></tr>
+  <tr data-k="none">
+    <td>nothing</td>
+    <td>—</td>
+    <td><span class="lang none">show content</span></td>
+    <td>strips show live values, no overlay</td>
+    <td><button onclick="setSel('none')">try</button></td></tr>
+</table>
+
+<!-- ================================================================ -->
+<h2><span class="num">2</span>Concept A — one PATCH panel (bottom)</h2>
+<p class="sub">
+  Your sketch, drawn: the toolbar stays Mapping-parity (view options + undo live there),
+  and a single bottom panel carries both strips with their transports. Object block:
+  offset/flip move the blue/red ends; the mocked <b>lamps − +</b> is the
+  fix-in-flow mutation (dashed = future). Output block: shift around the port, switch
+  output/port. Keyboard grammar lives in the panel footer — one line, always visible,
+  no overlay needed.
+</p>
+<div class="frame">
+  <div class="bar">
+    <span class="lbl2">Patching</span><span class="divider"></span>
+    <span class="grp"><span class="tbtn"><b>⌖</b> arrows</span><span class="tbtn"><b>#</b> numbers</span><span class="tbtn"><b>◉</b> live</span></span>
+    <span class="divider"></span>
+    <span class="grp"><span class="tbtn">undo</span><span class="tbtn off">redo</span></span>
+    <span class="push" id="s2-placed">8/8 placed</span>
+  </div>
+  <div class="canvas-wrap" style="height:110px;display:flex;align-items:center;justify-content:center;color:var(--dim);font:10.5px var(--mono)">
+    ( project canvas — as today )
+  </div>
+  <div style="border-top:1px solid var(--border-strong)">
+    <div class="stripblock">
+      <div class="striphead">
+        <span class="name" id="s2-objname">sector 2</span><span class="kind">object</span>
+        <span class="facts" id="s2-objfacts"></span>
+      </div>
+      <div class="lampstrip" id="s2-objstrip"></div>
+      <div class="transport">
+        <button class="kbtn" onclick="nudge(-5)">‹‹<small>; coarse</small></button>
+        <button class="kbtn" onclick="nudge(-1)">‹<small>k fine</small></button>
+        <button class="kbtn" onclick="doFlip()">flip<small>r</small></button>
+        <button class="kbtn" onclick="nudge(1)">›<small>l fine</small></button>
+        <button class="kbtn" onclick="nudge(5)">››<small>' coarse</small></button>
+        <span class="sep"></span>
+        <button class="kbtn future" title="future: fix the authored count without leaving Patching">lamps −<small>future</small></button>
+        <button class="kbtn future">lamps +<small>future</small></button>
+      </div>
+    </div>
+    <div class="stripblock">
+      <div class="striphead">
+        <span class="name">on</span>
+        <select id="s2-out"><option>Box 1</option><option>Box 2</option></select>
+        <select id="s2-port"><option>IO18 · port 0</option><option>IO13 · port 1</option><option>IO2 · port 2</option></select>
+        <span class="facts" id="s2-portfacts"></span>
+      </div>
+      <div class="lampstrip" id="s2-portstrip"></div>
+      <div class="transport">
+        <button class="kbtn" onclick="shift(-10)">‹‹<small>[ ×10</small></button>
+        <button class="kbtn" onclick="shift(-1)">‹<small>[ lamp</small></button>
+        <button class="kbtn" onclick="shift(1)">›<small>] lamp</small></button>
+        <button class="kbtn" onclick="shift(10)">››<small>] ×10</small></button>
+        <span class="sep"></span>
+        <button class="kbtn">unmap<small>u</small></button>
+        <button class="kbtn primary" style="color:var(--accent)">commit<small>m</small></button>
+      </div>
+    </div>
+    <div class="keysrow">
+      <span><b>r</b> flip</span><span><b>; '</b> rotate coarse</span><span><b>k l</b> rotate fine</span>
+      <span><b>[ ]</b> shift on wire</span><span><b>u</b> unmap</span><span><b>s</b> swap</span>
+      <span><b>m</b> commit + next</span><span><b>esc</b> back out</span><span><b>⌘Z</b> undo</span>
+    </div>
+  </div>
+</div>
+<p class="verdict"><b>Lean:</b> this is the shape I'd pick — both spaces visible at once is the
+  whole game, the transports sit under the thing they move, and the keys row replaces the
+  floating help overlay. The panel only exists in the Patching view.</p>
+
+<!-- ================================================================ -->
+<h2><span class="num">3</span>Concept B — split Object / Output panels</h2>
+<p class="sub">
+  The same blocks as two separate panels: the object strip docked under the tree
+  (left, where objects live) and the port strip under the Outputs dock (right, where
+  the wire lives). Cross-view parity is cleaner (the object panel could exist in
+  Mapping too) — but the two strips no longer sit aligned, and the eye bounces.
+</p>
+<div class="frame">
+  <div class="skel">
+    <div class="dock">
+      <div class="row">▸ Dome</div>
+      <div class="row sel">● sector 2</div>
+      <div class="row">● sector 3</div>
+      <div style="margin-top:10px;border-top:1px solid var(--border-subtle);padding-top:8px">
+        <div style="color:var(--subtle);margin-bottom:4px">OBJECT</div>
+        <div class="lampstrip" id="s3-objstrip" style="height:16px"></div>
+        <div class="transport" style="gap:3px">
+          <button class="kbtn" style="padding:1px 5px" onclick="nudge(-1)">‹</button>
+          <button class="kbtn" style="padding:1px 5px" onclick="doFlip()">flip</button>
+          <button class="kbtn" style="padding:1px 5px" onclick="nudge(1)">›</button>
+        </div>
+      </div>
+    </div>
+    <div class="canvas-wrap" style="display:flex;align-items:center;justify-content:center;color:var(--dim);font:10.5px var(--mono)">
+      ( canvas )
+    </div>
+    <div class="dock right">
+      <div class="row">Box 1 · IO18</div>
+      <div class="row sel" style="margin-bottom:8px">port 0 · 300</div>
+      <div style="color:var(--subtle);margin-bottom:4px">PORT</div>
+      <div class="lampstrip" id="s3-portstrip" style="height:16px"></div>
+      <div class="transport" style="gap:3px">
+        <button class="kbtn" style="padding:1px 5px" onclick="shift(-1)">‹</button>
+        <button class="kbtn" style="padding:1px 5px" onclick="shift(1)">›</button>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="verdict"><b>Cost:</b> dock width crushes a 300-lamp strip into gradient mode
+  permanently, and the two halves of one assignment never sit side by side. <b>Win:</b>
+  panels stay per-dock (no new bottom-dock chrome), object panel reusable in Mapping.</p>
+
+<!-- ================================================================ -->
+<h2><span class="num">4</span>Concept C — floating adjust HUD</h2>
+<p class="sub">
+  lp2014's dialog spirit: nothing until an assignment is selected/landed, then a
+  floating two-strip HUD rides the canvas bottom edge. Maximum canvas space, transient —
+  but it covers content, and "where did my controls go" when nothing is selected.
+</p>
+<div class="frame">
+  <div class="canvas-wrap" style="height:230px;position:relative">
+    <svg class="piece" id="s4-svg" width="288" height="216" viewBox="0 0 288 216" style="opacity:.8"></svg>
+    <div style="position:absolute;left:50%;bottom:10px;transform:translateX(-50%);width:min(620px,92%);
+                background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--r-md);
+                box-shadow:0 10px 30px rgba(0,0,0,.5);padding:8px 12px 10px">
+      <div class="striphead" style="margin-bottom:4px">
+        <span class="name" style="font-size:11px" id="s4-name">sector 2 → IO18:61-120</span>
+        <span class="facts">r flip · ;/' rotate · [/] shift · m commit</span>
+      </div>
+      <div class="lampstrip" id="s4-objstrip" style="height:14px"></div>
+      <div class="lampstrip" id="s4-portstrip" style="height:14px;margin-top:6px"></div>
+    </div>
+  </div>
+</div>
+<p class="verdict"><b>Cost:</b> transient controls fight the "walk-up, always the same"
+  promise, and the HUD covers the very sprites you're checking. Kept for contrast.</p>
+
+<!-- ================================================================ -->
+<h2><span class="num">5</span>The reactive lamp strip</h2>
+<p class="sub">
+  One control, two renderings: <b>bulbs</b> while each lamp gets ≥ 7px, <b>gradient</b>
+  beyond. Same overlays either way (endpoints, chase, breath, contested). Drag the count.
+</p>
+<div class="frame"><div class="stripblock">
+  <div class="striphead">
+    <span class="name">strip</span>
+    <span class="kind" id="s5-mode">bulbs</span>
+    <span class="facts"><input type="range" id="s5-count" min="4" max="600" value="24"
+      style="width:220px;vertical-align:middle"> <b id="s5-n">24</b> lamps</span>
+  </div>
+  <div class="lampstrip" id="s5-strip"></div>
+  <div class="under"><span>the switch is width ÷ count, not a magic number — the same
+    strip is bulbs in a wide bottom panel and gradient in a narrow dock</span></div>
+</div></div>
+
+<!-- ================================================================ -->
+<h2><span class="num">6</span>Walk-up assignment — the two-sided selection</h2>
+<p class="sub">
+  The pass-2 flow, stepped. The crux for the architecture: step 2 holds a <b>port-side
+  arm</b> and an <b>object click</b> at once — today's single selection store needs an
+  "armed" companion (like the swap arm), not a second store. Gap chunks default to the
+  <b>next unmapped object's count</b> (override stepper) — lp2014's manual group size,
+  automated.
+</p>
+<div class="steps">
+  <button id="w0" class="on" onclick="setStep(0)">0 · idle</button>
+  <button id="w1" onclick="setStep(1)">1 · select free chunk</button>
+  <button id="w2" onclick="setStep(2)">2 · click the pulsing object</button>
+  <button id="w3" onclick="setStep(3)">3 · adjust</button>
+  <button id="w4" onclick="setStep(4)">4 · commit → auto-advance</button>
+</div>
+<div class="frame">
+  <div class="bar">
+    <span class="lbl2">Patching</span><span class="divider"></span>
+    <span id="s6-status" style="color:var(--muted)">idle</span>
+    <span class="push">chunk size <button class="kbtn" style="padding:1px 6px">−</button>
+      <b id="s6-chunk" style="color:var(--muted)">60</b>
+      <button class="kbtn" style="padding:1px 6px">+</button> <span style="color:var(--dim)">(next unmapped)</span></span>
+  </div>
+  <div style="display:grid;grid-template-columns:290px 1fr;gap:0">
+    <div class="canvas-wrap" style="border-right:1px solid var(--border-subtle)">
+      <svg class="piece" id="s6-svg" width="288" height="216" viewBox="0 0 288 216"></svg>
+    </div>
+    <div>
+      <div class="stripblock">
+        <div class="striphead"><span class="name">IO18 · port 0</span><span class="kind">output port</span>
+          <span class="facts" id="s6-portfacts">61-120 armed</span></div>
+        <div class="lampstrip" id="s6-portstrip"></div>
+      </div>
+      <div class="stripblock">
+        <div class="striphead"><span class="name" id="s6-objname">—</span><span class="kind">object</span></div>
+        <div class="lampstrip" id="s6-objstrip"></div>
+      </div>
+      <p class="caption" id="s6-caption" style="padding:0 12px 10px"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------------- state ---------------- */
+const S = {
+  scenario: 'zook',
+  sel: 'object',          // object | port | none
+  reversed: false,
+  offset: 0,              // lamps of rotation on the object
+  wireStart: 60,          // object's window start on the port (0-based)
+  live: true,
+  anim: true,
+  step: 0,
+  t: 0,
+};
+const SCEN = {
+  zook:  { objName: 'sector 2', objCount: 60, portName: 'IO18 · port 0', portCount: 300,
+           decode: 'decoded as GRB (this fixture’s lamp type)' },
+  fyeah: { objName: 'letter Y', objCount: 38, portName: 'IO4 · port 0', portCount: 150,
+           decode: 'decoded as RGB — the F and ! share this port; their spans assume it too' },
+};
+const scen = () => SCEN[S.scenario];
+
+/* ---------------- palette-ish live values ---------------- */
+function liveRgb(i, n, t) {
+  const u = i / Math.max(1, n - 1);
+  const r = Math.sin(6.28 * (u * 1.7 - t * .21)) * .5 + .5;
+  const g = Math.sin(6.28 * (u * .9 + t * .13) + 2.1) * .5 + .5;
+  const b = Math.sin(6.28 * (u * 1.3 - t * .08) + 4.2) * .5 + .5;
+  return [30 + r * 200, 25 + g * 170, 40 + b * 215].map(Math.round);
+}
+const dim = (rgb, k) => rgb.map(v => Math.round(v * k));
+const css = rgb => `rgb(${rgb[0]} ${rgb[1]} ${rgb[2]})`;
+function breathLevel(t) { return 0.25 + 0.75 * (0.5 - 0.5 * Math.cos(6.28 * t / 0.75)); }
+
+/* ---------------- lamp strip renderer ---------------- */
+/* opts: {count, width, valueAt(i)->rgb, span:[a,b]|null, mode:'chase'|'breath'|null,
+          chaseDir:+1|-1, chasePhase:0..1, marks:[i...], capStart:i, capEnd:i} */
+function renderStrip(el, o) {
+  const w = el.clientWidth || 600;
+  const bulbs = w / o.count >= 7;
+  let html = '';
+  if (bulbs) {
+    let cells = '';
+    for (let i = 0; i < o.count; i++) cells += `<i style="background:${css(o.valueAt(i))}"></i>`;
+    html += `<div class="bulbs">${cells}</div>`;
+  } else {
+    const stops = [];
+    const n = Math.min(64, o.count);
+    for (let s = 0; s <= n; s++) {
+      const i = Math.round(s / n * (o.count - 1));
+      stops.push(`${css(o.valueAt(i))} ${(s / n * 100).toFixed(1)}%`);
+    }
+    html += `<div class="grad" style="background:linear-gradient(90deg,${stops.join(',')})"></div>`;
+  }
+  const pct = i => (i / o.count * 100);
+  if (o.marks) for (const m of o.marks) html += `<div class="marks"><i style="left:${pct(m)}%"></i></div>`;
+  if (o.span) {
+    const cls = o.mode === 'breath' ? 'span breath' : 'span';
+    const op = o.mode === 'breath' ? (0.25 + 0.55 * breathLevel(S.t)) : 1;
+    html += `<div class="${cls}" style="left:${pct(o.span[0])}%;width:${pct(o.span[1] - o.span[0])}%;opacity:${op}"></div>`;
+  }
+  if (o.capStart != null) html += `<div class="cap start" style="left:calc(${pct(o.capStart)}% - 1px)"></div>`;
+  if (o.capEnd != null) html += `<div class="cap end" style="left:calc(${pct(o.capEnd)}% - 1px)"></div>`;
+  if (o.mode === 'chase' && o.span) {
+    const u = o.chaseDir >= 0 ? o.chasePhase : 1 - o.chasePhase;
+    const at = o.span[0] + (o.span[1] - o.span[0]) * u;
+    html += `<div class="dot" style="left:${pct(at)}%"></div>`;
+  }
+  el.innerHTML = html;
+}
+
+/* ---------------- the piece (simplified sector geometry) ---------------- */
+function sectorPath() {
+  // a zook-ish sector: three struts fanning from the apex
+  return [[140,20],[80,80],[40,150],[95,195],[150,150],[110,95],[150,150],[205,190],[245,140],[185,85],[140,20]];
+}
+function fyeahPath() {
+  // the Y, roughly
+  return [[100,30],[140,90],[180,30],[140,90],[140,190]];
+}
+function drawPiece(svg, sel, t) {
+  const pts = S.scenario === 'zook' ? sectorPath() : fyeahPath();
+  const n = scen().objCount;
+  let d = '';
+  // resample the polyline into n lamps
+  const segs = []; let total = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const L = Math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1]);
+    segs.push(L); total += L;
+  }
+  const lampXY = k => {
+    let dist = k / (n - 1) * total, i = 0;
+    while (i < segs.length - 1 && dist > segs[i]) { dist -= segs[i]; i++; }
+    const f = segs[i] ? dist / segs[i] : 0;
+    return [pts[i][0] + (pts[i+1][0]-pts[i][0]) * f, pts[i][1] + (pts[i+1][1]-pts[i][1]) * f];
+  };
+  const headN = Math.max(3, Math.round(n * .12));
+  for (let k = 0; k < n; k++) {
+    const [x, y] = lampXY(k);
+    // object order index under flip
+    const j = S.reversed ? (n - 1 - k) : k;
+    let fill;
+    if (sel === 'object') {
+      if (j < headN) fill = '#0000ff';
+      else if (j >= n - headN) fill = '#ff0000';
+      else {
+        const u = j / (n - 1), ph = (t / 2) % 1;
+        const w = Math.max(0, 1 - Math.abs((u - ph)) * 7);
+        const lv = Math.round(30 + 225 * w);
+        fill = `rgb(${lv} ${lv} ${lv})`;
+      }
+    } else if (sel === 'port') {
+      const lv = Math.round(255 * (0.25 + 0.75 * (0.5 - 0.5 * Math.cos(6.28 * t / 0.75))));
+      fill = `rgb(${lv} ${lv} ${lv})`;
+    } else {
+      fill = css(liveRgb(k, n, t));
+    }
+    d += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.1" fill="${fill}"/>`;
+  }
+  svg.innerHTML = `<polyline points="${pts.map(p=>p.join(',')).join(' ')}"
+     fill="none" stroke="rgba(255,255,255,.08)" stroke-width="7" stroke-linejoin="round"/>` + d;
+}
+
+/* ---------------- section renders ---------------- */
+function objStripOpts(t, forceMode) {
+  const n = scen().objCount;
+  const mode = forceMode !== undefined ? forceMode :
+    (S.sel === 'object' ? 'chase' : S.sel === 'port' ? 'dimmed' : null);
+  const k = mode === 'dimmed' ? .22 : 1;
+  return {
+    count: n,
+    valueAt: i => S.live ? dim(liveRgb(i, n, t), k) : dim([90,110,130], k),
+    span: mode === 'chase' ? [0, n] : null,
+    mode: mode === 'chase' ? 'chase' : null,
+    chaseDir: S.reversed ? -1 : 1,
+    chasePhase: (t / 2) % 1,
+    capStart: mode === 'chase' ? (S.reversed ? n - 1 : 0) : null,
+    capEnd:   mode === 'chase' ? (S.reversed ? 0 : n - 1) : null,
+  };
+}
+function portStripOpts(t) {
+  const n = scen().portCount, on = scen().objCount;
+  const a = ((S.wireStart + S.offset) % n + n) % n, b = Math.min(n, a + on);
+  const marks = []; for (let m = 50; m < n; m += 50) marks.push(m);
+  const isObj = S.sel === 'object', isPort = S.sel === 'port';
+  const k = isPort ? .22 : 1;
+  return {
+    count: n,
+    valueAt: i => {
+      const inSpan = i >= a && i < b;
+      const base = S.live ? liveRgb(i, n, t) : [70, 85, 100];
+      if (isPort) return i >= a && i < b ? base : dim(base, .22);
+      return base;
+    },
+    span: (isObj || isPort) ? [a, b] : null,
+    mode: isObj ? 'chase' : isPort ? 'breath' : null,
+    chaseDir: S.reversed ? -1 : 1,
+    chasePhase: (t / 2) % 1,
+    marks,
+    capStart: isObj ? (S.reversed ? b - 1 : a) : null,
+    capEnd:   isObj ? (S.reversed ? a : b - 1) : null,
+  };
+}
+
+function renderAll() {
+  const t = S.t, sc = scen();
+  // §1
+  drawPiece(document.getElementById('s1-svg'), S.sel === 'none' ? null : S.sel, t);
+  document.getElementById('s1-objname').textContent = sc.objName;
+  document.getElementById('s1-portname').textContent = sc.portName;
+  document.getElementById('s1-objfacts').innerHTML =
+    `<b>${sc.objCount}</b> lamps · ${S.reversed ? '<b>reversed</b>' : 'forward'} · offset <b>${S.offset}</b>`;
+  const a = ((S.wireStart + S.offset) % sc.portCount + sc.portCount) % sc.portCount;
+  document.getElementById('s1-portfacts').innerHTML =
+    `window <b>${a + 1}-${Math.min(sc.portCount, a + sc.objCount)}</b> of ${sc.portCount}`;
+  document.getElementById('s1-objend').textContent = `lamp ${sc.objCount - 1}`;
+  document.getElementById('s1-portend').textContent = `wire ${sc.portCount}`;
+  document.getElementById('s1-decode').textContent = sc.decode;
+  document.getElementById('s1-what').textContent =
+    S.sel === 'object' ? `${sc.objName} selected — verifying the mapping` :
+    S.sel === 'port' ? `port span selected — finding lamps` : 'nothing selected';
+  document.getElementById('s1-lang').textContent =
+    S.sel === 'object' ? 'chase · object order' : S.sel === 'port' ? 'breath · dim the rest' : 'live';
+  renderStrip(document.getElementById('s1-objstrip'), objStripOpts(t));
+  renderStrip(document.getElementById('s1-portstrip'), portStripOpts(t));
+  // matrix current row
+  document.querySelectorAll('#matrix tr[data-k]').forEach(tr => {
+    tr.classList.toggle('cur',
+      (S.sel === 'object' && (tr.dataset.k === 'object')) ||
+      (S.sel === 'port' && tr.dataset.k === 'port') ||
+      (S.sel === 'none' && tr.dataset.k === 'none'));
+  });
+  // §2 (always renders the object-selected state so the panel reads whole)
+  document.getElementById('s2-objname').textContent = sc.objName;
+  document.getElementById('s2-objfacts').innerHTML =
+    `${S.reversed ? '<b>reversed</b>' : 'forward'} · offset <b>${S.offset}</b> · stride 1`;
+  document.getElementById('s2-portfacts').innerHTML =
+    `window <b>${a + 1}-${Math.min(sc.portCount, a + sc.objCount)}</b> · next free <b>${Math.min(sc.portCount, a + sc.objCount) + 1}</b>`;
+  renderStrip(document.getElementById('s2-objstrip'), objStripOpts(t, 'chase'));
+  renderStrip(document.getElementById('s2-portstrip'), { ...portStripOpts(t), mode: 'chase', span: [a, Math.min(sc.portCount, a + sc.objCount)] });
+  // §3 (narrow variants)
+  renderStrip(document.getElementById('s3-objstrip'), objStripOpts(t, 'chase'));
+  renderStrip(document.getElementById('s3-portstrip'), { ...portStripOpts(t), mode: 'chase', span: [a, Math.min(sc.portCount, a + sc.objCount)] });
+  // §4
+  drawPiece(document.getElementById('s4-svg'), 'object', t);
+  document.getElementById('s4-name').textContent =
+    `${sc.objName} → ${sc.portName.split(' ')[0]}:${a + 1}-${Math.min(sc.portCount, a + sc.objCount)}`;
+  renderStrip(document.getElementById('s4-objstrip'), objStripOpts(t, 'chase'));
+  renderStrip(document.getElementById('s4-portstrip'), { ...portStripOpts(t), mode: 'chase', span: [a, Math.min(sc.portCount, a + sc.objCount)] });
+  // §5
+  const n5 = +document.getElementById('s5-count').value;
+  document.getElementById('s5-n').textContent = n5;
+  const el5 = document.getElementById('s5-strip');
+  document.getElementById('s5-mode').textContent = (el5.clientWidth / n5 >= 7) ? 'bulbs' : 'gradient';
+  renderStrip(el5, {
+    count: n5, valueAt: i => liveRgb(i, n5, t),
+    span: [Math.floor(n5 * .2), Math.floor(n5 * .6)], mode: 'chase',
+    chaseDir: 1, chasePhase: (t / 2) % 1,
+    capStart: Math.floor(n5 * .2), capEnd: Math.floor(n5 * .6) - 1,
+  });
+  renderWalk(t);
+}
+
+/* ---------------- §6 walkthrough ---------------- */
+const WALK = [
+  ['idle', 'Nothing armed. The port strip shows real values; free space reads as gaps.'],
+  ['chunk 61-120 armed (next unmapped: sector 2 · 60 lamps)',
+   '<b>Port side arms.</b> The chunk breathes white on the piece and the strip. The canvas stays quiet — the app cannot know which object these lamps are; that fact is yours.'],
+  ['sector 2 ↔ 61-120 · tentative',
+   '<b>You click the object that pulsed.</b> The pairing lands tentatively; BOTH sides switch to the chase — the output now shows the actual mapping. The arm + the click is the two-sided moment: an armed port companion beside the one selection.'],
+  ['adjusting — r ; \' [ ]',
+   '<b>Adjust.</b> Offset moves the blue/red ends along the strut; flip reverses the sweep; [ ] slides the window on the wire.'],
+  ['committed · advanced to 121-180',
+   '<b>m commits</b> and the arm auto-advances to the next free chunk, sized by the next unmapped object. Repeat until all the lights are on.'],
+];
+function renderWalk(t) {
+  const sc = scen(), n = sc.portCount, on = sc.objCount;
+  const chunk = [60, 60 + on];
+  const armed = S.step >= 1 && S.step < 4;
+  const paired = S.step >= 2;
+  document.getElementById('s6-status').textContent = WALK[S.step][0];
+  document.getElementById('s6-caption').innerHTML = WALK[S.step][1];
+  document.getElementById('s6-portfacts').textContent =
+    S.step === 0 ? '—' : S.step === 4 ? '121-180 armed' : `${chunk[0]+1}-${chunk[1]} ${paired ? 'tentative' : 'armed'}`;
+  document.getElementById('s6-objname').textContent = paired ? sc.objName : '— (click the pulsing piece)';
+  const span = S.step === 4 ? [chunk[1], chunk[1] + on] : chunk;
+  renderStrip(document.getElementById('s6-portstrip'), {
+    count: n,
+    valueAt: i => {
+      const base = liveRgb(i, n, t);
+      if (!armed && S.step !== 4) return base;
+      const inSpan = i >= span[0] && i < span[1];
+      return inSpan ? base : dim(base, .22);
+    },
+    span: (armed || S.step === 4) ? span : null,
+    mode: paired && S.step < 4 ? 'chase' : (armed || S.step === 4) ? 'breath' : null,
+    chaseDir: 1, chasePhase: (t / 2) % 1,
+    marks: [50, 100, 150, 200, 250].filter(m => m < n),
+    capStart: paired && S.step < 4 ? span[0] : null,
+    capEnd: paired && S.step < 4 ? span[1] - 1 : null,
+  });
+  renderStrip(document.getElementById('s6-objstrip'), paired && S.step < 4 ? objStripOpts(t, 'chase')
+    : { count: on, valueAt: i => dim([90, 110, 130], .5), span: null, mode: null, chasePhase: 0, chaseDir: 1 });
+  drawPiece(document.getElementById('s6-svg'),
+    S.step === 1 ? 'port' : paired && S.step < 4 ? 'object' : null, t);
+}
+
+/* ---------------- controls ---------------- */
+function setScenario(s) { S.scenario = s; S.offset = 0; S.reversed = false;
+  document.getElementById('x-zook').classList.toggle('on', s === 'zook');
+  document.getElementById('x-fyeah').classList.toggle('on', s === 'fyeah'); renderAll(); }
+function setSel(k) { S.sel = k;
+  for (const [id, v] of [['x-selobj','object'],['x-selport','port'],['x-selnone','none']])
+    document.getElementById(id).classList.toggle('on', k === v);
+  renderAll(); }
+function doFlip() { S.reversed = !S.reversed; renderAll(); }
+function nudge(d) { S.offset += d; renderAll(); }
+function shift(d) { S.wireStart += d; renderAll(); }
+function toggleLive() { S.live = !S.live;
+  document.getElementById('x-live').classList.toggle('on', S.live); renderAll(); }
+function toggleAnim() { S.anim = !S.anim;
+  document.getElementById('x-anim').classList.toggle('on', S.anim); }
+function setStep(n) { S.step = n;
+  for (let i = 0; i <= 4; i++) document.getElementById('w' + i).classList.toggle('on', i === n);
+  renderAll(); }
+document.getElementById('s5-count').addEventListener('input', renderAll);
+
+let last = 0;
+function tick(ms) {
+  if (S.anim && ms - last > 90) { S.t = ms / 1000; last = ms; renderAll(); }
+  requestAnimationFrame(tick);
+}
+renderAll();
+requestAnimationFrame(tick);
+</script>
