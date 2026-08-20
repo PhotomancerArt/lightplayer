@@ -1108,6 +1108,114 @@ pub fn PropsPanel(
             ModuleContextStrip { chain, workspace_href }
         };
     }
+    // WIRE-side selections (the Patching view's leaves): readout cards in
+    // the same stack family, deepest first (B′) — the selected level is
+    // the top card, its wire ancestors unwind beneath, the module chain
+    // stays the muted strip. Cards are READOUTS in v1: the verbs act on
+    // the tree/canvas/port selection, never on card fields.
+    if let Some(surface_now) = surface.as_ref() {
+        match &selection {
+            Some(UiPatchTarget::Output { node }) => {
+                if let Some(output) = surface_now
+                    .outputs
+                    .iter()
+                    .find(|output| output.node == *node)
+                {
+                    let chain = output
+                        .module
+                        .map(|module| module_chain(&surface_now.modules, module))
+                        .unwrap_or_default();
+                    return rsx! {
+                        div { class: "lpme-stack",
+                            WireFactCard {
+                                glyph: "▦",
+                                name: output.display_name().to_string(),
+                                kind: "output".to_string(),
+                                facts: output_facts(output),
+                                selected: true,
+                            }
+                        }
+                        ModuleContextStrip { chain, workspace_href }
+                    };
+                }
+            }
+            Some(UiPatchTarget::Port { node, port }) => {
+                if let Some(output) = surface_now
+                    .outputs
+                    .iter()
+                    .find(|output| output.node == *node)
+                    && let Some(port) = output.bay.ports.iter().find(|entry| entry.key == *port)
+                {
+                    let chain = output
+                        .module
+                        .map(|module| module_chain(&surface_now.modules, module))
+                        .unwrap_or_default();
+                    return rsx! {
+                        div { class: "lpme-stack",
+                            WireFactCard {
+                                glyph: "⎓",
+                                name: port_name(port),
+                                kind: "port".to_string(),
+                                facts: port_facts(port),
+                                selected: true,
+                            }
+                            WireFactCard {
+                                glyph: "▦",
+                                name: output.display_name().to_string(),
+                                kind: "output".to_string(),
+                                facts: output_facts(output),
+                                selected: false,
+                            }
+                        }
+                        ModuleContextStrip { chain, workspace_href }
+                    };
+                }
+            }
+            Some(UiPatchTarget::Cell { id }) => {
+                // The owning output/port carry the labelled cell copy —
+                // the bay's, not the fixture's.
+                let owning = surface_now.outputs.iter().find_map(|output| {
+                    output
+                        .bay
+                        .ports
+                        .iter()
+                        .find_map(|port| {
+                            port.cells
+                                .iter()
+                                .find(|cell| cell.id == *id)
+                                .map(|cell| (port, cell))
+                        })
+                        .map(|(port, cell)| (output, port, cell))
+                });
+                if let Some((output, port, cell)) = owning {
+                    let chain = output
+                        .module
+                        .map(|module| module_chain(&surface_now.modules, module))
+                        .unwrap_or_default();
+                    return rsx! {
+                        div { class: "lpme-stack",
+                            WireFactCard {
+                                glyph: "▭",
+                                name: cell.producer.clone(),
+                                kind: "cell".to_string(),
+                                facts: cell_facts(cell),
+                                selected: true,
+                            }
+                            WireFactCard {
+                                glyph: "⎓",
+                                name: port_name(port),
+                                kind: "port".to_string(),
+                                facts: port_facts(port),
+                                selected: false,
+                            }
+                        }
+                        ModuleContextStrip { chain, workspace_href }
+                    };
+                }
+            }
+            _ => {}
+        }
+    }
     let fixture = match (&surface, &selection) {
         (
             Some(surface),
@@ -1148,6 +1256,135 @@ pub fn PropsPanel(
         }
         ModuleContextStrip { chain, workspace_href }
     }
+}
+
+/// A wire-side readout card (output / port / cell) in the stack's card
+/// family: head row + mono fact rows, no edit fields (v1 — the verbs act
+/// on selections, not cards).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn WireFactCard(
+    glyph: &'static str,
+    name: String,
+    kind: String,
+    facts: Vec<(String, String)>,
+    selected: bool,
+) -> Element {
+    let card_class = if selected {
+        "lpme-lvl lpme-lvl-sel"
+    } else {
+        "lpme-lvl"
+    };
+    rsx! {
+        div { class: "{card_class}",
+            div { class: "lpme-lvl-head",
+                span { class: "tw:w-3 tw:flex-none tw:text-center tw:text-[10px] tw:text-dim-foreground",
+                    "{glyph}"
+                }
+                span { class: "lpme-lvl-name", "{name}" }
+                span { class: "lpme-lvl-kind", "{kind}" }
+            }
+            div { class: "lpme-lvl-body",
+                for (label , value) in facts {
+                    div { class: "tw:flex tw:items-baseline tw:gap-2 tw:px-0.5",
+                        span { class: "tw:w-16 tw:flex-none tw:text-[10px] tw:text-dim-foreground",
+                            "{label}"
+                        }
+                        span { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-[11px] tw:text-subtle-foreground",
+                            "{value}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn port_name(port: &lpa_studio_core::UiPatchPort) -> String {
+    if port.pin_label.is_empty() {
+        format!("port {}", port.key)
+    } else {
+        port.pin_label.clone()
+    }
+}
+
+fn output_facts(output: &UiPatchSurfaceOutput) -> Vec<(String, String)> {
+    let used: u32 = output
+        .bay
+        .ports
+        .iter()
+        .flat_map(|port| port.cells.iter())
+        .map(|cell| cell.lamps)
+        .sum();
+    let total: u32 = output.bay.ports.iter().map(|port| port.lamps).sum();
+    let mut facts = vec![
+        (
+            "ports".to_string(),
+            output.bay.ports.len().to_string(),
+        ),
+        ("lamps".to_string(), format!("{used}/{total} used")),
+    ];
+    if output.name.is_none() {
+        if let Some((_, name)) = &output.name_assign {
+            facts.push((
+                "name".to_string(),
+                format!("unnamed — first assign names it \"{name}\""),
+            ));
+        }
+    }
+    if output.bay.contested_lamps > 0 {
+        facts.push((
+            "contested".to_string(),
+            format!("{} lamps", output.bay.contested_lamps),
+        ));
+    }
+    facts
+}
+
+fn port_facts(port: &lpa_studio_core::UiPatchPort) -> Vec<(String, String)> {
+    let used: u32 = port.cells.iter().map(|cell| cell.lamps).sum();
+    // 1-based spans, the chips' own convention.
+    let mut facts = vec![
+        (
+            "wire".to_string(),
+            format!("{}-{}", port.start + 1, port.start + port.lamps),
+        ),
+        ("lamps".to_string(), format!("{used}/{} used", port.lamps)),
+        ("cells".to_string(), port.cells.len().to_string()),
+    ];
+    let next_free = port
+        .cells
+        .iter()
+        .map(|cell| cell.wire_start + cell.lamps)
+        .max()
+        .unwrap_or(port.start)
+        .max(port.start);
+    if next_free < port.start + port.lamps {
+        facts.push(("next free".to_string(), format!("lamp {}", next_free + 1)));
+    }
+    facts
+}
+
+fn cell_facts(cell: &UiPatchCell) -> Vec<(String, String)> {
+    let mut facts = vec![
+        ("wire".to_string(), chip_text(cell)),
+        (
+            "source".to_string(),
+            format!(
+                "{}-{}",
+                cell.source_start + 1,
+                cell.source_start + cell.lamps
+            ),
+        ),
+        ("lamps".to_string(), cell.lamps.to_string()),
+    ];
+    if cell.reversed {
+        facts.push(("direction".to_string(), "reversed".to_string()));
+    }
+    if cell.contested {
+        facts.push(("contested".to_string(), "yes — lamps are dark".to_string()));
+    }
+    facts
 }
 
 /// The fixture's PLACEMENT card: `editor.json` arrange data as editable

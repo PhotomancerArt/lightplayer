@@ -470,6 +470,39 @@ fn props_stack_fixture_selected() -> Element {
 }
 
 #[story(
+    description = "The props stack with a PORT selected (the Patching view's wire leaves, B′ deepest-first): the port's readout card on top — 1-based wire span, used/free, cell count, next free lamp — its OUTPUT card unwinding beneath, module strip at the bottom. Readout cards: the verbs act on selections, never card fields."
+)]
+fn props_stack_port_selected() -> Element {
+    rsx! {
+        PropsStackStory {
+            doc: Map2dDoc::new(),
+            surface: labelled(mini_dome_surface(false)),
+            dived: false,
+            selection: Some(UiPatchTarget::Port {
+                node: NodeId::new(10),
+                port: 0,
+            }),
+        }
+    }
+}
+
+#[story(
+    description = "The props stack with a CELL selected: the wire-window card on top (producer path, port-named wire span, source span, reversed flag when set) over its port card. The contested treatment lives in the Outputs panel's bars; here the card states it plainly."
+)]
+fn props_stack_cell_selected() -> Element {
+    rsx! {
+        PropsStackStory {
+            doc: Map2dDoc::new(),
+            surface: labelled(mini_dome_surface(false)),
+            dived: false,
+            selection: Some(UiPatchTarget::Cell {
+                id: "dome:0:60:0".to_string(),
+            }),
+        }
+    }
+}
+
+#[story(
     description = "The awkward cases the stack must survive: an UNNAMED object shows its honest '(unnamed)' placeholder on the root card, and the loaner rig's absurd fixture label truncates in the unarranged placement card's header rather than widening the dock."
 )]
 fn props_stack_awkward_names() -> Element {
