@@ -109,9 +109,11 @@ fn view_with_surface(selection: Option<UiPatchTarget>) -> UiStudioView {
 
 /// Through the shell, like production: route-view in, workbench out.
 fn workbench_story(project_view: ProjectView) -> Element {
-    let selection = matches!(project_view, ProjectView::Mapping).then(|| UiPatchTarget::Instance {
-        node: NodeId::new(2),
-        path: "/sector/2".to_string(),
+    let selection = matches!(project_view, ProjectView::Mapping | ProjectView::Patch).then(|| {
+        UiPatchTarget::Instance {
+            node: NodeId::new(2),
+            path: "/sector/2".to_string(),
+        }
     });
     rsx! {
         div { class: "tw:flex tw:h-[720px] tw:flex-col",
@@ -239,6 +241,13 @@ fn workbench_nodes_view() -> Element {
 )]
 fn workbench_mapping_view() -> Element {
     workbench_story(ProjectView::Mapping)
+}
+
+#[story(
+    description = "The workbench's Patch view (R5): Nodes · Map · Patch in the band, the RESOLVED tree left (instances + wire chips — grain follows activity), Outputs attached right, and the patching center — verb toolbar with keys printed (r reverse · ;/' rotate · s swap · undo/redo · placed count) over the one project canvas. Sector 2 selected, so the verbs are live."
+)]
+fn workbench_patching_view() -> Element {
+    workbench_story(ProjectView::Patch)
 }
 
 #[story(

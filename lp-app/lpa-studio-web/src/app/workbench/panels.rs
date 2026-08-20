@@ -22,11 +22,14 @@ use lpa_mapping_editor::{
     structural_child_count,
 };
 use lpa_studio_core::{
-    NodeId, ProjectController, ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchCell,
-    UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule,
-    UiPatchSurfaceOutput, UiPatchTarget,
+    NodeId, PatchVerbKind, PatchVerbOp, ProjectController, ProjectEditorOp, UiAction,
+    UiArrangeTransform, UiPatchCell, UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture,
+    UiPatchSurfaceModule, UiPatchSurfaceOutput, UiPatchTarget,
 };
 use lpc_mapping::{Map2dDoc, Map2dShape};
+
+use crate::app::editor_shell::patching::PatchingUi;
+use crate::app::patch::verb_ui::{dispatch_verb, port_next_free, port_window, verb_subject};
 
 /// The editor-canvas object palette (OBJECT_COLORS), indexed per fixture:
 /// the one colour language — objects wear it everywhere, ports never do.
@@ -63,10 +66,11 @@ fn is_selected(selection: &Option<UiPatchTarget>, target: &UiPatchTarget) -> boo
     selection.as_ref() == Some(target)
 }
 
-/// Fetch-on-open: resolve unfetched map2d/patch bodies exactly the way
-/// the interim page does (a no-op once cached). The panel being OPEN is
-/// the demand signal — the lazy-loading principle, not an eager sweep.
-fn prefetch_bodies(on_action: &EventHandler<UiAction>, surface: &UiPatchSurface) {
+/// Fetch-on-demand: resolve unfetched map2d/patch bodies (a no-op once
+/// cached). The demand signal is a panel being OPEN — or the Patching
+/// center being mounted, whose verbs transform the patch bodies — the
+/// lazy-loading principle, not an eager sweep.
+pub(crate) fn prefetch_bodies(on_action: &EventHandler<UiAction>, surface: &UiPatchSurface) {
     for fixture in &surface.fixtures {
         if !fixture.mapping_loaded
             && let Some(artifact) = fixture.mapping_artifact.clone()
@@ -646,12 +650,22 @@ fn InstanceRow(
 pub fn OutputsPanel(
     surface: Option<UiPatchSurface>,
     selection: Option<UiPatchTarget>,
+    /// The Patching view passes true: a port click carries the walk-up
+    /// grammar (armed swap completes; a fixture-side selection ASSIGNS to
+    /// the port's next free lamp; otherwise select). Everywhere else a
+    /// port click only selects.
+    #[props(default)]
+    patch_verbs: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // The CLOSED boxes, by output node id — closed is the exception, so
     // an output the panel has never seen reads as open by default and no
     // seeding pass is needed when the surface grows.
     let mut collapsed = use_signal(std::collections::BTreeSet::<lpa_studio_core::NodeId>::new);
+    // The frame-scoped swap arm (armed in the Patching center, completed
+    // here) — absent when the panel renders outside the workbench frame
+    // (its own stories), which simply means no swap to complete.
+    let patching_ui = use_hook(try_consume_context::<PatchingUi>);
     let Some(surface) = surface else {
         return rsx! {
             p { class: "tw:mt-3 tw:px-2 tw:text-center tw:text-xs tw:text-dim-foreground",
@@ -660,6 +674,72 @@ pub fn OutputsPanel(
         };
     };
     prefetch_bodies(&on_action, &surface);
+    // The port-click grammar (the interim page's, re-housed): swap-arm
+    // completion → assign-on-selection → plain select.
+    let on_port_click = {
+        let surface = surface.clone();
+        let selection = selection.clone();
+        let on_action = on_action;
+        move |(node, port_key): (NodeId, u32)| {
+            let Some(output) = surface.outputs.iter().find(|output| output.node == node) else {
+                return;
+            };
+            if patch_verbs {
+                // An armed swap completes on the next port click.
+                if let Some(ui) = patching_ui {
+                    let mut armed_swap = ui.armed_swap;
+                    let armed = armed_swap.peek().clone();
+                    if let Some(a) = armed {
+                        if let Some(b) = port_window(output, port_key) {
+                            armed_swap.set(None);
+                            dispatch_verb(
+                                &on_action,
+                                &surface,
+                                &selection,
+                                PatchVerbKind::SwapPorts { a, b },
+                            );
+                        }
+                        return;
+                    }
+                }
+                // With a fixture-side selection, a port click ASSIGNS it
+                // there (spike §5's grammar); otherwise it selects.
+                let subject = selection
+                    .as_ref()
+                    .and_then(|selection| verb_subject(&surface, selection));
+                if let Some((subject_node, subject, _)) = subject {
+                    let Some(lamp) = port_next_free(output, port_key) else {
+                        return;
+                    };
+                    // An unnamed output gets its numeric default alongside
+                    // the write (D39) — the DTO prebuilt it.
+                    let output_name = match (&output.name, &output.name_assign) {
+                        (Some(name), _) => Some(name.clone()),
+                        (None, Some((_, name))) => Some(name.clone()),
+                        (None, None) => None,
+                    };
+                    on_action.call(UiAction::from_op(
+                        ProjectController::NODE_ID,
+                        PatchVerbOp {
+                            subject_fixture: Some(subject_node),
+                            subject,
+                            fixtures: crate::app::patch::verb_ui::verb_fixtures(&surface),
+                            assign_output_name: output.name_assign.clone(),
+                            verb: PatchVerbKind::Assign { output_name, lamp },
+                        },
+                    ));
+                    return;
+                }
+            }
+            select(
+                &on_action,
+                Some(UiPatchTarget::Port {
+                    node,
+                    port: port_key,
+                }),
+            );
+        }
+    };
     // Same module grouping as the Fixtures panel: the tree above the
     // outputs is context worth a slim row, never an empty header.
     let outputs = surface.outputs.clone();
@@ -701,6 +781,10 @@ pub fn OutputsPanel(
                     indent: 0,
                     selection: selection.clone(),
                     on_toggle,
+                    on_port_click: {
+                        let on_port_click = on_port_click.clone();
+                        move |args| on_port_click(args)
+                    },
                     on_action,
                 }
             }
@@ -719,6 +803,10 @@ pub fn OutputsPanel(
                         indent: module.depth + 1,
                         selection: selection.clone(),
                         on_toggle,
+                        on_port_click: {
+                            let on_port_click = on_port_click.clone();
+                            move |args| on_port_click(args)
+                        },
                         on_action,
                     }
                 }
@@ -739,6 +827,9 @@ fn OutputBox(
     indent: usize,
     selection: Option<UiPatchTarget>,
     on_toggle: EventHandler<lpa_studio_core::NodeId>,
+    /// A port row's click, `(output node, port key)` — the panel supplies
+    /// the grammar (select, or the Patching view's assign/swap).
+    on_port_click: EventHandler<(NodeId, u32)>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let name = output.display_name().to_string();
@@ -806,6 +897,7 @@ fn OutputBox(
                             node: output.node,
                             port,
                             selection: selection.clone(),
+                            on_port_click,
                             on_action,
                         }
                     }
@@ -822,6 +914,7 @@ fn PortRow(
     node: lpa_studio_core::NodeId,
     port: lpa_studio_core::UiPatchPort,
     selection: Option<UiPatchTarget>,
+    on_port_click: EventHandler<(NodeId, u32)>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let target = UiPatchTarget::Port {
@@ -839,9 +932,8 @@ fn PortRow(
             div {
                 class: "{line_class}",
                 onclick: {
-                    let on_action = on_action;
-                    let target = target.clone();
-                    move |_| select(&on_action, Some(target.clone()))
+                    let key = port.key;
+                    move |_| on_port_click.call((node, key))
                 },
                 span { class: "tw:font-mono tw:text-[10.5px] tw:font-semibold tw:text-strong-foreground",
                     "{port.pin_label}"

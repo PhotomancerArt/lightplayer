@@ -20,6 +20,7 @@ pub(crate) mod arrange;
 #[cfg(feature = "stories")]
 pub(crate) mod editor_shell_stories;
 pub(crate) mod mapping_session;
+pub(crate) mod patching;
 pub(crate) mod toolbar;
 
 use std::collections::BTreeMap;

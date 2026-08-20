@@ -353,6 +353,12 @@ pub fn WorkbenchFrame(
     let dive_focused = use_signal(|| None::<NodeId>);
     let dive_session = use_signal(|| MapEditorSession::new(lpc_mapping::Map2dDoc::new()));
     let dive_commits = use_signal(|| 0u64);
+    // The patching activity's cross-dock state: the swap verb arms in the
+    // center (`s`) and completes on an Outputs-dock port click — frame
+    // scope, like the dive signals, so both sides read one signal.
+    use_context_provider(|| crate::app::editor_shell::patching::PatchingUi {
+        armed_swap: Signal::new(None),
+    });
     // The Fixtures/Outputs panels' slice of the editor view (#409 DTOs)
     // and the surface's one shared selection.
     let surface = project_editor.patch_surface.clone();
@@ -435,13 +441,14 @@ pub fn WorkbenchFrame(
                             }
                         },
                         WorkbenchView::Patching => rsx! {
-                            // Placeholder center (patching-view plan P1);
-                            // P3 replaces it with the patching shell
-                            // (canvas + verb toolbar + pulse).
-                            div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:items-center tw:justify-center tw:p-6",
-                                span { class: "tw:text-xs tw:text-muted-foreground",
-                                    "Patching — under construction on this branch"
-                                }
+                            // The patching shell (R5): same canvas,
+                            // patching furniture — verb toolbar + keys,
+                            // selection pulse, no dive.
+                            crate::app::editor_shell::patching::PatchingShellCenter {
+                                surface: surface.clone(),
+                                selection: patch_selection.clone(),
+                                project_editor,
+                                on_action,
                             }
                         },
                     }
@@ -892,6 +899,16 @@ fn PanelBody(
                 dive_session,
                 dive_commits,
                 workspace_href,
+                on_action,
+            }
+        },
+        (PanelId::Outputs, WorkbenchView::Patching) => rsx! {
+            // The Patching view's port clicks carry the walk-up grammar
+            // (armed swap completes, a fixture-side selection assigns).
+            OutputsPanel {
+                surface,
+                selection: patch_selection,
+                patch_verbs: true,
                 on_action,
             }
         },
