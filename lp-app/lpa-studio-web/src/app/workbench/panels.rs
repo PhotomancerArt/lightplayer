@@ -390,12 +390,9 @@ fn authored_object_for_instance_path(doc: &Map2dDoc, instance_path: &str) -> Opt
     let first = instance_path
         .split('/')
         .find(|segment| !segment.is_empty())?;
-    doc.objects.iter().position(|object| {
-        object
-            .id
-            .as_ref()
-            .is_some_and(|id| id.as_str() == first)
-    })
+    doc.objects
+        .iter()
+        .position(|object| object.id.as_ref().is_some_and(|id| id.as_str() == first))
 }
 
 /// One fixture's row plus its instance (or range-grain) children.
@@ -433,7 +430,10 @@ fn FixtureRows(
     // fetch-on-open lands it. Component memoization (props PartialEq)
     // bounds the re-parse to actual body changes.
     let authored_doc = (grain == TreeGrain::Authored && dive_session.is_none())
-        .then(|| body.as_deref().and_then(|text| Map2dDoc::from_json(text).ok()))
+        .then(|| {
+            body.as_deref()
+                .and_then(|text| Map2dDoc::from_json(text).ok())
+        })
         .flatten();
     rsx! {
         div {
@@ -1318,10 +1318,7 @@ fn output_facts(output: &UiPatchSurfaceOutput) -> Vec<(String, String)> {
         .sum();
     let total: u32 = output.bay.ports.iter().map(|port| port.lamps).sum();
     let mut facts = vec![
-        (
-            "ports".to_string(),
-            output.bay.ports.len().to_string(),
-        ),
+        ("ports".to_string(), output.bay.ports.len().to_string()),
         ("lamps".to_string(), format!("{used}/{total} used")),
     ];
     if output.name.is_none() {
@@ -1656,7 +1653,10 @@ mod tests {
         doc.objects.push(object("door", Some("door")));
         doc.objects.push(object("no id yet", None));
 
-        assert_eq!(authored_object_for_instance_path(&doc, "/sector/2"), Some(0));
+        assert_eq!(
+            authored_object_for_instance_path(&doc, "/sector/2"),
+            Some(0)
+        );
         assert_eq!(authored_object_for_instance_path(&doc, "/door"), Some(1));
         assert_eq!(
             authored_object_for_instance_path(&doc, "/panels/3/2"),

@@ -90,7 +90,11 @@ mod stride_tests {
         assert_eq!(display_stride(150, 150), 1, "no subsample = identity");
         assert_eq!(display_stride(4000, 2000), 2);
         assert_eq!(display_stride(4001, 2000), 3, "ceil, never floor");
-        assert_eq!(display_stride(10, 0), 10, "empty draw never divides by zero");
+        assert_eq!(
+            display_stride(10, 0),
+            10,
+            "empty draw never divides by zero"
+        );
         assert_eq!(display_stride(0, 0), 1, "degenerate stays a valid stride");
     }
 }

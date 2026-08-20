@@ -148,9 +148,27 @@ fn patch_toolbar(
             id: "patch-verbs",
             trailing: false,
             items: vec![
-                verb("patch-reverse", "r reverse", "Reverse the selection's wire direction (r)", false, has_subject),
-                verb("patch-rotate-back", "; rotate", "Rotate the selection one stride back (;)", false, has_subject),
-                verb("patch-rotate-fwd", "' rotate", "Rotate the selection one stride forward (')", false, has_subject),
+                verb(
+                    "patch-reverse",
+                    "r reverse",
+                    "Reverse the selection's wire direction (r)",
+                    false,
+                    has_subject,
+                ),
+                verb(
+                    "patch-rotate-back",
+                    "; rotate",
+                    "Rotate the selection one stride back (;)",
+                    false,
+                    has_subject,
+                ),
+                verb(
+                    "patch-rotate-fwd",
+                    "' rotate",
+                    "Rotate the selection one stride forward (')",
+                    false,
+                    has_subject,
+                ),
                 verb(
                     "patch-swap",
                     "s swap",
@@ -164,7 +182,13 @@ fn patch_toolbar(
             id: "patch-history",
             trailing: false,
             items: vec![
-                verb("patch-undo", "undo", "Undo the last patch edit (⌘Z)", false, true),
+                verb(
+                    "patch-undo",
+                    "undo",
+                    "Undo the last patch edit (⌘Z)",
+                    false,
+                    true,
+                ),
                 verb("patch-redo", "redo", "Redo (⌘⇧Z)", false, true),
             ],
         },
@@ -176,7 +200,13 @@ fn patch_toolbar(
                     text: format!("{placed}/{instances} placed"),
                     kind: StatusKind::Mono,
                 },
-                verb("patch-help", "?", "Show the patching keys (?)", help_open, true),
+                verb(
+                    "patch-help",
+                    "?",
+                    "Show the patching keys (?)",
+                    help_open,
+                    true,
+                ),
             ],
         },
     ]
@@ -240,7 +270,9 @@ pub fn PatchingShellCenter(
         let selection = selection.clone();
         let on_action = on_action;
         move |id: &'static str| match id {
-            "patch-reverse" => dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Reverse),
+            "patch-reverse" => {
+                dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Reverse)
+            }
             "patch-rotate-back" => {
                 let stride = selection_stride(&surface, &selection);
                 dispatch_verb(
@@ -473,10 +505,7 @@ mod tests {
             })
         );
         assert_eq!(
-            pulse_subject(
-                &surface,
-                &Some(UiPatchTarget::Output { node: output })
-            ),
+            pulse_subject(&surface, &Some(UiPatchTarget::Output { node: output })),
             Some(PatchPulseSubject::Output {
                 node: output,
                 range: None,
@@ -485,7 +514,9 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Module { node: NodeId::new(1) })
+                &Some(UiPatchTarget::Module {
+                    node: NodeId::new(1)
+                })
             ),
             None,
             "a module selection clears the pulse"

@@ -26,9 +26,7 @@ pub use local_store_banner::LocalStoreBanner;
 pub use pane_frame::PaneFrame;
 pub use rich_object_pane::RichObjectPane;
 pub use session_control::{ChromeSessionControl, SessionPanel, SessionProjectControl};
-pub use site_chrome::{
-    ChromeModeToggle, ChromeProjectMenu, PlayToggle, SiteChrome, SiteSection,
-};
+pub use site_chrome::{ChromeModeToggle, ChromeProjectMenu, PlayToggle, SiteChrome, SiteSection};
 pub use studio_pane::{PaneChip, PaneChrome, PaneCollapse, PaneTone, StudioPane};
 pub use studio_settings_popover::StudioSettingsPopover;
 pub use studio_shell::{ShellGallery, StudioShell};
