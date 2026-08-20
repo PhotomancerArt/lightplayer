@@ -1660,9 +1660,11 @@ fn the_peaches_patch_bay_shows_the_same_cells_from_both_ends() {
 ///
 /// The leaf sits at wire lamps 22–33, patched into the middle of the
 /// body's run — so a pulse that painted producer-relative lamps, or the
-/// whole wire, fails here. The blink alternates highlight-white and dark;
-/// both are grey (R=G=B), and the leaf's own color is green, so the
-/// assertion is phase-independent: those lamps stopped being green.
+/// whole wire, fails here. The highlight BREATHES between a dim and a
+/// bright white — grey (R=G=B) at every phase, and the leaf's own color
+/// is green, so the assertion is phase-independent: those lamps stopped
+/// being green. The un-pulsed body dims to quarter power but keeps its
+/// hue, so red-over-green still holds there.
 #[test]
 fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
     let example =
