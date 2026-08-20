@@ -18,7 +18,9 @@ use lpa_studio_core::{
 use lpa_studio_web_story_macros::story;
 
 use crate::app::layout::session_control::ChromeSessionControl;
-use crate::app::layout::site_chrome::{ChromeProjectMenu, SiteChrome, SiteSection};
+use crate::app::layout::site_chrome::{
+    ChromeModeToggle, ChromeProjectMenu, SiteChrome, SiteSection,
+};
 use crate::app::layout::version_badge::{BuildChip, VersionChipPreview};
 use crate::app::project::ProjectDetailContent;
 use crate::app::story_fixtures::project_editor_fixture;
@@ -78,7 +80,7 @@ pub(crate) fn narrow() -> Element {
 
 #[story(
     label = "Narrow, ⋯ menu open",
-    description = "The ONE merged \u{22ef} menu (G3 ruling): Sections, Sessions, and Tools groups in a single popup; active section marked (Docs is current here)."
+    description = "The ONE merged \u{22ef} menu (G3 ruling): Sections and Tools groups in a single popup; active section marked (Docs is current here). Plain route, so the primary tabs stay inline and out of the menu."
 )]
 pub(crate) fn narrow_menu_open() -> Element {
     rsx! {
@@ -224,6 +226,67 @@ pub(crate) fn logo_sizes() -> Element {
                 LogoMark { size: 16 }
                 LogoMark { size: 22 }
                 LogoMark { size: 56 }
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Lens bar — the narrow ladder",
+    description = "The crowded bar (session control + Save/↺ + mode toggles aboard) folds EARLIER than the plain one — the cut is where things stop fitting, and this bar stops fitting ~220px sooner. Top to bottom: ≥900 everything; <900 the world nav retreats to ⋯, Patch/Play and Share go icon-only, the version chip hides, the device name folds; <680 the brand word yields with the ↺; <560 the phone bar — Devices/Projects become ⋯ rows, Patch a menu row, and the project name is the one flexible truncator. Nothing overlaps or wraps at any rung."
+)]
+pub(crate) fn lens_bar_ladder() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:gap-2",
+            for width in [1040u32, 840, 640, 390] {
+                {lens_frame(width, false)}
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Lens bar phone ⋯ menu",
+    description = "The phone rung's ⋯ menu (crowded bar <560): the Project group leads, the folded Patch toggle rides in as a mode row, and the Sections group carries ALL FIVE sections — Devices and Projects join the world's three, because the phone bar keeps no inline tabs at all."
+)]
+pub(crate) fn lens_bar_phone_menu_open() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[560px]",
+            {lens_frame(390, true)}
+        }
+    }
+}
+
+/// One crowded-bar frame: the session·project control (dirty — Save and ↺
+/// materialized), both mode toggles, the project ⋯ group, and the version
+/// chip behind the same fold the shell gives it.
+fn lens_frame(width: u32, menu_open: bool) -> Element {
+    rsx! {
+        div {
+            class: "tw:border tw:border-dashed tw:border-border-muted tw:px-4 tw:pt-3",
+            style: "max-width: {width}px;",
+            SiteChrome {
+                section: SiteSection::Session,
+                overflow_menu_open: menu_open,
+                // The shared P5 fixtures: the board-naming sim with one
+                // unsaved persisted edit, so Save/↺ are aboard.
+                session_control: Some(ChromeSessionControl {
+                    session: sim_control(Some("ESP32-C6")),
+                    project: Some(control_content(1, 0, UiStatus::good("Ready"))),
+                    on_action: EventHandler::new(|_| {}),
+                    initially_open: false,
+                }),
+                patch_toggle: Some(ChromeModeToggle { href: "#patch".to_string(), active: false }),
+                play_toggle: Some(ChromeModeToggle { href: "#play".to_string(), active: false }),
+                project_menu: Some(ChromeProjectMenu {
+                    on_share: EventHandler::new(|()| {}),
+                    on_archive: EventHandler::new(|()| {}),
+                }),
+                // The version chip behind the crowded bar's <900 fold —
+                // the same wrapper the shell mounts it in.
+                span { class: "tw:hidden tw:@min-[900px]:flex",
+                    VersionChipPreview { chip: branch_chip() }
+                }
             }
         }
     }

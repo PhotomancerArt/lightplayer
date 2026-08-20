@@ -86,8 +86,10 @@ pub fn SharePillPopover(
                 }
                 // The word carries its own type: `style.css` resets
                 // `button { font: inherit }` unlayered, which beats any
-                // font utility on the button itself.
-                span { class: "tw:text-[11.5px] tw:font-bold", "Share" }
+                // font utility on the button itself. It folds with the
+                // crowded bar's <900 rung (site_chrome's narrow ladder) —
+                // the glyph and the hover title carry the pill below it.
+                span { class: "tw:hidden tw:text-[11.5px] tw:font-bold tw:@min-[900px]:inline", "Share" }
             },
             label: "Share".to_string(),
             title: format!("Sharing and access for \"{name}\""),
