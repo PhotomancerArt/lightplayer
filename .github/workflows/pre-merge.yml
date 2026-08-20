@@ -181,6 +181,14 @@ jobs:
             studio:
               - 'lp-app/lpa-studio-web/**'
               - 'lp-app/lpa-studio-core/**'
+              # Crates the story pages render DIRECTLY (their visuals are
+              # story-baseline territory even though the story files live in
+              # lpa-studio-web): the mapping editor canvas and the lpc-mapping
+              # resolver/corpus its documents come from. Narrow by design —
+              # not lp-app/** or lp-core/** — to keep the ~10-15 min job off
+              # unrelated PRs.
+              - 'lp-app/lpa-mapping-editor/**'
+              - 'lp-core/lpc-mapping/**'
               - 'docs/user-guide/**'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
