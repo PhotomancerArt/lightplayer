@@ -1660,11 +1660,21 @@ fn the_peaches_patch_bay_shows_the_same_cells_from_both_ends() {
 ///
 /// The leaf sits at wire lamps 22–33, patched into the middle of the
 /// body's run — so a pulse that painted producer-relative lamps, or the
-/// whole wire, fails here. The highlight BREATHES between a dim and a
-/// bright white — grey (R=G=B) at every phase, and the leaf's own color
-/// is green, so the assertion is phase-independent: those lamps stopped
-/// being green. The un-pulsed body dims to quarter power but keeps its
-/// hue, so red-over-green still holds there.
+/// whole wire, fails here.
+///
+/// Both light languages ride this one path (microformat v2, D9):
+///
+/// - A FIXTURE subject chases. The leaf's twelve lamps put one blue head
+///   lamp at object 0 and one red tail lamp at object 11
+///   (`clamp(1, 10, round(12 / 10))`), so wire 22 is pure blue and wire 33
+///   pure red — constant colors, phase-independent, and a direction claim
+///   the breath cannot make.
+/// - The SAME lamps named wire-side (an output range) breathe instead:
+///   grey (R=G=B) at every phase of the fade, which is also proof the leaf
+///   stopped being green.
+///
+/// The un-pulsed body dims to quarter power but keeps its hue in both
+/// languages, so red-over-green still holds there.
 #[test]
 fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
     let example =
@@ -1745,7 +1755,7 @@ fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
         assert!(green > red, "before the pulse, wire lamp {lamp} is a leaf");
     }
 
-    // Pulse the whole leaf fixture.
+    // Pulse the whole leaf fixture: a fixture-side subject CHASES.
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         crate::PatchPulseOp {
@@ -1758,18 +1768,49 @@ fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
     drive(actor.run_one_batch_for_test());
     let snapshot = refresh!();
     let bay = bay_of(&snapshot);
-    for lamp in [22, 33] {
-        let [red, green, blue] = lamp_colour(&bay, lamp);
-        assert!(
-            red == green && green == blue,
-            "wire lamp {lamp} pulses grey (highlight white or its dark phase), got {red},{green},{blue}"
-        );
-    }
+    let [red, green, blue] = lamp_colour(&bay, 22);
+    assert!(
+        blue > 0 && red == 0 && green == 0,
+        "wire lamp 22 is the leaf's object lamp 0 — the chase's blue head, got {red},{green},{blue}"
+    );
+    let [red, green, blue] = lamp_colour(&bay, 33);
+    assert!(
+        red > 0 && green == 0 && blue == 0,
+        "wire lamp 33 is the leaf's last lamp — the chase's red tail, got {red},{green},{blue}"
+    );
     for lamp in [0, 21, 34, 55] {
         let [red, green, _] = lamp_colour(&bay, lamp);
         assert!(
             red > green,
             "wire lamp {lamp} is the body's flesh and keeps the show while the leaf pulses"
+        );
+    }
+
+    // The SAME lamps, named wire-side instead, breathe: one slot, two
+    // languages, and the language follows the subject's space (D9).
+    let output_node = project_editor(&snapshot)
+        .patch_surface
+        .as_ref()
+        .and_then(|surface| surface.outputs.first())
+        .expect("the patch surface names the wire's output")
+        .node;
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PatchPulseOp {
+            subject: Some(crate::PatchPulseSubject::Output {
+                node: output_node,
+                range: Some((22, 12)),
+            }),
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = refresh!();
+    let bay = bay_of(&snapshot);
+    for lamp in [22, 33] {
+        let [red, green, blue] = lamp_colour(&bay, lamp);
+        assert!(
+            red == green && green == blue,
+            "wire lamp {lamp} breathes grey (white or its dark phase), got {red},{green},{blue}"
         );
     }
 
@@ -4436,6 +4477,12 @@ fn every_patch_target_arm_round_trips_through_selection() {
     let targets = [
         UiPatchTarget::Output { node },
         UiPatchTarget::Port { node, port: 2 },
+        UiPatchTarget::Segment {
+            node,
+            port: 2,
+            start: 4,
+            lamps: 8,
+        },
         UiPatchTarget::Cell {
             id: "3:1:0:0".to_string(),
         },

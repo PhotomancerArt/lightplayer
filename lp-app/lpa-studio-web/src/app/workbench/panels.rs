@@ -1184,6 +1184,48 @@ pub fn PropsPanel(
                     };
                 }
             }
+            Some(UiPatchTarget::Segment {
+                node,
+                port,
+                start,
+                lamps,
+            }) => {
+                if let Some(output) = surface_now
+                    .outputs
+                    .iter()
+                    .find(|output| output.node == *node)
+                    && let Some(port) = output.bay.ports.iter().find(|entry| entry.key == *port)
+                {
+                    let chain = output
+                        .module
+                        .map(|module| module_chain(&surface_now.modules, module))
+                        .unwrap_or_default();
+                    let mapped = segment_mapped_lamps(port, *start, *lamps);
+                    return rsx! {
+                        div { class: "lpme-stack",
+                            WireFactCard {
+                                glyph: "▬",
+                                name: if mapped == 0 {
+                                    "free segment".to_string()
+                                } else {
+                                    "segment".to_string()
+                                },
+                                kind: "segment".to_string(),
+                                facts: segment_facts(*start, *lamps, mapped),
+                                selected: true,
+                            }
+                            WireFactCard {
+                                glyph: "⎓",
+                                name: port_name(port),
+                                kind: "port".to_string(),
+                                facts: port_facts(port),
+                                selected: false,
+                            }
+                        }
+                        ModuleContextStrip { chain, workspace_href }
+                    };
+                }
+            }
             Some(UiPatchTarget::Cell { id }) => {
                 // The owning output/port carry the labelled cell copy —
                 // the bay's, not the fixture's.
@@ -1371,6 +1413,35 @@ fn port_facts(port: &lpa_studio_core::UiPatchPort) -> Vec<(String, String)> {
         .max(port.start);
     if next_free < port.start + port.lamps {
         facts.push(("next free".to_string(), format!("lamp {}", next_free + 1)));
+    }
+    facts
+}
+
+/// Lamps of a segment window that some cell already claims — a free
+/// segment's window should be zero, and saying so honestly beats implying a
+/// clear run over an occupied one.
+fn segment_mapped_lamps(port: &lpa_studio_core::UiPatchPort, start: u32, lamps: u32) -> u32 {
+    let end = start.saturating_add(lamps);
+    port.cells
+        .iter()
+        .map(|cell| {
+            let cell_end = cell.wire_start.saturating_add(cell.lamps);
+            end.min(cell_end).saturating_sub(start.max(cell.wire_start))
+        })
+        .sum()
+}
+
+fn segment_facts(start: u32, lamps: u32, mapped: u32) -> Vec<(String, String)> {
+    // 1-based spans, the chips' own convention.
+    let mut facts = vec![
+        (
+            "wire".to_string(),
+            format!("{}-{}", start + 1, start.saturating_add(lamps)),
+        ),
+        ("lamps".to_string(), lamps.to_string()),
+    ];
+    if mapped > 0 {
+        facts.push(("mapped".to_string(), format!("{mapped} lamps taken")));
     }
     facts
 }

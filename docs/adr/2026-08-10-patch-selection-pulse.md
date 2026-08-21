@@ -164,6 +164,12 @@ a four-billion-lamp frame (the chase is per-lamp work where the breath
 is slice math).
 
 Implementation: `lp-core/lpc-engine/src/nodes/output/output_node.rs`
-(`parse_highlight`, `paint_chase`); the producer that emits ordered,
-direction-carrying spans lands with the same plan's P2 — until then the
-existing producer's sorted-and-merged spans keep meaning breath.
+(`parse_highlight`, `paint_chase`) for the reading side;
+`lpa-studio-core/src/app/project/patch_pulse.rs` (`chase_text`,
+`highlight_text`) for the writing side, with the selection-kind half of
+the matrix on `UiPatchTarget::pulse_space`. The client picks the language
+in exactly ONE place — `PatchPulseSpace::language`, which is the table
+above in code — so no surface can name a selection in the wrong tongue.
+A fixture-side subject's spans keep the OBJECT's order (they are sorted
+by source lamp, never by wire position) and are never merged: each join
+between two spans is a fact about the wiring the chase exists to show.

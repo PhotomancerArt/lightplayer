@@ -98,8 +98,13 @@ pub(crate) fn verb_subject(
             },
             1,
         )),
+        // Wire-side and context levels are not verb subjects: the verbs act
+        // on an OBJECT. A free segment is the counterpart an armed verb
+        // completes against, not a subject in its own right (the arm
+        // grammar lands in P3).
         UiPatchTarget::Output { .. }
         | UiPatchTarget::Port { .. }
+        | UiPatchTarget::Segment { .. }
         | UiPatchTarget::Module { .. } => None,
     }
 }

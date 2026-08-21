@@ -35,54 +35,62 @@ pub(crate) struct PatchingUi {
 /// fixture-side targets pulse in fixture numbering (the controller maps
 /// them through the placements), wire-side targets in wire numbering.
 /// `Module` — and no selection — clear the pulse.
+///
+/// This resolves NUMBERS only. Which space (and so which light language)
+/// each target kind speaks is core's D9 matrix —
+/// [`UiPatchTarget::pulse_space`] — so the UI cannot pick a language by
+/// building the wrong subject variant.
 fn pulse_subject(
     surface: &UiPatchSurface,
     selection: &Option<UiPatchTarget>,
 ) -> Option<PatchPulseSubject> {
-    match selection.as_ref()? {
-        UiPatchTarget::Fixture { node } => Some(PatchPulseSubject::Fixture {
-            node: *node,
-            range: None,
-        }),
+    let target = selection.as_ref()?;
+    let space = target.pulse_space()?;
+    let (node, range) = match target {
+        UiPatchTarget::Fixture { node } => (*node, None),
         UiPatchTarget::Instance { node, path } => {
             let fixture = surface.fixtures.iter().find(|f| f.node == *node)?;
             let instance = fixture
                 .instances
                 .iter()
                 .find(|instance| instance.path == *path)?;
-            Some(PatchPulseSubject::Fixture {
-                node: *node,
-                range: Some((instance.start, instance.lamps)),
-            })
+            (*node, Some((instance.start, instance.lamps)))
         }
-        UiPatchTarget::Range { node, start, count } => Some(PatchPulseSubject::Fixture {
-            node: *node,
-            range: count.map(|count| (*start, count)),
-        }),
+        UiPatchTarget::Range { node, start, count } => (*node, count.map(|count| (*start, count))),
         UiPatchTarget::Cell { id } => {
             let node: u32 = id.split(':').next()?.parse().ok()?;
             let node = NodeId::new(node);
             let fixture = surface.fixtures.iter().find(|f| f.node == node)?;
             let cell = fixture.patch.cells.iter().find(|cell| cell.id == *id)?;
-            Some(PatchPulseSubject::Fixture {
-                node,
-                range: Some((cell.source_start, cell.lamps)),
-            })
+            (node, Some((cell.source_start, cell.lamps)))
         }
         UiPatchTarget::Port { node, port } => {
             let output = surface.outputs.iter().find(|output| output.node == *node)?;
             let port = output.bay.ports.iter().find(|p| p.key == *port)?;
-            Some(PatchPulseSubject::Output {
-                node: *node,
-                range: Some((port.start, port.lamps)),
-            })
+            (*node, Some((port.start, port.lamps)))
         }
-        UiPatchTarget::Output { node } => Some(PatchPulseSubject::Output {
-            node: *node,
-            range: None,
-        }),
-        UiPatchTarget::Module { .. } => None,
-    }
+        // A segment is already a wire window; its port is looked up so a
+        // stale one pulses nothing, and the window is clipped to the port
+        // rather than bleeding into its neighbour.
+        UiPatchTarget::Segment {
+            node,
+            port,
+            start,
+            lamps,
+        } => {
+            let output = surface.outputs.iter().find(|output| output.node == *node)?;
+            let port = output.bay.ports.iter().find(|p| p.key == *port)?;
+            let first = (*start).max(port.start);
+            let end = start
+                .saturating_add(*lamps)
+                .min(port.start.saturating_add(port.lamps));
+            (*node, Some((first, end.saturating_sub(first))))
+        }
+        UiPatchTarget::Output { node } => (*node, None),
+        // `pulse_space` already returned None for these.
+        UiPatchTarget::Module { .. } => return None,
+    };
+    Some(space.subject(node, range))
 }
 
 fn send_pulse(on_action: &EventHandler<UiAction>, subject: Option<PatchPulseSubject>) {
@@ -522,6 +530,70 @@ mod tests {
             "a module selection clears the pulse"
         );
         assert_eq!(pulse_subject(&surface, &None), None);
+    }
+
+    /// A free SEGMENT is already wire-space: it pulses its own window, and
+    /// the window is CLIPPED to the port it was drawn on rather than
+    /// bleeding into the next one. A segment on a port that has gone away
+    /// pulses nothing at all.
+    #[test]
+    fn a_segment_pulses_its_window_clipped_to_its_port() {
+        let surface = mini_dome_like_surface();
+        let output = surface.outputs[0].node;
+        let port = &surface.outputs[0].bay.ports[0];
+        assert_eq!(
+            (port.start, port.lamps),
+            (0, 39),
+            "the fixture's one port spans the whole wire"
+        );
+
+        assert_eq!(
+            pulse_subject(
+                &surface,
+                &Some(UiPatchTarget::Segment {
+                    node: output,
+                    port: port.key,
+                    start: 12,
+                    lamps: 8,
+                })
+            ),
+            Some(PatchPulseSubject::Output {
+                node: output,
+                range: Some((12, 8)),
+            }),
+            "a window inside the port passes straight through, in wire numbering"
+        );
+
+        assert_eq!(
+            pulse_subject(
+                &surface,
+                &Some(UiPatchTarget::Segment {
+                    node: output,
+                    port: port.key,
+                    start: 30,
+                    lamps: 100,
+                })
+            ),
+            Some(PatchPulseSubject::Output {
+                node: output,
+                range: Some((30, 9)),
+            }),
+            "an oversized window stops at the port's end"
+        );
+
+        assert_eq!(
+            pulse_subject(
+                &surface,
+                &Some(UiPatchTarget::Segment {
+                    node: output,
+                    port: 7,
+                    start: 0,
+                    lamps: 4,
+                })
+            ),
+            None,
+            "a segment on a port the surface no longer has pulses nothing"
+        );
     }
 }
 
