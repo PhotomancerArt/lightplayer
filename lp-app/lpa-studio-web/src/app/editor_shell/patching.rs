@@ -1,9 +1,14 @@
 //! The Patching view's center (R5): the ONE project canvas with
-//! patch-selection highlighting, the #409 verb set as toolbar items +
-//! keyboard grammar (re-housed from the interim `/patch` page through
+//! patch-selection highlighting, the #409 verb set as a keyboard grammar
+//! (re-housed from the interim `/patch` page through
 //! `app::patch::verb_ui`), and the selection pulse — the first consumer
 //! of #411's `PatchPulseOp` (select pulses the live sim/hardware,
 //! deselect and view-exit clear).
+//!
+//! Its bottom region is THE patch panel (pass 2, P4:
+//! `app::patch::patch_panel`) — the verbs' visible home, the invitations,
+//! and the keys row that replaced the help overlay. The toolbar above
+//! keeps only history and status (D4).
 //!
 //! Same canvas, different furniture (the one-project-canvas ADR): no
 //! dive here — the authored tree is Mapping's activity; this center
@@ -25,6 +30,7 @@ use lpa_studio_core::{
 use super::arrange::{PackSlots, ProjectCanvasHost, refresh_pack_slots};
 use super::toolbar::{StatusKind, ToolbarGroup, ToolbarItem, ToolbarStrip};
 use super::{mapping_assets, prefetch_editor_meta};
+use crate::app::patch::patch_panel::PatchPanel;
 use crate::app::patch::verb_ui::{
     dispatch_assign, dispatch_verb, next_free_segment, port_window, resize_segment,
     selection_stride, shift_segment, target_is_unmapped,
@@ -48,9 +54,9 @@ pub(crate) enum ArmedVerb {
 }
 
 impl ArmedVerb {
-    /// The banner's sentence — the armed verb NAMES itself, so the user is
-    /// never guessing which gesture the next click completes.
-    fn banner(&self) -> &'static str {
+    /// The armed sentence the PANEL shows — the armed verb NAMES itself, so
+    /// the user is never guessing which gesture the next click completes.
+    pub(crate) fn banner(&self) -> &'static str {
         match self {
             Self::Assign => {
                 "Assign armed — click the counterpart (an object, or a port / free segment) to link it (Esc cancels)"
@@ -150,22 +156,12 @@ fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
     ));
 }
 
-/// The patching activity's toolbar: verb buttons with their keys printed
-/// (every verb is a hotkey AND a visible control — walk-up-patching's
-/// controls-surface rule), history, and the counts readout. Another item
-/// list on the ONE strip, never another strip (the ADR's D1).
-fn patch_toolbar(
-    surface: &UiPatchSurface,
-    selection: &Option<UiPatchTarget>,
-    armed: Option<&ArmedVerb>,
-    help_open: bool,
-) -> Vec<ToolbarGroup> {
-    let has_subject = selection
-        .as_ref()
-        .and_then(|selection| crate::app::patch::verb_ui::verb_subject(surface, selection))
-        .is_some();
-    let port_selected = matches!(selection, Some(UiPatchTarget::Port { .. }));
-    let swap_armed = matches!(armed, Some(ArmedVerb::Swap(_)));
+/// The patching activity's toolbar, SLIMMED (D4): history and the counts
+/// readout. The verbs themselves moved into the panel's transport rows —
+/// the controls now sit beside the thing they act on, which is what a
+/// walk-up user reads. Every verb is still a hotkey (the center's
+/// `onkeydown` is untouched by the button move).
+fn patch_toolbar(surface: &UiPatchSurface) -> Vec<ToolbarGroup> {
     let verb = |id: &'static str, label: &str, title: &str, active: bool, enabled: bool| {
         ToolbarItem::Button {
             id,
@@ -197,40 +193,6 @@ fn patch_toolbar(
             }],
         },
         ToolbarGroup {
-            id: "patch-verbs",
-            trailing: false,
-            items: vec![
-                verb(
-                    "patch-reverse",
-                    "r reverse",
-                    "Reverse the selection's wire direction (r)",
-                    false,
-                    has_subject,
-                ),
-                verb(
-                    "patch-rotate-back",
-                    "; rotate",
-                    "Rotate the selection one stride back (;)",
-                    false,
-                    has_subject,
-                ),
-                verb(
-                    "patch-rotate-fwd",
-                    "' rotate",
-                    "Rotate the selection one stride forward (')",
-                    false,
-                    has_subject,
-                ),
-                verb(
-                    "patch-swap",
-                    "s swap",
-                    "Arm a port swap from the selected port, then click the other port (s)",
-                    swap_armed,
-                    port_selected || swap_armed,
-                ),
-            ],
-        },
-        ToolbarGroup {
             id: "patch-history",
             trailing: false,
             items: vec![
@@ -247,19 +209,10 @@ fn patch_toolbar(
         ToolbarGroup {
             id: "patch-status",
             trailing: true,
-            items: vec![
-                ToolbarItem::Status {
-                    text: format!("{placed}/{instances} placed"),
-                    kind: StatusKind::Mono,
-                },
-                verb(
-                    "patch-help",
-                    "?",
-                    "Show the patching keys (?)",
-                    help_open,
-                    true,
-                ),
-            ],
+            items: vec![ToolbarItem::Status {
+                text: format!("{placed}/{instances} placed"),
+                kind: StatusKind::Mono,
+            }],
         },
     ]
 }
@@ -275,7 +228,6 @@ pub fn PatchingShellCenter(
     project_editor: ProjectEditorView,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let mut help_open = use_signal(|| false);
     let PatchingUi {
         mut armed,
         mut segment_size,
@@ -319,40 +271,14 @@ pub fn PatchingShellCenter(
         send_pulse(&on_action, subject);
     }
     let armed_verb = armed.read().clone();
-    let groups = patch_toolbar(&surface, &selection, armed_verb.as_ref(), *help_open.read());
+    let groups = patch_toolbar(&surface);
     let on_item = {
         let surface = surface.clone();
         let selection = selection.clone();
         let on_action = on_action;
         move |id: &'static str| match id {
-            "patch-reverse" => {
-                dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Reverse)
-            }
-            "patch-rotate-back" => {
-                let stride = selection_stride(&surface, &selection);
-                dispatch_verb(
-                    &on_action,
-                    &surface,
-                    &selection,
-                    PatchVerbKind::Rotate { steps: -1, stride },
-                );
-            }
-            "patch-rotate-fwd" => {
-                let stride = selection_stride(&surface, &selection);
-                dispatch_verb(
-                    &on_action,
-                    &surface,
-                    &selection,
-                    PatchVerbKind::Rotate { steps: 1, stride },
-                );
-            }
-            "patch-swap" => arm_swap(&surface, &selection, &mut armed),
             "patch-undo" => dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Undo),
             "patch-redo" => dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Redo),
-            "patch-help" => {
-                let open = *help_open.peek();
-                help_open.set(!open);
-            }
             _ => {}
         }
     };
@@ -362,7 +288,9 @@ pub fn PatchingShellCenter(
             // The keyboard grammar: r reverse · ;/' rotate ∓/± stride ·
             // a arm assign · s arm swap · m next free segment (keeps the
             // arm) · [ ] shift the segment · - = narrow/widen it · Escape
-            // ladder (disarm, then deselect) · ⌘Z/⌘⇧Z undo/redo · ? help.
+            // ladder (disarm, then deselect) · ⌘Z/⌘⇧Z undo/redo. The keys
+            // are printed in the panel's footer row — the help overlay is
+            // gone (P4).
             tabindex: 0,
             onkeydown: {
                 let surface = surface.clone();
@@ -457,10 +385,6 @@ pub fn PatchingShellCenter(
                                 };
                                 dispatch_verb(&on_action, &surface, &selection, verb);
                             }
-                            "?" => {
-                                let open = *help_open.peek();
-                                help_open.set(!open);
-                            }
                             _ => {}
                         },
                         _ => {}
@@ -468,23 +392,6 @@ pub fn PatchingShellCenter(
                 }
             },
             ToolbarStrip { groups, on_item }
-            // The armed banner NAMES its verb (P4 folds it into the panel).
-            if let Some(verb) = armed_verb.as_ref() {
-                div { class: "tw:flex-none tw:border-b tw:border-border-subtle tw:bg-selection-bg tw:px-2.5 tw:py-1 tw:text-[11px] tw:text-selection-border",
-                    "{verb.banner()}"
-                }
-            }
-            if *help_open.read() {
-                div { class: "tw:fixed tw:bottom-4 tw:right-4 tw:z-50 tw:rounded-lg tw:border tw:border-border-strong tw:bg-card-subtle tw:p-4 tw:text-xs tw:leading-relaxed tw:shadow-lg",
-                    div { class: "tw:mb-1 tw:font-semibold", "Patch keys" }
-                    div { "click — select, always: plain clicks never write" }
-                    div { "a — arm assign (then click the counterpart) · m — next free segment" }
-                    div { "[ / ] — shift the segment · - / = — narrow / widen it" }
-                    div { "r — reverse · ; / ' — rotate ∓/± stride" }
-                    div { "s — arm swap (then click the other port)" }
-                    div { "⌘Z / ⌘⇧Z — undo / redo · Esc — disarm, then deselect · ? — close" }
-                }
-            }
             div { class: "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
                 if !surface.editor_meta_loaded {
                     div { class: "tw:flex tw:flex-1 tw:items-center tw:justify-center",
@@ -511,13 +418,22 @@ pub fn PatchingShellCenter(
                     }
                 }
             }
+            // THE panel (D8): always the center's bottom region, empty
+            // states included — never a dock, never a popover. It is a
+            // sibling consumer of the ONE selection above it.
+            PatchPanel {
+                surface: surface.clone(),
+                selection: selection.clone(),
+                armed: armed_verb,
+                on_action,
+            }
         }
     }
 }
 
-/// Arm the swap from the selected port (`s`, or the toolbar button); a
+/// Arm the swap from the selected port (`s`, or the panel's swap block); a
 /// second call disarms — the key is a toggle, like the page's Escape rung.
-fn arm_swap(
+pub(crate) fn arm_swap(
     surface: &UiPatchSurface,
     selection: &Option<UiPatchTarget>,
     armed: &mut Signal<Option<ArmedVerb>>,
@@ -547,9 +463,9 @@ pub(crate) fn is_armable(surface: &UiPatchSurface, target: &UiPatchTarget) -> bo
     }
 }
 
-/// Arm the ASSIGN (`a`, or P4's invitation button): a toggle like `s`,
-/// refused when the selection has nothing to link.
-fn arm_assign(
+/// Arm the ASSIGN (`a`, or the panel's invitation button): a toggle like
+/// `s`, refused when the selection has nothing to link.
+pub(crate) fn arm_assign(
     surface: &UiPatchSurface,
     selection: &Option<UiPatchTarget>,
     armed: &mut Signal<Option<ArmedVerb>>,
