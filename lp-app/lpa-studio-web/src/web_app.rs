@@ -847,14 +847,9 @@ pub fn App() -> Element {
     // picks what the shell renders, and the toggle only rewrites the URL.
     let project_view = current_route.project_view();
     let play = current_route.is_play();
-    let patch = project_view == router::ProjectView::Patch;
     let play_toggle = current_route
         .is_lens()
         .then(|| current_route.with_play(!play).path());
-    // The patch surface toggle (D36): project lens only — the surface is
-    // project-scoped.
-    let patch_toggle = matches!(&current_route, StudioRoute::Project { .. })
-        .then(|| current_route.with_patch(!patch).path());
     // The workbench view tabs' targets: same-session view suffixes on the
     // current lens address, plain links like the play/patch toggles — one
     // slot per view-table row. Only the default view is addressable on a
@@ -877,7 +872,9 @@ pub fn App() -> Element {
         .panes
         .iter()
         .any(|pane| matches!(&pane.body, lpa_studio_core::UiViewContent::ProjectEditor(_)));
-    let workbench_route = current_route.is_lens() && !play && !patch && editor_open;
+    // Patch is a workbench view (R5), so it gets the app frame too; only
+    // play still zooms out of the workbench.
+    let workbench_route = current_route.is_lens() && !play && editor_open;
 
     // Sharing administers THE project in the address bar (D1 — the address
     // bar IS the link), so both its doors exist only on a project route.
@@ -978,11 +975,10 @@ pub fn App() -> Element {
                 section,
                 project_menu,
                 session_control,
-                // Same-session zooms, plain hash links (the route listener
-                // sees no new document): props rather than children so the
-                // chrome's narrow ladder can fold Patch into the ⋯ menu.
-                patch_toggle: patch_toggle
-                    .map(|href| ChromeModeToggle { href, active: patch }),
+                // The play zoom, a plain hash link (the route listener sees
+                // no new document). Patch is a workbench VIEW now (R5) —
+                // the band tab carries it, so the chrome has no patch
+                // toggle to fold.
                 play_toggle: play_toggle
                     .map(|href| ChromeModeToggle { href, active: play }),
                 tight: workbench_route,
@@ -1698,7 +1694,7 @@ mod tests {
         for target in [
             project_route(),
             project_route().with_play(true),
-            project_route().with_patch(true),
+            project_route().with_view(router::ProjectView::Patch),
             StudioRoute::Device {
                 uid: "dev7k2".to_string(),
                 play: false,

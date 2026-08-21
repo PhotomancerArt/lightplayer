@@ -5,6 +5,17 @@ two-pass posture ruled by Yona). Companion to the unified editor-shell spike
 (`spikes/unified-editor-shell/index.html`) and the slice-2 ADR
 (`../adr/2026-08-10-object-ids-output-names-and-scatter.md`).
 
+**Amended 2026-08-20** (patching-view G1, `spikes/patching-controls/`
+rounds 1–3; ADR `../adr/2026-08-20-patching-view-grain-follows-activity.md`):
+the flow's home is ONE patch panel in the Patching view (object section
+over output section, lamp strips painting the light languages in the
+lamps); the selection model is ONE selection where **plain clicks never
+write** — pairing takes the explicit **assign arm** (`a`, the swap-arm
+grammar), and `m` advances the loop keeping the arm, so the walk-up
+cadence below stays one-key-one-click. lp2014's tentative/commit lane
+collapses into immediate-write + undo. A contiguous run on a port is a
+**"segment"** (WLED's word). The pulse below is a breath, never a blink.
+
 This is one of the most important flows in LightPlayer and one of the
 trickiest to get right. lp2014's version represents **years of
 tweaking under the real conditions**: late at night at a festival, on

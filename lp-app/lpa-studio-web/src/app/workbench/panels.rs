@@ -1,10 +1,10 @@
-//! The Fixtures and Outputs panels — the project tree's "multi-node
-//! custom faces" (spike round-2 ruling): derived slices over the #409
+//! The Tree (fixtures) and Outputs panels — derived slices over the
 //! patch-surface DTOs, sharing the surface's ONE core-owned selection
-//! (`ProjectEditorOp::PatchSelect`). Read-only in this pass: rows and
-//! cells SELECT; the verbs stay on the interim `/patch` page until the
-//! unified-editor plan re-houses them as the Mapping view's patching
-//! mode.
+//! (`ProjectEditorOp::PatchSelect`). The Tree's grain follows the VIEW
+//! ([`TreeGrain`]): authored in Mapping, resolved in Patching. Rows and
+//! cells select everywhere; in the Patching view the Outputs panel's
+//! port clicks additionally carry the patch grammar (armed swap /
+//! assign — see `OutputsPanel::patch_verbs`).
 //!
 //! Density rules (spike §3, ratified): the Fixtures panel is
 //! fixture → instance rows with text channel chips (port identity is
@@ -22,11 +22,14 @@ use lpa_mapping_editor::{
     structural_child_count,
 };
 use lpa_studio_core::{
-    NodeId, ProjectController, ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchCell,
-    UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule,
-    UiPatchSurfaceOutput, UiPatchTarget,
+    NodeId, PatchVerbKind, PatchVerbOp, ProjectController, ProjectEditorOp, UiAction,
+    UiArrangeTransform, UiPatchCell, UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture,
+    UiPatchSurfaceModule, UiPatchSurfaceOutput, UiPatchTarget,
 };
 use lpc_mapping::{Map2dDoc, Map2dShape};
+
+use crate::app::editor_shell::patching::PatchingUi;
+use crate::app::patch::verb_ui::{dispatch_verb, port_next_free, port_window, verb_subject};
 
 /// The editor-canvas object palette (OBJECT_COLORS), indexed per fixture:
 /// the one colour language — objects wear it everywhere, ports never do.
@@ -36,6 +39,18 @@ const OBJECT_COLORS: [&str; 6] = [
 
 fn object_color(index: usize) -> &'static str {
     OBJECT_COLORS[index % OBJECT_COLORS.len()]
+}
+
+/// Which tree the Fixtures panel shows — **grain follows activity,
+/// never dive state** (the `_features/patching.md` ruling, R5): the
+/// Mapping view reads the AUTHORED tree (objects, repeat interiors —
+/// what mapping edits), the Patching view the RESOLVED one (instances /
+/// ranges with their wire chips — what patching assigns). The naming
+/// pair matches `lpc_mapping::resolve`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TreeGrain {
+    Authored,
+    Resolved,
 }
 
 /// Dispatch a selection change to the core — the same op the patch
@@ -51,10 +66,11 @@ fn is_selected(selection: &Option<UiPatchTarget>, target: &UiPatchTarget) -> boo
     selection.as_ref() == Some(target)
 }
 
-/// Fetch-on-open: resolve unfetched map2d/patch bodies exactly the way
-/// the interim page does (a no-op once cached). The panel being OPEN is
-/// the demand signal — the lazy-loading principle, not an eager sweep.
-fn prefetch_bodies(on_action: &EventHandler<UiAction>, surface: &UiPatchSurface) {
+/// Fetch-on-demand: resolve unfetched map2d/patch bodies (a no-op once
+/// cached). The demand signal is a panel being OPEN — or the Patching
+/// center being mounted, whose verbs transform the patch bodies — the
+/// lazy-loading principle, not an eager sweep.
+pub(crate) fn prefetch_bodies(on_action: &EventHandler<UiAction>, surface: &UiPatchSurface) {
     for fixture in &surface.fixtures {
         if !fixture.mapping_loaded
             && let Some(artifact) = fixture.mapping_artifact.clone()
@@ -112,6 +128,10 @@ fn chip_text(cell: &UiPatchCell) -> String {
 const CHIP: &str = "tw:whitespace-nowrap tw:rounded tw:border tw:border-border-strong tw:bg-card-muted tw:px-1 tw:font-mono tw:text-[9.5px] tw:text-subtle-foreground";
 const ROW_IDLE: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash";
 const ROW_SELECTED: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1";
+// The undived authored rows are structure, not selection targets (the
+// authored tree is edited through the dive) — same look, no affordance.
+const ROW_STATIC: &str = "tw:flex tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1";
+const ROW_STATIC_SELECTED: &str = "tw:flex tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1";
 
 /// Indent per tree level as an inline style — arbitrary depth (nested
 /// modules, nested repeats) must never outrun a generated tailwind class.
@@ -177,6 +197,14 @@ fn ModuleRow(
 pub fn FixturesPanel(
     surface: Option<UiPatchSurface>,
     selection: Option<UiPatchTarget>,
+    /// Which tree this view reads (grain follows activity): the Mapping
+    /// view passes `Authored`, the Patching view `Resolved`.
+    grain: TreeGrain,
+    /// Fixture map2d bodies by artifact — the authored grain's source for
+    /// UNDIVED fixtures (a fixture whose body hasn't loaded shows its
+    /// flat row until the panel's fetch-on-open lands it).
+    #[props(default)]
+    bodies: std::rc::Rc<std::collections::BTreeMap<lpa_studio_core::ArtifactLocation, String>>,
     /// The dive, when one is live: `(focused node, shared session)` — the
     /// focused fixture's row grows its OBJECT tree (the editor's old
     /// wiring-order rail, unified here; one tree, one selection).
@@ -234,6 +262,11 @@ pub fn FixturesPanel(
                     dive_session: dive
                         .filter(|(node, _)| *node == fixture.node)
                         .map(|(_, session)| session),
+                    grain,
+                    body: fixture
+                        .mapping_artifact
+                        .as_ref()
+                        .and_then(|artifact| bodies.get(artifact).cloned()),
                     fixture,
                     color: object_color(index),
                     indent: 0,
@@ -254,6 +287,11 @@ pub fn FixturesPanel(
                         dive_session: dive
                             .filter(|(node, _)| *node == fixture.node)
                             .map(|(_, session)| session),
+                        grain,
+                        body: fixture
+                            .mapping_artifact
+                            .as_ref()
+                            .and_then(|artifact| bodies.get(artifact).cloned()),
                         fixture,
                         color: object_color(index),
                         indent: module.depth + 1,
@@ -287,18 +325,21 @@ fn shape_row_text(shape: &Map2dShape) -> String {
     }
 }
 
-/// Flatten the dived document's shape tree in wiring order: each object's
-/// root row, then its structural descendants (a repeat's inner item, at
-/// any nesting) — the full depth the G1 feedback asked for. Selection is
-/// the EXACT path, so a group and its inner item highlight distinctly.
-fn dive_rows(doc: &Map2dDoc, selection: &MapSelection) -> Vec<DiveRow> {
+/// Flatten a document's shape tree in wiring order: each object's root
+/// row, then its structural descendants (a repeat's inner item, at any
+/// nesting) — the full depth the G1 feedback asked for. `selected`
+/// judges the EXACT path, so a group and its inner item highlight
+/// distinctly. Serves both authored renders: the dive (live session
+/// selection) and the undived Mapping tree (derived patch-selection
+/// highlight).
+fn authored_rows(doc: &Map2dDoc, selected: &dyn Fn(&ShapePath) -> bool) -> Vec<DiveRow> {
     fn descend(
         rows: &mut Vec<DiveRow>,
         doc: &Map2dDoc,
         path: &ShapePath,
         depth: usize,
         object_index: usize,
-        selection: &MapSelection,
+        selected: &dyn Fn(&ShapePath) -> bool,
     ) {
         let Some(shape) = path.resolve(doc) else {
             return;
@@ -313,10 +354,10 @@ fn dive_rows(doc: &Map2dDoc, selection: &MapSelection) -> Vec<DiveRow> {
                 depth,
                 label: shape_row_text(child),
                 trail: String::new(),
-                selected: selection.contains(&child_path),
+                selected: selected(&child_path),
                 object_index,
             });
-            descend(rows, doc, &child_path, depth + 1, object_index, selection);
+            descend(rows, doc, &child_path, depth + 1, object_index, selected);
         }
     }
     let mut rows = Vec::new();
@@ -327,12 +368,31 @@ fn dive_rows(doc: &Map2dDoc, selection: &MapSelection) -> Vec<DiveRow> {
             depth: 0,
             label: object.name.clone(),
             trail: shape_row_text(&object.shape),
-            selected: selection.contains(&path),
+            selected: selected(&path),
             object_index,
         });
-        descend(&mut rows, doc, &path, 1, object_index, selection);
+        descend(&mut rows, doc, &path, 1, object_index, selected);
     }
     rows
+}
+
+fn dive_rows(doc: &Map2dDoc, selection: &MapSelection) -> Vec<DiveRow> {
+    authored_rows(doc, &|path| selection.contains(path))
+}
+
+/// The authored↔resolved selection bridge (`/sector/2`, D46): a resolved
+/// instance path is an object-id segment plus integer instance steps, so
+/// the authored row it names is DERIVED — the object whose sticky id
+/// matches the first segment — never a second selection store. The
+/// instance number stays implied (the authored tree has one row per
+/// repeat interior, not per instance).
+fn authored_object_for_instance_path(doc: &Map2dDoc, instance_path: &str) -> Option<usize> {
+    let first = instance_path
+        .split('/')
+        .find(|segment| !segment.is_empty())?;
+    doc.objects
+        .iter()
+        .position(|object| object.id.as_ref().is_some_and(|id| id.as_str() == first))
 }
 
 /// One fixture's row plus its instance (or range-grain) children.
@@ -344,6 +404,13 @@ fn FixtureRows(
     /// Tree level under the module rows (0 = no enclosing module).
     indent: usize,
     selection: Option<UiPatchTarget>,
+    /// Which tree this fixture's children render (grain follows
+    /// activity — see [`TreeGrain`]).
+    grain: TreeGrain,
+    /// The fixture's map2d body, when loaded — the authored grain's
+    /// undived source.
+    #[props(default)]
+    body: Option<String>,
     /// Present while this fixture is the dive: its object tree renders
     /// from (and selects through) the shared session.
     #[props(default)]
@@ -358,6 +425,16 @@ fn FixtureRows(
     };
     let range_grain = fixture.instances.is_empty();
     let kind = if range_grain { "range" } else { "2d map" };
+    // The undived authored tree (Mapping grain): the loaded body, parsed;
+    // a fixture with no loaded body keeps its flat row until the panel's
+    // fetch-on-open lands it. Component memoization (props PartialEq)
+    // bounds the re-parse to actual body changes.
+    let authored_doc = (grain == TreeGrain::Authored && dive_session.is_none())
+        .then(|| {
+            body.as_deref()
+                .and_then(|text| Map2dDoc::from_json(text).ok())
+        })
+        .flatten();
     rsx! {
         div {
             class: "{row_class}",
@@ -376,7 +453,7 @@ fn FixtureRows(
                 "{fixture.patch.lamps} · {kind}"
             }
         }
-        if let Some(mut session) = dive_session {
+        if grain == TreeGrain::Authored && let Some(mut session) = dive_session {
             // The DIVE's object tree (one tree, one selection): the edited
             // document's FULL shape tree in wiring order — objects, and
             // inside each the structural descent (a repeat's inner item at
@@ -420,9 +497,59 @@ fn FixtureRows(
                     }
                 }
             }
+        } else if grain == TreeGrain::Authored {
+            // The UNDIVED authored tree (Mapping grain): structure from the
+            // loaded body — display rows, not selection targets (authored
+            // editing goes through the dive). The one highlight is DERIVED
+            // from the shared patch selection (`/sector/2` → the object
+            // whose sticky id matches — the D46 bridge, never a second
+            // selection store).
+            if let Some(doc) = authored_doc {
+                {
+                    let highlighted = selection.as_ref().and_then(|target| match target {
+                        UiPatchTarget::Instance { node, path } if *node == fixture.node => {
+                            authored_object_for_instance_path(&doc, path)
+                        }
+                        _ => None,
+                    });
+                    let mut rows = authored_rows(&doc, &|_| false);
+                    if let Some(object) = highlighted {
+                        for row in &mut rows {
+                            if row.object_index == object && row.path.is_root() {
+                                row.selected = true;
+                            }
+                        }
+                    }
+                    rsx! {
+                        for row in rows {
+                            div {
+                                key: "auth-{row.object_index}-{row.path.descent:?}",
+                                class: if row.selected { "{ROW_STATIC_SELECTED} tw:py-0.5" } else { "{ROW_STATIC} tw:py-0.5" },
+                                style: indent_style(indent + 1 + row.depth),
+                                if row.path.is_root() {
+                                    span {
+                                        class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-[2px]",
+                                        style: "background: {editor_object_color(row.object_index)};",
+                                    }
+                                } else {
+                                    span {
+                                        class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-[2px] tw:border",
+                                        style: "border-color: {editor_object_color(row.object_index)};",
+                                    }
+                                }
+                                span { class: "tw:truncate tw:text-[12px] tw:text-muted-foreground", "{row.label}" }
+                                span { class: "tw:ml-auto tw:flex-none tw:font-mono tw:text-[9.5px] tw:text-dim-foreground",
+                                    "{row.trail}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         } else if range_grain {
-            // The peach case: no instance grain — one honest row for the
-            // fixture's whole channel range, chips from its cells.
+            // The peach case (Resolved grain): no instance grain — one
+            // honest row for the fixture's whole channel range, chips from
+            // its cells.
             div {
                 class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1 tw:px-1.5 tw:py-0.5",
                 style: indent_style(indent + 1),
@@ -436,7 +563,9 @@ fn FixtureRows(
         } else {
             for instance in fixture.instances.clone() {
                 InstanceRow {
-                    key: "{fixture.node.0}-{instance.path}",
+                    // Keyed by START, not path: id-less display rows all
+                    // carry the empty path, and start is unique per strand.
+                    key: "{fixture.node.0}-{instance.start}",
                     cells: instance_cells(&fixture, &instance)
                         .into_iter()
                         .cloned()
@@ -464,9 +593,20 @@ fn InstanceRow(
     selection: Option<UiPatchTarget>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let target = UiPatchTarget::Instance {
-        node,
-        path: instance.path.clone(),
+    // An id-less display row (empty path — the doc hasn't been through
+    // ensure-ids) selects at RANGE grain: same lamps, same pulse, honest
+    // about not being path-addressable (grain-robustness ruling, G1 R2).
+    let target = if instance.path.is_empty() {
+        UiPatchTarget::Range {
+            node,
+            start: instance.start,
+            count: Some(instance.lamps),
+        }
+    } else {
+        UiPatchTarget::Instance {
+            node,
+            path: instance.path.clone(),
+        }
     };
     let row_class = if is_selected(&selection, &target) {
         ROW_SELECTED
@@ -523,12 +663,22 @@ fn InstanceRow(
 pub fn OutputsPanel(
     surface: Option<UiPatchSurface>,
     selection: Option<UiPatchTarget>,
+    /// The Patching view passes true: a port click carries the walk-up
+    /// grammar (armed swap completes; a fixture-side selection ASSIGNS to
+    /// the port's next free lamp; otherwise select). Everywhere else a
+    /// port click only selects.
+    #[props(default)]
+    patch_verbs: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // The CLOSED boxes, by output node id — closed is the exception, so
     // an output the panel has never seen reads as open by default and no
     // seeding pass is needed when the surface grows.
     let mut collapsed = use_signal(std::collections::BTreeSet::<lpa_studio_core::NodeId>::new);
+    // The frame-scoped swap arm (armed in the Patching center, completed
+    // here) — absent when the panel renders outside the workbench frame
+    // (its own stories), which simply means no swap to complete.
+    let patching_ui = use_hook(try_consume_context::<PatchingUi>);
     let Some(surface) = surface else {
         return rsx! {
             p { class: "tw:mt-3 tw:px-2 tw:text-center tw:text-xs tw:text-dim-foreground",
@@ -537,6 +687,72 @@ pub fn OutputsPanel(
         };
     };
     prefetch_bodies(&on_action, &surface);
+    // The port-click grammar (the interim page's, re-housed): swap-arm
+    // completion → assign-on-selection → plain select.
+    let on_port_click = {
+        let surface = surface.clone();
+        let selection = selection.clone();
+        let on_action = on_action;
+        move |(node, port_key): (NodeId, u32)| {
+            let Some(output) = surface.outputs.iter().find(|output| output.node == node) else {
+                return;
+            };
+            if patch_verbs {
+                // An armed swap completes on the next port click.
+                if let Some(ui) = patching_ui {
+                    let mut armed_swap = ui.armed_swap;
+                    let armed = armed_swap.peek().clone();
+                    if let Some(a) = armed {
+                        if let Some(b) = port_window(output, port_key) {
+                            armed_swap.set(None);
+                            dispatch_verb(
+                                &on_action,
+                                &surface,
+                                &selection,
+                                PatchVerbKind::SwapPorts { a, b },
+                            );
+                        }
+                        return;
+                    }
+                }
+                // With a fixture-side selection, a port click ASSIGNS it
+                // there (spike §5's grammar); otherwise it selects.
+                let subject = selection
+                    .as_ref()
+                    .and_then(|selection| verb_subject(&surface, selection));
+                if let Some((subject_node, subject, _)) = subject {
+                    let Some(lamp) = port_next_free(output, port_key) else {
+                        return;
+                    };
+                    // An unnamed output gets its numeric default alongside
+                    // the write (D39) — the DTO prebuilt it.
+                    let output_name = match (&output.name, &output.name_assign) {
+                        (Some(name), _) => Some(name.clone()),
+                        (None, Some((_, name))) => Some(name.clone()),
+                        (None, None) => None,
+                    };
+                    on_action.call(UiAction::from_op(
+                        ProjectController::NODE_ID,
+                        PatchVerbOp {
+                            subject_fixture: Some(subject_node),
+                            subject,
+                            fixtures: crate::app::patch::verb_ui::verb_fixtures(&surface),
+                            assign_output_name: output.name_assign.clone(),
+                            verb: PatchVerbKind::Assign { output_name, lamp },
+                        },
+                    ));
+                    return;
+                }
+            }
+            select(
+                &on_action,
+                Some(UiPatchTarget::Port {
+                    node,
+                    port: port_key,
+                }),
+            );
+        }
+    };
     // Same module grouping as the Fixtures panel: the tree above the
     // outputs is context worth a slim row, never an empty header.
     let outputs = surface.outputs.clone();
@@ -578,6 +794,10 @@ pub fn OutputsPanel(
                     indent: 0,
                     selection: selection.clone(),
                     on_toggle,
+                    on_port_click: {
+                        let on_port_click = on_port_click.clone();
+                        move |args| on_port_click(args)
+                    },
                     on_action,
                 }
             }
@@ -596,6 +816,10 @@ pub fn OutputsPanel(
                         indent: module.depth + 1,
                         selection: selection.clone(),
                         on_toggle,
+                        on_port_click: {
+                            let on_port_click = on_port_click.clone();
+                            move |args| on_port_click(args)
+                        },
                         on_action,
                     }
                 }
@@ -616,6 +840,9 @@ fn OutputBox(
     indent: usize,
     selection: Option<UiPatchTarget>,
     on_toggle: EventHandler<lpa_studio_core::NodeId>,
+    /// A port row's click, `(output node, port key)` — the panel supplies
+    /// the grammar (select, or the Patching view's assign/swap).
+    on_port_click: EventHandler<(NodeId, u32)>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let name = output.display_name().to_string();
@@ -683,6 +910,7 @@ fn OutputBox(
                             node: output.node,
                             port,
                             selection: selection.clone(),
+                            on_port_click,
                             on_action,
                         }
                     }
@@ -699,6 +927,7 @@ fn PortRow(
     node: lpa_studio_core::NodeId,
     port: lpa_studio_core::UiPatchPort,
     selection: Option<UiPatchTarget>,
+    on_port_click: EventHandler<(NodeId, u32)>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let target = UiPatchTarget::Port {
@@ -716,9 +945,8 @@ fn PortRow(
             div {
                 class: "{line_class}",
                 onclick: {
-                    let on_action = on_action;
-                    let target = target.clone();
-                    move |_| select(&on_action, Some(target.clone()))
+                    let key = port.key;
+                    move |_| on_port_click.call((node, key))
                 },
                 span { class: "tw:font-mono tw:text-[10.5px] tw:font-semibold tw:text-strong-foreground",
                     "{port.pin_label}"
@@ -893,6 +1121,114 @@ pub fn PropsPanel(
             ModuleContextStrip { chain, workspace_href }
         };
     }
+    // WIRE-side selections (the Patching view's leaves): readout cards in
+    // the same stack family, deepest first (B′) — the selected level is
+    // the top card, its wire ancestors unwind beneath, the module chain
+    // stays the muted strip. Cards are READOUTS in v1: the verbs act on
+    // the tree/canvas/port selection, never on card fields.
+    if let Some(surface_now) = surface.as_ref() {
+        match &selection {
+            Some(UiPatchTarget::Output { node }) => {
+                if let Some(output) = surface_now
+                    .outputs
+                    .iter()
+                    .find(|output| output.node == *node)
+                {
+                    let chain = output
+                        .module
+                        .map(|module| module_chain(&surface_now.modules, module))
+                        .unwrap_or_default();
+                    return rsx! {
+                        div { class: "lpme-stack",
+                            WireFactCard {
+                                glyph: "▦",
+                                name: output.display_name().to_string(),
+                                kind: "output".to_string(),
+                                facts: output_facts(output),
+                                selected: true,
+                            }
+                        }
+                        ModuleContextStrip { chain, workspace_href }
+                    };
+                }
+            }
+            Some(UiPatchTarget::Port { node, port }) => {
+                if let Some(output) = surface_now
+                    .outputs
+                    .iter()
+                    .find(|output| output.node == *node)
+                    && let Some(port) = output.bay.ports.iter().find(|entry| entry.key == *port)
+                {
+                    let chain = output
+                        .module
+                        .map(|module| module_chain(&surface_now.modules, module))
+                        .unwrap_or_default();
+                    return rsx! {
+                        div { class: "lpme-stack",
+                            WireFactCard {
+                                glyph: "⎓",
+                                name: port_name(port),
+                                kind: "port".to_string(),
+                                facts: port_facts(port),
+                                selected: true,
+                            }
+                            WireFactCard {
+                                glyph: "▦",
+                                name: output.display_name().to_string(),
+                                kind: "output".to_string(),
+                                facts: output_facts(output),
+                                selected: false,
+                            }
+                        }
+                        ModuleContextStrip { chain, workspace_href }
+                    };
+                }
+            }
+            Some(UiPatchTarget::Cell { id }) => {
+                // The owning output/port carry the labelled cell copy —
+                // the bay's, not the fixture's.
+                let owning = surface_now.outputs.iter().find_map(|output| {
+                    output
+                        .bay
+                        .ports
+                        .iter()
+                        .find_map(|port| {
+                            port.cells
+                                .iter()
+                                .find(|cell| cell.id == *id)
+                                .map(|cell| (port, cell))
+                        })
+                        .map(|(port, cell)| (output, port, cell))
+                });
+                if let Some((output, port, cell)) = owning {
+                    let chain = output
+                        .module
+                        .map(|module| module_chain(&surface_now.modules, module))
+                        .unwrap_or_default();
+                    return rsx! {
+                        div { class: "lpme-stack",
+                            WireFactCard {
+                                glyph: "▭",
+                                name: cell.producer.clone(),
+                                kind: "cell".to_string(),
+                                facts: cell_facts(cell),
+                                selected: true,
+                            }
+                            WireFactCard {
+                                glyph: "⎓",
+                                name: port_name(port),
+                                kind: "port".to_string(),
+                                facts: port_facts(port),
+                                selected: false,
+                            }
+                        }
+                        ModuleContextStrip { chain, workspace_href }
+                    };
+                }
+            }
+            _ => {}
+        }
+    }
     let fixture = match (&surface, &selection) {
         (
             Some(surface),
@@ -933,6 +1269,132 @@ pub fn PropsPanel(
         }
         ModuleContextStrip { chain, workspace_href }
     }
+}
+
+/// A wire-side readout card (output / port / cell) in the stack's card
+/// family: head row + mono fact rows, no edit fields (v1 — the verbs act
+/// on selections, not cards).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn WireFactCard(
+    glyph: &'static str,
+    name: String,
+    kind: String,
+    facts: Vec<(String, String)>,
+    selected: bool,
+) -> Element {
+    let card_class = if selected {
+        "lpme-lvl lpme-lvl-sel"
+    } else {
+        "lpme-lvl"
+    };
+    rsx! {
+        div { class: "{card_class}",
+            div { class: "lpme-lvl-head",
+                span { class: "tw:w-3 tw:flex-none tw:text-center tw:text-[10px] tw:text-dim-foreground",
+                    "{glyph}"
+                }
+                span { class: "lpme-lvl-name", "{name}" }
+                span { class: "lpme-lvl-kind", "{kind}" }
+            }
+            div { class: "lpme-lvl-body",
+                for (label , value) in facts {
+                    div { class: "tw:flex tw:items-baseline tw:gap-2 tw:px-0.5",
+                        span { class: "tw:w-16 tw:flex-none tw:text-[10px] tw:text-dim-foreground",
+                            "{label}"
+                        }
+                        span { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-[11px] tw:text-subtle-foreground",
+                            "{value}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn port_name(port: &lpa_studio_core::UiPatchPort) -> String {
+    if port.pin_label.is_empty() {
+        format!("port {}", port.key)
+    } else {
+        port.pin_label.clone()
+    }
+}
+
+fn output_facts(output: &UiPatchSurfaceOutput) -> Vec<(String, String)> {
+    let used: u32 = output
+        .bay
+        .ports
+        .iter()
+        .flat_map(|port| port.cells.iter())
+        .map(|cell| cell.lamps)
+        .sum();
+    let total: u32 = output.bay.ports.iter().map(|port| port.lamps).sum();
+    let mut facts = vec![
+        ("ports".to_string(), output.bay.ports.len().to_string()),
+        ("lamps".to_string(), format!("{used}/{total} used")),
+    ];
+    if output.name.is_none() {
+        if let Some((_, name)) = &output.name_assign {
+            facts.push((
+                "name".to_string(),
+                format!("unnamed — first assign names it \"{name}\""),
+            ));
+        }
+    }
+    if output.bay.contested_lamps > 0 {
+        facts.push((
+            "contested".to_string(),
+            format!("{} lamps", output.bay.contested_lamps),
+        ));
+    }
+    facts
+}
+
+fn port_facts(port: &lpa_studio_core::UiPatchPort) -> Vec<(String, String)> {
+    let used: u32 = port.cells.iter().map(|cell| cell.lamps).sum();
+    // 1-based spans, the chips' own convention.
+    let mut facts = vec![
+        (
+            "wire".to_string(),
+            format!("{}-{}", port.start + 1, port.start + port.lamps),
+        ),
+        ("lamps".to_string(), format!("{used}/{} used", port.lamps)),
+        ("cells".to_string(), port.cells.len().to_string()),
+    ];
+    let next_free = port
+        .cells
+        .iter()
+        .map(|cell| cell.wire_start + cell.lamps)
+        .max()
+        .unwrap_or(port.start)
+        .max(port.start);
+    if next_free < port.start + port.lamps {
+        facts.push(("next free".to_string(), format!("lamp {}", next_free + 1)));
+    }
+    facts
+}
+
+fn cell_facts(cell: &UiPatchCell) -> Vec<(String, String)> {
+    let mut facts = vec![
+        ("wire".to_string(), chip_text(cell)),
+        (
+            "source".to_string(),
+            format!(
+                "{}-{}",
+                cell.source_start + 1,
+                cell.source_start + cell.lamps
+            ),
+        ),
+        ("lamps".to_string(), cell.lamps.to_string()),
+    ];
+    if cell.reversed {
+        facts.push(("direction".to_string(), "reversed".to_string()));
+    }
+    if cell.contested {
+        facts.push(("contested".to_string(), "yes — lamps are dark".to_string()));
+    }
+    facts
 }
 
 /// The fixture's PLACEMENT card: `editor.json` arrange data as editable
@@ -1180,5 +1642,49 @@ mod tests {
         assert_eq!(names(4), ["root", "spare"]);
         assert_eq!(names(1), ["root"]);
         assert!(names(99).is_empty(), "unknown leaf yields no chain");
+    }
+
+    /// The D46 bridge: a resolved instance path (`/sector/2`) names the
+    /// authored object by its STICKY ID segment — never by name, never by
+    /// position — and nested instance steps don't confuse it.
+    #[test]
+    fn instance_paths_derive_their_authored_object() {
+        use lpc_mapping::{Map2dObject, Map2dObjectId, Map2dShape, PathShape};
+        let object = |name: &str, id: Option<&str>| Map2dObject {
+            name: name.to_string(),
+            id: id.map(|id| Map2dObjectId::new(id).expect("test id")),
+            stride: None,
+            shape: Map2dShape::Path(PathShape {
+                points: vec![[0.0, 0.0], [1.0, 0.0]],
+                count: 10,
+                gaps: Vec::new(),
+                reversed: false,
+            }),
+        };
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(object("Renamed Sector", Some("sector")));
+        doc.objects.push(object("door", Some("door")));
+        doc.objects.push(object("no id yet", None));
+
+        assert_eq!(
+            authored_object_for_instance_path(&doc, "/sector/2"),
+            Some(0)
+        );
+        assert_eq!(authored_object_for_instance_path(&doc, "/door"), Some(1));
+        assert_eq!(
+            authored_object_for_instance_path(&doc, "/panels/3/2"),
+            None,
+            "unknown id segment derives nothing"
+        );
+        assert_eq!(
+            authored_object_for_instance_path(&doc, ""),
+            None,
+            "an empty path derives nothing"
+        );
+        assert_eq!(
+            authored_object_for_instance_path(&doc, "/no id yet"),
+            None,
+            "names never stand in for ids"
+        );
     }
 }

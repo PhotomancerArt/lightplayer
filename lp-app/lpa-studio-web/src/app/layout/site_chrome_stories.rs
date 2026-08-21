@@ -276,7 +276,6 @@ fn lens_frame(width: u32, menu_open: bool) -> Element {
                     on_action: EventHandler::new(|_| {}),
                     initially_open: false,
                 }),
-                patch_toggle: Some(ChromeModeToggle { href: "#patch".to_string(), active: false }),
                 play_toggle: Some(ChromeModeToggle { href: "#play".to_string(), active: false }),
                 project_menu: Some(ChromeProjectMenu {
                     on_share: EventHandler::new(|()| {}),

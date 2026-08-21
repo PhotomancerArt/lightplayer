@@ -1,17 +1,15 @@
-//! Patch surface stories (D36, slice 2): hand-built DTOs, like every face
-//! story — derivation is covered by unit tests and e2e; these pin the
-//! LOOK. Frames are deliberately absent (the canvas renders its honest
-//! "no frame yet"): live pixels are the dev server's job, and a story that
-//! faked them would drift from the renderer it claims to pin.
+//! Shared patch-surface STORY FIXTURES: hand-built DTOs (mini-dome,
+//! peach) the workbench and editor-shell stories pin their looks with —
+//! derivation is covered by unit tests and e2e. Frames are deliberately
+//! absent (cells draw their honest "no frame yet"): live pixels are the
+//! dev server's job, and a story that faked them would drift from the
+//! renderer it claims to pin. (The interim `/patch` page and its stories
+//! are gone — R5 re-housed patching as a workbench view.)
 
-use dioxus::prelude::*;
 use lpa_studio_core::{
     NodeId, UiFixturePatch, UiPatchBay, UiPatchCell, UiPatchInstance, UiPatchPort, UiPatchSurface,
-    UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput, UiPatchTarget,
+    UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput,
 };
-use lpa_studio_web_story_macros::story;
-
-use super::PatchSurfacePage;
 
 fn cell(id: &str, producer: &str, source_start: u32, lamps: u32, wire_start: u32) -> UiPatchCell {
     UiPatchCell {
@@ -316,62 +314,5 @@ fn build_peach_surface() -> UiPatchSurface {
             },
         ],
         ..Default::default()
-    }
-}
-
-fn surface_view(
-    surface: UiPatchSurface,
-    selection: Option<UiPatchTarget>,
-) -> lpa_studio_core::ProjectEditorView {
-    lpa_studio_core::ProjectEditorView::new(
-        "story",
-        0,
-        lpa_studio_core::ProjectSyncSummary::default(),
-        Vec::new(),
-        lpa_studio_core::ProjectNodeTreeView::new(Vec::new(), 0),
-        Vec::new(),
-    )
-    .with_patch_surface(Some(surface), selection)
-}
-
-#[story(
-    description = "The patch surface on the mini-dome: output → port sidebar, two named outputs' port strips with sectors and doors sharing ports (many-to-many), and both fixtures' instance chips. Sector 2 is selected — the sidebar, its cells, and its chip light together. Frames are absent by design; live pixels are the dev server's demo."
-)]
-fn patch_surface_mini_dome_selected_sector() -> Element {
-    rsx! {
-        PatchSurfacePage {
-            view: surface_view(
-                mini_dome_surface(false),
-                Some(UiPatchTarget::Instance {
-                    node: NodeId::new(2),
-                    path: "/sector/2".to_string(),
-                }),
-            ),
-            on_action: move |_| {},
-        }
-    }
-}
-
-#[story(
-    description = "The overlap state: a sector and a door claiming the same stretch of port 0 wear the contested red on every strip they appear in, and the sidebar's output row counts the contested lamps. Degrade-and-report — nothing stops rendering."
-)]
-fn patch_surface_mini_dome_overlap() -> Element {
-    rsx! {
-        PatchSurfacePage {
-            view: surface_view(mini_dome_surface(true), None),
-            on_action: move |_| {},
-        }
-    }
-}
-
-#[story(
-    description = "The peach on the same surface: one unnamed output, format-1 range-grain fixtures (no instance chips — 'range grain' says so), the body split with its far half reversed. The surface is honest at both grains; instance verbs will simply be absent here."
-)]
-fn patch_surface_peach_range_grain() -> Element {
-    rsx! {
-        PatchSurfacePage {
-            view: surface_view(peach_surface(), None),
-            on_action: move |_| {},
-        }
     }
 }

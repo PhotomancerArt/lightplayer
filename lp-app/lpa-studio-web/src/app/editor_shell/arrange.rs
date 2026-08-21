@@ -131,6 +131,12 @@ pub(crate) fn ProjectCanvasHost(
     /// (stories).
     #[props(default)]
     on_focus: Option<EventHandler<NodeId>>,
+    /// Live colors on ALL fixture sprites, default-on (the Patching
+    /// view's guide invariant: patched objects glow with product data,
+    /// unpatched stay palette). The Mapping view omits it — its live
+    /// display is the dived feed behind the L toggle.
+    #[props(default)]
+    live_sprites: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // Geometry is derived per (surface, bodies, pack, selection) change —
@@ -246,6 +252,35 @@ pub(crate) fn ProjectCanvasHost(
             if !colors.is_empty() && *arrange_live.peek() != colors {
                 arrange_live.set(colors);
             }
+        }
+    }
+
+    // The SPRITE live feed (live_sprites hosts — the Patching view): one
+    // color vec per fixture key, decoded from each fixture's published
+    // frame per snapshot tick. Keep-last-good PER FIXTURE across apply
+    // gaps (same reasoning as the dived feed); compare-then-set so a
+    // quiet frame re-renders nothing.
+    let mut sprite_live = use_signal(BTreeMap::<String, Vec<[u8; 3]>>::new);
+    if live_sprites {
+        let previous = sprite_live.peek().clone();
+        let mut feeds = BTreeMap::new();
+        for (key, node) in &nodes {
+            let colors = surface
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.node == *node)
+                .map(|fixture| fixture_live_colors(&fixture.patch))
+                .unwrap_or_default();
+            if colors.is_empty() {
+                if let Some(kept) = previous.get(key) {
+                    feeds.insert(key.clone(), kept.clone());
+                }
+            } else {
+                feeds.insert(key.clone(), colors);
+            }
+        }
+        if previous != feeds {
+            sprite_live.set(feeds);
         }
     }
 
@@ -390,6 +425,7 @@ pub(crate) fn ProjectCanvasHost(
                 viewport,
                 drag: arrange_drag,
                 live_feed: arrange_live,
+                sprite_live_feed: live_sprites.then_some(sprite_live),
                 on_committed: committed,
                 placement: dive_placement,
                 fixtures: sprites,
