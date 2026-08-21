@@ -30,8 +30,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    ControlLamp2d, ControlLayout2d, ControlPathSpan2d, LpValue, NodeRuntimeStatus, OutputDefView,
-    ProductRef, Revision, SlotData, SlotPath, WithRevision,
+    ColorOrder, ControlLamp2d, ControlLayout2d, ControlPathSpan2d, LpValue, NodeRuntimeStatus,
+    OutputDefView, ProductRef, Revision, SlotData, SlotPath, WithRevision,
 };
 
 use crate::dataflow::resolver::QueryKey;
@@ -87,6 +87,78 @@ fn highlight_level_16(time_seconds: f32) -> u16 {
         0.5 - 0.5 * libm::cosf(core::f32::consts::TAU * time_seconds / HIGHLIGHT_BREATH_SECONDS);
     let span = f32::from(HIGHLIGHT_CREST_16 - HIGHLIGHT_FLOOR_16);
     HIGHLIGHT_FLOOR_16 + libm::roundf(span * phase.clamp(0.0, 1.0)) as u16
+}
+
+/// The chase's head and tail colors, 8-bit per channel.
+///
+/// Blue leads, red trails — the walk-up question a fixture selection answers
+/// is "which end is lamp 0, and which way does it run?", so the ends are
+/// named by hue rather than by motion, and the sweep between them says the
+/// rest. Ratified as exact hexes in the patching spike
+/// (`spikes/patching-controls/index.html` §3 and its `chaseRgb`).
+const CHASE_HEAD_RGB: [u8; 3] = [0, 0, 255];
+const CHASE_TAIL_RGB: [u8; 3] = [255, 0, 0];
+
+/// How many lamps at each end wear the head/tail color: `round(n/10)`,
+/// clamped to 1..=10 (D10). One lamp is unreadable across a room and eleven
+/// is a stripe, not an end marker.
+const CHASE_HEAD_MAX_LAMPS: u32 = 10;
+
+/// Full period of the chase's white dot, in seconds — one pass across the
+/// whole object per period (the spike's `(t / 2) % 1`).
+const CHASE_SWEEP_SECONDS: f32 = 2.0;
+
+/// Falloff of the dot's raised window, in reciprocal object-lengths: the dot
+/// fades to the floor `1/CHASE_DOT_FALLOFF` of the object away from its
+/// centre, so it reads as a runner rather than a wash at any lamp count.
+const CHASE_DOT_FALLOFF: f32 = 7.0;
+
+/// The chase body's floor and crest, 16-bit unorm per channel (white).
+///
+/// The body sits near-dark (25/255) so the object reads as
+/// dark-with-a-runner: unlike the breath, the chase's job is DIRECTION, and
+/// a bright body would hide the dot's travel. The crest is full white for
+/// the one dot; peak current stays bounded because the lit window is a
+/// fraction of the object and everything else is at the floor.
+const CHASE_BODY_FLOOR_16: u16 = 25 * 257;
+const CHASE_BODY_CREST_16: u16 = 255 * 257;
+
+/// Head/tail lamp count for an object of `n` lamps (D10): `round(n / 10)`
+/// clamped to 1..=10, in integers (`(n + 5) / 10` is round-half-up).
+fn chase_head_lamps(n: u32) -> u32 {
+    (n.saturating_add(5) / 10).clamp(1, CHASE_HEAD_MAX_LAMPS)
+}
+
+/// The chase body's level for object-order lamp `j` of `n` at
+/// `time_seconds`: a raised window around the sweeping dot, floored at
+/// [`CHASE_BODY_FLOOR_16`] so a selected object never reads as dead lamps.
+fn chase_body_level_16(j: u32, n: u32, time_seconds: f32) -> u16 {
+    let position = if n <= 1 {
+        0.0
+    } else {
+        j as f32 / (n - 1) as f32
+    };
+    let phase = libm::fmodf(time_seconds / CHASE_SWEEP_SECONDS, 1.0);
+    let phase = if phase < 0.0 { phase + 1.0 } else { phase };
+    let window = (1.0 - libm::fabsf(position - phase) * CHASE_DOT_FALLOFF).clamp(0.0, 1.0);
+    let span = f32::from(CHASE_BODY_CREST_16 - CHASE_BODY_FLOOR_16);
+    CHASE_BODY_FLOOR_16 + libm::roundf(span * window) as u16
+}
+
+/// Pack an RGB triple into the channel order a run is stored in.
+///
+/// Producers render already-ordered samples (`fixture_node::ordered_rgb_u16`)
+/// and declare the order in their span encoding; a diagnostic painting a
+/// SPECIFIC color has to speak the same order or blue comes out green.
+fn ordered_rgb_16(color_order: ColorOrder, [r, g, b]: [u16; 3]) -> [u16; 3] {
+    match color_order {
+        ColorOrder::Rgb => [r, g, b],
+        ColorOrder::Grb => [g, r, b],
+        ColorOrder::Rbg => [r, b, g],
+        ColorOrder::Gbr => [g, b, r],
+        ColorOrder::Brg => [b, r, g],
+        ColorOrder::Bgr => [b, g, r],
+    }
 }
 
 /// Samples per RGB lamp, the unit both the buffer and the reports speak.
@@ -280,24 +352,42 @@ impl OutputNode {
         }
     }
 
-    /// Read the `highlight` Debug slot's lamp spans for this frame.
+    /// Read the `highlight` Debug slot's value for this frame.
     ///
     /// Same tolerance contract as [`Self::test_pattern_active`]: an
     /// unresolvable slot reads as "no highlight" and is logged, never fatal.
-    /// The microformat parse is equally forgiving — see
-    /// [`parse_highlight_lamps`].
-    fn highlight_lamps(&mut self, ctx: &mut TickContext<'_>) -> Result<Vec<(u32, u32)>, NodeError> {
+    /// The microformat parse is equally forgiving — see [`parse_highlight`].
+    fn highlight_value(&mut self, ctx: &mut TickContext<'_>) -> Result<Highlight, NodeError> {
         let reader = self.def_view(ctx)?.highlight();
         match reader.get::<_, String>(ctx) {
-            Ok(text) => Ok(parse_highlight_lamps(&text)),
+            Ok(text) => Ok(parse_highlight(&text)),
             Err(error) => {
                 log::debug!("[output] highlight unavailable: {error}");
-                Ok(Vec::new())
+                Ok(Highlight::default())
             }
         }
     }
 
-    /// Paint the highlight spans over whatever frame is in the buffer.
+    /// Paint the highlight over whatever frame is in the buffer, in the mode
+    /// the slot named.
+    ///
+    /// Both modes are overlays, not bypasses, and both dim the rest of the
+    /// wire first. Chase falls back to the breath when the output's sample
+    /// layout cannot say which channel is which (A2) — a mis-decoded chase
+    /// would name the wrong end of the strand, which is worse than the
+    /// direction-free language.
+    fn paint_highlight(&mut self, highlight: &Highlight, time_seconds: f32) {
+        match highlight {
+            Highlight::Breath(spans) => self.paint_breath(spans, time_seconds),
+            Highlight::Chase(spans) => {
+                if !self.paint_chase(spans, time_seconds) {
+                    self.paint_breath(&breath_spans(spans), time_seconds);
+                }
+            }
+        }
+    }
+
+    /// Paint the breathing-white highlight over the named spans.
     ///
     /// An overlay, not a bypass, in two moves (lp2014's selection language):
     /// first EVERY established sample dims to a quarter — the background
@@ -305,7 +395,7 @@ impl OutputNode {
     /// take the breathing white ([`highlight_level_16`]). Lamps past the
     /// established extent are clipped, not an error: a selection can outlive
     /// a shrinking wire by a frame, and a diagnostic never kills output.
-    fn paint_highlight(&mut self, spans: &[(u32, u32)], time_seconds: f32) {
+    fn paint_breath(&mut self, spans: &[(u32, u32)], time_seconds: f32) {
         if spans.is_empty() {
             return;
         }
@@ -324,6 +414,72 @@ impl OutputNode {
                 *sample = level;
             }
         }
+    }
+
+    /// Paint the chase over the named spans, in OBJECT order.
+    ///
+    /// Same dim-the-rest first move as the breath, then every named lamp
+    /// takes its object-order color: blue for the first `h` lamps, red for
+    /// the last `h` ([`chase_head_lamps`]), and the body carries the white
+    /// dot sweeping head-to-tail ([`chase_body_level_16`]). A reversed span's
+    /// wire indices are walked backward, so object order stays continuous
+    /// across a strand plugged in at the far end — which is exactly the
+    /// mis-wiring the language exists to show.
+    ///
+    /// Returns `false` and paints NOTHING when the output's declared sample
+    /// layout does not resolve every named in-extent lamp to an RGB run
+    /// (A2): the caller then falls back to the breath.
+    fn paint_chase(&mut self, spans: &[ChaseSpan], time_seconds: f32) -> bool {
+        let total = chase_lamp_count(spans);
+        if total == 0 {
+            return false;
+        }
+        let Some(layout) = self.published_sample_layout.as_ref() else {
+            return false;
+        };
+        let established = self.control_samples.len();
+
+        // Resolve first, paint second: a half-decoded chase is a lie about
+        // the wire, so one unresolvable lamp sends the whole output to the
+        // breath rather than painting part of the answer.
+        let mut lookup = ChannelOrders::new(layout);
+        for wire in chase_wire_lamps(spans) {
+            let first = lamps_to_samples(wire) as usize;
+            if first.saturating_add(SAMPLES_PER_LAMP as usize) > established {
+                continue;
+            }
+            if lookup.order_at(first as u32).is_none() {
+                return false;
+            }
+        }
+
+        for sample in self.control_samples.iter_mut() {
+            *sample >>= 2;
+        }
+        let heads = chase_head_lamps(total);
+        let mut lookup = ChannelOrders::new(layout);
+        for (ordinal, wire) in chase_wire_lamps(spans).enumerate() {
+            let first = lamps_to_samples(wire) as usize;
+            let end = first.saturating_add(SAMPLES_PER_LAMP as usize);
+            if end > established {
+                continue;
+            }
+            let ordinal = ordinal as u32;
+            let rgb = if ordinal < heads {
+                rgb8_to_16(CHASE_HEAD_RGB)
+            } else if ordinal >= total - heads {
+                rgb8_to_16(CHASE_TAIL_RGB)
+            } else {
+                let level = chase_body_level_16(ordinal, total, time_seconds);
+                [level; 3]
+            };
+            let Some(order) = lookup.order_at(first as u32) else {
+                continue;
+            };
+            let ordered = ordered_rgb_16(order, rgb);
+            self.control_samples[first..end].copy_from_slice(&ordered);
+        }
+        true
     }
 
     /// Overwrite every established sample with one color, in place.
@@ -565,34 +721,225 @@ const fn lamps_to_samples(lamps: u32) -> u32 {
     lamps.saturating_mul(SAMPLES_PER_LAMP)
 }
 
-/// Parse the `highlight` Debug slot's microformat into `(start, count)` lamp
-/// spans.
+/// What the `highlight` Debug slot asked this output to paint.
 ///
-/// Comma-separated inclusive lamp ranges in the output's flat wire numbering,
-/// the same numbering `at.lamp` anchors and the status reports speak:
-/// `"0-29,45,90-119"`. Whitespace around segments is tolerated; a segment
-/// that does not parse, or an inverted range, is SKIPPED — the slot is a
-/// diagnostic written by tooling, and half a highlight beats a dead one.
+/// Two light languages, one slot (microformat v2 — see [`parse_highlight`]):
+/// the wire-side selection BREATHES (white, direction-free) and a
+/// fixture-side one CHASES (blue head, red tail, white dot in object order).
+/// Which one a selection deserves is the client's call; the engine only
+/// honors what the string names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Highlight {
+    /// v1, the bare span list: breathing white over unordered wire spans.
+    Breath(Vec<(u32, u32)>),
+    /// v2, `chase:`: ordered, direction-carrying spans in OBJECT order.
+    Chase(Vec<ChaseSpan>),
+}
+
+impl Default for Highlight {
+    fn default() -> Self {
+        Self::Breath(Vec::new())
+    }
+}
+
+impl Highlight {
+    /// Nothing to paint — the byte-identity path every unpulsed project takes.
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Breath(spans) => spans.is_empty(),
+            Self::Chase(spans) => spans.is_empty(),
+        }
+    }
+}
+
+/// One run of an object's lamps on the wire, carrying which way it runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ChaseSpan {
+    /// Lowest wire lamp of the run.
+    start: u32,
+    /// Lamps in the run, always at least one.
+    count: u32,
+    /// The run's wire indices descend as object order advances — a strand
+    /// plugged in at the far end. Written as a descending range (`59-0`).
+    reversed: bool,
+}
+
+/// Most lamps a single chase will walk before it is treated as garbage.
+///
+/// The chase costs work per lamp (the breath is slice math), so a fat-fingered
+/// `0-4294967295` must not become a four-billion-iteration frame. Far above
+/// any real output's lamp count, far below a stall.
+const CHASE_MAX_LAMPS: u32 = 65_536;
+
+/// Parse the `highlight` Debug slot's microformat (v2).
+///
+/// Grammar, in the output's flat wire numbering — the same numbering
+/// `at.lamp` anchors and the status reports speak:
+///
+/// ```text
+/// value   := [ "chase:" ] list         ; prefix is case-insensitive
+/// list    := segment { "," segment }
+/// segment := lamp | lamp "-" lamp      ; inclusive on both ends
+/// ```
+///
+/// - **No prefix** (`"0-29,45,90-119"`) is the v1 breath: unordered wire
+///   spans, inverted ranges skipped. Every value ever written keeps its
+///   meaning.
+/// - **`chase:`** (`"chase:60-119,59-0"`) lists the spans in OBJECT order —
+///   the first segment holds object lamp 0 — and a DESCENDING range means
+///   that run is walked backward on the wire.
+/// - Whitespace around segments and around the prefix is tolerated; a
+///   segment that does not parse is SKIPPED; an unknown prefix (anything
+///   else before a `:`) reads as EMPTY. The slot is a diagnostic written by
+///   tooling and hand-driven from the Debug section, so half a highlight
+///   beats a dead one — and a value the engine does not understand paints
+///   nothing rather than guessing.
+fn parse_highlight(text: &str) -> Highlight {
+    let text = text.trim();
+    let Some((prefix, rest)) = text.split_once(':') else {
+        return Highlight::Breath(parse_highlight_lamps(text));
+    };
+    if !prefix.trim().eq_ignore_ascii_case("chase") {
+        return Highlight::default();
+    }
+    Highlight::Chase(parse_chase_spans(rest))
+}
+
+/// Parse the v1 bare span list into `(start, count)` lamp spans.
+///
+/// Order carries no meaning here and an inverted range is skipped — the
+/// breath lights a set of lamps, not a path.
 fn parse_highlight_lamps(text: &str) -> Vec<(u32, u32)> {
     let mut spans = Vec::new();
     for segment in text.split(',') {
-        let segment = segment.trim();
-        if segment.is_empty() {
-            continue;
-        }
-        let (first, last) = match segment.split_once('-') {
-            Some((first, last)) => (first.trim().parse::<u32>(), last.trim().parse::<u32>()),
-            None => (segment.parse::<u32>(), segment.parse::<u32>()),
-        };
-        let (Ok(first), Ok(last)) = (first, last) else {
+        let Some((first, last)) = parse_span_segment(segment) else {
             continue;
         };
         if last < first {
             continue;
         }
-        spans.push((first, last - first + 1));
+        spans.push((first, (last - first).saturating_add(1)));
     }
     spans
+}
+
+/// Parse the `chase:` span list, keeping listed order and direction.
+fn parse_chase_spans(text: &str) -> Vec<ChaseSpan> {
+    let mut spans = Vec::new();
+    for segment in text.split(',') {
+        let Some((first, last)) = parse_span_segment(segment) else {
+            continue;
+        };
+        let (start, end, reversed) = if last < first {
+            (last, first, true)
+        } else {
+            (first, last, false)
+        };
+        spans.push(ChaseSpan {
+            start,
+            count: (end - start).saturating_add(1),
+            reversed,
+        });
+    }
+    spans
+}
+
+/// One `lamp` or `lamp-lamp` segment as its written endpoints, or `None`
+/// when it is not a segment at all.
+fn parse_span_segment(segment: &str) -> Option<(u32, u32)> {
+    let segment = segment.trim();
+    if segment.is_empty() {
+        return None;
+    }
+    let (first, last) = match segment.split_once('-') {
+        Some((first, last)) => (first.trim().parse::<u32>(), last.trim().parse::<u32>()),
+        None => (segment.parse::<u32>(), segment.parse::<u32>()),
+    };
+    match (first, last) {
+        (Ok(first), Ok(last)) => Some((first, last)),
+        _ => None,
+    }
+}
+
+/// Total lamps a chase names, saturating: the `n` its head/tail sizing and
+/// sweep position are measured in, clipping to the wire notwithstanding.
+fn chase_lamp_count(spans: &[ChaseSpan]) -> u32 {
+    let total = spans
+        .iter()
+        .fold(0u32, |total, span| total.saturating_add(span.count));
+    if total > CHASE_MAX_LAMPS { 0 } else { total }
+}
+
+/// The chase's wire lamps in OBJECT order: spans as listed, and a reversed
+/// span's indices walked from its top down, so the object's own numbering
+/// stays continuous across a re-plugged strand.
+fn chase_wire_lamps(spans: &[ChaseSpan]) -> impl Iterator<Item = u32> + '_ {
+    spans.iter().flat_map(|span| {
+        (0..span.count).map(move |step| {
+            if span.reversed {
+                span.start.saturating_add(span.count - 1 - step)
+            } else {
+                span.start.saturating_add(step)
+            }
+        })
+    })
+}
+
+/// The same lamps as breath spans — the A2 fallback's shape, where direction
+/// is dropped because the wire cannot say which channel is blue.
+fn breath_spans(spans: &[ChaseSpan]) -> Vec<(u32, u32)> {
+    spans.iter().map(|span| (span.start, span.count)).collect()
+}
+
+/// Which channel order each sample of a published buffer is stored in.
+///
+/// A cursor, not a map: the layout's runs and a chase's lamps both walk the
+/// buffer roughly in order, so remembering the last run that answered keeps
+/// the lookup O(1) on the common path without allocating. Rows are ignored —
+/// an output's published buffer is one flat sequence and its producers all
+/// place into row 0.
+struct ChannelOrders<'a> {
+    spans: &'a [ControlSpan],
+    cursor: usize,
+}
+
+impl<'a> ChannelOrders<'a> {
+    fn new(layout: &'a ControlLayout) -> Self {
+        Self {
+            spans: &layout.spans,
+            cursor: 0,
+        }
+    }
+
+    /// The channel order of the RGB run covering `sample`, or `None` when no
+    /// run does (a gap, or a `Raw` run with no color interpretation).
+    fn order_at(&mut self, sample: u32) -> Option<ColorOrder> {
+        let count = self.spans.len();
+        for step in 0..count {
+            let index = (self.cursor + step) % count;
+            let span = &self.spans[index];
+            if sample < span.start || sample >= span.start.saturating_add(span.len) {
+                continue;
+            }
+            match &span.encoding {
+                ControlHint::RgbPixels { color_order, .. } => {
+                    self.cursor = index;
+                    return Some(*color_order);
+                }
+                ControlHint::Raw => continue,
+            }
+        }
+        None
+    }
+}
+
+/// 8-bit unorm to 16-bit unorm: 0..=255 maps onto 0..=65535 exactly.
+fn rgb8_to_16(rgb: [u8; 3]) -> [u16; 3] {
+    [
+        u16::from(rgb[0]) * 257,
+        u16::from(rgb[1]) * 257,
+        u16::from(rgb[2]) * 257,
+    ]
 }
 
 /// One product rendered whole, for the fragments that only want part of it.
@@ -1020,7 +1367,7 @@ impl NodeRuntime for OutputNode {
         // A pattern only ever REPAINTS an extent the graph already established;
         // before the first rendered frame there is nothing to repaint, so that
         // frame renders the graph and establishes it.
-        let highlight = self.highlight_lamps(ctx)?;
+        let highlight = self.highlight_value(ctx)?;
         if self.test_pattern_active(ctx)? && !self.control_samples.is_empty() {
             self.fill_solid(TEST_PATTERN_RGB);
             self.paint_highlight(&highlight, ctx.time_seconds());
@@ -1142,6 +1489,10 @@ mod tests {
         highlight: String,
         /// The `highlight` twin of `test_pattern_resolvable`.
         highlight_resolvable: bool,
+        /// Channel order the rendered span declares, or `None` for a `Raw`
+        /// span with no color interpretation — the layout the chase needs
+        /// and the one it must refuse (A2).
+        sample_color_order: Option<ColorOrder>,
         graph_extent: ControlExtent,
         graph_color: [u16; 3],
         /// The products the `input` slot answers with, as a fragment map —
@@ -1168,6 +1519,7 @@ mod tests {
                 test_pattern_resolvable: true,
                 highlight: String::new(),
                 highlight_resolvable: true,
+                sample_color_order: None,
                 graph_extent: ONE_LAMP,
                 graph_color: [1000, 2000, 3000],
                 graph_products: Vec::new(),
@@ -1290,12 +1642,19 @@ mod tests {
             }
             // One span covering the whole fragment, in the fragment's OWN
             // coordinates — the output is what rebases it.
+            let len = target.samples.len() as u32;
             Ok(ControlSampleLayout {
                 spans: vec![lpc_model::ControlSampleSpan {
                     row: 0,
                     start: 0,
-                    len: target.samples.len() as u32,
-                    encoding: lpc_model::ControlSampleEncoding::Raw,
+                    len,
+                    encoding: match self.sample_color_order {
+                        Some(color_order) => lpc_model::ControlSampleEncoding::RgbPixels {
+                            count: len / 3,
+                            color_order,
+                        },
+                        None => lpc_model::ControlSampleEncoding::Raw,
+                    },
                 }],
             })
         }
@@ -1761,11 +2120,245 @@ mod tests {
         );
     }
 
+    // ---- Highlight chase ----------------------------------------------
+
+    #[test]
+    fn parse_highlight_reads_both_languages() {
+        assert_eq!(
+            parse_highlight("0-29, 45,90-119"),
+            Highlight::Breath(vec![(0, 30), (45, 1), (90, 30)]),
+            "a bare list is still the v1 breath, unchanged",
+        );
+        assert_eq!(
+            parse_highlight("chase:60-119,59-0"),
+            Highlight::Chase(vec![
+                ChaseSpan {
+                    start: 60,
+                    count: 60,
+                    reversed: false,
+                },
+                ChaseSpan {
+                    start: 0,
+                    count: 60,
+                    reversed: true,
+                },
+            ]),
+            "chase spans keep their listed OBJECT order, and a descending \
+             range is the reversed run",
+        );
+        assert_eq!(
+            parse_highlight(" CHASE: 7 , zork , 4-4 "),
+            Highlight::Chase(vec![
+                ChaseSpan {
+                    start: 7,
+                    count: 1,
+                    reversed: false,
+                },
+                ChaseSpan {
+                    start: 4,
+                    count: 1,
+                    reversed: false,
+                },
+            ]),
+            "the prefix is case-insensitive and padding-tolerant; junk \
+             segments are skipped, never fatal",
+        );
+        assert_eq!(
+            parse_highlight("wobble:0-3"),
+            Highlight::Breath(Vec::new()),
+            "an unknown prefix paints nothing rather than guessing a language",
+        );
+        assert!(parse_highlight("").is_empty());
+        assert!(parse_highlight("chase:").is_empty());
+    }
+
+    #[test]
+    fn chase_heads_clamp_between_one_and_ten() {
+        assert_eq!(chase_head_lamps(0), 1);
+        assert_eq!(chase_head_lamps(1), 1, "a tiny object still marks an end");
+        assert_eq!(chase_head_lamps(9), 1);
+        assert_eq!(chase_head_lamps(15), 2, "round(n / 10), not floor");
+        assert_eq!(chase_head_lamps(100), 10);
+        assert_eq!(
+            chase_head_lamps(30_000),
+            10,
+            "a dome-scale object gets an end marker, not a striped end",
+        );
+    }
+
+    #[test]
+    fn the_chase_paints_blue_head_red_tail_and_dims_the_rest() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = lamps(6);
+        resolver.sample_color_order = Some(ColorOrder::Rgb);
+        resolver.highlight = String::from("chase:0-3");
+
+        consume_at_time(&mut node, &mut resolver, Revision::new(1), 0.0).expect("graph frame");
+
+        let floor = CHASE_BODY_FLOOR_16;
+        assert_eq!(
+            resolver.published_samples(),
+            vec![
+                // object lamp 0: the blue head (n = 4, so one lamp each end)
+                0, 0, 65535, // body, at the floor: the dot sits on the head end at t=0
+                floor, floor, floor, floor, floor, floor,
+                // object lamp 3: the red tail
+                65535, 0, 0, // unnamed lamps keep the graph frame at quarter power
+                250, 500, 750, 250, 500, 750,
+            ],
+        );
+    }
+
+    #[test]
+    fn a_reversed_chase_span_walks_its_wire_lamps_backward() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = lamps(4);
+        resolver.sample_color_order = Some(ColorOrder::Rgb);
+        resolver.highlight = String::from("chase:3-0");
+
+        consume_at_time(&mut node, &mut resolver, Revision::new(1), 0.0).expect("graph frame");
+
+        let floor = CHASE_BODY_FLOOR_16;
+        assert_eq!(
+            resolver.published_samples(),
+            vec![
+                65535, 0, 0, // wire lamp 0 is the OBJECT's last: red
+                floor, floor, floor, floor, floor, floor, 0, 0,
+                65535, // wire lamp 3 is object lamp 0: blue
+            ],
+            "a strand plugged in at the far end runs its head at the high \
+             wire index — the mis-wiring the language exists to show",
+        );
+    }
+
+    #[test]
+    fn the_chase_dot_sweeps_the_object_in_order() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = lamps(11);
+        resolver.sample_color_order = Some(ColorOrder::Rgb);
+        resolver.highlight = String::from("chase:0-10");
+
+        // Half a period: the dot sits at the object's midpoint (u = 0.5),
+        // which for 11 lamps is object lamp 5 exactly.
+        consume_at_time(
+            &mut node,
+            &mut resolver,
+            Revision::new(1),
+            CHASE_SWEEP_SECONDS / 2.0,
+        )
+        .expect("mid-sweep frame");
+        let samples = resolver.published_samples();
+        assert_eq!(
+            &samples[15..18],
+            &[CHASE_BODY_CREST_16; 3],
+            "the dot is full white where it stands",
+        );
+        assert!(
+            samples[12] < CHASE_BODY_CREST_16 && samples[12] > CHASE_BODY_FLOOR_16,
+            "and falls off around it ({})",
+            samples[12],
+        );
+
+        // At phase 0 the dot has run back to the head end, so the midpoint
+        // is dark again — the body is dark-with-a-runner, not a wash.
+        consume_at_time(&mut node, &mut resolver, Revision::new(2), 0.0).expect("start frame");
+        assert_eq!(
+            &resolver.published_samples()[15..18],
+            &[CHASE_BODY_FLOOR_16; 3],
+        );
+    }
+
+    #[test]
+    fn the_chase_paints_in_the_outputs_declared_channel_order() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = lamps(2);
+        resolver.sample_color_order = Some(ColorOrder::Grb);
+        resolver.highlight = String::from("chase:0-1");
+
+        consume_at_time(&mut node, &mut resolver, Revision::new(1), 0.0).expect("graph frame");
+
+        assert_eq!(
+            resolver.published_samples(),
+            vec![0, 0, 65535, 0, 65535, 0],
+            "on a GRB run the red tail is the MIDDLE channel — a chase that \
+             ignored the layout would light the wrong end green",
+        );
+    }
+
+    #[test]
+    fn a_chase_without_an_rgb_layout_falls_back_to_the_breath() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = TWO_LAMPS;
+        // The default fake publishes `Raw` spans: samples with no color
+        // interpretation, the A2 case.
+        resolver.highlight = String::from("chase:0-1");
+
+        consume_at_time(&mut node, &mut resolver, Revision::new(1), 0.0).expect("graph frame");
+
+        let floor = HIGHLIGHT_FLOOR_16;
+        assert_eq!(
+            resolver.published_samples(),
+            vec![floor, floor, floor, floor, floor, floor],
+            "the whole output breathes rather than painting a chase whose \
+             blue might come out green",
+        );
+    }
+
+    #[test]
+    fn an_absurd_chase_span_breathes_instead_of_walking_four_billion_lamps() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = TWO_LAMPS;
+        resolver.sample_color_order = Some(ColorOrder::Rgb);
+        resolver.highlight = String::from("chase:0-4294967295");
+
+        consume_at_time(&mut node, &mut resolver, Revision::new(1), 0.0).expect("graph frame");
+
+        let floor = HIGHLIGHT_FLOOR_16;
+        assert_eq!(
+            resolver.published_samples(),
+            vec![floor, floor, floor, floor, floor, floor],
+            "a hand-typed absurdity costs a breath, not a frame",
+        );
+    }
+
+    #[test]
+    fn a_chase_naming_no_lamps_publishes_the_graph_frame_byte_for_byte() {
+        let mut chased = output_node();
+        let mut chased_resolver = FakeResolver::new();
+        chased_resolver.sample_color_order = Some(ColorOrder::Rgb);
+        chased_resolver.highlight = String::from("chase:");
+        consume_at(&mut chased, &mut chased_resolver, Revision::new(1)).expect("chase frame");
+
+        let mut plain = output_node();
+        let mut plain_resolver = FakeResolver::new();
+        plain_resolver.sample_color_order = Some(ColorOrder::Rgb);
+        consume_at(&mut plain, &mut plain_resolver, Revision::new(1)).expect("plain frame");
+
+        assert_eq!(
+            chased_resolver.buffer.bytes, plain_resolver.buffer.bytes,
+            "an empty chase is an empty highlight: the render path publishes \
+             exactly the bytes it always did",
+        );
+        assert_eq!(chased_resolver.published_samples(), vec![1000, 2000, 3000]);
+    }
+
     // ---- Output fragments ---------------------------------------------
 
     /// Two lamps' worth of samples: the smallest fragment that can be
     /// reversed and still say something.
     const TWO_LAMPS: ControlExtent = ControlExtent::new(1, 6);
+
+    /// An extent of `count` RGB lamps in one row — the shape a chase's
+    /// object order is read against.
+    const fn lamps(count: u32) -> ControlExtent {
+        ControlExtent::new(1, count * SAMPLES_PER_LAMP)
+    }
 
     fn product(output: u32, extent: ControlExtent) -> ControlProduct {
         ControlProduct::new(node_id(), output, extent)
