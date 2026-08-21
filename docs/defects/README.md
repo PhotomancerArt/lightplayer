@@ -280,6 +280,7 @@ values; statistical diffs are for the arithmetic in between.
 | state-conflation | 2026-08-14 | [sibling-module-bus-tie-blanks-preview](2026-08-14-sibling-module-bus-tie-blanks-preview.md) | **open** | lpc-engine (bus resolution) + fw-browser preview runtime |
 | newest-only-inflight-memory | 2026-08-13 | [stale-echo-reseeded-dive-session](2026-08-13-stale-echo-reseeded-dive-session.md) | fixed | lpa-studio-web editor_shell (mapping_session pipeline) |
 | config-masked-defect | 2026-08-05 | [generated-palette-header-dies-on-naga](2026-08-05-generated-palette-header-dies-on-naga.md) | fixed | lps-frontend (parse.rs) + lpc-model shader_header_gen |
+| config-masked-defect | 2026-08-21 | [hello-gate-assumes-fresh-boot](2026-08-21-hello-gate-assumes-fresh-boot.md) | **open** | lpa-link device_session (readiness) + fw server_loop heartbeat |
 | unenforced-test-precondition | 2026-08-05 | [cross-core-panic-races-the-isr-thread](2026-08-05-cross-core-panic-races-the-isr-thread.md) | fixed | lp-fw/lp-ws281x tests (cross_core) |
 | reclaim-ordered-behind-its-own-rebuild | 2026-08-04 | [compile-window-drops-rebuilt-before-compile](2026-08-04-compile-window-drops-rebuilt-before-compile.md) | fixed | lpc-engine nodes (fixture + output pressure handlers) |
 | assumed-context | 2026-08-02 | [provisioning-flashes-one-image-unchecked](2026-08-02-provisioning-flashes-one-image-unchecked.md) | fixed | lpa-link serial ESP32 providers + lpa-boards + justfile |
