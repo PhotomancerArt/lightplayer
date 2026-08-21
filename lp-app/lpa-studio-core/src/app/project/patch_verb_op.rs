@@ -67,6 +67,16 @@ pub enum PatchVerbKind {
     },
     /// Remove the subject's entries (fixture subject = clear the doc).
     Clear,
+    /// Set the SUBJECT FIXTURE's flow flag (P5b): `manual` places only
+    /// authored entries, `auto` flows everything else on behind them. The
+    /// selection's grain is ignored — flow is a fixture fact.
+    SetFlow {
+        manual: bool,
+    },
+    /// Take every object of the subject fixture off the wire — one write,
+    /// one undo step, no confirm. Meaningful under `manual`, which is where
+    /// the UI offers it.
+    UnmapAll,
     /// Run ensure-ids on the SUBJECT fixture's map2d document — the one
     /// mapping write this surface may make (undoable like every verb).
     EnsureIds,

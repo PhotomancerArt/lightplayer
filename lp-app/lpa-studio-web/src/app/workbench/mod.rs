@@ -353,11 +353,13 @@ pub fn WorkbenchFrame(
     let dive_focused = use_signal(|| None::<NodeId>);
     let dive_session = use_signal(|| MapEditorSession::new(lpc_mapping::Map2dDoc::new()));
     let dive_commits = use_signal(|| 0u64);
-    // The patching activity's cross-dock state: the swap verb arms in the
-    // center (`s`) and completes on an Outputs-dock port click — frame
-    // scope, like the dive signals, so both sides read one signal.
+    // The patching activity's cross-dock state: verbs arm in the center
+    // (`a` / `s`) and complete on a counterpart click in the Outputs or
+    // Tree dock — frame scope, like the dive signals, so every side reads
+    // ONE arm (and one segment-size override).
     use_context_provider(|| crate::app::editor_shell::patching::PatchingUi {
-        armed_swap: Signal::new(None),
+        armed: Signal::new(None),
+        segment_size: Signal::new(None),
     });
     // The Fixtures/Outputs panels' slice of the editor view (#409 DTOs)
     // and the surface's one shared selection.
@@ -876,6 +878,8 @@ fn PanelBody(
                     selection: patch_selection,
                     grain: TreeGrain::Resolved,
                     dive: None,
+                    // An armed assign completes on an object row here.
+                    patch_verbs: true,
                     on_action,
                 }
             }

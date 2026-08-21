@@ -99,3 +99,77 @@ over its live frame.**
   page is interim (G1: patching re-houses inside the mapping editor);
   the op takes subjects, not page state, so the re-housed UI calls the
   same seam.
+
+## Amendment 2026-08-20 — CHASE joins the breath (microformat v2)
+
+The slot now carries **two light languages**, because a patch selection
+asks two different questions. "Which strand IS this?" (wire-side) is
+answered by the breath this ADR decided. "Does this object run the way I
+think it does?" (fixture-side) needs DIRECTION, which a symmetric white
+fade cannot say. Design record: `spikes/patching-controls/index.html` §3
+(the ruling matrix and its `chaseRgb`) and the walk-up assignment plan
+(`2026-08-20-1826-patching-pass2-walkup-assignment`, D1/D9/D10).
+
+**Microformat v2** — the slot stays `ValueSlot<String>`, still a Debug
+slot, still hand-drivable from the Debug section:
+
+```text
+value   := [ "chase:" ] list         ; prefix is case-insensitive
+list    := segment { "," segment }
+segment := lamp | lamp "-" lamp      ; inclusive on both ends
+```
+
+- **No prefix** is v1, unchanged in meaning and in bytes: unordered wire
+  spans, breathing white, inverted ranges skipped. Nothing that ever
+  wrote this slot has to change.
+- **`chase:`** lists the spans in **object order** — the first segment
+  holds object lamp 0 — and a **descending** range (`59-0`) means that
+  run is walked backward on the wire. `chase:60-119,59-0` is one object
+  whose second half is plugged in at the far end.
+- Junk segments are still skipped; an **unknown prefix paints nothing**
+  rather than guessing a language. An empty or unparseable value is the
+  byte-identity no-op the original decision pinned.
+
+**The chase's look** (D10, ratified in the spike): the first and last
+`clamp(1, 10, round(n / 10))` lamps of the object wear blue `#0000ff`
+and red `#ff0000`; the body sits near-dark (25/255) with one full-white
+dot sweeping head-to-tail once every 2 s, on a raised window that fades
+out a seventh of the object either side. `n` is the object's total lamp
+count across all its spans, so the ends stay legible on a 12-lamp arch
+and on a 3000-lamp dome. Everything outside the named spans dims `>>2`,
+exactly as the breath does — the two languages share their first move.
+
+**Selection kind → language** (the spike's §3 matrix; the engine only
+honors what the string says, the client chooses):
+
+| selection | language |
+|---|---|
+| fixture object / instance / range / cell / mapped segment | CHASE |
+| output / port / free segment | BREATH |
+| nothing | show content |
+
+**A2 — layout fallback.** Breath paints white, which is
+channel-order-agnostic; blue and red are not. The chase resolves every
+named lamp's channel order from the output's own published sample
+layout (`ControlSampleLayout`, the `RgbPixels { color_order }` runs the
+producers declare and already render in), and packs its colors in that
+order. **If any named, in-extent lamp does not resolve to an RGB run —
+no layout published yet, a `Raw` run, or a gap — the whole output falls
+back to the breath for that frame and paints no chase at all.** Refusing
+per-output rather than per-lamp is deliberate: a chase that decodes half
+an object names the wrong end of the strand, and a wrong direction claim
+is worse than an honest direction-free one. The same fallback catches
+absurd input: a chase naming more than 65 536 lamps costs a breath, not
+a four-billion-lamp frame (the chase is per-lamp work where the breath
+is slice math).
+
+Implementation: `lp-core/lpc-engine/src/nodes/output/output_node.rs`
+(`parse_highlight`, `paint_chase`) for the reading side;
+`lpa-studio-core/src/app/project/patch_pulse.rs` (`chase_text`,
+`highlight_text`) for the writing side, with the selection-kind half of
+the matrix on `UiPatchTarget::pulse_space`. The client picks the language
+in exactly ONE place — `PatchPulseSpace::language`, which is the table
+above in code — so no surface can name a selection in the wrong tongue.
+A fixture-side subject's spans keep the OBJECT's order (they are sorted
+by source lamp, never by wire position) and are never merged: each join
+between two spans is a fact about the wiring the chase exists to show.

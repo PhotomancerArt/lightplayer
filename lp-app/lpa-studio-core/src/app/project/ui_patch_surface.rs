@@ -139,6 +139,16 @@ pub struct UiPatchSurfaceFixture {
     /// not landed yet; the page dispatches it so verbs have their document
     /// (a verb before it lands blocks honestly).
     pub patch_loaded: bool,
+    /// The fixture's patch declares MANUAL flow (`flow: "manual"`, P5b):
+    /// only authored entries place, and an object with no entry is
+    /// genuinely unmapped — dark on the piece, no wire chip here.
+    ///
+    /// False = auto-mapped, the historical behaviour: the lamps no entry
+    /// names flow on after the last anchor, so nothing is ever unmapped for
+    /// long. Read from the patch BODY (the same bytes the verbs transform),
+    /// so it is `false` while the body is still loading and while it is
+    /// unreadable — silence is not the manual claim.
+    pub manual_flow: bool,
     /// The addressable instance table (`/sector/0` …), parsed from the
     /// fixture's map2d document. EMPTY for shape-less strips and for docs
     /// without object ids — the fixture then patches at range grain only
@@ -234,6 +244,20 @@ pub enum UiPatchTarget {
     Output { node: NodeId },
     /// One port of an output.
     Port { node: NodeId, port: u32 },
+    /// A SEGMENT: a contiguous lamp window on one port, in WIRE numbering
+    /// (`start` is the output's own lamp index, inside `port`'s span).
+    ///
+    /// The walk-up surface's wire-side unit for FREE space — the window a
+    /// click on unmapped port lamps draws, sized to the object it is about
+    /// to take. A MAPPED run is NOT a segment: it keeps selecting as
+    /// [`Self::Cell`], which already names it and speaks the fixture's
+    /// language. WLED's word, ratified; "universe" stays banned.
+    Segment {
+        node: NodeId,
+        port: u32,
+        start: u32,
+        lamps: u32,
+    },
     /// One bay cell, by its twin-hover run id.
     Cell { id: String },
     /// One fixture instance, by its path.
@@ -247,6 +271,43 @@ pub enum UiPatchTarget {
         start: u32,
         count: Option<u32>,
     },
+}
+
+impl UiPatchTarget {
+    /// Which space this selection kind counts its lamps in — the
+    /// target-kind half of the D9 language matrix, whose one authority is
+    /// [`crate::PatchPulseSpace::language`]. `None` = a level that pulses
+    /// nothing.
+    ///
+    /// Kept here rather than in each surface so no caller can invent a
+    /// third answer: the space decides the language, and a client that
+    /// resolves a target's lamp numbers hands them to
+    /// [`crate::PatchPulseSpace::subject`] without choosing anything.
+    #[must_use]
+    pub fn pulse_space(&self) -> Option<crate::PatchPulseSpace> {
+        match self {
+            // Fixture-side: the object's own numbering, whatever grain it
+            // was named at — a mapped run included, since a cell IS a piece
+            // of its fixture.
+            Self::Fixture { .. }
+            | Self::Instance { .. }
+            | Self::Range { .. }
+            | Self::Cell { .. } => Some(crate::PatchPulseSpace::Fixture),
+            // Wire-side: lamps on an output, named by the wire.
+            Self::Output { .. } | Self::Port { .. } | Self::Segment { .. } => {
+                Some(crate::PatchPulseSpace::Wire)
+            }
+            // A module is a level above both spaces: it names no lamps.
+            Self::Module { .. } => None,
+        }
+    }
+
+    /// The light language this selection kind deserves (D9), or `None` when
+    /// it pulses nothing.
+    #[must_use]
+    pub fn pulse_language(&self) -> Option<crate::PatchPulseLanguage> {
+        Some(self.pulse_space()?.language())
+    }
 }
 
 /// Parse a fixture's map2d body into its instance table.

@@ -137,8 +137,16 @@ pub(crate) fn ProjectCanvasHost(
     /// display is the dived feed behind the L toggle.
     #[props(default)]
     live_sprites: bool,
+    /// The Patching view passes true: a sprite is a COUNTERPART an armed
+    /// assign can complete against, exactly like its tree row. Selection
+    /// is unchanged either way — plain clicks never write.
+    #[props(default)]
+    patch_verbs: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    // The frame-scoped arm; absent outside the workbench frame (stories).
+    let patching_ui =
+        use_hook(try_consume_context::<crate::app::editor_shell::patching::PatchingUi>);
     // Geometry is derived per (surface, bodies, pack, selection) change —
     // resolver runs are cheap at fixture grain and the memo keeps drag
     // overrides and camera work off that path.
@@ -347,11 +355,26 @@ pub(crate) fn ProjectCanvasHost(
     };
     let on_fixture = {
         let nodes = nodes.clone();
+        let grammar_surface = surface.clone();
+        let grammar_selection = selection.clone();
         move |event: FixtureEvent| match event {
             FixtureEvent::Select(Some(key)) => {
                 if let Some(node) = nodes.get(&key) {
                     drag_override.set(None);
-                    select(Some(UiPatchTarget::Fixture { node: *node }));
+                    let target = UiPatchTarget::Fixture { node: *node };
+                    // The same fixture-side completion the tree's rows
+                    // carry: armed assign + a free segment → the clicked
+                    // sprite takes it. Unarmed, this is a plain select.
+                    if patch_verbs {
+                        crate::app::editor_shell::patching::complete_assign_on_object(
+                            &on_action,
+                            &grammar_surface,
+                            &grammar_selection,
+                            patching_ui,
+                            &target,
+                        );
+                    }
+                    select(Some(target));
                 }
             }
             FixtureEvent::Select(None) => {

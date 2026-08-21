@@ -78,6 +78,40 @@ fixture a place in the outputs, guided by the actual lights.
    group-size setting is what makes this guess right.
 6. **Repeat until all the lights are on.**
 
+### Who this loop is for
+
+The loop above is the **[sign](use-cases/sign.md)** and
+**[dome-scale](use-cases/dome-scale.md)** cases; the
+**[scarf](use-cases/scarf.md)** never enters it (one strip on one port
+flows correctly with no patching gesture at all). See
+[`use-cases/`](use-cases/README.md) for the three shapes and what each
+asks of the product.
+
+### RULED 2026-08-21: auto-flow is a per-fixture FLAG
+
+Amendment (patching pass-2, P5b). The sparse-anchors-over-auto-flow model
+made "unmapped" unreachable: clearing an object's entry only returned it
+to the flow, which re-placed it — so the invitation states above had
+nothing to invite. Auto-mapping is right for the scarf and
+counter-productive for everything else, so it is a flag at the fixture
+level rather than a law of the model:
+
+- `{stem}.patch.json` carries `"flow": "auto" | "manual"` (patch format
+  3; absent field, and an absent file, mean `auto` — every earlier
+  document reads exactly as it always did).
+- **auto**: lamps no entry names flow on after the last anchor, as
+  before.
+- **manual**: only authored entries place. Unnamed lamps are on no wire —
+  dark on the piece, unmapped in the editor. `Clear` becomes lp2014's
+  real `u`, and **unmap all** (one write, one undo step, no confirm)
+  empties a fixture to start a re-patch.
+
+The panel shows the flag on the object section as a fixture-level fact
+and toggles it undoably. Creation-time defaults (Strip preset → auto,
+drawn shape → manual) are deliberately NOT decided yet — they are owed to
+the hardware walk of the three use cases. A resolve-time heuristic is
+banned: it would flip existing, documented fixtures dark.
+
 ### The guide invariant
 
 The fixture display must always show **which objects are patched and

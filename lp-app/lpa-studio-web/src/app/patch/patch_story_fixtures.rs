@@ -179,6 +179,8 @@ fn build_mini_dome_surface(contested: bool) -> UiPatchSurface {
                 patch_artifact: None,
                 mapping_loaded: true,
                 patch_loaded: true,
+                // Stories pose the AUTO-mapped world (P5b's default).
+                manual_flow: false,
                 patch: UiFixturePatch {
                     lamps: 150,
                     cells: vec![
@@ -213,6 +215,8 @@ fn build_mini_dome_surface(contested: bool) -> UiPatchSurface {
                 patch_artifact: None,
                 mapping_loaded: true,
                 patch_loaded: true,
+                // Stories pose the AUTO-mapped world (P5b's default).
+                manual_flow: false,
                 patch: UiFixturePatch {
                     lamps: 27,
                     cells: vec![
@@ -280,6 +284,8 @@ fn build_peach_surface() -> UiPatchSurface {
                 patch_artifact: None,
                 mapping_loaded: true,
                 patch_loaded: true,
+                // Stories pose the AUTO-mapped world (P5b's default).
+                manual_flow: false,
                 patch: UiFixturePatch {
                     lamps: 44,
                     cells: vec![cell("body:0:0:0", "peach_body", 0, 22, 0), {
@@ -302,6 +308,8 @@ fn build_peach_surface() -> UiPatchSurface {
                 patch_artifact: None,
                 mapping_loaded: true,
                 patch_loaded: true,
+                // Stories pose the AUTO-mapped world (P5b's default).
+                manual_flow: false,
                 patch: UiFixturePatch {
                     lamps: 12,
                     cells: vec![cell("leaf:0:0:22", "peach_leaf", 0, 12, 22)],

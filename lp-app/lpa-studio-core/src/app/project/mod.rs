@@ -81,7 +81,7 @@ pub use node::{
 pub use node_card_ui_state::{
     ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,
 };
-pub use patch_pulse::{PatchPulseOp, PatchPulseSubject};
+pub use patch_pulse::{PatchPulseLanguage, PatchPulseOp, PatchPulseSpace, PatchPulseSubject};
 pub use patch_verb_op::{
     PatchVerbFixture, PatchVerbKind, PatchVerbOp, PatchVerbSubject, PatchVerbWindow,
 };

@@ -380,16 +380,59 @@ pub(crate) fn control_rgb_at_sample(
     preview: &UiControlProductPreview,
     sample_start: u32,
 ) -> Option<[u8; 3]> {
+    let color_order = control_color_order_at_sample(preview, sample_start)?;
+    Some(order_channels(
+        color_order,
+        sample_triple(preview, sample_start)?,
+    ))
+}
+
+/// The colour order the product's OWN layout declares at `sample_start`, or
+/// `None` where it declares none — a `Raw` run, or wire the layout says
+/// nothing about at all.
+///
+/// A wire's layout only covers the stretches a producer was PLACED on: free
+/// lamps between runs carry real samples (the engine's selection highlight
+/// paints them) that no span names. A reader that wants those lamps has to
+/// bring its own order — see [`wire_lamp_rgb`] and the panel's A1 decode
+/// line.
+pub(crate) fn control_color_order_at_sample(
+    preview: &UiControlProductPreview,
+    sample_start: u32,
+) -> Option<ColorOrder> {
     let span = preview.sample_layout.spans.iter().find(|span| {
         matches!(span.encoding, ControlSampleEncoding::RgbPixels { .. })
             && sample_start >= span.start
             && sample_start.saturating_add(3) <= span.start.saturating_add(span.len)
             && (sample_start - span.start).is_multiple_of(3)
     })?;
-    let color_order = match span.encoding {
-        ControlSampleEncoding::RgbPixels { color_order, .. } => color_order,
-        ControlSampleEncoding::Raw => return None,
-    };
+    match span.encoding {
+        ControlSampleEncoding::RgbPixels { color_order, .. } => Some(color_order),
+        ControlSampleEncoding::Raw => None,
+    }
+}
+
+/// One WIRE lamp's colour, decoded under the layout's own order where the
+/// layout declares one and under `assumed` where it does not (A1).
+///
+/// The honest shape of a walk-up port strip: mapped stretches decode by what
+/// the wire says about itself, and the free stretches between them decode by
+/// the lamp type of the fixture the user is about to put there. `None` means
+/// the sample is not on the wire at all (past the published extent) — a lamp
+/// with no signal behind it, not a black lamp.
+pub(crate) fn wire_lamp_rgb(
+    preview: &UiControlProductPreview,
+    wire_lamp: u32,
+    assumed: ColorOrder,
+) -> Option<[u8; 3]> {
+    let sample_start = wire_lamp.saturating_mul(3);
+    let order = control_color_order_at_sample(preview, sample_start).unwrap_or(assumed);
+    Some(order_channels(order, sample_triple(preview, sample_start)?))
+}
+
+/// Three consecutive samples as display sRGB8, in the order they ride the
+/// wire (no colour interpretation yet).
+fn sample_triple(preview: &UiControlProductPreview, sample_start: u32) -> Option<[u8; 3]> {
     let sample = |offset: u32| -> Option<u8> {
         let index = sample_start.checked_add(offset)? as usize;
         let byte_index = index.checked_mul(2)?;
@@ -397,17 +440,19 @@ pub(crate) fn control_rgb_at_sample(
         let hi = *preview.bytes.get(byte_index + 1)?;
         Some(linear_unorm16_to_srgb8(u16::from_le_bytes([lo, hi])))
     };
-    let a = sample(0)?;
-    let b = sample(1)?;
-    let c = sample(2)?;
-    Some(match color_order {
+    Some([sample(0)?, sample(1)?, sample(2)?])
+}
+
+/// Wire-order channels back into RGB.
+fn order_channels(color_order: ColorOrder, [a, b, c]: [u8; 3]) -> [u8; 3] {
+    match color_order {
         ColorOrder::Rgb => [a, b, c],
         ColorOrder::Grb => [b, a, c],
         ColorOrder::Rbg => [a, c, b],
         ColorOrder::Gbr => [c, a, b],
         ColorOrder::Brg => [b, c, a],
         ColorOrder::Bgr => [c, b, a],
-    })
+    }
 }
 
 /// Encode one LINEAR unorm16 control sample as display sRGB8.
@@ -419,7 +464,7 @@ pub(crate) fn control_rgb_at_sample(
 /// 2026-08-05 G1 finding: "much more saturated than the shader"). Same
 /// transfer as the engine's LUT, float form (non-embedded client; ~4.5k
 /// calls/frame is nothing here).
-fn linear_unorm16_to_srgb8(value: u16) -> u8 {
+pub(crate) fn linear_unorm16_to_srgb8(value: u16) -> u8 {
     let linear = value as f32 / 65535.0;
     let srgb = if linear <= 0.003_130_8 {
         12.92 * linear
@@ -599,5 +644,41 @@ mod tests {
         // second cell's wire 1 (green) wins the contested slot.
         assert_eq!(colors[0], BLUE);
         assert_eq!(colors[1], GREEN);
+    }
+
+    /// A1's decode: the wire's own layout wins wherever it declares an
+    /// order, and the caller's assumption covers only the stretches it says
+    /// nothing about — the free lamps a walk-up user is about to spend.
+    /// Past the published extent there is no lamp at all, not a black one.
+    #[test]
+    fn undeclared_wire_decodes_under_the_assumed_lamp_type() {
+        let mut frame = wire_frame(4);
+        // Only the first two lamps are placed, and that run is GRB.
+        frame.sample_layout.spans = vec![ControlSampleSpan {
+            row: 0,
+            start: 0,
+            len: 6,
+            encoding: ControlSampleEncoding::RgbPixels {
+                count: 2,
+                color_order: ColorOrder::Grb,
+            },
+        }];
+        // Lamp 0's samples are (65535, 0, 0): GRB reads that as green.
+        assert_eq!(wire_lamp_rgb(&frame, 0, ColorOrder::Rgb), Some(GREEN));
+        assert_eq!(
+            control_color_order_at_sample(&frame, 0),
+            Some(ColorOrder::Grb)
+        );
+        // Lamp 3's samples are (65535, 0, 0) too, but nothing declares them:
+        // the assumption decides, and it is the caller's to state.
+        assert_eq!(control_color_order_at_sample(&frame, 9), None);
+        assert_eq!(wire_lamp_rgb(&frame, 3, ColorOrder::Rgb), Some(RED));
+        assert_eq!(wire_lamp_rgb(&frame, 3, ColorOrder::Grb), Some(GREEN));
+        assert_eq!(
+            control_rgb_at_sample(&frame, 9),
+            None,
+            "the layout-only decode still refuses to invent an order"
+        );
+        assert_eq!(wire_lamp_rgb(&frame, 9, ColorOrder::Rgb), None);
     }
 }
