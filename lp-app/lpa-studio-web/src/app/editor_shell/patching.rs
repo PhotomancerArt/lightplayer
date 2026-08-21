@@ -8,6 +8,13 @@
 //! Same canvas, different furniture (the one-project-canvas ADR): no
 //! dive here — the authored tree is Mapping's activity; this center
 //! reads the resolved surface and writes patches through the verbs.
+//!
+//! It also owns the ARM GRAMMAR (pass 2, P3): linking is explicit — `a`
+//! arms an assign, `s` a swap, and the next counterpart CLICK (in the
+//! Outputs dock, the Tree, or on a sprite) completes it as one real,
+//! undoable write. Plain clicks only ever select. `m` walks the next free
+//! segment and keeps the arm, `[`/`]` and `-`/`=` nudge that window
+//! (selection only), and Esc is a ladder: disarm, then deselect.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -18,17 +25,53 @@ use lpa_studio_core::{
 use super::arrange::{PackSlots, ProjectCanvasHost, refresh_pack_slots};
 use super::toolbar::{StatusKind, ToolbarGroup, ToolbarItem, ToolbarStrip};
 use super::{mapping_assets, prefetch_editor_meta};
-use crate::app::patch::verb_ui::{dispatch_verb, port_window, selection_stride};
+use crate::app::patch::verb_ui::{
+    dispatch_assign, dispatch_verb, next_free_segment, port_window, resize_segment,
+    selection_stride, shift_segment, target_is_unmapped,
+};
 use crate::app::workbench::panels::prefetch_bodies;
 
-/// Cross-dock patching UI state, provided by the workbench frame: the
-/// swap verb arms here (`s` in the center) and completes on a port click
-/// in the Outputs dock — the same two-sided gesture the interim page
+/// Which patch verb is ARMED, if any — the generalized swap arm (R3's
+/// selection model v3: linking is explicit, plain clicks never write).
+///
+/// `Assign` carries NO payload on purpose: both ends resolve at COMPLETION
+/// from the current selection plus the thing clicked. The selection moves
+/// under a live arm (`m` advances to the next free segment and keeps it),
+/// so an arm that captured its counterpart at arming time would go stale
+/// on the second lap of the walk-up loop.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ArmedVerb {
+    /// The next counterpart click links the selection to what it hits.
+    Assign,
+    /// The next port click swaps that port with this armed window.
+    Swap(PatchVerbWindow),
+}
+
+impl ArmedVerb {
+    /// The banner's sentence — the armed verb NAMES itself, so the user is
+    /// never guessing which gesture the next click completes.
+    fn banner(&self) -> &'static str {
+        match self {
+            Self::Assign => {
+                "Assign armed — click the counterpart (an object, or a port / free segment) to link it (Esc cancels)"
+            }
+            Self::Swap(_) => "Swap armed — click the other port in the Outputs panel (Esc cancels)",
+        }
+    }
+}
+
+/// Cross-dock patching UI state, provided by the workbench frame: verbs arm
+/// here (`a` / `s` in the center) and complete on a counterpart click in
+/// the Outputs or Tree dock — the same two-sided gesture the interim page
 /// carried inside one component, now spanning the frame. The context is
 /// the precedent the page itself set (`HoveredPatchCell`).
 #[derive(Clone, Copy)]
 pub(crate) struct PatchingUi {
-    pub armed_swap: Signal<Option<PatchVerbWindow>>,
+    pub armed: Signal<Option<ArmedVerb>>,
+    /// The free-segment size the user nudged with `-`/`=`, kept across `m`
+    /// (the ruling's "size override"). `None` = size every segment by the
+    /// next unmapped object, the walk-up default.
+    pub segment_size: Signal<Option<u32>>,
 }
 
 /// Map the shared patch selection onto the pulse's subject vocabulary:
@@ -114,7 +157,7 @@ fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
 fn patch_toolbar(
     surface: &UiPatchSurface,
     selection: &Option<UiPatchTarget>,
-    armed: bool,
+    armed: Option<&ArmedVerb>,
     help_open: bool,
 ) -> Vec<ToolbarGroup> {
     let has_subject = selection
@@ -122,6 +165,7 @@ fn patch_toolbar(
         .and_then(|selection| crate::app::patch::verb_ui::verb_subject(surface, selection))
         .is_some();
     let port_selected = matches!(selection, Some(UiPatchTarget::Port { .. }));
+    let swap_armed = matches!(armed, Some(ArmedVerb::Swap(_)));
     let verb = |id: &'static str, label: &str, title: &str, active: bool, enabled: bool| {
         ToolbarItem::Button {
             id,
@@ -181,8 +225,8 @@ fn patch_toolbar(
                     "patch-swap",
                     "s swap",
                     "Arm a port swap from the selected port, then click the other port (s)",
-                    armed,
-                    port_selected || armed,
+                    swap_armed,
+                    port_selected || swap_armed,
                 ),
             ],
         },
@@ -232,7 +276,10 @@ pub fn PatchingShellCenter(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let mut help_open = use_signal(|| false);
-    let PatchingUi { mut armed_swap } = use_context::<PatchingUi>();
+    let PatchingUi {
+        mut armed,
+        mut segment_size,
+    } = use_context::<PatchingUi>();
     // The pulse's echo guard: dispatch only when the mapped subject
     // actually changes (sweep-with-clear lives in the controller; this
     // just keeps renders from re-sending the same subject).
@@ -271,8 +318,8 @@ pub fn PatchingShellCenter(
         pulsed.set(subject.clone());
         send_pulse(&on_action, subject);
     }
-    let armed = armed_swap.read().is_some();
-    let groups = patch_toolbar(&surface, &selection, armed, *help_open.read());
+    let armed_verb = armed.read().clone();
+    let groups = patch_toolbar(&surface, &selection, armed_verb.as_ref(), *help_open.read());
     let on_item = {
         let surface = surface.clone();
         let selection = selection.clone();
@@ -299,7 +346,7 @@ pub fn PatchingShellCenter(
                     PatchVerbKind::Rotate { steps: 1, stride },
                 );
             }
-            "patch-swap" => arm_swap(&surface, &selection, &mut armed_swap),
+            "patch-swap" => arm_swap(&surface, &selection, &mut armed),
             "patch-undo" => dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Undo),
             "patch-redo" => dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Redo),
             "patch-help" => {
@@ -312,9 +359,10 @@ pub fn PatchingShellCenter(
     rsx! {
         div {
             class: "tw:flex tw:min-h-0 tw:flex-1 tw:flex-col tw:outline-none",
-            // The keyboard grammar (the interim page's, verbatim):
-            // r reverse · ;/' rotate ∓/± stride · s arm swap · Escape
-            // ladder · ⌘Z/⌘⇧Z undo/redo · ? help.
+            // The keyboard grammar: r reverse · ;/' rotate ∓/± stride ·
+            // a arm assign · s arm swap · m next free segment (keeps the
+            // arm) · [ ] shift the segment · - = narrow/widen it · Escape
+            // ladder (disarm, then deselect) · ⌘Z/⌘⇧Z undo/redo · ? help.
             tabindex: 0,
             onkeydown: {
                 let surface = surface.clone();
@@ -324,11 +372,13 @@ pub fn PatchingShellCenter(
                     let meta = event.modifiers().meta() || event.modifiers().ctrl();
                     match event.key() {
                         Key::Escape => {
-                            // The ladder: drop the armed swap first, then
-                            // the selection.
-                            if armed_swap.peek().is_some() {
-                                armed_swap.set(None);
+                            // The ladder: rung 1 disarms (either verb),
+                            // rung 2 clears the selection — and with it the
+                            // segment size the user had nudged.
+                            if armed.peek().is_some() {
+                                armed.set(None);
                             } else {
+                                segment_size.set(None);
                                 select(&on_action, None);
                             }
                         }
@@ -357,7 +407,48 @@ pub fn PatchingShellCenter(
                                     PatchVerbKind::Rotate { steps: 1, stride },
                                 );
                             }
-                            "s" => arm_swap(&surface, &selection, &mut armed_swap),
+                            // The ASSIGN arm: a toggle, like `s`. Armed,
+                            // the next counterpart click links — nothing
+                            // is written until then.
+                            "a" => arm_assign(&surface, &selection, &mut armed),
+                            "s" => arm_swap(&surface, &selection, &mut armed),
+                            // `m` (D3): advance to the next free segment on
+                            // the selected output, KEEPING the arm — the
+                            // walk-up loop is one key and one click per
+                            // object.
+                            "m" => {
+                                if let Some(next) = next_free_segment(
+                                    &surface,
+                                    selection.as_ref(),
+                                    *segment_size.peek(),
+                                ) {
+                                    select(&on_action, Some(next));
+                                }
+                            }
+                            // Segment nudges: selection only, never a doc
+                            // write (a window is not a patch until the arm
+                            // completes).
+                            "[" | "]" => {
+                                let delta = if key.as_str() == "[" { -1 } else { 1 };
+                                if let Some(target) = selection.as_ref()
+                                    && let Some(next) = shift_segment(&surface, target, delta)
+                                {
+                                    select(&on_action, Some(next));
+                                }
+                            }
+                            "-" | "=" => {
+                                let delta = if key.as_str() == "-" { -1 } else { 1 };
+                                if let Some(target) = selection.as_ref()
+                                    && let Some(next) = resize_segment(&surface, target, delta)
+                                {
+                                    // Resizing is what CREATES the override
+                                    // `m` then keeps.
+                                    if let UiPatchTarget::Segment { lamps, .. } = &next {
+                                        segment_size.set(Some(*lamps));
+                                    }
+                                    select(&on_action, Some(next));
+                                }
+                            }
                             "z" if meta => {
                                 let verb = if event.modifiers().shift() {
                                     PatchVerbKind::Redo
@@ -377,18 +468,21 @@ pub fn PatchingShellCenter(
                 }
             },
             ToolbarStrip { groups, on_item }
-            if armed {
+            // The armed banner NAMES its verb (P4 folds it into the panel).
+            if let Some(verb) = armed_verb.as_ref() {
                 div { class: "tw:flex-none tw:border-b tw:border-border-subtle tw:bg-selection-bg tw:px-2.5 tw:py-1 tw:text-[11px] tw:text-selection-border",
-                    "Swap armed — click the other port in the Outputs panel (Esc cancels)"
+                    "{verb.banner()}"
                 }
             }
             if *help_open.read() {
                 div { class: "tw:fixed tw:bottom-4 tw:right-4 tw:z-50 tw:rounded-lg tw:border tw:border-border-strong tw:bg-card-subtle tw:p-4 tw:text-xs tw:leading-relaxed tw:shadow-lg",
                     div { class: "tw:mb-1 tw:font-semibold", "Patch keys" }
-                    div { "click port — assign selection · click cell — select" }
+                    div { "click — select, always: plain clicks never write" }
+                    div { "a — arm assign (then click the counterpart) · m — next free segment" }
+                    div { "[ / ] — shift the segment · - / = — narrow / widen it" }
                     div { "r — reverse · ; / ' — rotate ∓/± stride" }
                     div { "s — arm swap (then click the other port)" }
-                    div { "⌘Z / ⌘⇧Z — undo / redo · Esc — back out · ? — close" }
+                    div { "⌘Z / ⌘⇧Z — undo / redo · Esc — disarm, then deselect · ? — close" }
                 }
             }
             div { class: "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
@@ -411,11 +505,109 @@ pub fn PatchingShellCenter(
                         // glows with its live output colors (D2=b —
                         // patched vs unpatched at a glance).
                         live_sprites: true,
+                        // A sprite completes an armed assign, like its row.
+                        patch_verbs: true,
                         on_action,
                     }
                 }
             }
         }
+    }
+}
+
+/// Arm the swap from the selected port (`s`, or the toolbar button); a
+/// second call disarms — the key is a toggle, like the page's Escape rung.
+fn arm_swap(
+    surface: &UiPatchSurface,
+    selection: &Option<UiPatchTarget>,
+    armed: &mut Signal<Option<ArmedVerb>>,
+) {
+    if armed.peek().is_some() {
+        armed.set(None);
+        return;
+    }
+    if let Some(UiPatchTarget::Port { node, port }) = selection
+        && let Some(output) = surface.outputs.iter().find(|output| output.node == *node)
+        && let Some(window) = port_window(output, *port)
+    {
+        armed.set(Some(ArmedVerb::Swap(window)));
+    }
+}
+
+/// Can this selection start an assign? An UNMAPPED object (whatever grain
+/// it was named at) or a free SEGMENT — the two ends of the one link. A
+/// mapped thing arms nothing: there is no link to make, and the ruling
+/// says it plain-reselects.
+pub(crate) fn is_armable(surface: &UiPatchSurface, target: &UiPatchTarget) -> bool {
+    match target {
+        // A `Segment` only ever names FREE space (a mapped run selects as
+        // its `Cell`, which speaks the fixture's language instead).
+        UiPatchTarget::Segment { .. } => true,
+        other => target_is_unmapped(surface, other),
+    }
+}
+
+/// Arm the ASSIGN (`a`, or P4's invitation button): a toggle like `s`,
+/// refused when the selection has nothing to link.
+fn arm_assign(
+    surface: &UiPatchSurface,
+    selection: &Option<UiPatchTarget>,
+    armed: &mut Signal<Option<ArmedVerb>>,
+) {
+    if armed.peek().is_some() {
+        armed.set(None);
+        return;
+    }
+    if selection
+        .as_ref()
+        .is_some_and(|target| is_armable(surface, target))
+    {
+        armed.set(Some(ArmedVerb::Assign));
+    }
+}
+
+/// The arm grammar's FIXTURE-SIDE completion, shared by every surface a
+/// user can click an object on (the Tree's rows, the canvas's sprites).
+///
+/// An armed assign with a free segment selected completes here: the clicked
+/// object takes the segment (one write, one undo step, through the same
+/// verb path every other gesture uses). Anything else — a mapped object, a
+/// fixture-side selection, no arm at all — only DISARMS: nonsense pairs
+/// refuse rather than guess (§2), and mapped things always plain-reselect.
+///
+/// The caller selects the clicked target either way: after a completion the
+/// object is what the user is looking at (the spike's transition), and
+/// without one this was just a plain click.
+pub(crate) fn complete_assign_on_object(
+    on_action: &EventHandler<UiAction>,
+    surface: &UiPatchSurface,
+    selection: &Option<UiPatchTarget>,
+    ui: Option<PatchingUi>,
+    target: &UiPatchTarget,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let mut armed = ui.armed;
+    if *armed.peek() != Some(ArmedVerb::Assign) {
+        return;
+    }
+    // The arm is spent by the click, completed or not.
+    armed.set(None);
+    let Some(UiPatchTarget::Segment { node, start, .. }) = selection else {
+        return;
+    };
+    if !target_is_unmapped(surface, target) {
+        return;
+    }
+    let Some(output) = surface.outputs.iter().find(|output| output.node == *node) else {
+        return;
+    };
+    if dispatch_assign(on_action, surface, target, output, *start) {
+        // The nudged size was fine-tuning for the segment this write just
+        // spent; the next one sizes itself off the next object again.
+        let mut segment_size = ui.segment_size;
+        segment_size.set(None);
     }
 }
 
@@ -595,23 +787,80 @@ mod tests {
             "a segment on a port the surface no longer has pulses nothing"
         );
     }
-}
 
-/// Arm the swap from the selected port (`s`, or the toolbar button); a
-/// second call disarms — the key is a toggle, like the page's Escape rung.
-fn arm_swap(
-    surface: &UiPatchSurface,
-    selection: &Option<UiPatchTarget>,
-    armed_swap: &mut Signal<Option<PatchVerbWindow>>,
-) {
-    if armed_swap.peek().is_some() {
-        armed_swap.set(None);
-        return;
+    /// The assign arm's precondition (§2): an UNMAPPED object or a free
+    /// SEGMENT arms; a mapped object, a port, a module — nothing to link —
+    /// do not. Mapped things always plain-reselect, so they must never put
+    /// the surface into an armed state the next click would spend.
+    #[test]
+    fn only_the_two_ends_of_a_link_can_arm_assign() {
+        let mut surface = mini_dome_like_surface();
+        // Sector 2 has no run yet; sector 1 does.
+        surface.fixtures[0].instances[1].placed = false;
+        let node = surface.fixtures[0].node;
+        let output = surface.outputs[0].node;
+
+        assert!(is_armable(
+            &surface,
+            &UiPatchTarget::Instance {
+                node,
+                path: "/sector/2".to_string(),
+            }
+        ));
+        assert!(
+            !is_armable(
+                &surface,
+                &UiPatchTarget::Instance {
+                    node,
+                    path: "/sector/1".to_string(),
+                }
+            ),
+            "a mapped object plain-reselects — it arms nothing"
+        );
+        assert!(is_armable(
+            &surface,
+            &UiPatchTarget::Segment {
+                node: output,
+                port: 0,
+                start: 0,
+                lamps: 30,
+            }
+        ));
+        assert!(
+            !is_armable(
+                &surface,
+                &UiPatchTarget::Port {
+                    node: output,
+                    port: 0
+                }
+            ),
+            "a whole port is the SWAP arm's subject, not the assign arm's"
+        );
+        assert!(!is_armable(
+            &surface,
+            &UiPatchTarget::Module {
+                node: NodeId::new(1),
+            }
+        ));
+
+        // Every instance placed: the fixture row has nothing left to link.
+        surface.fixtures[0].instances[1].placed = true;
+        assert!(!is_armable(&surface, &UiPatchTarget::Fixture { node }));
     }
-    if let Some(UiPatchTarget::Port { node, port }) = selection
-        && let Some(output) = surface.outputs.iter().find(|output| output.node == *node)
-        && let Some(window) = port_window(output, *port)
-    {
-        armed_swap.set(Some(window));
+
+    /// The banner names the armed verb — a walk-up user must never have to
+    /// guess which gesture the next click completes.
+    #[test]
+    fn the_banner_names_the_armed_verb() {
+        assert!(ArmedVerb::Assign.banner().starts_with("Assign armed"));
+        assert!(
+            ArmedVerb::Swap(PatchVerbWindow {
+                output_name: None,
+                start: 0,
+                lamps: 30,
+            })
+            .banner()
+            .starts_with("Swap armed")
+        );
     }
 }
