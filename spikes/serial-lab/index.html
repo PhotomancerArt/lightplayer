@@ -149,12 +149,14 @@ async function openPort(baud) {
 
 async function closePort() {
   if (!S.port) return { ok: true, note: "no port" };
+  const wasOpen = !!S.baud;
+  S.baud = null;  // FIRST: stops readLoop re-acquiring the lock (close race)
   try {
     if (S.reader) { await S.reader.cancel().catch(() => {}); }
     if (S.writer) { S.writer.releaseLock(); S.writer = null; }
-    if (S.baud) await S.port.close();
+    if (wasOpen) await S.port.close();
   } catch (e) { err(`close: ${e}`); }
-  S.baud = null; S.reader = null;
+  S.reader = null;
   meta("port closed (grant retained — CLI may use the device now)");
   updateChips();
   return { ok: true };
