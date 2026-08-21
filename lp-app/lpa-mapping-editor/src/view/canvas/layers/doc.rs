@@ -27,6 +27,9 @@ pub(crate) struct DocLayersInput<'a> {
     pub gap_segments: &'a [[[f32; 2]; 2]],
     pub path_objects: &'a [(usize, Vec<[f32; 2]>)],
     pub resolved: &'a ResolvedMap2d,
+    /// Each object's authored strand as `(start, count)` — the wiring
+    /// numbers' coverage (arrows are pre-filtered to the same grain).
+    pub annotation_spans: &'a [(u32, u32)],
     pub selection: &'a MapSelection,
     /// Objects rendering instance-by-instance (selected/scoped repeats).
     pub tessellating: &'a BTreeSet<usize>,
@@ -296,7 +299,16 @@ pub(crate) fn doc_layers(input: &DocLayersInput<'_>) -> Element {
             }
         }
         if input.show_numbers {
-            for lamp in &input.resolved.lamps {
+            // Authored grain: numbers cover each object's authored strand
+            // only — a repeat's expanded instances stay unnumbered.
+            for lamp in input.annotation_spans.iter().flat_map(|&(start, count)| {
+                input
+                    .resolved
+                    .lamps
+                    .iter()
+                    .skip(start as usize)
+                    .take(count as usize)
+            }) {
                 {
                     let font = if lamp.index + 1 >= 100 {
                         radius * 0.62
