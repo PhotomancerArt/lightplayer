@@ -178,15 +178,26 @@ jobs:
             # filters above): a dep bump can change rendering, but gating on
             # it would run the ~10-15 min stories job on every dependency PR;
             # a miss surfaces on the very next merge to main.
+            # Beyond the two studio crates, the list covers every crate whose
+            # code or data is rendered DIRECTLY by story files: the story proc
+            # macros (a sibling dir, so the studio-web glob misses it), the
+            # board editor panes + BoardDiagram/catalog (board_editor_stories,
+            # board_diagram_stories), the palette catalog + gradient sampling
+            # that GradientStripCanvas and the palette-chooser swatches draw
+            # pixels from, and the mapping editor canvas + the lpc-mapping
+            # resolver/corpus its documents come from. Narrow by design — not
+            # lp-app/** or lp-core/** — to keep the ~10-15 min job off
+            # unrelated PRs. Deliberately NOT here: lpc-model, lpc-wire,
+            # lpc-history, lpc-cloud-api — stories import them only to
+            # construct fixture values, so a change there that moves pixels
+            # arrives together with a studio-side edit that does trigger this.
             studio:
               - 'lp-app/lpa-studio-web/**'
+              - 'lp-app/lpa-studio-web-story-macros/**'
               - 'lp-app/lpa-studio-core/**'
-              # Crates the story pages render DIRECTLY (their visuals are
-              # story-baseline territory even though the story files live in
-              # lpa-studio-web): the mapping editor canvas and the lpc-mapping
-              # resolver/corpus its documents come from. Narrow by design —
-              # not lp-app/** or lp-core/** — to keep the ~10-15 min job off
-              # unrelated PRs.
+              - 'lp-app/lpa-board-editor/**'
+              - 'lp-app/lpa-boards/**'
+              - 'lp-app/lpa-palettes/**'
               - 'lp-app/lpa-mapping-editor/**'
               - 'lp-core/lpc-mapping/**'
               - 'docs/user-guide/**'
