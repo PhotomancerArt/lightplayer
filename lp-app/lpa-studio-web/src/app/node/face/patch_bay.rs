@@ -352,6 +352,11 @@ fn port_caption(port: &lpa_studio_core::UiPatchPort) -> String {
 /// The fixture row's caption: how its own channel space arrives.
 fn fixture_caption(patch: &UiFixturePatch) -> String {
     let runs = patch.cells.len();
+    if runs == 0 {
+        // The manual-flow state (P5b): a fixture whose lamps are on no wire
+        // at all. "0 runs" would read as a bug; this is a choice.
+        return format!("{} lamps · not mapped", patch.lamps);
+    }
     if patch.is_single_run() {
         return format!("{} lamps · one run", patch.lamps);
     }

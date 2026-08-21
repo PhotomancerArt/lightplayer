@@ -431,7 +431,7 @@ fn a_newer_patch_format_refuses_the_fixture_at_load() {
     let mut fs = project_fs(true);
     fs.write_file_mut(
         "/body.patch.json".as_path(),
-        br#"{ "format": 3, "entries": [] }"#,
+        br#"{ "format": 4, "entries": [] }"#,
     )
     .expect("newer body patch");
 
@@ -441,7 +441,123 @@ fn a_newer_patch_format_refuses_the_fixture_at_load() {
     let NodeRuntimeStatus::Error(message) = status else {
         panic!("a refused document is an error");
     };
-    assert!(message.contains("unsupported patch format 3"), "{message}");
+    assert!(message.contains("unsupported patch format 4"), "{message}");
+}
+
+/// MANUAL flow (P5b), end to end: the body declares it and names only its
+/// first two lamps, so lamps 2–3 reach NO wire — where auto-flow would have
+/// re-placed them past the last anchor. This is what makes "not mapped =
+/// not lit" a state a fixture can actually be in.
+#[test]
+fn a_manual_fixture_places_only_what_its_entries_name() {
+    let flowed = published_lamps(&settled(&project_fs(false)).0);
+    let mut fs = project_fs(true);
+    fs.write_file_mut(
+        "/body.patch.json".as_path(),
+        br#"{
+  "format": 3,
+  "flow": "manual",
+  "entries": [
+    [[0, 2], -1, 0]
+  ]
+}"#,
+    )
+    .expect("manual body patch");
+    fs.write_file_mut(
+        "/leaf.patch.json".as_path(),
+        br#"{ "format": 1, "entries": [ { "range": { "start": 0, "count": 2 }, "at": { "channel": 2 } } ] }"#,
+    )
+    .expect("leaf patch");
+
+    let (engine, _registry) = settled(&fs);
+    assert_eq!(
+        published_lamps(&engine),
+        vec![flowed[0], flowed[1], flowed[4], flowed[5]],
+        "the body's unnamed lamps 2-3 are on no wire at all"
+    );
+    assert_eq!(
+        fixture_status(&engine, "body"),
+        None,
+        "unmapped lamps are a state, not a fault"
+    );
+}
+
+/// The unmap-all state: a manual document with NO entries lights nothing of
+/// its fixture — the one place an empty document does not mean auto-flow.
+#[test]
+fn an_empty_manual_document_takes_the_fixture_off_the_wire() {
+    let flowed = published_lamps(&settled(&project_fs(false)).0);
+    let mut fs = project_fs(true);
+    fs.write_file_mut(
+        "/body.patch.json".as_path(),
+        br#"{ "format": 3, "flow": "manual", "entries": [] }"#,
+    )
+    .expect("unmapped body");
+    fs.write_file_mut(
+        "/leaf.patch.json".as_path(),
+        br#"{ "format": 1, "entries": [] }"#,
+    )
+    .expect("cleared leaf patch");
+
+    let (engine, _registry) = settled(&fs);
+    assert_eq!(
+        published_lamps(&engine),
+        vec![flowed[4], flowed[5]],
+        "only the auto leaf reaches the wire; the manual body is dark"
+    );
+}
+
+/// Flipping the flag back is the whole undo story: the same entries under
+/// `auto` flow the tail again, with no other edit.
+#[test]
+fn flipping_the_flag_back_to_auto_returns_the_lamps_to_flow() {
+    let flowed = published_lamps(&settled(&project_fs(false)).0);
+    let mut fs = project_fs(true);
+    // The leaf sits far down the wire, so the body's own tail has somewhere
+    // visible to flow INTO when the flag comes off.
+    fs.write_file_mut(
+        "/leaf.patch.json".as_path(),
+        br#"{ "format": 1, "entries": [ { "range": { "start": 0, "count": 2 }, "at": { "channel": 10 } } ] }"#,
+    )
+    .expect("leaf patch");
+    fs.write_file_mut(
+        "/body.patch.json".as_path(),
+        br#"{
+  "format": 3,
+  "flow": "manual",
+  "entries": [
+    [[0, 2], -1, 0]
+  ]
+}"#,
+    )
+    .expect("manual body patch");
+    let (mut engine, mut registry) = load(&fs);
+    tick(&mut engine, &registry, SETTLE_TICKS);
+    assert_eq!(
+        published_lamps(&engine)[2],
+        [0, 0, 0],
+        "wire lamp 2 is dark while the body is manual"
+    );
+
+    // The SAME entries, `auto` — one field, no other edit.
+    fs.write_file_mut(
+        "/body.patch.json".as_path(),
+        br#"{
+  "format": 2,
+  "entries": [
+    [[0, 2], -1, 0]
+  ]
+}"#,
+    )
+    .expect("auto body patch");
+    apply_asset_change(&mut engine, &mut registry, &fs, &["/body.patch.json"]);
+    tick(&mut engine, &registry, SETTLE_TICKS);
+
+    assert_eq!(
+        published_lamps(&engine)[2..4],
+        [flowed[2], flowed[3]],
+        "the body's tail flows again the moment the flag comes off"
+    );
 }
 
 /// The output's published DISPLAY layout: where a client is told to draw each

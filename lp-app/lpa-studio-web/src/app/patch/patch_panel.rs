@@ -34,7 +34,9 @@ use lpa_studio_core::{
     UiControlProductPreview, UiPatchCell, UiPatchSurface, UiPatchSurfaceFixture, UiPatchTarget,
 };
 
-use crate::app::editor_shell::patching::{ArmedVerb, PatchingUi, arm_assign, arm_swap};
+use crate::app::editor_shell::patching::{
+    ArmedVerb, PatchingUi, arm_assign, arm_swap, assign_subject_target,
+};
 use crate::app::node::lamp_view::{
     UNLIT_RGB, control_color_order_at_sample, control_rgb_at_sample, wire_lamp_rgb,
 };
@@ -96,6 +98,13 @@ pub(crate) struct ObjectView {
     pub lamps: u32,
     pub mapped: bool,
     pub reversed: bool,
+    /// The owning FIXTURE's flow flag (P5b) — a fixture fact shown on the
+    /// object section because that is where the user is looking when they
+    /// discover an object cannot be unmapped.
+    pub manual: bool,
+    /// The fixture this object belongs to — the flow verbs' subject
+    /// (they act on the fixture whatever grain the selection named).
+    pub fixture: NodeId,
 }
 
 /// The OUTPUT half: the wire this selection is about — picked directly, or
@@ -245,6 +254,8 @@ pub(crate) fn object_view(
     Some(ObjectView {
         mapped: !target_is_unmapped(surface, target),
         reversed: cells.iter().any(|cell| cell.reversed),
+        manual: fixture.manual_flow,
+        fixture: fixture.node,
         target: target.clone(),
         name,
         context,
@@ -381,6 +392,10 @@ pub(crate) fn output_view(
 }
 
 /// The object section's facts, in the fact-card idiom (label + mono value).
+///
+/// `flow` is the FIXTURE's fact, not this object's — it belongs here because
+/// it is the answer to "why did unmapping this put it back on the wire?"
+/// (P5b), and this is the section the user is reading when they ask.
 pub(crate) fn object_facts(object: &ObjectView) -> Vec<(String, String)> {
     vec![
         ("lamps".to_string(), object.lamps.to_string()),
@@ -396,7 +411,13 @@ pub(crate) fn object_facts(object: &ObjectView) -> Vec<(String, String)> {
                 "unmapped".to_string()
             },
         ),
+        ("flow".to_string(), flow_label(object.manual).to_string()),
     ]
+}
+
+/// What the fixture's flow flag is CALLED, everywhere it is shown.
+pub(crate) fn flow_label(manual: bool) -> &'static str {
+    if manual { "manual" } else { "auto-mapped" }
 }
 
 /// The output section's facts: the pin and its occupancy, plus the window
@@ -898,6 +919,17 @@ fn ObjectPane(
                     let target = Some(object.target.clone());
                     let stride = selection_stride(&surface, &target);
                     let mapped = object.mapped;
+                    let manual = object.manual;
+                    // The flow verbs act on the FIXTURE, whatever grain the
+                    // selection named — dispatched against the whole-fixture
+                    // subject so an instance selection cannot narrow them.
+                    let fixture_target = Some(UiPatchTarget::Fixture { node: object.fixture });
+                    let fixture_verb = {
+                        let surface = surface.clone();
+                        move |kind: PatchVerbKind| {
+                            dispatch_verb(&on_action, &surface, &fixture_target, kind);
+                        }
+                    };
                     let verb = {
                         let surface = surface.clone();
                         let target = target.clone();
@@ -979,6 +1011,40 @@ fn ObjectPane(
                                 "lamps +"
                             }
                         }
+                        // The FIXTURE row (P5b): whether this fixture's
+                        // unnamed lamps flow, and — when they do not — the
+                        // one gesture that takes the whole thing back off
+                        // the wire. Undoable like every other verb, so the
+                        // toggle is safe to try.
+                        div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1.5",
+                            span { class: "tw:font-mono tw:text-[10px] tw:text-dim-foreground",
+                                "fixture"
+                            }
+                            button {
+                                class: if manual { STEP_ARMED } else { STEP },
+                                title: if manual {
+                                    "This fixture is MANUAL: only assigned objects light. Click to auto-map the rest."
+                                } else {
+                                    "This fixture AUTO-MAPS: unassigned objects flow onto the wire anyway. Click to go manual."
+                                },
+                                onclick: {
+                                    let fixture_verb = fixture_verb.clone();
+                                    move |_| fixture_verb(PatchVerbKind::SetFlow { manual: !manual })
+                                },
+                                "flow: {flow_label(manual)}"
+                            }
+                            if manual {
+                                button {
+                                    class: "{STEP}",
+                                    title: "Take every object of this fixture off the wire (undoable)",
+                                    onclick: {
+                                        let fixture_verb = fixture_verb.clone();
+                                        move |_| fixture_verb(PatchVerbKind::UnmapAll)
+                                    },
+                                    "unmap all"
+                                }
+                            }
+                        }
                     }
                 }
                 None => {
@@ -1042,11 +1108,15 @@ fn ObjectPane(
                                                 };
                                                 // Pickers write (ratified): the same
                                                 // one-step verb the armed click
-                                                // dispatches.
+                                                // dispatches, narrowed the same way.
+                                                let subject = assign_subject_target(
+                                                    &surface,
+                                                    target,
+                                                );
                                                 if dispatch_assign(
                                                         &on_action,
                                                         &surface,
-                                                        target,
+                                                        &subject,
                                                         output,
                                                         start,
                                                     ) && let Some(ui) = ui
@@ -1241,11 +1311,15 @@ fn OutputPane(
                                         };
                                         match object_target.as_ref() {
                                             Some(target) => {
+                                                let subject = assign_subject_target(
+                                                    &surface,
+                                                    target,
+                                                );
                                                 if let Some(lamp) = port_next_free(entry, key) {
                                                     dispatch_assign(
                                                         &on_action,
                                                         &surface,
-                                                        target,
+                                                        &subject,
                                                         entry,
                                                         lamp,
                                                     );
@@ -1458,11 +1532,12 @@ fn OutputPane(
                                             // The object lands at the port's next
                                             // free lamp — the spike's picker
                                             // transition.
+                                            let subject = assign_subject_target(&surface, &target);
                                             if let Some(lamp) = port_next_free(entry, key)
                                                 && dispatch_assign(
                                                     &on_action,
                                                     &surface,
-                                                    &target,
+                                                    &subject,
                                                     entry,
                                                     lamp,
                                                 )
@@ -1643,6 +1718,7 @@ mod tests {
             vec![
                 ("lamps".to_string(), "30".to_string()),
                 ("wire".to_string(), "unmapped".to_string()),
+                ("flow".to_string(), "auto-mapped".to_string()),
             ]
         );
         assert_eq!(
@@ -1651,6 +1727,40 @@ mod tests {
             "an unmapped object has no wire to derive"
         );
         assert!(target_is_unmapped(&surface, &selection), "so it invites");
+    }
+
+    /// The fixture's flow flag reaches the object section (P5b): it is a
+    /// FIXTURE fact carried on every object of that fixture, whatever grain
+    /// the selection named, because it is the answer to "why did unmapping
+    /// this put it straight back on the wire?".
+    #[test]
+    fn the_object_section_carries_its_fixtures_flow_flag() {
+        let mut surface = half_patched_surface();
+        let selection = UiPatchTarget::Instance {
+            node: dome_node(),
+            path: "/sector/2".to_string(),
+        };
+        let object = object_view(&surface, Some(&selection)).expect("object");
+        assert!(!object.manual, "a document with no flag is auto");
+        assert_eq!(object.fixture, dome_node(), "the flow verbs' subject");
+
+        surface.fixtures[0].manual_flow = true;
+        let object = object_view(&surface, Some(&selection)).expect("object");
+        assert!(object.manual);
+        assert_eq!(
+            object_facts(&object)[2],
+            ("flow".to_string(), "manual".to_string())
+        );
+        // The same flag on a mapped sibling — it belongs to the fixture, not
+        // to whichever object happens to be selected.
+        let mapped = object_view(
+            &surface,
+            Some(&UiPatchTarget::Cell {
+                id: "2:0".to_string(),
+            }),
+        )
+        .expect("object");
+        assert!(mapped.mapped && mapped.manual);
     }
 
     /// `#derived` / `#paired`: a mapped object derives its window, and the

@@ -1579,6 +1579,10 @@ impl ResolveHost for EngineResolveHost<'_> {
     ///   `consumer` is not the default. Zero runs is NOT a gap: the planner
     ///   emits no fragment and no warning.
     ///
+    /// A producer whose patch declares MANUAL flow (P5b) never gets the
+    /// `None` answer: its unentered lamps are meant to be on no wire, so the
+    /// default output is told "nothing lands here" like any other.
+    ///
     /// Deliberately silent when the node is missing or mid-execution: this
     /// answers "how is this producer patched", and "we could not ask right
     /// now" means auto-flow, not a dead frame. A node whose patch failed to
@@ -1597,9 +1601,16 @@ impl ResolveHost for EngineResolveHost<'_> {
             .control_patch_placement()
             .filter(|runs| !runs.is_empty());
         let is_default = self.is_default_fragments_consumer(consumer);
+        let manual = node.control_patch_manual();
         let Some(runs) = runs else {
-            // Unpatched producer: auto-flow on the default output only.
-            return if is_default { None } else { Some(Vec::new()) };
+            // Unpatched producer: auto-flow on the default output only —
+            // unless it declared manual flow, which is exactly the statement
+            // "do not flow me".
+            return if is_default && !manual {
+                None
+            } else {
+                Some(Vec::new())
+            };
         };
         let consumer_name = self.output_identities.get(&consumer).cloned().flatten();
         let filtered: Vec<crate::node::PatchedRun> = runs

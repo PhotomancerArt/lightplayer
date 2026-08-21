@@ -301,11 +301,16 @@ impl FixtureNode {
             self.resolved_patch = None;
             return;
         };
-        // An empty document is a CLEARED patch, and a cleared patch means
-        // auto-flow — the same thing deleting the file means. Resolving it
-        // would instead anchor the whole fixture at channel 0, which is
+        // An empty AUTO document is a CLEARED patch, and a cleared patch
+        // means auto-flow — the same thing deleting the file means. Resolving
+        // it would instead anchor the whole fixture at channel 0, which is
         // auto-flow only when this fixture is alone on the wire; an installer
         // who cleared one strand of three would find the wire contested.
+        //
+        // An empty MANUAL document means the opposite — nothing is mapped —
+        // and that is carried by [`Self::control_patch_manual`], not by the
+        // run list: an empty list is indistinguishable from "unpatched"
+        // downstream, so the flag is what keeps those lamps off the wire.
         let Some(doc) = source.doc.as_ref().filter(|doc| !doc.entries.is_empty()) else {
             self.resolved_patch = None;
             return;
@@ -857,6 +862,18 @@ impl NodeRuntime for FixtureNode {
         self.resolved_patch
             .as_ref()
             .map(|(_, runs)| runs.as_slice())
+    }
+
+    /// The fixture's own patch document answers this — including while it is
+    /// unreadable, where the last good document stands (keep-last-good, same
+    /// as the placement it belongs to). No document, or one this build could
+    /// not parse at all, is auto: the flow flag is a claim a fixture makes,
+    /// and silence is not that claim.
+    fn control_patch_manual(&self) -> bool {
+        self.patch_source
+            .as_ref()
+            .and_then(|source| source.doc.as_ref())
+            .is_some_and(|doc| doc.flow == lpc_mapping::PatchFlow::Manual)
     }
 
     fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {

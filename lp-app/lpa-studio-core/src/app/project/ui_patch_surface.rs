@@ -139,6 +139,16 @@ pub struct UiPatchSurfaceFixture {
     /// not landed yet; the page dispatches it so verbs have their document
     /// (a verb before it lands blocks honestly).
     pub patch_loaded: bool,
+    /// The fixture's patch declares MANUAL flow (`flow: "manual"`, P5b):
+    /// only authored entries place, and an object with no entry is
+    /// genuinely unmapped — dark on the piece, no wire chip here.
+    ///
+    /// False = auto-mapped, the historical behaviour: the lamps no entry
+    /// names flow on after the last anchor, so nothing is ever unmapped for
+    /// long. Read from the patch BODY (the same bytes the verbs transform),
+    /// so it is `false` while the body is still loading and while it is
+    /// unreadable — silence is not the manual claim.
+    pub manual_flow: bool,
     /// The addressable instance table (`/sector/0` …), parsed from the
     /// fixture's map2d document. EMPTY for shape-less strips and for docs
     /// without object ids — the fixture then patches at range grain only

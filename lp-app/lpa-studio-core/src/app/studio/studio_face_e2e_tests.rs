@@ -3998,6 +3998,206 @@ fn verbs_author_the_mini_dome_permutation_byte_identically() {
     );
 }
 
+/// The flow flag and the real unmap (P5b), through the live verb path: the
+/// doors go MANUAL, `unmap all` empties the document in ONE write, the
+/// surface reports every door unmapped, and undo walks both gestures back
+/// one step each. The flag reaches the DTO from the written bytes, which is
+/// what the panel reads.
+#[test]
+fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
+    use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let mut snapshot = None;
+    for _ in 0..4 {
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = Some(next);
+        }
+    }
+    let snapshot = snapshot.expect("a refresh emits a snapshot");
+
+    let doors = {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        surface
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.label.to_lowercase().contains("door"))
+            .expect("no doors fixture")
+            .clone()
+    };
+    assert!(
+        !doors.manual_flow,
+        "the shipped doors document declares no flow — that reads as auto"
+    );
+    // What the page's mount prefetch does, and what it keeps doing: a
+    // fetch's response lands on a LATER batch, and a save drops the cached
+    // bodies, so this is re-run before every verb. A verb ahead of its body
+    // blocks honestly rather than writing.
+    macro_rules! prefetch {
+        () => {{
+            for _ in 0..3 {
+                for artifact in [doors.patch_artifact.clone(), doors.mapping_artifact.clone()]
+                    .into_iter()
+                    .flatten()
+                {
+                    handle
+                        .tx
+                        .send(StudioCommand::Action(crate::UiAction::from_op(
+                            ProjectController::NODE_ID,
+                            crate::AssetContentFetchOp { artifact },
+                        )));
+                    drive(actor.run_one_batch_for_test());
+                }
+            }
+        }};
+    }
+    prefetch!();
+
+    let fixtures = vec![crate::PatchVerbFixture {
+        node: doors.node,
+        patch_artifact: doors.patch_artifact.clone().expect("patch artifact"),
+        mapping_artifact: doors.mapping_artifact.clone(),
+        lamp_count: doors.patch.lamps,
+    }];
+    macro_rules! verb {
+        ($kind:expr) => {{
+            handle
+                .tx
+                .send(StudioCommand::Action(crate::UiAction::from_op(
+                    ProjectController::NODE_ID,
+                    PatchVerbOp {
+                        subject_fixture: Some(doors.node),
+                        subject: PatchVerbSubject::default(),
+                        fixtures: fixtures.clone(),
+                        assign_output_name: None,
+                        verb: $kind,
+                    },
+                )));
+            drive(actor.run_one_batch_for_test());
+        }};
+    }
+
+    let project_dir = format!("/projects/{}", example.id.replace('/', "-"));
+    let patch_path = format!(
+        "{project_dir}/{}",
+        doors
+            .patch_artifact
+            .as_ref()
+            .unwrap()
+            .file_path()
+            .as_str()
+            .trim_start_matches('/')
+    );
+    let body = || {
+        let bytes = server
+            .borrow()
+            .base_fs()
+            .read_file(patch_path.as_str().as_path())
+            .unwrap_or_else(|_| panic!("no body at {patch_path}"));
+        String::from_utf8(bytes).expect("utf8 patch doc")
+    };
+    macro_rules! save {
+        () => {{
+            handle.tx.send(project_action(ProjectOp::SaveOverlay));
+            drive(actor.run_one_batch_for_test());
+        }};
+    }
+    // The shipped bytes, straight off disk — no save needed, and a save
+    // here would be a batch the fetches above still need.
+    let shipped = body();
+
+    // Auto → manual: the flag moves, the entries do not.
+    verb!(PatchVerbKind::SetFlow { manual: true });
+    save!();
+    let manual = body();
+    assert!(manual.contains("\"flow\": \"manual\""), "{manual}");
+    assert!(manual.contains("\"format\": 3"), "{manual}");
+    assert!(manual.contains("/door/2"), "no entry moved: {manual}");
+
+    // Unmap all: ONE write that empties the document, flag intact.
+    prefetch!();
+    verb!(PatchVerbKind::UnmapAll);
+    save!();
+    let unmapped = body();
+    assert!(unmapped.contains("\"entries\": []"), "{unmapped}");
+    assert!(unmapped.contains("\"flow\": \"manual\""), "{unmapped}");
+
+    // The surface says so: the fixture is manual and every door is
+    // unmapped. Prefetched first — the flag is read from the BODY, and a
+    // save drops the cached bodies (the same window in which the verbs
+    // block with "still loading").
+    prefetch!();
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let mut latest = None;
+    while let Some(next) = view.try_recv() {
+        latest = Some(next);
+    }
+    let snapshot = latest.expect("the refresh emits a snapshot");
+    let surface = project_editor(&snapshot)
+        .patch_surface
+        .as_ref()
+        .expect("the patch surface");
+    let fixture = surface
+        .fixtures
+        .iter()
+        .find(|fixture| fixture.node == doors.node)
+        .expect("an unmapped fixture STAYS on the surface — its objects are the ones to click");
+    assert!(fixture.manual_flow, "the DTO carries the written flag");
+    assert!(
+        !fixture.instances.is_empty(),
+        "the object table survives having no runs"
+    );
+    assert!(
+        fixture.instances.iter().all(|instance| !instance.placed),
+        "an entry-less object in a manual fixture is UNMAPPED, not reflowed"
+    );
+    assert!(
+        fixture.patch.cells.is_empty() && fixture.patch.lamps > 0,
+        "no wire chip, but the row still knows how many lamps it is offering"
+    );
+
+    // One undo per gesture, in order: the entries come back, then the flag.
+    // Trimmed because the undo path replays the snapshot bytes verbatim
+    // while the write path appends a trailing newline — a pre-existing
+    // cosmetic asymmetry in the verb stack, not a P5b claim.
+    verb!(PatchVerbKind::Undo);
+    save!();
+    assert_eq!(
+        body().trim_end(),
+        manual.trim_end(),
+        "one step undid the whole unmap-all"
+    );
+    prefetch!();
+    verb!(PatchVerbKind::Undo);
+    save!();
+    assert_eq!(
+        body().trim_end(),
+        shipped.trim_end(),
+        "and one more undid the flag alone"
+    );
+}
+
 /// The Arrange substrate end-to-end (unified-editor P2): the editor.json
 /// loaded-flag settles ABSENT through the fetch op (no file in a fresh
 /// project — never a read error), an [`crate::EditorMetaOp`] Set writes a

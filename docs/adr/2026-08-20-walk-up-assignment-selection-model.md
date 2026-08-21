@@ -100,6 +100,47 @@ lamps the wire is not driving. A ghost treatment (stroke-only head/tail
 ticks) is deferred to a G1 finding — it ships only if walking the loop
 shows the direction cue is missed.
 
+## Amendment 2026-08-21 (G1): the flow flag makes the model reachable
+
+The G1 gate found the model's precondition missing: **nothing could be
+unmapped.** A patch is sparse anchors over auto-flow, so `Clear` returned
+an object to the flow and the flow re-placed it (past the wire's end when
+the ports were full). Every state this ADR describes on the unmapped
+side — the invitations, the armed pairing, the chase on an object with no
+wire — was unreachable in real data.
+
+Ruled: auto-flow is a **per-fixture flag**, not a law of the model.
+`{stem}.patch.json` gains `"flow": "auto" | "manual"` (patch format 3;
+absent field and absent file both mean `auto`, so no existing document
+changes meaning). Under `manual`, only authored entries place and unnamed
+lamps are on no wire. Two verbs join the set through the same
+`PatchVerbOp` path — `SetFlow { manual }` (fixture grain, one undo step)
+and `UnmapAll` (delete every entry, one write, no confirm) — and the panel
+shows the flag as a fixture-level fact on the object section.
+
+Consequences for this model specifically:
+
+- A **fixture-grain click** (a canvas sprite, a Tree fixture row) now
+  resolves its assign subject to the fixture's next object still waiting
+  for a wire — the same object the free segment was SIZED for. Sprites
+  are honest (D2): the canvas can only name a fixture, and a whole-fixture
+  subject is not something `assign` can place.
+- A fixture whose lamps reach NO wire still appears on the patch surface
+  (an empty row carrying its own lamp count). Before the flag,
+  "no runs" meant "not a patchable thing"; now it is the state whose
+  objects the user most needs to click.
+- The flag's home is the patch file, not `map2d` (shape is not wiring
+  policy) and not a def slot (two wiring truths, and `lpc_model` serde is
+  the flash lever). Per-object tombstones were rejected outright: wrong
+  grain for what is fixture identity, absurd at dome scale.
+
+The three cases this serves are recorded in
+[`docs/design/use-cases/`](../design/use-cases/README.md) — scarf (auto's
+home turf), sign ("not mapped = not lit" is the progress bar), dome-scale
+(never auto-mapped, re-wired every build). Creation-time defaults are
+deferred to a real-hardware walk of those three; a resolve-time heuristic
+is banned, as it would flip existing documented fixtures dark.
+
 ## Consequences
 
 - The arm is the only write gesture on this surface besides the transport

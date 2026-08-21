@@ -244,6 +244,21 @@ pub trait NodeRuntime {
         None
     }
 
+    /// Does this producer's patch declare MANUAL flow (`flow: "manual"`,
+    /// P5b)?
+    ///
+    /// A manual producer never auto-flows: lamps its entries do not name are
+    /// on no wire at all. That is a claim [`Self::control_patch_placement`]
+    /// cannot make on its own — an empty run list there is indistinguishable
+    /// from "unpatched", which auto-flows — so the flag rides beside it and
+    /// the output planner reads both.
+    ///
+    /// False for every node but a manually-patched fixture, which keeps
+    /// auto-flow byte-identical to what it always was.
+    fn control_patch_manual(&self) -> bool {
+        false
+    }
+
     /// Render capability for nodes whose produced slots can materialize visual products.
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
         None

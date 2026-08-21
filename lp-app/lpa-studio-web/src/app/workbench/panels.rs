@@ -778,8 +778,14 @@ pub fn OutputsPanel(
                                 Some((start, _)) => Some(start),
                                 None => port_next_free(output, port_key),
                             };
+                            // A whole-fixture selection means its next
+                            // object still waiting for a wire — the same
+                            // narrowing the sprite click does (P5b).
+                            let subject = crate::app::editor_shell::patching::assign_subject_target(
+                                &surface, target,
+                            );
                             if let Some(lamp) = lamp
-                                && dispatch_assign(&on_action, &surface, target, output, lamp)
+                                && dispatch_assign(&on_action, &surface, &subject, output, lamp)
                             {
                                 // The override was fine-tuning for the
                                 // segment the write just spent: the next

@@ -265,6 +265,45 @@ pub(crate) fn fixture_patch(
     })
 }
 
+/// The row for a fixture whose lamps reach NO wire — the manual-flow state
+/// (P5b): a full-width row of its own lamps with nothing on it.
+///
+/// Before the flow flag this could not happen to a producing fixture (an
+/// unclaimed lamp always flowed somewhere), so [`fixture_patch`] answering
+/// `None` meant "not a patchable thing" and the surface dropped the fixture.
+/// It IS a state now, and dropping the fixture would hide exactly the
+/// objects a walk-up user has to click. The lamp count comes from the
+/// fixture's OWN published control product, because no run is left to carry
+/// it; `None` when the fixture has published nothing to count.
+pub(crate) fn unplaced_fixture_patch(preview: &crate::UiProductPreview) -> Option<UiFixturePatch> {
+    let crate::UiProductPreview::ControlNative(control) = preview else {
+        return None;
+    };
+    // The declared RGB runs when the product states them, else the raw
+    // sample count read as RGB triples — the same reading every other
+    // lamp-counting surface does.
+    let declared: u32 = control
+        .sample_layout
+        .spans
+        .iter()
+        .filter_map(|span| match span.encoding {
+            lpc_model::ControlSampleEncoding::RgbPixels { count, .. } => Some(count),
+            lpc_model::ControlSampleEncoding::Raw => None,
+        })
+        .sum();
+    let lamps = if declared > 0 {
+        declared
+    } else {
+        control.extent.sample_count() / 3
+    };
+    (lamps > 0).then(|| UiFixturePatch {
+        lamps,
+        cells: Vec::new(),
+        frame: None,
+        single_output: true,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

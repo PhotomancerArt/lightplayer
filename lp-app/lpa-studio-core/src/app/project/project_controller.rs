@@ -3453,10 +3453,21 @@ impl ProjectController {
                     .and_then(|editor| editor.content.as_ref())
                     .and_then(|content| content.text());
                 let mapping_loaded = body.is_some();
+                let patch_body = fixture
+                    .patch_editor
+                    .as_ref()
+                    .and_then(|editor| editor.content.as_ref())
+                    .and_then(|content| content.text());
                 let patch_loaded = fixture
                     .patch_editor
                     .as_ref()
                     .is_some_and(|editor| editor.content.is_some());
+                // The flow flag off the same bytes the verbs transform (P5b).
+                // A body that has not landed — or one this build cannot read
+                // — is AUTO: manual is a claim a document makes.
+                let manual_flow = patch_body
+                    .and_then(|text| lpc_mapping::PatchDoc::from_json(text).ok())
+                    .is_some_and(|doc| doc.flow == lpc_mapping::PatchFlow::Manual);
                 let mut instances = body
                     .map(super::ui_patch_surface::instances_from_map2d)
                     .unwrap_or_default();
@@ -3483,6 +3494,7 @@ impl ProjectController {
                         .map(|editor| editor.artifact.clone()),
                     mapping_loaded,
                     patch_loaded,
+                    manual_flow,
                     instances,
                     arrange: None,
                     module: None,
@@ -3616,7 +3628,9 @@ impl ProjectController {
     }
 
     fn apply_patch_bays(&self, nodes: &mut [UiNodeView]) {
-        use super::patch_bay_derivation::{OutputWire, fixture_patch, output_bay};
+        use super::patch_bay_derivation::{
+            OutputWire, fixture_patch, output_bay, unplaced_fixture_patch,
+        };
 
         let Some(sync) = self.sync.as_ref() else {
             return;
@@ -3674,7 +3688,12 @@ impl ProjectController {
                     output.patch = (!bay.is_empty()).then_some(bay);
                 }
                 crate::UiNodeFace::Fixture(fixture) => {
-                    fixture.patch = fixture_patch(id, &wires, &producer);
+                    // A fixture with no run on any wire still gets its row:
+                    // under manual flow that is a real, reachable state, and
+                    // the objects it holds are what the walk-up user clicks
+                    // to put them somewhere (P5b).
+                    fixture.patch = fixture_patch(id, &wires, &producer)
+                        .or_else(|| unplaced_fixture_patch(&fixture.preview.preview));
                 }
                 _ => {}
             }
@@ -7100,6 +7119,10 @@ impl ProjectController {
                         patch_verbs::rotate(&ctx, &doc, &subject, *steps, *stride)
                     }
                     PatchVerbKind::Clear => patch_verbs::clear(&ctx, &doc, &subject),
+                    // Fixture-grain verbs: the selection picked the fixture,
+                    // not the thing inside it.
+                    PatchVerbKind::SetFlow { manual } => patch_verbs::set_flow(&ctx, &doc, *manual),
+                    PatchVerbKind::UnmapAll => patch_verbs::unmap_all(&ctx, &doc),
                     _ => unreachable!("port/undo verbs handled above"),
                 };
                 match result {

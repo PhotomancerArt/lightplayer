@@ -482,6 +482,38 @@ pub(crate) fn arm_assign(
     }
 }
 
+/// What a FIXTURE-grain click actually means to the assign arm (P5b).
+///
+/// Sprites are honest (D2): the canvas can only say "this fixture", and the
+/// Tree's fixture row says the same. But a free segment is SIZED by the
+/// fixture's next unmapped object, so that object is what the click is
+/// offering to place — narrowing to it is what makes clicking a door on the
+/// canvas do the thing the panel just said it would.
+///
+/// A fixture with no object table is one strand (the scarf): the whole
+/// fixture at range grain, which is the only entry its document can hold.
+/// Every other target passes through unchanged.
+pub(crate) fn assign_subject_target(
+    surface: &UiPatchSurface,
+    target: &UiPatchTarget,
+) -> UiPatchTarget {
+    let UiPatchTarget::Fixture { node } = target else {
+        return target.clone();
+    };
+    let Some(fixture) = surface.fixtures.iter().find(|entry| entry.node == *node) else {
+        return target.clone();
+    };
+    match fixture.instances.iter().find(|instance| !instance.placed) {
+        Some(instance) => crate::app::patch::verb_ui::instance_target(*node, instance),
+        None if fixture.instances.is_empty() => UiPatchTarget::Range {
+            node: *node,
+            start: 0,
+            count: None,
+        },
+        None => target.clone(),
+    }
+}
+
 /// The arm grammar's FIXTURE-SIDE completion, shared by every surface a
 /// user can click an object on (the Tree's rows, the canvas's sprites).
 ///
@@ -519,7 +551,8 @@ pub(crate) fn complete_assign_on_object(
     let Some(output) = surface.outputs.iter().find(|output| output.node == *node) else {
         return;
     };
-    if dispatch_assign(on_action, surface, target, output, *start) {
+    let subject = assign_subject_target(surface, target);
+    if dispatch_assign(on_action, surface, &subject, output, *start) {
         // The nudged size was fine-tuning for the segment this write just
         // spent; the next one sizes itself off the next object again.
         let mut segment_size = ui.segment_size;
@@ -762,6 +795,44 @@ mod tests {
         // Every instance placed: the fixture row has nothing left to link.
         surface.fixtures[0].instances[1].placed = true;
         assert!(!is_armable(&surface, &UiPatchTarget::Fixture { node }));
+    }
+
+    /// A fixture-grain click (a sprite, a Tree fixture row) means the
+    /// object the free segment was SIZED for — its first one still waiting
+    /// for a wire (P5b). Without this the canvas could only ever offer a
+    /// whole-fixture subject, which the assign verb refuses.
+    #[test]
+    fn a_fixture_click_assigns_the_next_object_waiting_for_a_wire() {
+        let mut surface = mini_dome_like_surface();
+        surface.fixtures[0].instances[1].placed = false;
+        let node = surface.fixtures[0].node;
+
+        assert_eq!(
+            assign_subject_target(&surface, &UiPatchTarget::Fixture { node }),
+            UiPatchTarget::Instance {
+                node,
+                path: "/sector/2".to_string(),
+            },
+            "sector 1 is already placed; sector 2 is what the click offers"
+        );
+        // A named object passes straight through — the click said which.
+        let named = UiPatchTarget::Instance {
+            node,
+            path: "/sector/1".to_string(),
+        };
+        assert_eq!(assign_subject_target(&surface, &named), named);
+
+        // A fixture with no object table is ONE strand: the whole thing, at
+        // the range grain its document can actually hold (the scarf).
+        surface.fixtures[0].instances.clear();
+        assert_eq!(
+            assign_subject_target(&surface, &UiPatchTarget::Fixture { node }),
+            UiPatchTarget::Range {
+                node,
+                start: 0,
+                count: None,
+            }
+        );
     }
 
     /// The banner names the armed verb — a walk-up user must never have to
