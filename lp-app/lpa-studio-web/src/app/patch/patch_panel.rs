@@ -20,16 +20,25 @@
 //! selection nudge or one of the existing verbs; the panel never opens a
 //! second write path.
 //!
-//! Strips are PLACEHOLDERS here (containers + honest static geometry) —
-//! P5 fills them with live lamps and the chase/breath languages.
+//! The strips (P5) paint the light languages IN the lamps. The OUTPUT strip
+//! is the selected port's published bytes, decoded under A1's lamp type; the
+//! OBJECT strip is the object's own lamps in OBJECT order — decoded from the
+//! same published frames when it is mapped, and client-computed when it is
+//! not, because an unmapped object has no wire to carry a chase. Both follow
+//! the spike's reactive rule (bulbs ≥ 7px/lamp, gradient beyond) via the
+//! shared [`LampStrip`].
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    NodeId, PatchVerbKind, PatchVerbWindow, ProjectEditorOp, UiAction, UiPatchCell, UiPatchSurface,
-    UiPatchSurfaceFixture, UiPatchTarget,
+    ColorOrder, NodeId, PatchVerbKind, PatchVerbWindow, ProjectEditorOp, UiAction,
+    UiControlProductPreview, UiPatchCell, UiPatchSurface, UiPatchSurfaceFixture, UiPatchTarget,
 };
 
 use crate::app::editor_shell::patching::{ArmedVerb, PatchingUi, arm_assign, arm_swap};
+use crate::app::node::lamp_view::{
+    UNLIT_RGB, control_color_order_at_sample, control_rgb_at_sample, wire_lamp_rgb,
+};
+use crate::app::patch::lamp_strip::{LampStrip, StripPresentation, chase_colors, use_chase_phase};
 use crate::app::patch::verb_ui::{
     dispatch_assign, dispatch_verb, free_runs, instance_target, next_free_segment, port_next_free,
     resize_segment, segment_at_free_run, selection_stride, shift_segment, target_is_unmapped,
@@ -415,6 +424,240 @@ pub(crate) fn output_facts(output: &OutputView) -> Vec<(String, String)> {
     facts
 }
 
+// -- the strips ----------------------------------------------------------------
+
+/// Are engine frames actually flowing? The client chase runs only when the
+/// answer is yes; frozen otherwise, so a story (whose fixtures carry no
+/// frame) renders the same pixels every time.
+pub(crate) fn surface_is_live(surface: &UiPatchSurface) -> bool {
+    surface
+        .outputs
+        .iter()
+        .any(|output| output.bay.frame.is_some())
+}
+
+/// The fixture an object-side target belongs to.
+fn object_fixture<'a>(
+    surface: &'a UiPatchSurface,
+    target: &UiPatchTarget,
+) -> Option<&'a UiPatchSurfaceFixture> {
+    match target {
+        UiPatchTarget::Fixture { node }
+        | UiPatchTarget::Instance { node, .. }
+        | UiPatchTarget::Range { node, .. } => fixture_of(surface, *node),
+        UiPatchTarget::Cell { id } => cell_owner(surface, id).map(|(fixture, _)| fixture),
+        _ => None,
+    }
+}
+
+/// The published frame of the output whose bay carries this run.
+///
+/// Per RUN, not per fixture: a fixture can drive two boxes (the mini dome
+/// drives both), and `UiFixturePatch::frame` carries only the first one's —
+/// enough for the bay's own face, a lie for a panel that must show the
+/// object the user just selected. The wire a run landed on is the only wire
+/// that can answer for it.
+fn cell_frame<'a>(
+    surface: &'a UiPatchSurface,
+    cell_id: &str,
+) -> Option<&'a UiControlProductPreview> {
+    surface
+        .outputs
+        .iter()
+        .find(|output| {
+            output
+                .bay
+                .ports
+                .iter()
+                .any(|port| port.cells.iter().any(|cell| cell.id == cell_id))
+        })?
+        .bay
+        .frame
+        .as_ref()
+}
+
+/// The OBJECT strip: the object's lamps in the OBJECT's own order.
+///
+/// Mapped, it is the published wire decoded back through the object's runs,
+/// each against ITS OWN output's frame and end-first where the run is
+/// reversed — which is how the engine's chase reaches this strip without the
+/// client painting a thing, and why a reversed strand still reads
+/// object-continuous here while running backwards on the wire.
+///
+/// Unmapped, there is no wire and therefore nothing published: the strip
+/// computes the chase itself (D2's ONE client-side chase surface — honest,
+/// because the strip is a readout, not the piece).
+///
+/// Empty = nothing honest to draw (no frame yet); the host box's track shows
+/// through rather than a field of invented black lamps.
+fn object_strip_colors(surface: &UiPatchSurface, object: &ObjectView, phase: f32) -> Vec<[u8; 3]> {
+    let lamps = object.lamps as usize;
+    if lamps == 0 {
+        return Vec::new();
+    }
+    if !object.mapped {
+        return chase_colors(lamps, phase);
+    }
+    let Some(fixture) = object_fixture(surface, &object.target) else {
+        return Vec::new();
+    };
+    let Some((range_start, _)) = object_source_range(fixture, &object.target) else {
+        return Vec::new();
+    };
+    let mut colors = vec![UNLIT_RGB; lamps];
+    let mut lit = false;
+    for cell in cells_over(fixture, (range_start, object.lamps)) {
+        let Some(frame) = cell_frame(surface, &cell.id) else {
+            continue;
+        };
+        for index in 0..cell.lamps {
+            let Some(slot) = cell
+                .source_start
+                .saturating_add(index)
+                .checked_sub(range_start)
+                .and_then(|offset| colors.get_mut(offset as usize))
+            else {
+                continue;
+            };
+            let wire = if cell.reversed {
+                cell.wire_start
+                    .saturating_add(cell.lamps.saturating_sub(1).saturating_sub(index))
+            } else {
+                cell.wire_start.saturating_add(index)
+            };
+            if let Some(rgb) = control_rgb_at_sample(frame, wire.saturating_mul(3)) {
+                *slot = rgb;
+                lit = true;
+            }
+        }
+    }
+    if lit { colors } else { Vec::new() }
+}
+
+/// The output's published frame, if one has arrived.
+fn output_frame(surface: &UiPatchSurface, node: NodeId) -> Option<&UiControlProductPreview> {
+    surface
+        .outputs
+        .iter()
+        .find(|output| output.node == node)?
+        .bay
+        .frame
+        .as_ref()
+}
+
+/// The OUTPUT strip: the port's WHOLE extent, in wire order.
+///
+/// Every lamp of the span, mapped or free — the free stretches are the point
+/// of the walk-up flow, and the engine paints the selection's breath into
+/// them before it publishes, so they carry real light. Lamps past the
+/// published extent decode to nothing and draw as the unlit neutral.
+fn output_strip_colors(
+    frame: Option<&UiControlProductPreview>,
+    span: (u32, u32),
+    assumed: ColorOrder,
+) -> Vec<[u8; 3]> {
+    let Some(frame) = frame else {
+        return Vec::new();
+    };
+    let (start, lamps) = span;
+    (0..lamps)
+        .map(|index| {
+            wire_lamp_rgb(frame, start.saturating_add(index), assumed).unwrap_or(UNLIT_RGB)
+        })
+        .collect()
+}
+
+/// The next object still waiting for a wire, with its fixture — the one that
+/// sizes a free segment, and so (D6) the one whose lamp type the free
+/// stretches are read under.
+fn next_unmapped_object(surface: &UiPatchSurface) -> Option<(&UiPatchSurfaceFixture, String)> {
+    for fixture in &surface.fixtures {
+        if fixture.instances.is_empty() {
+            if fixture.patch.cells.is_empty() && fixture.patch.lamps > 0 {
+                return Some((fixture, fixture.label.clone()));
+            }
+            continue;
+        }
+        if let Some(instance) = fixture.instances.iter().find(|entry| !entry.placed) {
+            return Some((fixture, instance.label.clone()));
+        }
+    }
+    None
+}
+
+/// A fixture's lamp type, learned from the wire it already drives.
+///
+/// The layout a frame carries declares a colour order per PLACED run, so a
+/// fixture with a run anywhere states its own lamp type; one with no run at
+/// all has never told anybody, and the panel says so rather than guessing in
+/// silence.
+fn fixture_color_order(fixture: &UiPatchSurfaceFixture) -> Option<ColorOrder> {
+    let frame = fixture.patch.frame.as_ref()?;
+    fixture
+        .patch
+        .cells
+        .iter()
+        .find_map(|cell| control_color_order_at_sample(frame, cell.wire_start.saturating_mul(3)))
+}
+
+/// A1, said out loud: which lamp type the output strip decoded under, and
+/// where that assumption came from.
+///
+/// The wire's own layout answers for every stretch a producer sits on. The
+/// FREE stretches — the ones a walk-up user is about to spend — have no
+/// declared order at all, so the strip reads them under the lamp type of the
+/// object that would land there (D6). That is a deliberate lp2014-style
+/// assumption, which is exactly why the panel prints it.
+fn decode_line(
+    surface: &UiPatchSurface,
+    output: &OutputView,
+    object: Option<&ObjectView>,
+    frame: Option<&UiControlProductPreview>,
+) -> (ColorOrder, String) {
+    let Some(frame) = frame else {
+        return (ColorOrder::Rgb, "no signal on this wire yet".to_string());
+    };
+    // A mapped window: the owner object's own lamp type, as published.
+    if let Some(object) = object.filter(|object| object.mapped)
+        && let Some(order) = output
+            .window
+            .and_then(|(start, _)| control_color_order_at_sample(frame, start.saturating_mul(3)))
+            .or_else(|| object_fixture(surface, &object.target).and_then(fixture_color_order))
+    {
+        return (order, decoded_as(order, &object.name));
+    }
+    // Free space: the object that sized the segment (D6).
+    if let Some((fixture, name)) = next_unmapped_object(surface)
+        && let Some(order) = fixture_color_order(fixture)
+    {
+        return (order, decoded_as(order, &name));
+    }
+    // Nothing on this surface has stated a lamp type yet: fall back to what
+    // this wire's other runs use, and name the fallback as a fallback.
+    let order = frame
+        .sample_layout
+        .spans
+        .iter()
+        .find_map(|span| control_color_order_at_sample(frame, span.start))
+        .unwrap_or(ColorOrder::Rgb);
+    (order, decoded_as(order, "assumed"))
+}
+
+fn decoded_as(order: ColorOrder, source: &str) -> String {
+    format!("decoded as {} — {source}", color_order_label(order))
+}
+
+fn color_order_label(order: ColorOrder) -> &'static str {
+    match order {
+        ColorOrder::Rgb => "RGB",
+        ColorOrder::Grb => "GRB",
+        ColorOrder::Rbg => "RBG",
+        ColorOrder::Gbr => "GBR",
+        ColorOrder::Brg => "BRG",
+        ColorOrder::Bgr => "BGR",
+    }
+}
+
 /// Every object still waiting for a wire, in surface order — the object
 /// side's inline picker (direct-assign).
 pub(crate) fn unmapped_objects(surface: &UiPatchSurface) -> Vec<(UiPatchTarget, String)> {
@@ -629,6 +872,12 @@ fn ObjectPane(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let ui = use_hook(try_consume_context::<PatchingUi>);
+    // The one self-animated surface in the panel, and the only chase the
+    // client ever computes: it runs when an UNMAPPED object is on screen and
+    // engine frames are flowing, and stands still otherwise. A mapped
+    // object's chase is published data and needs no clock here.
+    let animate = object.as_ref().is_some_and(|object| !object.mapped) && surface_is_live(&surface);
+    let phase = use_chase_phase(animate);
     let class = if primary { SECTION_PRIMARY } else { SECTION };
     let is_armed = matches!(armed, Some(ArmedVerb::Assign));
     // The invitation belongs to the object side when the WIRE side holds a
@@ -645,6 +894,7 @@ fn ObjectPane(
             match object {
                 Some(object) => {
                     let facts = object_facts(&object);
+                    let colors = object_strip_colors(&surface, &object, phase);
                     let target = Some(object.target.clone());
                     let stride = selection_stride(&surface, &target);
                     let mapped = object.mapped;
@@ -664,11 +914,13 @@ fn ObjectPane(
                             deselect: primary,
                             on_action,
                         }
-                        // Strip container — P5 paints the chase in the
-                        // lamps here; today it carries the object's honest
-                        // extent and nothing it does not know.
+                        // The object's own lamps, in object order: the
+                        // published chase when it is on a wire, the
+                        // client-computed one when it is not. Nothing to
+                        // decode yet leaves the track showing — an honest
+                        // "no signal", not a field of black lamps.
                         div { class: "{STRIP}", "data-patch-strip": "object",
-                            div { class: "tw:absolute tw:inset-y-[3px] tw:left-[2px] tw:right-[2px] tw:rounded-[3px] tw:bg-border-muted" }
+                            LampStrip { colors }
                         }
                         div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1.5",
                             button {
@@ -851,6 +1103,10 @@ fn OutputPane(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let ui = use_hook(try_consume_context::<PatchingUi>);
+    // The strip reports which presentation its measured box chose, so the
+    // fact line can name it (the spike's mode chip) — and so a walk-up gate
+    // can see where the 7px threshold actually falls.
+    let presentation = use_signal(StripPresentation::default);
     let class = if primary { SECTION_PRIMARY } else { SECTION };
     let is_armed = matches!(armed, Some(ArmedVerb::Assign));
     let swap_armed = matches!(armed, Some(ArmedVerb::Swap(_)));
@@ -880,8 +1136,17 @@ fn OutputPane(
                         .port
                         .map(|key| format!("{}:{key}", output.node.0))
                         .unwrap_or_default();
-                    let object_target = object_view(&surface, selection.as_ref())
-                        .map(|object| object.target);
+                    let object = object_view(&surface, selection.as_ref());
+                    let frame = output_frame(&surface, output.node);
+                    let (assumed, decode_note) = decode_line(
+                        &surface,
+                        &output,
+                        object.as_ref(),
+                        frame,
+                    );
+                    let colors = output_strip_colors(frame, output.span, assumed);
+                    let has_signal = !colors.is_empty();
+                    let object_target = object.map(|object| object.target);
                     let shift_window = output
                         .window
                         .filter(|_| !free)
@@ -1012,10 +1277,12 @@ fn OutputPane(
                                 }
                             }
                         }
-                        // Strip container — P5 decodes the port's live
-                        // lamps here. Today it shows the honest geometry:
-                        // the window inside the port's span.
+                        // The port's WHOLE extent as published, with the
+                        // selection's window marked over it — the window is
+                        // a DOM overlay so it survives whichever
+                        // presentation the strip below it chose.
                         div { class: "{STRIP}", "data-patch-strip": "output",
+                            LampStrip { colors, presentation }
                             if let Some(style) = window_style {
                                 div {
                                     class: "tw:absolute tw:inset-y-0 tw:rounded-[3px] tw:border tw:border-selection-border tw:bg-selection-bg",
@@ -1025,11 +1292,13 @@ fn OutputPane(
                         }
                         div { class: "tw:flex tw:flex-wrap tw:items-baseline tw:gap-2 tw:font-mono tw:text-[10px] tw:text-dim-foreground",
                             span { "wire {span_start + 1}" }
-                            // A1, stated where it is assumed: the strip's
-                            // values decode under the CURRENT fixture's
-                            // lamp type. P5 names the layout it used.
-                            span { class: "tw:text-status-warning-foreground",
-                                "decoded under this fixture's lamp type"
+                            // A1, stated where it is assumed: the free
+                            // stretches of this wire are read under a lamp
+                            // type nobody declared, so the panel names the
+                            // one it used and where it got it.
+                            span { class: "tw:text-status-warning-foreground", "{decode_note}" }
+                            if has_signal {
+                                span { "{presentation().label()}" }
                             }
                             span { class: "tw:ml-auto", "wire {span_start + span_lamps}" }
                         }
@@ -1233,9 +1502,12 @@ fn OutputPane(
 mod tests {
     use super::*;
     use lpa_studio_core::{
-        UiFixturePatch, UiPatchBay, UiPatchInstance, UiPatchPort, UiPatchSurfaceFixture,
-        UiPatchSurfaceOutput,
+        ControlExtent, ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan,
+        UiControlSampleFormat, UiFixturePatch, UiPatchBay, UiPatchInstance, UiPatchPort,
+        UiPatchSurfaceFixture, UiPatchSurfaceOutput,
     };
+
+    use crate::app::patch::lamp_strip::{FROZEN_CHASE_PHASE, chase_head_lamps};
 
     fn dome_node() -> NodeId {
         NodeId::new(2)
@@ -1513,6 +1785,218 @@ mod tests {
         assert_eq!(ports[0].1, "1 · IO18 · port 0");
         assert_eq!(parse_port_key(&ports[0].0), Some((output_node(), 0)));
         assert_eq!(parse_port_key("nonsense"), None);
+    }
+
+    /// A published wire whose lamp `n` is saturated in channel `n % 3`, with
+    /// `declared` lamps carrying `order` and the rest declared by nobody —
+    /// the shape of a half-patched port.
+    fn wire_frame(lamps: u32, declared: u32, order: ColorOrder) -> UiControlProductPreview {
+        let mut bytes = Vec::with_capacity(lamps as usize * 6);
+        for lamp in 0..lamps {
+            let mut rgb = [0_u16; 3];
+            rgb[(lamp % 3) as usize] = 65535;
+            for sample in rgb {
+                bytes.extend_from_slice(&sample.to_le_bytes());
+            }
+        }
+        UiControlProductPreview {
+            revision: 1,
+            extent: ControlExtent::new(1, lamps * 3),
+            sample_format: UiControlSampleFormat::U16,
+            sample_layout: ControlSampleLayout {
+                spans: vec![ControlSampleSpan {
+                    row: 0,
+                    start: 0,
+                    len: declared * 3,
+                    encoding: ControlSampleEncoding::RgbPixels {
+                        count: declared,
+                        color_order: order,
+                    },
+                }],
+            },
+            display_layout: None,
+            bytes: bytes.into(),
+        }
+    }
+
+    /// The same surface, live: sector 1's 30 lamps are declared GRB, the
+    /// free half of the port is declared by nobody.
+    fn live_surface() -> UiPatchSurface {
+        let mut surface = half_patched_surface();
+        let frame = wire_frame(60, 30, ColorOrder::Grb);
+        surface.fixtures[0].patch.frame = Some(frame.clone());
+        surface.outputs[0].bay.frame = Some(frame);
+        surface
+    }
+
+    /// A surface with no frame is not live, and the chase that would animate
+    /// stands still — the property every story render depends on.
+    #[test]
+    fn a_surface_without_frames_is_not_live() {
+        assert!(!surface_is_live(&half_patched_surface()));
+        assert!(surface_is_live(&live_surface()));
+    }
+
+    /// An UNMAPPED object has no wire and so no published bytes: its strip
+    /// is the one chase the client computes, blue-headed and red-tailed in
+    /// OBJECT order (D2 — and it stays in the strip, never on the sprites).
+    #[test]
+    fn the_object_strip_chases_an_unmapped_object() {
+        let surface = half_patched_surface();
+        let selection = UiPatchTarget::Instance {
+            node: dome_node(),
+            path: "/sector/2".to_string(),
+        };
+        let object = object_view(&surface, Some(&selection)).expect("object");
+        let colors = object_strip_colors(&surface, &object, FROZEN_CHASE_PHASE);
+        assert_eq!(colors.len(), 30, "the object's own lamps, all of them");
+        let heads = chase_head_lamps(30);
+        assert_eq!(colors[0], [0, 0, 255], "lamp 0 leads in blue");
+        assert_eq!(colors[30 - 1], [255, 0, 0], "the last lamp trails in red");
+        assert!(
+            colors[heads..30 - heads]
+                .iter()
+                .all(|color| color[0] == color[1])
+        );
+    }
+
+    /// A MAPPED object's strip is its own wire, decoded back through its
+    /// runs — which is how the ENGINE's chase reaches this strip without the
+    /// client painting anything. A reversed run reads object-continuous.
+    #[test]
+    fn the_object_strip_reads_a_mapped_objects_own_wire() {
+        let surface = live_surface();
+        let selection = UiPatchTarget::Instance {
+            node: dome_node(),
+            path: "/sector/1".to_string(),
+        };
+        let object = object_view(&surface, Some(&selection)).expect("object");
+        assert!(object.mapped && object.reversed);
+        let colors = object_strip_colors(&surface, &object, FROZEN_CHASE_PHASE);
+        assert_eq!(colors.len(), 30);
+        // The run is laid end-first, so object lamp 0 is wire lamp 29 —
+        // saturated in channel 29 % 3 = 2, read under GRB as blue.
+        assert_eq!(colors[0], [0, 0, 255]);
+        // Object lamp 1 is wire 28 (channel 1) — GRB reads that as red.
+        assert_eq!(colors[1], [255, 0, 0]);
+        // And with no frame there is nothing honest to draw at all.
+        let dark = object_strip_colors(&half_patched_surface(), &object, FROZEN_CHASE_PHASE);
+        assert!(dark.is_empty(), "no frame, no invented lamps");
+    }
+
+    /// A fixture driving TWO boxes decodes each run against the wire that
+    /// run landed on. `UiFixturePatch::frame` carries only the FIRST
+    /// output's — enough for the bay's own face, and a lie on a panel
+    /// showing the object the user just selected (the mini dome, whose
+    /// sectors are split across both of its boxes, reads wrong without
+    /// this).
+    #[test]
+    fn a_split_fixture_reads_each_run_from_its_own_output() {
+        let mut surface = live_surface();
+        // A second box, all-red, carrying sector 2's run at wire 0.
+        let second = output_node().0 + 1;
+        let mut red = wire_frame(60, 30, ColorOrder::Rgb);
+        red.bytes = std::iter::repeat_n([65535_u16, 0, 0], 60)
+            .flatten()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<u8>>()
+            .into();
+        let run = cell("2:1", 30, 0, 30, false);
+        surface.fixtures[0].patch.cells.push(run.clone());
+        surface.fixtures[0].instances[1].placed = true;
+        surface.outputs.push(UiPatchSurfaceOutput {
+            node: NodeId::new(second),
+            label: "out_b".to_string(),
+            name: Some("Box 2".to_string()),
+            bay: UiPatchBay {
+                ports: vec![UiPatchPort {
+                    key: 0,
+                    pin_label: "IO14".to_string(),
+                    start: 0,
+                    lamps: 60,
+                    cells: vec![run],
+                }],
+                frame: Some(red),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let selection = UiPatchTarget::Instance {
+            node: dome_node(),
+            path: "/sector/2".to_string(),
+        };
+        let object = object_view(&surface, Some(&selection)).expect("object");
+        assert!(object.mapped, "sector 2 now sits on the second box");
+        let colors = object_strip_colors(&surface, &object, FROZEN_CHASE_PHASE);
+        assert!(
+            colors.iter().all(|color| *color == [255, 0, 0]),
+            "every lamp reads the SECOND box's wire, not the first's: {colors:?}"
+        );
+    }
+
+    /// The output strip is the WHOLE port, free lamps included — the free
+    /// stretch is the thing the walk-up flow is about, and the engine paints
+    /// its breath into the published bytes before publishing.
+    #[test]
+    fn the_output_strip_covers_the_whole_port_extent() {
+        let surface = live_surface();
+        let free = UiPatchTarget::Segment {
+            node: output_node(),
+            port: 0,
+            start: 30,
+            lamps: 30,
+        };
+        let output = output_view(&surface, Some(&free)).expect("window");
+        let frame = output_frame(&surface, output.node);
+        let colors = output_strip_colors(frame, output.span, ColorOrder::Rgb);
+        assert_eq!(colors.len(), 60, "every lamp of the port, mapped or not");
+        // Wire 0 is declared GRB (channel 0 saturated → green); wire 30 is
+        // declared by nobody, so the assumption decides (channel 0 → red).
+        assert_eq!(colors[0], [0, 255, 0]);
+        assert_eq!(colors[30], [255, 0, 0]);
+        assert_eq!(
+            output_strip_colors(None, output.span, ColorOrder::Rgb),
+            Vec::<[u8; 3]>::new(),
+            "no frame = no strip, not a black one"
+        );
+    }
+
+    /// A1 out loud: the mapped window names its owner's lamp type, a free
+    /// segment names the object that would land there (D6), and a wire with
+    /// no frame says so instead of decoding nothing into a claim.
+    #[test]
+    fn the_decode_line_names_the_lamp_type_and_its_source() {
+        let surface = live_surface();
+        let mapped = UiPatchTarget::Instance {
+            node: dome_node(),
+            path: "/sector/1".to_string(),
+        };
+        let output = output_view(&surface, Some(&mapped)).expect("derived window");
+        let object = object_view(&surface, Some(&mapped));
+        let frame = output_frame(&surface, output.node);
+        assert_eq!(
+            decode_line(&surface, &output, object.as_ref(), frame),
+            (ColorOrder::Grb, "decoded as GRB — sector 1".to_string())
+        );
+
+        let free = UiPatchTarget::Segment {
+            node: output_node(),
+            port: 0,
+            start: 30,
+            lamps: 30,
+        };
+        let output = output_view(&surface, Some(&free)).expect("window");
+        assert_eq!(
+            decode_line(&surface, &output, None, frame),
+            (ColorOrder::Grb, "decoded as GRB — sector 2".to_string()),
+            "the free stretch reads under the object about to take it"
+        );
+
+        assert_eq!(
+            decode_line(&surface, &output, None, None),
+            (ColorOrder::Rgb, "no signal on this wire yet".to_string())
+        );
     }
 
     /// A range-grain fixture (no instances, no runs) is one pickable object;

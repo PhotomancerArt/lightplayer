@@ -4,6 +4,7 @@
 //! behind, and pass 2's panel joined it here so its stories land on a
 //! three-segment path the story build accepts.)
 
+pub(crate) mod lamp_strip;
 pub(crate) mod patch_panel;
 #[cfg(feature = "stories")]
 pub(crate) mod patch_story_fixtures;
