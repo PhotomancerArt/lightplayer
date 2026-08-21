@@ -316,6 +316,7 @@ mod tests {
     fn spans() -> Vec<ObjectInstanceSpan> {
         (0..5)
             .map(|instance| ObjectInstanceSpan {
+                object: 0,
                 id: Some(Map2dObjectId::new("sector").unwrap()),
                 instances: vec![instance],
                 start: instance * 30,

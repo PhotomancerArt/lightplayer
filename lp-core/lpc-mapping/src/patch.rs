@@ -1135,6 +1135,7 @@ mod tests {
         let mut spans = Vec::new();
         for instance in 0..5u32 {
             spans.push(ObjectInstanceSpan {
+                object: 0,
                 id: Some(Map2dObjectId::new("sector").unwrap()),
                 instances: vec![instance],
                 start: instance * 30,
@@ -1143,6 +1144,7 @@ mod tests {
         }
         for instance in 0..3u32 {
             spans.push(ObjectInstanceSpan {
+                object: 1,
                 id: Some(Map2dObjectId::new("door").unwrap()),
                 instances: vec![instance],
                 start: 150 + instance * 9,
@@ -1601,6 +1603,7 @@ mod tests {
         let mut grown = Vec::new();
         for instance in 0..5u32 {
             grown.push(ObjectInstanceSpan {
+                object: 0,
                 id: Some(Map2dObjectId::new("sector").unwrap()),
                 instances: vec![instance],
                 start: instance * 40,

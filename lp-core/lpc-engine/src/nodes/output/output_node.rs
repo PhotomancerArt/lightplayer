@@ -57,15 +57,37 @@ use crate::resource::{
 /// first-class settings, this is the constant a smarter policy replaces.
 const TEST_PATTERN_RGB: [u8; 3] = [64, 64, 64];
 
-/// Half-period of the `highlight` blink, in seconds: 2 Hz, snappy enough to
-/// find on a rig at a glance without reading as show content.
+/// Full period of the `highlight` breath, in seconds.
 ///
-/// The blink alternates the highlighted lamps between the test-pattern white
-/// and dark rather than white and the live frame: white guarantees contrast
-/// on dark content, dark guarantees it on bright content, and together the
-/// selection is findable on ANY background. Same dim white as the pattern,
-/// for the same max-current reason.
-const HIGHLIGHT_BLINK_SECONDS: f32 = 0.25;
+/// The highlight FADES — a raised cosine between a dim floor and a bright
+/// crest — rather than blinking: a hard on/off square reads as distracting
+/// flashing on the piece (G1 feedback), where lp2014's field-proven
+/// selection breathed (`BaseOutputDevice.applyFading`: `64 + timeCos(750ms)
+/// × 192`, never fully dark). 750 ms keeps it findable at a glance without
+/// reading as show content.
+const HIGHLIGHT_BREATH_SECONDS: f32 = 0.75;
+
+/// The breath's floor and crest, 16-bit unorm per channel (white).
+///
+/// Contrast on ANY background comes from the dim-the-rest pass (see
+/// [`OutputNode::paint_highlight`]): everything else drops to 25%, so full
+/// white content dims to 16383 — the crest (96 → 24672) rises clearly above
+/// it and the floor (16 → 4112) dips clearly below mid content, and the
+/// MOTION of the breath does the rest. Peak current stays bounded: the
+/// crest is 37.5% white on the selection alone while the rest of the strip
+/// sits at quarter power — less total draw than the old half-duty blink.
+const HIGHLIGHT_FLOOR_16: u16 = 16 * 257;
+const HIGHLIGHT_CREST_16: u16 = 96 * 257;
+
+/// The breath's level at `time_seconds`: a raised cosine from
+/// [`HIGHLIGHT_FLOOR_16`] (at phase 0) to [`HIGHLIGHT_CREST_16`] (half
+/// period), never zero — a selection must never read as dead lamps.
+fn highlight_level_16(time_seconds: f32) -> u16 {
+    let phase =
+        0.5 - 0.5 * libm::cosf(core::f32::consts::TAU * time_seconds / HIGHLIGHT_BREATH_SECONDS);
+    let span = f32::from(HIGHLIGHT_CREST_16 - HIGHLIGHT_FLOOR_16);
+    HIGHLIGHT_FLOOR_16 + libm::roundf(span * phase.clamp(0.0, 1.0)) as u16
+}
 
 /// Samples per RGB lamp, the unit both the buffer and the reports speak.
 const SAMPLES_PER_LAMP: u32 = 3;
@@ -277,23 +299,20 @@ impl OutputNode {
 
     /// Paint the highlight spans over whatever frame is in the buffer.
     ///
-    /// An overlay, not a bypass: the graph (or the test pattern) has already
-    /// painted `control_samples`, and only the named lamps are overwritten —
-    /// with the highlight white in the blink's on phase, dark in its off
-    /// phase. Lamps past the established extent are clipped, not an error: a
-    /// selection can outlive a shrinking wire by a frame, and a diagnostic
-    /// never kills output.
+    /// An overlay, not a bypass, in two moves (lp2014's selection language):
+    /// first EVERY established sample dims to a quarter — the background
+    /// recedes so the selection never has to shout — then the named lamps
+    /// take the breathing white ([`highlight_level_16`]). Lamps past the
+    /// established extent are clipped, not an error: a selection can outlive
+    /// a shrinking wire by a frame, and a diagnostic never kills output.
     fn paint_highlight(&mut self, spans: &[(u32, u32)], time_seconds: f32) {
-        let on = (time_seconds / HIGHLIGHT_BLINK_SECONDS) as i64 % 2 == 0;
-        let rgb16: [u16; 3] = if on {
-            [
-                u16::from(TEST_PATTERN_RGB[0]) * 257,
-                u16::from(TEST_PATTERN_RGB[1]) * 257,
-                u16::from(TEST_PATTERN_RGB[2]) * 257,
-            ]
-        } else {
-            [0, 0, 0]
-        };
+        if spans.is_empty() {
+            return;
+        }
+        for sample in self.control_samples.iter_mut() {
+            *sample >>= 2;
+        }
+        let level = highlight_level_16(time_seconds);
         for (start, count) in spans {
             let first = lamps_to_samples(*start) as usize;
             let last = lamps_to_samples(start.saturating_add(*count)) as usize;
@@ -301,8 +320,8 @@ impl OutputNode {
             if first >= end {
                 continue;
             }
-            for (index, sample) in self.control_samples[first..end].iter_mut().enumerate() {
-                *sample = rgb16[index % 3];
+            for sample in self.control_samples[first..end].iter_mut() {
+                *sample = level;
             }
         }
     }
@@ -1614,7 +1633,7 @@ mod tests {
     }
 
     #[test]
-    fn the_highlight_paints_its_lamps_over_the_rendered_frame() {
+    fn the_highlight_paints_its_lamps_and_dims_the_rest() {
         let mut node = output_node();
         let mut resolver = FakeResolver::new();
         resolver.graph_extent = TWO_LAMPS;
@@ -1622,10 +1641,12 @@ mod tests {
 
         consume_at(&mut node, &mut resolver, Revision::new(1)).expect("graph frame");
 
+        let floor = HIGHLIGHT_FLOOR_16;
         assert_eq!(
             resolver.published_samples(),
-            vec![1000, 2000, 3000, PATTERN16, PATTERN16, PATTERN16],
-            "lamp 0 keeps the graph's colors; lamp 1 wears the highlight",
+            vec![250, 500, 750, floor, floor, floor],
+            "lamp 0 keeps the graph's colors at quarter power (the background \
+             recedes); lamp 1 wears the breath's floor at phase 0",
         );
         assert_eq!(
             resolver.input_resolve_calls, 1,
@@ -1634,19 +1655,33 @@ mod tests {
     }
 
     #[test]
-    fn the_highlight_blinks_dark_in_its_off_phase() {
+    fn the_highlight_breathes_and_never_goes_dark() {
         let mut node = output_node();
         let mut resolver = FakeResolver::new();
         resolver.graph_extent = TWO_LAMPS;
         resolver.highlight = String::from("1");
 
-        consume_at_time(&mut node, &mut resolver, Revision::new(1), 0.3).expect("graph frame");
-
-        assert_eq!(
-            resolver.published_samples(),
-            vec![1000, 2000, 3000, 0, 0, 0],
-            "off phase: the highlighted lamp goes dark, the rest keep the show",
+        // Half period: the crest (libm cos of an f32 π rounds within one
+        // step of exact, so pin through the level fn's own value).
+        let crest_time = HIGHLIGHT_BREATH_SECONDS / 2.0;
+        consume_at_time(&mut node, &mut resolver, Revision::new(1), crest_time)
+            .expect("graph frame");
+        let crest = resolver.published_samples()[3];
+        assert_eq!(crest, highlight_level_16(crest_time));
+        assert!(
+            crest >= HIGHLIGHT_CREST_16 - 1,
+            "half period reaches the crest ({crest})"
         );
+
+        // A hard-blink regression would spend half the cycle at zero; the
+        // breath NEVER goes dark — a selection must never read as dead lamps.
+        for step in 0..12 {
+            let time = HIGHLIGHT_BREATH_SECONDS * (step as f32) / 12.0;
+            assert!(
+                highlight_level_16(time) >= HIGHLIGHT_FLOOR_16,
+                "breath floor holds at t={time}"
+            );
+        }
     }
 
     #[test]
@@ -1658,12 +1693,22 @@ mod tests {
 
         resolver.test_pattern = true;
         resolver.highlight = String::from("0");
-        consume_at_time(&mut node, &mut resolver, Revision::new(2), 0.3).expect("pattern frame");
+        consume_at_time(&mut node, &mut resolver, Revision::new(2), 0.0).expect("pattern frame");
 
+        let floor = HIGHLIGHT_FLOOR_16;
+        let dimmed_pattern = PATTERN16 >> 2;
         assert_eq!(
             resolver.published_samples(),
-            vec![0, 0, 0, PATTERN16, PATTERN16, PATTERN16],
-            "the pulse overlays the pattern too, so a selection stays findable mid-wiring-test",
+            vec![
+                floor,
+                floor,
+                floor,
+                dimmed_pattern,
+                dimmed_pattern,
+                dimmed_pattern
+            ],
+            "the breath overlays the pattern too (pattern dimmed beneath it), \
+             so a selection stays findable mid-wiring-test",
         );
     }
 
@@ -1676,9 +1721,10 @@ mod tests {
 
         consume_at(&mut node, &mut resolver, Revision::new(1)).expect("graph frame");
 
+        let floor = HIGHLIGHT_FLOOR_16;
         assert_eq!(
             resolver.published_samples(),
-            vec![1000, 2000, 3000, PATTERN16, PATTERN16, PATTERN16],
+            vec![250, 500, 750, floor, floor, floor],
             "the buffer keeps its extent; lamps the wire does not have are ignored",
         );
     }
