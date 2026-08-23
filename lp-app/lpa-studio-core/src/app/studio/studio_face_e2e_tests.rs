@@ -3946,6 +3946,10 @@ fn verbs_author_the_mini_dome_permutation_byte_identically() {
     while view.try_recv().is_some() {}
     let after_undo = body_of(doors.patch_artifact.as_ref().unwrap());
     assert_ne!(before_undo, after_undo, "undo moved the document back");
+    assert!(
+        after_undo.ends_with('\n'),
+        "undo restores the same newline-terminated bytes a forward write produces"
+    );
     verb!(doors.node, None, PatchVerbKind::Redo);
     handle.tx.send(project_action(ProjectOp::SaveOverlay));
     drive(actor.run_one_batch_for_test());
