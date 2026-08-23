@@ -7139,7 +7139,7 @@ impl ProjectController {
                 .map(|(artifact, before, after)| {
                     (
                         artifact.clone(),
-                        before.clone().into_bytes(),
+                        format!("{before}\n").into_bytes(),
                         format!("{after}\n").into_bytes(),
                     )
                 })
