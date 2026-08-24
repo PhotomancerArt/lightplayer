@@ -7,6 +7,8 @@
 //!   lines become buffered console drafts (drained into the log ring by the
 //!   controller), state/progress events are ignored (state is read by
 //!   snapshot pull).
+//! - [`probe_event_sink`] — the narration-only sink for a bootloader probe:
+//!   log lines become console drafts, nothing else is derived.
 //! - [`management_event_sink`] — the per-operation sink for
 //!   `DeviceSession::manage`: log lines are captured AND mirrored as
 //!   progressive `UxUpdate::Log`s, progress events update the live activity
@@ -64,6 +66,24 @@ fn log_line_draft(line: &str, origin: DeviceLineOrigin) -> UiLogDraft {
             line,
         ),
     }
+}
+
+/// The sink for a management operation whose ONLY output is narration:
+/// log lines become console drafts in `pending`, and progress/state events
+/// are ignored (the caller reads the operation's return value for its
+/// answer).
+///
+/// [`management_event_sink`] is the flash's sink — it drives a card-owned
+/// op flow, which a bootloader probe has none of. Without a sink of its
+/// own the probe ran under `DeviceEventSink::noop()` and its several
+/// seconds of esptool traffic reached the browser console and nowhere the
+/// wizard could show it.
+pub(crate) fn probe_event_sink(pending: Rc<RefCell<Vec<UiLogDraft>>>) -> DeviceEventSink {
+    DeviceEventSink::new(move |event| {
+        if let DeviceEvent::LogLine { line, origin } = event {
+            pending.borrow_mut().push(log_line_draft(&line, origin));
+        }
+    })
 }
 
 /// The connect-time sink: buffer device console lines as drafts for the

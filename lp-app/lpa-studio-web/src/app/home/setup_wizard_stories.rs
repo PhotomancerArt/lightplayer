@@ -59,22 +59,36 @@ fn probe(verdict: BoardVerdict) -> BoardProbe {
 }
 
 fn console() -> Vec<UiLogEntry> {
-    [
+    lines(&[
         "Connected to ESP32-C6 bootloader",
         "Erasing flash",
         "Writing app image at 0x10000",
-    ]
-    .iter()
-    .enumerate()
-    .map(|(index, message)| {
-        UiLogEntry::new(
-            1_800_000_000.0 + index as f64,
-            UiLogLevel::Info,
-            UiLogSource::with_detail(UiLogOrigin::Device, "lpa-link"),
-            *message,
-        )
-    })
-    .collect()
+    ])
+}
+
+fn lines(messages: &[&str]) -> Vec<UiLogEntry> {
+    messages
+        .iter()
+        .enumerate()
+        .map(|(index, message)| {
+            UiLogEntry::new(
+                1_800_000_000.0 + index as f64,
+                UiLogLevel::Info,
+                UiLogSource::with_detail(UiLogOrigin::Device, "lpa-link"),
+                *message,
+            )
+        })
+        .collect()
+}
+
+/// What the link says while a board is being opened and woken — the tail
+/// the two waiting steps now show.
+fn connect_console() -> Vec<UiLogEntry> {
+    lines(&[
+        "opening /dev/tty.usbserial-2110 at 921600",
+        "asserting DTR/RTS reset",
+        "waiting for the server hello",
+    ])
 }
 
 /// The STANDALONE frame: the wizard as its own card in the entry-cards
@@ -233,16 +247,81 @@ fn board_first() -> Element {
 fn port_picking() -> Element {
     frame(hardware(SetupState::PortPicking {
         preseeded_board: None,
+        grants: Vec::new(),
     }))
+}
+
+#[story(
+    description = "PORT_PICKING with several already-authorized ports (D7): never guess between grants — the in-app picker lists them as deliberate, synthetically-clickable rows, with the browser's own chooser demoted to the last one. Unlike Chrome's dialog, this list can later carry registry recognition."
+)]
+fn port_picking_granted_list() -> Element {
+    frame(hardware(SetupState::PortPicking {
+        preseeded_board: None,
+        grants: vec![
+            lpa_studio_core::SetupGrantedPort {
+                endpoint_id: "browser-serial-esp32-port-1".to_string(),
+                label: "Serial device (1a86:7523)".to_string(),
+            },
+            lpa_studio_core::SetupGrantedPort {
+                endpoint_id: "browser-serial-esp32-port-2".to_string(),
+                label: "ESP32 Serial (303a:1001)".to_string(),
+            },
+        ],
+    }))
+}
+
+#[story(
+    description = "PORT_PICKING with two IDENTICAL grants: getInfo() gives only VID:PID, so two of the same bridge chip cannot be told apart until opened — the honesty note says so instead of pretending (D7). Picking either is safe; \"Not this one?\" on the next screen is the way back."
+)]
+fn port_picking_granted_twins() -> Element {
+    frame(hardware(SetupState::PortPicking {
+        preseeded_board: None,
+        grants: vec![
+            lpa_studio_core::SetupGrantedPort {
+                endpoint_id: "browser-serial-esp32-port-1".to_string(),
+                label: "Serial device (1a86:7523)".to_string(),
+            },
+            lpa_studio_core::SetupGrantedPort {
+                endpoint_id: "browser-serial-esp32-port-2".to_string(),
+                label: "Serial device (1a86:7523)".to_string(),
+            },
+        ],
+    }))
+}
+
+#[story(
+    description = "CONNECTING: the seconds PORT_PICKING used to claim for itself. The chooser is done — the port is open, the board is being reset, and the hello deadline is running — and the wizard says so, with the link's own lines under it instead of only in the browser console (bench, 2026-08-08)."
+)]
+fn connecting() -> Element {
+    let mut wizard = hardware(SetupState::Connecting {
+        preseeded_board: None,
+        via_grant: None,
+    });
+    wizard.console_tail = connect_console();
+    frame(wizard)
+}
+
+#[story(
+    description = "CONNECTING through an adopted grant (D7): a single unambiguous authorized port was taken without a chooser — visibly, naming the port, and reversibly, with \"Not this one?\" one click away. This is what makes an agent-driven reconnect zero-click while keeping the human in charge."
+)]
+fn connecting_via_grant() -> Element {
+    let mut wizard = hardware(SetupState::Connecting {
+        preseeded_board: None,
+        via_grant: Some("Serial device (1a86:7523)".to_string()),
+    });
+    wizard.console_tail = connect_console();
+    frame(wizard)
 }
 
 #[story(
     description = "PROBING, the last STANDALONE frame: the port is granted but no verdict has landed, so the connection has no identity yet — and a board the registry already remembers would show its remembered card next to an un-mergeable anonymous one. So the pre-verdict window keeps the wizard standalone and stands the bound session's row down; the card the flow will ride is the one the verdict names. One spinner for one probe pass — chip identity and what is already on the board, decided together (design §4)."
 )]
 fn probing() -> Element {
-    frame(hardware(SetupState::Probing {
+    let mut wizard = hardware(SetupState::Probing {
         preseeded_board: None,
-    }))
+    });
+    wizard.console_tail = connect_console();
+    frame(wizard)
 }
 
 #[story(
@@ -308,6 +387,20 @@ fn already_lightplayer() -> Element {
         named_card(),
         hardware(SetupState::AlreadyLp {
             probe: probe(BoardVerdict::LightPlayer {
+                known: Some(remembered()),
+            }),
+        }),
+    )
+}
+
+#[story(
+    description = "STALE_LP: LightPlayer is on the board, but too old for this Studio to talk to — the link's own Incompatible diagnosis, carried through the probe. Recognised like ALREADY_LP and never adoptable: there is no protocol to adopt. The update is the only verb, and it is a flash, so the board pick's confirmation still warns before anything is overwritten. Before this state existed the board landed on PROBE_FAILED and was told to hold BOOT."
+)]
+fn stale_lightplayer() -> Element {
+    takeover(
+        named_card(),
+        hardware(SetupState::StaleLp {
+            probe: probe(BoardVerdict::StaleLightPlayer {
                 known: Some(remembered()),
             }),
         }),

@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LightPlayer serial lab</title>
+<style>
+  :root {
+    --bg: #14151a; --surface: #1d1f26; --border: #33363f;
+    --fg: #d6d8de; --strong: #f2f3f5; --subtle: #8b8e98;
+    --good: #4ade80; --warn: #fbbf24; --bad: #f87171; --violet: #a78bfa;
+    --frame: #7dd3fc;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 13px/1.45 "SF Mono", ui-monospace, Menlo, monospace; }
+  header { display: flex; gap: 10px; align-items: center; padding: 10px 14px;
+           background: var(--surface); border-bottom: 1px solid var(--border);
+           position: sticky; top: 0; flex-wrap: wrap; }
+  h1 { font-size: 14px; margin: 0 8px 0 0; color: var(--strong); }
+  .chip { padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border);
+          font-size: 11px; color: var(--subtle); }
+  .chip.on   { color: var(--good); border-color: var(--good); }
+  .chip.off  { color: var(--bad);  border-color: var(--bad); }
+  .chip.warn { color: var(--warn); border-color: var(--warn); }
+  #controls { display: flex; gap: 6px; padding: 8px 14px; flex-wrap: wrap;
+              border-bottom: 1px solid var(--border); align-items: center; }
+  button { background: var(--surface); color: var(--fg); cursor: pointer;
+           border: 1px solid var(--border); border-radius: 6px;
+           padding: 5px 10px; font: inherit; font-size: 12px; }
+  button:hover { border-color: var(--violet); color: var(--strong); }
+  button.primary { border-color: var(--good); color: var(--good); font-weight: 600; }
+  input { background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+          border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 12px; }
+  #baud { width: 90px; }
+  #sendline { flex: 1; min-width: 180px; }
+  #log { padding: 8px 14px 40px; overflow-y: auto;
+         height: calc(100vh - 132px); }
+  .entry { white-space: pre-wrap; word-break: break-all; }
+  .entry .t { color: var(--subtle); }
+  .entry.log   { color: var(--fg); }
+  .entry.frame { color: var(--frame); }
+  .entry.bin   { color: var(--warn); }
+  .entry.meta  { color: var(--violet); }
+  .entry.err   { color: var(--bad); }
+  #nosupport { margin: 14px; padding: 12px; border: 1px solid var(--warn);
+               border-radius: 8px; color: var(--warn); display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>serial lab</h1>
+  <span id="chip-ctl" class="chip off">control: connecting…</span>
+  <span id="chip-port" class="chip off">port: none</span>
+  <span id="chip-rx" class="chip">rx 0 B</span>
+  <span id="chip-signals" class="chip">dtr ? rts ?</span>
+</header>
+<div id="controls">
+  <button id="btn-grant" class="primary">Grant port (CH340 1a86)</button>
+  <button id="btn-grant-any">Grant (any)</button>
+  <button onclick="run({op:'adopt'})">Adopt</button>
+  <input id="baud" value="921600" title="baud">
+  <button onclick="run({op:'open', baud:+document.getElementById('baud').value})">Open</button>
+  <button onclick="run({op:'close'})">Close/Release</button>
+  <button onclick="run({op:'hello'})">Hello →</button>
+  <button onclick="run({op:'sequence', name:'esptool_reset'})">RTS reset</button>
+  <button onclick="run({op:'sequence', name:'dtr_pulse'})">DTR pulse</button>
+  <button onclick="run({op:'clear'})">Clear</button>
+  <input id="sendline" placeholder='raw line, or M!{"id":1,"msg":"hello"}'>
+  <button onclick="sendBox()">Send</button>
+  <label><input type="checkbox" id="autoscroll" checked> follow</label>
+</div>
+<div id="nosupport"></div>
+<div id="log"></div>
+
+<script>
+"use strict";
+/* ============================== state ================================= */
+const S = {
+  port: null, reader: null, writer: null, readAbort: null,
+  baud: null, rxBytes: 0, seq: 0, buffer: [], BUF_CAP: 8000, DOM_CAP: 600,
+  partial: "", decoder: new TextDecoder("utf-8", { fatal: false }),
+  signals: { dtr: null, rts: null },
+};
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+
+function now() { return Date.now(); }
+
+function pageLog(line) {  // passive telemetry to the control server
+  fetch("/page-log", { method: "POST", body: JSON.stringify({ line }) })
+    .catch(() => {});
+}
+
+/* ============================ log buffer ============================== */
+function push(kind, text, opts = {}) {
+  const entry = { seq: ++S.seq, t: now(), kind, text, ...opts };
+  S.buffer.push(entry);
+  if (S.buffer.length > S.BUF_CAP) S.buffer.splice(0, S.buffer.length - S.BUF_CAP);
+  const div = document.createElement("div");
+  div.className = `entry ${kind}`;
+  const ts = new Date(entry.t).toISOString().slice(11, 23);
+  div.innerHTML = `<span class="t">${ts} </span>`;
+  div.appendChild(document.createTextNode(text));
+  logEl.appendChild(div);
+  while (logEl.children.length > S.DOM_CAP) logEl.removeChild(logEl.firstChild);
+  if ($("autoscroll").checked) logEl.scrollTop = logEl.scrollHeight;
+  return entry;
+}
+const meta = (text) => { push("meta", text); pageLog(text); };
+const err  = (text) => { push("err", text); pageLog("ERR " + text); };
+
+/* ============================ serial core ============================= */
+function updateChips() {
+  const p = $("chip-port");
+  if (S.port && S.baud) { p.textContent = `port: open @ ${S.baud}`; p.className = "chip on"; }
+  else if (S.port)      { p.textContent = "port: granted, closed"; p.className = "chip warn"; }
+  else                  { p.textContent = "port: none"; p.className = "chip off"; }
+  $("chip-rx").textContent = `rx ${S.rxBytes} B`;
+  $("chip-signals").textContent =
+    `dtr ${S.signals.dtr ?? "?"} rts ${S.signals.rts ?? "?"}`;
+}
+
+function portInfoStr(port) {
+  const i = port.getInfo();
+  const hex = (v) => (v ?? 0).toString(16).padStart(4, "0");
+  return `${hex(i.usbVendorId)}:${hex(i.usbProductId)}`;
+}
+
+async function adopt() {
+  const ports = await navigator.serial.getPorts();
+  if (!ports.length) return { ok: false, error: "no granted ports (click Grant)" };
+  // Prefer the CH340 (1a86); otherwise first grant.
+  S.port = ports.find((p) => p.getInfo().usbVendorId === 0x1a86) ?? ports[0];
+  meta(`adopted port ${portInfoStr(S.port)} (${ports.length} granted)`);
+  updateChips();
+  return { ok: true, port: portInfoStr(S.port), granted: ports.length };
+}
+
+async function openPort(baud) {
+  if (!S.port) { const a = await adopt(); if (!a.ok) return a; }
+  if (S.baud) return { ok: false, error: `already open @ ${S.baud}` };
+  await S.port.open({ baudRate: baud, bufferSize: 65536 });
+  S.baud = baud; S.partial = "";
+  meta(`opened @ ${baud}`);
+  readLoop();
+  updateChips();
+  return { ok: true, baud };
+}
+
+async function closePort() {
+  if (!S.port) return { ok: true, note: "no port" };
+  const wasOpen = !!S.baud;
+  S.baud = null;  // FIRST: stops readLoop re-acquiring the lock (close race)
+  try {
+    if (S.reader) { await S.reader.cancel().catch(() => {}); }
+    if (S.writer) { S.writer.releaseLock(); S.writer = null; }
+    if (wasOpen) await S.port.close();
+  } catch (e) { err(`close: ${e}`); }
+  S.reader = null;
+  meta("port closed (grant retained — CLI may use the device now)");
+  updateChips();
+  return { ok: true };
+}
+
+async function readLoop() {
+  while (S.port && S.port.readable && S.baud) {
+    S.reader = S.port.readable.getReader();
+    try {
+      for (;;) {
+        const { value, done } = await S.reader.read();
+        if (done) break;
+        ingest(value);
+      }
+    } catch (e) {
+      err(`read: ${e}`);
+    } finally {
+      try { S.reader.releaseLock(); } catch {}
+    }
+    if (!S.baud) break;  // closed on purpose
+  }
+}
+
+function ingest(bytes) {
+  S.rxBytes += bytes.length;
+  updateChips();
+  S.partial += S.decoder.decode(bytes, { stream: true });
+  for (;;) {
+    const nl = S.partial.indexOf("\n");
+    if (nl < 0) break;
+    const line = S.partial.slice(0, nl).replace(/\r$/, "");
+    S.partial = S.partial.slice(nl + 1);
+    if (!line.length) continue;
+    classify(line);
+  }
+  if (S.partial.length > 16384) {  // runaway binary with no newlines
+    push("bin", `[${S.partial.length} B no-newline chunk] ` + hexPreview(S.partial));
+    S.partial = "";
+  }
+}
+
+function hexPreview(str) {
+  const head = [...str.slice(0, 32)]
+    .map((c) => c.codePointAt(0).toString(16).padStart(2, "0")).join(" ");
+  return head + (str.length > 32 ? " …" : "");
+}
+
+function classify(line) {
+  if (line.startsWith("M!")) {
+    const body = line.slice(2);
+    try {
+      const obj = JSON.parse(body);
+      const kind = obj?.msg && typeof obj.msg === "object"
+        ? Object.keys(obj.msg)[0] : String(obj?.msg ?? "?");
+      push("frame", `⇦ frame id=${obj.id} ${kind}: ${body}`, { frame: obj });
+    } catch {
+      push("frame", `⇦ frame (unparsed): ${line}`);
+    }
+    return;
+  }
+  const replacements = (line.match(/�/g) || []).length;
+  if (replacements > 3 && replacements > line.length / 8) {
+    push("bin", `[binary ${line.length} ch] ` + hexPreview(line));
+  } else {
+    push("log", line);
+  }
+}
+
+async function writeText(text) {
+  if (!S.baud) return { ok: false, error: "port not open" };
+  const w = S.port.writable.getWriter();
+  try {
+    await w.write(new TextEncoder().encode(text));
+  } finally { w.releaseLock(); }
+  push("meta", `⇨ ${JSON.stringify(text)}`);
+  return { ok: true, wrote: text.length };
+}
+
+let nextFrameId = 100;
+async function writeFrame(msg, id) {
+  const frame = { id: id ?? nextFrameId++, msg };
+  return writeText("M!" + JSON.stringify(frame) + "\n").then((r) =>
+    ({ ...r, frame }));
+}
+
+async function setSignals(sig) {
+  if (!S.port || !S.baud) return { ok: false, error: "port not open" };
+  const mapped = {};
+  if ("dtr" in sig) mapped.dataTerminalReady = !!sig.dtr;
+  if ("rts" in sig) mapped.requestToSend = !!sig.rts;
+  if ("brk" in sig) mapped.break = !!sig.brk;
+  await S.port.setSignals(mapped);
+  if ("dtr" in sig) S.signals.dtr = !!sig.dtr;
+  if ("rts" in sig) S.signals.rts = !!sig.rts;
+  meta(`signals ${JSON.stringify(mapped)}`);
+  updateChips();
+  return { ok: true, set: mapped };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const SEQUENCES = {
+  // esptool "hard reset": pulse RTS (wired to EN on dev boards).
+  esptool_reset: async () => {
+    await setSignals({ dtr: false, rts: true }); await sleep(120);
+    await setSignals({ rts: false });
+  },
+  // DTR-only pulse (some CH340 wirings put EN on DTR).
+  dtr_pulse: async () => {
+    await setSignals({ dtr: true, rts: false }); await sleep(120);
+    await setSignals({ dtr: false });
+  },
+  // esptool classic bootloader entry: IO0 low (DTR) while EN pulses (RTS).
+  bootloader_entry: async () => {
+    await setSignals({ dtr: false, rts: true }); await sleep(100);
+    await setSignals({ dtr: true, rts: false }); await sleep(80);
+    await setSignals({ dtr: false });
+  },
+  both_high_low: async () => {
+    await setSignals({ dtr: true, rts: true }); await sleep(120);
+    await setSignals({ dtr: false, rts: false });
+  },
+};
+
+/* ============================ command layer =========================== */
+const lab = {  // exposed for eval + local console spelunking
+  S, adopt, openPort, closePort, writeText, writeFrame, setSignals,
+  SEQUENCES, push, sleep,
+  dump: (since = 0) => S.buffer.filter((e) => e.seq > since),
+};
+window.lab = lab;
+
+async function execute(cmd) {
+  const { op } = cmd;
+  switch (op) {
+    case "status":
+      return {
+        ok: true, port: S.port ? portInfoStr(S.port) : null, baud: S.baud,
+        rxBytes: S.rxBytes, seq: S.seq, signals: S.signals,
+        webSerial: "serial" in navigator,
+      };
+    case "adopt": return adopt();
+    case "open": return openPort(cmd.baud ?? 921600);
+    case "close": return closePort();
+    case "signals": return setSignals(cmd);
+    case "sequence": {
+      const fn = SEQUENCES[cmd.name];
+      if (!fn) return { ok: false, error: `unknown sequence ${cmd.name}` };
+      const before = S.seq;
+      await fn();
+      return { ok: true, name: cmd.name, sinceSeq: before };
+    }
+    case "write": return writeText(cmd.text.endsWith("\n") ? cmd.text : cmd.text + "\n");
+    case "frame": return writeFrame(cmd.msg, cmd.frameId);
+    case "hello": return writeFrame("hello");
+    case "capture": {
+      const since = cmd.since ?? S.seq;
+      await sleep(cmd.ms ?? 3000);
+      const entries = S.buffer.filter((e) => e.seq > since);
+      return { ok: true, since, count: entries.length,
+               entries: entries.slice(-(cmd.max ?? 300)) };
+    }
+    case "buffer": {
+      const entries = S.buffer.filter((e) => e.seq > (cmd.since ?? 0));
+      return { ok: true, count: entries.length,
+               entries: entries.slice(-(cmd.max ?? 300)) };
+    }
+    case "clear":
+      S.buffer = []; logEl.innerHTML = ""; return { ok: true };
+    case "reload":
+      setTimeout(() => location.reload(), 200); return { ok: true };
+    case "eval": {
+      const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+      try {
+        const value = await new AsyncFn("lab", cmd.js)(lab);
+        let json;
+        try { json = JSON.parse(JSON.stringify(value ?? null)); }
+        catch { json = String(value); }
+        return { ok: true, value: json };
+      } catch (e) {
+        return { ok: false, error: String(e) };
+      }
+    }
+    default:
+      return { ok: false, error: `unknown op ${op}` };
+  }
+}
+
+/* ======================== control channel (SSE) ======================= */
+function connectControl() {
+  const es = new EventSource("/events");
+  es.onopen = () => {
+    $("chip-ctl").textContent = "control: connected";
+    $("chip-ctl").className = "chip on";
+    pageLog("page connected " + (navigator.userAgent.includes("Brave") ? "(brave)" : ""));
+  };
+  es.onerror = () => {
+    $("chip-ctl").textContent = "control: reconnecting…";
+    $("chip-ctl").className = "chip warn";
+  };
+  es.onmessage = async (ev) => {
+    let cmd;
+    try { cmd = JSON.parse(ev.data); } catch { return; }
+    push("meta", `[cmd ${cmd.id}] ${JSON.stringify(cmd)}`);
+    let result;
+    try { result = await execute(cmd); }
+    catch (e) { result = { ok: false, error: String(e) }; }
+    result.id = cmd.id;
+    push("meta", `[cmd ${cmd.id}] -> ${JSON.stringify(result).slice(0, 300)}`);
+    fetch("/result", { method: "POST", body: JSON.stringify(result) })
+      .catch(() => {});
+  };
+}
+
+/* ============================== boot ================================== */
+function boot() {
+  if (!("serial" in navigator)) {
+    const el = $("nosupport");
+    el.style.display = "block";
+    el.textContent = "navigator.serial is unavailable. In Brave: enable " +
+      "brave://flags/#brave-web-serial-api (or use Chrome), then reload.";
+    pageLog("NO WEB SERIAL SUPPORT in this browser profile");
+  }
+  $("btn-grant").onclick = async () => {
+    try {
+      S.port = await navigator.serial.requestPort(
+        { filters: [{ usbVendorId: 0x1a86 }] });
+      meta(`granted ${portInfoStr(S.port)}`);
+      updateChips();
+    } catch (e) { err(`grant: ${e}`); }
+  };
+  $("btn-grant-any").onclick = async () => {
+    try {
+      S.port = await navigator.serial.requestPort();
+      meta(`granted ${portInfoStr(S.port)}`);
+      updateChips();
+    } catch (e) { err(`grant: ${e}`); }
+  };
+  $("sendline").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendBox();
+  });
+  connectControl();
+  meta("serial lab ready — grant the port, then the agent drives via /cmd");
+}
+
+function sendBox() {
+  const text = $("sendline").value;
+  if (!text) return;
+  writeText(text.endsWith("\n") ? text : text + "\n");
+  $("sendline").value = "";
+}
+
+boot();
+</script>
+</body>
+</html>

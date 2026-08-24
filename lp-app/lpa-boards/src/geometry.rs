@@ -809,6 +809,33 @@ mod tests {
         }
     }
 
+    /// An enclosed product (the dig2go: a closed case with one LED pigtail)
+    /// has no pin rails at all. The layout still has to produce a board, its
+    /// terminal, and a view box that contains the band — rail-less is a
+    /// shape the renderer must handle, not an authoring mistake.
+    #[test]
+    fn a_rail_less_board_still_lays_out() {
+        let dig2go = board_by_id("quinled/dig2go").expect("dig2go sidecar embedded");
+        let layout = BoardLayout::compute(
+            dig2go,
+            &DiagramOptions {
+                mode: DiagramMode::Caps,
+                ..DiagramOptions::default()
+            },
+        );
+        assert!(layout.rail_rows().next().is_none(), "no rails on the case");
+        assert!(layout.board_h > 0.0 && layout.board_w > 0.0);
+        assert_eq!(layout.terminals.len(), 1, "the LED pigtail");
+        assert_eq!(layout.band.len(), 1);
+        let [vx, vy, vw, vh] = layout.view_box;
+        for row in &layout.band {
+            for cell in &row.cells {
+                assert!(cell.rect.x >= vx && cell.rect.right() <= vx + vw);
+                assert!(cell.rect.y >= vy && cell.rect.bottom() <= vy + vh);
+            }
+        }
+    }
+
     #[test]
     fn plain_mode_has_no_cells_or_band() {
         let layout = BoardLayout::compute(quinled(), &DiagramOptions::default());

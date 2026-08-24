@@ -243,10 +243,13 @@ async fn channel_refuses_a_device_without_firmware() {
         "gate error should carry the classifiable prefix: {error}"
     );
     assert_eq!(session.state(), DeviceState::BlankFlash);
-    assert_eq!(
-        device.premature_input_bytes(),
-        0,
-        "the gate must block the write entirely"
+    let premature = device.premature_input();
+    assert!(
+        premature
+            .lines()
+            .all(|line| line.is_empty() || (line.starts_with("M!") && line.contains("\"hello\""))),
+        "the gate must block app writes entirely; only the loss-tolerant \
+         readiness hello request may reach a firmware-less device: {premature:?}"
     );
 }
 

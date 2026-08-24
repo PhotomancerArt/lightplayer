@@ -31,15 +31,15 @@ pub mod state;
 pub mod target;
 pub mod verdict;
 
-pub use command::SetupCommand;
+pub use command::{PortRequestStrategy, SetupCommand};
 pub use event::{SetupEvent, SetupEventKind};
 pub use executor::{SetupDispatch, SetupExecutorContext, dispatch_for};
 pub use gesture::SetupGesture;
 pub use naming::{derive_device_name, month_day_label, unique_device_name};
 pub use reducer::{SetupContext, SetupFlow, SetupStep, reduce};
 pub use state::{
-    BoardPickState, CloseReason, ConnectHint, ProvisionPhase, ProvisionState, SetupState,
-    SetupStateKind,
+    BoardPickState, CloseReason, ConnectHint, ProvisionPhase, ProvisionState, SetupGrantedPort,
+    SetupState, SetupStateKind,
 };
 pub use target::{HardwareSetupTarget, SetupCapabilities, SetupTarget, SimulatorSetupTarget};
 pub use verdict::{BoardProbe, BoardVerdict, ProbeEvidence, classify_board, known_device_for};
