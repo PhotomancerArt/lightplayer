@@ -104,9 +104,14 @@ pub fn LogoMark(size: u32, #[props(default = false)] animated: bool) -> Element 
 /// The wordmark text, shared by the lockup forms. `mono` renders it
 /// `currentColor` (print/one-color contexts); otherwise the whole word
 /// sweeps the LED rainbow.
+///
+/// `pub(crate)` for the landing hero (`app::home::brand_hero`), which
+/// stacks the word under a shader triangle rather than under the mark:
+/// one wordmark, one set of type metrics, one rainbow — a forked copy
+/// would drift the moment either changed.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn BrandWord(word_px: u32, #[props(default = false)] mono: bool) -> Element {
+pub(crate) fn BrandWord(word_px: u32, #[props(default = false)] mono: bool) -> Element {
     let style = format!("font-size:{word_px}px");
     let word_class = if mono { "" } else { "lp-brand-word" };
     rsx! {

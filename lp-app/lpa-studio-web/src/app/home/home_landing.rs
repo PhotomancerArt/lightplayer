@@ -1,13 +1,20 @@
-//! The Home landing page (`/`, vision D14 / spike §5) — **the M3
-//! stub**: lockup, one-line tagline, three dive-in cards. Deliberately
-//! no marketing depth and no demo strip; the real landing pass is M3's.
-//! Reached through the logo only — there is no Home nav tab (D11).
+//! The Home landing page (`/`, vision D14 / spike §5): the brand hero, a
+//! one-line tagline, three dive-in cards. Still no marketing depth — but
+//! the stub's static lockup is gone: [`BrandHero`] makes the mark's
+//! triangle a window onto a live engine shader, so the landing demonstrates
+//! the product instead of describing it. Reached through the logo only —
+//! there is no Home nav tab (D11).
+//!
+//! Direction: the hero is the seed of the fixture-hero (a module panel
+//! under it, touch/sound driving it) — see the
+//! `2026-08-24-1100-logo-triangle-chip` plan, D1, and `brand_hero.rs`.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, UiAction};
 
+use crate::app::home::brand_hero::BrandHero;
 use crate::app::home::package_card::home_action;
-use crate::base::{LogoStacked, StudioIcon, StudioIconName};
+use crate::base::{StudioIcon, StudioIconName};
 use crate::cloud::SharedOpenState;
 
 /// The landing stub: the brand, what this is, and three ways in.
@@ -32,7 +39,7 @@ pub fn HomePage(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> 
                     "{line}"
                 }
             }
-            LogoStacked { size: 96 }
+            BrandHero { on_action }
             p { class: "tw:m-0 tw:max-w-md tw:text-sm tw:text-muted-foreground",
                 "Friendly shaders, everywhere"
             }
