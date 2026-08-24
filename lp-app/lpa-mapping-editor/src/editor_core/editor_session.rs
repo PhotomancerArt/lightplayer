@@ -10,8 +10,8 @@
 use std::collections::BTreeSet;
 
 use lpc_mapping::{
-    Bounds2d, GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathShape,
-    PolygonShape, RepeatShape, ResolvedMap2d, RingDir, RingOrder, RingShape, Rotation2d,
+    Bounds2d, GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathAlign,
+    PathShape, PolygonShape, RepeatShape, ResolvedMap2d, RingDir, RingOrder, RingShape, Rotation2d,
     bounds_of_points, resolve,
 };
 
@@ -456,6 +456,7 @@ impl MapEditorSession {
                     count,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: PathAlign::On,
                 });
             }
         });
@@ -676,6 +677,7 @@ impl MapEditorSession {
                 count,
                 reversed: false,
                 gaps: Vec::new(),
+                align: PathAlign::On,
             }),
         }))
     }
@@ -765,11 +767,13 @@ fn rotate_shape(shape: &Map2dShape, rotation: Rotation2d, degrees: f32) -> Optio
             count: path.count,
             reversed: path.reversed,
             gaps: path.gaps.clone(),
+            align: path.align,
         }),
         // A polygon carries its turn in its points, exactly like a path.
         Map2dShape::Polygon(polygon) => Map2dShape::Polygon(PolygonShape {
             points: polygon.points.iter().map(|p| rotation.apply(*p)).collect(),
             count: polygon.count,
+            align: polygon.align,
         }),
         Map2dShape::Ring(ring) => Map2dShape::Ring(RingShape {
             center: rotation.apply(ring.center),
@@ -800,6 +804,7 @@ fn bake_path(positions: &[[f32; 2]]) -> Map2dShape {
         count: (positions.len() as u32).max(1),
         reversed: false,
         gaps: Vec::new(),
+        align: PathAlign::On,
     })
 }
 
@@ -1777,6 +1782,7 @@ mod tests {
                         count: 3,
                         reversed: false,
                         gaps: Vec::new(),
+                        align: PathAlign::On,
                     })),
                     center: [100.0, 60.0],
                     count: 3,
@@ -1883,6 +1889,7 @@ mod tests {
                 count: 4,
                 reversed: false,
                 gaps: Vec::new(),
+                align: PathAlign::On,
             }),
         });
         MapEditorSession::new(doc)
@@ -1901,6 +1908,7 @@ mod tests {
                     count: 4,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: PathAlign::On,
                 })),
                 center: [100.0, 100.0],
                 count,

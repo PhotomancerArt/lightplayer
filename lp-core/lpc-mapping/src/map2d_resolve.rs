@@ -608,7 +608,7 @@ fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map2d_doc::{Map2dObject, Map2dShape};
+    use crate::map2d_doc::{Map2dObject, Map2dShape, PathAlign};
     use alloc::boxed::Box;
     use alloc::string::String;
     use alloc::vec;
@@ -713,6 +713,7 @@ mod tests {
             count: 5,
             reversed: false,
             gaps: Vec::new(),
+            align: PathAlign::On,
         }));
         let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
         assert_eq!(positions[0], [0.0, 0.0]);
@@ -727,6 +728,7 @@ mod tests {
             count: 2,
             reversed: true,
             gaps: Vec::new(),
+            align: PathAlign::On,
         }));
         assert_eq!(resolved.lamps[0].pos, [10.0, 0.0]);
         assert_eq!(resolved.lamps[1].pos, [0.0, 0.0]);
@@ -856,6 +858,7 @@ mod tests {
                 Map2dShape::Polygon(PolygonShape {
                     points: vec![[0.0, 0.0], [1.0, 0.0]],
                     count: 3,
+                    align: PathAlign::On,
                 }),
                 "at least 3 points",
             ),
@@ -863,6 +866,7 @@ mod tests {
                 Map2dShape::Polygon(PolygonShape {
                     points: vec![[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]],
                     count: 0,
+                    align: PathAlign::On,
                 }),
                 "count",
             ),
@@ -870,6 +874,7 @@ mod tests {
                 Map2dShape::Polygon(PolygonShape {
                     points: vec![[2.0, 2.0], [2.0, 2.0], [2.0, 2.0]],
                     count: 3,
+                    align: PathAlign::On,
                 }),
                 "zero perimeter",
             ),
@@ -916,6 +921,7 @@ mod tests {
             shape_stride(&Map2dShape::Polygon(PolygonShape {
                 points: vec![[0.0, 0.0], [12.0, 0.0], [6.0, 10.392305]],
                 count: 10,
+                align: PathAlign::On,
             })),
             1
         );
@@ -975,6 +981,7 @@ mod tests {
         PolygonShape {
             points: vec![[0.0, 0.0], [12.0, 0.0], [6.0, 10.392305]],
             count: 9,
+            align: PathAlign::On,
         }
     }
 
@@ -992,6 +999,7 @@ mod tests {
                 count: 2,
                 reversed: false,
                 gaps: Vec::new(),
+                align: PathAlign::On,
             })),
             center: [0.0, 0.0],
             count: 4,
@@ -1162,6 +1170,7 @@ mod tests {
                     count: 2,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: PathAlign::On,
                 })),
                 object(Map2dShape::Repeat(RepeatShape {
                     shape: Box::new(Map2dShape::Path(PathShape {
@@ -1169,6 +1178,7 @@ mod tests {
                         count: 2,
                         reversed: false,
                         gaps: Vec::new(),
+                        align: PathAlign::On,
                     })),
                     center: [0.0, 0.0],
                     count: 3,
@@ -1191,6 +1201,7 @@ mod tests {
                     count: 3,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: PathAlign::On,
                 })),
                 object(Map2dShape::Ring(button_rings())),
             ],
@@ -1217,6 +1228,7 @@ mod tests {
                     count: 2,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: PathAlign::On,
                 }),
             }],
             ..Map2dDoc::new()
@@ -1259,6 +1271,7 @@ mod tests {
             count,
             reversed,
             gaps,
+            align: PathAlign::On,
         }
     }
 
@@ -1270,6 +1283,7 @@ mod tests {
             count: 4,
             reversed: false,
             gaps: Vec::new(),
+            align: PathAlign::On,
         }
     }
 
@@ -1282,6 +1296,7 @@ mod tests {
                 count: 4,
                 reversed: false,
                 gaps: Vec::new(),
+                align: PathAlign::On,
             })),
             center: [0.0, 0.0],
             count: instances,

@@ -52,8 +52,8 @@ pub use editor_meta::{
 pub use map_object_path::MapObjectPath;
 pub use map2d_doc::{
     DEFAULT_SAMPLE_DIAMETER, GridCorner, GridRouting, GridShape, MAP2D_FORMAT, MAX_REPEAT_COUNT,
-    Map2dDoc, Map2dObject, Map2dShape, PathShape, PolygonShape, RepeatShape, RingDir, RingOrder,
-    RingShape,
+    Map2dDoc, Map2dObject, Map2dShape, PathAlign, PathShape, PolygonShape, RepeatShape, RingDir,
+    RingOrder, RingShape,
 };
 pub use map2d_error::Map2dError;
 pub use map2d_fit::{Bounds2d, bounds_of_points, fit_points};

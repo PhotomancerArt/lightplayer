@@ -26,7 +26,7 @@
 //! it regenerates.
 
 use lpc_mapping::{
-    Map2dDoc, Map2dObject, Map2dObjectId, Map2dShape, PathShape, RepeatShape, resolve,
+    Map2dDoc, Map2dObject, Map2dObjectId, Map2dShape, PathAlign, PathShape, RepeatShape, resolve,
 };
 use std::path::Path;
 
@@ -175,6 +175,7 @@ fn dome_doc() -> Map2dDoc {
                 count: SECTOR_LAMPS,
                 reversed: false,
                 gaps,
+                align: PathAlign::On,
             })),
             center: CENTER,
             count: 5,
@@ -199,6 +200,7 @@ fn doors_doc() -> Map2dDoc {
                 count: DOOR_LAMPS,
                 reversed: false,
                 gaps: Vec::new(),
+                align: PathAlign::On,
             })),
             center: CENTER,
             count: 3,

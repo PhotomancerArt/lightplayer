@@ -110,6 +110,7 @@ mod tests {
                 count: 4,
                 reversed: false,
                 gaps: Vec::new(),
+                align: lpc_mapping::PathAlign::On,
             }),
         });
         let resolved = resolve(&doc).unwrap();

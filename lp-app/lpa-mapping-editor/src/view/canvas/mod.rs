@@ -447,6 +447,7 @@ pub fn EditorCanvas(
                     count,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: lpc_mapping::PathAlign::On,
                 }),
             }],
             ..lpc_mapping::Map2dDoc::new()
