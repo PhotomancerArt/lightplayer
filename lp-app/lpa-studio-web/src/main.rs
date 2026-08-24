@@ -11,6 +11,8 @@ mod local_model_probe;
 mod local_store;
 mod openrouter_oauth;
 mod router;
+#[cfg(test)]
+mod select_mirror_lint;
 mod settings_io;
 #[cfg(feature = "stories")]
 mod stories;

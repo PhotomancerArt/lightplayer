@@ -475,7 +475,15 @@ fn NewFromPatternForm(
                     value: "{export}",
                     onchange: move |event| selected.set(event.value()),
                     for name in exports.iter().cloned() {
-                        option { key: "{name}", value: "{name}", "{name}" }
+                        // `selected` mirrors the bound value onto the option:
+                        // the select's own `value` lands before its options
+                        // mount, so it alone cannot restore the selection.
+                        option {
+                            key: "{name}",
+                            value: "{name}",
+                            selected: name == export,
+                            "{name}"
+                        }
                     }
                 }
             }

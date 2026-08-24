@@ -1348,7 +1348,12 @@ fn ObjectPane(
                                                 }
                                             }
                                         },
-                                        option { value: "", "or pick…" }
+                                        // The bound value IS the placeholder
+                                        // (the picker snaps back after each
+                                        // pick); `selected` mirrors that so
+                                        // the mount order can't pick another
+                                        // option (see select_mirror_lint).
+                                        option { value: "", selected: true, "or pick…" }
                                         for (index , (_ , label)) in options.iter().enumerate() {
                                             option { key: "{index}", value: "{index}", "{label}" }
                                         }
@@ -1724,11 +1729,21 @@ fn OutputPane(
                                         }
                                     }
                                 },
+                                // `selected` mirrors the bound value onto
+                                // each option: the select's own `value` is
+                                // applied before the options mount, so it
+                                // alone cannot restore the selection (see
+                                // select_mirror_lint).
                                 if selected_port.is_empty() {
-                                    option { value: "", "pick a port…" }
+                                    option { value: "", selected: true, "pick a port…" }
                                 }
                                 for (value , label) in ports.iter().cloned() {
-                                    option { key: "{value}", value: "{value}", "{label}" }
+                                    option {
+                                        key: "{value}",
+                                        value: "{value}",
+                                        selected: value == selected_port,
+                                        "{label}"
+                                    }
                                 }
                             }
                         }
