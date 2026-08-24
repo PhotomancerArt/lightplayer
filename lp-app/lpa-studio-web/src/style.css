@@ -1595,10 +1595,21 @@ label:has(> input:not(:disabled)) {
 /* Object BODIES (patching round 3: an object is a THING). Rest state is
    barely-there so the lamps stay the light's voice; hover lifts the body
    under the pointer — pure CSS, no re-render, which is what keeps 150
-   dome objects cheap. Selected wears the accent. */
+   dome objects cheap. Selected wears the accent.
+
+   The rest stroke is the object's OWN colour, mixed down (design-language
+   round, Q3): a canvas of bodies reads as the same colour-coded set the
+   lamps do, without any body shouting. `--lpme-obj-c` is set per path by
+   the fixture layer; the flat neutral above it is the fallback for a body
+   that names no colour (and for engines without color-mix). */
 .lpme-obj-hull {
     fill: rgba(255, 255, 255, 0.025);
     stroke: rgba(154, 151, 143, 0.35);
+    stroke: color-mix(
+        in srgb,
+        var(--lpme-obj-c, rgb(154, 151, 143)) 40%,
+        transparent
+    );
     pointer-events: all;
     transition:
         fill 80ms ease,

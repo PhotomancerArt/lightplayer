@@ -71,7 +71,7 @@ pub enum CanvasDrag {
         /// the whole fixture. Resolved at PRESS time, from the point the
         /// pointer actually went down on.
         lamp: Option<u32>,
-        /// The object HULL the press landed inside ([`hit_object`]), when
+        /// The object BODY the press landed inside ([`hit_object`]), when
         /// one claimed the point — the round-3 "objects are THINGS" hit
         /// target. Resolved at PRESS time like the lamp.
         object: Option<usize>,

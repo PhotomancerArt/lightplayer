@@ -10,14 +10,22 @@
 //! draw their `:hover` state for free — they still carry no handlers, and
 //! their events bubble to the canvas root like any other.
 //!
-//! Objects are THINGS here (G1 round 3): each one draws a padded convex hull
-//! of its own lamps — faint at rest, lifted on hover, accent-stroked when
-//! selected — and the WHOLE hull is the click target, which is what makes a
-//! 3 px lamp on a dome reachable at all.
+//! Objects are THINGS here (G1 round 3): each one draws a body around its own
+//! lamps — faint at rest, lifted on hover, accent-stroked when selected — and
+//! the WHOLE body is the click target, which is what makes a 3 px lamp on a
+//! dome reachable at all. Since the design-language round that body is an
+//! ALIGNED OUTLINE (outline.rs) rather than a convex hull, and a path object's
+//! lamps are voronoi CELLS (cells.rs) rather than dots — the cell is the
+//! lamp's live surface, so it carries the live-fill hooks the dot used to.
+//!
+//! The shell builds all of that geometry; this layer only paints it and
+//! hit-tests it.
 
 use dioxus::prelude::*;
 
-use super::hull::{hull_path_d, point_in_polygon};
+use super::cells::LampCell;
+use super::hull::hull_path_d;
+use super::outline::point_in_loops;
 use crate::editor_core::placement::Placement;
 
 /// Padding around a fixture's own-space bounds for hit-testing, in doc
@@ -47,31 +55,40 @@ pub struct FixtureSprite {
     pub arranged: bool,
     pub selected: bool,
     /// Selected instance's `(start, lamps)` window, for lamp rings. Only
-    /// drawn when the selection has no HULL to outline instead — the hull
+    /// drawn when the selection has no BODY to outline instead — the body
     /// IS the selection indicator wherever one exists (G1 round 3).
     pub selected_range: Option<(u32, u32)>,
     /// This fixture's objects as clickable bodies, in the shell's own order
     /// (a pick reports the INDEX into this list). Empty for a fixture whose
-    /// document names no objects, or whose body draws no lamps to hull.
+    /// document names no objects, or whose body draws no lamps to outline.
     pub objects: Vec<SpriteObject>,
 }
 
 /// One object of a fixture, as the canvas draws and hit-tests it.
 ///
-/// The crate stays project-unaware: an object here is a closed outline, a
-/// name for the tooltip, and a selected flag. What it MEANS — an instance
-/// path, a lamp range — is the shell's business, recovered from the index
-/// this sprite lists it at.
+/// The crate stays project-unaware: an object here is a body to click, an
+/// outline to paint, its lamps' cells, a name for the tooltip, and a selected
+/// flag. What it MEANS — an instance path, a lamp range — is the shell's
+/// business, recovered from the index this sprite lists it at.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpriteObject {
     /// Human name, for the hover title only.
     pub label: String,
-    /// The padded hull polygon in the sprite's OWN space, closed implicitly.
-    /// Fewer than three points means "no body" — nothing is drawn and
+    /// The HIT body in the sprite's OWN space: the symmetric on-path band's
+    /// loops (planning Q7 — a thin one-sided VISUAL must not make the object
+    /// harder to click), read with nonzero winding. Empty means "no body" —
     /// nothing hits.
-    pub hull: Vec<[f32; 2]>,
+    pub hull: Vec<Vec<[f32; 2]>>,
+    /// The VISUAL outline loops, aligned as the document authored it. Empty
+    /// means nothing is drawn.
+    pub outline: Vec<Vec<[f32; 2]>>,
+    /// Voronoi cells for objects whose lamps read as a ribbon (path,
+    /// polygon); empty for the kinds that keep dots. `lamp` indexes the
+    /// sprite's DISPLAYED points, so the live-fill hooks stride exactly like
+    /// the circles'.
+    pub cells: Vec<LampCell>,
     /// `(first lamp, count)` in the fixture's TRUE numbering — the same
-    /// space [`nearest_lamp`] answers in, so overlapping hulls can be broken
+    /// space [`nearest_lamp`] answers in, so overlapping bodies can be broken
     /// apart by the lamp the pointer is actually closest to.
     pub lamps: (u32, u32),
     pub selected: bool,
@@ -109,11 +126,11 @@ pub enum FixtureBody {
 /// `None` for a placeholder or strip body, where the sprite genuinely knows
 /// nothing finer than "this fixture".
 ///
-/// Since G1 round 3 the HULL answers first: `object` is the index into
+/// Since G1 round 3 the BODY answers first: `object` is the index into
 /// [`FixtureSprite::objects`] whose body contains the point, which is how a
 /// click lands on an object without hitting a 3 px lamp. The lamp stays —
-/// it is the tiebreak between overlapping hulls, and the only answer where
-/// no hull covers the point at all.
+/// it is the tiebreak between overlapping bodies, and the only answer where
+/// no body covers the point at all.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FixturePick {
     pub key: String,
@@ -212,16 +229,16 @@ pub(crate) fn nearest_lamp(sprite: &FixtureSprite, project_point: [f64; 2]) -> O
 }
 
 /// Which OBJECT of `sprite` a project-space point lands on: the index into
-/// [`FixtureSprite::objects`] whose padded hull contains it.
+/// [`FixtureSprite::objects`] whose hit body contains it.
 ///
-/// The whole hull is the target, so a click in the middle of a dome sector
+/// The whole body is the target, so a click in the middle of a dome sector
 /// selects that sector without going anywhere near a lamp. Two rules keep
 /// that honest where bodies overlap (a repeat whose instances interleave, an
-/// object drawn inside another's convex span):
+/// object drawn inside another's span):
 ///
-/// - a hull that contains the point AND owns the nearest lamp wins outright
+/// - a body that contains the point AND owns the nearest lamp wins outright
 ///   — the lamp is the finest fact available, so it breaks the tie;
-/// - otherwise the LAST containing hull wins, matching the paint order
+/// - otherwise the LAST containing body wins, matching the paint order
 ///   (topmost) the rest of the canvas resolves overlaps by.
 ///
 /// `None` = no body covers the point, and the caller falls back to the
@@ -232,10 +249,11 @@ pub(crate) fn hit_object(sprite: &FixtureSprite, project_point: [f64; 2]) -> Opt
     }
     let owner = nearest_lamp(sprite, project_point)
         .and_then(|lamp| sprite.objects.iter().position(|object| object.owns(lamp)));
-    let local = sprite.placement.inverse(project_point);
+    let [lx, ly] = sprite.placement.inverse(project_point);
+    let local = [lx as f32, ly as f32];
     let mut found = None;
     for (index, object) in sprite.objects.iter().enumerate() {
-        if !point_in_polygon(&object.hull, local) {
+        if !point_in_loops(&object.hull, local) {
             continue;
         }
         if owner == Some(index) {
@@ -244,6 +262,21 @@ pub(crate) fn hit_object(sprite: &FixtureSprite, project_point: [f64; 2]) -> Opt
         found = Some(index);
     }
     found
+}
+
+/// Every loop of an outline as ONE `d`: subpaths, so the whole object is a
+/// single element (dome scale is ~150 of them) and the browser's nonzero
+/// fill rule does the merging a boolean union would otherwise cost.
+#[must_use]
+fn loops_path_d(loops: &[Vec<[f32; 2]>]) -> String {
+    let mut d = String::new();
+    for polygon in loops.iter().filter(|polygon| polygon.len() >= 3) {
+        if !d.is_empty() {
+            d.push(' ');
+        }
+        d.push_str(&hull_path_d(polygon));
+    }
+    d
 }
 
 /// Has this press travelled far enough (CSS pixels) to count as a drag?
@@ -326,6 +359,25 @@ fn FixtureGroup(
     let upp = units_per_px / sprite.placement.s.max(1e-6);
     let tag_font = 11.0 * upp;
     let lamp_r = (3.0 * upp).min(bw.max(bh) / 18.0).max(0.35 * upp);
+    // The emitter core inside a cell: a screen-constant speck of near-white,
+    // so a big cell still reads as "a lamp lives here" rather than as a
+    // painted tile.
+    let core_r = 1.1 * upp;
+    let lamp_points: &[[f32; 2]] = match &sprite.body {
+        FixtureBody::Lamps { points, .. } => points,
+        _ => &[],
+    };
+    // A lamp its object paints as a CELL draws no dot: the cell is that
+    // lamp's whole surface (and carries its live-fill hooks), so a circle
+    // under it would only be a second, differently-shaped copy of it.
+    let mut celled = vec![false; lamp_points.len()];
+    for object in &sprite.objects {
+        for cell in &object.cells {
+            if let Some(slot) = celled.get_mut(cell.lamp) {
+                *slot = true;
+            }
+        }
+    }
     let frame_stroke = if selected {
         format!("stroke:#4c9ffe;stroke-width:{}", 1.5 * upp)
     } else {
@@ -372,12 +424,21 @@ fn FixtureGroup(
                 // pointer move repaints without re-rendering a thing, which
                 // is what keeps 150 dome objects cheap.
                 for (index, object) in sprite.objects.iter().enumerate() {
-                    if object.hull.len() >= 3 {
+                    if !object.outline.is_empty() {
                         path {
                             key: "hull-{index}",
                             class: if object.selected { "lpme-obj-hull lpme-obj-hull-on" } else { "lpme-obj-hull" },
-                            d: hull_path_d(&object.hull),
+                            d: loops_path_d(&object.outline),
+                            // Overlapping strand loops merge and a closed
+                            // strand's hole stays open — the same rule
+                            // `point_in_loops` hit-tests with, so what is
+                            // clickable is what is painted.
+                            fill_rule: "nonzero",
                             stroke_width: if object.selected { "{1.4 * upp}" } else { "{1.0 * upp}" },
+                            // The object's own colour, for the at-rest stroke
+                            // tint (`.lpme-obj-hull` mixes it down); hover and
+                            // selected keep the shared blues.
+                            style: "--lpme-obj-c: {sprite.color};",
                             // Not a gesture hook — the canvas root owns
                             // those — but the name the body stands for, so a
                             // walk (or a story diff) can say which is which.
@@ -385,20 +446,50 @@ fn FixtureGroup(
                         }
                     }
                 }
+                // The CELLS, over every outline (an object's cells must not
+                // be tinted by a neighbour's body fill) and under nothing:
+                // each one is a lamp's live surface, so it carries the same
+                // feed hooks the circles do.
+                for (index, object) in sprite.objects.iter().enumerate() {
+                    for cell in object.cells.iter() {
+                        if cell.polygon.len() >= 3 {
+                            path {
+                                key: "cell-{index}-{cell.lamp}",
+                                d: hull_path_d(&cell.polygon),
+                                fill: "{sprite.color}",
+                                fill_opacity: "0.85",
+                                "data-sprite-fixture": "{sprite.key}",
+                                "data-sprite-lamp": "{cell.lamp * lamp_stride}",
+                            }
+                            if let Some(point) = lamp_points.get(cell.lamp) {
+                                circle {
+                                    key: "core-{index}-{cell.lamp}",
+                                    cx: "{point[0]}",
+                                    cy: "{point[1]}",
+                                    r: "{core_r}",
+                                    fill: "#fffaf0",
+                                    fill_opacity: "0.45",
+                                }
+                            }
+                        }
+                    }
+                }
                 match &sprite.body {
                     FixtureBody::Lamps { points, .. } => rsx! {
                         for (index, point) in points.iter().enumerate() {
-                            circle {
-                                key: "{index}",
-                                cx: "{point[0]}",
-                                cy: "{point[1]}",
-                                r: "{lamp_r}",
-                                fill: "{sprite.color}",
-                                fill_opacity: "0.9",
-                                // The live-fill hooks (host sprite feed):
-                                // sprite key + TRUE lamp index.
-                                "data-sprite-fixture": "{sprite.key}",
-                                "data-sprite-lamp": "{index * lamp_stride}",
+                            if !celled.get(index).copied().unwrap_or(false) {
+                                circle {
+                                    key: "{index}",
+                                    cx: "{point[0]}",
+                                    cy: "{point[1]}",
+                                    r: "{lamp_r}",
+                                    fill: "{sprite.color}",
+                                    fill_opacity: "0.9",
+                                    // The live-fill hooks (host sprite feed):
+                                    // sprite key + TRUE lamp index.
+                                    "data-sprite-fixture": "{sprite.key}",
+                                    "data-sprite-lamp": "{index * lamp_stride}",
+                                }
                             }
                         }
                         if let Some((start, lamps)) = sprite.selected_range {

@@ -8,9 +8,13 @@
 //! so the shape reads as a body rather than as a taut rubber band, and
 //! filled faintly so it is a click target everywhere inside.
 //!
-//! Pure math on purpose — no Dioxus, no sprites. The hull is computed ONCE
-//! per surface build (the shell's render pass) and then only rendered and
-//! hit-tested, because dome-scale means ~150 of these on screen at once.
+//! Pure math on purpose — no Dioxus, no sprites.
+//!
+//! The design-language round replaced the hull as the object BODY: an object
+//! now wears its aligned outline (outline.rs), which follows concavities the
+//! hull swallowed. What survives here is the geometry other callers still
+//! want — the hull itself, its padding, and the `d` writer every body path
+//! (outline loops, voronoi cells) emits through.
 
 /// Andrew's monotone chain: the convex hull of `points`, counter-clockwise
 /// in a y-DOWN space (which is what SVG user space is), no repeated last
@@ -142,28 +146,6 @@ pub fn pad_hull(hull: &[[f32; 2]], pad: f32) -> Vec<[f32; 2]> {
     }
 }
 
-/// Is `point` inside this polygon? Even-odd ray crossing, which is exact
-/// enough for a click target and needs no winding assumption.
-#[must_use]
-pub(crate) fn point_in_polygon(polygon: &[[f32; 2]], point: [f64; 2]) -> bool {
-    if polygon.len() < 3 {
-        return false;
-    }
-    let mut inside = false;
-    let mut j = polygon.len() - 1;
-    for i in 0..polygon.len() {
-        let (xi, yi) = (f64::from(polygon[i][0]), f64::from(polygon[i][1]));
-        let (xj, yj) = (f64::from(polygon[j][0]), f64::from(polygon[j][1]));
-        if (yi > point[1]) != (yj > point[1])
-            && point[0] < (xj - xi) * (point[1] - yi) / (yj - yi) + xi
-        {
-            inside = !inside;
-        }
-        j = i;
-    }
-    inside
-}
-
 /// The polygon as an SVG `d`, closed — one path element per object is the
 /// whole scale budget (dome-scale: ~150 of them).
 #[must_use]
@@ -184,7 +166,15 @@ pub(crate) fn hull_path_d(polygon: &[[f32; 2]]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::outline::point_in_loops;
     use super::*;
+
+    /// Containment for the assertions below. The canvas hit-tests OUTLINE
+    /// loops now ([`point_in_loops`]); a convex hull is one loop, where
+    /// nonzero and even-odd agree.
+    fn inside(polygon: &[[f32; 2]], point: [f32; 2]) -> bool {
+        point_in_loops(&[polygon.to_vec()], point)
+    }
 
     /// The hull of a filled square is its four corners, and the interior
     /// points are dropped.
@@ -230,9 +220,9 @@ mod tests {
                 "{point:?} did not move out"
             );
         }
-        assert!(point_in_polygon(&padded, [-1.5, 5.0]), "{padded:?}");
-        assert!(point_in_polygon(&padded, [5.0, 5.0]));
-        assert!(!point_in_polygon(&padded, [-5.0, 5.0]));
+        assert!(inside(&padded, [-1.5, 5.0]), "{padded:?}");
+        assert!(inside(&padded, [5.0, 5.0]));
+        assert!(!inside(&padded, [-5.0, 5.0]));
     }
 
     /// The degenerate shapes get real, clickable area — the reason a
@@ -241,13 +231,13 @@ mod tests {
     fn a_line_and_a_point_pad_into_clickable_bodies() {
         let strand = pad_hull(&[[0.0, 0.0], [30.0, 0.0]], 3.0);
         assert_eq!(strand.len(), 4);
-        assert!(point_in_polygon(&strand, [15.0, 2.0]), "{strand:?}");
-        assert!(point_in_polygon(&strand, [-2.0, 0.0]), "the capped end");
-        assert!(!point_in_polygon(&strand, [15.0, 9.0]));
+        assert!(inside(&strand, [15.0, 2.0]), "{strand:?}");
+        assert!(inside(&strand, [-2.0, 0.0]), "the capped end");
+        assert!(!inside(&strand, [15.0, 9.0]));
 
         let dot = pad_hull(&[[5.0, 5.0]], 2.0);
-        assert!(point_in_polygon(&dot, [6.0, 4.0]));
-        assert!(!point_in_polygon(&dot, [9.0, 5.0]));
+        assert!(inside(&dot, [6.0, 4.0]));
+        assert!(!inside(&dot, [9.0, 5.0]));
 
         assert!(pad_hull(&[], 3.0).is_empty());
     }

@@ -38,7 +38,8 @@ pub use editor_core::view_geometry::{
 };
 pub use view::canvas::{
     CanvasAnchor, CanvasDrag, EditorCanvas, FixtureBody, FixtureEvent, FixturePick, FixtureSprite,
-    SpriteObject, capture_pointer, convex_hull, object_color, pad_hull,
+    LampCell, SpriteObject, aligned_outline, capture_pointer, convex_hull, hit_body, lamp_cells,
+    object_color, pad_hull, point_in_loops,
 };
 pub use view::floats::{HelpFloat, ZoomFloat, tool_hint};
 pub use view::keys::{EditorKeyOutcome, handle_editor_key};

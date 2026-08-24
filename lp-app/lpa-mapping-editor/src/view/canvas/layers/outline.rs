@@ -471,9 +471,8 @@ pub fn hit_body(strands: &[Vec<[f32; 2]>], r: f32) -> Vec<Vec<[f32; 2]>> {
 
 /// Nonzero-winding containment over every loop — the same rule the paint
 /// uses, so a closed strand's hole really is a hole and overlapping
-/// strand loops really do merge. (hull.rs's even-odd `point_in_polygon`
-/// is NOT reusable here: any-hit over even-odd loops would fill the
-/// hole.)
+/// strand loops really do merge. (An even-odd any-hit per loop, the rule
+/// the old convex-hull body was tested with, would fill the hole.)
 #[must_use]
 pub fn point_in_loops(loops: &[Vec<[f32; 2]>], point: [f32; 2]) -> bool {
     let p = to_f64(point);
