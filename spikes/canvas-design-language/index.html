@@ -141,8 +141,9 @@
   with whole-hull hit targets; this spike explores the next step on three axes:
   <b>(1)</b> the outline itself — convex hull vs a morphological <b>offset-and-union</b>
   (buffer every lamp by r, union the discs) that respects concavity;
-  <b>(2)</b> the lamps — round 2: the <b>fill/stroke model</b> (fill = what the LEDs light,
-  with lp2014-style directional beam wedges; stroke = the iconographic outline);
+  <b>(2)</b> the lamps — round 3: <b>stroke + voronoi</b>, the solid cell ribbon placed on /
+  inside / outside the stroke to capture direction (an object provides an outline stroke and
+  its lamp polygons);
   <b>(3)</b> overlapping-object <b>selection</b> — shipped v1 vs KiCad-style menu vs
   click-to-cycle vs prefer-same-fixture. Section 4 composes the pieces into three
   complete design languages on the mini-dome. Geometry is real-ish: the mini-dome's
@@ -197,28 +198,26 @@
 
 <!-- ============================ 2 ─ LAMPS ============================ -->
 <section data-sec="2">
-<h2><span class="num">2</span>Lamps — the fill/stroke model: beams have a direction</h2>
+<h2><span class="num">2</span>Lamps — stroke + voronoi, direction by alignment</h2>
 <p class="sub">
-  <b>Round 2 (gate insight):</b> every round-1 treatment kept LEDs omnidirectional, but that's
-  not how they work — lp2014 drew LEDs as <b>triangles with a beam angle pointing in a
-  direction</b>, and when a strip wraps something, pointing <b>inward</b> conveys the shape.
-  Two concepts hide in "how do lamps look": the <b>FILL</b> (what the LEDs physically light —
-  points, discs, or directional wedges) and the <b>STROKE</b> (the iconographic outline that
-  makes the thing recognizable — §1's smooth union). Beam direction here is <b>derived</b>:
-  tangent along the strand, normal flipped toward the object's centroid (wrapped) or away
-  (outward-facing). An unordered scatter has no derivable direction at all — which is exactly
-  why objects (line, circle, grid, path…) should ultimately <b>provide</b> their fill+stroke,
-  with authored hints like "wraps a form" vs "faces the viewer" when derivation can't know.
+  <b>Round 3 (gate rulings):</b> the <b>voronoi look</b> is the one — beams rejected ("they
+  aren't solid") — but stroke <b>direction must be captured, Illustrator-style</b>: the solid
+  voronoi cell ribbon is <b>aligned</b> to the path like a stroke — <b>on path</b> (faces the
+  viewer), <b>inside</b> (a strip wrapping a form), <b>outside</b> (edge-lit). Cells are the
+  round-1 derivation (Voronoi ∩ disc); each lamp shifts by its own cell radius so the band's
+  edge kisses the path, exactly like an aligned stroke; the pale core marks the true emitter.
+  <b>Scope ruled IN:</b> an object formally provides <b>(1) an outline stroke</b> and
+  <b>(2) a series of lamp polygons</b> (as lp2014 did) — derived today, customizable someday;
+  this section is the look-spike for that model.
 </p>
 <div class="cmp" id="s2-grid"></div>
 <div class="cmp" id="s2-zoom"></div>
-<div class="cmp" id="s2-composed"></div>
-<p class="cap"><b>Reading it:</b> omni dots (shipped) and the round-1 Voronoi hybrid say nothing
-  about orientation; <b>beams inward</b> makes the C-arc and dome sectors read as wrapped
-  surfaces — the lamps <i>explain</i> the stroke instead of just sitting on it; <b>beams
-  outward</b> is the same machinery for edge-lit rigs. The composed row is the model as it
-  would ship: stroke = iconographic outline, fill = the physically honest glyph. At 45% the
-  wedge fill keeps directionality readable exactly where circles dissolve.</p>
+<p class="cap"><b>Reading it:</b> all three alignments keep the solid tiled body that made round
+  1 work; inside/outside add the physical fact — the C-arc aligned <b>inside</b> reads as a
+  strip wrapped around a column, <b>outside</b> as an edge-lit rim, and the alignment is
+  exactly the per-object authored bit ("wraps a form" / "edge-lit" / "faces viewer"). At 45%
+  the ribbon stays a solid body where circles dissolve. Beam wedges kept only as the rejected
+  strip.</p>
 </section>
 
 <!-- ============================ 3 ─ SELECTION ============================ -->
@@ -231,7 +230,9 @@
   whole hull is the target, a hull that also owns the nearest lamp wins, else last-painted.
   <b>Round 2 (gate note: cycle is intuitive):</b> the new <b>cycle + hold/rclick menu</b> policy
   keeps plain clicks on the cycle fast path and summons the candidate menu on press-and-hold
-  (~420ms) or right-click.
+  (~420ms) or right-click. <b>Round 3: ambiguity is generous</b> — anything within ~10px of a
+  body counts as a candidate (marked <code>~</code> in the log), so clicking near-but-not-on
+  the overlap still cycles instead of feeling broken.
 </p>
 <div class="xstrip local" id="s3-modes">
   <span class="lbl">policy</span>
@@ -272,16 +273,16 @@
   Everything composed: same scene, <b>sector 1 hovered</b>, <b>sector 3 selected</b>, door 1
   overlapping sector 3's base. <b>A</b> is a faithful reproduction of what shipped in pass 2.
   <b>B</b> renders objects as tinted entities: smooth line-buffer body, per-object hue at rest,
-  <b>round 2:</b> fill = inward beam wedges (§2), name chip on the body; the fixture frame
-  demotes to a corner tag. <b>C</b> pushes "solid" to the limit: opaque bodies with a drop
+  <b>round 3:</b> fill = the voronoi ribbon offset inward (§2's ruled look), name chip on the
+  body; the fixture frame demotes to a corner tag. <b>C</b> pushes "solid" to the limit: opaque bodies with a drop
   shadow, lamps as lit cores. <b>Gate ruling: B reads cleanest</b> — C kept only for contrast.
 </p>
 <div class="cmp" id="s4-grid"></div>
-<p class="cap"><b>What to judge (round 2):</b> B with beam-wedge fill — do the wedges still read
-  once live lamp colors paint them (the wedge would carry the live color, the core stays the
-  emitter truth)? How much per-object hue survives into production — full hue at rest, or
-  neutral at rest with hue only on hover/selection? And do the on-body name chips scale to
-  ~150 dome objects, or do they need a zoom threshold?</p>
+<p class="cap"><b>What to judge (round 3):</b> B with the inside-aligned ribbon — do the cells
+  still read once live lamp colors paint them (each cell would carry its lamp's live color,
+  the pale core stays the emitter truth)? How much per-object hue survives into production —
+  full hue at rest, or neutral at rest with hue only on hover/selection? And do the on-body
+  name chips scale to ~150 dome objects, or do they need a zoom threshold?</p>
 </section>
 
 <footer>
@@ -612,6 +613,32 @@ function lampWedges(o, side=1, len=9, half=4.4) {
       `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="1.8" fill="${o.color}"/>`;
   }).join('');
 }
+/* stroke + voronoi (round 3): Illustrator-style stroke ALIGNMENT — the
+   solid cell ribbon sits on / inside / outside the path. side 0 = centered
+   on the path, +1 = inside (wrapped), -1 = outside (edge-lit). Each lamp
+   shifts by its OWN cell radius so the band's edge kisses the path, exactly
+   like an inside-aligned stroke; a pale core marks the true emitter. */
+function voronoiRibbon(o, side, dFixed) {
+  const ds=beamDirs(o.pts);
+  const radiusAt = i => {
+    if (dFixed) return dFixed;
+    let nn=1/0;
+    for (let k=0;k<o.pts.length;k++) { if (k===i) continue;
+      const dd=(o.pts[i][0]-o.pts[k][0])**2+(o.pts[i][1]-o.pts[k][1])**2;
+      if (dd<nn) nn=dd; }
+    return Math.min(13, Math.max(3.2, Math.sqrt(nn)*0.92));
+  };
+  const off = side===0 ? o.pts
+    : o.pts.map((p,i)=>{ const d=radiusAt(i);
+        return [p[0]+ds[i][0]*side*d, p[1]+ds[i][1]*side*d]; });
+  const cells=lampCells(off);
+  let h=cells.map(c=>c.length>2
+    ? `<path d="${loopD(c)}" fill="${o.color}" fill-opacity=".8" stroke="${o.color}" stroke-opacity=".5" stroke-width=".6"/>`
+    : '').join('');
+  for (const p of o.pts)
+    h+=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="1.3" fill="#fffaf0" fill-opacity=".45"/>`;
+  return h;
+}
 function sizedR(pts, i, lo=2, hi=7) {
   let nn=1/0;
   for (let k=0;k<pts.length;k++) { if (k===i) continue;
@@ -730,17 +757,16 @@ function renderS2() {
      <svg width="${(W*.45+8).toFixed(0)}" height="${(H*.45+8).toFixed(0)}"
        viewBox="0 0 ${(W*.45+8).toFixed(0)} ${(H*.45+8).toFixed(0)}">
        <g transform="translate(4,4) scale(.45)">${body}</g></svg></div>`;
-  const modes = [['dots','omni dots · shipped'],['hybrid','round 1 · voronoi hybrid (omni)'],
-                 ['in','beams inward · wrapped form'],['out','beams outward · edge-lit']];
+  const variants = [['align: on path · faces viewer',0],['align: inside · wrapped',1],
+                    ['align: outside · edge-lit',-1]];
+  const ribbon = side => objs.map(o=>voronoiRibbon(o, side)).join('');
   document.getElementById('s2-grid').innerHTML =
-    modes.map(([m,t])=>cell(t, inner(m))).join('');
+    variants.map(([t,s])=>cell('stroke + voronoi · '+t, stroke()+ribbon(s))).join('') +
+    cell('omni dots · shipped ref', inner('dots'));
   document.getElementById('s2-zoom').innerHTML =
-    modes.map(([m,t])=>mini('45% · '+m, inner(m))).join('');
-  document.getElementById('s2-composed').innerHTML =
-    cell('composed · stroke + beam fill', stroke()+inner('in')) +
-    mini('45% · composed beams', stroke()+inner('in')) +
-    cell('composed · stroke + dot fill', stroke()+inner('dots')) +
-    mini('45% · composed dots', stroke()+inner('dots'));
+    variants.map(([t,s])=>mini('45% · '+t.split(' ·')[0], stroke()+ribbon(s))).join('') +
+    mini('45% · shipped dots', inner('dots')) +
+    mini('rejected · beams (not solid)', stroke()+inner('in'));
 }
 
 /* =============================== §3 selection ======================== */
@@ -760,8 +786,24 @@ function buildScene3() {
   ]);
 }
 const SIM_A = [101, 145], SIM_B = [402, 264];
+/* round 3 (gate note): ambiguity is GENEROUS — a click near-but-not-on a
+   body still counts it as a candidate, so cycling works beside the overlap
+   instead of feeling broken. Near-misses are marked ~ in the log. */
+const SLOP = 10;
+function distToLoops(loops, x, y) {
+  let best=1/0;
+  for (const lp of loops) for (let i=0; i<lp.length; i++) {
+    const a=lp[i], b=lp[(i+1)%lp.length];
+    const vx=b[0]-a[0], vy=b[1]-a[1], L2=vx*vx+vy*vy||1e-9;
+    let t=((x-a[0])*vx+(y-a[1])*vy)/L2; t=t<0?0:t>1?1:t;
+    const dx=x-(a[0]+vx*t), dy=y-(a[1]+vy*t), dd=dx*dx+dy*dy;
+    if (dd<best) best=dd;
+  }
+  return Math.sqrt(best);
+}
 function candidatesAt(x,y) {
-  return SCENE3.map((o,i)=>({o,i})).filter(({o})=>inLoops(o.body,x,y));
+  return SCENE3.map((o,i)=>({o,i, near: !inLoops(o.body,x,y)}))
+    .filter(c=>!c.near || distToLoops(c.o.body,x,y)<=SLOP);
 }
 function nearestLampOwner(x,y) {
   let best=1/0, who=-1;
@@ -783,7 +825,7 @@ function closeMenu() { S3.menu=null; const m=document.querySelector('.dmenu'); i
 function click3(x, y, viaSim) {
   closeMenu();
   const cands = candidatesAt(x,y);
-  const names = cands.map(c=>SCENE3[c.i].name).join(', ');
+  const names = cands.map(c=>(c.near?'~':'')+SCENE3[c.i].name).join(', ');
   if (!cands.length) { S3.sel=null; S3.lastClick=null;
     log3(`(${x|0},${y|0}) → background → <b>deselect</b>`); renderS3(); return; }
   const mode=S.mode;
@@ -918,7 +960,7 @@ function renderS4() {
     B+=`<path d="${loopsD(o.body)}" fill-rule="evenodd" fill="${fill}"
         stroke="${strk}" stroke-width="${s==='sel'?1.7:1.1}"/>`;
   });
-  objs.forEach((o,i)=>{ B+=lampWedges({...o, color:tintOf(i)}, 1, 8, 3.8); });
+  objs.forEach((o,i)=>{ B+=voronoiRibbon({...o, color:tintOf(i)}, 1); });
   objs.forEach((o,i)=>{ B+=chip(o, st(i), tintOf(i)); });
 
   /* C — solid tiles */
@@ -943,7 +985,7 @@ function renderS4() {
     <svg width="${W}" height="${H}" viewBox="0 -6 ${W} ${H}">${inner}</svg></div>`;
   document.getElementById('s4-grid').innerHTML =
     cell('A — current (shipped pass 2)','convex + neutral', A) +
-    cell('B — tinted entities','smooth body + inward beams + chips', B) +
+    cell('B — tinted entities','body + offset+ voronoi + chips', B) +
     cell('C — solid tiles','opaque + lit cores', Cm);
 }
 
