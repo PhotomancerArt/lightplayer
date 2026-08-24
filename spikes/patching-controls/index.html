@@ -1,0 +1,791 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike · patching selection &amp; controls · round 2</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #101317;            --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;       --surface-subtle: #14181d;
+    --surface-muted: #11161b; --raised: #20272e;   --raised-strong: #26313a;
+    --terminal: #0c1114;      --track: #10151a;
+
+    --border: #2a3138;        --border-muted: #252d34;
+    --border-subtle: #293039; --border-strong: #3e4852;
+
+    --text: #f2f0e8;   --strong: #fffaf0;  --muted: #c7cbd0;
+    --subtle: #99a2ad; --dim: #9ba4ad;
+    --heading: #94b8aa; --accent: #7be0b2; --accent-border: #65bd96;
+
+    --sel: #4c9ffe;    --sel-bg: rgba(76,159,254,.12);
+    --good: #3fd68e;   --dirty: #e4c065;
+    --err-bg: #301b1d; --err-border: #874b4b; --err-text: #ffc7c7;
+    --warn-text: #f0dc7a;
+
+    --obj-0: #5aa9e6; --obj-1: #3fd68e; --obj-2: #e4c065;
+    --obj-3: #c792ea; --obj-4: #f0913b; --obj-5: #64d8cb;
+    --gap: #3a4149;
+
+    /* wiring-order endpoint colours — PURE rgb on purpose (D2 ruling):
+       the physical-truth channel, distinct from the soft UI palette. */
+    --wire-start: #0000ff; --wire-end: #ff0000;
+
+    --sans: Inter, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    --r-xs: 5px; --r-sm: 6px; --r-md: 8px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 26px 30px 140px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 13.5px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--heading);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 940px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
+       text-transform: uppercase; margin: 34px 0 4px; }
+  h2 .num { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--subtle); font-size: 12px; margin: 0 0 12px; max-width: 940px; }
+  p.sub b { color: var(--muted); }
+
+  .xstrip {
+    display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+    border: 1px dashed var(--border-strong); border-radius: var(--r-md);
+    padding: 10px 12px; margin: 0 0 8px; background: var(--surface-subtle);
+    position: sticky; top: 8px; z-index: 40;
+  }
+  .xstrip .lbl { font: 10px var(--mono); letter-spacing: .1em; color: var(--dim);
+                 text-transform: uppercase; margin-right: -6px; }
+  button, select {
+    font: 11px var(--mono); color: var(--muted);
+    background: var(--raised); border: 1px solid var(--border-strong);
+    border-radius: var(--r-xs); padding: 3px 9px; cursor: pointer;
+  }
+  button:hover { color: var(--strong); }
+  button.on { color: var(--sel); border-color: var(--sel); background: var(--sel-bg); }
+  button.primary { color: var(--accent); border-color: var(--accent-border); }
+  input[type=range] { accent-color: var(--accent); }
+
+  .frame {
+    border: 1px solid var(--border); border-radius: var(--r-md);
+    background: var(--surface); overflow: hidden; margin: 10px 0 6px;
+  }
+  .frame .bar {
+    display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--border-subtle); background: var(--surface-muted);
+    padding: 5px 10px; font: 10.5px var(--mono); color: var(--subtle);
+  }
+  .frame .bar .grp { display: flex; gap: 5px; align-items: center; }
+  .frame .bar .divider { width: 1px; height: 14px; background: var(--border-strong); }
+  .frame .bar .lbl2 { font-size: 10px; letter-spacing: .13em; color: var(--dim);
+                      text-transform: uppercase; font-weight: 600; }
+  .frame .bar .push { margin-left: auto; }
+  .tbtn { font: 10.5px var(--mono); color: var(--subtle); background: var(--surface);
+          border: 1px solid var(--border-strong); border-radius: var(--r-xs);
+          padding: 2px 7px; }
+  .tbtn b { color: var(--muted); font-weight: 600; }
+  .tbtn.off { opacity: .38; }
+
+  .canvas-wrap { position: relative; background:
+      radial-gradient(circle at 1px 1px, rgba(255,255,255,.05) 1px, transparent 1px) 0 0/26px 26px,
+      var(--terminal); }
+  svg.piece { display: block; margin: 0 auto; }
+
+  /* ---- lamp strips: the lamps ARE the display ---- */
+  .stripblock { padding: 9px 12px 11px; }
+  .striphead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .striphead .name { font-size: 12px; font-weight: 600; color: var(--strong); }
+  .striphead .kind { font: 9.5px var(--mono); letter-spacing: .1em;
+                     text-transform: uppercase; color: var(--dim); }
+  .striphead .facts { margin-left: auto; font: 10px var(--mono); color: var(--dim); }
+  .striphead .facts b { color: var(--muted); font-weight: 600; }
+  .lampstrip { position: relative; height: 22px; border-radius: 4px;
+               background: var(--track); overflow: visible; }
+  .lampstrip .bulbs { position: absolute; inset: 0; display: flex; gap: 2px;
+                      padding: 3px 2px; }
+  .lampstrip .bulbs i { flex: 1; border-radius: 3px; min-width: 3px; }
+  .lampstrip .grad { position: absolute; inset: 3px 2px; border-radius: 3px; }
+  .lampstrip .span { position: absolute; top: -3px; bottom: -3px; border: 1px solid var(--sel);
+                     border-radius: 4px; z-index: 2; pointer-events: none; }
+  .lampstrip .marks { position: absolute; inset: 0; z-index: 1; }
+  .lampstrip .marks i { position: absolute; top: 0; bottom: 0; width: 1px;
+                        background: rgba(255,255,255,.14); }
+  .under { display: flex; gap: 10px; margin-top: 5px; align-items: center;
+           font: 10px var(--mono); color: var(--dim); }
+  .under .flag { color: var(--warn-text); }
+
+  .transport { display: flex; gap: 5px; align-items: center; margin-top: 7px; flex-wrap: wrap; }
+  .transport .sep { width: 10px; }
+  .kbtn { font: 11px var(--mono); color: var(--muted); background: var(--raised);
+          border: 1px solid var(--border-strong); border-radius: var(--r-xs);
+          padding: 2px 8px; min-width: 30px; }
+  .kbtn small { display: block; font-size: 8.5px; color: var(--dim); letter-spacing: .05em; }
+  .kbtn.future { border-style: dashed; color: var(--dim); }
+  .keysrow { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 12px;
+             border-top: 1px solid var(--border-subtle); background: var(--surface-muted);
+             font: 10px var(--mono); color: var(--dim); }
+  .keysrow b { color: var(--subtle); font-weight: 600; }
+
+  /* ---- THE two-section panel ---- */
+  .psection { padding: 9px 12px 11px; position: relative; }
+  .psection + .psection { border-top: 1px solid var(--border-subtle); }
+  .psection.primary { box-shadow: inset 2px 0 0 var(--sel); background: rgba(76,159,254,.035); }
+  .psection .shead { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .psection .shead .slabel { font: 9.5px var(--mono); letter-spacing: .13em;
+                             text-transform: uppercase; color: var(--dim); width: 52px; }
+  .psection .shead .name { font-size: 12px; font-weight: 600; color: var(--strong); }
+  .psection .shead .facts { margin-left: auto; font: 10px var(--mono); color: var(--dim); }
+  .psection .shead .facts b { color: var(--muted); }
+  .psection .shead .x { padding: 0 6px; line-height: 1.4; font-size: 11px; }
+  .prompt { border: 1px dashed var(--border-strong); border-radius: var(--r-sm);
+            padding: 9px 12px; font-size: 12px; color: var(--subtle);
+            display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .prompt b { color: var(--muted); }
+  .prompt select { max-width: 200px; }
+  .simrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
+  .simrow .lbl { font: 10px var(--mono); letter-spacing: .1em; color: var(--dim);
+                 text-transform: uppercase; }
+  .statebadge { font: 10px var(--mono); color: var(--sel); border: 1px solid var(--sel);
+                background: var(--sel-bg); border-radius: 999px; padding: 1px 9px; }
+
+  table.matrix { border-collapse: collapse; width: 100%; font-size: 11.5px; margin-top: 8px; }
+  .matrix th { font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+               color: var(--dim); text-align: left; padding: 5px 10px;
+               border-bottom: 1px solid var(--border-strong); }
+  .matrix td { padding: 6px 10px; border-bottom: 1px solid var(--border-muted);
+               color: var(--muted); vertical-align: top; }
+  .matrix td:first-child { font-family: var(--mono); font-size: 11px; color: var(--strong);
+                           white-space: nowrap; }
+  .matrix .lang { font-family: var(--mono); font-size: 10.5px; }
+  .matrix .lang.chase { color: #9db9ff; }
+  .matrix .lang.fade { color: #ddd; }
+  .matrix .lang.none { color: var(--dim); }
+
+  .rejected { border: 1px solid var(--border-muted); border-radius: var(--r-md);
+              background: var(--surface-subtle); padding: 8px 12px; font-size: 11.5px;
+              color: var(--dim); margin: 8px 0; }
+  .rejected b { color: var(--subtle); }
+  .caption { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  .caption b { color: var(--strong); }
+</style>
+
+<h1>Patching selection &amp; controls — R3 spike · round 2</h1>
+<p class="hint">
+  Round-2 rulings applied: <b>Concept A won</b> (one patch panel, object section on top,
+  output below); the chase paints <b>the lamps themselves</b> on every representation
+  (strips show actual output, so blue/red/sweep live in the lamp values — head/tail size
+  = clamp(1, 10, count/10)); and the selection model is <b>ONE selection at a time</b> —
+  a fixture object or an output port <i>segment</i> (WLED's own word) — and <b>plain
+  clicks never write</b>. Linking takes the explicit <b>assign arm</b> (a, or the button
+  in the invitation — the swap-arm grammar): armed, the next counterpart click completes
+  the pairing; <b>m</b> advances the walk-up loop and keeps the arm. The panel's other
+  section carries the counterpart: the derived mapping, or the invitation.
+</p>
+
+<div class="xstrip">
+  <span class="lbl">scenario</span>
+  <button id="x-zook" class="on" onclick="setScenario('zook')">zook dome</button>
+  <button id="x-fyeah" onclick="setScenario('fyeah')">fyeah sign</button>
+  <span class="lbl">values</span>
+  <button id="x-live" class="on" onclick="toggleLive()">live values</button>
+  <span class="lbl" style="margin-left:auto">motion</span>
+  <button id="x-anim" class="on" onclick="toggleAnim()">animate</button>
+</div>
+
+<!-- ================================================================ -->
+<h2><span class="num">1</span>THE panel — one selection, two sections, the counterpart follows</h2>
+<p class="sub">
+  The simulated clicks below drive the real state machine. Watch the panel: the
+  <b>selected</b> section wears the blue edge and its light language runs in the lamps;
+  the other section shows either the <b>derived counterpart</b> or the <b>invitation</b>
+  (with the mobile-friendly inline picker). Assigning happens on the click — the object
+  strip snaps to the chase, the output section doesn't change (it was already showing
+  that segment). <b>esc</b> deselects; each section also has its ×.
+</p>
+<div class="simrow">
+  <span class="lbl">simulate click:</span>
+  <button onclick="act('freeport')">free port space</button>
+  <button id="sim-obj-un" onclick="act('unmapped-object')">unmapped object</button>
+  <button onclick="act('mapped-object')">mapped object</button>
+  <button onclick="act('cell')">mapped segment (cell)</button>
+  <button onclick="act('esc')">esc</button>
+  <span class="lbl" style="margin-left:12px">state:</span>
+  <span class="statebadge" id="statebadge">nothing selected</span>
+</div>
+<div class="frame">
+  <div class="bar">
+    <span class="lbl2">Patching</span><span class="divider"></span>
+    <span class="grp"><span class="tbtn"><b>⌖</b> arrows</span><span class="tbtn"><b>#</b> numbers</span><span class="tbtn"><b>◉</b> live</span></span>
+    <span class="divider"></span>
+    <span class="grp"><span class="tbtn">undo</span><span class="tbtn off">redo</span></span>
+    <span class="push" id="p-placed"></span>
+  </div>
+  <div style="display:grid;grid-template-columns:280px 1fr;gap:0">
+    <div class="canvas-wrap" style="border-right:1px solid var(--border-subtle)">
+      <svg class="piece" id="p-svg" width="278" height="252" viewBox="0 0 278 252"></svg>
+    </div>
+    <div id="p-panel">
+      <!-- object section -->
+      <div class="psection" id="ps-object">
+        <div class="shead">
+          <span class="slabel">object</span>
+          <span class="name" id="po-name">—</span>
+          <span class="facts" id="po-facts"></span>
+          <button class="x" id="po-x" onclick="act('esc')" title="deselect">×</button>
+        </div>
+        <div id="po-body"></div>
+      </div>
+      <!-- output section -->
+      <div class="psection" id="ps-output">
+        <div class="shead">
+          <span class="slabel">output</span>
+          <span class="name" id="pp-name">—</span>
+          <span class="facts" id="pp-facts"></span>
+          <button class="x" id="pp-x" onclick="act('esc')" title="deselect">×</button>
+        </div>
+        <div id="pp-body"></div>
+      </div>
+      <div class="keysrow">
+        <span><b>r</b> flip</span><span><b>; '</b> rotate coarse</span><span><b>k l</b> rotate fine</span>
+        <span><b>[ ]</b> shift on wire</span><span><b>a</b> assign (arm)</span><span><b>u</b> unmap</span><span><b>s</b> swap</span>
+        <span><b>m</b> next free segment</span><span><b>esc</b> deselect</span><span><b>⌘Z</b> undo</span>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="caption" id="p-caption"></p>
+
+<!-- ================================================================ -->
+<h2><span class="num">2</span>The two flows, stepped</h2>
+<p class="sub">
+  Same machine, narrated. <b>Segment-first</b> is the walk-up loop (the dome at 2am);
+  <b>object-first</b> is the reverse arrow. Note step 2 of each: the assignment IS the
+  click — no armed state, no second selection, no tentative lane (the write is real,
+  ⌘Z undoes). <b>m</b> advances to the next free segment sized by the next unmapped
+  object.
+</p>
+<div class="simrow">
+  <span class="lbl">segment-first:</span>
+  <button onclick="flowSeg(0)">1 · click free space</button>
+  <button onclick="flowSeg(4)">2 · arm (a)</button>
+  <button onclick="flowSeg(1)">3 · click the pulsing object</button>
+  <button onclick="flowSeg(2)">4 · adjust</button>
+  <button onclick="flowSeg(3)">5 · m → next (stays armed)</button>
+  <span class="lbl" style="margin-left:14px">object-first:</span>
+  <button onclick="flowObj(0)">1 · click unmapped object</button>
+  <button onclick="flowObj(1)">2 · click a port</button>
+</div>
+<p class="caption" id="flow-caption">Use the steps — the panel and piece above are the stage.</p>
+
+<!-- ================================================================ -->
+<h2><span class="num">3</span>The ruling matrix (round-2 state)</h2>
+<table class="matrix" id="matrix">
+  <tr><th>selection</th><th>purpose</th><th>light language (in the lamps)</th><th>panel</th></tr>
+  <tr data-k="object">
+    <td>fixture object / instance</td>
+    <td>verify the mapping: shape, direction, rotation, count</td>
+    <td><span class="lang chase">CHASE</span> — blue head · red tail (clamp(1,10,n/10)) · white sweep, object order</td>
+    <td>object = selected; output = derived window, adjustable</td></tr>
+  <tr data-k="segment">
+    <td>port segment <span style="color:var(--dim)">(naming open — "cell" once mapped)</span></td>
+    <td>physically identify lamps on a port</td>
+    <td><span class="lang fade">BREATH</span> — white fade, rest of output dims</td>
+    <td>output = selected (adjustable span); object = derived owner, or the invitation</td></tr>
+  <tr data-k="output">
+    <td>output / whole port</td>
+    <td>identify a box's wire</td>
+    <td><span class="lang fade">BREATH</span> — whole span</td>
+    <td>output = selected; object = —</td></tr>
+  <tr data-k="none">
+    <td>nothing</td>
+    <td>—</td>
+    <td><span class="lang none">show content</span></td>
+    <td>both sections empty-state</td></tr>
+</table>
+
+<!-- ================================================================ -->
+<h2><span class="num">4</span>The reactive lamp strip</h2>
+<p class="sub">Bulbs while each lamp gets ≥ 7px, gradient beyond — same chase either way,
+  painted in the lamps. Drag the count; heads scale by clamp(1,10,n/10).</p>
+<div class="frame"><div class="stripblock">
+  <div class="striphead">
+    <span class="name">strip</span>
+    <span class="kind" id="s5-mode">bulbs</span>
+    <span class="facts"><input type="range" id="s5-count" min="4" max="600" value="24"
+      style="width:220px;vertical-align:middle"> <b id="s5-n">24</b> lamps</span>
+  </div>
+  <div class="lampstrip" id="s5-strip"></div>
+</div></div>
+
+<!-- ================================================================ -->
+<h2><span class="num">5</span>Rejected rooms</h2>
+<div class="rejected"><b>Concept B (split object/output dock panels):</b> dock width forces
+  permanent gradient mode and the two halves of one assignment never sit aligned — rejected
+  round 2 for the one bottom panel. <b>Concept C (floating HUD):</b> transient controls
+  fight the walk-up promise and cover the sprites being checked — rejected round 2.</div>
+
+<script>
+/* ================= state ================= */
+const S = { scenario: 'zook', live: true, anim: true, t: 0 };
+const SCEN = {
+  zook: {
+    portName: 'IO18 · port 0', portCount: 300,
+    decode: 'decoded as GRB (this fixture’s lamp type)',
+    objects: [
+      { name: 'sector 0', count: 60, mapped: { start: 0 } },
+      { name: 'sector 1', count: 60, mapped: { start: 60, reversed: true } },
+      { name: 'sector 2', count: 60, mapped: null },
+      { name: 'sector 3', count: 60, mapped: null },
+      { name: 'sector 4', count: 60, mapped: null },
+    ],
+  },
+  fyeah: {
+    portName: 'IO4 · port 0', portCount: 150,
+    decode: 'decoded as RGB — F and ! share this port and assume it too',
+    objects: [
+      { name: 'letter F', count: 47, mapped: { start: 0 } },
+      { name: 'letter Y', count: 38, mapped: null },
+      { name: 'bang !', count: 21, mapped: null },
+    ],
+  },
+};
+const scen = () => SCEN[S.scenario];
+/* selection: null | {kind:'object', i} | {kind:'segment', start, len, owner:i|null} */
+let sel = null;
+let armed = false;  /* the assign arm — explicit, like the swap arm */
+
+/* ================= helpers ================= */
+const heads = n => Math.max(1, Math.min(10, Math.round(n / 10)));
+function liveRgb(i, n, t) {
+  const u = i / Math.max(1, n - 1);
+  const r = Math.sin(6.28 * (u * 1.7 - t * .21)) * .5 + .5;
+  const g = Math.sin(6.28 * (u * .9 + t * .13) + 2.1) * .5 + .5;
+  const b = Math.sin(6.28 * (u * 1.3 - t * .08) + 4.2) * .5 + .5;
+  return [30 + r * 200, 25 + g * 170, 40 + b * 215].map(Math.round);
+}
+const dim = (rgb, k) => rgb.map(v => Math.round(v * k));
+const css = rgb => `rgb(${rgb[0]} ${rgb[1]} ${rgb[2]})`;
+const breath = t => 0.25 + 0.75 * (0.5 - 0.5 * Math.cos(6.28 * t / 0.75));
+/* chase color for object-order index j of n — THE lamp value, not an overlay */
+function chaseRgb(j, n, t) {
+  const h = heads(n);
+  if (j < h) return [0, 0, 255];
+  if (j >= n - h) return [255, 0, 0];
+  const u = j / (n - 1), ph = (t / 2) % 1;
+  const w = Math.max(0, 1 - Math.abs(u - ph) * 7);
+  const lv = Math.round(25 + 230 * w);
+  return [lv, lv, lv];
+}
+function nextFree(len) {
+  const sc = scen(), taken = [];
+  for (const o of sc.objects) if (o.mapped) taken.push([o.mapped.start, o.mapped.start + o.count]);
+  taken.sort((a, b) => a[0] - b[0]);
+  let at = 0;
+  for (const [a, b] of taken) { if (at + len <= a) break; at = Math.max(at, b); }
+  return Math.min(at, sc.portCount - len);
+}
+const firstUnmapped = () => scen().objects.findIndex(o => !o.mapped);
+
+/* ================= strip renderer (lamps ARE the display) ================= */
+function renderStrip(el, o) {
+  const w = el.clientWidth || 600;
+  const bulbs = w / o.count >= 7;
+  let html = '';
+  if (bulbs) {
+    let cells = '';
+    for (let i = 0; i < o.count; i++) cells += `<i style="background:${css(o.valueAt(i))}"></i>`;
+    html += `<div class="bulbs">${cells}</div>`;
+  } else {
+    const stops = []; const n = Math.min(96, o.count);
+    for (let s = 0; s <= n; s++) {
+      const i = Math.round(s / n * (o.count - 1));
+      stops.push(`${css(o.valueAt(i))} ${(s / n * 100).toFixed(1)}%`);
+    }
+    html += `<div class="grad" style="background:linear-gradient(90deg,${stops.join(',')})"></div>`;
+  }
+  const pct = i => (i / o.count * 100);
+  if (o.marks) { let m = ''; for (const k of o.marks) m += `<i style="left:${pct(k)}%"></i>`;
+    html += `<div class="marks">${m}</div>`; }
+  if (o.span) html += `<div class="span" style="left:${pct(o.span[0])}%;width:${pct(o.span[1]-o.span[0])}%"></div>`;
+  el.innerHTML = html;
+}
+
+/* ================= the piece ================= */
+function pieces() {
+  if (S.scenario === 'zook') return [
+    [[139,16],[80,72],[42,138],[95,180],[139,140]],
+    [[139,16],[198,72],[236,138],[183,180],[139,140]],
+    [[42,138],[70,214],[139,238],[139,140],[95,180]],
+    [[236,138],[208,214],[139,238],[139,140],[183,180]],
+    [[80,72],[139,110],[198,72],[139,16],[80,72]],
+  ].slice(0, scen().objects.length);
+  return [
+    [[52,40],[52,200],[52,110],[100,110],[52,110],[52,40],[110,40]],
+    [[140,40],[168,96],[196,40],[168,96],[168,200]],
+    [[236,40],[236,150],[236,182],[236,200]],
+  ];
+}
+function drawPiece(svg, t) {
+  const sc = scen(), shapes = pieces();
+  let html = '';
+  shapes.forEach((pts, oi) => {
+    const o = sc.objects[oi];
+    const segs = []; let total = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const L = Math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1]) || .001;
+      segs.push(L); total += L;
+    }
+    const n = Math.min(o.count, 40);
+    const xy = k => {
+      let d2 = k / (n - 1) * total, i = 0;
+      while (i < segs.length - 1 && d2 > segs[i]) { d2 -= segs[i]; i++; }
+      const f = segs[i] ? d2 / segs[i] : 0;
+      return [pts[i][0] + (pts[i+1][0]-pts[i][0]) * f, pts[i][1] + (pts[i+1][1]-pts[i][1]) * f];
+    };
+    const isSelObj = sel && sel.kind === 'object' && sel.i === oi;
+    const segOwner = sel && sel.kind === 'segment' && sel.owner === oi;
+    /* The piece stands for the PHYSICAL dome: it is wired whether or not
+       it is patched, so a free segment's lamps really do breathe out
+       there. The spike knows the ground truth (object oi sits at its
+       sequential wire position); the CANVAS in the real app cannot —
+       which is exactly why the human supplies the pairing. */
+    const phys0 = sc.objects.slice(0, oi).reduce((a, x) => a + x.count, 0);
+    const inSeg = (k) => {
+      if (!sel || sel.kind !== 'segment') return false;
+      const wire = o.mapped
+        ? o.mapped.start + (o.mapped.reversed ? (o.count - 1 - k) : k)
+        : phys0 + k;
+      return wire >= sel.start && wire < sel.start + sel.len;
+    };
+    html += `<polyline points="${pts.map(p=>p.join(',')).join(' ')}" fill="none"
+       stroke="rgba(255,255,255,.07)" stroke-width="6" stroke-linejoin="round"/>`;
+    for (let k = 0; k < n; k++) {
+      const [x, y] = xy(k);
+      const trueIdx = Math.round(k / (n - 1) * (o.count - 1));
+      let fill;
+      if (isSelObj || segOwner) {
+        const j = (isSelObj && sel.rev) || (segOwner && o.mapped?.reversed)
+          ? (o.count - 1 - trueIdx) : trueIdx;
+        fill = css(chaseRgb(j, o.count, t));
+      } else if (sel && sel.kind === 'segment') {
+        fill = inSeg(trueIdx)
+          ? css([255, 255, 255].map(v => Math.round(v * breath(t))))
+          : css(dim(o.mapped ? liveRgb(trueIdx, o.count, t) : [58, 65, 73], .35));
+      } else if (sel) {
+        fill = css(dim(liveRgb(trueIdx, o.count, t), .25));
+      } else {
+        fill = o.mapped ? css(liveRgb(trueIdx, o.count, t)) : 'var(--gap)';
+      }
+      html += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${fill}"/>`;
+    }
+  });
+  svg.innerHTML = html;
+}
+
+/* ================= panel render ================= */
+function objectBody(o, oi, t) {
+  const rev = o.mapped?.reversed || (sel?.kind === 'object' && sel.i === oi && sel.rev);
+  return `
+    <div class="lampstrip" id="po-strip"></div>
+    <div class="transport">
+      <button class="kbtn" onclick="objNudge(-5)">‹‹<small>; coarse</small></button>
+      <button class="kbtn" onclick="objNudge(-1)">‹<small>k fine</small></button>
+      <button class="kbtn" onclick="objFlip()">flip<small>r</small></button>
+      <button class="kbtn" onclick="objNudge(1)">›<small>l fine</small></button>
+      <button class="kbtn" onclick="objNudge(5)">››<small>' coarse</small></button>
+      <span class="sep"></span>
+      <button class="kbtn" onclick="objUnmap()">unmap<small>u</small></button>
+      <span class="sep"></span>
+      <button class="kbtn future" title="future: fix the authored count in flow">lamps −<small>future</small></button>
+      <button class="kbtn future">lamps +<small>future</small></button>
+    </div>`;
+}
+function renderPanel(t) {
+  const sc = scen();
+  const placed = sc.objects.filter(o => o.mapped).length;
+  document.getElementById('p-placed').textContent = `${placed}/${sc.objects.length} placed`;
+  const psObj = document.getElementById('ps-object'), psOut = document.getElementById('ps-output');
+  psObj.classList.toggle('primary', sel?.kind === 'object');
+  psOut.classList.toggle('primary', sel?.kind === 'segment');
+  document.getElementById('po-x').hidden = sel?.kind !== 'object';
+  document.getElementById('pp-x').hidden = sel?.kind !== 'segment';
+
+  /* -- object section -- */
+  const poName = document.getElementById('po-name'), poFacts = document.getElementById('po-facts'),
+        poBody = document.getElementById('po-body');
+  let objIndex = sel?.kind === 'object' ? sel.i
+    : sel?.kind === 'segment' ? sel.owner : null;
+  if (objIndex != null) {
+    const o = sc.objects[objIndex];
+    poName.textContent = o.name + (sel?.kind === 'segment' ? '' : '');
+    const rev = o.mapped?.reversed ? 'reversed' : 'forward';
+    poFacts.innerHTML = o.mapped
+      ? `<b>${o.count}</b> lamps · ${rev} · offset <b>${o.mapped.offset || 0}</b>`
+      : `<b>${o.count}</b> lamps · unmapped`;
+    poBody.innerHTML = objectBody(o, objIndex, t);
+    renderStrip(document.getElementById('po-strip'), {
+      count: o.count,
+      valueAt: i => {
+        const j = o.mapped?.reversed ? (o.count - 1 - i) : i;
+        return chaseRgb(j, o.count, t);
+      },
+    });
+  } else if (sel?.kind === 'segment') {
+    poName.textContent = '—';
+    poFacts.textContent = '';
+    const opts = sc.objects.map((o, i) => !o.mapped
+      ? `<option value="${i}">${o.name} · ${o.count}</option>` : '').join('');
+    poBody.innerHTML = `<div class="prompt">Not mapped to any object.
+      <button class="kbtn primary" onclick="armAssign()" ${armed ? 'disabled' : ''}>
+        ${armed ? 'armed — click the object' : 'assign'}<small>a · next click links</small></button>
+      <select onchange="assignFromPicker(this.value)"><option value="">or pick…</option>${opts}</select></div>`;
+  } else {
+    poName.textContent = '—'; poFacts.textContent = '';
+    poBody.innerHTML = `<div class="prompt" style="opacity:.6">Nothing selected — click an object or a port.</div>`;
+  }
+
+  /* -- output section -- */
+  const ppName = document.getElementById('pp-name'), ppFacts = document.getElementById('pp-facts'),
+        ppBody = document.getElementById('pp-body');
+  const showSegment = sel?.kind === 'segment';
+  const derived = sel?.kind === 'object' && sc.objects[sel.i].mapped;
+  if (showSegment || derived) {
+    ppName.innerHTML = `${sc.portName.split(' · ')[0]} <select style="margin-left:4px">
+      <option>${sc.portName.split(' · ')[1]}</option><option>port 1</option></select>`;
+    const span = showSegment ? [sel.start, sel.start + sel.len]
+      : [sc.objects[sel.i].mapped.start, sc.objects[sel.i].mapped.start + sc.objects[sel.i].count];
+    ppFacts.innerHTML = `window <b>${span[0] + 1}-${span[1]}</b> of ${sc.portCount}` +
+      (derived ? ' · <span style="color:var(--dim)">derived from object</span>' : '');
+    ppBody.innerHTML = `
+      <div class="lampstrip" id="pp-strip"></div>
+      <div class="under"><span>wire 1</span><span class="flag">${sc.decode}</span>
+        <span style="margin-left:auto">wire ${sc.portCount}</span></div>
+      <div class="transport">
+        <button class="kbtn" onclick="segShift(-10)">‹‹<small>[ ×10</small></button>
+        <button class="kbtn" onclick="segShift(-1)">‹<small>[ lamp</small></button>
+        <button class="kbtn" onclick="segShift(1)">›<small>] lamp</small></button>
+        <button class="kbtn" onclick="segShift(10)">››<small>] ×10</small></button>
+        ${showSegment && sel.owner == null ? `<span class="sep"></span>
+          <button class="kbtn" onclick="segGrow(-1)">narrow<small>-</small></button>
+          <button class="kbtn" onclick="segGrow(1)">widen<small>=</small></button>` : ''}
+        <span class="sep"></span>
+        <button class="kbtn primary" onclick="advance()">next free<small>m</small></button>
+      </div>`;
+    const marks = []; for (let m = 50; m < sc.portCount; m += 50) marks.push(m);
+    renderStrip(document.getElementById('pp-strip'), {
+      count: sc.portCount, marks, span,
+      valueAt: i => {
+        const inSpan = i >= span[0] && i < span[1];
+        if (showSegment && sel.owner == null)
+          return inSpan ? [255,255,255].map(v => Math.round(v * breath(t))) : dim(portRgb(i, t), .22);
+        if (inSpan) { /* chase in wire order through the owner's mapping */
+          const o = sc.objects[showSegment ? sel.owner : sel.i];
+          let j = i - span[0];
+          if (o.mapped?.reversed || (sel.kind === 'object' && sel.rev)) j = (span[1]-span[0]-1) - j;
+          return chaseRgb(j, span[1] - span[0], t);
+        }
+        return dim(portRgb(i, t), .25);
+      },
+    });
+  } else if (sel?.kind === 'object') {
+    ppName.textContent = '—'; ppFacts.textContent = '';
+    ppBody.innerHTML = `<div class="prompt">This object isn't mapped to any port segment.
+      <button class="kbtn primary" onclick="armAssign()" ${armed ? 'disabled' : ''}>
+        ${armed ? 'armed — click a port' : 'assign'}<small>a · next click links</small></button>
+      <select onchange="mapFromPicker(this.value)"><option value="">or pick…</option>
+        <option value="0">${sc.portName} · next free</option>
+        <option value="1">IO13 · port 1 · next free</option></select></div>`;
+  } else {
+    ppName.textContent = '—'; ppFacts.textContent = '';
+    ppBody.innerHTML = `<div class="prompt" style="opacity:.6">No port segment selected.</div>`;
+  }
+}
+function portRgb(i, t) {
+  /* the port's real values: each mapped object's window shows its data; gaps dark */
+  const sc = scen();
+  for (const o of sc.objects) if (o.mapped) {
+    if (i >= o.mapped.start && i < o.mapped.start + o.count) {
+      let j = i - o.mapped.start;
+      if (o.mapped.reversed) j = o.count - 1 - j;
+      return liveRgb(j, o.count, t);
+    }
+  }
+  return [22, 27, 33];
+}
+
+/* ================= actions (the model) ================= */
+function badge() {
+  const sc = scen();
+  const b = document.getElementById('statebadge');
+  if (!sel) b.textContent = 'nothing selected';
+  else if (sel.kind === 'object')
+    b.textContent = `object: ${sc.objects[sel.i].name} (${sc.objects[sel.i].mapped ? 'mapped' : 'unmapped'})`;
+  else b.textContent = `segment: ${sel.start + 1}-${sel.start + sel.len}` +
+    (sel.owner != null ? ` (owner ${sc.objects[sel.owner].name})` : ' (free)');
+  if (armed) b.textContent += ' · ASSIGN ARMED';
+}
+function caption(html) { document.getElementById('p-caption').innerHTML = html; }
+function act(what) {
+  const sc = scen();
+  if (what === 'esc') {
+    if (armed) { armed = false; caption('<b>Disarmed</b> — esc’s first rung. Selection kept.'); badge(); renderAll(); return; }
+    sel = null; caption('Deselected — the panel returns to its empty states.');
+  }
+  else if (what === 'freeport') {
+    if (armed && sel?.kind === 'object' && !sc.objects[sel.i].mapped) {
+      const i = sel.i;
+      sc.objects[i].mapped = { start: nextFree(sc.objects[i].count) };
+      armed = false;
+      caption(`<b>Armed port click completes the pairing</b> — ${sc.objects[i].name} lands at the
+        port's next free lamp. Plain port clicks would only have selected.`);
+      badge(); renderAll(); return;
+    }
+    const fu = firstUnmapped();
+    const len = fu >= 0 ? sc.objects[fu].count : 30;
+    sel = { kind: 'segment', start: nextFree(len), len, owner: null };
+    armed = false;
+    caption(`<b>Free port space clicked — selection only, nothing writes.</b> The segment
+      auto-sizes to the next unmapped object and BREATHES; the object section offers the
+      <b>assign</b> arm (a).`);
+  }
+  else if (what === 'unmapped-object') {
+    const fu = firstUnmapped();
+    if (fu < 0) { caption('Everything is mapped — unmap something first (select it, then unmap).'); return; }
+    if (armed && sel?.kind === 'segment' && sel.owner == null) {
+      sc.objects[fu].mapped = { start: sel.start };
+      sel = { kind: 'object', i: fu };
+      armed = false;
+      caption(`<b>Armed click completes the pairing.</b> ${sc.objects[fu].name} mapped to the
+        segment (a real write — ⌘Z undoes) and became the selection; the output section
+        didn't change. Both sides now run the CHASE.`);
+    } else {
+      sel = { kind: 'object', i: fu };
+      armed = false;
+      caption(`<b>Unmapped object selected — selection only.</b> Looking is always free: a
+        plain click never writes, whatever was selected before. The output section offers
+        the <b>assign</b> arm.`);
+    }
+  }
+  else if (what === 'mapped-object') {
+    const mi = sc.objects.findIndex(o => o.mapped);
+    sel = { kind: 'object', i: mi };
+    caption(`<b>Mapped object selected</b> — plain re-selection, NO steal: if a free segment
+      was selected, it's simply gone. The output section shows the DERIVED window,
+      fully adjustable.`);
+  }
+  else if (what === 'cell') {
+    const mi = sc.objects.findIndex(o => o.mapped);
+    const o = sc.objects[mi];
+    sel = { kind: 'segment', start: o.mapped.start, len: o.count, owner: mi };
+    caption(`<b>Mapped segment (cell) selected.</b> It names an object's lamps, so it verifies
+      like one — the CHASE runs; the object section shows the owner. (Open question honored:
+      selecting a mapped segment ≈ selecting its cell.)`);
+  }
+  badge(); renderAll();
+}
+function assignFromPicker(v) { if (v === '') return;
+  const sc = scen(), i = +v;
+  if (sel?.kind === 'segment') { sc.objects[i].mapped = { start: sel.start }; sel = { kind: 'object', i };
+    caption('<b>Picker assignment</b> — same transition as the click, for tight/mobile layouts.'); }
+  badge(); renderAll(); }
+function mapFromPicker(v) { if (v === '') return;
+  const sc = scen();
+  if (sel?.kind === 'object') { sc.objects[sel.i].mapped = { start: nextFree(sc.objects[sel.i].count) };
+    caption('<b>Picker mapping</b> — the object lands at the port’s next free lamp.'); }
+  badge(); renderAll(); }
+function objFlip() { const sc = scen();
+  if (sel?.kind === 'object') { const o = sc.objects[sel.i];
+    if (o.mapped) o.mapped.reversed = !o.mapped.reversed; else sel.rev = !sel.rev; }
+  renderAll(); }
+function objNudge(d) { const sc = scen();
+  if (sel?.kind === 'object' && sc.objects[sel.i].mapped) {
+    const m = sc.objects[sel.i].mapped; m.offset = (m.offset || 0) + d; }
+  renderAll(); }
+function objUnmap() { const sc = scen();
+  if (sel?.kind === 'object') { sc.objects[sel.i].mapped = null;
+    caption('<b>Unmapped.</b> The object stays selected; the output section returns to the invitation.'); }
+  badge(); renderAll(); }
+function segShift(d) { const sc = scen();
+  if (sel?.kind === 'segment' && sel.owner == null) sel.start = Math.max(0, Math.min(sc.portCount - sel.len, sel.start + d));
+  else if (sel?.kind === 'segment') { const o = sc.objects[sel.owner]; o.mapped.start = Math.max(0, o.mapped.start + d); sel.start = o.mapped.start; }
+  else if (sel?.kind === 'object' && sc.objects[sel.i].mapped) sc.objects[sel.i].mapped.start = Math.max(0, sc.objects[sel.i].mapped.start + d);
+  badge(); renderAll(); }
+function segGrow(d) { if (sel?.kind === 'segment' && sel.owner == null)
+  { sel.len = Math.max(1, sel.len + d); badge(); renderAll(); } }
+function armAssign() { if (sel && !armed) { armed = true;
+  caption('<b>Assign armed (a)</b> — the NEXT counterpart click links. Esc disarms; plain grammar is untouched.');
+  badge(); renderAll(); } }
+function advance() { const sc = scen(), fu = firstUnmapped();
+  const len = fu >= 0 ? sc.objects[fu].count : 30;
+  sel = { kind: 'segment', start: nextFree(len), len, owner: null };
+  armed = true;  /* the walk-up loop keeps the arm the user started */
+  caption(`<b>m</b> — advanced to the next free segment (${len} lamps) and KEPT the arm:
+    the loop the user started stays one-key-one-click per panel.`);
+  badge(); renderAll(); }
+
+/* flows */
+function flowSeg(i) {
+  const cap = document.getElementById('flow-caption');
+  if (i === 4) { armAssign();
+    cap.innerHTML = '<b>Walk-up 2.</b> The explicit arm — one key. From here the loop is one click per panel; m keeps it armed.'; return; }
+  if (i === 0) { act('freeport');
+    cap.innerHTML = '<b>Walk-up 1.</b> The chunk breathes on the piece — the canvas makes no claim about objects; the human supplies that fact.'; }
+  if (i === 1) { act('unmapped-object');
+    cap.innerHTML = '<b>Walk-up 2.</b> You saw which panel pulsed; you clicked it; it is mapped. One click, one write, one selection.'; }
+  if (i === 2) { objNudge(2);
+    cap.innerHTML = '<b>Walk-up 3.</b> Adjust: offset walks the blue/red heads along the strut; flip if the sweep runs the wrong way.'; }
+  if (i === 3) { advance();
+    cap.innerHTML = '<b>Walk-up 4.</b> Next free segment armed, sized by the next unmapped object — around the dome in a loop.'; }
+}
+function flowObj(i) {
+  const cap = document.getElementById('flow-caption');
+  if (i === 0) { sel = null; act('unmapped-object');
+    cap.innerHTML = '<b>Reverse 1.</b> Object first: the chase runs, the output section invites.'; }
+  if (i === 1) { mapFromPicker('0');
+    cap.innerHTML = '<b>Reverse 2.</b> The port click (here the picker) lands it at the next free lamp — same transition, other direction.'; }
+}
+
+/* ================= §4 strip demo ================= */
+function renderS5(t) {
+  const n5 = +document.getElementById('s5-count').value;
+  document.getElementById('s5-n').textContent = n5;
+  const el5 = document.getElementById('s5-strip');
+  document.getElementById('s5-mode').textContent = (el5.clientWidth / n5 >= 7) ? 'bulbs' : 'gradient';
+  renderStrip(el5, { count: n5, valueAt: i => chaseRgb(i, n5, t) });
+}
+
+/* ================= top-level ================= */
+function renderAll() {
+  drawPiece(document.getElementById('p-svg'), S.t);
+  renderPanel(S.t);
+  renderS5(S.t);
+}
+function setScenario(s) { S.scenario = s; sel = null; badge();
+  document.getElementById('x-zook').classList.toggle('on', s === 'zook');
+  document.getElementById('x-fyeah').classList.toggle('on', s === 'fyeah'); renderAll(); }
+function toggleLive() { S.live = !S.live;
+  document.getElementById('x-live').classList.toggle('on', S.live); renderAll(); }
+function toggleAnim() { S.anim = !S.anim;
+  document.getElementById('x-anim').classList.toggle('on', S.anim); }
+document.getElementById('s5-count').addEventListener('input', renderAll);
+
+let last = 0;
+function tick(ms) {
+  if (S.anim && ms - last > 90) { S.t = ms / 1000; last = ms; renderAll(); }
+  requestAnimationFrame(tick);
+}
+/* hash states for headless capture: #armed #paired #derived #objfirst */
+badge();
+caption('Click a simulate button — the machine is live.');
+switch (location.hash) {
+  case '#armed': act('freeport'); armAssign(); break;
+  case '#paired': act('freeport'); armAssign(); act('unmapped-object'); break;
+  case '#derived': act('mapped-object'); break;
+  case '#objfirst': act('unmapped-object'); break;
+}
+renderAll();
+requestAnimationFrame(tick);
+</script>

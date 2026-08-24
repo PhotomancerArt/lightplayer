@@ -38,15 +38,17 @@ use crate::editor_core::view_geometry::{ArrowInput, wiring_arrows};
 use crate::view::view_options::EditorViewOptions;
 
 pub use canvas_anchor::{CanvasAnchor, capture_pointer};
-pub use lamp_metrics::{fit_region, lamp_display_radius};
+pub use lamp_metrics::{authored_spans, fit_region, lamp_display_radius};
 pub use palette::object_color;
 
-pub use layers::fixtures::{FixtureBody, FixtureEvent, FixtureSprite};
+pub use layers::fixtures::{FixtureBody, FixtureEvent, FixturePick, FixtureSprite, SpriteObject};
+pub use layers::hull::{convex_hull, pad_hull};
 
 use layers::doc::{DocLayersInput, doc_layers};
 use layers::draft::{DraftLayerInput, draft_layer};
 use layers::fixtures::{
     FixtureLayerInput, dragged_placement, exceeds_drag_threshold, fixture_layer, hit_fixture,
+    hit_object, nearest_lamp,
 };
 use layers::marquee::marquee_layer;
 use layers::selection::{SelectionLayerInput, selection_layer};
@@ -62,6 +64,15 @@ pub enum CanvasDrag {
     /// move past the CSS-pixel threshold; under it, pointer-up selects.
     FixturePress {
         key: String,
+        /// The TRUE lamp index the press landed nearest, when the sprite
+        /// draws lamps — what makes a tap name an OBJECT (Q10) rather than
+        /// the whole fixture. Resolved at PRESS time, from the point the
+        /// pointer actually went down on.
+        lamp: Option<u32>,
+        /// The object HULL the press landed inside ([`hit_object`]), when
+        /// one claimed the point — the round-3 "objects are THINGS" hit
+        /// target. Resolved at PRESS time like the lamp.
+        object: Option<usize>,
         start_client: [f64; 2],
         original: Placement,
         moved: bool,
@@ -123,6 +134,13 @@ pub fn EditorCanvas(
     /// inline `style` — per-frame colors are direct DOM writes, never a
     /// 1500-node diff.
     live_feed: Signal<Vec<[u8; 3]>>,
+    /// Per-SPRITE live lamp colors, keyed by sprite key and indexed by
+    /// TRUE lamp index (the fixture layer display-subsamples; its
+    /// `data-sprite-lamp` attributes carry the stride-corrected index).
+    /// Same direct-DOM contract as `live_feed`; `None` = no sprite feed
+    /// (the Mapping view), an absent/empty entry = that sprite's palette.
+    #[props(default)]
+    sprite_live_feed: Option<Signal<std::collections::BTreeMap<String, Vec<[u8; 3]>>>>,
     /// Fired after any committed (undoable) change.
     on_committed: EventHandler<()>,
     /// Where the edited document sits in project space. Identity when the
@@ -203,6 +221,17 @@ pub fn EditorCanvas(
             // overrides to the rebuilt nodes.
             let _revision_witness = session.read().doc().objects.len();
             apply_live_fills(&canvas_dom_id, live_on, &colors);
+        });
+    }
+    // The sprite feed's writes, same direct-DOM contract. A sprite node
+    // rebuilt between feed ticks briefly shows its palette until the next
+    // tick re-applies — self-healing at snapshot cadence.
+    {
+        let canvas_dom_id = canvas_dom_id.clone();
+        use_effect(move || {
+            if let Some(feed) = sprite_live_feed {
+                live_fills::apply_sprite_live_fills(&canvas_dom_id, &feed());
+            }
         });
     }
 
@@ -350,16 +379,16 @@ pub fn EditorCanvas(
             });
         fit_region(frame, 1.0)
     });
-    let spans: Vec<(u32, u32)> = resolved
-        .spans
-        .iter()
-        .map(|span| (span.start, span.count))
-        .collect();
+    // Wiring annotations follow the Mapping view's AUTHORED grain: arrows
+    // and numbers cover each object's authored strand only, so a repeat's
+    // expanded instances keep their lamp dots without per-instance chrome
+    // (and a dome-scale document doesn't pay for N sets of arrows).
+    let annotation_spans = authored_spans(&resolved);
     let positions = resolved.positions();
     let arrows = opts.arrows.then(|| {
         wiring_arrows(&ArrowInput {
             positions: &positions,
-            spans: &spans,
+            spans: &annotation_spans,
             view_width: 0.0,
             view_height: 0.0,
             end_gap: radius * 1.05,
@@ -481,16 +510,26 @@ pub fn EditorCanvas(
                     let client = [point.x, point.y];
                     let view = event_view_point(&anchor, &evt);
                     let project = camera.peek().view_to_doc(view);
-                    let hit =
-                        hit_fixture(&fixtures_down, [f64::from(project[0]), f64::from(project[1])])
-                            .map(|sprite| (sprite.key.clone(), sprite.placement));
+                    let project_point = [f64::from(project[0]), f64::from(project[1])];
+                    let hit = hit_fixture(&fixtures_down, project_point).map(|sprite| {
+                        (
+                            sprite.key.clone(),
+                            sprite.placement,
+                            nearest_lamp(sprite, project_point),
+                            hit_object(sprite, project_point),
+                        )
+                    });
                     match hit {
-                        Some((key, original)) => drag.set(Some(CanvasDrag::FixturePress {
-                            key,
-                            start_client: client,
-                            original,
-                            moved: false,
-                        })),
+                        Some((key, original, lamp, object)) => {
+                            drag.set(Some(CanvasDrag::FixturePress {
+                                key,
+                                lamp,
+                                object,
+                                start_client: client,
+                                original,
+                                moved: false,
+                            }));
+                        }
                         None => drag.set(Some(CanvasDrag::FixtureTap {
                             start_client: client,
                             moved: false,
@@ -533,6 +572,8 @@ pub fn EditorCanvas(
                 match current_drag {
                     CanvasDrag::FixturePress {
                         key,
+                        lamp,
+                        object,
                         start_client,
                         original,
                         moved,
@@ -554,6 +595,8 @@ pub fn EditorCanvas(
                         }
                         drag.set(Some(CanvasDrag::FixturePress {
                             key,
+                            lamp,
+                            object,
                             start_client,
                             original,
                             moved: now_moved,
@@ -617,6 +660,8 @@ pub fn EditorCanvas(
                     CanvasDrag::Pan { .. } => {}
                     CanvasDrag::FixturePress {
                         key,
+                        lamp,
+                        object,
                         start_client,
                         original,
                         moved,
@@ -638,7 +683,11 @@ pub fn EditorCanvas(
                                     commit: true,
                                 });
                             } else {
-                                handler.call(FixtureEvent::Select(Some(key)));
+                                handler.call(FixtureEvent::Select(Some(FixturePick {
+                                    key,
+                                    lamp,
+                                    object,
+                                })));
                             }
                         }
                     }
@@ -752,7 +801,18 @@ pub fn EditorCanvas(
                     width: "28",
                     height: "28",
                     pattern_units: "userSpaceOnUse",
-                    circle { cx: "1", cy: "1", r: "1", fill: "rgba(255, 255, 255, 0.06)" }
+                    // Tile spacing is project space (scales with the camera
+                    // by design), but userSpaceOnUse pattern *content*
+                    // inherits that same scale — left alone, the dots would
+                    // grow with zoom right along with the spacing. Counter
+                    // the camera scale so the rendered dot stays
+                    // screen-constant, same idiom as the fixture layer.
+                    circle {
+                        cx: "1",
+                        cy: "1",
+                        r: "{1.0 / cam.scale}",
+                        fill: "rgba(255, 255, 255, 0.06)",
+                    }
                 }
                 marker {
                     id: "lpme-arrow-head",
@@ -812,6 +872,7 @@ pub fn EditorCanvas(
                         gap_segments: &gap_segments,
                         path_objects: &path_objects,
                         resolved: &resolved,
+                        annotation_spans: &annotation_spans,
                         selection: &selection,
                         tessellating: &tessellating,
                         scoped_object,

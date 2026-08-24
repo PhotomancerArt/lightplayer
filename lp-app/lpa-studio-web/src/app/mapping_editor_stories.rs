@@ -135,6 +135,7 @@ fn fixture_story_sprites() -> Vec<FixtureSprite> {
         .collect();
     vec![
         FixtureSprite {
+            objects: Vec::new(),
             key: "panel".to_string(),
             label: "dome panel".to_string(),
             color: "#5aa9e6".to_string(),
@@ -153,6 +154,7 @@ fn fixture_story_sprites() -> Vec<FixtureSprite> {
             selected_range: Some((32, 16)),
         },
         FixtureSprite {
+            objects: Vec::new(),
             key: "halo".to_string(),
             label: "halo".to_string(),
             color: "#3fd68e".to_string(),
@@ -171,6 +173,7 @@ fn fixture_story_sprites() -> Vec<FixtureSprite> {
             selected_range: None,
         },
         FixtureSprite {
+            objects: Vec::new(),
             key: "block".to_string(),
             label: "matrix (pending)".to_string(),
             color: "#e4c065".to_string(),
@@ -186,6 +189,7 @@ fn fixture_story_sprites() -> Vec<FixtureSprite> {
             selected_range: None,
         },
         FixtureSprite {
+            objects: Vec::new(),
             key: "strip".to_string(),
             label: "shelf strip".to_string(),
             color: "#c792ea".to_string(),

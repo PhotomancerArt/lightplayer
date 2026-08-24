@@ -42,6 +42,13 @@ pub struct UiPatchSurface {
     /// Every producing fixture on any of those wires, with its runs and its
     /// instance table.
     pub fixtures: Vec<UiPatchSurfaceFixture>,
+    /// THE chase for the selected UNMAPPED object, computed once here (Q9)
+    /// — the panel strip and the canvas sprites both paint these colors, so
+    /// the two views can never disagree about what the object is doing.
+    /// `None` whenever the selection is mapped (its chase is in the
+    /// published bytes), wire-side, or absent. See
+    /// [`crate::UiPatchChasePreview`].
+    pub chase_preview: Option<crate::UiPatchChasePreview>,
     /// The project-level `editor.json` settled locally (cached content, or
     /// the file is known absent). While false, pages dispatch
     /// [`crate::EditorMetaFetchOp`] against [`Self::editor_meta_artifact`]
@@ -55,10 +62,15 @@ pub struct UiPatchSurface {
 }
 
 impl UiPatchSurface {
-    /// Is there anything to show? Mirrors [`UiPatchBay::is_empty`]'s
-    /// honesty: a surface with no output carrying a cell says nothing.
+    /// Is nothing PATCHED here — no output carrying a cell?
+    ///
+    /// Never a reason to withhold the surface: an all-free surface is the
+    /// walk-up flow's own starting point (every fixture manual and
+    /// unmapped), and hiding it leaves no port space to click. The pages'
+    /// empty state keys on the surface being absent — which means the
+    /// project has no output at all — not on this.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub fn nothing_patched(&self) -> bool {
         self.outputs.iter().all(|output| output.bay.is_empty())
     }
 }
@@ -139,6 +151,16 @@ pub struct UiPatchSurfaceFixture {
     /// not landed yet; the page dispatches it so verbs have their document
     /// (a verb before it lands blocks honestly).
     pub patch_loaded: bool,
+    /// The fixture's patch declares MANUAL flow (`flow: "manual"`, P5b):
+    /// only authored entries place, and an object with no entry is
+    /// genuinely unmapped — dark on the piece, no wire chip here.
+    ///
+    /// False = auto-mapped, the historical behaviour: the lamps no entry
+    /// names flow on after the last anchor, so nothing is ever unmapped for
+    /// long. Read from the patch BODY (the same bytes the verbs transform),
+    /// so it is `false` while the body is still loading and while it is
+    /// unreadable — silence is not the manual claim.
+    pub manual_flow: bool,
     /// The addressable instance table (`/sector/0` …), parsed from the
     /// fixture's map2d document. EMPTY for shape-less strips and for docs
     /// without object ids — the fixture then patches at range grain only
@@ -159,6 +181,9 @@ pub struct UiPatchSurfaceFixture {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UiPatchInstance {
     /// The D46 path (`/sector/2`) — the patch entry's `from`, verbatim.
+    /// EMPTY when the owning object has no sticky id yet: the strand still
+    /// displays and selects (at range grain, `UiPatchTarget::Range`), but
+    /// no patch entry can address it until ensure-ids stamps the document.
     pub path: String,
     /// Display label (`sector 2`).
     pub label: String,
@@ -231,6 +256,20 @@ pub enum UiPatchTarget {
     Output { node: NodeId },
     /// One port of an output.
     Port { node: NodeId, port: u32 },
+    /// A SEGMENT: a contiguous lamp window on one port, in WIRE numbering
+    /// (`start` is the output's own lamp index, inside `port`'s span).
+    ///
+    /// The walk-up surface's wire-side unit for FREE space — the window a
+    /// click on unmapped port lamps draws, sized to the object it is about
+    /// to take. A MAPPED run is NOT a segment: it keeps selecting as
+    /// [`Self::Cell`], which already names it and speaks the fixture's
+    /// language. WLED's word, ratified; "universe" stays banned.
+    Segment {
+        node: NodeId,
+        port: u32,
+        start: u32,
+        lamps: u32,
+    },
     /// One bay cell, by its twin-hover run id.
     Cell { id: String },
     /// One fixture instance, by its path.
@@ -246,13 +285,90 @@ pub enum UiPatchTarget {
     },
 }
 
+impl UiPatchTarget {
+    /// Which space this selection kind counts its lamps in — the numbering
+    /// half of the surface's vocabulary (the panel's blue edge reads this
+    /// too). `None` = a level that names no lamps at all.
+    #[must_use]
+    pub fn pulse_space(&self) -> Option<crate::PatchPulseSpace> {
+        match self {
+            // Fixture-side: the object's own numbering, whatever grain it
+            // was named at — a mapped run included, since a cell IS a piece
+            // of its fixture.
+            Self::Fixture { .. }
+            | Self::Instance { .. }
+            | Self::Range { .. }
+            | Self::Cell { .. } => Some(crate::PatchPulseSpace::Fixture),
+            // Wire-side: lamps on an output, named by the wire.
+            Self::Output { .. } | Self::Port { .. } | Self::Segment { .. } => {
+                Some(crate::PatchPulseSpace::Wire)
+            }
+            // A module is a level above both spaces: it names no lamps.
+            Self::Module { .. } => None,
+        }
+    }
+
+    /// **THE selection-kind → language matrix (D9)**, and the only place it
+    /// is decided. `None` = a selection that pulses nothing.
+    ///
+    /// | selection kind | space | language |
+    /// |---|---|---|
+    /// | [`Self::Instance`] / [`Self::Range`] / [`Self::Cell`] (incl. a mapped run) | fixture | CHASE |
+    /// | [`Self::Fixture`] | fixture | BREATH |
+    /// | [`Self::Output`] / [`Self::Port`] / free [`Self::Segment`] | wire | BREATH |
+    /// | [`Self::Module`], nothing | — | no pulse |
+    ///
+    /// The reason is the question each selection asks. CHASE is the
+    /// direction language: "does this OBJECT run the way I think it does?"
+    /// — one strand, one head, one tail. Everything else asks "which lamps
+    /// ARE this?", which white breathing answers without claiming a
+    /// direction it does not have.
+    ///
+    /// A whole fixture used to chase, and the G1 round-3 walk rejected it: a
+    /// multi-run fixture painted two heads and two tails and read as two
+    /// objects selected at once. A fixture is not an object (Q8) — it is a
+    /// bag of them — so it BREATHES: "these lamps are this fixture", no
+    /// direction claim. See `docs/adr/2026-08-10-patch-selection-pulse.md`
+    /// (Amendments 2026-08-20 and 2026-08-22).
+    #[must_use]
+    pub fn pulse_language(&self) -> Option<crate::PatchPulseLanguage> {
+        match self {
+            Self::Instance { .. } | Self::Range { .. } | Self::Cell { .. } => {
+                Some(crate::PatchPulseLanguage::Chase)
+            }
+            Self::Fixture { .. }
+            | Self::Output { .. }
+            | Self::Port { .. }
+            | Self::Segment { .. } => Some(crate::PatchPulseLanguage::Breath),
+            Self::Module { .. } => None,
+        }
+    }
+
+    /// The pulse subject for this target once the CLIENT has resolved its
+    /// lamp numbers: space and language both come from the matrix above, so
+    /// a surface that knows `(node, range)` never picks a tongue by hand.
+    #[must_use]
+    pub fn pulse_subject(
+        &self,
+        node: NodeId,
+        range: Option<(u32, u32)>,
+    ) -> Option<crate::PatchPulseSubject> {
+        Some(crate::PatchPulseSubject {
+            lamps: self.pulse_space()?.lamps(node, range),
+            language: self.pulse_language()?,
+        })
+    }
+}
+
 /// Parse a fixture's map2d body into its instance table.
 ///
-/// Only strands whose object carries a stable id are addressable —
-/// nameless strands are unpatchable by path and simply absent (range-grain
-/// entries still reach them). Repeat instances get one row each
-/// (`/sector/2`); a plain identified object gets its whole-object row
-/// (`/door`) — for a single-strand object the two coincide.
+/// The resolver expands EVERY object — repeats and all — so the effective
+/// tree always displays, whatever the document's format age (grain
+/// robustness: old data must never collapse the Patch view). The sticky id
+/// gates only ADDRESSABILITY: an id-bearing strand gets its D46 path
+/// (`/sector/2`, what patch entries key on); an id-less strand gets an
+/// empty path — it displays, selects, and pulses at range grain, and
+/// becomes path-addressable the moment ensure-ids stamps the document.
 pub(crate) fn instances_from_map2d(text: &str) -> Vec<UiPatchInstance> {
     let Ok(doc) = lpc_mapping::Map2dDoc::from_json(text) else {
         return Vec::new();
@@ -264,18 +380,21 @@ pub(crate) fn instances_from_map2d(text: &str) -> Vec<UiPatchInstance> {
     spans
         .iter()
         .filter_map(|span| {
-            let id = span.id.as_ref()?;
-            let path = lpc_mapping::MapObjectPath {
-                id: id.clone(),
-                instances: span.instances.clone(),
-            };
+            let object = doc.objects.get(span.object)?;
+            let path = span
+                .id
+                .as_ref()
+                .map(|id| {
+                    lpc_mapping::MapObjectPath {
+                        id: id.clone(),
+                        instances: span.instances.clone(),
+                    }
+                    .to_text()
+                })
+                .unwrap_or_default();
             // The stride of the ADDRESSED node: descend the object's shape
             // through the instance steps (a door instance's stride is the
             // polygon's side, not the repeat's whole inner count).
-            let object = doc
-                .objects
-                .iter()
-                .find(|object| object.id.as_ref() == Some(id))?;
             let mut shape = &object.shape;
             for _ in &span.instances {
                 if let lpc_mapping::Map2dShape::Repeat(repeat) = shape {
@@ -286,12 +405,21 @@ pub(crate) fn instances_from_map2d(text: &str) -> Vec<UiPatchInstance> {
                 .stride
                 .filter(|stride| *stride > 0)
                 .unwrap_or_else(|| lpc_mapping::shape_stride(shape));
+            // Display name: the id when there is one, else the authored
+            // name, else an honest positional fallback.
+            let base = span
+                .id
+                .as_ref()
+                .map(|id| id.as_str().to_string())
+                .filter(|base| !base.is_empty())
+                .or_else(|| Some(object.name.clone()).filter(|name| !name.is_empty()))
+                .unwrap_or_else(|| format!("object {}", span.object + 1));
             let label = if span.instances.is_empty() {
-                id.as_str().to_string()
+                base
             } else {
                 format!(
                     "{} {}",
-                    id.as_str(),
+                    base,
                     span.instances
                         .iter()
                         .map(|instance| instance.to_string())
@@ -300,7 +428,7 @@ pub(crate) fn instances_from_map2d(text: &str) -> Vec<UiPatchInstance> {
                 )
             };
             Some(UiPatchInstance {
-                path: path.to_text(),
+                path,
                 label,
                 start: span.start,
                 lamps: span.count,
@@ -338,18 +466,29 @@ mod tests {
         assert_eq!(instances[1].stride, 3, "one polygon side, not 9");
     }
 
-    /// A document without ids (the peach) yields NO instances — the
-    /// fixture patches at range grain, and the surface must not invent an
-    /// address grain the format cannot store.
+    /// A document without ids still DISPLAYS its effective expansion —
+    /// old-format data must never collapse the Patch tree (G1 R2, the
+    /// zook lesson) — but the rows carry EMPTY paths: no address grain is
+    /// invented that the patch format cannot store, so they select and
+    /// pulse as ranges until ensure-ids stamps the document.
     #[test]
-    fn documents_without_ids_have_no_instance_grain() {
+    fn documents_without_ids_display_but_are_not_addressable() {
         let doc = r#"{
   "format": 1,
   "objects": [
-    { "name": "strand", "shape": { "grid": { "origin": [0.5,0.5], "cols": 8, "rows": 1, "pitch": 1 } } }
+    { "name": "sector", "shape": { "repeat": {
+        "shape": { "grid": { "origin": [0.5,0.5], "cols": 8, "rows": 1, "pitch": 1 } },
+        "center": [60.0,60.0], "count": 5 } } }
   ]
 }"#;
-        assert!(instances_from_map2d(doc).is_empty());
+        let instances = instances_from_map2d(doc);
+        assert_eq!(instances.len(), 5, "the repeat expands for display");
+        assert_eq!(instances[2].label, "sector 2");
+        assert_eq!(
+            instances[2].path, "",
+            "no id, no address — range grain until ensure-ids"
+        );
+        assert_eq!((instances[2].start, instances[2].lamps), (16, 8));
     }
 
     /// An explicit object-level stride override beats the derivation.

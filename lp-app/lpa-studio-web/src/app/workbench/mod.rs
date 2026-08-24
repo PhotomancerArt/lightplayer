@@ -50,16 +50,20 @@ use lpa_studio_core::{
 
 use crate::app::{ProjectNodeWorkspace, ProjectPane};
 use crate::core::PaneView;
-use panels::{FixturesPanel, OutputsPanel};
+use panels::{FixturesPanel, OutputsPanel, TreeGrain};
 
 /// Which center the workbench renders — the route's view suffix
 /// ([`crate::router::ProjectView`]), narrowed to the views the workbench
-/// hosts (play and patch short-circuit before the workbench mounts).
+/// hosts (only play still short-circuits before the workbench mounts).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WorkbenchView {
     #[default]
     Nodes,
     Mapping,
+    /// The patching activity: resolved instances against outputs
+    /// (grain-follows-activity — the Mapping view shows the authored
+    /// tree, this view the resolved one).
+    Patching,
 }
 
 /// One row of the view table: everything the chrome needs to draw and
@@ -90,11 +94,19 @@ pub const VIEWS: &[ViewSpec] = &[
         label: "Map",
         route_view: crate::router::ProjectView::Mapping,
     },
+    ViewSpec {
+        view: WorkbenchView::Patching,
+        // Short-noun posture like "Map" — RULED at the patching-view G1
+        // ("/patch. keep it short and simple"); `/patching` stays a
+        // parse alias.
+        label: "Patch",
+        route_view: crate::router::ProjectView::Patch,
+    },
 ];
 
 /// The view a route suffix addresses: the [`VIEWS`] row that claims it,
-/// or the default view (play and patch short-circuit before the
-/// workbench mounts, so an unclaimed suffix means the workspace).
+/// or the default view (play short-circuits before the workbench
+/// mounts, so an unclaimed suffix means the workspace).
 pub fn view_for_route(route_view: crate::router::ProjectView) -> WorkbenchView {
     VIEWS
         .iter()
@@ -211,6 +223,11 @@ pub fn roster(view: WorkbenchView, side: DockSide) -> &'static [PanelId] {
         (DockSide::Right, WorkbenchView::Mapping) => {
             &[PanelId::Props, PanelId::Outputs, PanelId::Device]
         }
+        // Patching leads with the wire side: Outputs first (its default),
+        // Props for the selected patch target, Device in reach.
+        (DockSide::Right, WorkbenchView::Patching) => {
+            &[PanelId::Outputs, PanelId::Props, PanelId::Device]
+        }
     }
 }
 
@@ -227,6 +244,12 @@ pub fn defaults(view: WorkbenchView) -> DockState {
         WorkbenchView::Mapping => DockState {
             left: Some(PanelId::Tree),
             right: Some(PanelId::Props),
+        },
+        // Patching opens against the outputs (Q3): the resolved tree on
+        // the left, the wire on the right.
+        WorkbenchView::Patching => DockState {
+            left: Some(PanelId::Tree),
+            right: Some(PanelId::Outputs),
         },
     }
 }
@@ -330,6 +353,15 @@ pub fn WorkbenchFrame(
     let dive_focused = use_signal(|| None::<NodeId>);
     let dive_session = use_signal(|| MapEditorSession::new(lpc_mapping::Map2dDoc::new()));
     let dive_commits = use_signal(|| 0u64);
+    // The patching activity's cross-dock state: verbs arm in the center
+    // (`a` / `s`) and complete on a counterpart click in the Outputs or
+    // Tree dock — frame scope, like the dive signals, so every side reads
+    // ONE arm (and one segment-size override).
+    let patching_ui = use_context_provider(|| crate::app::editor_shell::patching::PatchingUi {
+        armed: Signal::new(None),
+        segment_size: Signal::new(None),
+        summon_outputs: Signal::new(false),
+    });
     // The Fixtures/Outputs panels' slice of the editor view (#409 DTOs)
     // and the surface's one shared selection.
     let surface = project_editor.patch_surface.clone();
@@ -341,6 +373,50 @@ pub fn WorkbenchFrame(
     // to the fold, so widening the window simply reveals the desktop
     // docks again.
     let mut summoned = use_signal(move || initial_summoned);
+    // The panel's summon request (mobile object-first invitation): the
+    // counterpart to click lives in the Outputs panel, so it comes up.
+    // Desktop sets it too — harmlessly, the overlay is display-gated.
+    {
+        let mut request = patching_ui.summon_outputs;
+        use_effect(move || {
+            if *request.read() {
+                request.set(false);
+                summoned.set(Some(PanelId::Outputs));
+            }
+        });
+    }
+    // A summoned panel is a full-screen pick surface: once a pick happens
+    // — the selection moved, or a patch write landed (an armed completion
+    // keeps the selection, so the write is its own signal) — it dismisses
+    // itself (G1 round 3, #6: "I expect it to go away once I do the only
+    // thing I can, which is select something").
+    {
+        let selection = patch_selection.clone();
+        let placed = surface
+            .as_ref()
+            .map(|surface| {
+                surface
+                    .outputs
+                    .iter()
+                    .flat_map(|output| output.bay.ports.iter())
+                    .flat_map(|port| port.cells.iter())
+                    .map(|cell| u64::from(cell.lamps))
+                    .sum::<u64>()
+            })
+            .unwrap_or(0);
+        let fingerprint = (selection, placed);
+        let mut last = use_signal(|| None::<(Option<UiPatchTarget>, u64)>);
+        use_effect(use_reactive!(|fingerprint| {
+            let changed = last
+                .peek()
+                .as_ref()
+                .is_some_and(|previous| *previous != fingerprint);
+            last.set(Some(fingerprint));
+            if changed && summoned.peek().is_some() {
+                summoned.set(None);
+            }
+        }));
+    }
 
     rsx! {
         // No outer box (R5): the workbench is the page's working surface,
@@ -408,6 +484,17 @@ pub fn WorkbenchFrame(
                                 dive_focused,
                                 dive_session,
                                 dive_commits,
+                                on_action,
+                            }
+                        },
+                        WorkbenchView::Patching => rsx! {
+                            // The patching shell (R5): same canvas,
+                            // patching furniture — verb toolbar + keys,
+                            // selection pulse, no dive.
+                            crate::app::editor_shell::patching::PatchingShellCenter {
+                                surface: surface.clone(),
+                                selection: patch_selection.clone(),
+                                project_editor,
                                 on_action,
                             }
                         },
@@ -799,14 +886,45 @@ fn PanelBody(
         (PanelId::Tree, WorkbenchView::Mapping) => rsx! {
             div { class: "tw:grid tw:content-start tw:gap-2.5",
                 TreePanelActions { panes: panes.clone(), on_action }
-                // Today's fixture tree, re-housed whole: mixed grain
-                // (effective instances + the dive's authored objects) is
-                // DELIBERATE until the R5 patching plan splits the grains
-                // (grain-follows-activity ruling).
+                // The AUTHORED tree, uniformly (grain-follows-activity,
+                // R5): objects and repeat interiors for every fixture —
+                // the dived one through the live session, the rest from
+                // their loaded bodies. Wire chips live in the Patching
+                // view now.
                 FixturesPanel {
                     surface,
                     selection: patch_selection,
+                    grain: TreeGrain::Authored,
+                    bodies: std::rc::Rc::new(
+                        panes
+                            .iter()
+                            .find_map(|pane| match &pane.body {
+                                UiViewContent::ProjectEditor(editor) => {
+                                    Some(crate::app::editor_shell::mapping_assets(editor).0)
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or_default(),
+                    ),
                     dive: (*dive_focused.read()).map(|node| (node, dive_session)),
+                    on_action,
+                }
+            }
+        },
+        (PanelId::Tree, WorkbenchView::Patching) => rsx! {
+            div { class: "tw:grid tw:content-start tw:gap-2.5",
+                TreePanelActions { panes: panes.clone(), on_action }
+                // The RESOLVED tree: instances/ranges with their wire
+                // chips, never dive-driven — Patching reads effective
+                // grain regardless of any dive left armed in Mapping
+                // (grain follows activity).
+                FixturesPanel {
+                    surface,
+                    selection: patch_selection,
+                    grain: TreeGrain::Resolved,
+                    dive: None,
+                    // An armed assign completes on an object row here.
+                    patch_verbs: true,
                     on_action,
                 }
             }
@@ -830,6 +948,16 @@ fn PanelBody(
                 dive_session,
                 dive_commits,
                 workspace_href,
+                on_action,
+            }
+        },
+        (PanelId::Outputs, WorkbenchView::Patching) => rsx! {
+            // The Patching view's port clicks carry the walk-up grammar
+            // (armed swap completes, a fixture-side selection assigns).
+            OutputsPanel {
+                surface,
+                selection: patch_selection,
+                patch_verbs: true,
                 on_action,
             }
         },
@@ -900,6 +1028,10 @@ mod tests {
             roster(WorkbenchView::Mapping, DockSide::Right),
             &[PanelId::Props, PanelId::Outputs, PanelId::Device]
         );
+        assert_eq!(
+            roster(WorkbenchView::Patching, DockSide::Right),
+            &[PanelId::Outputs, PanelId::Props, PanelId::Device]
+        );
     }
 
     #[test]
@@ -928,6 +1060,13 @@ mod tests {
             DockState {
                 left: Some(PanelId::Tree),
                 right: Some(PanelId::Props),
+            }
+        );
+        assert_eq!(
+            defaults(WorkbenchView::Patching),
+            DockState {
+                left: Some(PanelId::Tree),
+                right: Some(PanelId::Outputs),
             }
         );
     }
@@ -971,10 +1110,15 @@ mod tests {
         for spec in VIEWS {
             assert_eq!(view_for_route(spec.route_view), spec.view);
         }
-        // Unclaimed suffixes (play/patch short-circuit before the
-        // workbench) fall back to the default view.
+        // Patch is a claimed workbench view now (R5); only play still
+        // short-circuits before the workbench, so it stays unclaimed and
+        // falls back to the default view.
         assert_eq!(
             view_for_route(crate::router::ProjectView::Patch),
+            WorkbenchView::Patching
+        );
+        assert_eq!(
+            view_for_route(crate::router::ProjectView::Play),
             WorkbenchView::default()
         );
     }

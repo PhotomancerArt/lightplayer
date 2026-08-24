@@ -20,6 +20,7 @@ pub(crate) mod arrange;
 #[cfg(feature = "stories")]
 pub(crate) mod editor_shell_stories;
 pub(crate) mod mapping_session;
+pub(crate) mod patching;
 pub(crate) mod toolbar;
 
 use std::collections::BTreeMap;
@@ -798,7 +799,7 @@ type MappingAssets = (
     BTreeMap<ArtifactLocation, UiAssetEditor>,
 );
 
-fn mapping_assets(project_editor: &ProjectEditorView) -> MappingAssets {
+pub(crate) fn mapping_assets(project_editor: &ProjectEditorView) -> MappingAssets {
     let mut assets = MappingAssets::default();
     fn face(assets: &mut MappingAssets, face: &Option<UiNodeFace>) {
         if let Some(UiNodeFace::Fixture(fixture)) = face

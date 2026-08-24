@@ -20,8 +20,8 @@
 //! constructs, and the writer's minimal stamping does the rest.
 
 use lpc_mapping::{
-    MapObjectPath, ObjectInstanceSpan, PatchDoc, PatchEntry, PatchRange, PatchResolveContext,
-    PatchSource, resolve_patch,
+    MapObjectPath, ObjectInstanceSpan, PatchDoc, PatchEntry, PatchFlow, PatchRange,
+    PatchResolveContext, PatchSource, resolve_patch,
 };
 
 /// What a verb operates on, resolved from the surface selection.
@@ -307,6 +307,44 @@ pub fn clear(
     Ok(next)
 }
 
+/// Set the fixture's flow flag (P5b) — the one verb whose subject is the
+/// FIXTURE itself, whatever the selection named.
+///
+/// Auto→manual keeps every authored entry; objects that never had one go
+/// unmapped (dark, and honestly so). Manual→auto hands those lamps back to
+/// the flow. Both directions are one undo step, and neither touches an
+/// entry, which is what makes the toggle safe to try.
+pub fn set_flow(
+    ctx: &PatchVerbContext<'_>,
+    doc: &PatchDoc,
+    manual: bool,
+) -> Result<PatchDoc, PatchVerbError> {
+    let mut next = doc.clone();
+    next.flow = if manual {
+        PatchFlow::Manual
+    } else {
+        PatchFlow::Auto
+    };
+    next.normalize_format();
+    ctx.validate(&next)?;
+    Ok(next)
+}
+
+/// Take every object of the fixture off the wire: delete ALL entries,
+/// whatever the selection named.
+///
+/// The same document [`clear`] with a [`PatchSubject::Fixture`] writes —
+/// spelled as its own verb because the gesture is its own thing (a common
+/// action, per the ruling, and not a dangerous one with undo). It means
+/// what it says only under [`PatchFlow::Manual`]; the UI offers it there.
+pub fn unmap_all(ctx: &PatchVerbContext<'_>, doc: &PatchDoc) -> Result<PatchDoc, PatchVerbError> {
+    let mut next = doc.clone();
+    next.entries.clear();
+    next.normalize_format();
+    ctx.validate(&next)?;
+    Ok(next)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +354,7 @@ mod tests {
     fn spans() -> Vec<ObjectInstanceSpan> {
         (0..5)
             .map(|instance| ObjectInstanceSpan {
+                object: 0,
                 id: Some(Map2dObjectId::new("sector").unwrap()),
                 instances: vec![instance],
                 start: instance * 30,
@@ -470,5 +509,61 @@ mod tests {
         // representable here).
         let error = assign(&ctx, &doc, &subject("/sector/1"), None, 10).unwrap_err();
         assert!(error.0.contains("wire lamp"), "{error}");
+    }
+
+    /// The flow toggle (P5b): it moves the flag and nothing else, stamps
+    /// format 3 going manual, drops back going auto, and round-trips
+    /// through the writer both ways.
+    #[test]
+    fn set_flow_moves_only_the_flag() {
+        let spans = spans();
+        let ctx = PatchVerbContext {
+            fixture_lamp_count: 150,
+            object_spans: &spans,
+        };
+        let doc = assign(&ctx, &PatchDoc::new(), &subject("/sector/0"), None, 0).unwrap();
+
+        let manual = set_flow(&ctx, &doc, true).unwrap();
+        assert_eq!(manual.flow, PatchFlow::Manual);
+        assert_eq!(manual.entries, doc.entries, "no entry moved");
+        assert_eq!(manual.format, 3);
+        assert_eq!(
+            PatchDoc::from_json(&manual.to_json_pretty()).unwrap(),
+            manual
+        );
+
+        let back = set_flow(&ctx, &manual, false).unwrap();
+        assert_eq!(back.flow, PatchFlow::Auto);
+        assert_eq!(back, doc, "the flag is the only difference either way");
+    }
+
+    /// Unmap-all empties the document whatever the selection named, and
+    /// keeps the flag — the fixture stays manual, it is just empty now
+    /// (which under manual means nothing is lit).
+    #[test]
+    fn unmap_all_clears_every_entry_and_keeps_the_flag() {
+        let spans = spans();
+        let ctx = PatchVerbContext {
+            fixture_lamp_count: 150,
+            object_spans: &spans,
+        };
+        let mut doc = PatchDoc::new();
+        doc = assign(&ctx, &doc, &subject("/sector/0"), None, 0).unwrap();
+        doc = assign(&ctx, &doc, &subject("/sector/1"), Some("B".into()), 39).unwrap();
+        doc = set_flow(&ctx, &doc, true).unwrap();
+
+        let empty = unmap_all(&ctx, &doc).unwrap();
+        assert!(empty.entries.is_empty());
+        assert_eq!(empty.flow, PatchFlow::Manual);
+        assert_eq!(
+            empty.format, 3,
+            "an empty MANUAL doc still needs the flag, so it stays format 3"
+        );
+        assert_eq!(PatchDoc::from_json(&empty.to_json_pretty()).unwrap(), empty);
+
+        // Under auto the same verb is the old clear-the-doc: nothing newer
+        // than the base format is needed once the flag is gone.
+        let auto = unmap_all(&ctx, &set_flow(&ctx, &doc, false).unwrap()).unwrap();
+        assert_eq!(auto.format, 1);
     }
 }

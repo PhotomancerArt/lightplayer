@@ -69,9 +69,15 @@ pub struct UiOutputFace {
     /// Filled by the project controller's `apply_patch_bays` pass — the
     /// placements and the published frame both ride the output-frame probe,
     /// which this node's sections cannot see (same provenance rule as
-    /// [`Self::board`]). `None` when no frame has arrived: the bay is a
-    /// picture of a LIVE wire, and there is nothing honest to draw for a
-    /// project that has not run.
+    /// [`Self::board`]).
+    ///
+    /// Present for every output the pass can see, INCLUDING one nothing is
+    /// patched onto: its ports are the geometry the def declares, and a
+    /// wire with free space on it is a real state (manual flow, P5b), not
+    /// an absence. `None` only when there is no wire pass at all (no live
+    /// project). A card that has nothing to SHOW hides the section itself —
+    /// the renderer's call, not a hole in the data (an empty bay is what
+    /// the patch surface's free ports are made of).
     pub patch: Option<crate::UiPatchBay>,
 }
 

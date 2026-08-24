@@ -1660,9 +1660,21 @@ fn the_peaches_patch_bay_shows_the_same_cells_from_both_ends() {
 ///
 /// The leaf sits at wire lamps 22–33, patched into the middle of the
 /// body's run — so a pulse that painted producer-relative lamps, or the
-/// whole wire, fails here. The blink alternates highlight-white and dark;
-/// both are grey (R=G=B), and the leaf's own color is green, so the
-/// assertion is phase-independent: those lamps stopped being green.
+/// whole wire, fails here.
+///
+/// Both light languages ride this one path (microformat v2, D9):
+///
+/// - A FIXTURE subject chases. The leaf's twelve lamps put one blue head
+///   lamp at object 0 and one red tail lamp at object 11
+///   (`clamp(1, 10, round(12 / 10))`), so wire 22 is pure blue and wire 33
+///   pure red — constant colors, phase-independent, and a direction claim
+///   the breath cannot make.
+/// - The SAME lamps named wire-side (an output range) breathe instead:
+///   grey (R=G=B) at every phase of the fade, which is also proof the leaf
+///   stopped being green.
+///
+/// The un-pulsed body dims to quarter power but keeps its hue in both
+/// languages, so red-over-green still holds there.
 #[test]
 fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
     let example =
@@ -1743,14 +1755,57 @@ fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
         assert!(green > red, "before the pulse, wire lamp {lamp} is a leaf");
     }
 
-    // Pulse the whole leaf fixture.
+    // Pulse the leaf's lamps as an OBJECT — the range grain an id-less
+    // strand selects at. An object subject CHASES (D9: the chase is the
+    // object language; a whole-FIXTURE target breathes instead).
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         crate::PatchPulseOp {
-            subject: Some(crate::PatchPulseSubject::Fixture {
+            subject: crate::UiPatchTarget::Range {
                 node: leaf_node,
-                range: None,
-            }),
+                start: 0,
+                count: None,
+            }
+            .pulse_subject(leaf_node, None),
+        },
+    )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = refresh!();
+    let bay = bay_of(&snapshot);
+    let [red, green, blue] = lamp_colour(&bay, 22);
+    assert!(
+        blue > 0 && red == 0 && green == 0,
+        "wire lamp 22 is the leaf's object lamp 0 — the chase's blue head, got {red},{green},{blue}"
+    );
+    let [red, green, blue] = lamp_colour(&bay, 33);
+    assert!(
+        red > 0 && green == 0 && blue == 0,
+        "wire lamp 33 is the leaf's last lamp — the chase's red tail, got {red},{green},{blue}"
+    );
+    for lamp in [0, 21, 34, 55] {
+        let [red, green, _] = lamp_colour(&bay, lamp);
+        assert!(
+            red > green,
+            "wire lamp {lamp} is the body's flesh and keeps the show while the leaf pulses"
+        );
+    }
+
+    // The SAME lamps, named wire-side instead, breathe: one slot, two
+    // languages, and the language follows the subject's space (D9).
+    let output_node = project_editor(&snapshot)
+        .patch_surface
+        .as_ref()
+        .and_then(|surface| surface.outputs.first())
+        .expect("the patch surface names the wire's output")
+        .node;
+    handle.tx.send(StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::PatchPulseOp {
+            subject: crate::UiPatchTarget::Port {
+                node: output_node,
+                port: 0,
+            }
+            .pulse_subject(output_node, Some((22, 12))),
         },
     )));
     drive(actor.run_one_batch_for_test());
@@ -1760,14 +1815,7 @@ fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
         let [red, green, blue] = lamp_colour(&bay, lamp);
         assert!(
             red == green && green == blue,
-            "wire lamp {lamp} pulses grey (highlight white or its dark phase), got {red},{green},{blue}"
-        );
-    }
-    for lamp in [0, 21, 34, 55] {
-        let [red, green, _] = lamp_colour(&bay, lamp);
-        assert!(
-            red > green,
-            "wire lamp {lamp} is the body's flesh and keeps the show while the leaf pulses"
+            "wire lamp {lamp} breathes grey (white or its dark phase), got {red},{green},{blue}"
         );
     }
 
@@ -3669,12 +3717,17 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
             // The peach: one unnamed output; fixtures patch at range grain.
             assert_eq!(surface.outputs.len(), 1, "{id}");
             assert_eq!(surface.outputs[0].name, None, "{id}: unnamed output");
+            // Id-less documents still DISPLAY their effective expansion
+            // (grain robustness, G1 R2) — but with EMPTY paths: no address
+            // grain is invented that the patch format cannot store, so the
+            // fixtures keep patching at range grain.
             assert!(
                 surface
                     .fixtures
                     .iter()
-                    .all(|fixture| fixture.instances.is_empty()),
-                "{id}: no ids, no instance grain"
+                    .flat_map(|fixture| &fixture.instances)
+                    .all(|instance| instance.path.is_empty()),
+                "{id}: no ids, no path addresses — range grain holds"
             );
             assert!(
                 !surface.fixtures.is_empty(),
@@ -3939,6 +3992,10 @@ fn verbs_author_the_mini_dome_permutation_byte_identically() {
     while view.try_recv().is_some() {}
     let after_undo = body_of(doors.patch_artifact.as_ref().unwrap());
     assert_ne!(before_undo, after_undo, "undo moved the document back");
+    assert!(
+        after_undo.ends_with('\n'),
+        "undo restores the same newline-terminated bytes a forward write produces"
+    );
     verb!(doors.node, None, PatchVerbKind::Redo);
     handle.tx.send(project_action(ProjectOp::SaveOverlay));
     drive(actor.run_one_batch_for_test());
@@ -3947,6 +4004,206 @@ fn verbs_author_the_mini_dome_permutation_byte_identically() {
         body_of(doors.patch_artifact.as_ref().unwrap()),
         before_undo,
         "redo restores the undone gesture byte-for-byte"
+    );
+}
+
+/// The flow flag and the real unmap (P5b), through the live verb path: the
+/// doors go MANUAL, `unmap all` empties the document in ONE write, the
+/// surface reports every door unmapped, and undo walks both gestures back
+/// one step each. The flag reaches the DTO from the written bytes, which is
+/// what the panel reads.
+#[test]
+fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
+    use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let mut snapshot = None;
+    for _ in 0..4 {
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = Some(next);
+        }
+    }
+    let snapshot = snapshot.expect("a refresh emits a snapshot");
+
+    let doors = {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        surface
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.label.to_lowercase().contains("door"))
+            .expect("no doors fixture")
+            .clone()
+    };
+    assert!(
+        !doors.manual_flow,
+        "the shipped doors document declares no flow — that reads as auto"
+    );
+    // What the page's mount prefetch does, and what it keeps doing: a
+    // fetch's response lands on a LATER batch, and a save drops the cached
+    // bodies, so this is re-run before every verb. A verb ahead of its body
+    // blocks honestly rather than writing.
+    macro_rules! prefetch {
+        () => {{
+            for _ in 0..3 {
+                for artifact in [doors.patch_artifact.clone(), doors.mapping_artifact.clone()]
+                    .into_iter()
+                    .flatten()
+                {
+                    handle
+                        .tx
+                        .send(StudioCommand::Action(crate::UiAction::from_op(
+                            ProjectController::NODE_ID,
+                            crate::AssetContentFetchOp { artifact },
+                        )));
+                    drive(actor.run_one_batch_for_test());
+                }
+            }
+        }};
+    }
+    prefetch!();
+
+    let fixtures = vec![crate::PatchVerbFixture {
+        node: doors.node,
+        patch_artifact: doors.patch_artifact.clone().expect("patch artifact"),
+        mapping_artifact: doors.mapping_artifact.clone(),
+        lamp_count: doors.patch.lamps,
+    }];
+    macro_rules! verb {
+        ($kind:expr) => {{
+            handle
+                .tx
+                .send(StudioCommand::Action(crate::UiAction::from_op(
+                    ProjectController::NODE_ID,
+                    PatchVerbOp {
+                        subject_fixture: Some(doors.node),
+                        subject: PatchVerbSubject::default(),
+                        fixtures: fixtures.clone(),
+                        assign_output_name: None,
+                        verb: $kind,
+                    },
+                )));
+            drive(actor.run_one_batch_for_test());
+        }};
+    }
+
+    let project_dir = format!("/projects/{}", example.id.replace('/', "-"));
+    let patch_path = format!(
+        "{project_dir}/{}",
+        doors
+            .patch_artifact
+            .as_ref()
+            .unwrap()
+            .file_path()
+            .as_str()
+            .trim_start_matches('/')
+    );
+    let body = || {
+        let bytes = server
+            .borrow()
+            .base_fs()
+            .read_file(patch_path.as_str().as_path())
+            .unwrap_or_else(|_| panic!("no body at {patch_path}"));
+        String::from_utf8(bytes).expect("utf8 patch doc")
+    };
+    macro_rules! save {
+        () => {{
+            handle.tx.send(project_action(ProjectOp::SaveOverlay));
+            drive(actor.run_one_batch_for_test());
+        }};
+    }
+    // The shipped bytes, straight off disk — no save needed, and a save
+    // here would be a batch the fetches above still need.
+    let shipped = body();
+
+    // Auto → manual: the flag moves, the entries do not.
+    verb!(PatchVerbKind::SetFlow { manual: true });
+    save!();
+    let manual = body();
+    assert!(manual.contains("\"flow\": \"manual\""), "{manual}");
+    assert!(manual.contains("\"format\": 3"), "{manual}");
+    assert!(manual.contains("/door/2"), "no entry moved: {manual}");
+
+    // Unmap all: ONE write that empties the document, flag intact.
+    prefetch!();
+    verb!(PatchVerbKind::UnmapAll);
+    save!();
+    let unmapped = body();
+    assert!(unmapped.contains("\"entries\": []"), "{unmapped}");
+    assert!(unmapped.contains("\"flow\": \"manual\""), "{unmapped}");
+
+    // The surface says so: the fixture is manual and every door is
+    // unmapped. Prefetched first — the flag is read from the BODY, and a
+    // save drops the cached bodies (the same window in which the verbs
+    // block with "still loading").
+    prefetch!();
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let mut latest = None;
+    while let Some(next) = view.try_recv() {
+        latest = Some(next);
+    }
+    let snapshot = latest.expect("the refresh emits a snapshot");
+    let surface = project_editor(&snapshot)
+        .patch_surface
+        .as_ref()
+        .expect("the patch surface");
+    let fixture = surface
+        .fixtures
+        .iter()
+        .find(|fixture| fixture.node == doors.node)
+        .expect("an unmapped fixture STAYS on the surface — its objects are the ones to click");
+    assert!(fixture.manual_flow, "the DTO carries the written flag");
+    assert!(
+        !fixture.instances.is_empty(),
+        "the object table survives having no runs"
+    );
+    assert!(
+        fixture.instances.iter().all(|instance| !instance.placed),
+        "an entry-less object in a manual fixture is UNMAPPED, not reflowed"
+    );
+    assert!(
+        fixture.patch.cells.is_empty() && fixture.patch.lamps > 0,
+        "no wire chip, but the row still knows how many lamps it is offering"
+    );
+
+    // One undo per gesture, in order: the entries come back, then the flag.
+    // Trimmed because the undo path replays the snapshot bytes verbatim
+    // while the write path appends a trailing newline — a pre-existing
+    // cosmetic asymmetry in the verb stack, not a P5b claim.
+    verb!(PatchVerbKind::Undo);
+    save!();
+    assert_eq!(
+        body().trim_end(),
+        manual.trim_end(),
+        "one step undid the whole unmap-all"
+    );
+    prefetch!();
+    verb!(PatchVerbKind::Undo);
+    save!();
+    assert_eq!(
+        body().trim_end(),
+        shipped.trim_end(),
+        "and one more undid the flag alone"
     );
 }
 
@@ -4429,6 +4686,12 @@ fn every_patch_target_arm_round_trips_through_selection() {
     let targets = [
         UiPatchTarget::Output { node },
         UiPatchTarget::Port { node, port: 2 },
+        UiPatchTarget::Segment {
+            node,
+            port: 2,
+            start: 4,
+            lamps: 8,
+        },
         UiPatchTarget::Cell {
             id: "3:1:0:0".to_string(),
         },
@@ -4464,6 +4727,179 @@ fn every_patch_target_arm_round_trips_through_selection() {
             project_editor(&snapshot).patch_selection,
             Some(target),
             "the arm echoes through core state"
+        );
+    }
+}
+
+/// The fully unmapped project (the G1 walk's own starting point): EVERY
+/// fixture manual with every object taken off the wire. Nothing publishes a
+/// run, so nothing published a wire — and the surface must still be the
+/// whole project: both outputs, their ports at the geometry the output DEF
+/// declares, zero cells, and every fixture listed with its objects unmapped.
+///
+/// This is the state walk-up assignment exists FOR: with no output on the
+/// surface there is no free port space to click, and the flow is dead
+/// exactly where it is needed most.
+#[test]
+fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
+    use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let mut snapshot = None;
+    for _ in 0..4 {
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = Some(next);
+        }
+    }
+    let snapshot = snapshot.expect("a refresh emits a snapshot");
+
+    let all: Vec<crate::UiPatchSurfaceFixture> = project_editor(&snapshot)
+        .patch_surface
+        .as_ref()
+        .expect("surface")
+        .fixtures
+        .clone();
+    assert_eq!(all.len(), 2, "the mini-dome patches two fixtures");
+    let verb_fixtures: Vec<crate::PatchVerbFixture> = all
+        .iter()
+        .map(|fixture| crate::PatchVerbFixture {
+            node: fixture.node,
+            patch_artifact: fixture.patch_artifact.clone().expect("patch artifact"),
+            mapping_artifact: fixture.mapping_artifact.clone(),
+            lamp_count: fixture.patch.lamps,
+        })
+        .collect();
+    // The page's mount prefetch, re-run before every verb: a save drops the
+    // cached bodies, and a verb ahead of its body blocks rather than writes.
+    macro_rules! prefetch {
+        () => {{
+            for _ in 0..3 {
+                for artifact in all
+                    .iter()
+                    .flat_map(|fixture| {
+                        [
+                            fixture.patch_artifact.clone(),
+                            fixture.mapping_artifact.clone(),
+                        ]
+                    })
+                    .flatten()
+                {
+                    handle
+                        .tx
+                        .send(StudioCommand::Action(crate::UiAction::from_op(
+                            ProjectController::NODE_ID,
+                            crate::AssetContentFetchOp { artifact },
+                        )));
+                    drive(actor.run_one_batch_for_test());
+                }
+            }
+        }};
+    }
+    macro_rules! verb {
+        ($node:expr, $kind:expr) => {{
+            handle
+                .tx
+                .send(StudioCommand::Action(crate::UiAction::from_op(
+                    ProjectController::NODE_ID,
+                    PatchVerbOp {
+                        subject_fixture: Some($node),
+                        subject: PatchVerbSubject::default(),
+                        fixtures: verb_fixtures.clone(),
+                        assign_output_name: None,
+                        verb: $kind,
+                    },
+                )));
+            drive(actor.run_one_batch_for_test());
+            handle.tx.send(project_action(ProjectOp::SaveOverlay));
+            drive(actor.run_one_batch_for_test());
+        }};
+    }
+    // Both fixtures manual, both emptied — the walk's own opening gesture.
+    for fixture in &all {
+        prefetch!();
+        verb!(fixture.node, PatchVerbKind::SetFlow { manual: true });
+        prefetch!();
+        verb!(fixture.node, PatchVerbKind::UnmapAll);
+    }
+
+    prefetch!();
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let mut latest = None;
+    while let Some(next) = view.try_recv() {
+        latest = Some(next);
+    }
+    let snapshot = latest.expect("the refresh emits a snapshot");
+    let surface = project_editor(&snapshot)
+        .patch_surface
+        .as_ref()
+        .expect("a project with outputs ALWAYS has a patch surface — free ports are the point")
+        .clone();
+
+    // Both outputs, at the geometry their defs declare (out_a 39/30/39,
+    // out_b 39/30), with nothing on them.
+    assert_eq!(surface.outputs.len(), 2, "both boxes stay on the surface");
+    let port_spans = |name: &str| -> Vec<(u32, u32, u32)> {
+        surface
+            .outputs
+            .iter()
+            .find(|output| output.display_name() == name)
+            .unwrap_or_else(|| panic!("output {name} left the surface"))
+            .bay
+            .ports
+            .iter()
+            .map(|port| (port.key, port.start, port.lamps))
+            .collect()
+    };
+    assert_eq!(
+        port_spans("1"),
+        vec![(0, 0, 39), (1, 39, 30), (2, 69, 39)],
+        "the def's ports are the geometry when no wire was published"
+    );
+    assert_eq!(port_spans("Box 2"), vec![(0, 0, 39), (1, 39, 30)]);
+    assert!(
+        surface
+            .outputs
+            .iter()
+            .flat_map(|output| &output.bay.ports)
+            .all(|port| port.cells.is_empty()),
+        "nothing is patched, so no port carries a cell"
+    );
+
+    // Both fixtures still listed, every object unmapped and still offering
+    // its lamps — the counterparts the walk-up flow clicks.
+    assert_eq!(surface.fixtures.len(), 2, "both fixtures stay listed");
+    for fixture in &surface.fixtures {
+        assert!(fixture.manual_flow, "{}: the written flag", fixture.label);
+        assert!(
+            !fixture.instances.is_empty()
+                && fixture.instances.iter().all(|instance| !instance.placed),
+            "{}: every object is unmapped",
+            fixture.label
+        );
+        assert!(
+            fixture.patch.cells.is_empty() && fixture.patch.lamps > 0,
+            "{}: no run, but the row still offers its lamps",
+            fixture.label
         );
     }
 }

@@ -5,6 +5,26 @@ two-pass posture ruled by Yona). Companion to the unified editor-shell spike
 (`spikes/unified-editor-shell/index.html`) and the slice-2 ADR
 (`../adr/2026-08-10-object-ids-output-names-and-scatter.md`).
 
+**Amended 2026-08-20** (patching-view G1, `spikes/patching-controls/`
+rounds 1–3; ADR `../adr/2026-08-20-patching-view-grain-follows-activity.md`):
+the flow's home is ONE patch panel in the Patching view (object section
+over output section, lamp strips painting the light languages in the
+lamps); the selection model is ONE selection where **plain clicks never
+write** — pairing takes the explicit **assign arm** (`a`, the swap-arm
+grammar), and `m` advances the loop keeping the arm, so the walk-up
+cadence below stays one-key-one-click. lp2014's tentative/commit lane
+collapses into immediate-write + undo. A contiguous run on a port is a
+**"segment"** (WLED's word). The pulse below is a breath, never a blink.
+
+**Implemented in pass 2** (2026-08-24) — the flow described here is the
+one that shipped, with the gate's four rounds of rework recorded as
+amendments in
+[`../adr/2026-08-20-walk-up-assignment-selection-model.md`](../adr/2026-08-20-walk-up-assignment-selection-model.md).
+Read that ADR for what the panel actually does today: the fixture CARD,
+object-grain canvas selection, the mode-gated grammar, the one
+core-computed chase preview, and the light-language matrix (chase =
+object, breath = everything else).
+
 This is one of the most important flows in LightPlayer and one of the
 trickiest to get right. lp2014's version represents **years of
 tweaking under the real conditions**: late at night at a festival, on
@@ -66,6 +86,40 @@ fixture a place in the outputs, guided by the actual lights.
    output — sometimes the next port, sometimes the next gap; the
    group-size setting is what makes this guess right.
 6. **Repeat until all the lights are on.**
+
+### Who this loop is for
+
+The loop above is the **[sign](use-cases/sign.md)** and
+**[dome-scale](use-cases/dome-scale.md)** cases; the
+**[scarf](use-cases/scarf.md)** never enters it (one strip on one port
+flows correctly with no patching gesture at all). See
+[`use-cases/`](use-cases/README.md) for the three shapes and what each
+asks of the product.
+
+### RULED 2026-08-21: auto-flow is a per-fixture FLAG
+
+Amendment (patching pass-2, P5b). The sparse-anchors-over-auto-flow model
+made "unmapped" unreachable: clearing an object's entry only returned it
+to the flow, which re-placed it — so the invitation states above had
+nothing to invite. Auto-mapping is right for the scarf and
+counter-productive for everything else, so it is a flag at the fixture
+level rather than a law of the model:
+
+- `{stem}.patch.json` carries `"flow": "auto" | "manual"` (patch format
+  3; absent field, and an absent file, mean `auto` — every earlier
+  document reads exactly as it always did).
+- **auto**: lamps no entry names flow on after the last anchor, as
+  before.
+- **manual**: only authored entries place. Unnamed lamps are on no wire —
+  dark on the piece, unmapped in the editor. `Clear` becomes lp2014's
+  real `u`, and **unmap all** (one write, one undo step, no confirm)
+  empties a fixture to start a re-patch.
+
+The panel shows the flag on the object section as a fixture-level fact
+and toggles it undoably. Creation-time defaults (Strip preset → auto,
+drawn shape → manual) are deliberately NOT decided yet — they are owed to
+the hardware walk of the three use cases. A resolve-time heuristic is
+banned: it would flip existing, documented fixtures dark.
 
 ### The guide invariant
 

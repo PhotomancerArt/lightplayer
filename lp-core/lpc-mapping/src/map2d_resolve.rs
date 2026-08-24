@@ -38,7 +38,8 @@ pub struct ResolvedLamp {
 /// is its own strand of wire. Consumers that mean "this object's whole lamp
 /// range" want [`ResolvedMap2d::object_span`]; consumers that mean "the
 /// physical runs" (the fixture's honest spans, the output face's strip
-/// boundaries, wiring-arrow chain hops) want the span list itself.
+/// boundaries) want the span list itself; the Mapping editor's wiring
+/// annotations keep the AUTHORED grain — each object's first span only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectSpan {
     pub object: u32,
@@ -383,8 +384,14 @@ fn resolve_polygon(
 /// Strand order matches [`ResolvedMap2d::spans`] exactly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectInstanceSpan {
+    /// The owning object's index in `doc.objects` — always present: the
+    /// resolver knows every strand's object whether or not it has an id,
+    /// so DISPLAY can expand id-less documents too (grain robustness:
+    /// old-format data must never collapse the effective tree).
+    pub object: usize,
     /// The owning object's stable id; `None` when the document has not been
-    /// through ensure-ids (such strands are unaddressable by path).
+    /// through ensure-ids (such strands are unaddressable by path — patch
+    /// ENTRIES need the id, display does not).
     pub id: Option<crate::map2d_object_id::Map2dObjectId>,
     /// Repeat-instance indices, outermost first; empty for a plain shape.
     pub instances: Vec<u32>,
@@ -416,6 +423,7 @@ pub fn object_instance_spans(doc: &Map2dDoc, resolved: &ResolvedMap2d) -> Vec<Ob
             .unwrap_or_default();
         cursor[object] += 1;
         spans.push(ObjectInstanceSpan {
+            object,
             id: doc.objects.get(object).and_then(|object| object.id.clone()),
             instances,
             start: span.start,

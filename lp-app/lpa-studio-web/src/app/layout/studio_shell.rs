@@ -110,20 +110,8 @@ pub fn StudioShell(
     // card — so it deliberately short-circuits the whole editor layout
     // below. `PlayModeSurface` wraps its own controls, which is what makes
     // the same mount usable on a phone.
-    // Patch mode (D36): the project-scoped patching surface, full width —
-    // no pane column, no workspace. Same-session like play. Interim: the
-    // unified-editor plan re-houses it as the Mapping view's patching
-    // mode and deletes this page.
-    if project_view == ProjectView::Patch
-        && let Some(editor) = project_editor.clone()
-    {
-        return rsx! {
-            div { class: "tw:grid tw:min-w-0 tw:grid-cols-1",
-                crate::app::patch::PatchSurfacePage { view: editor, on_action }
-            }
-        };
-    }
-
+    // (Patch no longer short-circuits: it is a workbench view — the R5
+    // patching pass. The interim full-page surface is retired.)
     if play && let Some(face) = play_mode_face(project_editor.as_ref()) {
         return rsx! {
             div { class: "tw:grid tw:min-w-0 tw:grid-cols-1",
@@ -139,7 +127,7 @@ pub fn StudioShell(
     }
 
     // The workbench (PanelDock chrome): every project-editor render in a
-    // workbench view. Play and patch returned above; the states below
+    // workbench view. Play returned above; the states below
     // (no editor yet, bare panes) keep the legacy grid.
     if let Some(project_editor) = project_editor {
         let view = view_for_route(project_view);

@@ -68,16 +68,40 @@
 //! recorded trigger for the next tier: a real patch doc exceeding ~32 KB
 //! on-device.
 //!
+//! **Format 3** (the flow flag, P5b) is format 2's rows plus one top-level
+//! field:
+//!
+//! ```jsonc
+//! {
+//!   "format": 3,
+//!   "flow": "manual",
+//!   "entries": [["/door/1", -1, 30]]
+//! }
+//! ```
+//!
+//! [`PatchFlow::Manual`] turns the sparse-anchors-over-auto-flow model off
+//! for THIS fixture: only authored entries place, and a lamp no entry
+//! claims is absent from every wire (dark on hardware, honestly unmapped
+//! in the editor). `auto` — and an absent field, and an absent file — is
+//! the flow-everything behaviour every earlier format had. The flag lives
+//! at the FIXTURE grain because that is what it is: a scarf is one strip
+//! that should just flow, a sign's letters are placed one by one and "not
+//! mapped = not lit" is the progress bar (`docs/design/use-cases/`).
+//!
 //! # Minimal stamping
 //!
 //! Writers stamp the lowest format that can represent the document
 //! ([`PatchDoc::required_format`], mirroring [`crate::Map2dDoc`]): a doc
 //! using only format-1 constructs writes the keyed shape stamped 1 (the
-//! peach corpus stays readable by old builds), and any format-2 construct —
+//! peach corpus stays readable by old builds), any format-2 construct —
 //! a path source, an output reference, a nonzero rotation — switches the
-//! whole doc to rows stamped 2. The format gate keeps refusing newer
-//! ([`format_gate`]): minimal stamping governs WRITING, the gate governs
-//! READING, and nothing ever migrates in place.
+//! whole doc to rows stamped 2, and `flow: manual` (a claim about the
+//! lamps no entry names, which no older build could honour) stamps 3.
+//! Each format parses its OWN shape only: 3 reads format 2's rows, so the
+//! flag rides on one canonical row form rather than forking the decode.
+//! The format gate keeps refusing newer ([`format_gate`]): minimal
+//! stamping governs WRITING, the gate governs READING, and nothing ever
+//! migrates in place.
 //!
 //! A format-1 document carrying the reserved `at.output`/`offset` fields
 //! still parses and is refused at RESOLVE time with an error naming the fix
@@ -114,11 +138,17 @@
 //!
 //! # Anchor and reflow
 //!
-//! A patch is **sparse**. Entries anchor the ranges an installer cares
-//! about; every lamp no entry claims flows on after the highest anchored
-//! end **on the default output**, in fixture order. Runs addressed to a
-//! named output neither consume nor extend the default-output cursor.
-//! An EMPTY document resolves to the whole fixture at wire lamp 0.
+//! A patch is **sparse**. Under `flow: auto` entries anchor the ranges an
+//! installer cares about; every lamp no entry claims flows on after the
+//! highest anchored end **on the default output**, in fixture order. Runs
+//! addressed to a named output neither consume nor extend the
+//! default-output cursor. An EMPTY document resolves to the whole fixture
+//! at wire lamp 0.
+//!
+//! Under `flow: manual` there is no reflow at all: resolution is exactly
+//! the authored entries, and an empty document resolves to NOTHING. That
+//! is what makes `Clear` a real unmap — the lamps it releases stay off the
+//! wire instead of being re-placed past its end.
 //!
 //! # Refusals
 //!
@@ -138,7 +168,7 @@ use crate::map_object_path::MapObjectPath;
 use crate::map2d_resolve::ObjectInstanceSpan;
 
 /// Newest patch document format this crate can read.
-pub const PATCH_FORMAT: u32 = 2;
+pub const PATCH_FORMAT: u32 = 3;
 
 /// The format every document using only the original constructs declares.
 pub const PATCH_FORMAT_BASE: u32 = 1;
@@ -147,16 +177,63 @@ pub const PATCH_FORMAT_BASE: u32 = 1;
 /// path source, an output reference, or a nonzero rotation offset.
 pub const PATCH_FORMAT_OBJECT_GRAIN: u32 = 2;
 
-/// An authored patch document: sparse placement entries over auto-flow.
+/// The format a document needs once it declares [`PatchFlow::Manual`]:
+/// older builds would auto-flow the lamps it means to leave dark.
+pub const PATCH_FORMAT_FLOW: u32 = 3;
+
+/// How a fixture's UNCLAIMED lamps behave — the fixture-grain wiring
+/// policy (P5b).
+///
+/// Not a per-object tombstone: "which lamps auto-flow" is one fact about a
+/// fixture's installation, and per-object bookkeeping for it is absurd at
+/// dome scale (~22k lamps). See `docs/design/use-cases/`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PatchFlow {
+    /// Entries anchor; everything else flows on after them. The historical
+    /// behaviour, and what an absent field (or an absent file) means.
+    #[default]
+    Auto,
+    /// Only authored entries place. Lamps no entry claims are on no wire.
+    Manual,
+}
+
+impl PatchFlow {
+    /// The `"flow"` field's spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Manual => "manual",
+        }
+    }
+
+    /// Parse the field's spelling; unknown text is a document error, never
+    /// a silent fallback to auto (which would light lamps the author meant
+    /// to leave dark).
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "auto" => Some(Self::Auto),
+            "manual" => Some(Self::Manual),
+            _ => None,
+        }
+    }
+}
+
+/// An authored patch document: placement entries, and what happens to the
+/// lamps they do not name ([`PatchFlow`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchDoc {
     /// Format version gate; see [`PATCH_FORMAT`]. [`Self::to_json`] always
     /// writes [`Self::required_format`] (stamp and shape cannot diverge),
     /// and [`Self::normalize_format`] folds it back into the value.
     pub format: u32,
+    /// What the unclaimed lamps do. `Auto` is the absent-field value, so a
+    /// format 1/2 document reads exactly as it always has.
+    pub flow: PatchFlow,
     /// Anchored entries, in authoring order. An empty list is a valid
-    /// document meaning "everything auto-flows" — the state a cleared patch
-    /// leaves behind.
+    /// document: under `Auto` it means "everything auto-flows" — the state
+    /// a cleared patch leaves behind — and under `Manual` it means the
+    /// fixture is entirely unmapped.
     pub entries: Vec<PatchEntry>,
 }
 
@@ -353,6 +430,7 @@ impl PatchDoc {
     pub fn new() -> Self {
         Self {
             format: PATCH_FORMAT_BASE,
+            flow: PatchFlow::Auto,
             entries: Vec::new(),
         }
     }
@@ -369,7 +447,8 @@ impl PatchDoc {
         format_gate(peek.format, PATCH_FORMAT)?;
         match peek.format {
             PATCH_FORMAT_BASE => parse_v1(json),
-            PATCH_FORMAT_OBJECT_GRAIN => parse_v2(json),
+            PATCH_FORMAT_OBJECT_GRAIN => parse_rows(json, PATCH_FORMAT_OBJECT_GRAIN),
+            PATCH_FORMAT_FLOW => parse_rows(json, PATCH_FORMAT_FLOW),
             _ => unreachable!("format_gate admits only known formats"),
         }
     }
@@ -378,6 +457,13 @@ impl PatchDoc {
     /// minimal stamping, exactly like [`crate::Map2dDoc::required_format`].
     #[must_use]
     pub fn required_format(&self) -> u32 {
+        // A manual flow is a claim about lamps NO entry names; an older
+        // build reading it would flow them onto the wire, which is the
+        // opposite of what the document says. It stamps 3 whatever the
+        // entries look like.
+        if self.flow == PatchFlow::Manual {
+            return PATCH_FORMAT_FLOW;
+        }
         let object_grain = self.entries.iter().any(|entry| {
             matches!(entry.source, PatchSource::Path { .. })
                 || entry.output.is_some()
@@ -404,7 +490,7 @@ impl PatchDoc {
             PATCH_FORMAT_BASE => {
                 serde_json::to_string(&v1_doc(self)).expect("patch doc serializes")
             }
-            _ => serde_json::to_string(&v2_value(self)).expect("patch doc serializes"),
+            stamp => serde_json::to_string(&rows_value(self, stamp)).expect("patch doc serializes"),
         }
     }
 
@@ -416,7 +502,7 @@ impl PatchDoc {
             PATCH_FORMAT_BASE => {
                 serde_json::to_string_pretty(&v1_doc(self)).expect("patch doc serializes")
             }
-            _ => v2_pretty(self),
+            stamp => rows_pretty(self, stamp),
         }
     }
 }
@@ -486,6 +572,8 @@ fn parse_v1(json: &str) -> Result<PatchDoc, PatchError> {
     let doc: V1Doc = serde_json::from_str(json).map_err(|e| PatchError::Parse(e.to_string()))?;
     Ok(PatchDoc {
         format: doc.format,
+        // Format 1 has no flow field, and its absence IS auto.
+        flow: PatchFlow::Auto,
         entries: doc
             .entries
             .into_iter()
@@ -532,11 +620,35 @@ fn v1_doc(doc: &PatchDoc) -> V1Doc {
     }
 }
 
-// ---- format 2: tuple rows + outputs header table -----------------------
+// ---- formats 2 and 3: tuple rows + outputs header table ----------------
 
-fn parse_v2(json: &str) -> Result<PatchDoc, PatchError> {
+/// The row shape, shared by format 2 and format 3 — the ONE canonical form
+/// for both. Format 3 differs by exactly one top-level field (`flow`), so
+/// it reads the same rows rather than forking the decode; `stamp` says
+/// which format the caller peeked, and only format 3 may carry the field.
+fn parse_rows(json: &str, stamp: u32) -> Result<PatchDoc, PatchError> {
     let value: serde_json::Value =
         serde_json::from_str(json).map_err(|e| PatchError::Parse(e.to_string()))?;
+    let flow = match (value.get("flow"), stamp) {
+        (None, _) => PatchFlow::Auto,
+        (Some(serde_json::Value::String(text)), PATCH_FORMAT_FLOW) => PatchFlow::parse(text)
+            .ok_or_else(|| {
+                parse_error(&alloc::format!(
+                    "unknown flow {text:?} (only \"auto\" and \"manual\")"
+                ))
+            })?,
+        (Some(_), PATCH_FORMAT_FLOW) => {
+            return Err(parse_error("\"flow\" must be \"auto\" or \"manual\""));
+        }
+        // The field is a format-3 construct: a format-2 document carrying
+        // it would light differently on a build that ignored it, so it is
+        // refused with the fix rather than honoured off-format.
+        (Some(_), _) => {
+            return Err(parse_error(
+                "\"flow\" is a format-3 field — stamp the document format 3 to declare it",
+            ));
+        }
+    };
     let outputs: Vec<String> = match value.get("outputs") {
         None => Vec::new(),
         Some(serde_json::Value::Array(names)) => names
@@ -560,7 +672,8 @@ fn parse_v2(json: &str) -> Result<PatchDoc, PatchError> {
         .map(|(index, row)| parse_v2_row(index, row, &outputs))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(PatchDoc {
-        format: PATCH_FORMAT_OBJECT_GRAIN,
+        format: stamp,
+        flow,
         entries,
     })
 }
@@ -680,12 +793,16 @@ fn parse_error(reason: &str) -> PatchError {
     PatchError::Parse(reason.to_string())
 }
 
-/// The row form of a document. The outputs table lists names in first-use
-/// order; rows reference it by index (−1 = default).
-fn v2_value(doc: &PatchDoc) -> serde_json::Value {
+/// The row form of a document, stamped `stamp` (2 or 3 — the caller's
+/// [`PatchDoc::required_format`]). The outputs table lists names in
+/// first-use order; rows reference it by index (−1 = default).
+fn rows_value(doc: &PatchDoc, stamp: u32) -> serde_json::Value {
     let (outputs, rows) = v2_parts(doc);
     let mut object = serde_json::Map::new();
-    object.insert("format".into(), PATCH_FORMAT_OBJECT_GRAIN.into());
+    object.insert("format".into(), stamp.into());
+    if stamp >= PATCH_FORMAT_FLOW {
+        object.insert("flow".into(), doc.flow.as_str().into());
+    }
     if !outputs.is_empty() {
         object.insert("outputs".into(), outputs.into());
     }
@@ -747,11 +864,16 @@ fn push_range(parts: &mut Vec<serde_json::Value>, range: &PatchRange) {
     }
 }
 
-/// The canonical pretty form: 2-space indent, `outputs` inline, one row
-/// per line. Hand-authored documents target exactly this.
-fn v2_pretty(doc: &PatchDoc) -> String {
+/// The canonical pretty form: 2-space indent, `flow` and `outputs` inline,
+/// one row per line. Hand-authored documents target exactly this.
+fn rows_pretty(doc: &PatchDoc, stamp: u32) -> String {
     let (outputs, rows) = v2_parts(doc);
-    let mut text = String::from("{\n  \"format\": 2,\n");
+    let mut text = alloc::format!("{{\n  \"format\": {stamp},\n");
+    if stamp >= PATCH_FORMAT_FLOW {
+        text.push_str("  \"flow\": \"");
+        text.push_str(doc.flow.as_str());
+        text.push_str("\",\n");
+    }
     if !outputs.is_empty() {
         text.push_str("  \"outputs\": ");
         text.push_str(&serde_json::to_string(&outputs).expect("outputs table serializes"));
@@ -794,11 +916,15 @@ pub struct PatchResolution {
 
 /// Resolve a patch against a fixture.
 ///
-/// Returns every lamp of the fixture exactly once: the document's entries
-/// in authoring order, then the lamps no entry claimed, flowing on the
-/// default output in fixture order from the highest default-anchored wire
-/// end. An empty document therefore resolves to the single full-length run
-/// at wire lamp 0 that auto-flow would have produced.
+/// Under [`PatchFlow::Auto`] this returns every lamp of the fixture exactly
+/// once: the document's entries in authoring order, then the lamps no entry
+/// claimed, flowing on the default output in fixture order from the highest
+/// default-anchored wire end. An empty document therefore resolves to the
+/// single full-length run at wire lamp 0 that auto-flow would have produced.
+///
+/// Under [`PatchFlow::Manual`] it returns the authored entries and nothing
+/// else. Unclaimed lamps are on no wire — the honest "not mapped = not lit"
+/// a sign or a dome is patched by.
 ///
 /// One object = one contiguous wire window: entries addressing a path an
 /// earlier entry already addressed (regardless of sub-span) degrade — they
@@ -857,6 +983,15 @@ pub fn resolve_patch(
     }
 
     let mut resolved = anchored.clone();
+
+    // Manual flow: the entries ARE the resolution. Nothing fills in behind
+    // them, so a fixture's unnamed lamps stay off every wire.
+    if doc.flow == PatchFlow::Manual {
+        return Ok(PatchResolution {
+            ranges: resolved,
+            refusals,
+        });
+    }
 
     // Reflow: whatever the entries left over, in fixture order, on the
     // DEFAULT output, starting past every default-group anchor. Sorting a
@@ -1107,6 +1242,7 @@ mod tests {
     fn doc(entries: Vec<PatchEntry>) -> PatchDoc {
         let mut doc = PatchDoc {
             format: PATCH_FORMAT_BASE,
+            flow: PatchFlow::Auto,
             entries,
         };
         doc.normalize_format();
@@ -1135,6 +1271,7 @@ mod tests {
         let mut spans = Vec::new();
         for instance in 0..5u32 {
             spans.push(ObjectInstanceSpan {
+                object: 0,
                 id: Some(Map2dObjectId::new("sector").unwrap()),
                 instances: vec![instance],
                 start: instance * 30,
@@ -1143,6 +1280,7 @@ mod tests {
         }
         for instance in 0..3u32 {
             spans.push(ObjectInstanceSpan {
+                object: 1,
                 id: Some(Map2dObjectId::new("door").unwrap()),
                 instances: vec![instance],
                 start: 150 + instance * 9,
@@ -1346,9 +1484,9 @@ mod tests {
     #[test]
     fn a_newer_format_is_refused_whole_before_the_parse() {
         assert_eq!(
-            PatchDoc::from_json(r#"{"format":3,"entries":[]}"#),
+            PatchDoc::from_json(r#"{"format":4,"entries":[]}"#),
             Err(PatchError::UnsupportedFormat {
-                found: 3,
+                found: 4,
                 supported: PATCH_FORMAT
             })
         );
@@ -1601,6 +1739,7 @@ mod tests {
         let mut grown = Vec::new();
         for instance in 0..5u32 {
             grown.push(ObjectInstanceSpan {
+                object: 0,
                 id: Some(Map2dObjectId::new("sector").unwrap()),
                 instances: vec![instance],
                 start: instance * 40,
@@ -2002,6 +2141,7 @@ mod tests {
             &ctx,
             &super::PatchDoc {
                 format: 2,
+                flow: PatchFlow::Auto,
                 entries: vec![path_entry("/sector/1", 8)],
             },
         )
@@ -2011,5 +2151,140 @@ mod tests {
             (resolved[0].start, resolved[0].count, resolved[0].lamp),
             (4, 4, 8)
         );
+    }
+
+    // ---- format 3: the flow flag ---------------------------------------
+
+    /// A manual document with one entry: the entry places, and the lamps no
+    /// entry names are on NO wire (the whole point — "not mapped = not
+    /// lit"). The same document read as auto reflows them, which is the
+    /// before/after this flag exists to separate.
+    #[test]
+    fn manual_flow_places_only_the_authored_entries() {
+        let mut manual = doc(vec![entry(0, Some(4), 10, false)]);
+        manual.flow = PatchFlow::Manual;
+        manual.normalize_format();
+        assert_eq!(
+            resolve_bare(12, &manual).unwrap(),
+            vec![range(0, 4, 10, false)],
+            "lamps 4..12 are unmapped, not reflowed"
+        );
+
+        let mut auto = manual.clone();
+        auto.flow = PatchFlow::Auto;
+        assert_eq!(
+            resolve_bare(12, &auto).unwrap(),
+            vec![range(0, 4, 10, false), range(4, 8, 14, false)],
+            "the same entries under auto still flow the tail"
+        );
+    }
+
+    /// An EMPTY manual document resolves to nothing at all — the state
+    /// `unmap all` leaves behind. (Empty + auto is still the whole fixture
+    /// at wire lamp 0.)
+    #[test]
+    fn an_empty_manual_document_resolves_to_nothing() {
+        let mut manual = PatchDoc::new();
+        manual.flow = PatchFlow::Manual;
+        assert_eq!(resolve_bare(30, &manual).unwrap(), Vec::new());
+        assert_eq!(
+            resolve_bare(30, &PatchDoc::new()).unwrap(),
+            vec![range(0, 30, 0, false)],
+            "auto is unchanged"
+        );
+    }
+
+    /// Manual resolution still refuses the things a document cannot mean:
+    /// two entries on one fixture lamp, two on one wire lamp.
+    #[test]
+    fn manual_flow_still_checks_collisions() {
+        let mut manual = doc(vec![
+            entry(0, Some(4), 0, false),
+            entry(2, Some(2), 20, false),
+        ]);
+        manual.flow = PatchFlow::Manual;
+        assert!(matches!(
+            resolve_bare(12, &manual),
+            Err(PatchError::LampClaimedTwice { .. })
+        ));
+    }
+
+    /// The flag round-trips: `manual` stamps 3 and reads back, `auto`
+    /// stamps minimally (the field is not written below format 3), and an
+    /// ABSENT field — at any format, file included — is auto.
+    #[test]
+    fn the_flow_flag_round_trips_and_absent_means_auto() {
+        let mut manual = doc(vec![entry(0, Some(4), 0, false)]);
+        manual.flow = PatchFlow::Manual;
+        manual.normalize_format();
+        assert_eq!(manual.format, PATCH_FORMAT_FLOW);
+        for text in [manual.to_json(), manual.to_json_pretty()] {
+            assert!(text.contains("\"flow\""), "{text}");
+            let parsed = PatchDoc::from_json(&text).unwrap();
+            assert_eq!(parsed, manual, "{text}");
+            assert_eq!(parsed.to_json(), manual.to_json(), "byte-stable");
+        }
+        // The pretty form is the canonical hand-authored one: `{`, format,
+        // flow, `"entries": [`, one line per row, `]`, `}` (no outputs
+        // table here — these entries name no output).
+        let pretty = manual.to_json_pretty();
+        assert_eq!(pretty.lines().count(), 6 + manual.entries.len(), "{pretty}");
+
+        // Auto never writes the field, and drops back to the shape its
+        // entries need (this doc's are format-1 constructs).
+        let mut auto = manual.clone();
+        auto.flow = PatchFlow::Auto;
+        auto.normalize_format();
+        assert_eq!(auto.format, PATCH_FORMAT_BASE);
+        let written = auto.to_json();
+        assert!(!written.contains("flow"), "{written}");
+
+        // Absent at every readable format = auto.
+        for text in [
+            r#"{"format":1,"entries":[]}"#,
+            r#"{"format":2,"entries":[]}"#,
+            r#"{"format":3,"entries":[]}"#,
+        ] {
+            assert_eq!(
+                PatchDoc::from_json(text).unwrap().flow,
+                PatchFlow::Auto,
+                "{text}"
+            );
+        }
+    }
+
+    /// The format-3 shape is format 2's rows plus the field — and the field
+    /// is refused off-format (an older build would flow the lamps it means
+    /// to leave dark), as is a spelling nobody defined.
+    #[test]
+    fn the_flow_field_is_format_three_only_and_never_guessed() {
+        let doc = PatchDoc::from_json(
+            r#"{"format":3,"flow":"manual","outputs":["1"],"entries":[["/door/1",0,30,"r"]]}"#,
+        )
+        .unwrap();
+        assert_eq!(doc.flow, PatchFlow::Manual);
+        assert_eq!(doc.entries.len(), 1);
+        assert!(doc.entries[0].reversed);
+        assert_eq!(doc.entries[0].output.as_deref(), Some("1"));
+
+        for (text, needle) in [
+            (r#"{"format":2,"flow":"manual","entries":[]}"#, "format 3"),
+            (
+                r#"{"format":3,"flow":"later","entries":[]}"#,
+                "unknown flow",
+            ),
+            (r#"{"format":3,"flow":true,"entries":[]}"#, "must be"),
+            // One canonical shape per format: format 3 reads ROWS.
+            (
+                r#"{"format":3,"entries":[{"range":{"start":0},"at":{"channel":0}}]}"#,
+                "row",
+            ),
+        ] {
+            let error = PatchDoc::from_json(text).unwrap_err();
+            assert!(
+                matches!(&error, PatchError::Parse(reason) if reason.contains(needle)),
+                "{text} → {error}"
+            );
+        }
     }
 }

@@ -7,10 +7,12 @@ use dioxus::prelude::*;
 use lpa_mapping_editor::{Map2dDoc, MapEditorSession, ShapePath};
 use lpa_studio_web_story_macros::story;
 
-use super::panels::{FixturesPanel, OutputsPanel, PropsPanel};
+use super::panels::{FixturesPanel, OutputsPanel, PropsPanel, TreeGrain};
 use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchHrefs, WorkbenchView};
 use crate::app::StudioShell;
-use crate::app::patch::patch_surface_stories::{mini_dome_surface, peach_surface};
+use crate::app::patch::patch_story_fixtures::{
+    mini_dome_surface, mini_dome_walkup_surface, peach_surface,
+};
 use crate::app::story_fixtures::{
     project_editor_fixture, project_ready_view, project_synced_pane_view, simulator_lens_card,
 };
@@ -58,6 +60,42 @@ fn labelled(mut surface: UiPatchSurface) -> UiPatchSurface {
     surface
 }
 
+/// One embedded mini-dome file's text, by example-relative path.
+fn mini_dome_text(path: &str) -> String {
+    let example = lpa_studio_core::app::home::embedded_example("examples/mini-dome")
+        .expect("mini-dome embedded");
+    let bytes = example
+        .files
+        .iter()
+        .find(|(file, _)| *file == path)
+        .map(|(_, bytes)| *bytes)
+        .unwrap_or_else(|| panic!("mini-dome file {path}"));
+    std::str::from_utf8(bytes).expect("utf8 body").to_string()
+}
+
+/// The mini-dome surface with fixture map2d ARTIFACTS stamped (the shared
+/// builder leaves them `None`), plus the bodies map the authored grain
+/// reads — the Mapping tree's undived source.
+fn mini_dome_with_bodies() -> (
+    UiPatchSurface,
+    std::rc::Rc<std::collections::BTreeMap<ArtifactLocation, String>>,
+) {
+    let mut surface = labelled(mini_dome_surface(false));
+    let dome = ArtifactLocation::file("/dome/dome.map2d.json");
+    let doors = ArtifactLocation::file("/doors/doors.map2d.json");
+    let mut bodies = std::collections::BTreeMap::new();
+    bodies.insert(dome.clone(), mini_dome_text("dome/dome.map2d.json"));
+    bodies.insert(doors.clone(), mini_dome_text("doors/doors.map2d.json"));
+    for fixture in &mut surface.fixtures {
+        fixture.mapping_artifact = Some(if fixture.label == "dome" {
+            dome.clone()
+        } else {
+            doors.clone()
+        });
+    }
+    (surface, std::rc::Rc::new(bodies))
+}
+
 /// The ready-project studio view with the mini-dome patch surface on its
 /// editor pane, so the workbench's Fixtures/Outputs docks render real.
 fn view_with_surface(selection: Option<UiPatchTarget>) -> UiStudioView {
@@ -73,9 +111,11 @@ fn view_with_surface(selection: Option<UiPatchTarget>) -> UiStudioView {
 
 /// Through the shell, like production: route-view in, workbench out.
 fn workbench_story(project_view: ProjectView) -> Element {
-    let selection = matches!(project_view, ProjectView::Mapping).then(|| UiPatchTarget::Instance {
-        node: NodeId::new(2),
-        path: "/sector/2".to_string(),
+    let selection = matches!(project_view, ProjectView::Mapping | ProjectView::Patch).then(|| {
+        UiPatchTarget::Instance {
+            node: NodeId::new(2),
+            path: "/sector/2".to_string(),
+        }
     });
     rsx! {
         div { class: "tw:flex tw:h-[720px] tw:flex-col",
@@ -101,7 +141,7 @@ fn dock_frame(body: Element) -> Element {
 }
 
 #[story(
-    description = "The Fixtures panel on the mini-dome: fixture rows with object-colour swatches, instance rows with mapped dots and port-named channel chips (text + position — the one colour language leaves ports uncoloured). Sector 2 selected."
+    description = "The Tree panel at RESOLVED grain (the Patching view's tree, grain-follows-activity): fixture rows with object-colour swatches, instance rows with mapped dots and port-named channel chips (text + position — the one colour language leaves ports uncoloured). Sector 2 selected."
 )]
 fn fixtures_panel_mini_dome() -> Element {
     dock_frame(rsx! {
@@ -111,25 +151,36 @@ fn fixtures_panel_mini_dome() -> Element {
                 node: NodeId::new(2),
                 path: "/sector/2".to_string(),
             }),
+            grain: TreeGrain::Resolved,
             on_action: move |_| {},
         }
     })
 }
 
 #[story(
-    description = "The Fixtures panel while DIVED into the dome fixture (G1): the module row is the tree level above the fixtures, and the dived fixture grows its FULL shape tree — the sector repeat group (×5) with its inner path as a nested child row, the inner item selected by its exact ShapePath. Rows select through the shared editor session; the doors fixture keeps its instance rows beside the dive."
+    description = "The Tree panel at AUTHORED grain, UNDIVED (the Mapping view's tree): every fixture shows its authored structure from its loaded body — objects with repeat interiors as static rows, no wire chips (those are Patching information now). The shared patch selection /sector/2 highlights the sector object by its sticky id — the derived authored↔resolved bridge, not a second selection."
+)]
+fn fixtures_panel_mapping_authored() -> Element {
+    let (surface, bodies) = mini_dome_with_bodies();
+    dock_frame(rsx! {
+        FixturesPanel {
+            surface: Some(surface),
+            selection: Some(UiPatchTarget::Instance {
+                node: NodeId::new(2),
+                path: "/sector/2".to_string(),
+            }),
+            grain: TreeGrain::Authored,
+            bodies,
+            on_action: move |_| {},
+        }
+    })
+}
+
+#[story(
+    description = "The Tree panel at AUTHORED grain while DIVED into the dome fixture (G1): the module row is the tree level above the fixtures, and the dived fixture grows its FULL shape tree — the sector repeat group (×5) with its inner path as a nested child row, the inner item selected by its exact ShapePath. Rows select through the shared editor session; the undived doors fixture shows its own authored structure statically from its body."
 )]
 fn fixtures_panel_dived_dome_tree() -> Element {
-    let example = lpa_studio_core::app::home::embedded_example("examples/mini-dome")
-        .expect("mini-dome embedded");
-    let bytes = example
-        .files
-        .iter()
-        .find(|(path, _)| *path == "dome/dome.map2d.json")
-        .map(|(_, bytes)| *bytes)
-        .expect("dome map2d");
-    let doc =
-        Map2dDoc::from_json(std::str::from_utf8(bytes).expect("utf8 map2d")).expect("dome parses");
+    let doc = Map2dDoc::from_json(&mini_dome_text("dome/dome.map2d.json")).expect("dome parses");
     let session = use_signal(move || {
         let mut session = MapEditorSession::new(doc.clone());
         // The repeat's inner path — the row the flat tree used to hide.
@@ -138,10 +189,13 @@ fn fixtures_panel_dived_dome_tree() -> Element {
             .select_only_path(ShapePath::root(0).child(0));
         session
     });
+    let (surface, bodies) = mini_dome_with_bodies();
     dock_frame(rsx! {
         FixturesPanel {
-            surface: Some(labelled(mini_dome_surface(false))),
+            surface: Some(surface),
             selection: None,
+            grain: TreeGrain::Authored,
+            bodies,
             dive: Some((NodeId::new(2), session)),
             on_action: move |_| {},
         }
@@ -149,13 +203,14 @@ fn fixtures_panel_dived_dome_tree() -> Element {
 }
 
 #[story(
-    description = "The Fixtures panel at range grain (the peach): no instance rows — one honest 0..N range row per fixture with its wire-window chips, the reversed half wearing ‹rev."
+    description = "The Tree panel at range grain (the peach, RESOLVED): no instance rows — one honest 0..N range row per fixture with its wire-window chips, the reversed half wearing ‹rev."
 )]
 fn fixtures_panel_peach_range() -> Element {
     dock_frame(rsx! {
         FixturesPanel {
             surface: Some(labelled(peach_surface())),
             selection: None,
+            grain: TreeGrain::Resolved,
             on_action: move |_| {},
         }
     })
@@ -188,6 +243,40 @@ fn workbench_nodes_view() -> Element {
 )]
 fn workbench_mapping_view() -> Element {
     workbench_story(ProjectView::Mapping)
+}
+
+#[story(
+    description = "The workbench's Patch view (R5, pass 2): Nodes · Map · Patch in the band, the RESOLVED tree left (instances + wire chips — grain follows activity), Outputs attached right, and the patching center — the SLIMMED toolbar (undo/redo and the placed count; the verbs moved down beside the thing they act on, D4) over the one project canvas, with THE panel as the center's bottom region (D8 — always present). Sector 2 of an auto-mapped fixture is selected, so the panel shows the lean state and its keys row: the grammar is printed in the panel now, and the help overlay is gone."
+)]
+fn workbench_patching_view() -> Element {
+    workbench_story(ProjectView::Patch)
+}
+
+#[story(
+    description = "The mobile fold in the PATCHING view with the Outputs panel summoned — the destination of the object-first invitation below 820px (round 3, #6): the ports come to the user rather than an inline dropdown, and picking there completes the assign and dismisses the panel. The Patching view's Outputs panel carries the walk-up grammar (free runs are click targets), which is what makes it a pick surface rather than a readout. The surface is the walk-up pose: manual fixtures, sector 4 still waiting, IO13 empty. At lg the same mount shows the ordinary Patch workbench with that object selected — the invitation state in place."
+)]
+fn workbench_patching_mobile_pick() -> Element {
+    rsx! {
+        div { class: "tw:flex tw:h-[640px] tw:flex-col",
+            WorkbenchFrame {
+                view: WorkbenchView::Patching,
+                panes: vec![project_synced_pane_view()],
+                project_editor: project_editor_fixture(ProjectSyncPhase::Ready)
+                    .with_patch_surface(
+                        Some(labelled(mini_dome_walkup_surface())),
+                        Some(UiPatchTarget::Instance {
+                            node: NodeId::new(2),
+                            path: "/sector/4".to_string(),
+                        }),
+                    ),
+                lens_card: Some(simulator_lens_card()),
+                running: true,
+                hrefs: WorkbenchHrefs::inert_all(),
+                initial_summoned: Some(super::PanelId::Outputs),
+                on_action: move |_| {},
+            }
+        }
+    }
 }
 
 #[story(
@@ -405,6 +494,39 @@ fn props_stack_fixture_selected() -> Element {
             surface: props_stack_surface(),
             dived: false,
             selection: Some(UiPatchTarget::Fixture { node: NodeId::new(2) }),
+        }
+    }
+}
+
+#[story(
+    description = "The props stack with a PORT selected (the Patching view's wire leaves, B′ deepest-first): the port's readout card on top — 1-based wire span, used/free, cell count, next free lamp — its OUTPUT card unwinding beneath, module strip at the bottom. Readout cards: the verbs act on selections, never card fields."
+)]
+fn props_stack_port_selected() -> Element {
+    rsx! {
+        PropsStackStory {
+            doc: Map2dDoc::new(),
+            surface: labelled(mini_dome_surface(false)),
+            dived: false,
+            selection: Some(UiPatchTarget::Port {
+                node: NodeId::new(10),
+                port: 0,
+            }),
+        }
+    }
+}
+
+#[story(
+    description = "The props stack with a CELL selected: the wire-window card on top (producer path, port-named wire span, source span, reversed flag when set) over its port card. The contested treatment lives in the Outputs panel's bars; here the card states it plainly."
+)]
+fn props_stack_cell_selected() -> Element {
+    rsx! {
+        PropsStackStory {
+            doc: Map2dDoc::new(),
+            surface: labelled(mini_dome_surface(false)),
+            dived: false,
+            selection: Some(UiPatchTarget::Cell {
+                id: "dome:0:60:0".to_string(),
+            }),
         }
     }
 }

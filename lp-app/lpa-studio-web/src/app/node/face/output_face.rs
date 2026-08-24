@@ -99,8 +99,11 @@ pub fn OutputFace(
         }
         // The patch, under the wires that carry it: what each port is
         // actually driving, cell by cell (D34a). Read-only — the document
-        // is edited as text.
-        if let Some(bay) = face.patch.clone() {
+        // is edited as text. A bay with no cell on it says nothing the
+        // wire rows above do not already say, so the card leaves it out —
+        // the DTO still carries it, because free port space is what the
+        // Patching view's walk-up assignment clicks.
+        if let Some(bay) = face.patch.clone().filter(|bay| !bay.is_empty()) {
             PatchBaySection { bay }
         }
     }

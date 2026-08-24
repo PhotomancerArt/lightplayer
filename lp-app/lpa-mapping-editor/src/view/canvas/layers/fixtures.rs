@@ -3,13 +3,21 @@
 //! between the dot grid and the placed doc layers.
 //!
 //! Sprites are plain data (the shell builds them from its surface; this
-//! crate stays project-unaware), and the layer is purely visual:
-//! `pointer-events: none` throughout — the canvas-level hit test owns
-//! every fixture gesture (SVG child delegation is unreliable under
-//! Dioxus's event delegation, 07a39242f).
+//! crate stays project-unaware), and the layer is purely visual: the
+//! canvas-level hit test owns every fixture gesture (SVG child delegation is
+//! unreliable under Dioxus's event delegation, 07a39242f). The one exception
+//! is the object HULLS, which take `pointer-events` back so the browser can
+//! draw their `:hover` state for free — they still carry no handlers, and
+//! their events bubble to the canvas root like any other.
+//!
+//! Objects are THINGS here (G1 round 3): each one draws a padded convex hull
+//! of its own lamps — faint at rest, lifted on hover, accent-stroked when
+//! selected — and the WHOLE hull is the click target, which is what makes a
+//! 3 px lamp on a dome reachable at all.
 
 use dioxus::prelude::*;
 
+use super::hull::{hull_path_d, point_in_polygon};
 use crate::editor_core::placement::Placement;
 
 /// Padding around a fixture's own-space bounds for hit-testing, in doc
@@ -38,8 +46,43 @@ pub struct FixtureSprite {
     /// False renders the dashed "not yet arranged" frame.
     pub arranged: bool,
     pub selected: bool,
-    /// Selected instance's `(start, lamps)` window, for lamp rings.
+    /// Selected instance's `(start, lamps)` window, for lamp rings. Only
+    /// drawn when the selection has no HULL to outline instead — the hull
+    /// IS the selection indicator wherever one exists (G1 round 3).
     pub selected_range: Option<(u32, u32)>,
+    /// This fixture's objects as clickable bodies, in the shell's own order
+    /// (a pick reports the INDEX into this list). Empty for a fixture whose
+    /// document names no objects, or whose body draws no lamps to hull.
+    pub objects: Vec<SpriteObject>,
+}
+
+/// One object of a fixture, as the canvas draws and hit-tests it.
+///
+/// The crate stays project-unaware: an object here is a closed outline, a
+/// name for the tooltip, and a selected flag. What it MEANS — an instance
+/// path, a lamp range — is the shell's business, recovered from the index
+/// this sprite lists it at.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpriteObject {
+    /// Human name, for the hover title only.
+    pub label: String,
+    /// The padded hull polygon in the sprite's OWN space, closed implicitly.
+    /// Fewer than three points means "no body" — nothing is drawn and
+    /// nothing hits.
+    pub hull: Vec<[f32; 2]>,
+    /// `(first lamp, count)` in the fixture's TRUE numbering — the same
+    /// space [`nearest_lamp`] answers in, so overlapping hulls can be broken
+    /// apart by the lamp the pointer is actually closest to.
+    pub lamps: (u32, u32),
+    pub selected: bool,
+}
+
+impl SpriteObject {
+    /// Does this object own `lamp` (fixture numbering)?
+    fn owns(&self, lamp: u32) -> bool {
+        let (start, count) = self.lamps;
+        lamp >= start && lamp < start.saturating_add(count)
+    }
 }
 
 /// The three honest fixture bodies (the arrange canvas's vocabulary).
@@ -57,10 +100,32 @@ pub enum FixtureBody {
 /// What a fixture gesture asks of the shell. The crate keeps only
 /// ephemeral pointer state; the shell owns the override lifecycle and
 /// feeds effective placements back through the sprites prop.
+/// What a tap on the canvas actually hit: the sprite, and — when its body
+/// draws real lamps — the TRUE lamp index nearest the pointer.
+///
+/// The lamp is what lets the shell name an OBJECT rather than a whole
+/// fixture (the patching view's Q10 ruling): sprites already carry true
+/// indexes for the live-fill feed, and a click is a claim about one lamp.
+/// `None` for a placeholder or strip body, where the sprite genuinely knows
+/// nothing finer than "this fixture".
+///
+/// Since G1 round 3 the HULL answers first: `object` is the index into
+/// [`FixtureSprite::objects`] whose body contains the point, which is how a
+/// click lands on an object without hitting a 3 px lamp. The lamp stays —
+/// it is the tiebreak between overlapping hulls, and the only answer where
+/// no hull covers the point at all.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FixturePick {
+    pub key: String,
+    pub lamp: Option<u32>,
+    /// Index into the sprite's object list, when a hull claimed the point.
+    pub object: Option<usize>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum FixtureEvent {
     /// Tap on a fixture selects it; a background tap deselects (`None`).
-    Select(Option<String>),
+    Select(Option<FixturePick>),
     /// Live during a drag (`commit: false`), once at pointer-up
     /// (`commit: true`) — one committed move per gesture.
     Move {
@@ -71,6 +136,32 @@ pub enum FixtureEvent {
     /// Double-click on a fixture when not dived, or on a NEIGHBOUR while
     /// dived (D2: dive-switch).
     Dive(String),
+}
+
+/// The display-subsample stride: with `total` true lamps drawn as `drawn`
+/// points, drawn point `i` stands for true lamp `i * stride`. Never 0.
+pub(crate) fn display_stride(total: u32, drawn: usize) -> usize {
+    (total as usize).div_ceil(drawn.max(1)).max(1)
+}
+
+#[cfg(test)]
+mod stride_tests {
+    use super::display_stride;
+
+    /// The true-index mapping under subsampling — the off-by-stride trap
+    /// the sprite live colors (and the instance rings) both step around.
+    #[test]
+    fn display_stride_maps_drawn_points_to_true_lamps() {
+        assert_eq!(display_stride(150, 150), 1, "no subsample = identity");
+        assert_eq!(display_stride(4000, 2000), 2);
+        assert_eq!(display_stride(4001, 2000), 3, "ceil, never floor");
+        assert_eq!(
+            display_stride(10, 0),
+            10,
+            "empty draw never divides by zero"
+        );
+        assert_eq!(display_stride(0, 0), 1, "degenerate stays a valid stride");
+    }
 }
 
 /// Topmost sprite whose (padded) placed frame contains the project-space
@@ -87,6 +178,72 @@ pub(crate) fn hit_fixture<'a>(
             && ly >= by - HIT_PAD
             && ly <= by + bh + HIT_PAD
     })
+}
+
+/// The TRUE lamp index nearest a project-space point inside `sprite`, when
+/// its body draws lamps at all.
+///
+/// Drawn point `i` stands for true lamp `i * stride` (the display
+/// subsample), so the answer survives the stride: the index this returns is
+/// always a real lamp of the fixture's own document, never a drawn slot.
+/// Under subsampling only every k-th lamp is reachable — the shell resolves
+/// the returned lamp to the OBJECT that owns it, and an object shorter than
+/// the stride is sub-pixel on screen anyway.
+///
+/// Nearest, not hit-tested: the pointer is compared against the drawn points
+/// in the sprite's OWN space (where the lamp radius is drawn), so a click in
+/// the gap between two lamps still names the one the user was aiming at.
+pub(crate) fn nearest_lamp(sprite: &FixtureSprite, project_point: [f64; 2]) -> Option<u32> {
+    let FixtureBody::Lamps { points, total } = &sprite.body else {
+        return None;
+    };
+    let stride = display_stride(*total, points.len());
+    let [lx, ly] = sprite.placement.inverse(project_point);
+    let (index, _) = points
+        .iter()
+        .enumerate()
+        .map(|(index, point)| {
+            let dx = f64::from(point[0]) - lx;
+            let dy = f64::from(point[1]) - ly;
+            (index, dx * dx + dy * dy)
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))?;
+    u32::try_from(index * stride).ok()
+}
+
+/// Which OBJECT of `sprite` a project-space point lands on: the index into
+/// [`FixtureSprite::objects`] whose padded hull contains it.
+///
+/// The whole hull is the target, so a click in the middle of a dome sector
+/// selects that sector without going anywhere near a lamp. Two rules keep
+/// that honest where bodies overlap (a repeat whose instances interleave, an
+/// object drawn inside another's convex span):
+///
+/// - a hull that contains the point AND owns the nearest lamp wins outright
+///   — the lamp is the finest fact available, so it breaks the tie;
+/// - otherwise the LAST containing hull wins, matching the paint order
+///   (topmost) the rest of the canvas resolves overlaps by.
+///
+/// `None` = no body covers the point, and the caller falls back to the
+/// nearest lamp exactly as before.
+pub(crate) fn hit_object(sprite: &FixtureSprite, project_point: [f64; 2]) -> Option<usize> {
+    if sprite.objects.is_empty() {
+        return None;
+    }
+    let owner = nearest_lamp(sprite, project_point)
+        .and_then(|lamp| sprite.objects.iter().position(|object| object.owns(lamp)));
+    let local = sprite.placement.inverse(project_point);
+    let mut found = None;
+    for (index, object) in sprite.objects.iter().enumerate() {
+        if !point_in_polygon(&object.hull, local) {
+            continue;
+        }
+        if owner == Some(index) {
+            return Some(index);
+        }
+        found = Some(index);
+    }
+    found
 }
 
 /// Has this press travelled far enough (CSS pixels) to count as a drag?
@@ -157,6 +314,13 @@ fn FixtureGroup(
 ) -> Element {
     let [bx, by, bw, bh] = sprite.bounds;
     let selected = sprite.selected;
+    // The display-subsample stride: drawn lamp `index` is TRUE lamp
+    // `index * stride` — the ring windows and the sprite live-color
+    // attributes both need the real index.
+    let lamp_stride = match &sprite.body {
+        FixtureBody::Lamps { points, total } => display_stride(*total, points.len()),
+        _ => 1,
+    };
     // Screen-constant strokes/text inside a scaled group: counter the
     // group scale on top of the camera scale.
     let upp = units_per_px / sprite.placement.s.max(1e-6);
@@ -199,8 +363,30 @@ fn FixtureGroup(
                 "{sprite.label}"
             }
             if !body_hidden {
+                // The OBJECT BODIES, under the lamps: one path each, faint at
+                // rest, lifted on hover, accent-stroked when selected. These
+                // are the only children that take pointer events — purely so
+                // the browser can run `:hover` itself; they carry no handlers
+                // and the canvas root still owns every gesture. The hover and
+                // selected looks live in `.lpme-obj-hull` (style.css), so a
+                // pointer move repaints without re-rendering a thing, which
+                // is what keeps 150 dome objects cheap.
+                for (index, object) in sprite.objects.iter().enumerate() {
+                    if object.hull.len() >= 3 {
+                        path {
+                            key: "hull-{index}",
+                            class: if object.selected { "lpme-obj-hull lpme-obj-hull-on" } else { "lpme-obj-hull" },
+                            d: hull_path_d(&object.hull),
+                            stroke_width: if object.selected { "{1.4 * upp}" } else { "{1.0 * upp}" },
+                            // Not a gesture hook — the canvas root owns
+                            // those — but the name the body stands for, so a
+                            // walk (or a story diff) can say which is which.
+                            "data-sprite-object": "{object.label}",
+                        }
+                    }
+                }
                 match &sprite.body {
-                    FixtureBody::Lamps { points, total } => rsx! {
+                    FixtureBody::Lamps { points, .. } => rsx! {
                         for (index, point) in points.iter().enumerate() {
                             circle {
                                 key: "{index}",
@@ -209,13 +395,17 @@ fn FixtureGroup(
                                 r: "{lamp_r}",
                                 fill: "{sprite.color}",
                                 fill_opacity: "0.9",
+                                // The live-fill hooks (host sprite feed):
+                                // sprite key + TRUE lamp index.
+                                "data-sprite-fixture": "{sprite.key}",
+                                "data-sprite-lamp": "{index * lamp_stride}",
                             }
                         }
                         if let Some((start, lamps)) = sprite.selected_range {
                             // Ring the selected instance's lamps (subsample-aware:
                             // ring what is drawn).
                             {
-                                let stride = (*total as usize).div_ceil(points.len().max(1)).max(1);
+                                let stride = lamp_stride;
                                 rsx! {
                                     for (index, point) in points.iter().enumerate() {
                                         if (index * stride) as u32 >= start && ((index * stride) as u32) < start + lamps {
@@ -303,6 +493,7 @@ mod tests {
             color: "#fff".to_string(),
             placement,
             bounds,
+            objects: Vec::new(),
             body: FixtureBody::Placeholder { lamps: 10 },
             arranged: true,
             selected: false,
@@ -350,6 +541,70 @@ mod tests {
             Some("under"),
             "outside the topmost pad, the sprite underneath answers"
         );
+    }
+
+    /// A tap names the TRUE lamp nearest it, in the sprite's own space and
+    /// through its placement — the fact the shell turns into an OBJECT
+    /// selection (Q10).
+    #[test]
+    fn nearest_lamp_names_a_true_index_through_the_placement() {
+        let mut sprite = sprite("a", Placement::IDENTITY, [0.0, 0.0, 30.0, 0.0]);
+        sprite.body = FixtureBody::Lamps {
+            points: vec![[0.0, 0.0], [10.0, 0.0], [20.0, 0.0], [30.0, 0.0]],
+            total: 4,
+        };
+        assert_eq!(nearest_lamp(&sprite, [0.0, 0.0]), Some(0));
+        assert_eq!(nearest_lamp(&sprite, [21.0, 3.0]), Some(2));
+        assert_eq!(
+            nearest_lamp(&sprite, [100.0, 0.0]),
+            Some(3),
+            "a click past the end still names the lamp it was aiming at"
+        );
+
+        // Through a placement: the point is inverse-transformed first.
+        sprite.placement = Placement {
+            t: [100.0, 50.0],
+            r: 0.0,
+            s: 2.0,
+        };
+        assert_eq!(nearest_lamp(&sprite, [140.0, 50.0]), Some(2));
+    }
+
+    /// Display subsampling must not lose the true index: drawn point `i`
+    /// stands for lamp `i * stride`, so what comes back is always a lamp of
+    /// the fixture's own document (which is what an object span is measured
+    /// in) — never a drawn slot.
+    #[test]
+    fn nearest_lamp_survives_the_display_stride() {
+        let mut sprite = sprite("a", Placement::IDENTITY, [0.0, 0.0, 30.0, 0.0]);
+        // 4000 true lamps drawn as 2000 points: stride 2.
+        sprite.body = FixtureBody::Lamps {
+            points: (0..2000).map(|i| [i as f32, 0.0]).collect(),
+            total: 4000,
+        };
+        assert_eq!(display_stride(4000, 2000), 2);
+        assert_eq!(nearest_lamp(&sprite, [0.0, 0.0]), Some(0));
+        assert_eq!(nearest_lamp(&sprite, [7.0, 0.0]), Some(14), "7 * stride");
+        assert_eq!(nearest_lamp(&sprite, [1999.0, 0.0]), Some(3998));
+    }
+
+    /// Bodies that draw no lamps know nothing finer than "this fixture" —
+    /// and say so, so the shell can fall back to the fixture grain.
+    #[test]
+    fn a_lampless_body_names_no_lamp() {
+        let placeholder = sprite("a", Placement::IDENTITY, [0.0, 0.0, 30.0, 30.0]);
+        assert_eq!(nearest_lamp(&placeholder, [1.0, 1.0]), None);
+
+        let mut strip = placeholder.clone();
+        strip.body = FixtureBody::Strip { lamps: 60 };
+        assert_eq!(nearest_lamp(&strip, [1.0, 1.0]), None);
+
+        let mut empty = placeholder.clone();
+        empty.body = FixtureBody::Lamps {
+            points: Vec::new(),
+            total: 0,
+        };
+        assert_eq!(nearest_lamp(&empty, [1.0, 1.0]), None);
     }
 
     #[test]

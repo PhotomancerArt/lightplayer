@@ -5,15 +5,20 @@
 The project editor renders as the **workbench** (`src/app/workbench/`):
 a full-height PanelDock frame under ONE chrome band — each dock's
 attached panel tabs in a segment sized to its dock, the view tabs
-(Nodes · Map, as route suffixes) centered between them. Fixed-home
-panels (Tree | Device · Outputs · Props), radio per side with per-view
-memory; a collapsed side keeps its tab row as the reopen affordance;
-the Tree's body is view-keyed (node tree on Nodes, fixture tree on
-Map). Below 820px it folds to a summon toolbar; the open project's
-state lives on the site header's session·project control. See
+(Nodes · Map · Patch, as route suffixes; `/patching` and `/map` parse
+as aliases) centered between them. Fixed-home panels (Tree | Device ·
+Outputs · Props), radio per side with per-view memory; a collapsed side
+keeps its tab row as the reopen affordance; the Tree's body is
+view-keyed — node tree on Nodes, and the fixture tree's GRAIN follows
+the view (authored objects on Map, resolved instances with wire chips
+on Patch). The Patching view's center is the one project canvas with
+patch verbs, the selection pulse, and live sprite colors default-on.
+Below 820px it folds to a summon toolbar; the open project's state
+lives on the site header's session·project control. See
 `docs/adr/2026-08-12-studio-workbench-panel-dock.md` (amended
-2026-08-14) and
-`docs/adr/2026-08-19-single-session-web-and-session-control.md`.
+2026-08-14),
+`docs/adr/2026-08-19-single-session-web-and-session-control.md`, and
+`docs/adr/2026-08-20-patching-view-grain-follows-activity.md`.
 
 The web app owns Dioxus presentation. It renders `StudioView` panes and
 contextual `UiAction` controls, then dispatches those actions back into
