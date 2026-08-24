@@ -141,8 +141,8 @@
   with whole-hull hit targets; this spike explores the next step on three axes:
   <b>(1)</b> the outline itself — convex hull vs a morphological <b>offset-and-union</b>
   (buffer every lamp by r, union the discs) that respects concavity;
-  <b>(2)</b> the lamps — small circles vs sized dots vs lp2014-style <b>polygons</b>
-  (Voronoi cell ∩ disc) vs a hybrid;
+  <b>(2)</b> the lamps — round 2: the <b>fill/stroke model</b> (fill = what the LEDs light,
+  with lp2014-style directional beam wedges; stroke = the iconographic outline);
   <b>(3)</b> overlapping-object <b>selection</b> — shipped v1 vs KiCad-style menu vs
   click-to-cycle vs prefer-same-fixture. Section 4 composes the pieces into three
   complete design languages on the mini-dome. Geometry is real-ish: the mini-dome's
@@ -153,6 +153,9 @@
   <span class="lbl">outline r</span>
   <input type="range" id="padr" min="5" max="16" step="1" value="9">
   <span class="val" id="padr-v">9</span>
+  <span class="lbl">buffer</span>
+  <button id="b-line" title="offset from the polyline through lamp centres (smooth) — long jumps stay point-buffered">line</button>
+  <button id="b-disc" title="round 1: offset from per-lamp discs (scalloped)">discs</button>
   <span class="lbl">holes</span>
   <button id="b-holes" title="offset-union of a hollow shape has interior holes; fill = keep only outer loops">fill holes</button>
   <span class="lbl">smoothing</span>
@@ -172,7 +175,11 @@
   Same lamps, three treatments per row: the shipped <b>padded convex hull</b>, the
   <b>offset-union</b> (distance field, iso-contour at r, marching squares + Chaikin), and both
   <b>overlaid</b> — the hatched wedge is the area the convex hull claims but the object doesn't
-  occupy: dead click-target, and visually a lie about the shape. Drag <b>outline r</b> above;
+  occupy: dead click-target, and visually a lie about the shape. <b>Round 2 (gate ruling):</b>
+  union wins; the buffer now offsets from the <b>polyline through lamp centres</b> instead of
+  per-lamp discs, which kills the scalloped edge (flip <b>buffer: discs</b> above to see round
+  1's bumps; jumps longer than ~2.6× the local spacing stay point-buffered so gaps never
+  bridge). Drag <b>outline r</b> above;
   note the dome sectors are hollow strands, so the union honestly grows a hole
   (toggle <b>fill holes</b> to decide whether solidity should win). The thin spike at the dome apex is
   real shipped behaviour: the convex pad's miter clamp (4×r) flings needle-sharp corners — the union
@@ -190,23 +197,28 @@
 
 <!-- ============================ 2 ─ LAMPS ============================ -->
 <section data-sec="2">
-<h2><span class="num">2</span>Lamps — circles vs sized dots vs polygons vs hybrid</h2>
+<h2><span class="num">2</span>Lamps — the fill/stroke model: beams have a direction</h2>
 <p class="sub">
-  Yona: small circles read poorly at small sizes; lp2014 drew lamps as <b>polygons</b> (its
-  internal representation) — "might be better (though hard to decide which polygons in some
-  cases)". Derivation here: each lamp's polygon = its <b>Voronoi cell ∩ disc(R)</b>, R from the
-  local nearest-neighbour distance — dense runs tile into cells like lp2014, isolated lamps
-  stay round-ish, and no tessellation has to be authored. Bottom strip repeats every column at
-  <b>45% zoom</b> — the size where circles currently fall apart. The sparse scatter is the
-  "hard to decide" case on purpose.
+  <b>Round 2 (gate insight):</b> every round-1 treatment kept LEDs omnidirectional, but that's
+  not how they work — lp2014 drew LEDs as <b>triangles with a beam angle pointing in a
+  direction</b>, and when a strip wraps something, pointing <b>inward</b> conveys the shape.
+  Two concepts hide in "how do lamps look": the <b>FILL</b> (what the LEDs physically light —
+  points, discs, or directional wedges) and the <b>STROKE</b> (the iconographic outline that
+  makes the thing recognizable — §1's smooth union). Beam direction here is <b>derived</b>:
+  tangent along the strand, normal flipped toward the object's centroid (wrapped) or away
+  (outward-facing). An unordered scatter has no derivable direction at all — which is exactly
+  why objects (line, circle, grid, path…) should ultimately <b>provide</b> their fill+stroke,
+  with authored hints like "wraps a form" vs "faces the viewer" when derivation can't know.
 </p>
 <div class="cmp" id="s2-grid"></div>
 <div class="cmp" id="s2-zoom"></div>
-<p class="cap"><b>Reading it:</b> at far zoom, uniform circles thin into noise; <b>sized dots</b>
-  keep mass but stay a crowd; <b>polygons</b> fuse each object into a continuous lit body —
-  the strongest "this is one THING" signal — at the cost of invented geometry where spacing is
-  ambiguous (scatter row). <b>Hybrid</b> keeps the polygon body but marks the true emitter as a
-  bright core, so polygon-shape guesses cost less: the core is the truth, the cell is upholstery.</p>
+<div class="cmp" id="s2-composed"></div>
+<p class="cap"><b>Reading it:</b> omni dots (shipped) and the round-1 Voronoi hybrid say nothing
+  about orientation; <b>beams inward</b> makes the C-arc and dome sectors read as wrapped
+  surfaces — the lamps <i>explain</i> the stroke instead of just sitting on it; <b>beams
+  outward</b> is the same machinery for edge-lit rigs. The composed row is the model as it
+  would ship: stroke = iconographic outline, fill = the physically honest glyph. At 45% the
+  wedge fill keeps directionality readable exactly where circles dissolve.</p>
 </section>
 
 <!-- ============================ 3 ─ SELECTION ============================ -->
@@ -217,6 +229,9 @@
   and a door lying over a sector's base (two fixtures). Bodies are offset-union.
   <b>Click the canvas</b> — or use the sim buttons (headless capture uses them too). Shipped v1:
   whole hull is the target, a hull that also owns the nearest lamp wins, else last-painted.
+  <b>Round 2 (gate note: cycle is intuitive):</b> the new <b>cycle + hold/rclick menu</b> policy
+  keeps plain clicks on the cycle fast path and summons the candidate menu on press-and-hold
+  (~420ms) or right-click.
 </p>
 <div class="xstrip local" id="s3-modes">
   <span class="lbl">policy</span>
@@ -224,9 +239,11 @@
   <button data-mode="cycle">click-again-to-cycle</button>
   <button data-mode="menu">menu on ambiguity</button>
   <button data-mode="fixture">prefer same fixture</button>
+  <button data-mode="combo">cycle + hold/rclick menu</button>
   <span class="lbl" style="margin-left:10px">sim</span>
   <button id="sim-a">✕ A between comb teeth</button>
   <button id="sim-b">✕ B door-over-sector</button>
+  <button id="sim-hold">⊙ hold at A</button>
   <button id="s3-clear">clear selection</button>
 </div>
 <div class="wrap3" id="wrap3">
@@ -243,6 +260,8 @@
       <td>always explicit, teaches the stack — but a menu interrupts flow in dense scenes (dome base = every click)</td></tr>
   <tr><td>prefer same fixture</td><td>candidates from the currently-selected object's fixture win first, then v1 rules</td>
       <td>makes sector→sector walks frictionless — but it's a modifier on v1, not an answer to cold ambiguity</td></tr>
+  <tr><td>cycle + hold/rclick menu</td><td><b>round 2 (gate note):</b> plain click = v1-then-cycle; press-and-hold ~420ms or right-click = the candidate menu at that point</td>
+      <td>fast path stays zero-friction and reachable, the menu becomes an opt-in inspection tool instead of an interruption — cost is one more hidden gesture to learn</td></tr>
 </table>
 </section>
 
@@ -252,16 +271,17 @@
 <p class="sub">
   Everything composed: same scene, <b>sector 1 hovered</b>, <b>sector 3 selected</b>, door 1
   overlapping sector 3's base. <b>A</b> is a faithful reproduction of what shipped in pass 2.
-  <b>B</b> renders objects as tinted entities: offset-union body, per-object hue at rest,
-  polygon lamps, name chip on the body; the fixture frame demotes to a corner tag.
-  <b>C</b> pushes "solid" to the limit: opaque bodies with a drop shadow, lamps as lit cores —
-  objects read as physical tiles sitting on the canvas.
+  <b>B</b> renders objects as tinted entities: smooth line-buffer body, per-object hue at rest,
+  <b>round 2:</b> fill = inward beam wedges (§2), name chip on the body; the fixture frame
+  demotes to a corner tag. <b>C</b> pushes "solid" to the limit: opaque bodies with a drop
+  shadow, lamps as lit cores. <b>Gate ruling: B reads cleanest</b> — C kept only for contrast.
 </p>
 <div class="cmp" id="s4-grid"></div>
-<p class="cap"><b>What to judge:</b> does per-object hue at rest (B) help or is it noise vs the
-  app's calm neutral-at-rest rule (A)? Do polygon lamps + body read as ONE thing or as a
-  costume? Is C's opacity too heavy once live lamp colors play on top? (C's cores are where
-  live fill would land — the body would stay static.)</p>
+<p class="cap"><b>What to judge (round 2):</b> B with beam-wedge fill — do the wedges still read
+  once live lamp colors paint them (the wedge would carry the live color, the core stays the
+  emitter truth)? How much per-object hue survives into production — full hue at rest, or
+  neutral at rest with hue only on hover/selection? And do the on-body name chips scale to
+  ~150 dome objects, or do they need a zoom threshold?</p>
 </section>
 
 <footer>
@@ -270,18 +290,20 @@
   PNGs use <code>solo</code>; sims run on load.</p>
 <table class="dm">
   <tr><th>state</th><th>hash</th></tr>
-  <tr><td>§1 outlines, r=9 filled holes</td><td><code>#solo=1</code></td></tr>
+  <tr><td>§1 outlines, line buffer (round 2)</td><td><code>#solo=1</code></td></tr>
+  <tr><td>§1 round-1 disc buffer (scalloped)</td><td><code>#solo=1&amp;buf=disc</code></td></tr>
   <tr><td>§1 honest holes, r=7</td><td><code>#solo=1&amp;pad=7&amp;holes=0</code></td></tr>
-  <tr><td>§2 lamp styles</td><td><code>#solo=2</code></td></tr>
+  <tr><td>§2 fill/stroke beam model</td><td><code>#solo=2</code></td></tr>
   <tr><td>§3 menu open at door/sector</td><td><code>#solo=3&amp;mode=menu&amp;sim=b</code></td></tr>
   <tr><td>§3 cycle, second click</td><td><code>#solo=3&amp;mode=cycle&amp;sim=a2</code></td></tr>
+  <tr><td>§3 combo: hold summons menu</td><td><code>#solo=3&amp;mode=combo&amp;sim=hold</code></td></tr>
   <tr><td>§4 three languages</td><td><code>#solo=4</code></td></tr>
 </table>
 </footer>
 
 <script>
 /* =============================== state =============================== */
-const S = { pad: 9, holes: true, smooth: true, mode: 'v1', solo: '' };
+const S = { pad: 9, holes: true, smooth: true, buffer: 'line', mode: 'v1', solo: '' };
 
 /* =============================== geometry ============================ */
 /* mini-dome sector strands (prior spike's flattened dome), scaled */
@@ -410,11 +432,31 @@ function unionLoops(pts, r, opts={}) {
   for (const p of pts) { x0=Math.min(x0,p[0]); x1=Math.max(x1,p[0]);
                          y0=Math.min(y0,p[1]); y1=Math.max(y1,p[1]); }
   x0-=m; y0-=m; x1+=m; y1+=m;
+  /* line-buffer mode (Yona §1 gate note): offset from the POLYLINE through
+     lamp centres, not from per-lamp discs — kills the scalloped "string of
+     pearls" edge. Segments much longer than the local spacing are jumps
+     (comb spine→tooth), not strand runs: those stay point-buffered so the
+     buffer never bridges a gap the wire doesn't. */
+  const segsL = [];
+  if ((opts.buffer ?? S.buffer) === 'line' && pts.length > 1) {
+    const lens = [];
+    for (let i=0; i<pts.length-1; i++)
+      lens.push(Math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1]));
+    const med = [...lens].sort((a,b)=>a-b)[Math.floor(lens.length/2)] || 0;
+    for (let i=0; i<pts.length-1; i++)
+      if (lens[i] <= Math.max(med*2.6, 1)) segsL.push([pts[i], pts[i+1]]);
+  }
   const nx=Math.ceil((x1-x0)/cell)+1, ny=Math.ceil((y1-y0)/cell)+1;
   const F = new Float32Array(nx*ny);
   for (let j=0; j<ny; j++) for (let i=0; i<nx; i++) {
     const x=x0+i*cell, y=y0+j*cell; let d=1/0;
     for (const p of pts) { const dx=x-p[0], dy=y-p[1], dd=dx*dx+dy*dy; if (dd<d) d=dd; }
+    for (const [a,b] of segsL) {
+      const vx=b[0]-a[0], vy=b[1]-a[1], L2=vx*vx+vy*vy || 1e-9;
+      let t=((x-a[0])*vx+(y-a[1])*vy)/L2; t = t<0?0 : t>1?1 : t;
+      const dx=x-(a[0]+vx*t), dy=y-(a[1]+vy*t), dd=dx*dx+dy*dy;
+      if (dd<d) d=dd;
+    }
     F[j*nx+i] = Math.sqrt(d)-r;
   }
   /* marching squares → segment soup */
@@ -539,6 +581,37 @@ function lampCells(pts, opts={}) {
     });
   });
 }
+/* ------- beam model: per-lamp direction from strand tangent ------- */
+function beamDirs(pts) {
+  const n=pts.length; let cx=0, cy=0;
+  for (const p of pts) { cx+=p[0]; cy+=p[1]; }
+  cx/=n; cy/=n;
+  return pts.map((p,i)=>{
+    const a=pts[Math.max(0,i-1)], b=pts[Math.min(n-1,i+1)];
+    let tx=b[0]-a[0], ty=b[1]-a[1];
+    const L=Math.hypot(tx,ty)||1e-6; tx/=L; ty/=L;
+    let nx=-ty, ny=tx;
+    /* flip the normal toward the object's centroid = "wraps a form" */
+    if ((cx-p[0])*nx+(cy-p[1])*ny < 0) { nx=-nx; ny=-ny; }
+    return [nx,ny,tx,ty];
+  });
+}
+/* lp2014-style LED triangles: apex at the emitter, base at the beam's far
+   end (a beam spreads), plus a small emitter core dot. side=1 inward
+   (wrapped), side=-1 outward. */
+function lampWedges(o, side=1, len=9, half=4.4) {
+  const ds=beamDirs(o.pts);
+  return o.pts.map((p,i)=>{
+    const [nx,ny,tx,ty]=ds[i];
+    const bx=nx*side, by=ny*side;
+    const fx=p[0]+bx*len, fy=p[1]+by*len;
+    return `<polygon points="${p[0].toFixed(1)},${p[1].toFixed(1)} `+
+      `${(fx+tx*half).toFixed(1)},${(fy+ty*half).toFixed(1)} `+
+      `${(fx-tx*half).toFixed(1)},${(fy-ty*half).toFixed(1)}" `+
+      `fill="${o.color}" fill-opacity=".5"/>`+
+      `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="1.8" fill="${o.color}"/>`;
+  }).join('');
+}
 function sizedR(pts, i, lo=2, hi=7) {
   let nn=1/0;
   for (let k=0;k<pts.length;k++) { if (k===i) continue;
@@ -550,6 +623,8 @@ function sizedR(pts, i, lo=2, hi=7) {
 const CSS = getComputedStyle(document.documentElement);
 const C = n => CSS.getPropertyValue(n).trim();
 const SECTOR_COLOR = C('--obj-0'), DOOR_COLOR = C('--obj-2');
+const mix = (hex,a) => { const n=parseInt(hex.slice(1),16);
+  return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
 
 function domeObjects() {
   const objs = [];
@@ -634,24 +709,38 @@ function renderS2() {
   const sector = { fx:'mini_dome', name:'sector 2', color:SECTOR_COLOR,
     pts: sampleAlong(RAW_SECTORS[2].map(TX), 40).map(p=>[p[0]-70, p[1]-215]) };
   const door = { fx:'doors', name:'door 0', color:DOOR_COLOR,
-    pts: sampleAlong(RAW_DOORS[0].map(TX), 9).map(p=>[p[0]-100, p[1]-330+215-70+30]) };
-  /* place door under the sector chunk */
-  door.pts = sampleAlong(RAW_DOORS[0].map(TX), 9).map(p=>[p[0]-115, p[1]-190]);
-  const scatter = { fx:'panel', name:'scatter', color:C('--obj-3'),
-    pts: SCATTER.map(p=>[p[0]+10, p[1]+220]) };
-  const objs = [sector, door, scatter];
-  const modes = [['dots','current · r 2.2 circles'],['sized','sized dots · r ∝ local density'],
-                 ['poly','polygons · voronoi ∩ disc'],['hybrid','hybrid · cell + emitter core']];
+    pts: sampleAlong(RAW_DOORS[0].map(TX), 9).map(p=>[p[0]-115, p[1]-190]) };
+  const carc = { fx:'arc', name:'C-arc', color:C('--obj-5'),
+    pts: cArcPts().map(p=>[p[0]*.72+30, p[1]*.72+195]) };
+  const objs = [sector, door, carc];
   const W=210, H=400;
-  const inner = mode => objs.map(o=>lampMarkup(o, mode)).join('');
-  document.getElementById('s2-grid').innerHTML = modes.map(([m,t])=>
+  const inner = mode => objs.map(o=>{
+    if (mode==='in')  return lampWedges(o, 1);
+    if (mode==='out') return lampWedges(o, -1);
+    return lampMarkup(o, mode);
+  }).join('');
+  const stroke = () => objs.map(o=>
+    `<path d="${loopsD(unionLoops(o.pts, S.pad))}" fill-rule="evenodd"
+       fill="${mix(o.color,.05)}" stroke="${mix(o.color,.45)}" stroke-width="1.2"/>`).join('');
+  const cell = (t, body) =>
     `<div class="cell"><h3>${t}</h3>
-     <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${inner(m)}</svg></div>`).join('');
-  document.getElementById('s2-zoom').innerHTML = modes.map(([m,t])=>
-    `<div class="cell"><h3>45% · ${m}</h3>
+     <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${body}</svg></div>`;
+  const mini = (t, body) =>
+    `<div class="cell"><h3>${t}</h3>
      <svg width="${(W*.45+8).toFixed(0)}" height="${(H*.45+8).toFixed(0)}"
        viewBox="0 0 ${(W*.45+8).toFixed(0)} ${(H*.45+8).toFixed(0)}">
-       <g transform="translate(4,4) scale(.45)">${inner(m)}</g></svg></div>`).join('');
+       <g transform="translate(4,4) scale(.45)">${body}</g></svg></div>`;
+  const modes = [['dots','omni dots · shipped'],['hybrid','round 1 · voronoi hybrid (omni)'],
+                 ['in','beams inward · wrapped form'],['out','beams outward · edge-lit']];
+  document.getElementById('s2-grid').innerHTML =
+    modes.map(([m,t])=>cell(t, inner(m))).join('');
+  document.getElementById('s2-zoom').innerHTML =
+    modes.map(([m,t])=>mini('45% · '+m, inner(m))).join('');
+  document.getElementById('s2-composed').innerHTML =
+    cell('composed · stroke + beam fill', stroke()+inner('in')) +
+    mini('45% · composed beams', stroke()+inner('in')) +
+    cell('composed · stroke + dot fill', stroke()+inner('dots')) +
+    mini('45% · composed dots', stroke()+inner('dots'));
 }
 
 /* =============================== §3 selection ======================== */
@@ -704,7 +793,7 @@ function click3(x, y, viaSim) {
     renderS3(); return;
   }
   let pick;
-  if (mode==='cycle' && S3.lastClick
+  if ((mode==='cycle' || mode==='combo') && S3.lastClick
       && Math.hypot(S3.lastClick.x-x, S3.lastClick.y-y)<9) {
     const order=cands.map(c=>c.i);
     const at=order.indexOf(S3.sel);
@@ -761,6 +850,21 @@ function renderS3() {
   }
 }
 function closeMenuDom(){ const m=document.querySelector('.dmenu'); if (m && !S3.menu) m.remove(); }
+/* combo mode: hold (or right-click) summons the menu instead of interrupting
+   the plain-click fast path */
+function openMenuAt(x, y, via) {
+  closeMenu();
+  const cands=candidatesAt(x,y);
+  if (!cands.length) { log3(`${via} (${x|0},${y|0}) → background — no menu`); renderS3(); return; }
+  if (cands.length===1) {
+    S3.sel=cands[0].i; S3.lastClick={x,y};
+    log3(`${via} (${x|0},${y|0}) → one body → <b>${SCENE3[cands[0].i].name}</b>`);
+    renderS3(); return;
+  }
+  S3.menu={x,y,cands};
+  log3(`${via} (${x|0},${y|0}) → <span class="amb">${cands.length} bodies</span> → menu`);
+  renderS3();
+}
 
 /* =============================== §4 languages ======================== */
 function renderS4() {
@@ -775,8 +879,6 @@ function renderS4() {
     return [x0-10,y0-10,x1-x0+20,y1-y0+20];
   };
   const [fx,fy,fw,fh]=frameOf(objs);
-  const mix=(hex,a)=>{ const n=parseInt(hex.slice(1),16);
-    return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
   const chip=(o,cls,tint)=>{ /* name chip at the object's centroid: on the body */
     let cx=0, cy=0;
     for (const p of o.pts) { cx+=p[0]; cy+=p[1]; }
@@ -816,7 +918,7 @@ function renderS4() {
     B+=`<path d="${loopsD(o.body)}" fill-rule="evenodd" fill="${fill}"
         stroke="${strk}" stroke-width="${s==='sel'?1.7:1.1}"/>`;
   });
-  objs.forEach((o,i)=>{ B+=lampMarkup({...o, color:tintOf(i)},'poly'); });
+  objs.forEach((o,i)=>{ B+=lampWedges({...o, color:tintOf(i)}, 1, 8, 3.8); });
   objs.forEach((o,i)=>{ B+=chip(o, st(i), tintOf(i)); });
 
   /* C — solid tiles */
@@ -841,7 +943,7 @@ function renderS4() {
     <svg width="${W}" height="${H}" viewBox="0 -6 ${W} ${H}">${inner}</svg></div>`;
   document.getElementById('s4-grid').innerHTML =
     cell('A — current (shipped pass 2)','convex + neutral', A) +
-    cell('B — tinted entities','union + polygon lamps + chips', B) +
+    cell('B — tinted entities','smooth body + inward beams + chips', B) +
     cell('C — solid tiles','opaque + lit cores', Cm);
 }
 
@@ -849,6 +951,8 @@ function renderS4() {
 function renderAll() {
   document.getElementById('padr').value=S.pad;
   document.getElementById('padr-v').textContent=S.pad;
+  document.getElementById('b-line').classList.toggle('on', S.buffer==='line');
+  document.getElementById('b-disc').classList.toggle('on', S.buffer==='disc');
   document.getElementById('b-holes').classList.toggle('on', S.holes);
   document.getElementById('b-smooth').classList.toggle('on', S.smooth);
   document.querySelectorAll('#s3-modes [data-mode]').forEach(b=>
@@ -861,6 +965,7 @@ function writeHash() {
   const p=new URLSearchParams();
   if (S.solo) p.set('solo',S.solo);
   if (S.pad!==9) p.set('pad',S.pad);
+  if (S.buffer!=='line') p.set('buf',S.buffer);
   if (!S.holes) p.set('holes','0');
   if (!S.smooth) p.set('smooth','0');
   if (S.mode!=='v1') p.set('mode',S.mode);
@@ -870,6 +975,7 @@ function readHash() {
   const p=new URLSearchParams(location.hash.slice(1));
   S.solo=p.get('solo')||'';
   S.pad=+(p.get('pad')||9);
+  S.buffer=p.get('buf')==='disc'?'disc':'line';
   S.holes=p.get('holes')!=='0';
   S.smooth=p.get('smooth')!=='0';
   S.mode=p.get('mode')||'v1';
@@ -878,6 +984,10 @@ function readHash() {
 
 document.getElementById('padr').addEventListener('input', e=>{
   S.pad=+e.target.value; writeHash(); renderAll(); });
+document.getElementById('b-line').addEventListener('click', ()=>{
+  S.buffer='line'; writeHash(); renderAll(); });
+document.getElementById('b-disc').addEventListener('click', ()=>{
+  S.buffer='disc'; writeHash(); renderAll(); });
 document.getElementById('b-holes').addEventListener('click', ()=>{
   S.holes=!S.holes; writeHash(); renderAll(); });
 document.getElementById('b-smooth').addEventListener('click', ()=>{
@@ -889,9 +999,30 @@ document.querySelectorAll('#s3-modes [data-mode]').forEach(b=>
     closeMenu(); writeHash(); renderAll(); }));
 document.getElementById('sim-a').addEventListener('click', ()=>click3(...SIM_A, true));
 document.getElementById('sim-b').addEventListener('click', ()=>click3(...SIM_B, true));
+document.getElementById('sim-hold').addEventListener('click', ()=>{
+  if (S.mode!=='combo') { S.mode='combo'; writeHash(); renderAll(); }
+  openMenuAt(...SIM_A, 'hold');
+});
 document.getElementById('s3-clear').addEventListener('click', ()=>{
   S3.sel=null; S3.lastClick=null; closeMenu(); log3('cleared'); renderS3(); });
+let holdTimer=null, holdFired=false;
+document.getElementById('svg3').addEventListener('pointerdown', e=>{
+  if (S.mode!=='combo' || e.button!==0) return;
+  const r=e.currentTarget.getBoundingClientRect();
+  const x=e.clientX-r.left, y=e.clientY-r.top;
+  holdFired=false;
+  holdTimer=setTimeout(()=>{ holdFired=true; openMenuAt(x, y, 'hold'); }, 420);
+});
+document.getElementById('svg3').addEventListener('pointerup', ()=>clearTimeout(holdTimer));
+document.getElementById('svg3').addEventListener('pointerleave', ()=>clearTimeout(holdTimer));
+document.getElementById('svg3').addEventListener('contextmenu', e=>{
+  if (S.mode!=='combo') return;
+  e.preventDefault();
+  const r=e.currentTarget.getBoundingClientRect();
+  openMenuAt(e.clientX-r.left, e.clientY-r.top, 'rclick');
+});
 document.getElementById('svg3').addEventListener('click', e=>{
+  if (holdFired) { holdFired=false; return; }
   const r=e.currentTarget.getBoundingClientRect();
   click3(e.clientX-r.left, e.clientY-r.top, false);
 });
@@ -901,4 +1032,5 @@ renderAll();
 if (sim==='a') click3(...SIM_A, true);
 if (sim==='a2') { click3(...SIM_A, true); click3(...SIM_A, true); }
 if (sim==='b') click3(...SIM_B, true);
+if (sim==='hold') openMenuAt(...SIM_A, 'hold');
 </script>
