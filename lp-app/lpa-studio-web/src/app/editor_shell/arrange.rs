@@ -24,7 +24,8 @@ use lpa_studio_core::{
 };
 use lpc_mapping::Bounds2d;
 
-use crate::app::node::lamp_view::fixture_live_colors;
+use crate::app::node::lamp_view::{UNLIT_RGB, fixture_live_colors};
+use crate::app::patch::patch_panel::srgb8;
 
 /// Display cap: a fixture with more lamps than this renders every k-th
 /// lamp (display subsampling only — dome-scale fixtures must not melt the
@@ -273,19 +274,37 @@ pub(crate) fn ProjectCanvasHost(
         let previous = sprite_live.peek().clone();
         let mut feeds = BTreeMap::new();
         for (key, node) in &nodes {
-            let colors = surface
+            let Some(fixture) = surface
                 .fixtures
                 .iter()
                 .find(|fixture| fixture.node == *node)
-                .map(|fixture| fixture_live_colors(&fixture.patch))
-                .unwrap_or_default();
-            if colors.is_empty() {
-                if let Some(kept) = previous.get(key) {
-                    feeds.insert(key.clone(), kept.clone());
-                }
-            } else {
-                feeds.insert(key.clone(), colors);
+            else {
+                continue;
+            };
+            let mut colors = fixture_live_colors(&fixture.patch);
+            // Keep-last-good across an apply gap — but only while the
+            // fixture still HAS a run. A fixture with nothing on a wire
+            // publishes no frame at all, and keeping its last good colors
+            // then would leave the light it used to make painted on lamps
+            // that are now dark: exactly the second opinion Q9 exists to
+            // remove. Unmapped means unlit, and the selected object's chase
+            // arrives from the controller below.
+            if colors.is_empty()
+                && !fixture.patch.cells.is_empty()
+                && let Some(kept) = previous.get(key)
+            {
+                colors = kept.clone();
             }
+            // THE unmapped chase (Q9), from the controller: the selected
+            // object has no wire, so no published frame can carry its
+            // colors — but the panel strip is showing them, and a sprite
+            // that stayed dark would be a second opinion about one object.
+            // The very same `chase_preview` paints both.
+            let colors = with_chase_preview(&surface, *node, colors, fixture.patch.lamps);
+            if colors.is_empty() {
+                continue;
+            }
+            feeds.insert(key.clone(), colors);
         }
         if previous != feeds {
             sprite_live.set(feeds);
@@ -358,13 +377,21 @@ pub(crate) fn ProjectCanvasHost(
         let grammar_surface = surface.clone();
         let grammar_selection = selection.clone();
         move |event: FixtureEvent| match event {
-            FixtureEvent::Select(Some(key)) => {
-                if let Some(node) = nodes.get(&key) {
+            FixtureEvent::Select(Some(pick)) => {
+                if let Some(node) = nodes.get(&pick.key) {
                     drag_override.set(None);
-                    let target = UiPatchTarget::Fixture { node: *node };
+                    // Q10: a sprite click names the OBJECT under the cursor,
+                    // not the whole fixture — the sprite already knows which
+                    // true lamp was hit, and the surface knows which object
+                    // owns it. The fixture stays the honest fallback where a
+                    // body draws no lamps (placeholder, strip) or no object
+                    // covers the one clicked.
+                    let target = sprite_target(&grammar_surface, *node, pick.lamp);
                     // The same fixture-side completion the tree's rows
                     // carry: armed assign + a free segment → the clicked
-                    // sprite takes it. Unarmed, this is a plain select.
+                    // OBJECT takes it (stronger than the old next-unmapped
+                    // resolution — a click says WHICH). Unarmed, this is a
+                    // plain select.
                     if patch_verbs {
                         crate::app::editor_shell::patching::complete_assign_on_object(
                             &on_action,
@@ -463,6 +490,77 @@ pub(crate) fn ProjectCanvasHost(
                 HelpFloat {}
             }
         }
+    }
+}
+
+/// Lay the controller's unmapped-chase preview (Q9) over one fixture's
+/// sprite colors, in the fixture's own lamp numbering.
+///
+/// The preview is the SAME data the panel strip paints, converted through
+/// the same linear → sRGB transfer a published frame sample takes — so the
+/// strip and the sprites cannot disagree, and both advance and freeze on
+/// the controller's one frame clock.
+///
+/// An unmapped object usually has no live colors at all behind it (nothing
+/// published its lamps), so the base may be empty: it is grown to the
+/// fixture's lamp count with the unlit neutral first, which reads as
+/// geometry rather than as black lamps. A fixture the preview does not name
+/// is returned untouched.
+fn with_chase_preview(
+    surface: &UiPatchSurface,
+    node: NodeId,
+    base: Vec<[u8; 3]>,
+    lamps: u32,
+) -> Vec<[u8; 3]> {
+    let Some(preview) = surface
+        .chase_preview
+        .as_ref()
+        .filter(|preview| preview.node == node)
+    else {
+        return base;
+    };
+    let end = preview.start as usize + preview.colors.len();
+    let mut colors = base;
+    if colors.len() < end.max(lamps as usize) {
+        colors.resize(end.max(lamps as usize), UNLIT_RGB);
+    }
+    for (offset, rgb) in preview.colors.iter().enumerate() {
+        if let Some(slot) = colors.get_mut(preview.start as usize + offset) {
+            *slot = srgb8(*rgb);
+        }
+    }
+    colors
+}
+
+/// What a sprite click selects (Q10): the OBJECT owning the clicked lamp,
+/// or the whole fixture when nothing finer can be named.
+///
+/// The lamp arrives in the fixture's OWN numbering (the canvas corrects for
+/// display subsampling before it leaves), which is the space instance spans
+/// are measured in — so the lookup is a plain containment test. Two honest
+/// fallbacks: a body that draws no lamps yields no lamp at all, and a
+/// fixture whose document has no object table (the scarf) IS its own object.
+///
+/// The object target follows addressability like every other surface's
+/// (`instance_target`): a sticky id selects by path, an id-less strand by
+/// the range its lamps occupy.
+fn sprite_target(surface: &UiPatchSurface, node: NodeId, lamp: Option<u32>) -> UiPatchTarget {
+    let fixture = UiPatchTarget::Fixture { node };
+    let Some(lamp) = lamp else {
+        return fixture;
+    };
+    let Some(entry) = surface.fixtures.iter().find(|entry| entry.node == node) else {
+        return fixture;
+    };
+    match entry
+        .instances
+        .iter()
+        .find(|instance| lamp >= instance.start && lamp < instance.start + instance.lamps)
+    {
+        Some(instance) => crate::app::patch::verb_ui::instance_target(node, instance),
+        // Under a display stride the clicked lamp can fall in a gap between
+        // spans; the fixture is the honest answer rather than a guess.
+        None => fixture,
     }
 }
 
@@ -946,6 +1044,170 @@ mod tests {
         let bounds = fit_bounds(&sprites).expect("bounds");
         assert!(bounds.min_x <= 0.0 && bounds.min_y <= 0.0);
         assert!(bounds.min_x + bounds.width >= 90.0, "{bounds:?}");
+    }
+
+    /// A three-instance fixture with nothing on a wire — the shape a
+    /// walk-up user clicks at.
+    fn dome_surface() -> UiPatchSurface {
+        use lpa_studio_core::{UiFixturePatch, UiPatchInstance, UiPatchSurfaceFixture};
+
+        let instance = |path: &str, start: u32| UiPatchInstance {
+            path: path.to_string(),
+            label: path.to_string(),
+            start,
+            lamps: 30,
+            stride: 1,
+            placed: false,
+        };
+        UiPatchSurface {
+            fixtures: vec![UiPatchSurfaceFixture {
+                node: NodeId::new(2),
+                label: "dome".to_string(),
+                manual_flow: true,
+                patch: UiFixturePatch {
+                    lamps: 90,
+                    ..Default::default()
+                },
+                instances: vec![
+                    instance("/sector/0", 0),
+                    instance("/sector/1", 30),
+                    instance("/sector/2", 60),
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// Q10: a sprite click names the OBJECT the clicked lamp belongs to.
+    /// The fixture is the fallback, not the answer — it is what a click can
+    /// still mean when the sprite draws no lamps or no span covers the one
+    /// it hit.
+    #[test]
+    fn a_sprite_click_resolves_its_lamp_to_an_object() {
+        let surface = dome_surface();
+        let node = NodeId::new(2);
+
+        assert_eq!(
+            sprite_target(&surface, node, Some(0)),
+            UiPatchTarget::Instance {
+                node,
+                path: "/sector/0".to_string(),
+            }
+        );
+        assert_eq!(
+            sprite_target(&surface, node, Some(59)),
+            UiPatchTarget::Instance {
+                node,
+                path: "/sector/1".to_string(),
+            },
+            "the last lamp of a span is still that span's"
+        );
+        assert_eq!(
+            sprite_target(&surface, node, None),
+            UiPatchTarget::Fixture { node },
+            "a placeholder or strip body names no lamp — the fixture answers"
+        );
+        assert_eq!(
+            sprite_target(&surface, node, Some(900)),
+            UiPatchTarget::Fixture { node },
+            "a lamp no span covers falls back rather than guessing"
+        );
+        assert_eq!(
+            sprite_target(&surface, NodeId::new(99), Some(0)),
+            UiPatchTarget::Fixture {
+                node: NodeId::new(99),
+            },
+            "an unknown fixture resolves nothing finer than itself"
+        );
+    }
+
+    /// An id-less document still selects — at RANGE grain, the same target
+    /// its tree row builds, so the arm's two ends agree about what was
+    /// clicked (the grain-robustness invariant).
+    #[test]
+    fn a_sprite_click_on_an_idless_document_selects_a_range() {
+        let mut surface = dome_surface();
+        for instance in &mut surface.fixtures[0].instances {
+            instance.path.clear();
+        }
+        assert_eq!(
+            sprite_target(&surface, NodeId::new(2), Some(35)),
+            UiPatchTarget::Range {
+                node: NodeId::new(2),
+                start: 30,
+                count: Some(30),
+            }
+        );
+    }
+
+    /// Q9's canvas half: the sprites paint the CONTROLLER's chase, at the
+    /// controller's phase — the very colors the panel strip is showing.
+    #[test]
+    fn the_sprite_feed_paints_the_core_computed_chase() {
+        use lpa_studio_core::UiPatchChasePreview;
+
+        let mut surface = dome_surface();
+        let node = NodeId::new(2);
+        // No preview: the sprites are whatever the wire published (here,
+        // nothing) — the canvas invents no chase of its own.
+        assert!(with_chase_preview(&surface, node, Vec::new(), 90).is_empty());
+
+        surface.chase_preview = Some(UiPatchChasePreview {
+            node,
+            start: 30,
+            colors: vec![[65535, 0, 0]; 30],
+            phase: 0.25,
+        });
+        let colors = with_chase_preview(&surface, node, Vec::new(), 90);
+        assert_eq!(colors.len(), 90, "the fixture's whole lamp field");
+        assert_eq!(colors[0], UNLIT_RGB, "lamps outside the object stay unlit");
+        assert_eq!(colors[30], srgb8([65535, 0, 0]));
+        assert_eq!(colors[59], srgb8([65535, 0, 0]));
+        assert_eq!(colors[60], UNLIT_RGB);
+
+        // A live base keeps its own lamps and takes the chase over the
+        // object's — one fixture, two honest sources.
+        let base = vec![[9, 9, 9]; 90];
+        let colors = with_chase_preview(&surface, node, base, 90);
+        assert_eq!(colors[0], [9, 9, 9]);
+        assert_eq!(colors[30], srgb8([65535, 0, 0]));
+
+        // Another fixture's sprites are untouched.
+        assert!(with_chase_preview(&surface, NodeId::new(7), Vec::new(), 90).is_empty());
+    }
+
+    /// A fixture with NO run publishes no frame, so its live colors are
+    /// empty — and keeping the last good ones would leave the light it used
+    /// to make painted on lamps that are now dark. Unmapping must actually
+    /// go dark (and then only the SELECTED object chases, from the
+    /// controller). The keep-last-good exists for apply gaps on a fixture
+    /// that still has a run, and that case still keeps.
+    #[test]
+    fn keep_last_good_does_not_outlive_a_fixtures_runs() {
+        use lpa_studio_core::UiPatchCell;
+
+        let surface = dome_surface();
+        let fixture = &surface.fixtures[0];
+        assert!(fixture.patch.cells.is_empty(), "nothing on a wire");
+        assert!(
+            fixture_live_colors(&fixture.patch).is_empty(),
+            "and so no frame, and so no colors to feed"
+        );
+
+        let mut mapped = dome_surface();
+        mapped.fixtures[0].patch.cells.push(UiPatchCell {
+            id: "2:0".to_string(),
+            source_start: 0,
+            lamps: 30,
+            wire_start: 0,
+            ..Default::default()
+        });
+        assert!(
+            !mapped.fixtures[0].patch.cells.is_empty(),
+            "a fixture that still has a run keeps its last good frame across \
+             an apply gap — the condition the feed guards on",
+        );
     }
 
     #[test]

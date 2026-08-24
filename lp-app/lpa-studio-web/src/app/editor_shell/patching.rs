@@ -450,17 +450,57 @@ pub(crate) fn arm_swap(
     }
 }
 
-/// Can this selection start an assign? An UNMAPPED object (whatever grain
-/// it was named at) or a free SEGMENT — the two ends of the one link. A
-/// mapped thing arms nothing: there is no link to make, and the ruling
-/// says it plain-reselects.
+/// Can this selection start an assign? An UNMAPPED object on a MANUAL
+/// fixture (whatever grain it was named at), or a free SEGMENT — the two
+/// ends of the one link. A mapped thing arms nothing: there is no link to
+/// make, and the ruling says it plain-reselects.
+///
+/// The mode gate is Q11's: an auto-mapped fixture flows its own unnamed
+/// lamps onto the wire, so there is no link to arm there either — `a` on one
+/// of its objects does nothing rather than arming a gesture the next click
+/// could not complete. A whole FIXTURE never arms (Q8: the card is not an
+/// object); the canvas now names objects directly, so nothing needs it to.
 pub(crate) fn is_armable(surface: &UiPatchSurface, target: &UiPatchTarget) -> bool {
     match target {
         // A `Segment` only ever names FREE space (a mapped run selects as
         // its `Cell`, which speaks the fixture's language instead).
         UiPatchTarget::Segment { .. } => true,
-        other => target_is_unmapped(surface, other),
+        // The fixture card is a card, not an object — except for the scarf,
+        // the count-only strand that has no objects to be a card ABOUT.
+        UiPatchTarget::Fixture { node } => {
+            fixture_is_manual(surface, *node)
+                && surface
+                    .fixtures
+                    .iter()
+                    .any(|fixture| fixture.node == *node && fixture.instances.is_empty())
+                && target_is_unmapped(surface, target)
+        }
+        other => {
+            target_fixture(other).is_some_and(|node| fixture_is_manual(surface, node))
+                && target_is_unmapped(surface, other)
+        }
     }
+}
+
+/// The fixture a fixture-side target names, when it names one.
+fn target_fixture(target: &UiPatchTarget) -> Option<NodeId> {
+    match target {
+        UiPatchTarget::Fixture { node }
+        | UiPatchTarget::Instance { node, .. }
+        | UiPatchTarget::Range { node, .. } => Some(*node),
+        // Cell ids are `node:output:source:wire` (the bay's format).
+        UiPatchTarget::Cell { id } => Some(NodeId::new(id.split(':').next()?.parse().ok()?)),
+        _ => None,
+    }
+}
+
+/// Does this fixture's patch declare MANUAL flow (P5b)? Unknown fixtures are
+/// not manual: manual is a claim a document makes.
+fn fixture_is_manual(surface: &UiPatchSurface, node: NodeId) -> bool {
+    surface
+        .fixtures
+        .iter()
+        .any(|fixture| fixture.node == node && fixture.manual_flow)
 }
 
 /// Arm the ASSIGN (`a`, or the panel's invitation button): a toggle like
@@ -482,16 +522,18 @@ pub(crate) fn arm_assign(
     }
 }
 
-/// What a FIXTURE-grain click actually means to the assign arm (P5b).
+/// What a FIXTURE-grain subject actually means to the assign arm.
 ///
-/// Sprites are honest (D2): the canvas can only say "this fixture", and the
-/// Tree's fixture row says the same. But a free segment is SIZED by the
-/// fixture's next unmapped object, so that object is what the click is
-/// offering to place — narrowing to it is what makes clicking a door on the
-/// canvas do the thing the panel just said it would.
+/// Since Q10 the canvas names OBJECTS directly (a sprite click resolves its
+/// lamp to the span that owns it), so this narrowing no longer runs from the
+/// canvas. What still reaches it: the panel's pickers, the Outputs panel's
+/// port-click completion, and the scarf — a fixture with no object table,
+/// which is one strand and patches at the range grain its document can
+/// actually hold.
 ///
-/// A fixture with no object table is one strand (the scarf): the whole
-/// fixture at range grain, which is the only entry its document can hold.
+/// A fixture WITH objects is a card, not a subject (Q8), and `is_armable`
+/// refuses it before this is ever asked; the next-unmapped narrowing here
+/// stays as the honest answer for any caller that hands one over anyway.
 /// Every other target passes through unchanged.
 pub(crate) fn assign_subject_target(
     surface: &UiPatchSurface,
@@ -545,7 +587,10 @@ pub(crate) fn complete_assign_on_object(
     let Some(UiPatchTarget::Segment { node, start, .. }) = selection else {
         return;
     };
-    if !target_is_unmapped(surface, target) {
+    // The same precondition the arm itself has: an unmapped object on a
+    // manual fixture. A fixture ROW (Q8's card) and an auto-mapped object
+    // are nonsense counterparts — they refuse, spending the arm.
+    if !is_armable(surface, target) {
         return;
     }
     let Some(output) = surface.outputs.iter().find(|output| output.node == *node) else {
@@ -574,6 +619,8 @@ mod tests {
             fixtures: vec![UiPatchSurfaceFixture {
                 node: NodeId::new(2),
                 label: "dome".to_string(),
+                // MANUAL: the mode the walk-up grammar lives in (Q11).
+                manual_flow: true,
                 instances: vec![
                     UiPatchInstance {
                         path: "/sector/1".to_string(),
@@ -791,6 +838,44 @@ mod tests {
                 node: NodeId::new(1),
             }
         ));
+
+        // Q8: a fixture WITH objects is a CARD, not an object — it arms
+        // nothing even while one of its objects is waiting for a wire. The
+        // canvas names objects directly now (Q10), so nothing needs it to.
+        assert!(!is_armable(&surface, &UiPatchTarget::Fixture { node }));
+
+        // Q11's mode gate: the same unmapped object on an AUTO-mapped
+        // fixture arms nothing. Its unnamed lamps flow onto the wire by
+        // themselves, so there is no link for the next click to complete.
+        let mut auto = surface.clone();
+        auto.fixtures[0].manual_flow = false;
+        assert!(!is_armable(
+            &auto,
+            &UiPatchTarget::Instance {
+                node,
+                path: "/sector/2".to_string(),
+            }
+        ));
+        assert!(
+            is_armable(
+                &auto,
+                &UiPatchTarget::Segment {
+                    node: output,
+                    port: 0,
+                    start: 0,
+                    lamps: 30,
+                }
+            ),
+            "the WIRE side is port-side: an auto fixture nearby changes nothing"
+        );
+
+        // The scarf (Q8's exception): a fixture with NO object table is its
+        // own object, so it arms like one — while it is manual and unmapped.
+        let mut scarf = surface.clone();
+        scarf.fixtures[0].instances.clear();
+        assert!(is_armable(&scarf, &UiPatchTarget::Fixture { node }));
+        scarf.fixtures[0].manual_flow = false;
+        assert!(!is_armable(&scarf, &UiPatchTarget::Fixture { node }));
 
         // Every instance placed: the fixture row has nothing left to link.
         surface.fixtures[0].instances[1].placed = true;

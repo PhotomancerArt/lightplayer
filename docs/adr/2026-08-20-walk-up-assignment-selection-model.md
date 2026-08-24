@@ -191,3 +191,129 @@ is banned, as it would flip existing documented fixtures dark.
   write, and it needs its own decision.
 - P6 cross-references this ADR from
   `2026-08-20-patching-view-grain-follows-activity.md`'s Consequences.
+
+## Amendment — 2026-08-23: G1 round 2 (Q7–Q11)
+
+The feel gate's second walk ruled five changes. They do not replace the
+selection model above; they change what a selection SHOWS, who computes
+the light, and what a click on the canvas names.
+
+### One chase, computed core-side (Q9) — supersedes the honest-sprites clause
+
+D2 ("honest sprites") said the unmapped chase lives only in the panel
+strip, because the strip is a readout and the canvas is a picture of the
+piece. That clause is **superseded**, in Yona's own words at the gate: a
+panel-only chase "implies we're not driving those views from the same
+data — that should be generated server side. very fishy". The objection
+is about PROVENANCE, not about pixels: two views of one object were being
+painted from two computations, and only one of them was the engine's.
+
+So the unmapped chase is computed ONCE, in `lpa-studio-core`, and shipped
+on the surface DTO (`UiPatchSurface::chase_preview` —
+`app/project/patch_preview.rs`). The panel strip paints it; the canvas
+sprites paint the same colors through the existing `live_fills`
+direct-DOM feed. No client-side chase renderer survives: the web crate's
+`chase_colors` / `use_chase_phase` are deleted, and the panel keeps no
+clock at all.
+
+- **The numbers are shared, not copied.** The language's constants and
+  functions moved to `lpc_model::nodes::output::chase` — head/tail hues,
+  `head_lamps`, sweep period, the dot window, body floor/crest. The
+  ENGINE imports them for `paint_chase`; the controller imports them for
+  the preview. Two copies of these constants was the exact smell this
+  ruling kills, and an engine test now asserts the wire's samples equal
+  `chase::lamp_rgb_16` lamp for lamp.
+- **Colors travel in the engine's space** (16-bit linear unorm), so every
+  client renders them through the same linear → sRGB transfer it already
+  decodes published frames with. The mapped chase and the unmapped one
+  land in the same greys by construction.
+- **The clock is the lens's frame counter**
+  (`OutputFrameCache::frames_seen`), not a wall clock. The engine states
+  the sweep in seconds because it holds a frame clock; the controller
+  does not, and counting published frames buys the property story capture
+  requires: with no frames flowing the preview FREEZES, in ONE place
+  (`preview_phase`), rather than each view freezing itself. A repeated
+  frame revision is not a frame, so a patch edit that re-cuts the wire
+  without republishing does not animate anything.
+- The MAPPED path is untouched: published bytes remain the one truth
+  there, and byte-identity when the highlight slot is empty still holds.
+
+### The fixture card (Q8)
+
+A whole-fixture selection is **not an object**, and the panel stops
+pretending it is. `UiPatchTarget::Fixture` renders a FIXTURE CARD:
+fixture name, lamp/object/placed counts, the flow selector, and — in
+manual mode — `unmap all`. No chase strip, no object transport, not
+armable, not assignable. The canvas selection ring and the engine-side
+pulse are unchanged: a wire-side breath of the fixture's mapped runs is
+still an honest answer to "which lamps are this fixture".
+
+EXCEPTION: a fixture with no sub-objects (the count-only strand — the
+scarf) **is** its own object. It keeps the object treatment, including
+the chase and the arm, and wears the flow selector on that row instead.
+
+P5b's `assign_subject_target` fixture→next-unmapped resolution survives
+only for that scarf case and for the pickers. A fixture ROW click under a
+live arm now refuses and disarms, like any other nonsense pair.
+
+### Object-grain canvas selection (Q10)
+
+Canvas sprites already carried true lamp indexes for the live-fill feed
+(`data-sprite-lamp`, stride-corrected). A sprite click now resolves the
+nearest drawn lamp to its TRUE index (`nearest_lamp`), and the shell maps
+that lamp to the object span containing it (`sprite_target`), emitting an
+`Instance` — or a `Range` for id-less documents, following the same
+addressability rule every other surface uses.
+
+- Armed completion on a canvas click therefore targets the object the
+  user pointed at, which is strictly stronger than P5b's
+  next-unmapped guess: a click says WHICH.
+- Fixture-grain selection stays reachable from the tree row.
+- Two honest fallbacks: a body that draws no lamps (placeholder, strip)
+  names no lamp, and a lamp no span covers falls back to the fixture
+  rather than guessing.
+- Display subsampling does NOT lose the grain: drawn point `i` stands for
+  true lamp `i * stride`, so what comes back is always a real lamp of the
+  fixture's own document. Only every k-th lamp is reachable, so an object
+  shorter than the stride cannot be clicked — at MAX_DISPLAY_LAMPS =
+  2000 such an object is sub-pixel on screen anyway, and the tree row
+  still names it.
+
+### Mode-gated grammar (Q11)
+
+An AUTO-mapped fixture reflows its own unnamed lamps on every resolve, so
+every gesture that pins one of its objects to a wire would be fought by
+the next frame. Auto fixtures therefore get a LEAN panel:
+
+- object rows show facts and the strip only — no transport, no
+  invitations, no arm affordances;
+- `is_armable` gains the mode check, so `a` does not arm on an auto
+  object and a click on one cannot complete an armed assign;
+- `next_unmapped_lamps` and the invitation pickers consider MANUAL
+  fixtures' objects only, so a free segment is never sized by an object
+  that was never waiting;
+- the flow SELECTOR (Q7) is what unlocks the grammar, and it lives on the
+  fixture card — one click away from any of its objects.
+
+The Outputs panel's free-run click targets are unchanged: they are
+port-side, and an auto fixture nearby changes nothing about them.
+
+### The flow control is a selector, not a toggle (Q7)
+
+`flow: manual` was a bare toggle button — it named one state and left the
+user to guess the other. It becomes an EXPLAINING selector: label
+"mapping", two always-visible cards with icon, title and a line of
+consequence — **auto-mapped** ("objects place themselves along the wire —
+just works") and **manual** ("only what you patch lights up — unmapped
+stays dark"). Picking dispatches the same undoable `SetFlow` verb.
+
+The card-picker pattern existed inline in the node face's space section
+(the shape/modifier tiles, ruled at G1b: inline tiles, no popover, no
+dropdown; selected = accent border + accent wash + check badge) but had
+never been extracted. It now lives in `base::option_cards` with the
+smallest honest API — options of `{id, icon, title, blurb}`. The space
+section keeps its own component (its faces are projection drawings and
+each tile dispatches a slot-op sequence) and now shares the STYLING from
+that module, so there is one visual language rather than two copies of
+it.
+

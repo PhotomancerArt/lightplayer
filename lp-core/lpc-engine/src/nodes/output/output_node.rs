@@ -29,6 +29,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use lpc_model::nodes::output::chase;
 use lpc_model::{
     ColorOrder, ControlLamp2d, ControlLayout2d, ControlPathSpan2d, LpValue, NodeRuntimeStatus,
     OutputDefView, ProductRef, Revision, SlotData, SlotPath, WithRevision,
@@ -89,61 +90,13 @@ fn highlight_level_16(time_seconds: f32) -> u16 {
     HIGHLIGHT_FLOOR_16 + libm::roundf(span * phase.clamp(0.0, 1.0)) as u16
 }
 
-/// The chase's head and tail colors, 8-bit per channel.
-///
-/// Blue leads, red trails — the walk-up question a fixture selection answers
-/// is "which end is lamp 0, and which way does it run?", so the ends are
-/// named by hue rather than by motion, and the sweep between them says the
-/// rest. Ratified as exact hexes in the patching spike
-/// (`spikes/patching-controls/index.html` §3 and its `chaseRgb`).
-const CHASE_HEAD_RGB: [u8; 3] = [0, 0, 255];
-const CHASE_TAIL_RGB: [u8; 3] = [255, 0, 0];
-
-/// How many lamps at each end wear the head/tail color: `round(n/10)`,
-/// clamped to 1..=10 (D10). One lamp is unreadable across a room and eleven
-/// is a stripe, not an end marker.
-const CHASE_HEAD_MAX_LAMPS: u32 = 10;
-
-/// Full period of the chase's white dot, in seconds — one pass across the
-/// whole object per period (the spike's `(t / 2) % 1`).
-const CHASE_SWEEP_SECONDS: f32 = 2.0;
-
-/// Falloff of the dot's raised window, in reciprocal object-lengths: the dot
-/// fades to the floor `1/CHASE_DOT_FALLOFF` of the object away from its
-/// centre, so it reads as a runner rather than a wash at any lamp count.
-const CHASE_DOT_FALLOFF: f32 = 7.0;
-
-/// The chase body's floor and crest, 16-bit unorm per channel (white).
-///
-/// The body sits near-dark (25/255) so the object reads as
-/// dark-with-a-runner: unlike the breath, the chase's job is DIRECTION, and
-/// a bright body would hide the dot's travel. The crest is full white for
-/// the one dot; peak current stays bounded because the lit window is a
-/// fraction of the object and everything else is at the floor.
-const CHASE_BODY_FLOOR_16: u16 = 25 * 257;
-const CHASE_BODY_CREST_16: u16 = 255 * 257;
-
-/// Head/tail lamp count for an object of `n` lamps (D10): `round(n / 10)`
-/// clamped to 1..=10, in integers (`(n + 5) / 10` is round-half-up).
-fn chase_head_lamps(n: u32) -> u32 {
-    (n.saturating_add(5) / 10).clamp(1, CHASE_HEAD_MAX_LAMPS)
-}
-
-/// The chase body's level for object-order lamp `j` of `n` at
-/// `time_seconds`: a raised window around the sweeping dot, floored at
-/// [`CHASE_BODY_FLOOR_16`] so a selected object never reads as dead lamps.
-fn chase_body_level_16(j: u32, n: u32, time_seconds: f32) -> u16 {
-    let position = if n <= 1 {
-        0.0
-    } else {
-        j as f32 / (n - 1) as f32
-    };
-    let phase = libm::fmodf(time_seconds / CHASE_SWEEP_SECONDS, 1.0);
-    let phase = if phase < 0.0 { phase + 1.0 } else { phase };
-    let window = (1.0 - libm::fabsf(position - phase) * CHASE_DOT_FALLOFF).clamp(0.0, 1.0);
-    let span = f32::from(CHASE_BODY_CREST_16 - CHASE_BODY_FLOOR_16);
-    CHASE_BODY_FLOOR_16 + libm::roundf(span * window) as u16
-}
+// The chase's numbers — head/tail hues, head sizing, sweep period, body
+// window — live in `lpc_model::nodes::output::chase`, NOT here. The studio
+// controller paints the same language for objects that have no wire yet
+// (an unmapped selection publishes no bytes to carry a chase), and two
+// copies of these constants would let the panel drift from the wall. This
+// module owns only the WIRE side: parsing the `chase:` microformat and
+// laying the language onto an output's sample buffer.
 
 /// Pack an RGB triple into the channel order a run is stored in.
 ///
@@ -419,9 +372,9 @@ impl OutputNode {
     /// Paint the chase over the named spans, in OBJECT order.
     ///
     /// Same dim-the-rest first move as the breath, then every named lamp
-    /// takes its object-order color: blue for the first `h` lamps, red for
-    /// the last `h` ([`chase_head_lamps`]), and the body carries the white
-    /// dot sweeping head-to-tail ([`chase_body_level_16`]). A reversed span's
+    /// takes its object-order color from the shared language
+    /// ([`chase::lamp_rgb_16`]): blue head, red tail, and a white dot
+    /// sweeping head-to-tail between them. A reversed span's
     /// wire indices are walked backward, so object order stays continuous
     /// across a strand plugged in at the far end — which is exactly the
     /// mis-wiring the language exists to show.
@@ -456,7 +409,7 @@ impl OutputNode {
         for sample in self.control_samples.iter_mut() {
             *sample >>= 2;
         }
-        let heads = chase_head_lamps(total);
+        let phase = chase::phase_at(time_seconds);
         let mut lookup = ChannelOrders::new(layout);
         for (ordinal, wire) in chase_wire_lamps(spans).enumerate() {
             let first = lamps_to_samples(wire) as usize;
@@ -464,15 +417,7 @@ impl OutputNode {
             if end > established {
                 continue;
             }
-            let ordinal = ordinal as u32;
-            let rgb = if ordinal < heads {
-                rgb8_to_16(CHASE_HEAD_RGB)
-            } else if ordinal >= total - heads {
-                rgb8_to_16(CHASE_TAIL_RGB)
-            } else {
-                let level = chase_body_level_16(ordinal, total, time_seconds);
-                [level; 3]
-            };
+            let rgb = chase::lamp_rgb_16(ordinal as u32, total, phase);
             let Some(order) = lookup.order_at(first as u32) else {
                 continue;
             };
@@ -931,15 +876,6 @@ impl<'a> ChannelOrders<'a> {
         }
         None
     }
-}
-
-/// 8-bit unorm to 16-bit unorm: 0..=255 maps onto 0..=65535 exactly.
-fn rgb8_to_16(rgb: [u8; 3]) -> [u16; 3] {
-    [
-        u16::from(rgb[0]) * 257,
-        u16::from(rgb[1]) * 257,
-        u16::from(rgb[2]) * 257,
-    ]
 }
 
 /// One product rendered whole, for the fragments that only want part of it.
@@ -2172,18 +2108,28 @@ mod tests {
         assert!(parse_highlight("chase:").is_empty());
     }
 
+    /// The wire paints the SHARED language, sample for sample — not a
+    /// second copy of it (Q9). The studio controller paints the same
+    /// `chase::lamp_rgb_16` for objects that have no wire yet, so this
+    /// assertion is what keeps the panel, the sprites and the wall from
+    /// drifting apart. Head sizing and the body window themselves are
+    /// pinned in `lpc_model::nodes::output::chase`.
     #[test]
-    fn chase_heads_clamp_between_one_and_ten() {
-        assert_eq!(chase_head_lamps(0), 1);
-        assert_eq!(chase_head_lamps(1), 1, "a tiny object still marks an end");
-        assert_eq!(chase_head_lamps(9), 1);
-        assert_eq!(chase_head_lamps(15), 2, "round(n / 10), not floor");
-        assert_eq!(chase_head_lamps(100), 10);
-        assert_eq!(
-            chase_head_lamps(30_000),
-            10,
-            "a dome-scale object gets an end marker, not a striped end",
-        );
+    fn the_chase_paints_the_shared_light_language_lamp_for_lamp() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = lamps(24);
+        resolver.sample_color_order = Some(ColorOrder::Rgb);
+        resolver.highlight = String::from("chase:0-23");
+
+        let seconds = 0.7;
+        consume_at_time(&mut node, &mut resolver, Revision::new(1), seconds).expect("graph frame");
+
+        let phase = chase::phase_at(seconds);
+        let expected: Vec<u16> = (0..24)
+            .flat_map(|ordinal| chase::lamp_rgb_16(ordinal, 24, phase))
+            .collect();
+        assert_eq!(resolver.published_samples(), expected);
     }
 
     #[test]
@@ -2196,7 +2142,7 @@ mod tests {
 
         consume_at_time(&mut node, &mut resolver, Revision::new(1), 0.0).expect("graph frame");
 
-        let floor = CHASE_BODY_FLOOR_16;
+        let floor = chase::BODY_FLOOR_16;
         assert_eq!(
             resolver.published_samples(),
             vec![
@@ -2220,7 +2166,7 @@ mod tests {
 
         consume_at_time(&mut node, &mut resolver, Revision::new(1), 0.0).expect("graph frame");
 
-        let floor = CHASE_BODY_FLOOR_16;
+        let floor = chase::BODY_FLOOR_16;
         assert_eq!(
             resolver.published_samples(),
             vec![
@@ -2247,17 +2193,17 @@ mod tests {
             &mut node,
             &mut resolver,
             Revision::new(1),
-            CHASE_SWEEP_SECONDS / 2.0,
+            chase::SWEEP_SECONDS / 2.0,
         )
         .expect("mid-sweep frame");
         let samples = resolver.published_samples();
         assert_eq!(
             &samples[15..18],
-            &[CHASE_BODY_CREST_16; 3],
+            &[chase::BODY_CREST_16; 3],
             "the dot is full white where it stands",
         );
         assert!(
-            samples[12] < CHASE_BODY_CREST_16 && samples[12] > CHASE_BODY_FLOOR_16,
+            samples[12] < chase::BODY_CREST_16 && samples[12] > chase::BODY_FLOOR_16,
             "and falls off around it ({})",
             samples[12],
         );
@@ -2267,7 +2213,7 @@ mod tests {
         consume_at_time(&mut node, &mut resolver, Revision::new(2), 0.0).expect("start frame");
         assert_eq!(
             &resolver.published_samples()[15..18],
-            &[CHASE_BODY_FLOOR_16; 3],
+            &[chase::BODY_FLOOR_16; 3],
         );
     }
 

@@ -23,10 +23,20 @@
 //! The strips (P5) paint the light languages IN the lamps. The OUTPUT strip
 //! is the selected port's published bytes, decoded under A1's lamp type; the
 //! OBJECT strip is the object's own lamps in OBJECT order — decoded from the
-//! same published frames when it is mapped, and client-computed when it is
-//! not, because an unmapped object has no wire to carry a chase. Both follow
-//! the spike's reactive rule (bulbs ≥ 7px/lamp, gradient beyond) via the
-//! shared [`LampStrip`].
+//! same published frames when it is mapped, and read from the controller's
+//! [`UiPatchSurface::chase_preview`] when it is not (Q9: the unmapped chase
+//! is computed ONCE, core-side, and the canvas sprites paint the very same
+//! colors). Nothing here animates itself; the panel has no clock. Both
+//! strips follow the spike's reactive rule (bulbs ≥ 7px/lamp, gradient
+//! beyond) via the shared [`LampStrip`].
+//!
+//! Two grains live in the object section (Q8). A whole-FIXTURE selection is
+//! not an object — it renders the FIXTURE CARD: fixture-grain facts, the
+//! flow selector, `unmap all`, and no chase or transport. A fixture with no
+//! sub-objects (the count-only strip — the scarf) IS its own object and
+//! keeps the object treatment, with the flow selector added. And the grammar
+//! itself is mode-gated (Q11): an AUTO-mapped fixture's objects show facts
+//! and a strip only, because auto reflow would fight every transport verb.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -35,16 +45,19 @@ use lpa_studio_core::{
 };
 
 use crate::app::editor_shell::patching::{
-    ArmedVerb, PatchingUi, arm_assign, arm_swap, assign_subject_target,
+    ArmedVerb, PatchingUi, arm_assign, arm_swap, assign_subject_target, is_armable,
 };
 use crate::app::node::lamp_view::{
-    UNLIT_RGB, control_color_order_at_sample, control_rgb_at_sample, wire_lamp_rgb,
+    UNLIT_RGB, control_color_order_at_sample, control_rgb_at_sample, linear_unorm16_to_srgb8,
+    wire_lamp_rgb,
 };
-use crate::app::patch::lamp_strip::{LampStrip, StripPresentation, chase_colors, use_chase_phase};
+use crate::app::patch::lamp_strip::{LampStrip, StripPresentation};
 use crate::app::patch::verb_ui::{
     dispatch_assign, dispatch_verb, free_runs, instance_target, next_free_segment, port_next_free,
     resize_segment, segment_at_free_run, selection_stride, shift_segment, target_is_unmapped,
 };
+use crate::base::option_cards::{OptionCard, OptionCards};
+use crate::base::{StudioIcon, StudioIconName};
 
 /// Stepped controls are squared blocks (the panel-language convention) —
 /// every transport button steps something discrete.
@@ -102,9 +115,79 @@ pub(crate) struct ObjectView {
     /// object section because that is where the user is looking when they
     /// discover an object cannot be unmapped.
     pub manual: bool,
+    /// This object IS its whole fixture — the count-only strand (the scarf),
+    /// which has no object table and so no fixture card of its own. It wears
+    /// the flow selector here instead (Q8's exception).
+    pub whole_fixture: bool,
     /// The fixture this object belongs to — the flow verbs' subject
     /// (they act on the fixture whatever grain the selection named).
     pub fixture: NodeId,
+}
+
+/// The FIXTURE CARD (Q8): what a whole-fixture selection shows instead of
+/// pretending the fixture is one object.
+///
+/// Fixture-grain facts and fixture-grain verbs only — the counts, the flow
+/// selector, and (in manual mode) `unmap all`. No chase, no transport: a
+/// fixture with sub-objects has no single direction to show and no single
+/// run to rotate, and the objects underneath it are one canvas click away.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FixtureCard {
+    pub node: NodeId,
+    pub name: String,
+    /// The fixture's address path, or its label when it has none.
+    pub context: String,
+    pub lamps: u32,
+    pub objects: usize,
+    pub placed: usize,
+    pub manual: bool,
+}
+
+/// The fixture card for this selection, or `None` when the selection is not
+/// a whole fixture WITH sub-objects.
+///
+/// The exception is the ruling's: a fixture with no object table is one
+/// strand (the scarf), which IS its own object — it keeps the object
+/// treatment ([`object_view`]) and gains the flow row there instead.
+pub(crate) fn fixture_card(
+    surface: &UiPatchSurface,
+    selection: Option<&UiPatchTarget>,
+) -> Option<FixtureCard> {
+    let UiPatchTarget::Fixture { node } = selection? else {
+        return None;
+    };
+    let fixture = fixture_of(surface, *node)?;
+    if fixture.instances.is_empty() {
+        return None;
+    }
+    Some(FixtureCard {
+        node: fixture.node,
+        name: fixture.label.clone(),
+        context: fixture
+            .address
+            .clone()
+            .unwrap_or_else(|| fixture.label.clone()),
+        lamps: fixture.patch.lamps,
+        objects: fixture.instances.len(),
+        placed: fixture
+            .instances
+            .iter()
+            .filter(|instance| instance.placed)
+            .count(),
+        manual: fixture.manual_flow,
+    })
+}
+
+/// The fixture card's facts, in the fact-card idiom.
+pub(crate) fn fixture_facts(card: &FixtureCard) -> Vec<(String, String)> {
+    vec![
+        ("lamps".to_string(), card.lamps.to_string()),
+        (
+            "objects".to_string(),
+            format!("{}/{} placed", card.placed, card.objects),
+        ),
+        ("flow".to_string(), flow_label(card.manual).to_string()),
+    ]
 }
 
 /// The OUTPUT half: the wire this selection is about — picked directly, or
@@ -198,8 +281,15 @@ pub(crate) fn object_view(
 ) -> Option<ObjectView> {
     let target = selection?;
     let (fixture, name, context, lamps) = match target {
+        // A whole fixture is an OBJECT only when it has no sub-objects: one
+        // count-only strand (the scarf), whose single patch entry IS the
+        // fixture. A fixture with an object table gets the FIXTURE CARD
+        // instead (Q8) — see [`fixture_card`].
         UiPatchTarget::Fixture { node } => {
             let fixture = fixture_of(surface, *node)?;
+            if !fixture.instances.is_empty() {
+                return None;
+            }
             (
                 fixture,
                 fixture.label.clone(),
@@ -255,6 +345,7 @@ pub(crate) fn object_view(
         mapped: !target_is_unmapped(surface, target),
         reversed: cells.iter().any(|cell| cell.reversed),
         manual: fixture.manual_flow,
+        whole_fixture: fixture.instances.is_empty(),
         fixture: fixture.node,
         target: target.clone(),
         name,
@@ -350,6 +441,12 @@ pub(crate) fn output_view(
                 _ => return None,
             };
             let fixture = fixture_of(surface, node)?;
+            // A fixture WITH objects names no single window (Q8): its runs
+            // are its objects', and picking the first one to show would
+            // claim a wire the card is not about.
+            if matches!(target, UiPatchTarget::Fixture { .. }) && !fixture.instances.is_empty() {
+                return None;
+            }
             let range = object_source_range(fixture, target)?;
             let ids: Vec<&str> = cells_over(fixture, range)
                 .into_iter()
@@ -447,16 +544,6 @@ pub(crate) fn output_facts(output: &OutputView) -> Vec<(String, String)> {
 
 // -- the strips ----------------------------------------------------------------
 
-/// Are engine frames actually flowing? The client chase runs only when the
-/// answer is yes; frozen otherwise, so a story (whose fixtures carry no
-/// frame) renders the same pixels every time.
-pub(crate) fn surface_is_live(surface: &UiPatchSurface) -> bool {
-    surface
-        .outputs
-        .iter()
-        .any(|output| output.bay.frame.is_some())
-}
-
 /// The fixture an object-side target belongs to.
 fn object_fixture<'a>(
     surface: &'a UiPatchSurface,
@@ -505,19 +592,27 @@ fn cell_frame<'a>(
 /// client painting a thing, and why a reversed strand still reads
 /// object-continuous here while running backwards on the wire.
 ///
-/// Unmapped, there is no wire and therefore nothing published: the strip
-/// computes the chase itself (D2's ONE client-side chase surface — honest,
-/// because the strip is a readout, not the piece).
+/// Unmapped, there is no wire and therefore nothing published — so the
+/// CONTROLLER paints the chase for it (Q9) and the strip reads
+/// [`UiPatchSurface::chase_preview`] like any other decode. The canvas
+/// sprites read the same colors, which is the whole point: one selection,
+/// one chase, painted once. The preview arrives in the engine's 16-bit
+/// linear space, so it goes through the same transfer a frame sample does.
 ///
 /// Empty = nothing honest to draw (no frame yet); the host box's track shows
 /// through rather than a field of invented black lamps.
-fn object_strip_colors(surface: &UiPatchSurface, object: &ObjectView, phase: f32) -> Vec<[u8; 3]> {
+fn object_strip_colors(surface: &UiPatchSurface, object: &ObjectView) -> Vec<[u8; 3]> {
     let lamps = object.lamps as usize;
     if lamps == 0 {
         return Vec::new();
     }
     if !object.mapped {
-        return chase_colors(lamps, phase);
+        return surface
+            .chase_preview
+            .as_ref()
+            .filter(|preview| preview.node == object.fixture && preview.colors.len() == lamps)
+            .map(|preview| preview.colors.iter().copied().map(srgb8).collect())
+            .unwrap_or_default();
     }
     let Some(fixture) = object_fixture(surface, &object.target) else {
         return Vec::new();
@@ -553,6 +648,17 @@ fn object_strip_colors(surface: &UiPatchSurface, object: &ObjectView, phase: f32
         }
     }
     if lit { colors } else { Vec::new() }
+}
+
+/// One core-computed preview lamp, in the sRGB bytes a strip and a sprite
+/// both paint with — the same transfer a published frame sample takes, so
+/// the mapped chase and the unmapped one land in the same greys.
+pub(crate) fn srgb8([r, g, b]: [u16; 3]) -> [u8; 3] {
+    [
+        linear_unorm16_to_srgb8(r),
+        linear_unorm16_to_srgb8(g),
+        linear_unorm16_to_srgb8(b),
+    ]
 }
 
 /// The output's published frame, if one has arrived.
@@ -591,8 +697,13 @@ fn output_strip_colors(
 /// The next object still waiting for a wire, with its fixture — the one that
 /// sizes a free segment, and so (D6) the one whose lamp type the free
 /// stretches are read under.
+///
+/// MANUAL fixtures only (Q11): an auto-mapped fixture's unnamed lamps flow
+/// onto the wire by themselves, so nothing there is waiting to be placed and
+/// a segment sized by one of its objects would be sized for a link the user
+/// is never asked to make.
 fn next_unmapped_object(surface: &UiPatchSurface) -> Option<(&UiPatchSurfaceFixture, String)> {
-    for fixture in &surface.fixtures {
+    for fixture in surface.fixtures.iter().filter(|entry| entry.manual_flow) {
         if fixture.instances.is_empty() {
             if fixture.patch.cells.is_empty() && fixture.patch.lamps > 0 {
                 return Some((fixture, fixture.label.clone()));
@@ -681,9 +792,13 @@ fn color_order_label(order: ColorOrder) -> &'static str {
 
 /// Every object still waiting for a wire, in surface order — the object
 /// side's inline picker (direct-assign).
+///
+/// MANUAL fixtures only (Q11), for the same reason [`next_unmapped_object`]
+/// filters: offering to patch an auto-mapped fixture's object would be
+/// offering a link its own flow flag makes meaningless.
 pub(crate) fn unmapped_objects(surface: &UiPatchSurface) -> Vec<(UiPatchTarget, String)> {
     let mut rows = Vec::new();
-    for fixture in &surface.fixtures {
+    for fixture in surface.fixtures.iter().filter(|entry| entry.manual_flow) {
         if fixture.instances.is_empty() {
             if fixture.patch.cells.is_empty() && fixture.patch.lamps > 0 {
                 rows.push((
@@ -752,6 +867,7 @@ pub fn PatchPanel(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let object = object_view(&surface, selection.as_ref());
+    let card = fixture_card(&surface, selection.as_ref());
     let output = output_view(&surface, selection.as_ref());
     let primary = primary_side(selection.as_ref());
     rsx! {
@@ -772,6 +888,7 @@ pub fn PatchPanel(
                 surface: surface.clone(),
                 selection: selection.clone(),
                 object,
+                card,
                 armed: armed.clone(),
                 primary: primary == Some(PanelSide::Object),
                 on_action,
@@ -888,17 +1005,18 @@ fn ObjectPane(
     surface: UiPatchSurface,
     selection: Option<UiPatchTarget>,
     object: Option<ObjectView>,
+    /// A whole-fixture selection (Q8) — the FIXTURE CARD takes the section
+    /// instead of an object; the two are mutually exclusive by construction.
+    #[props(default)]
+    card: Option<FixtureCard>,
     armed: Option<ArmedVerb>,
     primary: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let ui = use_hook(try_consume_context::<PatchingUi>);
-    // The one self-animated surface in the panel, and the only chase the
-    // client ever computes: it runs when an UNMAPPED object is on screen and
-    // engine frames are flowing, and stands still otherwise. A mapped
-    // object's chase is published data and needs no clock here.
-    let animate = object.as_ref().is_some_and(|object| !object.mapped) && surface_is_live(&surface);
-    let phase = use_chase_phase(animate);
+    // Nothing here animates itself any more (Q9): every picture the panel
+    // paints — published bytes or the controller's unmapped-chase preview —
+    // arrives as data on the surface, so the panel keeps no clock at all.
     let class = if primary { SECTION_PRIMARY } else { SECTION };
     let is_armed = matches!(armed, Some(ArmedVerb::Assign));
     // The invitation belongs to the object side when the WIRE side holds a
@@ -910,26 +1028,38 @@ fn ObjectPane(
     // A port or output selection has no object either — but nothing to
     // invite, so it says what WOULD name one.
     let wire_hint = free_segment.is_none() && selection.is_some();
+    if let Some(card) = card {
+        return rsx! {
+            section { class: "{class}",
+                FixtureCardPane {
+                    surface: surface.clone(),
+                    card,
+                    primary,
+                    on_action,
+                }
+            }
+        };
+    }
     rsx! {
         section { class: "{class}",
             match object {
                 Some(object) => {
                     let facts = object_facts(&object);
-                    let colors = object_strip_colors(&surface, &object, phase);
+                    let colors = object_strip_colors(&surface, &object);
                     let target = Some(object.target.clone());
                     let stride = selection_stride(&surface, &target);
                     let mapped = object.mapped;
+                    // Q11: an AUTO-mapped fixture reflows its own lamps, so
+                    // every transport verb here would be fought by the next
+                    // resolve. Its objects get the LEAN panel — facts and a
+                    // strip — and the selector that unlocks the grammar
+                    // lives on the fixture card, one click away.
                     let manual = object.manual;
-                    // The flow verbs act on the FIXTURE, whatever grain the
-                    // selection named — dispatched against the whole-fixture
-                    // subject so an instance selection cannot narrow them.
-                    let fixture_target = Some(UiPatchTarget::Fixture { node: object.fixture });
-                    let fixture_verb = {
-                        let surface = surface.clone();
-                        move |kind: PatchVerbKind| {
-                            dispatch_verb(&on_action, &surface, &fixture_target, kind);
-                        }
-                    };
+                    // The scarf (Q8's exception): a fixture with no object
+                    // table IS its own object, so it has no card to carry
+                    // the flow selector — it wears one here instead.
+                    let scarf = object.whole_fixture;
+                    let fixture = object.fixture;
                     let verb = {
                         let surface = surface.clone();
                         let target = target.clone();
@@ -947,101 +1077,98 @@ fn ObjectPane(
                             on_action,
                         }
                         // The object's own lamps, in object order: the
-                        // published chase when it is on a wire, the
-                        // client-computed one when it is not. Nothing to
-                        // decode yet leaves the track showing — an honest
-                        // "no signal", not a field of black lamps.
+                        // published chase when it is on a wire, and the
+                        // controller's core-computed preview when it is not
+                        // (Q9 — the very colors the canvas sprites paint).
+                        // Nothing to decode yet leaves the track showing —
+                        // an honest "no signal", not a field of black lamps.
                         div { class: "{STRIP}", "data-patch-strip": "object",
                             LampStrip { colors }
                         }
-                        div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1.5",
-                            button {
-                                class: if mapped { STEP } else { STEP_OFF },
-                                disabled: !mapped,
-                                title: "Rotate one stride back (;)",
-                                onclick: {
-                                    let verb = verb.clone();
-                                    move |_| verb(PatchVerbKind::Rotate { steps: -1, stride })
-                                },
-                                "‹ ;"
+                        if manual {
+                            div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1.5",
+                                button {
+                                    class: if mapped { STEP } else { STEP_OFF },
+                                    disabled: !mapped,
+                                    title: "Rotate one stride back (;)",
+                                    onclick: {
+                                        let verb = verb.clone();
+                                        move |_| verb(PatchVerbKind::Rotate { steps: -1, stride })
+                                    },
+                                    "‹ ;"
+                                }
+                                button {
+                                    class: if mapped { STEP } else { STEP_OFF },
+                                    disabled: !mapped,
+                                    title: "Rotate one stride forward (')",
+                                    onclick: {
+                                        let verb = verb.clone();
+                                        move |_| verb(PatchVerbKind::Rotate { steps: 1, stride })
+                                    },
+                                    "› '"
+                                }
+                                button {
+                                    class: if mapped { STEP } else { STEP_OFF },
+                                    disabled: !mapped,
+                                    title: "Reverse the wire direction (r)",
+                                    onclick: {
+                                        let verb = verb.clone();
+                                        move |_| verb(PatchVerbKind::Reverse)
+                                    },
+                                    "flip r"
+                                }
+                                button {
+                                    class: if mapped { STEP } else { STEP_OFF },
+                                    disabled: !mapped,
+                                    title: "Take this object off the wire",
+                                    onclick: {
+                                        let verb = verb.clone();
+                                        move |_| verb(PatchVerbKind::Clear)
+                                    },
+                                    "unmap"
+                                }
+                                span { class: "tw:w-2" }
+                                // Mock-level room only (plan): the lamp-count
+                                // edit is a mapping write, not a patch verb.
+                                button {
+                                    class: "{STEP_FUTURE}",
+                                    disabled: true,
+                                    title: "future — the count is authored in Mapping",
+                                    "lamps −"
+                                }
+                                button {
+                                    class: "{STEP_FUTURE}",
+                                    disabled: true,
+                                    title: "future — the count is authored in Mapping",
+                                    "lamps +"
+                                }
                             }
-                            button {
-                                class: if mapped { STEP } else { STEP_OFF },
-                                disabled: !mapped,
-                                title: "Rotate one stride forward (')",
-                                onclick: {
-                                    let verb = verb.clone();
-                                    move |_| verb(PatchVerbKind::Rotate { steps: 1, stride })
-                                },
-                                "› '"
-                            }
-                            button {
-                                class: if mapped { STEP } else { STEP_OFF },
-                                disabled: !mapped,
-                                title: "Reverse the wire direction (r)",
-                                onclick: {
-                                    let verb = verb.clone();
-                                    move |_| verb(PatchVerbKind::Reverse)
-                                },
-                                "flip r"
-                            }
-                            button {
-                                class: if mapped { STEP } else { STEP_OFF },
-                                disabled: !mapped,
-                                title: "Take this object off the wire",
-                                onclick: {
-                                    let verb = verb.clone();
-                                    move |_| verb(PatchVerbKind::Clear)
-                                },
-                                "unmap"
-                            }
-                            span { class: "tw:w-2" }
-                            // Mock-level room only (plan): the lamp-count
-                            // edit is a mapping write, not a patch verb.
-                            button {
-                                class: "{STEP_FUTURE}",
-                                disabled: true,
-                                title: "future — the count is authored in Mapping",
-                                "lamps −"
-                            }
-                            button {
-                                class: "{STEP_FUTURE}",
-                                disabled: true,
-                                title: "future — the count is authored in Mapping",
-                                "lamps +"
+                        } else {
+                            // The LEAN panel (Q11): no transport, no
+                            // invitation, and one line saying why — plus
+                            // where the grammar is unlocked.
+                            div { class: "tw:font-mono tw:text-[10px] tw:text-dim-foreground",
+                                "auto-mapped — this fixture places its own objects. Select the fixture to change that."
                             }
                         }
-                        // The FIXTURE row (P5b): whether this fixture's
-                        // unnamed lamps flow, and — when they do not — the
-                        // one gesture that takes the whole thing back off
-                        // the wire. Undoable like every other verb, so the
-                        // toggle is safe to try.
-                        div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1.5",
-                            span { class: "tw:font-mono tw:text-[10px] tw:text-dim-foreground",
-                                "fixture"
-                            }
-                            button {
-                                class: if manual { STEP_ARMED } else { STEP },
-                                title: if manual {
-                                    "This fixture is MANUAL: only assigned objects light. Click to auto-map the rest."
-                                } else {
-                                    "This fixture AUTO-MAPS: unassigned objects flow onto the wire anyway. Click to go manual."
-                                },
-                                onclick: {
-                                    let fixture_verb = fixture_verb.clone();
-                                    move |_| fixture_verb(PatchVerbKind::SetFlow { manual: !manual })
-                                },
-                                "flow: {flow_label(manual)}"
-                            }
-                            if manual {
-                                button {
-                                    class: "{STEP}",
-                                    title: "Take every object of this fixture off the wire (undoable)",
-                                    onclick: {
-                                        let fixture_verb = fixture_verb.clone();
-                                        move |_| fixture_verb(PatchVerbKind::UnmapAll)
-                                    },
-                                    "unmap all"
+                        // The scarf carries the fixture row itself: it has no
+                        // card of its own (Q8's exception).
+                        if scarf {
+                            div { class: "tw:grid tw:gap-1.5",
+                                FlowSelector {
+                                    surface: surface.clone(),
+                                    node: fixture,
+                                    manual,
+                                    on_action,
+                                }
+                                if manual {
+                                    div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1.5",
+                                        UnmapAllButton {
+                                            surface: surface.clone(),
+                                            node: fixture,
+                                            on_action,
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1160,6 +1287,135 @@ fn ObjectPane(
     }
 }
 
+/// THE FIXTURE CARD (Q8): what a whole-fixture selection shows.
+///
+/// Fixture-grain facts, the flow selector, and — in manual mode — the one
+/// gesture that takes the whole thing back off the wire. No chase strip and
+/// no object transport: a fixture with sub-objects has no single direction
+/// to show and no single run to rotate, and its objects are one canvas click
+/// away now that clicks name objects (Q10).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn FixtureCardPane(
+    surface: UiPatchSurface,
+    card: FixtureCard,
+    primary: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let facts = fixture_facts(&card);
+    let unplaced = card.objects.saturating_sub(card.placed);
+    rsx! {
+        SectionHead {
+            label: "fixture",
+            name: card.name.clone(),
+            context: card.context.clone(),
+            facts,
+            deselect: primary,
+            on_action,
+        }
+        FlowSelector {
+            surface: surface.clone(),
+            node: card.node,
+            manual: card.manual,
+            on_action,
+        }
+        div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1.5",
+            if card.manual {
+                UnmapAllButton { surface: surface.clone(), node: card.node, on_action }
+            }
+            span { class: "tw:font-mono tw:text-[10px] tw:text-dim-foreground",
+                if card.manual && unplaced > 0 {
+                    "{unplaced} still to patch — click one on the canvas."
+                } else if card.manual {
+                    "every object is on a wire."
+                } else {
+                    "objects flow onto the wire by themselves."
+                }
+            }
+        }
+    }
+}
+
+/// Q7: the flow control as an EXPLAINING selector, not a bare toggle.
+///
+/// Two cards, both always visible, each saying what picking it means — a
+/// toggle named one state and left the user to guess the other. Picking
+/// dispatches the ordinary `SetFlow` verb, so it is one undoable step
+/// through the same write path as everything else in the panel.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn FlowSelector(
+    surface: UiPatchSurface,
+    node: NodeId,
+    manual: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let options = vec![
+        OptionCard::new(
+            FLOW_AUTO,
+            StudioIconName::MapArrows,
+            "auto-mapped",
+            "objects place themselves along the wire — just works",
+        ),
+        OptionCard::new(
+            FLOW_MANUAL,
+            StudioIconName::Edited,
+            "manual",
+            "only what you patch lights up — unmapped stays dark",
+        ),
+    ];
+    rsx! {
+        OptionCards {
+            label: "mapping".to_string(),
+            options,
+            selected: if manual { FLOW_MANUAL.to_string() } else { FLOW_AUTO.to_string() },
+            on_pick: move |id: String| {
+                // The flow verb acts on the FIXTURE, whatever grain the
+                // selection named.
+                dispatch_verb(
+                    &on_action,
+                    &surface,
+                    &Some(UiPatchTarget::Fixture { node }),
+                    PatchVerbKind::SetFlow { manual: id == FLOW_MANUAL },
+                );
+            },
+        }
+    }
+}
+
+/// The flow selector's option ids — the values [`flow_label`] names.
+pub(crate) const FLOW_AUTO: &str = "auto";
+pub(crate) const FLOW_MANUAL: &str = "manual";
+
+/// Take every object of one fixture off the wire (undoable, like every other
+/// verb — so it is safe to try).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn UnmapAllButton(
+    surface: UiPatchSurface,
+    node: NodeId,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    rsx! {
+        button {
+            class: "{STEP}",
+            title: "Take every object of this fixture off the wire (undoable)",
+            onclick: move |_| {
+                dispatch_verb(
+                    &on_action,
+                    &surface,
+                    &Some(UiPatchTarget::Fixture { node }),
+                    PatchVerbKind::UnmapAll,
+                );
+            },
+            span { class: "tw:mr-1 tw:inline-flex tw:items-center tw:align-[-1px]", aria_hidden: "true",
+                StudioIcon { name: StudioIconName::UnboundValue, size: 10 }
+            }
+            "unmap all"
+        }
+    }
+}
+
 /// The OUTPUT section: the wire in play, its strip and window, the wire-side
 /// transport — or the invitation when an unmapped object is waiting.
 #[component]
@@ -1180,9 +1436,12 @@ fn OutputPane(
     let class = if primary { SECTION_PRIMARY } else { SECTION };
     let is_armed = matches!(armed, Some(ArmedVerb::Assign));
     let swap_armed = matches!(armed, Some(ArmedVerb::Swap(_)));
-    // The object side holds an UNMAPPED object: this section invites.
+    // The object side holds a LINKABLE object: this section invites. The
+    // test is the arm's own (Q11) — an auto-mapped fixture's object has no
+    // link to offer, and a fixture CARD is not an object at all (Q8), so
+    // neither gets an invitation it could not complete.
     let unmapped_object = match (&selection, &output) {
-        (Some(target), None) if target_is_unmapped(&surface, target) => Some(target.clone()),
+        (Some(target), None) if is_armable(&surface, target) => Some(target.clone()),
         _ => None,
     };
     let ports = port_options(&surface);
@@ -1582,7 +1841,7 @@ mod tests {
         UiPatchSurfaceFixture, UiPatchSurfaceOutput,
     };
 
-    use crate::app::patch::lamp_strip::{FROZEN_CHASE_PHASE, chase_head_lamps};
+    use lpa_studio_core::UiPatchChasePreview;
 
     fn dome_node() -> NodeId {
         NodeId::new(2)
@@ -1624,13 +1883,17 @@ mod tests {
     }
 
     /// Sector 1 mapped to the front of one 60-lamp port, sector 2 still
-    /// waiting — the shape both flows walk.
+    /// waiting — the shape both flows walk. MANUAL, because that is the
+    /// mode the walk-up grammar exists in (Q11): auto-mapped fixtures place
+    /// their own objects and get the lean panel instead.
     fn half_patched_surface() -> UiPatchSurface {
         let mapped = cell("2:0", 0, 0, 30, true);
         UiPatchSurface {
             fixtures: vec![UiPatchSurfaceFixture {
                 node: dome_node(),
                 label: "dome".to_string(),
+                address: Some("/rig.module/dome.fixture".to_string()),
+                manual_flow: true,
                 patch: UiFixturePatch {
                     lamps: 60,
                     cells: vec![mapped.clone()],
@@ -1718,7 +1981,7 @@ mod tests {
             vec![
                 ("lamps".to_string(), "30".to_string()),
                 ("wire".to_string(), "unmapped".to_string()),
-                ("flow".to_string(), "auto-mapped".to_string()),
+                ("flow".to_string(), "manual".to_string()),
             ]
         );
         assert_eq!(
@@ -1741,16 +2004,22 @@ mod tests {
             path: "/sector/2".to_string(),
         };
         let object = object_view(&surface, Some(&selection)).expect("object");
-        assert!(!object.manual, "a document with no flag is auto");
-        assert_eq!(object.fixture, dome_node(), "the flow verbs' subject");
-
-        surface.fixtures[0].manual_flow = true;
-        let object = object_view(&surface, Some(&selection)).expect("object");
         assert!(object.manual);
+        assert_eq!(object.fixture, dome_node(), "the flow verbs' subject");
         assert_eq!(
             object_facts(&object)[2],
             ("flow".to_string(), "manual".to_string())
         );
+
+        // A document with no flag is AUTO, and the fact says so.
+        surface.fixtures[0].manual_flow = false;
+        let object = object_view(&surface, Some(&selection)).expect("object");
+        assert!(!object.manual);
+        assert_eq!(
+            object_facts(&object)[2],
+            ("flow".to_string(), "auto-mapped".to_string())
+        );
+        surface.fixtures[0].manual_flow = true;
         // The same flag on a mapped sibling — it belongs to the fixture, not
         // to whichever object happens to be selected.
         let mapped = object_view(
@@ -1939,35 +2208,41 @@ mod tests {
         surface
     }
 
-    /// A surface with no frame is not live, and the chase that would animate
-    /// stands still — the property every story render depends on.
+    /// A chase the CONTROLLER painted (Q9): the strip renders the preview's
+    /// colors through the ordinary linear -> sRGB transfer and invents
+    /// nothing. The very same `chase_preview` reaches the canvas sprites, so
+    /// this assertion is what pins the two views to one picture.
     #[test]
-    fn a_surface_without_frames_is_not_live() {
-        assert!(!surface_is_live(&half_patched_surface()));
-        assert!(surface_is_live(&live_surface()));
-    }
-
-    /// An UNMAPPED object has no wire and so no published bytes: its strip
-    /// is the one chase the client computes, blue-headed and red-tailed in
-    /// OBJECT order (D2 — and it stays in the strip, never on the sprites).
-    #[test]
-    fn the_object_strip_chases_an_unmapped_object() {
-        let surface = half_patched_surface();
+    fn the_object_strip_paints_the_core_computed_chase() {
+        let mut surface = half_patched_surface();
         let selection = UiPatchTarget::Instance {
             node: dome_node(),
             path: "/sector/2".to_string(),
         };
         let object = object_view(&surface, Some(&selection)).expect("object");
-        let colors = object_strip_colors(&surface, &object, FROZEN_CHASE_PHASE);
-        assert_eq!(colors.len(), 30, "the object's own lamps, all of them");
-        let heads = chase_head_lamps(30);
-        assert_eq!(colors[0], [0, 0, 255], "lamp 0 leads in blue");
-        assert_eq!(colors[30 - 1], [255, 0, 0], "the last lamp trails in red");
+
+        // No preview on the surface: nothing honest to draw, and the strip
+        // does NOT fall back to a chase of its own (the P5 behaviour Q9
+        // deleted).
         assert!(
-            colors[heads..30 - heads]
-                .iter()
-                .all(|color| color[0] == color[1])
+            object_strip_colors(&surface, &object).is_empty(),
+            "the panel never computes a chase itself any more"
         );
+
+        surface.chase_preview = Some(UiPatchChasePreview {
+            node: dome_node(),
+            start: 30,
+            colors: (0..30_u16).map(|lamp| [lamp * 2000, 0, 65535]).collect(),
+            phase: 0.25,
+        });
+        let colors = object_strip_colors(&surface, &object);
+        assert_eq!(colors.len(), 30, "the object's own lamps, all of them");
+        assert_eq!(colors[0], srgb8([0, 0, 65535]));
+        assert_eq!(colors[29], srgb8([29 * 2000, 0, 65535]));
+
+        // A preview for ANOTHER fixture is not this object's picture.
+        surface.chase_preview.as_mut().expect("preview").node = NodeId::new(99);
+        assert!(object_strip_colors(&surface, &object).is_empty());
     }
 
     /// A MAPPED object's strip is its own wire, decoded back through its
@@ -1982,7 +2257,7 @@ mod tests {
         };
         let object = object_view(&surface, Some(&selection)).expect("object");
         assert!(object.mapped && object.reversed);
-        let colors = object_strip_colors(&surface, &object, FROZEN_CHASE_PHASE);
+        let colors = object_strip_colors(&surface, &object);
         assert_eq!(colors.len(), 30);
         // The run is laid end-first, so object lamp 0 is wire lamp 29 —
         // saturated in channel 29 % 3 = 2, read under GRB as blue.
@@ -1990,7 +2265,7 @@ mod tests {
         // Object lamp 1 is wire 28 (channel 1) — GRB reads that as red.
         assert_eq!(colors[1], [255, 0, 0]);
         // And with no frame there is nothing honest to draw at all.
-        let dark = object_strip_colors(&half_patched_surface(), &object, FROZEN_CHASE_PHASE);
+        let dark = object_strip_colors(&half_patched_surface(), &object);
         assert!(dark.is_empty(), "no frame, no invented lamps");
     }
 
@@ -2038,7 +2313,7 @@ mod tests {
         };
         let object = object_view(&surface, Some(&selection)).expect("object");
         assert!(object.mapped, "sector 2 now sits on the second box");
-        let colors = object_strip_colors(&surface, &object, FROZEN_CHASE_PHASE);
+        let colors = object_strip_colors(&surface, &object);
         assert!(
             colors.iter().all(|color| *color == [255, 0, 0]),
             "every lamp reads the SECOND box's wire, not the first's: {colors:?}"
@@ -2106,6 +2381,84 @@ mod tests {
         assert_eq!(
             decode_line(&surface, &output, None, None),
             (ColorOrder::Rgb, "no signal on this wire yet".to_string())
+        );
+    }
+
+    /// Q8: a whole-fixture selection is a CARD, not an object — fixture-grain
+    /// facts and verbs, no chase, no window to derive.
+    #[test]
+    fn a_fixture_selection_is_a_card_not_an_object() {
+        let surface = half_patched_surface();
+        let selection = UiPatchTarget::Fixture { node: dome_node() };
+
+        let card = fixture_card(&surface, Some(&selection)).expect("the card fills");
+        assert_eq!(card.name, "dome");
+        assert_eq!(card.context, "/rig.module/dome.fixture");
+        assert_eq!((card.lamps, card.objects, card.placed), (60, 2, 1));
+        assert!(card.manual);
+        assert_eq!(
+            fixture_facts(&card),
+            vec![
+                ("lamps".to_string(), "60".to_string()),
+                ("objects".to_string(), "1/2 placed".to_string()),
+                ("flow".to_string(), "manual".to_string()),
+            ]
+        );
+
+        assert_eq!(
+            object_view(&surface, Some(&selection)),
+            None,
+            "the fixture is not an object — the card takes the section"
+        );
+        assert_eq!(
+            output_view(&surface, Some(&selection)),
+            None,
+            "and it names no single wire window"
+        );
+
+        // The scarf (Q8's exception): no object table, so the fixture IS
+        // its own object and keeps the object treatment.
+        let mut scarf = half_patched_surface();
+        scarf.fixtures[0].instances.clear();
+        assert_eq!(fixture_card(&scarf, Some(&selection)), None);
+        let object = object_view(&scarf, Some(&selection)).expect("the strand is an object");
+        assert!(object.whole_fixture, "so it wears the flow selector itself");
+        assert_eq!(object.lamps, 60);
+    }
+
+    /// The flow selector's two option ids are the two states
+    /// [`flow_label`] names — one vocabulary, so a pick cannot mean
+    /// something the fact line does not say.
+    #[test]
+    fn the_flow_selectors_ids_are_the_flow_states() {
+        assert_eq!(flow_label(true), FLOW_MANUAL);
+        assert_ne!(flow_label(false), FLOW_MANUAL);
+        assert_eq!(FLOW_AUTO, "auto");
+    }
+
+    /// Q11: an AUTO fixture's objects are not offered a link — not by the
+    /// pickers, not by the sizing rule that draws free segments.
+    #[test]
+    fn an_auto_fixtures_objects_are_never_offered_a_link() {
+        use crate::app::patch::verb_ui::next_unmapped_lamps;
+
+        let mut surface = half_patched_surface();
+        assert_eq!(
+            unmapped_objects(&surface).len(),
+            1,
+            "sector 2, while manual"
+        );
+        assert_eq!(next_unmapped_lamps(&surface), Some(30));
+
+        surface.fixtures[0].manual_flow = false;
+        assert!(
+            unmapped_objects(&surface).is_empty(),
+            "auto-mapped objects place themselves — the picker offers none"
+        );
+        assert_eq!(
+            next_unmapped_lamps(&surface),
+            None,
+            "and none of them sizes a free segment"
         );
     }
 

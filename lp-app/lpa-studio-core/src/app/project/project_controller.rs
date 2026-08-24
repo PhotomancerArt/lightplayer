@@ -3630,6 +3630,15 @@ impl ProjectController {
                 name,
             ));
         }
+        // THE unmapped-selection chase (Q9), computed once for every view:
+        // the panel strip and the canvas sprites both paint these colors,
+        // riding the lens's own frame clock so they advance together and
+        // freeze together. Last, because it reads the finished fixtures.
+        surface.chase_preview = super::patch_preview::chase_preview(
+            &surface,
+            self.patch_selection.as_ref(),
+            self.sync.as_ref().map_or(0, |sync| sync.frames_seen()),
+        );
         (!surface.outputs.is_empty()).then_some(surface)
     }
 

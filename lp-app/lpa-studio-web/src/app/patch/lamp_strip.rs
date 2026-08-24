@@ -17,18 +17,19 @@
 //! PANEL-scale decision.
 //!
 //! **What the strip does not do.** It has no opinion about where its colours
-//! came from — wire bytes, a fixture-space decode, or the client-computed
-//! chase below. Callers decode; the strip paints. Its repaint key is the
-//! DIGEST of the colours it was handed plus the box it measured, so a live
-//! frame that changes nothing repaints nothing and no caller needs a frame
-//! revision to hand it.
+//! came from — wire bytes, a fixture-space decode, or the controller's
+//! unmapped-chase preview. Callers decode; the strip paints. Its repaint key
+//! is the DIGEST of the colours it was handed plus the box it measured, so a
+//! live frame that changes nothing repaints nothing and no caller needs a
+//! frame revision to hand it.
 //!
-//! **Animation.** Live data arrives as new colours from the caller — there is
-//! no rAF loop here, and the harness browser pane (`document.hidden`, zero
-//! rAF) paints on mount like every other pixel canvas in Studio. The ONE
-//! self-animated surface is the client chase ([`use_chase_phase`]), which
-//! stays frozen at [`FROZEN_CHASE_PHASE`] until engine frames are actually
-//! flowing — a story renders the same pixels every time.
+//! **Animation.** There is none here. Every picture this strip draws — the
+//! published wire, a fixture-space decode, the core-computed chase of an
+//! unmapped object — arrives as new colours from the caller, on the
+//! controller's own frame cadence. No rAF loop, no timer, no clock: the
+//! harness browser pane (`document.hidden`, zero rAF) paints on mount like
+//! every other pixel canvas in Studio, and a surface with no engine frames
+//! renders the same pixels every run.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -36,8 +37,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
 use wasm_bindgen::{Clamped, JsCast, closure::Closure};
-
-use crate::app::node::lamp_view::linear_unorm16_to_srgb8;
 
 /// Monotonic strip-canvas element ids (one per mounted strip).
 static NEXT_STRIP_CANVAS_ID: AtomicU64 = AtomicU64::new(0);
@@ -508,193 +507,9 @@ impl Drop for StripResizeObserver {
     }
 }
 
-// -- the client chase ----------------------------------------------------------
-//
-// The engine paints the chase into the published bytes before it publishes
-// (`output_node.rs`), so every MAPPED object's chase arrives here as ordinary
-// frame data — on the strip, on the sprites, and on the wall. An UNMAPPED
-// object has no wire and therefore no bytes, and it is exactly the object a
-// walk-up user is about to point at. The strip computes that one chase
-// itself. It is honest because the strip is a READOUT, not the piece: no
-// canvas sprite ever gets a client-side chase (D2).
-
-/// The chase's head and tail colours, mirrored from
-/// `lpc-engine`'s `CHASE_HEAD_RGB` / `CHASE_TAIL_RGB` (D10, spike `chaseRgb`).
-const CHASE_HEAD_RGB: [u8; 3] = [0, 0, 255];
-const CHASE_TAIL_RGB: [u8; 3] = [255, 0, 0];
-
-/// Head/tail lamps clamp, the engine's `CHASE_HEAD_MAX_LAMPS`.
-const CHASE_HEAD_MAX_LAMPS: usize = 10;
-
-/// The engine's `CHASE_BODY_FLOOR_16` / `CHASE_BODY_CREST_16` and
-/// `CHASE_DOT_FALLOFF`, in the engine's own 16-bit linear space — the strip
-/// runs the same numbers through the same linear → sRGB transfer the frame
-/// decode uses, so a mapped object and an unmapped one chase in the same
-/// greys.
-const CHASE_BODY_FLOOR_16: u16 = 25 * 257;
-const CHASE_BODY_CREST_16: u16 = 255 * 257;
-const CHASE_DOT_FALLOFF: f32 = 7.0;
-
-/// The engine's `CHASE_SWEEP_SECONDS`: one pass across the object per period.
-const CHASE_SWEEP_SECONDS: f64 = 2.0;
-
-/// How often the client chase advances. A timer, never `requestAnimationFrame`:
-/// the story-capture browser pane runs with `document.hidden` and delivers no
-/// animation frames at all.
-const CHASE_TICK_MS: u32 = 50;
-
-/// The phase every un-fed chase stands still at.
-///
-/// Determinism is a hard requirement, not a nicety: story capture compares
-/// PNGs and its thresholds are never widened, so a surface with no live
-/// engine frames must render the same pixels on every run. A quarter of the
-/// way along shows head, dot and tail at once — the most legible still.
-pub(crate) const FROZEN_CHASE_PHASE: f32 = 0.25;
-
-/// Head/tail lamp count for an object of `n` lamps (D10): `round(n / 10)`
-/// clamped to 1..=10 — the engine's `chase_head_lamps`, integer-identical.
-pub(crate) fn chase_head_lamps(lamps: usize) -> usize {
-    lamps
-        .saturating_add(5)
-        .div_euclid(10)
-        .clamp(1, CHASE_HEAD_MAX_LAMPS)
-}
-
-/// The chase, in OBJECT order: blue head, red tail, and a white dot sweeping
-/// between them at `phase` (0..1 along the object).
-pub(crate) fn chase_colors(lamps: usize, phase: f32) -> Vec<[u8; 3]> {
-    let lamps = lamps.max(1);
-    let heads = chase_head_lamps(lamps);
-    (0..lamps)
-        .map(|index| {
-            if index < heads {
-                CHASE_HEAD_RGB
-            } else if index + heads >= lamps {
-                CHASE_TAIL_RGB
-            } else {
-                let level = linear_unorm16_to_srgb8(chase_body_level_16(index, lamps, phase));
-                [level, level, level]
-            }
-        })
-        .collect()
-}
-
-/// The engine's `chase_body_level_16`, taking the phase already folded into
-/// 0..1 (the engine folds seconds; the client folds wall clock).
-fn chase_body_level_16(index: usize, lamps: usize, phase: f32) -> u16 {
-    let position = if lamps <= 1 {
-        0.0
-    } else {
-        index as f32 / (lamps - 1) as f32
-    };
-    let window = (1.0 - (position - phase).abs() * CHASE_DOT_FALLOFF).clamp(0.0, 1.0);
-    let span = f32::from(CHASE_BODY_CREST_16 - CHASE_BODY_FLOOR_16);
-    CHASE_BODY_FLOOR_16 + (span * window).round() as u16
-}
-
-/// The chase phase for the current instant, or [`FROZEN_CHASE_PHASE`] when
-/// `animate` is false.
-///
-/// Callers pass `animate` only when there is a client chase on screen AND
-/// engine frames are actually flowing. Both halves matter: a surface with no
-/// frames (every story) must render the same pixels every run, and a panel
-/// showing nothing but published data has no reason to re-render at all.
-///
-/// The ticker is shared BY CONSTRUCTION: the phase is a pure function of the
-/// wall clock, so every surface that asks agrees without a clock to pass
-/// around, and the timer exists only to force the re-read. It starts on the
-/// first frame that wants it and STOPS on the first tick that does not, so
-/// selecting a mapped object puts the panel back to rest.
-pub(crate) fn use_chase_phase(animate: bool) -> f32 {
-    let mut tick = use_signal(|| 0_u64);
-    let ticking = use_hook(|| Rc::new(Cell::new(false)));
-    let wanted = use_hook(|| Rc::new(Cell::new(false)));
-    wanted.set(animate);
-
-    if animate && !ticking.get() {
-        ticking.set(true);
-        let wanted = wanted.clone();
-        let ticking = ticking.clone();
-        spawn(async move {
-            loop {
-                gloo_timers::future::TimeoutFuture::new(CHASE_TICK_MS).await;
-                if !wanted.get() {
-                    ticking.set(false);
-                    return;
-                }
-                let next = *tick.peek() + 1;
-                tick.set(next);
-            }
-        });
-    }
-
-    if !animate {
-        return FROZEN_CHASE_PHASE;
-    }
-    // Subscribe: the tick is what makes this component re-read the clock.
-    let _ = tick();
-    let seconds = web_sys::js_sys::Date::now() / 1000.0;
-    (seconds / CHASE_SWEEP_SECONDS).rem_euclid(1.0) as f32
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The head/tail sizing is D10's, and it is the ENGINE's integer form —
-    /// a strip that rounded differently would draw a different object than
-    /// the wall does.
-    #[test]
-    fn head_and_tail_sizing_matches_the_engine() {
-        assert_eq!(chase_head_lamps(0), 1);
-        assert_eq!(chase_head_lamps(1), 1);
-        assert_eq!(chase_head_lamps(9), 1);
-        assert_eq!(chase_head_lamps(15), 2, "round(n / 10), not floor");
-        assert_eq!(chase_head_lamps(100), 10);
-        assert_eq!(chase_head_lamps(30_000), 10, "clamped, not proportional");
-    }
-
-    /// Blue leads, red trails, and the body between them is grey — the
-    /// walk-up question ("which end is lamp 0?") answered in the lamps.
-    #[test]
-    fn the_chase_paints_blue_head_and_red_tail() {
-        let colors = chase_colors(40, 0.5);
-        let heads = chase_head_lamps(40);
-        assert_eq!(heads, 4);
-        assert!(colors[..heads].iter().all(|color| *color == [0, 0, 255]));
-        assert!(
-            colors[40 - heads..]
-                .iter()
-                .all(|color| *color == [255, 0, 0])
-        );
-        for color in &colors[heads..40 - heads] {
-            assert_eq!(color[0], color[1], "the body is white/grey, never hued");
-            assert_eq!(color[1], color[2]);
-        }
-    }
-
-    /// The dot is a RUNNER, not a wash: it is brightest where the phase
-    /// says, and the far end of the object stays at the floor.
-    #[test]
-    fn the_dot_sweeps_the_object_in_order() {
-        let floor = linear_unorm16_to_srgb8(CHASE_BODY_FLOOR_16);
-        let front = chase_colors(100, 0.25);
-        let back = chase_colors(100, 0.75);
-        assert!(front[25][0] > front[75][0], "the dot is at the front");
-        assert!(back[75][0] > back[25][0], "and later, at the back");
-        assert_eq!(front[75][0], floor, "the far end sits at the floor");
-        assert!(
-            front[25][0] > floor + 40,
-            "the dot itself is unmistakably brighter"
-        );
-    }
-
-    /// A one-lamp object still marks an end rather than dividing by zero.
-    #[test]
-    fn a_single_lamp_object_is_all_head() {
-        assert_eq!(chase_colors(1, 0.4), vec![[0, 0, 255]]);
-        assert_eq!(chase_colors(0, 0.4).len(), 1, "never an empty picture");
-    }
 
     /// Only the layout-sized presentation claims `ux-box-sized-canvas`: the
     /// story gate asserts that class's bitmap matches its box, and a gradient
@@ -712,14 +527,18 @@ mod tests {
     }
 
     /// The repaint key is the picture: identical colours never repaint, and
-    /// a single changed lamp always does.
+    /// a single changed lamp always does. (The strip has no clock of its
+    /// own — a live surface repaints because its CALLER handed it new
+    /// colours, which is the only reason it ever should.)
     #[test]
     fn the_digest_is_the_picture() {
-        let a = chase_colors(60, 0.3);
-        assert_eq!(color_digest(&a), color_digest(&chase_colors(60, 0.3)));
+        let a: Vec<[u8; 3]> = (0..60).map(|lamp| [lamp as u8, 40, 200]).collect();
+        assert_eq!(color_digest(&a), color_digest(&a.clone()));
         let mut b = a.clone();
         b[30][1] = b[30][1].wrapping_add(1);
         assert_ne!(color_digest(&a), color_digest(&b));
-        assert_ne!(color_digest(&a), color_digest(&chase_colors(60, 0.31)));
+        let mut shorter = a.clone();
+        shorter.pop();
+        assert_ne!(color_digest(&a), color_digest(&shorter));
     }
 }

@@ -240,19 +240,29 @@ pub(crate) fn free_runs(port: &UiPatchPort) -> Vec<(u32, u32)> {
 /// no runs at all. This is what sizes a free segment — the walk-up doc's
 /// improvement on lp2014's user-set chunk number (P4's panel names the
 /// object itself; sizing only needs its count).
+///
+/// MANUAL fixtures only (Q11). An auto-mapped fixture places its own unnamed
+/// lamps, so none of its objects is waiting for anything — sizing a free
+/// segment by one would draw a window for a link the surface never offers.
+/// With no manual fixture on the surface, a free segment simply takes its
+/// whole run.
 pub(crate) fn next_unmapped_lamps(surface: &UiPatchSurface) -> Option<u32> {
-    surface.fixtures.iter().find_map(|fixture| {
-        if fixture.instances.is_empty() {
-            (fixture.patch.cells.is_empty() && fixture.patch.lamps > 0)
-                .then_some(fixture.patch.lamps)
-        } else {
-            fixture
-                .instances
-                .iter()
-                .find(|instance| !instance.placed)
-                .map(|instance| instance.lamps)
-        }
-    })
+    surface
+        .fixtures
+        .iter()
+        .filter(|f| f.manual_flow)
+        .find_map(|fixture| {
+            if fixture.instances.is_empty() {
+                (fixture.patch.cells.is_empty() && fixture.patch.lamps > 0)
+                    .then_some(fixture.patch.lamps)
+            } else {
+                fixture
+                    .instances
+                    .iter()
+                    .find(|instance| !instance.placed)
+                    .map(|instance| instance.lamps)
+            }
+        })
 }
 
 /// Is this fixture-side target still unmapped? The assign arm's
@@ -562,6 +572,10 @@ mod tests {
             fixtures: vec![UiPatchSurfaceFixture {
                 node: dome_node(),
                 label: "dome".to_string(),
+                // MANUAL: the walk-up grammar's own mode (Q11). An
+                // auto-mapped fixture places its own objects, so none of
+                // them ever sizes a segment or fills a picker.
+                manual_flow: true,
                 patch: UiFixturePatch {
                     lamps: 60,
                     cells: vec![cell("2:0", 0, 0, 30)],

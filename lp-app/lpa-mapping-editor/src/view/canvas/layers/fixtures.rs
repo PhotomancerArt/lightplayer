@@ -57,10 +57,24 @@ pub enum FixtureBody {
 /// What a fixture gesture asks of the shell. The crate keeps only
 /// ephemeral pointer state; the shell owns the override lifecycle and
 /// feeds effective placements back through the sprites prop.
+/// What a tap on the canvas actually hit: the sprite, and — when its body
+/// draws real lamps — the TRUE lamp index nearest the pointer.
+///
+/// The lamp is what lets the shell name an OBJECT rather than a whole
+/// fixture (the patching view's Q10 ruling): sprites already carry true
+/// indexes for the live-fill feed, and a click is a claim about one lamp.
+/// `None` for a placeholder or strip body, where the sprite genuinely knows
+/// nothing finer than "this fixture".
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FixturePick {
+    pub key: String,
+    pub lamp: Option<u32>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum FixtureEvent {
     /// Tap on a fixture selects it; a background tap deselects (`None`).
-    Select(Option<String>),
+    Select(Option<FixturePick>),
     /// Live during a drag (`commit: false`), once at pointer-up
     /// (`commit: true`) — one committed move per gesture.
     Move {
@@ -113,6 +127,37 @@ pub(crate) fn hit_fixture<'a>(
             && ly >= by - HIT_PAD
             && ly <= by + bh + HIT_PAD
     })
+}
+
+/// The TRUE lamp index nearest a project-space point inside `sprite`, when
+/// its body draws lamps at all.
+///
+/// Drawn point `i` stands for true lamp `i * stride` (the display
+/// subsample), so the answer survives the stride: the index this returns is
+/// always a real lamp of the fixture's own document, never a drawn slot.
+/// Under subsampling only every k-th lamp is reachable — the shell resolves
+/// the returned lamp to the OBJECT that owns it, and an object shorter than
+/// the stride is sub-pixel on screen anyway.
+///
+/// Nearest, not hit-tested: the pointer is compared against the drawn points
+/// in the sprite's OWN space (where the lamp radius is drawn), so a click in
+/// the gap between two lamps still names the one the user was aiming at.
+pub(crate) fn nearest_lamp(sprite: &FixtureSprite, project_point: [f64; 2]) -> Option<u32> {
+    let FixtureBody::Lamps { points, total } = &sprite.body else {
+        return None;
+    };
+    let stride = display_stride(*total, points.len());
+    let [lx, ly] = sprite.placement.inverse(project_point);
+    let (index, _) = points
+        .iter()
+        .enumerate()
+        .map(|(index, point)| {
+            let dx = f64::from(point[0]) - lx;
+            let dy = f64::from(point[1]) - ly;
+            (index, dx * dx + dy * dy)
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))?;
+    u32::try_from(index * stride).ok()
 }
 
 /// Has this press travelled far enough (CSS pixels) to count as a drag?
@@ -387,6 +432,70 @@ mod tests {
             Some("under"),
             "outside the topmost pad, the sprite underneath answers"
         );
+    }
+
+    /// A tap names the TRUE lamp nearest it, in the sprite's own space and
+    /// through its placement — the fact the shell turns into an OBJECT
+    /// selection (Q10).
+    #[test]
+    fn nearest_lamp_names_a_true_index_through_the_placement() {
+        let mut sprite = sprite("a", Placement::IDENTITY, [0.0, 0.0, 30.0, 0.0]);
+        sprite.body = FixtureBody::Lamps {
+            points: vec![[0.0, 0.0], [10.0, 0.0], [20.0, 0.0], [30.0, 0.0]],
+            total: 4,
+        };
+        assert_eq!(nearest_lamp(&sprite, [0.0, 0.0]), Some(0));
+        assert_eq!(nearest_lamp(&sprite, [21.0, 3.0]), Some(2));
+        assert_eq!(
+            nearest_lamp(&sprite, [100.0, 0.0]),
+            Some(3),
+            "a click past the end still names the lamp it was aiming at"
+        );
+
+        // Through a placement: the point is inverse-transformed first.
+        sprite.placement = Placement {
+            t: [100.0, 50.0],
+            r: 0.0,
+            s: 2.0,
+        };
+        assert_eq!(nearest_lamp(&sprite, [140.0, 50.0]), Some(2));
+    }
+
+    /// Display subsampling must not lose the true index: drawn point `i`
+    /// stands for lamp `i * stride`, so what comes back is always a lamp of
+    /// the fixture's own document (which is what an object span is measured
+    /// in) — never a drawn slot.
+    #[test]
+    fn nearest_lamp_survives_the_display_stride() {
+        let mut sprite = sprite("a", Placement::IDENTITY, [0.0, 0.0, 30.0, 0.0]);
+        // 4000 true lamps drawn as 2000 points: stride 2.
+        sprite.body = FixtureBody::Lamps {
+            points: (0..2000).map(|i| [i as f32, 0.0]).collect(),
+            total: 4000,
+        };
+        assert_eq!(display_stride(4000, 2000), 2);
+        assert_eq!(nearest_lamp(&sprite, [0.0, 0.0]), Some(0));
+        assert_eq!(nearest_lamp(&sprite, [7.0, 0.0]), Some(14), "7 * stride");
+        assert_eq!(nearest_lamp(&sprite, [1999.0, 0.0]), Some(3998));
+    }
+
+    /// Bodies that draw no lamps know nothing finer than "this fixture" —
+    /// and say so, so the shell can fall back to the fixture grain.
+    #[test]
+    fn a_lampless_body_names_no_lamp() {
+        let placeholder = sprite("a", Placement::IDENTITY, [0.0, 0.0, 30.0, 30.0]);
+        assert_eq!(nearest_lamp(&placeholder, [1.0, 1.0]), None);
+
+        let mut strip = placeholder.clone();
+        strip.body = FixtureBody::Strip { lamps: 60 };
+        assert_eq!(nearest_lamp(&strip, [1.0, 1.0]), None);
+
+        let mut empty = placeholder.clone();
+        empty.body = FixtureBody::Lamps {
+            points: Vec::new(),
+            total: 0,
+        };
+        assert_eq!(nearest_lamp(&empty, [1.0, 1.0]), None);
     }
 
     #[test]

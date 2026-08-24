@@ -42,6 +42,13 @@ pub struct UiPatchSurface {
     /// Every producing fixture on any of those wires, with its runs and its
     /// instance table.
     pub fixtures: Vec<UiPatchSurfaceFixture>,
+    /// THE chase for the selected UNMAPPED object, computed once here (Q9)
+    /// — the panel strip and the canvas sprites both paint these colors, so
+    /// the two views can never disagree about what the object is doing.
+    /// `None` whenever the selection is mapped (its chase is in the
+    /// published bytes), wire-side, or absent. See
+    /// [`crate::UiPatchChasePreview`].
+    pub chase_preview: Option<crate::UiPatchChasePreview>,
     /// The project-level `editor.json` settled locally (cached content, or
     /// the file is known absent). While false, pages dispatch
     /// [`crate::EditorMetaFetchOp`] against [`Self::editor_meta_artifact`]

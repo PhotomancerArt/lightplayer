@@ -414,7 +414,7 @@ fn ModifierRow(
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-1.5",
             span { class: ROW_LABEL_CLASS, "{row_label}" }
-            div { class: TILE_GRID_CLASS,
+            div { class: option_card_grid_class(),
                 for (index , ((label , hint) , projection)) in cards
                     .into_iter()
                     .zip(projections)
@@ -471,7 +471,7 @@ fn WireDirectionTiles(
     rsx! {
             div { class: "tw:grid tw:min-w-0 tw:gap-1.5",
                 span { class: ROW_LABEL_CLASS, "{DIRECTION_ROW_LABEL}" }
-                div { class: TILE_GRID_CLASS,
+                div { class: option_card_grid_class(),
                 for (candidate , label , hint) in [
                     (false, WIRE_FORWARD, HINT_WIRE_FORWARD),
                     (true, WIRE_REVERSED, HINT_WIRE_REVERSED),
@@ -596,7 +596,7 @@ pub fn ChoiceTiles(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     rsx! {
-        div { class: TILE_GRID_CLASS,
+        div { class: option_card_grid_class(),
             for choice in choices {
                 button {
                     key: "{choice.variant}",
@@ -1268,24 +1268,16 @@ fn segment_class(selected: bool) -> &'static str {
     }
 }
 
-/// The tile grid every tile set lays out in (shapes, modifiers, wire
-/// direction) — one template, so the sets align into one field.
-const TILE_GRID_CLASS: &str =
-    "tw:grid tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] tw:gap-1.5";
-
-/// One tile of the inline choice grid. Selected = accent border + accent
-/// wash + the check badge ([`TILE_CHECK_CLASS`]) — three signals, because
-/// the old filled-grey treatment was ruled hard to read.
-fn tile_class(selected: bool) -> &'static str {
-    if selected {
-        "tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-accent tw:bg-accent-wash tw:p-1.5 tw:text-left tw:text-strong-foreground"
-    } else {
-        "tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:p-1.5 tw:text-left tw:text-muted-foreground tw:hover:border-border-strong tw:hover:text-strong-foreground"
-    }
-}
-
-/// The selected tile's check badge, over the drawing's top-right corner.
-const TILE_CHECK_CLASS: &str = "tw:absolute tw:right-1 tw:top-1 tw:inline-flex tw:h-4 tw:w-4 tw:items-center tw:justify-center tw:rounded-pill tw:bg-accent tw:text-accent-foreground";
+// The tile grid, the tile look and the selected check badge are the SHARED
+// explaining-card language (`base::option_cards`), which this site's G1b
+// ruling defined: inline tiles, no popover, no dropdown, selected = accent
+// border + accent wash + check. The faces here are projection drawings and
+// each tile dispatches a slot-op sequence, so the COMPONENT stays local; only
+// the look is shared, and it is shared rather than copied.
+use crate::base::option_cards::{
+    OPTION_CARD_CHECK_CLASS as TILE_CHECK_CLASS, option_card_class as tile_class,
+    option_card_grid_class,
+};
 
 #[cfg(test)]
 mod tests {

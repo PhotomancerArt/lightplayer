@@ -1,3 +1,4 @@
+pub mod chase;
 pub mod output_def;
 pub mod output_name;
 pub mod output_port_def;
