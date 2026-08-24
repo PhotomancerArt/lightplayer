@@ -336,6 +336,14 @@ impl ProjectSync {
         self.output_frames.outputs()
     }
 
+    /// How many engine frames the mirror has seen — the lens's frame clock
+    /// (see [`OutputFrameCache::frames_seen`]). The patch surface's
+    /// unmapped-chase preview rides it, so panel and canvas advance together
+    /// and both stand still when nothing is playing.
+    pub fn frames_seen(&self) -> u64 {
+        self.output_frames.frames_seen()
+    }
+
     /// Whether the mirror carries any output node.
     ///
     /// The probe has no node selector — it answers for every output at once —

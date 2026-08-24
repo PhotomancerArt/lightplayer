@@ -37,8 +37,8 @@ pub use editor_core::view_geometry::{
     ArrowInput, MapArrowOverlay, MapArrowSeg, neutral_lamp_rgb, wiring_arrows,
 };
 pub use view::canvas::{
-    CanvasAnchor, CanvasDrag, EditorCanvas, FixtureBody, FixtureEvent, FixtureSprite,
-    capture_pointer, object_color,
+    CanvasAnchor, CanvasDrag, EditorCanvas, FixtureBody, FixtureEvent, FixturePick, FixtureSprite,
+    SpriteObject, capture_pointer, convex_hull, object_color, pad_hull,
 };
 pub use view::floats::{HelpFloat, ZoomFloat, tool_hint};
 pub use view::keys::{EditorKeyOutcome, handle_editor_key};

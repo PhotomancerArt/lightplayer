@@ -177,6 +177,8 @@ holds the full context.
 | Fixture paste-guidedness is a heuristic (no mapping and height ≠ 1) for want of a model-level "declared" marker | `2026-08-09-dimensionality-authoring-surface` | The mapping/patching work's D15 declared fixture space lands |
 | `wire_reversed` is an interim fixture-level bit; the patching work's per-range `reversed` supersedes it, and D15 may absorb `strip_order_meaningful` entirely | `2026-08-09-dimensionality-authoring-surface` | Mapping/patching slice 1 |
 | Desktop-app multi-session UX (the web shell's install funnel caps the tab at one session; the N-session pool and per-session projections stay) | `2026-08-19-single-session-web-and-session-control` | A desktop-app shell is built and wants to show more than one session at once |
+| A1: wire values decode under the CURRENT fixture's lamp type (owner's when mapped, else the next-unmapped object's) — the panel states the assumption rather than implying certainty | `2026-08-20-walk-up-assignment-selection-model` | Per-port lamp-type data exists on the surface |
+| The lamps−/+ control is mock-level room only (dashed, disabled): editing an object's lamp count is a mapping write, not a patch verb | `2026-08-20-walk-up-assignment-selection-model` | The count edit gets a home on the mapping write path |
 
 ## Relationship To Shared Planning
 

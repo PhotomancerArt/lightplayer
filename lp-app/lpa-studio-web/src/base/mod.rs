@@ -32,6 +32,7 @@ pub(crate) mod logo_mark_stories;
 pub mod markdown_text;
 #[cfg(feature = "stories")]
 pub(crate) mod markdown_text_stories;
+pub mod option_cards;
 pub mod outline;
 pub mod popover;
 #[cfg(feature = "stories")]
@@ -60,6 +61,9 @@ pub use inline_button::{
 pub use keyboard::Platform;
 pub use logo_mark::{LogoLockup, LogoMark, LogoStacked};
 pub use markdown_text::{MarkdownDocs, MarkdownText};
+pub use option_cards::{
+    OPTION_CARD_CHECK_CLASS, OptionCard, OptionCards, option_card_class, option_card_grid_class,
+};
 pub use popover::{IconPopoverButton, PopoverButton, PopoverCloseHandle, PopoverPlacement};
 pub use tabs::{TabItem, Tabs};
 pub use toast::{ToastHost, ToastMessage, ToastTone, Toasts, use_toast_provider};

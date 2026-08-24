@@ -41,12 +41,14 @@ pub use canvas_anchor::{CanvasAnchor, capture_pointer};
 pub use lamp_metrics::{authored_spans, fit_region, lamp_display_radius};
 pub use palette::object_color;
 
-pub use layers::fixtures::{FixtureBody, FixtureEvent, FixtureSprite};
+pub use layers::fixtures::{FixtureBody, FixtureEvent, FixturePick, FixtureSprite, SpriteObject};
+pub use layers::hull::{convex_hull, pad_hull};
 
 use layers::doc::{DocLayersInput, doc_layers};
 use layers::draft::{DraftLayerInput, draft_layer};
 use layers::fixtures::{
     FixtureLayerInput, dragged_placement, exceeds_drag_threshold, fixture_layer, hit_fixture,
+    hit_object, nearest_lamp,
 };
 use layers::marquee::marquee_layer;
 use layers::selection::{SelectionLayerInput, selection_layer};
@@ -62,6 +64,15 @@ pub enum CanvasDrag {
     /// move past the CSS-pixel threshold; under it, pointer-up selects.
     FixturePress {
         key: String,
+        /// The TRUE lamp index the press landed nearest, when the sprite
+        /// draws lamps — what makes a tap name an OBJECT (Q10) rather than
+        /// the whole fixture. Resolved at PRESS time, from the point the
+        /// pointer actually went down on.
+        lamp: Option<u32>,
+        /// The object HULL the press landed inside ([`hit_object`]), when
+        /// one claimed the point — the round-3 "objects are THINGS" hit
+        /// target. Resolved at PRESS time like the lamp.
+        object: Option<usize>,
         start_client: [f64; 2],
         original: Placement,
         moved: bool,
@@ -499,16 +510,26 @@ pub fn EditorCanvas(
                     let client = [point.x, point.y];
                     let view = event_view_point(&anchor, &evt);
                     let project = camera.peek().view_to_doc(view);
-                    let hit =
-                        hit_fixture(&fixtures_down, [f64::from(project[0]), f64::from(project[1])])
-                            .map(|sprite| (sprite.key.clone(), sprite.placement));
+                    let project_point = [f64::from(project[0]), f64::from(project[1])];
+                    let hit = hit_fixture(&fixtures_down, project_point).map(|sprite| {
+                        (
+                            sprite.key.clone(),
+                            sprite.placement,
+                            nearest_lamp(sprite, project_point),
+                            hit_object(sprite, project_point),
+                        )
+                    });
                     match hit {
-                        Some((key, original)) => drag.set(Some(CanvasDrag::FixturePress {
-                            key,
-                            start_client: client,
-                            original,
-                            moved: false,
-                        })),
+                        Some((key, original, lamp, object)) => {
+                            drag.set(Some(CanvasDrag::FixturePress {
+                                key,
+                                lamp,
+                                object,
+                                start_client: client,
+                                original,
+                                moved: false,
+                            }));
+                        }
                         None => drag.set(Some(CanvasDrag::FixtureTap {
                             start_client: client,
                             moved: false,
@@ -551,6 +572,8 @@ pub fn EditorCanvas(
                 match current_drag {
                     CanvasDrag::FixturePress {
                         key,
+                        lamp,
+                        object,
                         start_client,
                         original,
                         moved,
@@ -572,6 +595,8 @@ pub fn EditorCanvas(
                         }
                         drag.set(Some(CanvasDrag::FixturePress {
                             key,
+                            lamp,
+                            object,
                             start_client,
                             original,
                             moved: now_moved,
@@ -635,6 +660,8 @@ pub fn EditorCanvas(
                     CanvasDrag::Pan { .. } => {}
                     CanvasDrag::FixturePress {
                         key,
+                        lamp,
+                        object,
                         start_client,
                         original,
                         moved,
@@ -656,7 +683,11 @@ pub fn EditorCanvas(
                                     commit: true,
                                 });
                             } else {
-                                handler.call(FixtureEvent::Select(Some(key)));
+                                handler.call(FixtureEvent::Select(Some(FixturePick {
+                                    key,
+                                    lamp,
+                                    object,
+                                })));
                             }
                         }
                     }
