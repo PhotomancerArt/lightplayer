@@ -1,10 +1,10 @@
 //! The LightPlayer brand: [`LogoMark`], [`LogoLockup`], and [`LogoStacked`].
 //!
 //! Source of truth for the brand. The mark is a WS2811-style addressable-LED
-//! package — slim corner pads, lens ring, play triangle in the lens — drawn
-//! "datasheet fine": thin silkscreen strokes, near-square corners. Every part
-//! takes `currentColor`, so containers theme the whole mark (in-app chrome
-//! sets it strong white; mono/print contexts set ink).
+//! package — slim corner pads, a grown fillet-cornered play triangle filling
+//! the package — drawn "datasheet fine": thin silkscreen strokes, near-square
+//! corners. Every part takes `currentColor`, so containers theme the whole
+//! mark (in-app chrome sets it strong white; mono/print contexts set ink).
 //!
 //! Motion rules (spike gates 1–3 2026-08-03; gate-4 post-merge collapsed
 //! the in-app/marketing split — the full-rainbow brand runs everywhere):
@@ -32,9 +32,43 @@ use dioxus::prelude::*;
 const PKG: (f32, f32, f32, f32, f32, f32) = (5.5, 5.5, 21.0, 21.0, 1.9, 1.25);
 const PADS: [(f32, f32); 4] = [(3.6, 8.2), (26.5, 8.2), (26.5, 19.6), (3.6, 19.6)];
 const PAD_SIZE: (f32, f32, f32) = (1.9, 4.2, 0.6);
-const LENS: (f32, f32, f32, f32) = (16.0, 16.0, 7.6, 1.05);
-const PLAY_D: &str =
-    "M13.9 13v6c0 .58.64.94 1.14.64l4.9-3a.75.75 0 0 0 0-1.28l-4.9-3a.75.75 0 0 0-1.14.64z";
+/// The grown triangle (spike gate-1/2): circumradius, center, and the
+/// fillet-radius ratio. The hero uses a tighter ratio (see brand_hero).
+const TRI: (f32, f32, f32) = (15.4, 16.0, 7.6);
+const TRI_CORNER_RATIO: f32 = 0.16;
+
+/// SVG path for the brand triangle: equilateral, pointing right, centered
+/// (cx, cy) with circumradius r. Corners are true circular fillets of
+/// radius rho — tangent points on each edge joined by arcs, G1-continuous
+/// with the straight edges. Sweep flag 1: the path winds clockwise in
+/// SVG's y-down space.
+pub(crate) fn fillet_tri_path(cx: f32, cy: f32, r: f32, rho: f32) -> String {
+    let vs: [(f32, f32); 3] = std::array::from_fn(|i| {
+        let t = (i as f32 * 120.0).to_radians();
+        (cx + r * t.cos(), cy + r * t.sin())
+    });
+    let mut d = String::new();
+    for i in 0..3 {
+        let v = vs[i];
+        let a = vs[(i + 2) % 3];
+        let b = vs[(i + 1) % 3];
+        let la = ((a.0 - v.0).powi(2) + (a.1 - v.1).powi(2)).sqrt();
+        let lb = ((b.0 - v.0).powi(2) + (b.1 - v.1).powi(2)).sqrt();
+        let na = ((a.0 - v.0) / la, (a.1 - v.1) / la);
+        let nb = ((b.0 - v.0) / lb, (b.1 - v.1) / lb);
+        let phi = (na.0 * nb.0 + na.1 * nb.1).clamp(-1.0, 1.0).acos();
+        let t = rho / (phi / 2.0).tan();
+        let p1 = (v.0 + na.0 * t, v.1 + na.1 * t);
+        let p2 = (v.0 + nb.0 * t, v.1 + nb.1 * t);
+        let cmd = if i == 0 { 'M' } else { 'L' };
+        d.push_str(&format!(
+            "{cmd}{:.2} {:.2}A{rho:.2} {rho:.2} 0 0 1 {:.2} {:.2}",
+            p1.0, p1.1, p2.0, p2.1
+        ));
+    }
+    d.push('Z');
+    d
+}
 
 /// The brand mark at `size`×`size` CSS pixels, entirely `currentColor`.
 /// `animated` is the icon-only form: the play triangle cycles the LED
@@ -43,9 +77,9 @@ const PLAY_D: &str =
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn LogoMark(size: u32, #[props(default = false)] animated: bool) -> Element {
     let (px, py, pw, ph, prx, psw) = PKG;
-    let (lcx, lcy, lr, lsw) = LENS;
     let (padw, padh, padrx) = PAD_SIZE;
     let play_class = if animated { "lp-brand-play-anim" } else { "" };
+    let tri_d = fillet_tri_path(TRI.0, TRI.1, TRI.2, TRI.2 * TRI_CORNER_RATIO);
     rsx! {
         svg {
             width: "{size}",
@@ -57,16 +91,12 @@ pub fn LogoMark(size: u32, #[props(default = false)] animated: bool) -> Element 
                 x: "{px}", y: "{py}", width: "{pw}", height: "{ph}", rx: "{prx}",
                 stroke: "currentColor", stroke_width: "{psw}", fill: "none",
             }
-            g { fill: "currentColor", opacity: "0.75",
+            g { fill: "currentColor",
                 for (x, y) in PADS.iter() {
                     rect { x: "{x}", y: "{y}", width: "{padw}", height: "{padh}", rx: "{padrx}" }
                 }
             }
-            circle {
-                cx: "{lcx}", cy: "{lcy}", r: "{lr}",
-                stroke: "currentColor", stroke_width: "{lsw}", fill: "none", opacity: "0.85",
-            }
-            path { class: "{play_class}", fill: "currentColor", d: PLAY_D }
+            path { class: "{play_class}", fill: "currentColor", d: "{tri_d}" }
         }
     }
 }
@@ -177,8 +207,8 @@ pub fn LogoStacked(
 /// accent (the static frame of the icon-only animation).
 pub fn favicon_svg() -> String {
     let (px, py, pw, ph, prx, psw) = PKG;
-    let (lcx, lcy, lr, lsw) = LENS;
     let (padw, padh, padrx) = PAD_SIZE;
+    let tri_d = fillet_tri_path(TRI.0, TRI.1, TRI.2, TRI.2 * TRI_CORNER_RATIO);
     let pads = PADS
         .iter()
         .map(|(x, y)| {
@@ -202,9 +232,8 @@ pub fn favicon_svg() -> String {
          @media (prefers-color-scheme: dark) {{ .s {{ stroke: #fffaf0; }} .i {{ fill: #fffaf0; }} }}\n  \
          </style>\n  \
          <rect class=\"s\" x=\"{px}\" y=\"{py}\" width=\"{pw}\" height=\"{ph}\" rx=\"{prx}\" fill=\"none\" stroke-width=\"{psw}\"/>\n  \
-         <g opacity=\"0.75\">\n{pads}  </g>\n  \
-         <circle class=\"s\" cx=\"{lcx}\" cy=\"{lcy}\" r=\"{lr}\" fill=\"none\" stroke-width=\"{lsw}\" opacity=\"0.85\"/>\n  \
-         <path fill=\"#7be0b2\" d=\"{PLAY_D}\"/>\n\
+         <g>\n{pads}  </g>\n  \
+         <path fill=\"#7be0b2\" d=\"{tri_d}\"/>\n\
          </svg>\n"
     )
 }
@@ -216,6 +245,18 @@ mod tests {
 
     fn favicon_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("public/favicon.svg")
+    }
+
+    /// Pins the exact fillet-triangle `d` string, so float-formatting drift
+    /// or an accidental construction change fails loudly instead of quietly
+    /// nudging the mark.
+    #[test]
+    fn brand_triangle_path_is_stable() {
+        assert_eq!(
+            super::fillet_tri_path(15.4, 16.0, 7.6, 7.6 * 0.16),
+            "M21.18 14.95A1.22 1.22 0 0 1 21.18 17.05L13.42 21.53A1.22 1.22 0 0 1 \
+             11.60 20.48L11.60 11.52A1.22 1.22 0 0 1 13.42 10.47Z"
+        );
     }
 
     /// Drift gate: the committed favicon must match the generated one, so a
