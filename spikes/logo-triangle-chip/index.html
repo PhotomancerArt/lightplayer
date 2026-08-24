@@ -110,6 +110,10 @@
     -webkit-background-clip: text; background-clip: text;
     color: transparent;
     animation: kf-sweep calc(7s/var(--spd)) linear infinite;
+    /* background-clip:text only paints the line box; with line-height 1 the
+       g/y descenders fall outside it and get sliced. Padding extends the
+       painted area (and background covers padding); margin compensates. */
+    padding-bottom: .16em; margin-bottom: -.16em;
   }
   @keyframes kf-sweep { to { background-position: -300% 0; } }
   @keyframes kf-rfill { 0%{fill:var(--r1)} 17%{fill:var(--r2)} 33%{fill:var(--r3)}
@@ -234,9 +238,12 @@
   the record, "may think again later"); favicon = same mark, no per-size split; hero fill =
   <b>Spill</b> (light blooms past the edge); corner rounding fixed — true circular-arc fillets at
   the tangent points (the old quadratic-through-vertex rounding read wrong).
-  <b>Gate-3:</b> C1 confirmed; trying legs at the <b>same ink as the package</b> (production fades
-  them to 75% — the "different color" read). Legs control toggles match ↔ faded everywhere.
-  Still open: leg tone (this), default landing shader, triangle tone (accent vs white).
+  <b>Gate-3:</b> C1 confirmed; legs = <b>same ink as the package</b> (production's 75% fade read as
+  a different color — Legs control keeps faded for comparison). <b>Gate-4:</b> matched legs
+  confirmed ("closer to a proper mark"); wordmark descender clipping fixed (background-clip:text
+  vs line-height:1); <b>hero corner rounding gets its own, tighter ratio</b> — 0.16 fine at mark
+  scale, too much at hero scale (Hero corner control; mark unchanged).
+  Still open: hero corner ratio (this), default landing shader, triangle tone (accent vs white).
 </p>
 
 <div class="controls">
@@ -271,6 +278,12 @@
     <button class="chip" data-ctl="wt" data-v="std" aria-pressed="true">Std</button>
     <button class="chip" data-ctl="wt" data-v="fine">Fine</button>
     <button class="chip" data-ctl="wt" data-v="heavy">Heavy</button>
+  </span>
+  <span class="group"><b>Hero corner</b>
+    <button class="chip" data-ctl="hcr" data-v="0.16">Round ·16</button>
+    <button class="chip" data-ctl="hcr" data-v="0.12">Soft ·12</button>
+    <button class="chip" data-ctl="hcr" data-v="0.1" aria-pressed="true">Crisp ·10</button>
+    <button class="chip" data-ctl="hcr" data-v="0.07">Sharp ·07</button>
   </span>
   <span class="group"><b>Shader</b>
     <button class="chip" data-ctl="shader" data-v="aurora" aria-pressed="true">Aurora</button>
@@ -469,6 +482,10 @@ if (hash.get('fill')) state.heroVar = hash.get('fill');
 for (const k of ['canvas', 'motion', 'tri', 'wt', 'tsz', 'legs']) if (hash.get(k)) document.body.dataset[k] = hash.get(k);
 if (hash.get('spd')) document.body.style.setProperty('--spd', hash.get('spd'));
 let shader = hash.get('shader') || 'aurora';
+/* hero corner ratio (radius / circumradius). The small mark keeps 0.16;
+   at hero scale the same ratio reads balloon-y (gate-4), so the hero
+   triangle gets its own, tighter default. */
+let heroCr = parseFloat(hash.get('hcr')) || 0.1;
 
 function triR() { return TRI_R[document.body.dataset.tsz] || TRI_R.md; }
 
@@ -613,7 +630,6 @@ function makeTri(canvas, cssW, cssH, getMode) {
   canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';
   const ctx = canvas.getContext('2d');
   const R = cssH * 0.5, cx = cssW * 0.46, cy = cssH / 2;
-  const clip = new Path2D(triPath(cx, cy, R, R * 0.16));
   const buf = document.createElement('canvas');
   buf.width = 110; buf.height = Math.round(110 * cssH / cssW);
   const bctx = buf.getContext('2d');
@@ -641,6 +657,7 @@ function makeTri(canvas, cssW, cssH, getMode) {
     }
     bctx.putImageData(img, 0, 0);
     const mode = getMode();
+    const clip = new Path2D(triPath(cx, cy, R, R * heroCr));
     tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     tctx.clearRect(0, 0, cssW, cssH);
     tctx.save(); tctx.clip(clip);
@@ -704,10 +721,13 @@ for (const vc of document.querySelectorAll('.varcard')) {
     drawMock(tBase);
   });
 }
-/* §6 traced geometry */
-document.getElementById('dGhost').setAttribute('d', triPath(14.6, 15, 12.2, 1.8));
-document.getElementById('dEdge').setAttribute('d', triPath(14.6, 15, 12.2, 1.8));
-document.getElementById('dCore').setAttribute('d', triPath(14.9, 15, 6.4, 0.9));
+/* §6 traced geometry — follows the hero corner ratio */
+function applyTraced() {
+  document.getElementById('dGhost').setAttribute('d', triPath(14.6, 15, 12.2, 12.2 * heroCr));
+  document.getElementById('dEdge').setAttribute('d', triPath(14.6, 15, 12.2, 12.2 * heroCr));
+  document.getElementById('dCore').setAttribute('d', triPath(14.9, 15, 6.4, 6.4 * heroCr));
+}
+applyTraced();
 
 /* ---- the loop: one clock drives all canvases ---- */
 let tBase = 2.5, last = performance.now();
@@ -729,6 +749,7 @@ document.querySelectorAll('.chip[data-ctl]').forEach(btn => {
     document.querySelectorAll(`.chip[data-ctl=${ctl}]`).forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
     if (ctl === 'spd') document.body.style.setProperty('--spd', v);
     else if (ctl === 'shader') { shader = v; drawAll(tBase); }
+    else if (ctl === 'hcr') { heroCr = parseFloat(v); applyTraced(); drawAll(tBase); }
     else document.body.dataset[ctl] = v;
     if (ctl === 'tsz') { renderCards(); renderTabs(); renderContexts(); }
   });
@@ -736,7 +757,7 @@ document.querySelectorAll('.chip[data-ctl]').forEach(btn => {
 document.querySelectorAll('.chip[data-ctl]').forEach(b => {
   const ctl = b.dataset.ctl;
   const cur = ctl === 'spd' ? (getComputedStyle(document.body).getPropertyValue('--spd').trim() || '1')
-    : ctl === 'shader' ? shader : document.body.dataset[ctl];
+    : ctl === 'shader' ? shader : ctl === 'hcr' ? String(heroCr) : document.body.dataset[ctl];
   b.setAttribute('aria-pressed', String(b.dataset.v === cur));
 });
 if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
