@@ -357,9 +357,10 @@ pub fn WorkbenchFrame(
     // (`a` / `s`) and complete on a counterpart click in the Outputs or
     // Tree dock — frame scope, like the dive signals, so every side reads
     // ONE arm (and one segment-size override).
-    use_context_provider(|| crate::app::editor_shell::patching::PatchingUi {
+    let patching_ui = use_context_provider(|| crate::app::editor_shell::patching::PatchingUi {
         armed: Signal::new(None),
         segment_size: Signal::new(None),
+        summon_outputs: Signal::new(false),
     });
     // The Fixtures/Outputs panels' slice of the editor view (#409 DTOs)
     // and the surface's one shared selection.
@@ -372,6 +373,50 @@ pub fn WorkbenchFrame(
     // to the fold, so widening the window simply reveals the desktop
     // docks again.
     let mut summoned = use_signal(move || initial_summoned);
+    // The panel's summon request (mobile object-first invitation): the
+    // counterpart to click lives in the Outputs panel, so it comes up.
+    // Desktop sets it too — harmlessly, the overlay is display-gated.
+    {
+        let mut request = patching_ui.summon_outputs;
+        use_effect(move || {
+            if *request.read() {
+                request.set(false);
+                summoned.set(Some(PanelId::Outputs));
+            }
+        });
+    }
+    // A summoned panel is a full-screen pick surface: once a pick happens
+    // — the selection moved, or a patch write landed (an armed completion
+    // keeps the selection, so the write is its own signal) — it dismisses
+    // itself (G1 round 3, #6: "I expect it to go away once I do the only
+    // thing I can, which is select something").
+    {
+        let selection = patch_selection.clone();
+        let placed = surface
+            .as_ref()
+            .map(|surface| {
+                surface
+                    .outputs
+                    .iter()
+                    .flat_map(|output| output.bay.ports.iter())
+                    .flat_map(|port| port.cells.iter())
+                    .map(|cell| u64::from(cell.lamps))
+                    .sum::<u64>()
+            })
+            .unwrap_or(0);
+        let fingerprint = (selection, placed);
+        let mut last = use_signal(|| None::<(Option<UiPatchTarget>, u64)>);
+        use_effect(use_reactive!(|fingerprint| {
+            let changed = last
+                .peek()
+                .as_ref()
+                .is_some_and(|previous| *previous != fingerprint);
+            last.set(Some(fingerprint));
+            if changed && summoned.peek().is_some() {
+                summoned.set(None);
+            }
+        }));
+    }
 
     rsx! {
         // No outer box (R5): the workbench is the page's working surface,

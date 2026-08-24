@@ -1755,14 +1755,18 @@ fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
         assert!(green > red, "before the pulse, wire lamp {lamp} is a leaf");
     }
 
-    // Pulse the whole leaf fixture: a fixture-side subject CHASES.
+    // Pulse the leaf's lamps as an OBJECT — the range grain an id-less
+    // strand selects at. An object subject CHASES (D9: the chase is the
+    // object language; a whole-FIXTURE target breathes instead).
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         crate::PatchPulseOp {
-            subject: Some(crate::PatchPulseSubject::Fixture {
+            subject: crate::UiPatchTarget::Range {
                 node: leaf_node,
-                range: None,
-            }),
+                start: 0,
+                count: None,
+            }
+            .pulse_subject(leaf_node, None),
         },
     )));
     drive(actor.run_one_batch_for_test());
@@ -1797,10 +1801,11 @@ fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         crate::PatchPulseOp {
-            subject: Some(crate::PatchPulseSubject::Output {
+            subject: crate::UiPatchTarget::Port {
                 node: output_node,
-                range: Some((22, 12)),
-            }),
+                port: 0,
+            }
+            .pulse_subject(output_node, Some((22, 12))),
         },
     )));
     drive(actor.run_one_batch_for_test());

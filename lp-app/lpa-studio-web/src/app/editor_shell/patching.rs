@@ -78,6 +78,12 @@ pub(crate) struct PatchingUi {
     /// (the ruling's "size override"). `None` = size every segment by the
     /// next unmapped object, the walk-up default.
     pub segment_size: Signal<Option<u32>>,
+    /// A one-shot request to SUMMON the Outputs panel (the mobile fold's
+    /// full-screen pick surface): the object-first invitation sets it when
+    /// arming below the fold — the counterpart the user must now click
+    /// lives in that panel, so the panel comes to them (G1 round 3, #6).
+    /// The workbench consumes and resets it.
+    pub summon_outputs: Signal<bool>,
 }
 
 /// Map the shared patch selection onto the pulse's subject vocabulary:
@@ -85,16 +91,16 @@ pub(crate) struct PatchingUi {
 /// them through the placements), wire-side targets in wire numbering.
 /// `Module` — and no selection — clear the pulse.
 ///
-/// This resolves NUMBERS only. Which space (and so which light language)
-/// each target kind speaks is core's D9 matrix —
-/// [`UiPatchTarget::pulse_space`] — so the UI cannot pick a language by
-/// building the wrong subject variant.
+/// This resolves NUMBERS only. Which space each target counts in and which
+/// light language it deserves are core's D9 matrix
+/// ([`UiPatchTarget::pulse_language`]), applied by
+/// [`UiPatchTarget::pulse_subject`] — so the UI cannot name a selection in
+/// the wrong tongue.
 fn pulse_subject(
     surface: &UiPatchSurface,
     selection: &Option<UiPatchTarget>,
 ) -> Option<PatchPulseSubject> {
     let target = selection.as_ref()?;
-    let space = target.pulse_space()?;
     let (node, range) = match target {
         UiPatchTarget::Fixture { node } => (*node, None),
         UiPatchTarget::Instance { node, path } => {
@@ -136,10 +142,10 @@ fn pulse_subject(
             (*node, Some((first, end.saturating_sub(first))))
         }
         UiPatchTarget::Output { node } => (*node, None),
-        // `pulse_space` already returned None for these.
+        // `pulse_subject` already returns None for these.
         UiPatchTarget::Module { .. } => return None,
     };
-    Some(space.subject(node, range))
+    target.pulse_subject(node, range)
 }
 
 fn send_pulse(on_action: &EventHandler<UiAction>, subject: Option<PatchPulseSubject>) {
@@ -231,6 +237,7 @@ pub fn PatchingShellCenter(
     let PatchingUi {
         mut armed,
         mut segment_size,
+        summon_outputs: _,
     } = use_context::<PatchingUi>();
     // The pulse's echo guard: dispatch only when the mapped subject
     // actually changes (sweep-with-clear lives in the controller; this
@@ -661,16 +668,24 @@ mod tests {
     }
 
     /// Selection → pulse subject: fixture-side targets pulse in FIXTURE
-    /// numbering, wire-side in WIRE numbering, and Module clears.
+    /// numbering, wire-side in WIRE numbering, and Module clears. Each
+    /// subject carries the LANGUAGE core's matrix gave its target — the
+    /// object chases, the fixture card and the wire breathe (D9, round 3).
     #[test]
     fn selections_map_to_their_pulse_subjects() {
+        use lpa_studio_core::{PatchPulseLamps, PatchPulseLanguage};
+
         let surface = mini_dome_like_surface();
         let node = surface.fixtures[0].node;
         let output = surface.outputs[0].node;
 
         assert_eq!(
             pulse_subject(&surface, &Some(UiPatchTarget::Fixture { node })),
-            Some(PatchPulseSubject::Fixture { node, range: None })
+            Some(PatchPulseSubject {
+                lamps: PatchPulseLamps::Fixture { node, range: None },
+                language: PatchPulseLanguage::Breath,
+            }),
+            "a fixture is a bag of objects — no direction to claim"
         );
         let instance = &surface.fixtures[0].instances[1];
         assert_eq!(
@@ -681,9 +696,12 @@ mod tests {
                     path: instance.path.clone(),
                 })
             ),
-            Some(PatchPulseSubject::Fixture {
-                node,
-                range: Some((instance.start, instance.lamps)),
+            Some(PatchPulseSubject {
+                lamps: PatchPulseLamps::Fixture {
+                    node,
+                    range: Some((instance.start, instance.lamps)),
+                },
+                language: PatchPulseLanguage::Chase,
             })
         );
         let port = &surface.outputs[0].bay.ports[0];
@@ -695,16 +713,22 @@ mod tests {
                     port: port.key,
                 })
             ),
-            Some(PatchPulseSubject::Output {
-                node: output,
-                range: Some((port.start, port.lamps)),
+            Some(PatchPulseSubject {
+                lamps: PatchPulseLamps::Output {
+                    node: output,
+                    range: Some((port.start, port.lamps)),
+                },
+                language: PatchPulseLanguage::Breath,
             })
         );
         assert_eq!(
             pulse_subject(&surface, &Some(UiPatchTarget::Output { node: output })),
-            Some(PatchPulseSubject::Output {
-                node: output,
-                range: None,
+            Some(PatchPulseSubject {
+                lamps: PatchPulseLamps::Output {
+                    node: output,
+                    range: None,
+                },
+                language: PatchPulseLanguage::Breath,
             })
         );
         assert_eq!(
@@ -726,6 +750,14 @@ mod tests {
     /// pulses nothing at all.
     #[test]
     fn a_segment_pulses_its_window_clipped_to_its_port() {
+        use lpa_studio_core::{PatchPulseLamps, PatchPulseLanguage};
+
+        let breathes = |node, range| {
+            Some(PatchPulseSubject {
+                lamps: PatchPulseLamps::Output { node, range },
+                language: PatchPulseLanguage::Breath,
+            })
+        };
         let surface = mini_dome_like_surface();
         let output = surface.outputs[0].node;
         let port = &surface.outputs[0].bay.ports[0];
@@ -745,10 +777,7 @@ mod tests {
                     lamps: 8,
                 })
             ),
-            Some(PatchPulseSubject::Output {
-                node: output,
-                range: Some((12, 8)),
-            }),
+            breathes(output, Some((12, 8))),
             "a window inside the port passes straight through, in wire numbering"
         );
 
@@ -762,10 +791,7 @@ mod tests {
                     lamps: 100,
                 })
             ),
-            Some(PatchPulseSubject::Output {
-                node: output,
-                range: Some((30, 9)),
-            }),
+            breathes(output, Some((30, 9))),
             "an oversized window stops at the port's end"
         );
 

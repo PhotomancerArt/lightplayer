@@ -286,15 +286,9 @@ pub enum UiPatchTarget {
 }
 
 impl UiPatchTarget {
-    /// Which space this selection kind counts its lamps in — the
-    /// target-kind half of the D9 language matrix, whose one authority is
-    /// [`crate::PatchPulseSpace::language`]. `None` = a level that pulses
-    /// nothing.
-    ///
-    /// Kept here rather than in each surface so no caller can invent a
-    /// third answer: the space decides the language, and a client that
-    /// resolves a target's lamp numbers hands them to
-    /// [`crate::PatchPulseSpace::subject`] without choosing anything.
+    /// Which space this selection kind counts its lamps in — the numbering
+    /// half of the surface's vocabulary (the panel's blue edge reads this
+    /// too). `None` = a level that names no lamps at all.
     #[must_use]
     pub fn pulse_space(&self) -> Option<crate::PatchPulseSpace> {
         match self {
@@ -314,11 +308,55 @@ impl UiPatchTarget {
         }
     }
 
-    /// The light language this selection kind deserves (D9), or `None` when
-    /// it pulses nothing.
+    /// **THE selection-kind → language matrix (D9)**, and the only place it
+    /// is decided. `None` = a selection that pulses nothing.
+    ///
+    /// | selection kind | space | language |
+    /// |---|---|---|
+    /// | [`Self::Instance`] / [`Self::Range`] / [`Self::Cell`] (incl. a mapped run) | fixture | CHASE |
+    /// | [`Self::Fixture`] | fixture | BREATH |
+    /// | [`Self::Output`] / [`Self::Port`] / free [`Self::Segment`] | wire | BREATH |
+    /// | [`Self::Module`], nothing | — | no pulse |
+    ///
+    /// The reason is the question each selection asks. CHASE is the
+    /// direction language: "does this OBJECT run the way I think it does?"
+    /// — one strand, one head, one tail. Everything else asks "which lamps
+    /// ARE this?", which white breathing answers without claiming a
+    /// direction it does not have.
+    ///
+    /// A whole fixture used to chase, and the G1 round-3 walk rejected it: a
+    /// multi-run fixture painted two heads and two tails and read as two
+    /// objects selected at once. A fixture is not an object (Q8) — it is a
+    /// bag of them — so it BREATHES: "these lamps are this fixture", no
+    /// direction claim. See `docs/adr/2026-08-10-patch-selection-pulse.md`
+    /// (Amendments 2026-08-20 and 2026-08-22).
     #[must_use]
     pub fn pulse_language(&self) -> Option<crate::PatchPulseLanguage> {
-        Some(self.pulse_space()?.language())
+        match self {
+            Self::Instance { .. } | Self::Range { .. } | Self::Cell { .. } => {
+                Some(crate::PatchPulseLanguage::Chase)
+            }
+            Self::Fixture { .. }
+            | Self::Output { .. }
+            | Self::Port { .. }
+            | Self::Segment { .. } => Some(crate::PatchPulseLanguage::Breath),
+            Self::Module { .. } => None,
+        }
+    }
+
+    /// The pulse subject for this target once the CLIENT has resolved its
+    /// lamp numbers: space and language both come from the matrix above, so
+    /// a surface that knows `(node, range)` never picks a tongue by hand.
+    #[must_use]
+    pub fn pulse_subject(
+        &self,
+        node: NodeId,
+        range: Option<(u32, u32)>,
+    ) -> Option<crate::PatchPulseSubject> {
+        Some(crate::PatchPulseSubject {
+            lamps: self.pulse_space()?.lamps(node, range),
+            language: self.pulse_language()?,
+        })
     }
 }
 

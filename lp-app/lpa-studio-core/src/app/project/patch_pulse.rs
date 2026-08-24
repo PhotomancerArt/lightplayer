@@ -26,7 +26,9 @@
 //! ranges, `"0-29,45"` — chosen so the Debug section shows a legible,
 //! hand-editable string rather than an opaque blob. Since microformat v2 the
 //! slot carries TWO light languages, and which one a subject speaks is
-//! decided HERE, once: see [`PatchPulseSpace::language`].
+//! decided in ONE place — the selection-kind matrix on
+//! [`crate::UiPatchTarget::pulse_language`] — and CARRIED here on the
+//! subject, never re-derived.
 
 use core::any::Any;
 
@@ -40,9 +42,13 @@ use crate::{
 /// Samples per RGB lamp — the unit a published frame's extent is stated in.
 const SAMPLES_PER_LAMP: u32 = 3;
 
-/// What a patching surface selected, in the space it naturally knows.
+/// Which lamps a patching surface selected, in the space it naturally
+/// knows. The LANGUAGE they are said in rides alongside on
+/// [`PatchPulseSubject`] — since the G1 round-3 rework the two are separate
+/// axes (a whole fixture and one of its objects count in the same space and
+/// speak different tongues).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PatchPulseSubject {
+pub enum PatchPulseLamps {
     /// A producing fixture, or a `(start, lamps)` range of one, in its OWN
     /// numbering. `None` = the whole fixture. Instances and range-grain
     /// selections both arrive here.
@@ -60,8 +66,8 @@ pub enum PatchPulseSubject {
     },
 }
 
-impl PatchPulseSubject {
-    /// Which of the two spaces this subject counts in.
+impl PatchPulseLamps {
+    /// Which of the two spaces these lamps count in.
     #[must_use]
     pub fn space(&self) -> PatchPulseSpace {
         match self {
@@ -69,11 +75,34 @@ impl PatchPulseSubject {
             Self::Output { .. } => PatchPulseSpace::Wire,
         }
     }
+}
 
-    /// The light language this subject deserves — [`PatchPulseSpace::language`].
+/// What a patching surface selected: which lamps, and which light language
+/// the D9 matrix gives that selection.
+///
+/// The language is NOT re-derivable from the lamps — that is the round-3
+/// ruling in one sentence. A fixture-space subject can be an OBJECT (chase:
+/// "does this run the way I think it does?") or a whole FIXTURE (breath:
+/// "these lamps are this fixture"), and only the selection KIND knows which.
+/// So the matrix lives on [`crate::UiPatchTarget::pulse_language`] and its
+/// answer is CARRIED here, rather than guessed again downstream.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PatchPulseSubject {
+    pub lamps: PatchPulseLamps,
+    pub language: PatchPulseLanguage,
+}
+
+impl PatchPulseSubject {
+    /// Which of the two spaces this subject counts in.
+    #[must_use]
+    pub fn space(&self) -> PatchPulseSpace {
+        self.lamps.space()
+    }
+
+    /// The light language this subject was named in.
     #[must_use]
     pub fn language(&self) -> PatchPulseLanguage {
-        self.space().language()
+        self.language
     }
 }
 
@@ -88,38 +117,14 @@ pub enum PatchPulseSpace {
 }
 
 impl PatchPulseSpace {
-    /// **THE selection-kind → language matrix (D9)**, and the only place it
-    /// is decided: the CLIENT says which space it selected in, core says
-    /// which language that space speaks. Nothing downstream may pick.
-    ///
-    /// | selection kind | space | language |
-    /// |---|---|---|
-    /// | [`crate::UiPatchTarget::Fixture`] / `Instance` / `Range` / `Cell` (incl. a mapped run) | fixture | CHASE |
-    /// | [`crate::UiPatchTarget::Output`] / `Port` / free `Segment` | wire | BREATH |
-    /// | [`crate::UiPatchTarget::Module`], nothing | — | no pulse |
-    ///
-    /// The reason is the question each selection asks. A wire-side one asks
-    /// "which strand IS this?", which white breathing answers. A
-    /// fixture-side one asks "does this object run the way I think it
-    /// does?", which needs DIRECTION — see
-    /// `docs/adr/2026-08-10-patch-selection-pulse.md` (Amendment
-    /// 2026-08-20). [`crate::UiPatchTarget::pulse_space`] is the target-kind
-    /// half of the table.
+    /// The lamps for `(node, range)` counted in this space. The LANGUAGE is
+    /// the target kind's ([`crate::UiPatchTarget::pulse_language`]), never
+    /// the space's — see [`PatchPulseSubject`].
     #[must_use]
-    pub fn language(self) -> PatchPulseLanguage {
+    pub fn lamps(self, node: NodeId, range: Option<(u32, u32)>) -> PatchPulseLamps {
         match self {
-            Self::Fixture => PatchPulseLanguage::Chase,
-            Self::Wire => PatchPulseLanguage::Breath,
-        }
-    }
-
-    /// The subject for `(node, range)` selected in this space — so a caller
-    /// that knows the numbers never has to pick the language by hand.
-    #[must_use]
-    pub fn subject(self, node: NodeId, range: Option<(u32, u32)>) -> PatchPulseSubject {
-        match self {
-            Self::Fixture => PatchPulseSubject::Fixture { node, range },
-            Self::Wire => PatchPulseSubject::Output { node, range },
+            Self::Fixture => PatchPulseLamps::Fixture { node, range },
+            Self::Wire => PatchPulseLamps::Output { node, range },
         }
     }
 }
@@ -214,20 +219,21 @@ struct PulseSpan {
 /// An output the subject touches with an empty intersection is absent too:
 /// "no lamps" and "not involved" write the same clear.
 ///
-/// The language is the subject's ([`PatchPulseSpace::language`]), never the
-/// caller's: a fixture-side subject writes an ordered `chase:` list, a
-/// wire-side one the v1 bare list, byte for byte as before.
+/// The language is the SUBJECT's — the answer the D9 matrix already gave
+/// upstream ([`crate::UiPatchTarget::pulse_language`]), never re-decided
+/// here: an object writes an ordered `chase:` list, a fixture or a wire span
+/// the v1 bare list, byte for byte as before.
 pub(crate) fn pulse_highlights(
     subject: &PatchPulseSubject,
     wires: &[PulseWire<'_>],
 ) -> Vec<(NodeId, String)> {
     let mut writes = Vec::new();
     for wire in wires {
-        let spans = match subject {
-            PatchPulseSubject::Fixture { node, range } => {
+        let spans = match &subject.lamps {
+            PatchPulseLamps::Fixture { node, range } => {
                 fixture_wire_spans(*node, *range, wire.placements)
             }
-            PatchPulseSubject::Output { node, range } if *node == wire.node => {
+            PatchPulseLamps::Output { node, range } if *node == wire.node => {
                 let (start, lamps) = range.unwrap_or((0, wire.lamps));
                 Vec::from([PulseSpan {
                     source_lamp: start,
@@ -236,7 +242,7 @@ pub(crate) fn pulse_highlights(
                     reversed: false,
                 }])
             }
-            PatchPulseSubject::Output { .. } => Vec::new(),
+            PatchPulseLamps::Output { .. } => Vec::new(),
         };
         let text = match subject.language() {
             PatchPulseLanguage::Chase => chase_text(&spans),
@@ -437,6 +443,23 @@ mod tests {
         }
     }
 
+    /// A fixture-space subject in the OBJECT language — what an instance /
+    /// range / cell selection resolves to (D9).
+    fn chased(node: NodeId, range: Option<(u32, u32)>) -> PatchPulseSubject {
+        PatchPulseSubject {
+            lamps: PatchPulseLamps::Fixture { node, range },
+            language: PatchPulseLanguage::Chase,
+        }
+    }
+
+    /// A wire-space subject — always the breath.
+    fn breathed(node: NodeId, range: Option<(u32, u32)>) -> PatchPulseSubject {
+        PatchPulseSubject {
+            lamps: PatchPulseLamps::Output { node, range },
+            language: PatchPulseLanguage::Breath,
+        }
+    }
+
     fn wires(placements: &[WireOutputPlacement]) -> Vec<PulseWire<'_>> {
         Vec::from([PulseWire {
             node: NodeId::new(1),
@@ -445,16 +468,12 @@ mod tests {
         }])
     }
 
+    /// An object spanning its whole fixture (the range grain an id-less
+    /// strand selects at) chases every run it has, in object order.
     #[test]
-    fn a_whole_fixture_pulses_every_run_it_has_on_the_wire() {
+    fn an_object_covering_a_fixture_chases_every_run_it_has() {
         let placements = peach();
-        let writes = pulse_highlights(
-            &PatchPulseSubject::Fixture {
-                node: NodeId::new(2),
-                range: None,
-            },
-            &wires(&placements),
-        );
+        let writes = pulse_highlights(&chased(NodeId::new(2), None), &wires(&placements));
 
         assert_eq!(
             writes,
@@ -469,13 +488,7 @@ mod tests {
         // Lamps 20..24 of the body: 20–21 sit at the end of the forward
         // run, 22–23 at the START of the reversed one — which lays the
         // producer's high end low, so they land at the run's far END.
-        let writes = pulse_highlights(
-            &PatchPulseSubject::Fixture {
-                node: NodeId::new(2),
-                range: Some((20, 4)),
-            },
-            &wires(&placements),
-        );
+        let writes = pulse_highlights(&chased(NodeId::new(2), Some((20, 4))), &wires(&placements));
 
         assert_eq!(
             writes,
@@ -487,13 +500,7 @@ mod tests {
     #[test]
     fn an_instance_range_inside_one_run_maps_straight_through() {
         let placements = peach();
-        let writes = pulse_highlights(
-            &PatchPulseSubject::Fixture {
-                node: NodeId::new(3),
-                range: Some((4, 4)),
-            },
-            &wires(&placements),
-        );
+        let writes = pulse_highlights(&chased(NodeId::new(3), Some((4, 4))), &wires(&placements));
 
         assert_eq!(
             writes,
@@ -505,10 +512,7 @@ mod tests {
     fn a_port_selection_is_already_a_wire_span() {
         let placements = peach();
         let writes = pulse_highlights(
-            &PatchPulseSubject::Output {
-                node: NodeId::new(1),
-                range: Some((40, 16)),
-            },
+            &breathed(NodeId::new(1), Some((40, 16))),
             &wires(&placements),
         );
 
@@ -524,13 +528,7 @@ mod tests {
             placements: &[],
             lamps: 10,
         });
-        let writes = pulse_highlights(
-            &PatchPulseSubject::Output {
-                node: NodeId::new(1),
-                range: None,
-            },
-            &all,
-        );
+        let writes = pulse_highlights(&breathed(NodeId::new(1), None), &all);
 
         assert_eq!(writes, Vec::from([(NodeId::new(1), String::from("0-55"))]));
     }
@@ -538,13 +536,7 @@ mod tests {
     #[test]
     fn a_subject_off_every_wire_writes_nothing() {
         let placements = peach();
-        let writes = pulse_highlights(
-            &PatchPulseSubject::Fixture {
-                node: NodeId::new(9),
-                range: None,
-            },
-            &wires(&placements),
-        );
+        let writes = pulse_highlights(&chased(NodeId::new(9), None), &wires(&placements));
 
         assert!(writes.is_empty(), "the caller clears what nothing names");
     }
@@ -560,15 +552,15 @@ mod tests {
         assert_eq!(highlight_text(&[]), "");
     }
 
-    /// D9, per selection kind — the matrix core owns so no surface can
-    /// pick a language by hand.
+    /// D9 as reworked at G1 round 3: CHASE is the OBJECT language, and
+    /// nothing else speaks it. Space and language are separate axes now —
+    /// a whole fixture counts in fixture numbering and still breathes.
     #[test]
-    fn the_language_matrix_follows_the_selections_space() {
+    fn the_chase_is_the_object_language_and_everything_else_breathes() {
         use crate::{PatchPulseLanguage, PatchPulseSpace, UiPatchTarget};
 
         let node = NodeId::new(2);
         let chase = [
-            UiPatchTarget::Fixture { node },
             UiPatchTarget::Instance {
                 node,
                 path: String::from("/sector/2"),
@@ -590,6 +582,17 @@ mod tests {
             );
             assert_eq!(target.pulse_language(), Some(PatchPulseLanguage::Chase));
         }
+
+        // The round-3 change: a FIXTURE is a bag of objects, not one of
+        // them. It still counts in fixture numbering — and it breathes,
+        // because a multi-run fixture has no single direction to claim.
+        let fixture = UiPatchTarget::Fixture { node };
+        assert_eq!(fixture.pulse_space(), Some(PatchPulseSpace::Fixture));
+        assert_eq!(
+            fixture.pulse_language(),
+            Some(PatchPulseLanguage::Breath),
+            "\"these lamps are this fixture\" — no direction claim"
+        );
 
         let breath = [
             UiPatchTarget::Output { node },
@@ -613,16 +616,68 @@ mod tests {
         let module = UiPatchTarget::Module { node };
         assert_eq!(module.pulse_space(), None, "a module names no lamps");
         assert_eq!(module.pulse_language(), None);
+        assert_eq!(module.pulse_subject(node, None), None);
+    }
 
-        // …and the subject built for a space speaks that space's language,
-        // whichever surface resolved the numbers.
+    /// The subject a target builds carries BOTH answers, so nothing
+    /// downstream re-derives a language from the lamps it was handed.
+    #[test]
+    fn a_targets_subject_carries_its_lamps_and_its_language() {
+        use crate::UiPatchTarget;
+
+        let node = NodeId::new(2);
         assert_eq!(
-            PatchPulseSpace::Fixture.subject(node, None).language(),
-            PatchPulseLanguage::Chase
+            UiPatchTarget::Range {
+                node,
+                start: 0,
+                count: Some(4),
+            }
+            .pulse_subject(node, Some((0, 4))),
+            Some(chased(node, Some((0, 4)))),
+        );
+        // The same fixture-space lamps, named as the whole fixture: same
+        // `PatchPulseLamps`, different tongue.
+        assert_eq!(
+            UiPatchTarget::Fixture { node }.pulse_subject(node, None),
+            Some(PatchPulseSubject {
+                lamps: PatchPulseLamps::Fixture { node, range: None },
+                language: PatchPulseLanguage::Breath,
+            }),
         );
         assert_eq!(
-            PatchPulseSpace::Wire.subject(node, Some((0, 4))).language(),
-            PatchPulseLanguage::Breath
+            UiPatchTarget::Port { node, port: 1 }.pulse_subject(node, Some((0, 4))),
+            Some(breathed(node, Some((0, 4)))),
+        );
+    }
+
+    /// And the bytes follow the language, not the space: a whole fixture
+    /// writes the BARE list its runs cover — sorted and merged, no head, no
+    /// tail — where an object of the same fixture writes the ordered chase.
+    #[test]
+    fn a_whole_fixture_breathes_the_lamps_its_runs_cover() {
+        let placements = peach();
+        let writes = pulse_highlights(
+            &PatchPulseSubject {
+                lamps: PatchPulseLamps::Fixture {
+                    node: NodeId::new(2),
+                    range: None,
+                },
+                language: PatchPulseLanguage::Breath,
+            },
+            &wires(&placements),
+        );
+
+        assert_eq!(
+            writes,
+            Vec::from([(NodeId::new(1), String::from("0-21,34-55"))]),
+            "one lamp set, no direction — the two body stretches as they lie \
+             on the wire"
+        );
+        // The very same lamps, named as an object, keep object order and the
+        // reversed run's descending range.
+        assert_eq!(
+            pulse_highlights(&chased(NodeId::new(2), None), &wires(&placements)),
+            Vec::from([(NodeId::new(1), String::from("chase:0-21,55-34"))]),
         );
     }
 
@@ -635,10 +690,7 @@ mod tests {
         // planner hands them over in wire order.
         let placements = Vec::from([run(2, 60, 120, 0, 60, false), run(2, 0, 120, 60, 60, false)]);
         let writes = pulse_highlights(
-            &PatchPulseSubject::Fixture {
-                node: NodeId::new(2),
-                range: None,
-            },
+            &chased(NodeId::new(2), None),
             &Vec::from([PulseWire {
                 node: NodeId::new(1),
                 placements: &placements,
@@ -705,10 +757,7 @@ mod tests {
     fn a_segment_window_breathes_like_any_other_wire_span() {
         let placements = peach();
         let writes = pulse_highlights(
-            &PatchPulseSubject::Output {
-                node: NodeId::new(1),
-                range: Some((12, 8)),
-            },
+            &breathed(NodeId::new(1), Some((12, 8))),
             &wires(&placements),
         );
 

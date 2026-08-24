@@ -725,6 +725,22 @@ pub fn OutputsPanel(
         };
     };
     prefetch_bodies(&on_action, &surface);
+    // The counterpart glow (round 3, #5): while an assign is armed on a
+    // fixture-side selection, the FREE RUNS are where the next click
+    // belongs — they wear the attention ring. Animation only while frames
+    // flow (story determinism, same gate as the panel).
+    let free_attention = patch_verbs
+        && patching_ui.is_some_and(|ui| {
+            matches!(
+                *ui.armed.read(),
+                Some(crate::app::editor_shell::patching::ArmedVerb::Assign)
+            )
+        })
+        && selection
+            .as_ref()
+            .is_some_and(|target| is_armable(&surface, target))
+        && !matches!(selection, Some(UiPatchTarget::Segment { .. }))
+        && crate::app::patch::patch_panel::surface_is_live(&surface);
     // The port-click grammar (P3's arm grammar): an ARMED verb completes
     // here — swap against the clicked port, assign the fixture-side
     // selection onto it — and everything else is selection. The #436
@@ -865,6 +881,7 @@ pub fn OutputsPanel(
                     output,
                     indent: 0,
                     selection: selection.clone(),
+                    free_attention,
                     on_toggle,
                     on_port_click: {
                         let on_port_click = on_port_click.clone();
@@ -887,6 +904,7 @@ pub fn OutputsPanel(
                         output,
                         indent: module.depth + 1,
                         selection: selection.clone(),
+                        free_attention,
                         on_toggle,
                         on_port_click: {
                             let on_port_click = on_port_click.clone();
@@ -910,6 +928,9 @@ fn OutputBox(
     expanded: bool,
     /// Tree level under the module rows (0 = no enclosing module).
     indent: usize,
+    /// Round 3: armed assign + fixture-side selection = the free runs glow.
+    #[props(default)]
+    free_attention: bool,
     selection: Option<UiPatchTarget>,
     on_toggle: EventHandler<lpa_studio_core::NodeId>,
     /// A click on a port row or on free space in its bar — the panel
@@ -978,6 +999,7 @@ fn OutputBox(
                 div { class: "tw:ml-2.5 tw:grid tw:gap-1 tw:border-l tw:border-border-subtle tw:py-1 tw:pl-2",
                     for port in output.bay.ports.clone() {
                         PortRow {
+                        free_attention,
                             key: "{output.node.0}-{port.key}",
                             node: output.node,
                             port,
@@ -998,6 +1020,9 @@ fn OutputBox(
 fn PortRow(
     node: lpa_studio_core::NodeId,
     port: lpa_studio_core::UiPatchPort,
+    /// Round 3: the attention ring on this port's free runs.
+    #[props(default)]
+    free_attention: bool,
     selection: Option<UiPatchTarget>,
     on_port_click: EventHandler<PortClick>,
     on_action: EventHandler<UiAction>,
@@ -1060,7 +1085,7 @@ fn PortRow(
                 for (start , span) in runs {
                     div {
                         key: "free-{start}",
-                        class: "tw:absolute tw:top-0 tw:h-full tw:cursor-pointer tw:rounded-[3px] tw:hover:bg-selection-bg",
+                        class: if free_attention { "tw:absolute tw:top-0 tw:h-full tw:cursor-pointer tw:rounded-[3px] tw:hover:bg-selection-bg ux-arm-attention" } else { "tw:absolute tw:top-0 tw:h-full tw:cursor-pointer tw:rounded-[3px] tw:hover:bg-selection-bg" },
                         style: span_style(start, span),
                         title: "free — click to take a segment here",
                         onclick: {

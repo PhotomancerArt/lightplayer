@@ -15,8 +15,8 @@ use std::collections::BTreeMap;
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
     Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FitReconcile, FixtureBody, FixtureEvent,
-    FixtureSprite, HelpFloat, MapEditorSession, Placement, ZoomFloat, display_inset_padding,
-    object_color, tool_hint,
+    FixtureSprite, HelpFloat, MapEditorSession, Placement, SpriteObject, ZoomFloat, convex_hull,
+    display_inset_padding, object_color, pad_hull, tool_hint,
 };
 use lpa_studio_core::{
     ArtifactLocation, EditorMetaFixture, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
@@ -386,7 +386,7 @@ pub(crate) fn ProjectCanvasHost(
                     // owns it. The fixture stays the honest fallback where a
                     // body draws no lamps (placeholder, strip) or no object
                     // covers the one clicked.
-                    let target = sprite_target(&grammar_surface, *node, pick.lamp);
+                    let target = sprite_target(&grammar_surface, *node, pick.object, pick.lamp);
                     // The same fixture-side completion the tree's rows
                     // carry: armed assign + a free segment → the clicked
                     // OBJECT takes it (stronger than the old next-unmapped
@@ -544,12 +544,25 @@ fn with_chase_preview(
 /// The object target follows addressability like every other surface's
 /// (`instance_target`): a sticky id selects by path, an id-less strand by
 /// the range its lamps occupy.
-fn sprite_target(surface: &UiPatchSurface, node: NodeId, lamp: Option<u32>) -> UiPatchTarget {
+fn sprite_target(
+    surface: &UiPatchSurface,
+    node: NodeId,
+    object: Option<usize>,
+    lamp: Option<u32>,
+) -> UiPatchTarget {
     let fixture = UiPatchTarget::Fixture { node };
-    let Some(lamp) = lamp else {
+    let Some(entry) = surface.fixtures.iter().find(|entry| entry.node == node) else {
         return fixture;
     };
-    let Some(entry) = surface.fixtures.iter().find(|entry| entry.node == node) else {
+    // The HULL answers first (round 3: the whole body is the target): the
+    // pick's index is into the sprite's object list, which is built one
+    // entry per surface instance IN ORDER (`sprite_objects`).
+    if let Some(index) = object
+        && let Some(instance) = entry.instances.get(index)
+    {
+        return crate::app::patch::verb_ui::instance_target(node, instance);
+    }
+    let Some(lamp) = lamp else {
         return fixture;
     };
     match entry
@@ -613,6 +626,84 @@ fn sprite_of(render: &FixtureRender, selection: &Option<UiPatchTarget>) -> Fixtu
         arranged: render.arranged,
         selected: selection_touches(selection, render.node),
         selected_range: selected_instance_range(selection, render),
+        objects: sprite_objects(render, selection),
+    }
+}
+
+/// The fixture's objects as canvas BODIES (G1 round 3: an object is a
+/// THING, not a field of dots): one padded convex hull per instance, in the
+/// sprite's own space, ONE ENTRY PER INSTANCE IN SURFACE ORDER — a
+/// `FixturePick::object` is an index into this list, so degenerate hulls
+/// stay as empty placeholders rather than shifting everyone after them.
+///
+/// Computed once per sprite build (selection changes rebuild sprites
+/// anyway); the per-object cost is a hull over its drawn lamps, so a
+/// dome-scale fixture stays one pass over its (display-subsampled) points.
+fn sprite_objects(render: &FixtureRender, selection: &Option<UiPatchTarget>) -> Vec<SpriteObject> {
+    let FixtureBody::Lamps { points, total } = &render.body else {
+        return Vec::new();
+    };
+    if points.is_empty() || render.instances.is_empty() {
+        return Vec::new();
+    }
+    // The same subsample arithmetic the live-fill hooks use: drawn point i
+    // is TRUE lamp i × stride.
+    let stride = (*total as usize).div_ceil(points.len()).max(1);
+    // The hull should stand off the lamps by a hair more than a lamp dot,
+    // in own-space units: a fraction of the fixture's own extent reads
+    // consistently across docs drawn at wildly different scales.
+    let [_, _, bw, bh] = render.bounds;
+    let pad = (bw.max(bh) * 0.035).clamp(0.75, 14.0) as f32;
+    render
+        .instances
+        .iter()
+        .map(|(path, start, lamps)| {
+            let end = start.saturating_add(*lamps);
+            let member: Vec<[f32; 2]> = points
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| {
+                    let lamp = (index * stride) as u32;
+                    lamp >= *start && lamp < end
+                })
+                .map(|(_, point)| *point)
+                .collect();
+            let hull = pad_hull(&convex_hull(&member), pad);
+            let label = if path.is_empty() {
+                format!("lamps {start}\u{2013}{}", end.saturating_sub(1))
+            } else {
+                path.trim_start_matches('/').to_string()
+            };
+            SpriteObject {
+                label,
+                hull,
+                lamps: (*start, *lamps),
+                selected: object_selected(selection, render.node, path, *start, *lamps),
+            }
+        })
+        .collect()
+}
+
+/// Is THIS object the selection? Path-addressed instances match by path;
+/// id-less rows select at range grain (`instance_target`), so the window
+/// is the identity there.
+fn object_selected(
+    selection: &Option<UiPatchTarget>,
+    node: NodeId,
+    path: &str,
+    start: u32,
+    lamps: u32,
+) -> bool {
+    match selection {
+        Some(UiPatchTarget::Instance { node: n, path: p }) => {
+            *n == node && !path.is_empty() && p == path
+        }
+        Some(UiPatchTarget::Range {
+            node: n,
+            start: s,
+            count,
+        }) => *n == node && *s == start && *count == Some(lamps),
+        _ => false,
     }
 }
 
@@ -1089,14 +1180,14 @@ mod tests {
         let node = NodeId::new(2);
 
         assert_eq!(
-            sprite_target(&surface, node, Some(0)),
+            sprite_target(&surface, node, None, Some(0)),
             UiPatchTarget::Instance {
                 node,
                 path: "/sector/0".to_string(),
             }
         );
         assert_eq!(
-            sprite_target(&surface, node, Some(59)),
+            sprite_target(&surface, node, None, Some(59)),
             UiPatchTarget::Instance {
                 node,
                 path: "/sector/1".to_string(),
@@ -1104,17 +1195,17 @@ mod tests {
             "the last lamp of a span is still that span's"
         );
         assert_eq!(
-            sprite_target(&surface, node, None),
+            sprite_target(&surface, node, None, None),
             UiPatchTarget::Fixture { node },
             "a placeholder or strip body names no lamp — the fixture answers"
         );
         assert_eq!(
-            sprite_target(&surface, node, Some(900)),
+            sprite_target(&surface, node, None, Some(900)),
             UiPatchTarget::Fixture { node },
             "a lamp no span covers falls back rather than guessing"
         );
         assert_eq!(
-            sprite_target(&surface, NodeId::new(99), Some(0)),
+            sprite_target(&surface, NodeId::new(99), None, Some(0)),
             UiPatchTarget::Fixture {
                 node: NodeId::new(99),
             },
@@ -1132,7 +1223,7 @@ mod tests {
             instance.path.clear();
         }
         assert_eq!(
-            sprite_target(&surface, NodeId::new(2), Some(35)),
+            sprite_target(&surface, NodeId::new(2), None, Some(35)),
             UiPatchTarget::Range {
                 node: NodeId::new(2),
                 start: 30,
@@ -1218,5 +1309,89 @@ mod tests {
             s: 0.75,
         };
         assert_eq!(transform_of(&placement_of(&transform)), transform);
+    }
+
+    /// Objects become canvas BODIES (round 3): one hull per instance, IN
+    /// SURFACE ORDER — a pick's index must line up — and a degenerate span
+    /// stays as an empty placeholder rather than shifting its neighbours.
+    #[test]
+    fn sprite_objects_are_one_hull_per_instance_in_order() {
+        let render = FixtureRender {
+            node: NodeId::new(7),
+            key: "k".into(),
+            label: "fx".into(),
+            color: "#fff",
+            transform: UiArrangeTransform::default(),
+            arranged: true,
+            bounds: [0.0, 0.0, 100.0, 10.0],
+            body: FixtureBody::Lamps {
+                points: (0..20).map(|i| [i as f32 * 5.0, 0.0]).collect(),
+                total: 20,
+            },
+            instances: vec![
+                ("/a/0".into(), 0, 10),
+                ("/a/1".into(), 10, 10),
+                ("/gap".into(), 40, 5), // past the drawn points: no body
+            ],
+        };
+        let objects = sprite_objects(&render, &None);
+        assert_eq!(objects.len(), 3, "one entry per instance, always");
+        assert!(objects[0].hull.len() >= 3, "a real span grows a body");
+        assert!(objects[1].hull.len() >= 3);
+        assert!(
+            objects[2].hull.is_empty(),
+            "no lamps drawn in the span = no body, but the SLOT remains"
+        );
+        assert_eq!(objects[1].lamps, (10, 10), "true numbering rides along");
+    }
+
+    /// A pick's hull index resolves to THAT instance; the nearest lamp
+    /// stays the fallback where no hull claimed the point.
+    #[test]
+    fn sprite_target_prefers_the_picked_hull() {
+        let node = NodeId::new(7);
+        let mut surface = UiPatchSurface::default();
+        surface
+            .fixtures
+            .push(lpa_studio_core::UiPatchSurfaceFixture {
+                node,
+                instances: vec![
+                    lpa_studio_core::UiPatchInstance {
+                        path: "/a/0".into(),
+                        label: "a 0".into(),
+                        start: 0,
+                        lamps: 10,
+                        ..Default::default()
+                    },
+                    lpa_studio_core::UiPatchInstance {
+                        path: "/a/1".into(),
+                        label: "a 1".into(),
+                        start: 10,
+                        lamps: 10,
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            });
+        assert_eq!(
+            sprite_target(&surface, node, Some(1), Some(2)),
+            UiPatchTarget::Instance {
+                node,
+                path: "/a/1".into()
+            },
+            "the hull the press landed in wins over the nearest lamp"
+        );
+        assert_eq!(
+            sprite_target(&surface, node, None, Some(2)),
+            UiPatchTarget::Instance {
+                node,
+                path: "/a/0".into()
+            },
+            "no hull = the lamp's owner, exactly as before"
+        );
+        assert_eq!(
+            sprite_target(&surface, node, None, None),
+            UiPatchTarget::Fixture { node },
+        );
     }
 }

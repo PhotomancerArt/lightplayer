@@ -317,3 +317,38 @@ each tile dispatches a slot-op sequence) and now shares the STYLING from
 that module, so there is one visual language rather than two copies of
 it.
 
+
+## Amendment 2026-08-22 — chase is direction, breath is identity (G1 round 3)
+
+Round 3 of the feel gate walked the panel against mini-dome and caught
+the light language mumbling: selecting a FIXTURE ran the chase across
+every one of its runs, so a five-sector dome read as "two objects
+selected" — a blue head on one sector, a red tail on another, and no
+direction claim worth making in between.
+
+The matrix sharpens (D9 amended):
+
+| selection | language | it answers |
+|---|---|---|
+| object (instance / range / cell) | CHASE | "which way does it run?" |
+| fixture | BREATH | "which lamps are this fixture?" |
+| output / port / free segment | BREATH | "which lamps are this wire?" |
+
+**Chase is an OBJECT-ONLY language.** Direction is a property of one
+contiguous run in object order; a fixture is a bag of objects and has no
+single direction to claim. A fixture selection now breathes all its
+mapped lamps — identity, not direction — which is also what the fixture
+CARD (Q8) already said in chrome: fixture grain gets fixture-grain
+answers. A richer fixture-level canvas indicator stays future work.
+
+Presentation followed in the same round (recorded here for the trail,
+not as decisions of ADR weight): objects render as clickable HULL bodies
+on the canvas (round 3: "they should feel like individual THINGS not
+collections of hard to target tiny things" — the whole hull is the hit
+target, with the nearest lamp as the overlap tiebreak); hotkeys became
+kbd chips; an armed button pulses instead of changing its label, and the
+COUNTERPART section wears an attention ring; the port pickers carry
+occupancy; and at the mobile fold the object-first invitation summons
+the Outputs panel as the picker, which dismisses itself after the pick
+(the general fold rule: a summoned panel closes once a selection or
+write happens inside it).

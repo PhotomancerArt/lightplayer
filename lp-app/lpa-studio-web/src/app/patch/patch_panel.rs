@@ -74,6 +74,41 @@ const STEP_ARMED: &str = "tw:cursor-pointer tw:rounded-sm tw:border tw:border-se
 /// handler — the count edit belongs to a later pass).
 const STEP_FUTURE: &str = "tw:rounded-sm tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-2 tw:py-0.5 tw:font-mono tw:text-[10.5px] tw:leading-4 tw:text-dim-foreground";
 const PICKER: &str = "tw:min-w-0 tw:max-w-[210px] tw:cursor-pointer tw:rounded-sm tw:border tw:border-border-strong tw:bg-terminal tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[10.5px] tw:text-muted-foreground";
+
+/// The hotkey CHIP (G1 round 3, #5): a key on a button is a kbd badge,
+/// visually a key-cap, never prose glued to the label ("assign a" read
+/// like English). Shared by the transport buttons and the keys-row footer.
+const KBD: &str = "tw:inline-block tw:rounded-[3px] tw:border tw:border-border-strong tw:bg-terminal tw:px-1 tw:font-mono tw:text-[9px] tw:leading-[13px] tw:text-dim-foreground";
+
+/// A button label with its hotkey chip.
+fn keyed(label: &str, key: &str) -> Element {
+    rsx! {
+        span { class: "tw:inline-flex tw:items-center tw:gap-1",
+            span { "{label}" }
+            span { class: "{KBD}", "{key}" }
+        }
+    }
+}
+
+/// Are engine frames flowing? The gate on every attention ANIMATION (the
+/// armed pulse, the counterpart ring): live sessions breathe, stories and
+/// frameless surfaces render the settled state — the same freeze rule the
+/// chase preview keeps core-side.
+pub(crate) fn surface_is_live(surface: &UiPatchSurface) -> bool {
+    surface
+        .outputs
+        .iter()
+        .any(|output| output_frame(surface, output.node).is_some())
+}
+
+/// Is the viewport at the mobile fold (the workbench's ≤820px breakpoint)?
+/// Runtime-checked at gesture time; host test builds never fire gestures.
+fn at_mobile_fold() -> bool {
+    web_sys::window()
+        .and_then(|window| window.inner_width().ok())
+        .and_then(|width| width.as_f64())
+        .is_some_and(|width| width <= 820.0)
+}
 const SECTION: &str = "tw:grid tw:content-start tw:gap-1.5 tw:border-l-2 tw:border-l-transparent tw:px-2.5 tw:py-2 tw:max-[820px]:px-2 tw:max-[820px]:py-1.5";
 const SECTION_PRIMARY: &str = "tw:grid tw:content-start tw:gap-1.5 tw:border-l-2 tw:border-l-selection-border tw:bg-selection-bg tw:px-2.5 tw:py-2 tw:max-[820px]:px-2 tw:max-[820px]:py-1.5";
 const PROMPT: &str = "tw:flex tw:flex-wrap tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:px-2.5 tw:py-1.5 tw:text-[11.5px] tw:text-subtle-foreground";
@@ -815,10 +850,54 @@ pub(crate) fn port_options(surface: &UiPatchSurface) -> Vec<(String, String)> {
                 } else {
                     format!("{} · port {}", port.pin_label, port.key)
                 };
+                // Occupancy IN the option (round 3, #6): a destination you
+                // cannot judge is not a choice.
                 (
                     format!("{}:{}", output.node.0, port.key),
-                    format!("{} · {pin}", output.display_name()),
+                    format!(
+                        "{} · {pin} · {}",
+                        output.display_name(),
+                        port_occupancy(port)
+                    ),
                 )
+            })
+        })
+        .collect()
+}
+
+/// One terse occupancy phrase: where the free space is, or that none is.
+fn port_occupancy(port: &lpa_studio_core::UiPatchPort) -> String {
+    let used: u32 = port.cells.iter().map(|cell| cell.lamps).sum();
+    let free = port.lamps.saturating_sub(used);
+    if free == 0 {
+        "full".to_string()
+    } else if let Some((start, _)) = free_runs(port).into_iter().next() {
+        format!("{free} free @ {}", start + 1)
+    } else {
+        format!("{free} free")
+    }
+}
+
+/// The same choices as [`port_options`], as EXPLAINING CARDS (round 3, #6):
+/// title = the port, blurb = its occupancy, so picking a destination is an
+/// informed act rather than a name lottery.
+pub(crate) fn port_cards(surface: &UiPatchSurface) -> Vec<OptionCard> {
+    surface
+        .outputs
+        .iter()
+        .flat_map(|output| {
+            output.bay.ports.iter().map(move |port| {
+                let pin = if port.pin_label.is_empty() {
+                    format!("port {}", port.key)
+                } else {
+                    port.pin_label.clone()
+                };
+                OptionCard {
+                    id: format!("{}:{}", output.node.0, port.key),
+                    icon: StudioIconName::Usb,
+                    title: format!("{} · {pin}", output.display_name()),
+                    blurb: port_occupancy(port),
+                }
             })
         })
         .collect()
@@ -854,6 +933,13 @@ pub fn PatchPanel(
     let card = fixture_card(&surface, selection.as_ref());
     let output = output_view(&surface, selection.as_ref());
     let primary = primary_side(selection.as_ref());
+    // The attention language (round 3): while an assign is armed, the
+    // COUNTERPART section — where the next click belongs — wears the ring.
+    // Animations only run while frames flow (story determinism).
+    let live = surface_is_live(&surface);
+    let armed_assign = matches!(armed, Some(ArmedVerb::Assign));
+    let attention_object = live && armed_assign && primary == Some(PanelSide::Output);
+    let attention_output = live && armed_assign && primary == Some(PanelSide::Object);
     rsx! {
         // Capped and self-scrolling: the panel is the center's bottom
         // region, and it must never squeeze the canvas above it to nothing
@@ -875,6 +961,8 @@ pub fn PatchPanel(
                 card,
                 armed: armed.clone(),
                 primary: primary == Some(PanelSide::Object),
+                attention: attention_object,
+                animate: live,
                 on_action,
             }
             OutputPane {
@@ -883,45 +971,47 @@ pub fn PatchPanel(
                 output,
                 armed,
                 primary: primary == Some(PanelSide::Output),
+                attention: attention_output,
+                animate: live,
                 on_action,
             }
             // The keys row REPLACES the help overlay: one line, always
             // visible, in the panel the gesture happens in.
             div { class: "tw:flex tw:flex-none tw:flex-wrap tw:gap-x-3.5 tw:gap-y-0.5 tw:border-t tw:border-border-subtle tw:bg-card-muted tw:px-2.5 tw:py-1 tw:font-mono tw:text-[10px] tw:text-dim-foreground",
                 span {
-                    b { class: "tw:text-subtle-foreground", "a" }
+                    span { class: "{KBD}", "a" }
                     " assign"
                 }
                 span {
-                    b { class: "tw:text-subtle-foreground", "m" }
+                    span { class: "{KBD}", "m" }
                     " next free"
                 }
                 span {
-                    b { class: "tw:text-subtle-foreground", "[ ]" }
+                    span { class: "{KBD}", "[ ]" }
                     " shift"
                 }
                 span {
-                    b { class: "tw:text-subtle-foreground", "- =" }
+                    span { class: "{KBD}", "- =" }
                     " narrow / widen"
                 }
                 span {
-                    b { class: "tw:text-subtle-foreground", "r" }
+                    span { class: "{KBD}", "r" }
                     " flip"
                 }
                 span {
-                    b { class: "tw:text-subtle-foreground", "; '" }
+                    span { class: "{KBD}", "; '" }
                     " rotate"
                 }
                 span {
-                    b { class: "tw:text-subtle-foreground", "s" }
+                    span { class: "{KBD}", "s" }
                     " swap"
                 }
                 span {
-                    b { class: "tw:text-subtle-foreground", "⌘Z" }
+                    span { class: "{KBD}", "⌘Z" }
                     " undo"
                 }
                 span {
-                    b { class: "tw:text-subtle-foreground", "esc" }
+                    span { class: "{KBD}", "esc" }
                     " disarm, then deselect"
                 }
             }
@@ -995,14 +1085,34 @@ fn ObjectPane(
     card: Option<FixtureCard>,
     armed: Option<ArmedVerb>,
     primary: bool,
+    /// The arm's counterpart ring: an armed assign points HERE next.
+    #[props(default)]
+    attention: bool,
+    /// Frames are flowing — attention animations may run.
+    #[props(default)]
+    animate: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let ui = use_hook(try_consume_context::<PatchingUi>);
     // Nothing here animates itself any more (Q9): every picture the panel
     // paints — published bytes or the controller's unmapped-chase preview —
     // arrives as data on the surface, so the panel keeps no clock at all.
-    let class = if primary { SECTION_PRIMARY } else { SECTION };
+    let base = if primary { SECTION_PRIMARY } else { SECTION };
+    let class = if attention {
+        format!("{base} ux-arm-attention")
+    } else {
+        base.to_string()
+    };
     let is_armed = matches!(armed, Some(ArmedVerb::Assign));
+    let arm_class = if is_armed {
+        if animate {
+            format!("{STEP_ARMED} ux-arm-pulse")
+        } else {
+            STEP_ARMED.to_string()
+        }
+    } else {
+        STEP_ARM.to_string()
+    };
     // The invitation belongs to the object side when the WIRE side holds a
     // free segment: that is the pairing this panel can still make.
     let free_segment = match (&selection, &object) {
@@ -1079,7 +1189,7 @@ fn ObjectPane(
                                         let verb = verb.clone();
                                         move |_| verb(PatchVerbKind::Rotate { steps: -1, stride })
                                     },
-                                    "‹ ;"
+                                    {keyed("‹", ";")}
                                 }
                                 button {
                                     class: if mapped { STEP } else { STEP_OFF },
@@ -1089,7 +1199,7 @@ fn ObjectPane(
                                         let verb = verb.clone();
                                         move |_| verb(PatchVerbKind::Rotate { steps: 1, stride })
                                     },
-                                    "› '"
+                                    {keyed("›", "'")}
                                 }
                                 button {
                                     class: if mapped { STEP } else { STEP_OFF },
@@ -1099,7 +1209,7 @@ fn ObjectPane(
                                         let verb = verb.clone();
                                         move |_| verb(PatchVerbKind::Reverse)
                                     },
-                                    "flip r"
+                                    {keyed("flip", "r")}
                                 }
                                 button {
                                     class: if mapped { STEP } else { STEP_OFF },
@@ -1180,7 +1290,7 @@ fn ObjectPane(
                                 div { class: "{PROMPT}",
                                     span { "Not mapped to any object." }
                                     button {
-                                        class: if is_armed { STEP_ARMED } else { STEP_ARM },
+                                        class: "{arm_class}",
                                         title: "Arm the assign — the next object click links it (a)",
                                         onclick: {
                                             let surface = surface.clone();
@@ -1192,11 +1302,10 @@ fn ObjectPane(
                                                 }
                                             }
                                         },
-                                        if is_armed {
-                                            "armed — click the object"
-                                        } else {
-                                            "assign a"
-                                        }
+                                        // The label never changes (round 3):
+                                        // armed = the button pulses and the
+                                        // counterpart section wears the ring.
+                                        {keyed("assign", "a")}
                                     }
                                     select {
                                         class: "{PICKER}",
@@ -1410,6 +1519,12 @@ fn OutputPane(
     output: Option<OutputView>,
     armed: Option<ArmedVerb>,
     primary: bool,
+    /// The arm's counterpart ring: an armed assign points HERE next.
+    #[props(default)]
+    attention: bool,
+    /// Frames are flowing — attention animations may run.
+    #[props(default)]
+    animate: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let ui = use_hook(try_consume_context::<PatchingUi>);
@@ -1417,9 +1532,32 @@ fn OutputPane(
     // fact line can name it (the spike's mode chip) — and so a walk-up gate
     // can see where the 7px threshold actually falls.
     let presentation = use_signal(StripPresentation::default);
-    let class = if primary { SECTION_PRIMARY } else { SECTION };
+    let base = if primary { SECTION_PRIMARY } else { SECTION };
+    let class = if attention {
+        format!("{base} ux-arm-attention")
+    } else {
+        base.to_string()
+    };
     let is_armed = matches!(armed, Some(ArmedVerb::Assign));
     let swap_armed = matches!(armed, Some(ArmedVerb::Swap(_)));
+    let arm_class = if is_armed {
+        if animate {
+            format!("{STEP_ARMED} ux-arm-pulse")
+        } else {
+            STEP_ARMED.to_string()
+        }
+    } else {
+        STEP_ARM.to_string()
+    };
+    let swap_class = if swap_armed {
+        if animate {
+            format!("{STEP_ARMED} ux-arm-pulse")
+        } else {
+            STEP_ARMED.to_string()
+        }
+    } else {
+        STEP.to_string()
+    };
     // The object side holds a LINKABLE object: this section invites. The
     // test is the arm's own (Q11) — an auto-mapped fixture's object has no
     // link to offer, and a fixture CARD is not an object at all (Q8), so
@@ -1627,7 +1765,7 @@ fn OutputPane(
                                     let nudge = nudge.clone();
                                     move |_| nudge(-10)
                                 },
-                                "‹‹ [×10"
+                                {keyed("‹‹ ×10", "[")}
                             }
                             button {
                                 class: "{STEP}",
@@ -1636,7 +1774,7 @@ fn OutputPane(
                                     let nudge = nudge.clone();
                                     move |_| nudge(-1)
                                 },
-                                "‹ ["
+                                {keyed("‹", "[")}
                             }
                             button {
                                 class: "{STEP}",
@@ -1645,7 +1783,7 @@ fn OutputPane(
                                     let nudge = nudge.clone();
                                     move |_| nudge(1)
                                 },
-                                "] ›"
+                                {keyed("›", "]")}
                             }
                             button {
                                 class: "{STEP}",
@@ -1654,7 +1792,7 @@ fn OutputPane(
                                     let nudge = nudge.clone();
                                     move |_| nudge(10)
                                 },
-                                "]×10 ››"
+                                {keyed("×10 ››", "]")}
                             }
                             if free {
                                 span { class: "tw:w-2" }
@@ -1665,7 +1803,7 @@ fn OutputPane(
                                         let resize = resize.clone();
                                         move |_| resize(-1)
                                     },
-                                    "narrow −"
+                                    {keyed("narrow", "-")}
                                 }
                                 button {
                                     class: "{STEP}",
@@ -1674,13 +1812,13 @@ fn OutputPane(
                                         let resize = resize.clone();
                                         move |_| resize(1)
                                     },
-                                    "widen ="
+                                    {keyed("widen", "=")}
                                 }
                             }
                             if matches!(selection, Some(UiPatchTarget::Port { .. })) || swap_armed {
                                 span { class: "tw:w-2" }
                                 button {
-                                    class: if swap_armed { STEP_ARMED } else { STEP },
+                                    class: "{swap_class}",
                                     title: "Arm a port swap, then click the other port (s)",
                                     onclick: {
                                         let surface = surface.clone();
@@ -1692,11 +1830,7 @@ fn OutputPane(
                                             }
                                         }
                                     },
-                                    if swap_armed {
-                                        "armed — click a port"
-                                    } else {
-                                        "swap s"
-                                    }
+                                    {keyed("swap", "s")}
                                 }
                             }
                             span { class: "tw:w-2" }
@@ -1717,7 +1851,7 @@ fn OutputPane(
                                         }
                                     }
                                 },
-                                "next free m"
+                                {keyed("next free", "m")}
                             }
                         }
                     }
@@ -1738,7 +1872,7 @@ fn OutputPane(
                             div { class: "{PROMPT}",
                                 span { "Not on any port segment." }
                                 button {
-                                    class: if is_armed { STEP_ARMED } else { STEP_ARM },
+                                    class: "{arm_class}",
                                     title: "Arm the assign — the next port click links it (a)",
                                     onclick: {
                                         let surface = surface.clone();
@@ -1747,22 +1881,36 @@ fn OutputPane(
                                             if let Some(ui) = ui {
                                                 let mut armed = ui.armed;
                                                 arm_assign(&surface, &selection, &mut armed);
+                                                // At the mobile fold the ports
+                                                // live in the Outputs panel —
+                                                // bring it up (round 3, #6);
+                                                // picking there completes and
+                                                // dismisses it.
+                                                if armed.peek().is_some() && at_mobile_fold() {
+                                                    let mut summon = ui.summon_outputs;
+                                                    summon.set(true);
+                                                }
                                             }
                                         }
                                     },
-                                    if is_armed {
-                                        "armed — click a port"
-                                    } else {
-                                        "assign a"
-                                    }
+                                    // The label never changes (round 3): armed
+                                    // = pulse + the counterpart ring.
+                                    {keyed("assign", "a")}
                                 }
-                                select {
-                                    class: "{PICKER}",
-                                    value: "",
-                                    onchange: {
+                            }
+                            // The destinations as EXPLAINING CARDS (#6):
+                            // occupancy on every option; picking writes (the
+                            // ratified picker rule) at the port's next free
+                            // lamp. At the fold the summoned Outputs panel is
+                            // the picker instead.
+                            div { class: "tw:max-[820px]:hidden",
+                                OptionCards {
+                                    label: "or pick a port".to_string(),
+                                    options: port_cards(&surface),
+                                    on_pick: {
                                         let surface = surface.clone();
-                                        move |event: FormEvent| {
-                                            let Some((node, key)) = parse_port_key(&event.value()) else {
+                                        move |value: String| {
+                                            let Some((node, key)) = parse_port_key(&value) else {
                                                 return;
                                             };
                                             let Some(entry) = surface
@@ -1791,10 +1939,6 @@ fn OutputPane(
                                             }
                                         }
                                     },
-                                    option { value: "", "or pick…" }
-                                    for (value , label) in ports.iter().cloned() {
-                                        option { key: "{value}", value: "{value}", "{label} · next free" }
-                                    }
                                 }
                             }
                         },

@@ -124,18 +124,6 @@ fn unmapped_object_range(
     target: &UiPatchTarget,
 ) -> Option<(NodeId, u32, u32)> {
     let (fixture, start, lamps) = match target {
-        // A whole fixture is an OBJECT only when it has no object table:
-        // one count-only strand (the scarf), whose single patch entry IS
-        // the fixture. A fixture WITH objects is a card, not an object
-        // (Q8) — it has no single direction to chase, and painting one
-        // over all its sprites would be the pretence the card drops.
-        UiPatchTarget::Fixture { node } => {
-            let fixture = fixture_of(surface, *node)?;
-            if !fixture.instances.is_empty() {
-                return None;
-            }
-            (fixture, 0, fixture.patch.lamps)
-        }
         UiPatchTarget::Instance { node, path } => {
             let fixture = fixture_of(surface, *node)?;
             let instance = fixture
@@ -150,7 +138,10 @@ fn unmapped_object_range(
             (fixture, *start, lamps)
         }
         // A `Cell` IS a run: it is mapped by construction. Wire-side and
-        // context selections name no object.
+        // context selections name no object — and neither does a whole
+        // FIXTURE, whatever its object table looks like: since the round-3
+        // rework a fixture target speaks BREATH (D9), so a chase painted
+        // over its sprites would be the canvas contradicting the wire.
         _ => return None,
     };
     let end = start.saturating_add(lamps);
@@ -292,10 +283,18 @@ mod tests {
         assert!(chase_preview(&surface, None, 0).is_none());
     }
 
-    /// The range grain (an id-less strand, the peach) and the whole-fixture
-    /// grain both preview — the scarf is its own object.
+    /// The range grain previews (an id-less strand, the peach); a whole
+    /// FIXTURE never does.
+    ///
+    /// The chase is the object language (D9, round 3): a fixture target
+    /// breathes, so a chase painted on its sprites would be the canvas
+    /// saying one thing while the wire says another — and on a multi-run
+    /// fixture it painted two heads, which is what the gate rejected. That
+    /// holds even for the scarf, the count-only strand with no object table:
+    /// the matrix keys on the selection KIND, and no surface may special-case
+    /// its way to a second answer.
     #[test]
-    fn the_range_and_fixture_grains_preview_too() {
+    fn the_range_grain_previews_and_a_whole_fixture_never_does() {
         let mut surface = half_patched();
         let range = UiPatchTarget::Range {
             node: dome(),
@@ -310,18 +309,32 @@ mod tests {
             30,
         );
 
-        // A whole fixture WITH objects is a card, not an object (Q8): no
-        // chase, however unmapped it is.
+        // A whole fixture WITH objects is a card, not an object (Q8).
         surface.fixtures[0].patch.cells.clear();
         assert!(
             chase_preview(&surface, Some(&UiPatchTarget::Fixture { node: dome() }), 0).is_none(),
             "the fixture card stops pretending the fixture is one object",
         );
 
-        // The scarf: no instance table, no runs — one object of 60 lamps.
+        // …and the scarf's whole-fixture selection breathes like any other
+        // fixture: no object chase here either.
         surface.fixtures[0].instances.clear();
-        let whole = chase_preview(&surface, Some(&UiPatchTarget::Fixture { node: dome() }), 0)
-            .expect("preview");
+        assert!(
+            chase_preview(&surface, Some(&UiPatchTarget::Fixture { node: dome() }), 0).is_none(),
+            "a fixture target speaks breath, whatever its object table holds",
+        );
+        // Its lamps still chase when they are named as a RANGE — the grain
+        // an id-less strand actually patches at.
+        let whole = chase_preview(
+            &surface,
+            Some(&UiPatchTarget::Range {
+                node: dome(),
+                start: 0,
+                count: None,
+            }),
+            0,
+        )
+        .expect("preview");
         assert_eq!((whole.start, whole.colors.len()), (0, 60));
     }
 
