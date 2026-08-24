@@ -98,12 +98,27 @@ pub(crate) enum ThumbPreviewBadge {
     },
 }
 
+impl ThumbPreviewBadge {
+    /// Badge policy for browsing surfaces (2026-08-24, fidelity-tiers ADR
+    /// decision-4 note): a badge appears only when something is actually
+    /// wrong. The granted tier is not news — it stays log/wire-visible and
+    /// belongs on diagnostic surfaces, not on cards a visitor is browsing.
+    pub(crate) fn issue(self) -> Option<Self> {
+        matches!(self, Self::Error { .. }).then_some(self)
+    }
+}
+
 /// How long a thumb is willing to render (see the module docs).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ThumbMode {
     /// Hold the slot for as long as the consumer is mounted and visible —
     /// the docs hero, and every lease before posters existed.
     Live,
+    /// [`Live`](Self::Live), and the RASTER canvas is the face even for a
+    /// control-first product (whose raster normally presents hidden behind
+    /// its lamps). The landing hero: its triangle is a screen showing the
+    /// shader surface itself, not the fixture that consumes it.
+    LiveRaster,
     /// Show a session-cached poster with no lease at all; on a miss, lease
     /// briefly, capture one, and release. Gallery cards.
     PosterFirst,
@@ -229,6 +244,16 @@ pub(crate) fn use_thumb_preview(source: Option<PreviewSource>, mode: ThumbMode) 
 /// motion is the point.
 pub(crate) fn use_preview_lease(source: Option<PreviewSource>, fps: Option<f32>) -> ThumbPreview {
     use_preview_slot(source, fps, ThumbMode::Live)
+}
+
+/// [`use_preview_lease`], but the raster canvas reveals even for a
+/// control-first product ([`ThumbMode::LiveRaster`]). The landing hero's
+/// consumer surface: the brand triangle shows the shader itself.
+pub(crate) fn use_preview_lease_raster(
+    source: Option<PreviewSource>,
+    fps: Option<f32>,
+) -> ThumbPreview {
+    use_preview_slot(source, fps, ThumbMode::LiveRaster)
 }
 
 /// The one hook behind [`use_thumb_preview`] and [`use_preview_lease`].
@@ -460,7 +485,7 @@ mod wasm {
         let cached_source = source.clone();
         let poster = use_signal(move || match mode {
             ThumbMode::PosterFirst => cached_source.as_ref().and_then(cached_poster),
-            ThumbMode::Live => None,
+            ThumbMode::Live | ThumbMode::LiveRaster => None,
         });
         let state = use_hook(|| Rc::new(RefCell::new(LiveThumbState::default())));
 
@@ -580,6 +605,9 @@ mod wasm {
     enum LeaseKind {
         /// [`ThumbMode::Live`]: hold the slot while mounted and visible.
         Live,
+        /// [`ThumbMode::LiveRaster`]: [`Live`](Self::Live), and the raster
+        /// canvas is the face even when the product is control-first.
+        LiveRaster,
         /// [`ThumbMode::PosterFirst`] at rest: spend a frame budget, capture
         /// the poster, stand down.
         Poster,
@@ -593,6 +621,7 @@ mod wasm {
         fn from(mode: ThumbMode) -> Self {
             match mode {
                 ThumbMode::Live => Self::Live,
+                ThumbMode::LiveRaster => Self::LiveRaster,
                 ThumbMode::PosterFirst => Self::Poster,
             }
         }
@@ -829,7 +858,11 @@ mod wasm {
         // ticks the engine and carries the lamp answer home, but never shown —
         // until the lamps themselves land. Before that it is pending, exactly
         // like a visual slot before its first present: the gradient base.
-        let raster_revealed = presented && (control_first != Some(true) || state.lamp_fallback);
+        // A LiveRaster lease opts out: its consumer wants the shader surface
+        // itself, so the raster reveals regardless of control-first.
+        let raster_first = kind == LeaseKind::LiveRaster;
+        let raster_revealed =
+            presented && (raster_first || control_first != Some(true) || state.lamp_fallback);
         if *revealed.peek() != raster_revealed {
             revealed.set(raster_revealed);
         }

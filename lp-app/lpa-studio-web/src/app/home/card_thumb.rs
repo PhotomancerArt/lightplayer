@@ -28,8 +28,9 @@
 //!    name's initial: the placeholder before the first present, the
 //!    stories' whole face, and the fallback when previews fail.
 //!
-//! A corner badge surfaces the granted tier and failures (fidelity-tiers
-//! ADR: never silent).
+//! A corner badge surfaces failures only ([`ThumbPreviewBadge::issue`]):
+//! the granted tier stays log/wire-visible per the fidelity-tiers ADR's
+//! decision-4 note, but a browsing surface doesn't announce the normal.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{PreviewSource, UiControlProductPreview};
@@ -69,7 +70,9 @@ pub(crate) fn CardThumb(
     static_poster: Option<String>,
 ) -> Element {
     let preview = use_thumb_preview(source, mode);
-    let badge = static_badge.or(preview.badge);
+    let badge = static_badge
+        .or(preview.badge)
+        .and_then(ThumbPreviewBadge::issue);
     let lamps = static_lamps.or(preview.lamps);
     let poster = static_poster.or(preview.poster);
     let style = thumb_swatch_style(&seed, muted);

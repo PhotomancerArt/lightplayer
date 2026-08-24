@@ -87,6 +87,23 @@ saturation by design.
    > f32 backend still *errors* on a pinned Float rather than quietly
    > compiling Q32.
 
+   > **Note, 2026-08-24 — visibility surface chosen: issue-only badges on
+   > browsing surfaces.** This decision lists three visibility channels
+   > (badge/log/wire-queryable); the first implementation badged the granted
+   > tier on every preview card. Product decision (PR #444, chrome/UX polish
+   > pass): **browsing surfaces — the landing hero, gallery cards, docs
+   > heroes — badge failures only.** A visitor reading "GPU" on a thumbnail
+   > learns nothing actionable; the *normal* state needs no announcement.
+   > The rule itself is not weakened: tier selection stays explicit in logs
+   > and wire-queryable status, diagnostic surfaces may still show it, and a
+   > preview that *fails* keeps a visible badge everywhere with its reason.
+   > Context that shrank the stakes: primary targets have shifted from
+   > Q32-class boards to f32-class (ESP32/S3 with FPUs, RV32F direction), so
+   > the tier gap a badge once hinted at — quantization and i16 integer-part
+   > range — no longer separates preview from device on the boards most
+   > users hold. The power-masking rationale is unchanged and is served by
+   > the log/wire channels.
+
 ## Consequences
 
 - GPU shader assembly must close known f32/GPU-specific gaps (bounded-tanh

@@ -397,7 +397,9 @@ fn live_thumb_states() -> Element {
     // The live-thumb overlay states, injected statically (story mode has
     // no PreviewHost and mounts no canvas): placeholder gradient, GPU
     // tier, CPU fallback with a surfaced reason, and a failed preview.
-    // Live cards derive the same badges from their slot status.
+    // Badge policy is issue-only (fidelity-tiers ADR, decision-4 note), so
+    // the GPU and CPU cards here PROVE the absence: only the failure wears
+    // a badge. Tier state stays log/wire-visible for diagnosis.
     rsx! {
         section { class: "tw:grid tw:w-[720px] tw:grid-cols-4 tw:gap-3.5 tw:p-4",
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
@@ -410,7 +412,7 @@ fn live_thumb_states() -> Element {
                     label: "gpu".to_string(),
                     static_badge: Some(ThumbPreviewBadge::Gpu),
                 }
-                p { class: thumb_state_caption_class(), "GPU tier" }
+                p { class: thumb_state_caption_class(), "GPU tier — no badge" }
             }
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 CardThumb {
@@ -420,7 +422,7 @@ fn live_thumb_states() -> Element {
                         reason: Some("WebGPU unavailable".to_string()),
                     }),
                 }
-                p { class: thumb_state_caption_class(), "CPU fallback" }
+                p { class: thumb_state_caption_class(), "CPU fallback — no badge" }
             }
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 CardThumb {
@@ -456,7 +458,6 @@ fn thumb_product_faces() -> Element {
                     seed: "prj3fkq8zr21btxyw0a".to_string(),
                     label: "porch-sign".to_string(),
                     static_lamps: Some(thumb_lamp_frame()),
-                    static_badge: Some(ThumbPreviewBadge::Gpu),
                 }
                 p { class: thumb_state_caption_class(), "Control-first — lamps" }
             }
@@ -464,7 +465,6 @@ fn thumb_product_faces() -> Element {
                 CardThumb {
                     seed: "prj9sm2xc44dqnv7bgw".to_string(),
                     label: "plasma".to_string(),
-                    static_badge: Some(ThumbPreviewBadge::Gpu),
                 }
                 p { class: thumb_state_caption_class(), "Shader-only — raster" }
             }
@@ -503,11 +503,13 @@ fn poster_states() -> Element {
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 CardThumb {
                     seed: "prj9sm2xc44dqnv7bgw".to_string(),
-                    label: "poster-gpu".to_string(),
+                    label: "poster-failed".to_string(),
                     static_poster: Some(POSTER_TEST_IMAGE.to_string()),
-                    static_badge: Some(ThumbPreviewBadge::Gpu),
+                    static_badge: Some(ThumbPreviewBadge::Error {
+                        reason: "deploy: shader compile failed".to_string(),
+                    }),
                 }
-                p { class: thumb_state_caption_class(), "Poster + GPU badge" }
+                p { class: thumb_state_caption_class(), "Poster + failure badge" }
             }
         }
     }

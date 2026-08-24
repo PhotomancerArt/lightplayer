@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LightPlayer logo — triangle-in-chip simplification spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, verbatim) --- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-subtle: #293039;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --accent-hover: #6fc39f;
+    --gold: #e4c065;
+    --sans: 'InterV', Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: 'JBMV', "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    --r1:#ff5d5d; --r2:#ffab4a; --r3:#f5e04e; --r4:#5fe08b; --r5:#53c6f2; --r6:#a58af7;
+    --spd: 1;
+  }
+  @font-face { font-family:'InterV'; src:url('../../lp-app/lpa-studio-web/public/fonts/Inter-Regular.woff2') format('woff2'); font-weight:400; }
+  @font-face { font-family:'InterV'; src:url('../../lp-app/lpa-studio-web/public/fonts/Inter-SemiBold.woff2') format('woff2'); font-weight:600; }
+  @font-face { font-family:'InterV'; src:url('../../lp-app/lpa-studio-web/public/fonts/Inter-Bold.woff2') format('woff2'); font-weight:700; }
+  @font-face { font-family:'InterV'; src:url('../../lp-app/lpa-studio-web/public/fonts/Inter-ExtraBold.woff2') format('woff2'); font-weight:800; }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 880px; }
+  p.hint b { color: var(--muted); font-weight: 600; }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 880px; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+
+  /* ---- exploration controls -------------------------------------- */
+  .controls {
+    position: sticky; top: 10px; z-index: 40;
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px; margin-bottom: 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .controls .group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .chip {
+    appearance: none; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--subtle); font-size: 11.5px; font-weight: 600; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer; font-family: var(--sans);
+  }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+
+  /* ---- stages ------------------------------------------------------ */
+  body[data-canvas=terminal] { --stage-bg: var(--terminal); --stage-line: var(--border-muted);
+    --stage-mark: #fffaf0; --stage-ink: #c7cbd0; --stage-strong: #fffaf0; --stage-dim: #94b8aa; }
+  body[data-canvas=surface]  { --stage-bg: var(--surface); --stage-line: var(--border);
+    --stage-mark: #fffaf0; --stage-ink: #c7cbd0; --stage-strong: #fffaf0; --stage-dim: #94b8aa; }
+  body[data-canvas=light]    { --stage-bg: #f0eee6; --stage-line: #d8d4c8;
+    --stage-mark: #14181d; --stage-ink: #3a4048; --stage-strong: #14181d; --stage-dim: #5c6b66; }
+  .stage {
+    background: var(--stage-bg); border: 1px solid var(--stage-line); border-radius: 8px;
+    display: flex; align-items: center; gap: 16px; padding: 14px 16px;
+  }
+
+  /* ---- the mark ---------------------------------------------------- */
+  .lockup { display: inline-flex; align-items: center; color: var(--stage-mark); }
+  .lockup svg.mark { flex: none; display: block; }
+  .mark .pkg   { stroke: currentColor; fill: none; }
+  .mark .pad   { fill: currentColor; }
+  .mark .lens  { stroke: currentColor; fill: none; opacity: .85; }
+  .mark .play  { fill: var(--accent); }
+  .mark .solid { fill: currentColor; }
+  body[data-tri=white]  .mark .play { fill: var(--stage-mark); }
+  body[data-wt=fine]  .mark .pkg  { stroke-width: 0.95px; }
+  body[data-wt=heavy] .mark .pkg  { stroke-width: 1.8px; }
+  /* leg tone: production fades pads to 75%; "match" makes them the same
+     ink as the package (gate-3: legs looked like a different color) */
+  body[data-legs=match] .mark g[opacity], body[data-legs=match] .mark .pad { opacity: 1 !important; }
+
+  .word { font-weight: 800; line-height: 1; white-space: nowrap; color: var(--stage-strong); }
+  /* production in-app behavior (gate-4): the whole word sweeps the rainbow */
+  .word.rword {
+    background: linear-gradient(90deg,var(--r1),var(--r2),var(--r3),var(--r4),var(--r5),var(--r6),var(--r1));
+    background-size: 300% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    animation: kf-sweep calc(7s/var(--spd)) linear infinite;
+    /* background-clip:text only paints the line box; with line-height 1 the
+       g/y descenders fall outside it and get sliced. Padding extends the
+       painted area (and background covers padding); margin compensates. */
+    padding-bottom: .16em; margin-bottom: -.16em;
+  }
+  @keyframes kf-sweep { to { background-position: -300% 0; } }
+  @keyframes kf-rfill { 0%{fill:var(--r1)} 17%{fill:var(--r2)} 33%{fill:var(--r3)}
+                        50%{fill:var(--r4)} 67%{fill:var(--r5)} 83%{fill:var(--r6)} 100%{fill:var(--r1)} }
+  @keyframes kf-dash  { to { stroke-dashoffset: -22; } }
+  @keyframes kf-hue   { to { filter: hue-rotate(360deg); } }
+  @keyframes kf-glow  { 0%,100% { opacity:.55 } 50% { opacity:.95 } }
+  .a-rplay .mark .play { animation: kf-rfill calc(8s/var(--spd)) linear infinite; }
+
+  body[data-motion=off] * { animation-play-state: paused !important; }
+
+  /* ---- section 1 · leg treatments ---------------------------------- */
+  .grid { display: grid; gap: 14px; max-width: 1500px;
+    grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 13px; display: flex; flex-direction: column; gap: 9px; cursor: pointer;
+    transition: border-color .15s; position: relative;
+  }
+  .card:hover { border-color: var(--border-strong); }
+  .card[aria-pressed=true] { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
+  .card .cname { font-size: 12px; font-weight: 700; color: var(--strong); display:flex; align-items:baseline; gap:7px; }
+  .card .ctag { font-size: 10px; font-weight: 600; color: var(--dim); letter-spacing: .05em; text-transform: uppercase; }
+  .card .cnote { font-size: 11px; color: var(--dim); line-height: 1.4; }
+  .marksizes { display: flex; align-items: center; gap: 18px; justify-content: center; padding: 10px 0 4px; }
+
+  .rejrow { display: flex; gap: 10px; flex-wrap: wrap; max-width: 1500px; margin-top: 14px; }
+  .rej { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border-muted);
+    border-radius: 8px; padding: 8px 12px; background: var(--surface-muted); }
+  .rej .lockup { opacity: .55; }
+  .rej .why { font-size: 10.5px; color: var(--dim); max-width: 190px; line-height: 1.35; }
+  .rej .why b { color: var(--subtle); display: block; font-size: 10.5px; }
+
+  /* ---- section 2 · favicon strip ----------------------------------- */
+  .tabrow { display: grid; gap: 12px; max-width: 1500px;
+    grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); }
+  .tabcell { display: flex; flex-direction: column; gap: 6px; }
+  .tabmock { display:flex; align-items:center; gap:8px; background: var(--surface-raised);
+    border: 1px solid var(--border); border-bottom: none;
+    border-radius: 8px 8px 0 0; padding: 6px 12px 6px 10px; font-size: 11.5px; color: var(--muted);
+    white-space: nowrap; overflow: hidden; }
+  .tabmock .x { margin-left: auto; color: var(--dim); }
+  .tabcell .lab { font-size: 10px; color: var(--dim); padding-left: 2px; }
+
+  /* ---- section 3 · contexts ---------------------------------------- */
+  .sheet { display: grid; gap: 14px; max-width: 1500px;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 13px; display: flex; flex-direction: column; gap: 9px; }
+  .tile .tname { font-size: 11px; font-weight: 700; color: var(--muted);
+    letter-spacing: .07em; text-transform: uppercase; }
+  .tile .body { min-height: 96px; display:flex; align-items:center; justify-content:center; gap: 16px; }
+  .topbar { display:flex; align-items:center; gap:14px; background: var(--surface-subtle);
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; width: 100%; }
+  .topbar .nav { display:flex; gap:4px; margin-left: 8px; }
+  .topbar .nav span { font-size: 12px; font-weight:600; color: var(--subtle); padding: 3px 9px; border-radius: 6px; }
+  .topbar .nav span.on { color: var(--text); background: var(--surface-raised); }
+  .topbar .right { margin-left:auto; display:flex; gap:8px; align-items:center; }
+  .topbar .pill { font-size: 10.5px; font-weight:700; color: var(--accent);
+    border:1px solid var(--accent-border); border-radius: 999px; padding: 2px 9px; }
+  .apptile { border-radius: 14.5px; width: 64px; height: 64px; display:flex;
+    align-items:center; justify-content:center; flex:none;
+    box-shadow: 0 3px 10px rgba(0,0,0,.35); }
+  .apptile.t-dark { background: linear-gradient(160deg,#1d232a,#0c1114); color:#fffaf0; }
+  .apptile.t-accent { background: linear-gradient(160deg,#8ae7bd,#57c391); color:#0c1114; }
+  .apptile.t-black { background:#000; color:#e8e4da; }
+  .apptile.t-accent .mark .play { fill: #0c1114; }
+  .avatar { width: 56px; height: 56px; border-radius: 50%; background: var(--terminal);
+    border: 1px solid var(--border-muted); display:flex; align-items:center; justify-content:center;
+    color:#fffaf0; }
+  .favrow { display:flex; align-items:center; gap:18px; }
+  .favrow .lab { font-size: 10px; color: var(--dim); text-align:center; margin-top:4px; }
+
+  /* ---- hero sections ------------------------------------------------ */
+  .hero {
+    max-width: 1060px; border: 1px solid var(--stage-line); border-radius: 10px;
+    background: var(--stage-bg); padding: 44px 24px 40px;
+    display: flex; flex-direction: column; align-items: center; gap: 26px; text-align: center;
+  }
+  .hero .markbox { position: relative; line-height: 0; }
+  .hero canvas { display: block; }
+  .hero .hword { font-size: 40px; font-weight: 800; letter-spacing: -0.015em; }
+  .hero .tagline { margin: -8px 0 0; font-size: 14px; color: var(--stage-ink); }
+  .hero .cards { display: grid; grid-template-columns: repeat(3, minmax(150px, 200px)); gap: 12px; }
+  @media (max-width: 640px) { .hero .cards { grid-template-columns: 1fr; } }
+  .dive { display: grid; justify-items: center; gap: 7px; border: 1px solid var(--stage-line);
+    background: color-mix(in srgb, var(--stage-strong) 3%, transparent);
+    border-radius: 8px; padding: 14px 12px 12px; }
+  .dive .ic { width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--stage-line);
+    display: flex; align-items: center; justify-content: center; color: var(--accent); font-size: 14px; }
+  .dive .tt { font-size: 12.5px; font-weight: 700; color: var(--stage-strong); }
+  .dive .dd { font-size: 10.5px; line-height: 1.35; color: var(--stage-ink); opacity: .8; }
+  body[data-canvas=light] .dive { background: rgba(0,0,0,.03); }
+
+  /* §4 fill-variant picker row */
+  .varrow { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .varcard { display: flex; flex-direction: column; gap: 8px; align-items: center;
+    border: 1px solid var(--stage-line); border-radius: 10px; padding: 14px 16px 11px;
+    cursor: pointer; background: color-mix(in srgb, var(--stage-strong) 2%, transparent); }
+  .varcard[aria-pressed=true] { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
+  .varcard .vname { font-size: 11.5px; font-weight: 700; color: var(--stage-strong); }
+  .varcard .vnote { font-size: 10.5px; color: var(--stage-ink); opacity: .85; max-width: 180px; line-height: 1.35; }
+
+  /* H·D traced-light styles */
+  .traced .edge { fill: none; stroke: url(#tracegrad); stroke-width: 0.9;
+    stroke-linecap: round; stroke-dasharray: 8 5.5;
+    animation: kf-dash calc(1.6s/var(--spd)) linear infinite; }
+  .traced .ghost { fill: none; stroke: var(--stage-mark); opacity: .25; stroke-width: 0.45; }
+  .traced .core { fill: var(--accent); opacity: .7; animation: kf-glow calc(3.2s/var(--spd)) ease-in-out infinite; }
+  .traced { animation: kf-hue calc(9s/var(--spd)) linear infinite; }
+
+  @media (max-width: 720px) { body { padding: 18px 14px 120px; } }
+</style>
+</head>
+<body data-canvas="terminal" data-motion="on" data-tri="accent" data-wt="std" data-tsz="md" data-legs="match" style="--spd:1">
+
+<h1>LightPlayer logo — triangle-in-chip simplification</h1>
+<p class="hint">
+  Round 3. <b>Gate-1 (2026-08-24):</b> mark = <b>C · grown triangle</b>, chip legs kept; F knockout
+  rejected (reads YouTube); hero = the triangle itself, no chip frame.
+  <b>Gate-2:</b> legs = <b>C1 production geometry</b> (C2–C4 hints imperceptible — kept below for
+  the record, "may think again later"); favicon = same mark, no per-size split; hero fill =
+  <b>Spill</b> (light blooms past the edge); corner rounding fixed — true circular-arc fillets at
+  the tangent points (the old quadratic-through-vertex rounding read wrong).
+  <b>Gate-3:</b> C1 confirmed; legs = <b>same ink as the package</b> (production's 75% fade read as
+  a different color — Legs control keeps faded for comparison). <b>Gate-4:</b> matched legs
+  confirmed ("closer to a proper mark"); wordmark descender clipping fixed (background-clip:text
+  vs line-height:1); <b>hero corner rounding gets its own, tighter ratio</b> — 0.16 fine at mark
+  scale, too much at hero scale (Hero corner control; mark unchanged).
+  Still open: hero corner ratio (this), default landing shader, triangle tone (accent vs white).
+  <b>SHIPPED</b> via plan 2026-08-24-1100-logo-triangle-chip (PR #444): mark C1 matched-ink +
+  fillet 0.16r; hero = Spill at ρ0.10 as a live engine preview (examples/plasma); this spike is
+  now the design record.
+</p>
+
+<div class="controls">
+  <span class="group"><b>Canvas</b>
+    <button class="chip" data-ctl="canvas" data-v="terminal" aria-pressed="true">Terminal</button>
+    <button class="chip" data-ctl="canvas" data-v="surface">Surface</button>
+    <button class="chip" data-ctl="canvas" data-v="light">Light</button>
+  </span>
+  <span class="group"><b>Motion</b>
+    <button class="chip" data-ctl="motion" data-v="on" aria-pressed="true">On</button>
+    <button class="chip" data-ctl="motion" data-v="off">Off</button>
+  </span>
+  <span class="group"><b>Speed</b>
+    <button class="chip" data-ctl="spd" data-v="0.5">0.5×</button>
+    <button class="chip" data-ctl="spd" data-v="1" aria-pressed="true">1×</button>
+    <button class="chip" data-ctl="spd" data-v="2.5">2.5×</button>
+  </span>
+  <span class="group"><b>Triangle</b>
+    <button class="chip" data-ctl="tri" data-v="accent" aria-pressed="true">Accent</button>
+    <button class="chip" data-ctl="tri" data-v="white">White</button>
+  </span>
+  <span class="group"><b>Tri size</b>
+    <button class="chip" data-ctl="tsz" data-v="sm">S</button>
+    <button class="chip" data-ctl="tsz" data-v="md" aria-pressed="true">M</button>
+    <button class="chip" data-ctl="tsz" data-v="lg">L</button>
+  </span>
+  <span class="group"><b>Legs</b>
+    <button class="chip" data-ctl="legs" data-v="match" aria-pressed="true">Match chip</button>
+    <button class="chip" data-ctl="legs" data-v="faded">Faded (prod)</button>
+  </span>
+  <span class="group"><b>Chip stroke</b>
+    <button class="chip" data-ctl="wt" data-v="std" aria-pressed="true">Std</button>
+    <button class="chip" data-ctl="wt" data-v="fine">Fine</button>
+    <button class="chip" data-ctl="wt" data-v="heavy">Heavy</button>
+  </span>
+  <span class="group"><b>Hero corner</b>
+    <button class="chip" data-ctl="hcr" data-v="0.16">Round ·16</button>
+    <button class="chip" data-ctl="hcr" data-v="0.12">Soft ·12</button>
+    <button class="chip" data-ctl="hcr" data-v="0.1" aria-pressed="true">Crisp ·10</button>
+    <button class="chip" data-ctl="hcr" data-v="0.07">Sharp ·07</button>
+  </span>
+  <span class="group"><b>Shader</b>
+    <button class="chip" data-ctl="shader" data-v="aurora" aria-pressed="true">Aurora</button>
+    <button class="chip" data-ctl="shader" data-v="rainbow">Rainbow</button>
+    <button class="chip" data-ctl="shader" data-v="fire">Fire</button>
+  </span>
+</div>
+
+<!-- ==================== 1 · leg treatments ==================== -->
+<h2><span class="n">1</span> The mark — how much leg?</h2>
+<p class="sub">
+  All variants are C (chip + grown triangle); only the legs change. <b>Full</b> is the production
+  pad geometry; the others thin it toward a hint. <b>Six legs</b> is what a real WS2811 5050
+  package has — three per side. Each card shows 40&nbsp;/&nbsp;22&nbsp;/&nbsp;16&nbsp;px.
+  Click a card to drive §3.
+</p>
+<div class="grid" id="markcards"></div>
+<div class="rejrow" id="rejrow"></div>
+
+<!-- ==================== 2 · favicon strip ==================== -->
+<h2><span class="n">2</span> Favicon reality — leg treatments at 16&nbsp;px, in a tab</h2>
+<p class="sub">
+  Where the leg question actually gets decided. Triangle-only rides along as the
+  "if even hint-legs are too much at 16" fallback.
+</p>
+<div class="tabrow" id="tabrow"></div>
+
+<!-- ==================== 3 · contexts ==================== -->
+<h2><span class="n">3</span> Brand contexts — composed from the selected treatment</h2>
+<p class="sub" id="ctxsel">…</p>
+<div class="sheet" id="ctxsheet"></div>
+
+<!-- ==================== 4 · hero triangle ==================== -->
+<h2><span class="n">4</span> Hero — the shader triangle, three fills</h2>
+<p class="sub">
+  Chosen direction: the triangle alone, no chip frame. The remaining question is the fill.
+  <b>Pure</b> = continuous shader. <b>Pixels</b> = same shader through a fine LED-dot mask —
+  solid silhouette at a glance, addressable pixels up close. <b>Spill</b> = pure fill plus a
+  soft light bloom past the edges. Click a fill to swap it into the landing mock below.
+</p>
+<section class="hero" id="heroA">
+  <div class="varrow" id="varrow">
+    <div class="varcard" data-var="pure">
+      <canvas data-vc="pure" width="0" height="0"></canvas>
+      <span class="vname">Pure</span>
+      <span class="vnote">Continuous fill — sleekest, most "screen".</span>
+    </div>
+    <div class="varcard" data-var="px">
+      <canvas data-vc="px" width="0" height="0"></canvas>
+      <span class="vname">Pixels</span>
+      <span class="vnote">LED-dot texture — whispers "addressable" without lattice noise.</span>
+    </div>
+    <div class="varcard" data-var="glow">
+      <canvas data-vc="glow" width="0" height="0"></canvas>
+      <span class="vname">Spill</span>
+      <span class="vnote">Light blooms past the edge — the triangle is lit, not printed.</span>
+    </div>
+  </div>
+  <div class="markbox"><canvas id="cMock" width="0" height="0"></canvas></div>
+  <div class="hword word rword">LightPlayer</div>
+  <p class="tagline">Friendly shaders, everywhere</p>
+  <div class="cards" data-minicards></div>
+</section>
+
+<!-- ==================== 5 · lattice alternate ==================== -->
+<h2><span class="n">5</span> Alternate · LED lattice — kept for contrast</h2>
+<p class="sub">
+  The strongest "this is a pixel medium" argument, but busier than the pure triangle and it
+  competes with the wordmark. Here to make the §4 comparison honest.
+</p>
+<section class="hero" id="heroB">
+  <div class="markbox"><canvas id="cB" width="0" height="0"></canvas></div>
+  <div class="hword word rword">LightPlayer</div>
+  <p class="tagline">Friendly shaders, everywhere</p>
+  <div class="cards" data-minicards></div>
+</section>
+
+<!-- ==================== 6 · traced alternate ==================== -->
+<h2><span class="n">6</span> Alternate · Traced light — the calm fallback</h2>
+<p class="sub">
+  If a full shader fill turns out too loud in place: outline traced by a moving rainbow dash,
+  accent core breathing. All SVG/CSS.
+</p>
+<section class="hero" id="heroD">
+  <div class="markbox">
+    <svg class="traced" width="230" height="212" viewBox="0 0 32 30" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="tracegrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="var(--r1)"/><stop offset=".2" stop-color="var(--r2)"/>
+          <stop offset=".4" stop-color="var(--r3)"/><stop offset=".6" stop-color="var(--r4)"/>
+          <stop offset=".8" stop-color="var(--r5)"/><stop offset="1" stop-color="var(--r6)"/>
+        </linearGradient>
+      </defs>
+      <path class="ghost" id="dGhost"/>
+      <path class="edge" id="dEdge" pathLength="100"/>
+      <path class="core" id="dCore"/>
+    </svg>
+  </div>
+  <div class="hword word rword">LightPlayer</div>
+  <p class="tagline">Friendly shaders, everywhere</p>
+  <div class="cards" data-minicards></div>
+</section>
+
+<script>
+'use strict';
+/* ========================= geometry helpers ========================= */
+/* Production geometry, from lp-app/lpa-studio-web/src/base/logo_mark.rs */
+const PLAY_D = "M13.9 13v6c0 .58.64.94 1.14.64l4.9-3a.75.75 0 0 0 0-1.28l-4.9-3a.75.75 0 0 0-1.14.64z";
+const TRI_R = { sm: 6.6, md: 7.6, lg: 8.7 };  // grown-triangle circumradius (Tri size control)
+
+/* rounded triangle centered (cx,cy), circumradius r, pointing right.
+   Corners are true circular fillets of radius rho: tangent points computed
+   on each edge, joined by an SVG arc — G1-continuous with the straight
+   edges, so no visible kink (gate-2 feedback: the quadratic-through-vertex
+   rounding read wrong). */
+function triPath(cx, cy, r, rho, rot = 0) {
+  const vs = [0, 120, 240].map(a => {
+    const t = (a + rot) * Math.PI / 180;
+    return [cx + r * Math.cos(t), cy + r * Math.sin(t)];
+  });
+  let d = '';
+  for (let i = 0; i < 3; i++) {
+    const V = vs[i], A = vs[(i + 2) % 3], B = vs[(i + 1) % 3];
+    const la = Math.hypot(A[0] - V[0], A[1] - V[1]), lb = Math.hypot(B[0] - V[0], B[1] - V[1]);
+    const na = [(A[0] - V[0]) / la, (A[1] - V[1]) / la], nb = [(B[0] - V[0]) / lb, (B[1] - V[1]) / lb];
+    const phi = Math.acos(Math.min(1, Math.max(-1, na[0] * nb[0] + na[1] * nb[1])));
+    const t = rho / Math.tan(phi / 2);  // vertex → tangent-point distance
+    const P1 = [V[0] + na[0] * t, V[1] + na[1] * t];
+    const P2 = [V[0] + nb[0] * t, V[1] + nb[1] * t];
+    d += (i ? 'L' : 'M') + P1[0].toFixed(2) + ' ' + P1[1].toFixed(2) +
+      `A${rho.toFixed(2)} ${rho.toFixed(2)} 0 0 1 ${P2[0].toFixed(2)} ${P2[1].toFixed(2)}`;
+  }
+  return d + 'Z';
+}
+function rrectPath(x, y, w, h, r) {
+  return `M${x + r} ${y}H${x + w - r}Q${x + w} ${y} ${x + w} ${y + r}V${y + h - r}` +
+    `Q${x + w} ${y + h} ${x + w - r} ${y + h}H${x + r}Q${x} ${y + h} ${x} ${y + h - r}` +
+    `V${y + r}Q${x} ${y} ${x + r} ${y}Z`;
+}
+function svgOpen(size, cls) {
+  return `<svg class="mark ${cls || ''}" width="${size}" height="${size}" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">`;
+}
+function pkg() {
+  return `<rect class="pkg" x="5.5" y="5.5" width="21" height="21" rx="1.9" stroke-width="1.25"/>`;
+}
+/* leg builders: [x-left, width, height, rx, opacity, y-centers] mirrored right */
+function legsAt(w, h, rx, op, centers) {
+  const xl = 5.5 - w - 0.0, xr = 26.5;
+  // legs sit flush against the package sides, straddling it like real pads
+  return centers.map(cy =>
+    `<rect class="pad" x="${(5.5 - w + 0.6).toFixed(2)}" y="${(cy - h / 2).toFixed(2)}" width="${w}" height="${h}" rx="${rx}" opacity="${op}"/>` +
+    `<rect class="pad" x="${(26.5 - 0.6).toFixed(2)}" y="${(cy - h / 2).toFixed(2)}" width="${w}" height="${h}" rx="${rx}" opacity="${op}"/>`
+  ).join('');
+}
+function grownTri(r) { return `<path class="play" d="${triPath(15.4, 16, r, r * 0.16)}"/>`; }
+
+/* ==================== leg treatments (section 1) ==================== */
+const MARKS = {
+  full: { label: 'C1 · Full legs', tag: 'production pads',
+    note: 'The shipped pad geometry: two per side, full length. The strongest hardware read; the most ink at 16px.',
+    build: (s, r) => svgOpen(s) + pkg() +
+      `<g fill="currentColor" opacity="0.75">` +
+      [[3.6, 8.2], [26.5, 8.2], [26.5, 19.6], [3.6, 19.6]].map(([x, y]) =>
+        `<rect x="${x}" y="${y}" width="1.9" height="4.2" rx="0.6"/>`).join('') +
+      `</g>` + grownTri(r) + `</svg>` },
+  short: { label: 'C2 · Short legs', tag: 'hint',
+    note: 'Same positions, legs cut to stubs and faded. Reads "chip" at 40px, nearly disappears at 16 — the minimum viable hint.',
+    build: (s, r) => svgOpen(s) + pkg() + legsAt(1.6, 3.0, 0.55, 0.55, [10.3, 21.7]) + grownTri(r) + `</svg>` },
+  six: { label: 'C3 · Six legs', tag: 'true to the part',
+    note: 'Three slim legs per side — the actual WS2811 5050 pinout. More texture than C1 but each leg is lighter.',
+    build: (s, r) => svgOpen(s) + pkg() + legsAt(1.5, 2.9, 0.5, 0.7, [9.05, 16, 22.95]) + grownTri(r) + `</svg>` },
+  whisker: { label: 'C4 · Whiskers', tag: 'finest hint',
+    note: 'Legs as bare seating-plane ticks. Almost subliminal — the chip is implied rather than drawn.',
+    build: (s, r) => svgOpen(s) + pkg() + legsAt(1.15, 2.4, 0.4, 0.45, [10.3, 21.7]) + grownTri(r) + `</svg>` },
+};
+const REJECTED = [
+  { build: s => svgOpen(s) + pkg() +
+      `<g fill="currentColor" opacity="0.75">` +
+      [[3.6, 8.2], [26.5, 8.2], [26.5, 19.6], [3.6, 19.6]].map(([x, y]) =>
+        `<rect x="${x}" y="${y}" width="1.9" height="4.2" rx="0.6"/>`).join('') + `</g>` +
+      `<circle class="lens" cx="16" cy="16" r="7.6" stroke-width="1.05"/><path class="play" d="${PLAY_D}"/></svg>`,
+    name: 'A · Production', why: 'five systems; busy at small sizes — the complaint that started this' },
+  { build: s => svgOpen(s) + pkg() + grownTri(7.6).replace('class="play"', 'class="play"') + `</svg>`,
+    name: 'D · Padless', why: 'clean but loses the LED-chip story; legs wanted (gate-1)' },
+  { build: s => svgOpen(s) +
+      `<path class="solid" fill-rule="evenodd" d="${rrectPath(4.5, 4.5, 23, 23, 3.4)}${triPath(15.7, 16, 7.9, 1.2)}"/></svg>`,
+    name: 'F · Knockout', why: 'reads YouTube (gate-1); inverted slab is their icon grammar' },
+  { build: s => svgOpen(s) + `<path class="play" d="${triPath(15, 16, 10.4, 1.6)}"/></svg>`,
+    name: 'G · Triangle only', why: 'too generic as the everywhere-mark; survives as the favicon fallback (§2)' },
+];
+
+const state = { mark: 'full', heroVar: 'glow' };
+const hash = new URLSearchParams(location.hash.slice(1));
+if (hash.get('mark') && MARKS[hash.get('mark')]) state.mark = hash.get('mark');
+if (hash.get('fill')) state.heroVar = hash.get('fill');
+for (const k of ['canvas', 'motion', 'tri', 'wt', 'tsz', 'legs']) if (hash.get(k)) document.body.dataset[k] = hash.get(k);
+if (hash.get('spd')) document.body.style.setProperty('--spd', hash.get('spd'));
+let shader = hash.get('shader') || 'aurora';
+/* hero corner ratio (radius / circumradius). The small mark keeps 0.16;
+   at hero scale the same ratio reads balloon-y (gate-4), so the hero
+   triangle gets its own, tighter default. */
+let heroCr = parseFloat(hash.get('hcr')) || 0.1;
+
+function triR() { return TRI_R[document.body.dataset.tsz] || TRI_R.md; }
+
+const markcards = document.getElementById('markcards');
+function renderCards() {
+  markcards.innerHTML = '';
+  for (const [k, m] of Object.entries(MARKS)) {
+    const el = document.createElement('div');
+    el.className = 'card'; el.dataset.k = k;
+    el.setAttribute('aria-pressed', String(k === state.mark));
+    el.innerHTML = `<span class="cname">${m.label} <span class="ctag">${m.tag}</span></span>` +
+      `<div class="stage marksizes">` +
+        `<span class="lockup">${m.build(40, triR())}</span>` +
+        `<span class="lockup">${m.build(22, triR())}</span>` +
+        `<span class="lockup">${m.build(16, triR())}</span>` +
+      `</div><span class="cnote">${m.note}</span>`;
+    el.addEventListener('click', () => {
+      state.mark = k;
+      for (const c of markcards.children) c.setAttribute('aria-pressed', String(c.dataset.k === k));
+      renderContexts();
+    });
+    markcards.appendChild(el);
+  }
+}
+const rejrow = document.getElementById('rejrow');
+for (const r of REJECTED) {
+  const el = document.createElement('div');
+  el.className = 'rej';
+  el.innerHTML = `<span class="lockup" style="color:var(--stage-mark)">${r.build(24)}</span>` +
+    `<span class="why"><b>${r.name}</b>${r.why}</span>`;
+  rejrow.appendChild(el);
+}
+
+/* ==================== favicon strip (section 2) ===================== */
+const tabrow = document.getElementById('tabrow');
+function renderTabs() {
+  tabrow.innerHTML = '';
+  const entries = Object.entries(MARKS).map(([k, m]) => [m.label, m.build]);
+  entries.push(['G · Triangle only (fallback)', s => svgOpen(s) + `<path class="play" d="${triPath(15, 16, 10.4, 1.6)}"/></svg>`]);
+  for (const [label, build] of entries) {
+    const el = document.createElement('div');
+    el.className = 'tabcell';
+    el.innerHTML =
+      `<div class="tabmock"><span class="lockup" style="color:var(--stage-mark)">${build(16, triR())}</span>` +
+      ` LightPlayer Studio <span class="x">×</span></div>` +
+      `<span class="lab">${label}</span>`;
+    tabrow.appendChild(el);
+  }
+}
+
+/* ==================== contexts (section 3) ========================== */
+const ctxsheet = document.getElementById('ctxsheet');
+function renderContexts() {
+  const m = MARKS[state.mark], r = triR();
+  document.getElementById('ctxsel').innerHTML =
+    `Composed from <b>${m.label}</b> — click §1 cards to recompose. Wordmark stays Inter ExtraBold` +
+    ` with the production rainbow sweep (settled at the 2026-08-03 spike gates).`;
+  ctxsheet.innerHTML = `
+  <div class="tile" style="grid-column: 1 / -1">
+    <span class="tname">Top bar · 22px</span>
+    <div class="body"><div class="topbar">
+      <span class="lockup" style="gap:5px">${m.build(22, r)}<span class="word rword" style="font-size:13.5px">LightPlayer</span></span>
+      <span class="nav"><span class="on">Project</span><span>Devices</span><span>Output</span></span>
+      <span class="right"><span class="pill">LIVE</span></span>
+    </div></div>
+  </div>
+  <div class="tile">
+    <span class="tname">App icons</span>
+    <div class="body">
+      <span class="apptile t-dark"><span class="lockup a-rplay">${m.build(44, r)}</span></span>
+      <span class="apptile t-accent"><span class="lockup">${m.build(44, r)}</span></span>
+      <span class="apptile t-black"><span class="lockup a-rplay">${m.build(44, r)}</span></span>
+    </div>
+  </div>
+  <div class="tile">
+    <span class="tname">Favicon — actual size</span>
+    <div class="body favrow">
+      <span><span class="lockup" style="color:var(--stage-mark)">${m.build(16, r)}</span><div class="lab">16</div></span>
+      <span><span class="lockup" style="color:var(--stage-mark)">${m.build(32, r)}</span><div class="lab">32</div></span>
+      <span class="avatar"><span class="lockup a-rplay">${m.build(36, r)}</span></span>
+    </div>
+  </div>
+  <div class="tile">
+    <span class="tname">Stacked — landing form</span>
+    <div class="body stage" style="justify-content:center">
+      <span class="lockup" style="flex-direction:column;gap:10px">
+        ${m.build(72, r)}
+        <span class="word rword" style="font-size:20px">LightPlayer</span>
+      </span>
+    </div>
+  </div>`;
+}
+
+/* ====================== mini dive-in cards ========================== */
+for (const host of document.querySelectorAll('[data-minicards]')) {
+  host.innerHTML = `
+    <span class="dive"><span class="ic">▤</span><span class="tt">Devices</span>
+      <span class="dd">Your boards and the simulator — set up, connect, play.</span></span>
+    <span class="dive"><span class="ic">▦</span><span class="tt">Try the simulator</span>
+      <span class="dd">Set up the simulator as a board — no hardware needed.</span></span>
+    <span class="dive"><span class="ic">▶</span><span class="tt">Explore</span>
+      <span class="dd">Example projects to open, run, and make yours.</span></span>`;
+}
+
+/* ========================= shader engine ============================ */
+function hsl(h, s, l) {
+  h = ((h % 360) + 360) % 360 / 360;
+  const q = l < .5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const f = t => { t = ((t % 1) + 1) % 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p; };
+  return [f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255];
+}
+function firePal(v) {
+  v = Math.max(0, Math.min(1, v));
+  if (v < .38) { const t = v / .38; return [255 * t * .9, 20 * t, 8 * t]; }
+  if (v < .75) { const t = (v - .38) / .37; return [230 + 25 * t, 18 + 150 * t, 8 + 20 * t]; }
+  const t = (v - .75) / .25; return [255, 168 + 80 * t, 28 + 200 * t];
+}
+const SHADERS = {
+  aurora(u, v, t) {
+    const x = u * 6.3, y = v * 6.3;
+    const a = Math.sin(x * 1.7 + t * 1.1) + Math.sin(y * 2.3 - t * .9) +
+      Math.sin((x + y) * 1.3 + t * .6) + Math.sin(Math.hypot(x - 3.1, y - 3.1) * 2.2 - t * 1.4);
+    return hsl(150 + a * 42 + 18 * Math.sin(t * .3), .8, .42 + .12 * Math.sin(a * 1.5 + t));
+  },
+  rainbow(u, v, t) {
+    return hsl(u * 300 - t * 60 + 40 * Math.sin(v * 4 + t), .9, .56);
+  },
+  fire(u, v, t) {
+    const n = Math.sin(u * 9 + t * 3) * Math.sin(v * 7 - t * 5) + Math.sin((u + v) * 13 + t * 2.2);
+    return firePal((1 - v) * 1.3 + .26 * n - .18);
+  },
+};
+
+/* triangle-shader canvas; mode: 'pure' | 'px' | 'glow' (mode via getMode) */
+function makeTri(canvas, cssW, cssH, getMode) {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+  canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';
+  const ctx = canvas.getContext('2d');
+  const R = cssH * 0.5, cx = cssW * 0.46, cy = cssH / 2;
+  const buf = document.createElement('canvas');
+  buf.width = 110; buf.height = Math.round(110 * cssH / cssW);
+  const bctx = buf.getContext('2d');
+  const img = bctx.createImageData(buf.width, buf.height);
+  // LED-dot mask for 'px' mode
+  const mask = document.createElement('canvas');
+  mask.width = cssW * dpr; mask.height = cssH * dpr;
+  const mctx = mask.getContext('2d');
+  mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  mctx.fillStyle = '#fff';
+  const s = 9;
+  for (let y = 4, row = 0; y < cssH; y += s * 0.87, row++)
+    for (let x = 4 + (row % 2) * s / 2; x < cssW; x += s) {
+      mctx.beginPath(); mctx.arc(x, y, 3.6, 0, 7); mctx.fill();
+    }
+  // sharp triangle rendered to a temp layer, composited per mode
+  const tmp = document.createElement('canvas');
+  tmp.width = cssW * dpr; tmp.height = cssH * dpr;
+  const tctx = tmp.getContext('2d');
+  return t => {
+    const d = img.data; let i = 0;
+    for (let y = 0; y < buf.height; y++) for (let x = 0; x < buf.width; x++) {
+      const c = SHADERS[shader](x / buf.width, y / buf.height, t);
+      d[i++] = c[0]; d[i++] = c[1]; d[i++] = c[2]; d[i++] = 255;
+    }
+    bctx.putImageData(img, 0, 0);
+    const mode = getMode();
+    const clip = new Path2D(triPath(cx, cy, R, R * heroCr));
+    tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    tctx.clearRect(0, 0, cssW, cssH);
+    tctx.save(); tctx.clip(clip);
+    tctx.imageSmoothingEnabled = true;
+    tctx.drawImage(buf, 0, 0, cssW, cssH);
+    tctx.restore();
+    if (mode === 'px') {
+      tctx.save(); tctx.globalCompositeOperation = 'destination-in';
+      tctx.setTransform(1, 0, 0, 1, 0, 0);
+      tctx.drawImage(mask, 0, 0);
+      tctx.restore();
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (mode === 'glow') {
+      ctx.save();
+      ctx.filter = 'blur(14px)'; ctx.globalAlpha = 0.55;
+      const g = 0.045;
+      ctx.drawImage(tmp, -canvas.width * g / 2, -canvas.height * g / 2,
+        canvas.width * (1 + g), canvas.height * (1 + g));
+      ctx.restore();
+    }
+    ctx.drawImage(tmp, 0, 0);
+  };
+}
+/* dot-lattice renderer (alternate hero): per-column layout, clean edges */
+function makeDots(canvas, cssW, cssH) {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+  canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';
+  const ctx = canvas.getContext('2d');
+  const m = 9, s = 13, dots = [];
+  const W = cssW - 2 * m, H0 = cssH - 2 * m, cols = Math.floor(W / s);
+  for (let i = 0; i <= cols; i++) {
+    const x = m + i * s, colH = H0 * (1 - i / cols);
+    const n = Math.max(1, Math.round(colH / s));
+    for (let j = 0; j < n; j++) dots.push([x, cssH / 2 + (j - (n - 1) / 2) * s]);
+  }
+  return t => {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    for (const [x, y] of dots) {
+      const c = SHADERS[shader](x / cssW, y / cssH, t);
+      ctx.fillStyle = `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+      ctx.beginPath(); ctx.arc(x, y, 4.4, 0, 7); ctx.fill();
+    }
+  };
+}
+
+/* §4: three fixed-mode variant thumbs + one mock that follows the selection */
+const variantDraws = [...document.querySelectorAll('[data-vc]')].map(c =>
+  makeTri(c, 170, 158, () => c.dataset.vc));
+const drawMock = makeTri(document.getElementById('cMock'), 250, 232, () => state.heroVar);
+const drawB = makeDots(document.getElementById('cB'), 270, 246);
+for (const vc of document.querySelectorAll('.varcard')) {
+  vc.setAttribute('aria-pressed', String(vc.dataset.var === state.heroVar));
+  vc.addEventListener('click', () => {
+    state.heroVar = vc.dataset.var;
+    for (const o of document.querySelectorAll('.varcard'))
+      o.setAttribute('aria-pressed', String(o.dataset.var === state.heroVar));
+    drawMock(tBase);
+  });
+}
+/* §6 traced geometry — follows the hero corner ratio */
+function applyTraced() {
+  document.getElementById('dGhost').setAttribute('d', triPath(14.6, 15, 12.2, 12.2 * heroCr));
+  document.getElementById('dEdge').setAttribute('d', triPath(14.6, 15, 12.2, 12.2 * heroCr));
+  document.getElementById('dCore').setAttribute('d', triPath(14.9, 15, 6.4, 6.4 * heroCr));
+}
+applyTraced();
+
+/* ---- the loop: one clock drives all canvases ---- */
+let tBase = 2.5, last = performance.now();
+function drawAll(t) { variantDraws.forEach(d => d(t)); drawMock(t); drawB(t); }
+function frame(now) {
+  const spd = parseFloat(getComputedStyle(document.body).getPropertyValue('--spd')) || 1;
+  if (document.body.dataset.motion !== 'off') tBase += (now - last) / 1000 * spd;
+  last = now;
+  drawAll(tBase);
+  requestAnimationFrame(frame);
+}
+drawAll(tBase);  // synchronous first frame (screenshot safety)
+requestAnimationFrame(now => { last = now; requestAnimationFrame(frame); });
+
+/* ========================= controls ================================= */
+document.querySelectorAll('.chip[data-ctl]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const ctl = btn.dataset.ctl, v = btn.dataset.v;
+    document.querySelectorAll(`.chip[data-ctl=${ctl}]`).forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+    if (ctl === 'spd') document.body.style.setProperty('--spd', v);
+    else if (ctl === 'shader') { shader = v; drawAll(tBase); }
+    else if (ctl === 'hcr') { heroCr = parseFloat(v); applyTraced(); drawAll(tBase); }
+    else document.body.dataset[ctl] = v;
+    if (ctl === 'tsz') { renderCards(); renderTabs(); renderContexts(); }
+  });
+});
+document.querySelectorAll('.chip[data-ctl]').forEach(b => {
+  const ctl = b.dataset.ctl;
+  const cur = ctl === 'spd' ? (getComputedStyle(document.body).getPropertyValue('--spd').trim() || '1')
+    : ctl === 'shader' ? shader : ctl === 'hcr' ? String(heroCr) : document.body.dataset[ctl];
+  b.setAttribute('aria-pressed', String(b.dataset.v === cur));
+});
+if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  document.body.dataset.motion = 'off';
+  document.querySelectorAll('.chip[data-ctl=motion]').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.v === 'off')));
+}
+if (hash.get('sec')) {
+  addEventListener('load', () => setTimeout(() => {
+    const h = document.querySelectorAll('h2')[+hash.get('sec') - 1];
+    if (h) h.scrollIntoView({ block: 'start' });
+  }, 300));
+}
+
+renderCards(); renderTabs(); renderContexts();
+</script>
+</body>
+</html>
