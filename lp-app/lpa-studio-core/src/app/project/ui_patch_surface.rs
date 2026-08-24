@@ -55,10 +55,15 @@ pub struct UiPatchSurface {
 }
 
 impl UiPatchSurface {
-    /// Is there anything to show? Mirrors [`UiPatchBay::is_empty`]'s
-    /// honesty: a surface with no output carrying a cell says nothing.
+    /// Is nothing PATCHED here — no output carrying a cell?
+    ///
+    /// Never a reason to withhold the surface: an all-free surface is the
+    /// walk-up flow's own starting point (every fixture manual and
+    /// unmapped), and hiding it leaves no port space to click. The pages'
+    /// empty state keys on the surface being absent — which means the
+    /// project has no output at all — not on this.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub fn nothing_patched(&self) -> bool {
         self.outputs.iter().all(|output| output.bay.is_empty())
     }
 }

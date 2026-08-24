@@ -4721,3 +4721,176 @@ fn every_patch_target_arm_round_trips_through_selection() {
         );
     }
 }
+
+/// The fully unmapped project (the G1 walk's own starting point): EVERY
+/// fixture manual with every object taken off the wire. Nothing publishes a
+/// run, so nothing published a wire — and the surface must still be the
+/// whole project: both outputs, their ports at the geometry the output DEF
+/// declares, zero cells, and every fixture listed with its objects unmapped.
+///
+/// This is the state walk-up assignment exists FOR: with no output on the
+/// surface there is no free port space to click, and the flow is dead
+/// exactly where it is needed most.
+#[test]
+fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
+    use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
+
+    let example =
+        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("connect emits a snapshot");
+    let mut snapshot = None;
+    for _ in 0..4 {
+        handle.tx.send(project_action(ProjectOp::RefreshProject));
+        drive(actor.run_one_batch_for_test());
+        if let Some(next) = view.try_recv() {
+            snapshot = Some(next);
+        }
+    }
+    let snapshot = snapshot.expect("a refresh emits a snapshot");
+
+    let all: Vec<crate::UiPatchSurfaceFixture> = project_editor(&snapshot)
+        .patch_surface
+        .as_ref()
+        .expect("surface")
+        .fixtures
+        .clone();
+    assert_eq!(all.len(), 2, "the mini-dome patches two fixtures");
+    let verb_fixtures: Vec<crate::PatchVerbFixture> = all
+        .iter()
+        .map(|fixture| crate::PatchVerbFixture {
+            node: fixture.node,
+            patch_artifact: fixture.patch_artifact.clone().expect("patch artifact"),
+            mapping_artifact: fixture.mapping_artifact.clone(),
+            lamp_count: fixture.patch.lamps,
+        })
+        .collect();
+    // The page's mount prefetch, re-run before every verb: a save drops the
+    // cached bodies, and a verb ahead of its body blocks rather than writes.
+    macro_rules! prefetch {
+        () => {{
+            for _ in 0..3 {
+                for artifact in all
+                    .iter()
+                    .flat_map(|fixture| {
+                        [
+                            fixture.patch_artifact.clone(),
+                            fixture.mapping_artifact.clone(),
+                        ]
+                    })
+                    .flatten()
+                {
+                    handle
+                        .tx
+                        .send(StudioCommand::Action(crate::UiAction::from_op(
+                            ProjectController::NODE_ID,
+                            crate::AssetContentFetchOp { artifact },
+                        )));
+                    drive(actor.run_one_batch_for_test());
+                }
+            }
+        }};
+    }
+    macro_rules! verb {
+        ($node:expr, $kind:expr) => {{
+            handle
+                .tx
+                .send(StudioCommand::Action(crate::UiAction::from_op(
+                    ProjectController::NODE_ID,
+                    PatchVerbOp {
+                        subject_fixture: Some($node),
+                        subject: PatchVerbSubject::default(),
+                        fixtures: verb_fixtures.clone(),
+                        assign_output_name: None,
+                        verb: $kind,
+                    },
+                )));
+            drive(actor.run_one_batch_for_test());
+            handle.tx.send(project_action(ProjectOp::SaveOverlay));
+            drive(actor.run_one_batch_for_test());
+        }};
+    }
+    // Both fixtures manual, both emptied — the walk's own opening gesture.
+    for fixture in &all {
+        prefetch!();
+        verb!(fixture.node, PatchVerbKind::SetFlow { manual: true });
+        prefetch!();
+        verb!(fixture.node, PatchVerbKind::UnmapAll);
+    }
+
+    prefetch!();
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let mut latest = None;
+    while let Some(next) = view.try_recv() {
+        latest = Some(next);
+    }
+    let snapshot = latest.expect("the refresh emits a snapshot");
+    let surface = project_editor(&snapshot)
+        .patch_surface
+        .as_ref()
+        .expect("a project with outputs ALWAYS has a patch surface — free ports are the point")
+        .clone();
+
+    // Both outputs, at the geometry their defs declare (out_a 39/30/39,
+    // out_b 39/30), with nothing on them.
+    assert_eq!(surface.outputs.len(), 2, "both boxes stay on the surface");
+    let port_spans = |name: &str| -> Vec<(u32, u32, u32)> {
+        surface
+            .outputs
+            .iter()
+            .find(|output| output.display_name() == name)
+            .unwrap_or_else(|| panic!("output {name} left the surface"))
+            .bay
+            .ports
+            .iter()
+            .map(|port| (port.key, port.start, port.lamps))
+            .collect()
+    };
+    assert_eq!(
+        port_spans("1"),
+        vec![(0, 0, 39), (1, 39, 30), (2, 69, 39)],
+        "the def's ports are the geometry when no wire was published"
+    );
+    assert_eq!(port_spans("Box 2"), vec![(0, 0, 39), (1, 39, 30)]);
+    assert!(
+        surface
+            .outputs
+            .iter()
+            .flat_map(|output| &output.bay.ports)
+            .all(|port| port.cells.is_empty()),
+        "nothing is patched, so no port carries a cell"
+    );
+
+    // Both fixtures still listed, every object unmapped and still offering
+    // its lamps — the counterparts the walk-up flow clicks.
+    assert_eq!(surface.fixtures.len(), 2, "both fixtures stay listed");
+    for fixture in &surface.fixtures {
+        assert!(fixture.manual_flow, "{}: the written flag", fixture.label);
+        assert!(
+            !fixture.instances.is_empty()
+                && fixture.instances.iter().all(|instance| !instance.placed),
+            "{}: every object is unmapped",
+            fixture.label
+        );
+        assert!(
+            fixture.patch.cells.is_empty() && fixture.patch.lamps > 0,
+            "{}: no run, but the row still offers its lamps",
+            fixture.label
+        );
+    }
+}

@@ -3393,8 +3393,14 @@ impl ProjectController {
     /// [`Self::apply_patch_bays`] just wrote onto the faces: every output's
     /// bay, every patched fixture's row, and each fixture's instance table
     /// parsed from its OWN map2d body (the same bytes its mapping editor
-    /// holds). `None` when nothing patchable has answered — the surface
-    /// route then renders its empty state.
+    /// holds).
+    ///
+    /// An output belongs here whether or not anything is PATCHED onto it:
+    /// its ports are the def's own geometry, and their free space is what
+    /// walk-up assignment clicks — a project with every fixture manual and
+    /// unmapped is the state the flow exists for. `None` only when no
+    /// output answered at all (no live project, or a project that drives
+    /// nothing); the surface route then renders its empty state.
     fn build_patch_surface(&self, nodes: &[UiNodeView]) -> Option<crate::UiPatchSurface> {
         let mut surface = crate::UiPatchSurface::default();
         // Modules by KIND, not face: module faces deliberately derive
@@ -3684,8 +3690,13 @@ impl ProjectController {
                     let Some(wire) = wires.iter().find(|wire| wire.node == id) else {
                         return;
                     };
-                    let bay = output_bay(wire, &producer);
-                    output.patch = (!bay.is_empty()).then_some(bay);
+                    // Even a bay with no cell on it: the ports are the
+                    // output def's own geometry, and an output driving
+                    // NOTHING is exactly the state walk-up assignment
+                    // starts from (every fixture manual and unmapped). The
+                    // card hides an empty bay at render time; the patch
+                    // surface needs the free space.
+                    output.patch = Some(output_bay(wire, &producer));
                 }
                 crate::UiNodeFace::Fixture(fixture) => {
                     // A fixture with no run on any wire still gets its row:
