@@ -225,13 +225,13 @@
 
 <h1>LightPlayer logo — triangle-in-chip simplification</h1>
 <p class="hint">
-  Round 2. <b>Gate-1 decisions (2026-08-24):</b> mark = <b>C · grown triangle</b>, chip legs kept —
-  at least a hint of them (the legs are what keep it "our LED chip" rather than a play button in a
-  box); <b>F solid-knockout rejected</b> (reads YouTube); hero = <b>the triangle itself</b>, no chip
-  frame at hero scale. Open questions now: <b>how much leg</b> (§1 treatments, §2 at favicon size)
-  and <b>what the hero triangle's fill is</b> (§4: pure shader · LED-pixel texture · light spill).
-  §5–§6 keep the lattice and traced alternates for contrast. Rejected rungs live in the strip
-  under §1.
+  Round 3. <b>Gate-1 (2026-08-24):</b> mark = <b>C · grown triangle</b>, chip legs kept; F knockout
+  rejected (reads YouTube); hero = the triangle itself, no chip frame.
+  <b>Gate-2:</b> legs = <b>C1 production geometry</b> (C2–C4 hints imperceptible — kept below for
+  the record, "may think again later"); favicon = same mark, no per-size split; hero fill =
+  <b>Spill</b> (light blooms past the edge); corner rounding fixed — true circular-arc fillets at
+  the tangent points (the old quadratic-through-vertex rounding read wrong).
+  Still open: default landing shader (Aurora / Rainbow / Fire) and triangle tone (accent vs white).
 </p>
 
 <div class="controls">
@@ -372,8 +372,12 @@
 const PLAY_D = "M13.9 13v6c0 .58.64.94 1.14.64l4.9-3a.75.75 0 0 0 0-1.28l-4.9-3a.75.75 0 0 0-1.14.64z";
 const TRI_R = { sm: 6.6, md: 7.6, lg: 8.7 };  // grown-triangle circumradius (Tri size control)
 
-/* rounded triangle centered (cx,cy), circumradius r, corner radius cr, pointing right */
-function triPath(cx, cy, r, cr, rot = 0) {
+/* rounded triangle centered (cx,cy), circumradius r, pointing right.
+   Corners are true circular fillets of radius rho: tangent points computed
+   on each edge, joined by an SVG arc — G1-continuous with the straight
+   edges, so no visible kink (gate-2 feedback: the quadratic-through-vertex
+   rounding read wrong). */
+function triPath(cx, cy, r, rho, rot = 0) {
   const vs = [0, 120, 240].map(a => {
     const t = (a + rot) * Math.PI / 180;
     return [cx + r * Math.cos(t), cy + r * Math.sin(t)];
@@ -381,11 +385,14 @@ function triPath(cx, cy, r, cr, rot = 0) {
   let d = '';
   for (let i = 0; i < 3; i++) {
     const V = vs[i], A = vs[(i + 2) % 3], B = vs[(i + 1) % 3];
-    const f = cr / Math.hypot(A[0] - V[0], A[1] - V[1]);
-    const P1 = [V[0] + (A[0] - V[0]) * f, V[1] + (A[1] - V[1]) * f];
-    const P2 = [V[0] + (B[0] - V[0]) * f, V[1] + (B[1] - V[1]) * f];
+    const la = Math.hypot(A[0] - V[0], A[1] - V[1]), lb = Math.hypot(B[0] - V[0], B[1] - V[1]);
+    const na = [(A[0] - V[0]) / la, (A[1] - V[1]) / la], nb = [(B[0] - V[0]) / lb, (B[1] - V[1]) / lb];
+    const phi = Math.acos(Math.min(1, Math.max(-1, na[0] * nb[0] + na[1] * nb[1])));
+    const t = rho / Math.tan(phi / 2);  // vertex → tangent-point distance
+    const P1 = [V[0] + na[0] * t, V[1] + na[1] * t];
+    const P2 = [V[0] + nb[0] * t, V[1] + nb[1] * t];
     d += (i ? 'L' : 'M') + P1[0].toFixed(2) + ' ' + P1[1].toFixed(2) +
-      `Q${V[0].toFixed(2)} ${V[1].toFixed(2)} ${P2[0].toFixed(2)} ${P2[1].toFixed(2)}`;
+      `A${rho.toFixed(2)} ${rho.toFixed(2)} 0 0 1 ${P2[0].toFixed(2)} ${P2[1].toFixed(2)}`;
   }
   return d + 'Z';
 }
@@ -409,7 +416,7 @@ function legsAt(w, h, rx, op, centers) {
     `<rect class="pad" x="${(26.5 - 0.6).toFixed(2)}" y="${(cy - h / 2).toFixed(2)}" width="${w}" height="${h}" rx="${rx}" opacity="${op}"/>`
   ).join('');
 }
-function grownTri(r) { return `<path class="play" d="${triPath(15.4, 16, r, r * 0.22)}"/>`; }
+function grownTri(r) { return `<path class="play" d="${triPath(15.4, 16, r, r * 0.16)}"/>`; }
 
 /* ==================== leg treatments (section 1) ==================== */
 const MARKS = {
@@ -440,13 +447,13 @@ const REJECTED = [
   { build: s => svgOpen(s) + pkg() + grownTri(7.6).replace('class="play"', 'class="play"') + `</svg>`,
     name: 'D · Padless', why: 'clean but loses the LED-chip story; legs wanted (gate-1)' },
   { build: s => svgOpen(s) +
-      `<path class="solid" fill-rule="evenodd" d="${rrectPath(4.5, 4.5, 23, 23, 3.4)}${triPath(15.7, 16, 7.9, 1.74)}"/></svg>`,
+      `<path class="solid" fill-rule="evenodd" d="${rrectPath(4.5, 4.5, 23, 23, 3.4)}${triPath(15.7, 16, 7.9, 1.2)}"/></svg>`,
     name: 'F · Knockout', why: 'reads YouTube (gate-1); inverted slab is their icon grammar' },
-  { build: s => svgOpen(s) + `<path class="play" d="${triPath(15, 16, 10.4, 2.3)}"/></svg>`,
+  { build: s => svgOpen(s) + `<path class="play" d="${triPath(15, 16, 10.4, 1.6)}"/></svg>`,
     name: 'G · Triangle only', why: 'too generic as the everywhere-mark; survives as the favicon fallback (§2)' },
 ];
 
-const state = { mark: 'six', heroVar: 'pure' };
+const state = { mark: 'full', heroVar: 'glow' };
 const hash = new URLSearchParams(location.hash.slice(1));
 if (hash.get('mark') && MARKS[hash.get('mark')]) state.mark = hash.get('mark');
 if (hash.get('fill')) state.heroVar = hash.get('fill');
@@ -491,7 +498,7 @@ const tabrow = document.getElementById('tabrow');
 function renderTabs() {
   tabrow.innerHTML = '';
   const entries = Object.entries(MARKS).map(([k, m]) => [m.label, m.build]);
-  entries.push(['G · Triangle only (fallback)', s => svgOpen(s) + `<path class="play" d="${triPath(15, 16, 10.4, 2.3)}"/></svg>`]);
+  entries.push(['G · Triangle only (fallback)', s => svgOpen(s) + `<path class="play" d="${triPath(15, 16, 10.4, 1.6)}"/></svg>`]);
   for (const [label, build] of entries) {
     const el = document.createElement('div');
     el.className = 'tabcell';
@@ -597,7 +604,7 @@ function makeTri(canvas, cssW, cssH, getMode) {
   canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';
   const ctx = canvas.getContext('2d');
   const R = cssH * 0.5, cx = cssW * 0.46, cy = cssH / 2;
-  const clip = new Path2D(triPath(cx, cy, R, R * 0.22));
+  const clip = new Path2D(triPath(cx, cy, R, R * 0.16));
   const buf = document.createElement('canvas');
   buf.width = 110; buf.height = Math.round(110 * cssH / cssW);
   const bctx = buf.getContext('2d');
@@ -689,9 +696,9 @@ for (const vc of document.querySelectorAll('.varcard')) {
   });
 }
 /* §6 traced geometry */
-document.getElementById('dGhost').setAttribute('d', triPath(14.6, 15, 12.2, 2.6));
-document.getElementById('dEdge').setAttribute('d', triPath(14.6, 15, 12.2, 2.6));
-document.getElementById('dCore').setAttribute('d', triPath(14.9, 15, 6.4, 1.4));
+document.getElementById('dGhost').setAttribute('d', triPath(14.6, 15, 12.2, 1.8));
+document.getElementById('dEdge').setAttribute('d', triPath(14.6, 15, 12.2, 1.8));
+document.getElementById('dCore').setAttribute('d', triPath(14.9, 15, 6.4, 0.9));
 
 /* ---- the loop: one clock drives all canvases ---- */
 let tBase = 2.5, last = performance.now();
