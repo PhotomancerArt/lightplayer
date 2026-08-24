@@ -98,6 +98,9 @@
   body[data-tri=white]  .mark .play { fill: var(--stage-mark); }
   body[data-wt=fine]  .mark .pkg  { stroke-width: 0.95px; }
   body[data-wt=heavy] .mark .pkg  { stroke-width: 1.8px; }
+  /* leg tone: production fades pads to 75%; "match" makes them the same
+     ink as the package (gate-3: legs looked like a different color) */
+  body[data-legs=match] .mark g[opacity], body[data-legs=match] .mark .pad { opacity: 1 !important; }
 
   .word { font-weight: 800; line-height: 1; white-space: nowrap; color: var(--stage-strong); }
   /* production in-app behavior (gate-4): the whole word sweeps the rainbow */
@@ -221,7 +224,7 @@
   @media (max-width: 720px) { body { padding: 18px 14px 120px; } }
 </style>
 </head>
-<body data-canvas="terminal" data-motion="on" data-tri="accent" data-wt="std" data-tsz="md" style="--spd:1">
+<body data-canvas="terminal" data-motion="on" data-tri="accent" data-wt="std" data-tsz="md" data-legs="match" style="--spd:1">
 
 <h1>LightPlayer logo — triangle-in-chip simplification</h1>
 <p class="hint">
@@ -231,7 +234,9 @@
   the record, "may think again later"); favicon = same mark, no per-size split; hero fill =
   <b>Spill</b> (light blooms past the edge); corner rounding fixed — true circular-arc fillets at
   the tangent points (the old quadratic-through-vertex rounding read wrong).
-  Still open: default landing shader (Aurora / Rainbow / Fire) and triangle tone (accent vs white).
+  <b>Gate-3:</b> C1 confirmed; trying legs at the <b>same ink as the package</b> (production fades
+  them to 75% — the "different color" read). Legs control toggles match ↔ faded everywhere.
+  Still open: leg tone (this), default landing shader, triangle tone (accent vs white).
 </p>
 
 <div class="controls">
@@ -257,6 +262,10 @@
     <button class="chip" data-ctl="tsz" data-v="sm">S</button>
     <button class="chip" data-ctl="tsz" data-v="md" aria-pressed="true">M</button>
     <button class="chip" data-ctl="tsz" data-v="lg">L</button>
+  </span>
+  <span class="group"><b>Legs</b>
+    <button class="chip" data-ctl="legs" data-v="match" aria-pressed="true">Match chip</button>
+    <button class="chip" data-ctl="legs" data-v="faded">Faded (prod)</button>
   </span>
   <span class="group"><b>Chip stroke</b>
     <button class="chip" data-ctl="wt" data-v="std" aria-pressed="true">Std</button>
@@ -457,7 +466,7 @@ const state = { mark: 'full', heroVar: 'glow' };
 const hash = new URLSearchParams(location.hash.slice(1));
 if (hash.get('mark') && MARKS[hash.get('mark')]) state.mark = hash.get('mark');
 if (hash.get('fill')) state.heroVar = hash.get('fill');
-for (const k of ['canvas', 'motion', 'tri', 'wt', 'tsz']) if (hash.get(k)) document.body.dataset[k] = hash.get(k);
+for (const k of ['canvas', 'motion', 'tri', 'wt', 'tsz', 'legs']) if (hash.get(k)) document.body.dataset[k] = hash.get(k);
 if (hash.get('spd')) document.body.style.setProperty('--spd', hash.get('spd'));
 let shader = hash.get('shader') || 'aurora';
 
