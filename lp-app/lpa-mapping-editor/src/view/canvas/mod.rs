@@ -41,8 +41,10 @@ pub use canvas_anchor::{CanvasAnchor, capture_pointer};
 pub use lamp_metrics::{authored_spans, fit_region, lamp_display_radius};
 pub use palette::object_color;
 
+pub use layers::cells::{LampCell, lamp_cells};
 pub use layers::fixtures::{FixtureBody, FixtureEvent, FixturePick, FixtureSprite, SpriteObject};
 pub use layers::hull::{convex_hull, pad_hull};
+pub use layers::outline::{aligned_outline, dist_to_loops, hit_body, point_in_loops};
 
 use layers::doc::{DocLayersInput, doc_layers};
 use layers::draft::{DraftLayerInput, draft_layer};
