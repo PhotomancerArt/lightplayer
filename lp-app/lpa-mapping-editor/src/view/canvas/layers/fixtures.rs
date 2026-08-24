@@ -493,6 +493,7 @@ mod tests {
             color: "#fff".to_string(),
             placement,
             bounds,
+            objects: Vec::new(),
             body: FixtureBody::Placeholder { lamps: 10 },
             arranged: true,
             selected: false,
