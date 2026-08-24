@@ -91,7 +91,7 @@
   .lockup { display: inline-flex; align-items: center; color: var(--stage-mark); }
   .lockup svg.mark { flex: none; display: block; }
   .mark .pkg   { stroke: currentColor; fill: none; }
-  .mark .pad   { fill: currentColor; opacity: .75; }
+  .mark .pad   { fill: currentColor; }
   .mark .lens  { stroke: currentColor; fill: none; opacity: .85; }
   .mark .play  { fill: var(--accent); }
   .mark .solid { fill: currentColor; }
@@ -118,7 +118,7 @@
 
   body[data-motion=off] * { animation-play-state: paused !important; }
 
-  /* ---- section 1 · mark cards ------------------------------------- */
+  /* ---- section 1 · leg treatments ---------------------------------- */
   .grid { display: grid; gap: 14px; max-width: 1500px;
     grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); }
   .card {
@@ -132,6 +132,13 @@
   .card .ctag { font-size: 10px; font-weight: 600; color: var(--dim); letter-spacing: .05em; text-transform: uppercase; }
   .card .cnote { font-size: 11px; color: var(--dim); line-height: 1.4; }
   .marksizes { display: flex; align-items: center; gap: 18px; justify-content: center; padding: 10px 0 4px; }
+
+  .rejrow { display: flex; gap: 10px; flex-wrap: wrap; max-width: 1500px; margin-top: 14px; }
+  .rej { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border-muted);
+    border-radius: 8px; padding: 8px 12px; background: var(--surface-muted); }
+  .rej .lockup { opacity: .55; }
+  .rej .why { font-size: 10.5px; color: var(--dim); max-width: 190px; line-height: 1.35; }
+  .rej .why b { color: var(--subtle); display: block; font-size: 10.5px; }
 
   /* ---- section 2 · favicon strip ----------------------------------- */
   .tabrow { display: grid; gap: 12px; max-width: 1500px;
@@ -176,12 +183,11 @@
   /* ---- hero sections ------------------------------------------------ */
   .hero {
     max-width: 1060px; border: 1px solid var(--stage-line); border-radius: 10px;
-    background: var(--stage-bg); padding: 54px 24px 40px;
+    background: var(--stage-bg); padding: 44px 24px 40px;
     display: flex; flex-direction: column; align-items: center; gap: 26px; text-align: center;
   }
   .hero .markbox { position: relative; line-height: 0; }
   .hero canvas { display: block; }
-  .hero .chipsvg { position: absolute; inset: 0; pointer-events: none; color: var(--stage-mark); }
   .hero .hword { font-size: 40px; font-weight: 800; letter-spacing: -0.015em; }
   .hero .tagline { margin: -8px 0 0; font-size: 14px; color: var(--stage-ink); }
   .hero .cards { display: grid; grid-template-columns: repeat(3, minmax(150px, 200px)); gap: 12px; }
@@ -194,6 +200,15 @@
   .dive .tt { font-size: 12.5px; font-weight: 700; color: var(--stage-strong); }
   .dive .dd { font-size: 10.5px; line-height: 1.35; color: var(--stage-ink); opacity: .8; }
   body[data-canvas=light] .dive { background: rgba(0,0,0,.03); }
+
+  /* §4 fill-variant picker row */
+  .varrow { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .varcard { display: flex; flex-direction: column; gap: 8px; align-items: center;
+    border: 1px solid var(--stage-line); border-radius: 10px; padding: 14px 16px 11px;
+    cursor: pointer; background: color-mix(in srgb, var(--stage-strong) 2%, transparent); }
+  .varcard[aria-pressed=true] { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-border); }
+  .varcard .vname { font-size: 11.5px; font-weight: 700; color: var(--stage-strong); }
+  .varcard .vnote { font-size: 10.5px; color: var(--stage-ink); opacity: .85; max-width: 180px; line-height: 1.35; }
 
   /* H·D traced-light styles */
   .traced .edge { fill: none; stroke: url(#tracegrad); stroke-width: 0.9;
@@ -210,13 +225,13 @@
 
 <h1>LightPlayer logo — triangle-in-chip simplification</h1>
 <p class="hint">
-  Revisiting the mark from the complexity direction: the shipped logo is <b>five systems</b>
-  (package, pads, lens ring, triangle, word) and the small sizes — the favicon especially —
-  read busy. §1 is a <b>simplicity ladder</b>: each rung deletes one element; the question is
-  where "still LightPlayer" ends and "generic play button" begins. §2 puts every rung in a real
-  browser tab at 16&nbsp;px. §3 recomposes brand contexts from the selected rung (click a §1 card).
-  §4–§7 explore the <b>main-page hero</b>: a much bigger logo where the triangle itself runs a
-  shader — the mark demoing the product. Shader / speed / canvas controls apply everywhere.
+  Round 2. <b>Gate-1 decisions (2026-08-24):</b> mark = <b>C · grown triangle</b>, chip legs kept —
+  at least a hint of them (the legs are what keep it "our LED chip" rather than a play button in a
+  box); <b>F solid-knockout rejected</b> (reads YouTube); hero = <b>the triangle itself</b>, no chip
+  frame at hero scale. Open questions now: <b>how much leg</b> (§1 treatments, §2 at favicon size)
+  and <b>what the hero triangle's fill is</b> (§4: pure shader · LED-pixel texture · light spill).
+  §5–§6 keep the lattice and traced alternates for contrast. Rejected rungs live in the strip
+  under §1.
 </p>
 
 <div class="controls">
@@ -255,45 +270,67 @@
   </span>
 </div>
 
-<!-- ==================== 1 · simplicity ladder ==================== -->
-<h2><span class="n">1</span> The mark — simplicity ladder</h2>
+<!-- ==================== 1 · leg treatments ==================== -->
+<h2><span class="n">1</span> The mark — how much leg?</h2>
 <p class="sub">
-  Production first, then one deletion per rung. <b>Tri size</b> tunes the grown triangle
-  (rungs C onward); <b>Chip stroke</b> tunes the package line. Each card shows
-  40&nbsp;/&nbsp;22&nbsp;/&nbsp;16&nbsp;px. Click a card to drive §3.
+  All variants are C (chip + grown triangle); only the legs change. <b>Full</b> is the production
+  pad geometry; the others thin it toward a hint. <b>Six legs</b> is what a real WS2811 5050
+  package has — three per side. Each card shows 40&nbsp;/&nbsp;22&nbsp;/&nbsp;16&nbsp;px.
+  Click a card to drive §3.
 </p>
 <div class="grid" id="markcards"></div>
+<div class="rejrow" id="rejrow"></div>
 
 <!-- ==================== 2 · favicon strip ==================== -->
-<h2><span class="n">2</span> Favicon reality — every rung at 16&nbsp;px, in a tab</h2>
+<h2><span class="n">2</span> Favicon reality — leg treatments at 16&nbsp;px, in a tab</h2>
 <p class="sub">
-  The complaint that started this spike: at favicon size the production mark is noise.
-  Same ladder, actual size, real tab chrome.
+  Where the leg question actually gets decided. Triangle-only rides along as the
+  "if even hint-legs are too much at 16" fallback.
 </p>
 <div class="tabrow" id="tabrow"></div>
 
 <!-- ==================== 3 · contexts ==================== -->
-<h2><span class="n">3</span> Brand contexts — composed from the selected rung</h2>
+<h2><span class="n">3</span> Brand contexts — composed from the selected treatment</h2>
 <p class="sub" id="ctxsel">…</p>
 <div class="sheet" id="ctxsheet"></div>
 
-<!-- ==================== 4-7 · heroes ==================== -->
-<h2><span class="n">4</span> Hero A · Shader triangle — the mark <i>is</i> the screen</h2>
+<!-- ==================== 4 · hero triangle ==================== -->
+<h2><span class="n">4</span> Hero — the shader triangle, three fills</h2>
 <p class="sub">
-  No chip at all on the main page: one big rounded triangle, filled edge-to-edge by a live
-  shader. The chip stays the brand's small-size form; the hero is the product itself.
+  Chosen direction: the triangle alone, no chip frame. The remaining question is the fill.
+  <b>Pure</b> = continuous shader. <b>Pixels</b> = same shader through a fine LED-dot mask —
+  solid silhouette at a glance, addressable pixels up close. <b>Spill</b> = pure fill plus a
+  soft light bloom past the edges. Click a fill to swap it into the landing mock below.
 </p>
 <section class="hero" id="heroA">
-  <div class="markbox"><canvas id="cA" width="0" height="0"></canvas></div>
+  <div class="varrow" id="varrow">
+    <div class="varcard" data-var="pure">
+      <canvas data-vc="pure" width="0" height="0"></canvas>
+      <span class="vname">Pure</span>
+      <span class="vnote">Continuous fill — sleekest, most "screen".</span>
+    </div>
+    <div class="varcard" data-var="px">
+      <canvas data-vc="px" width="0" height="0"></canvas>
+      <span class="vname">Pixels</span>
+      <span class="vnote">LED-dot texture — whispers "addressable" without lattice noise.</span>
+    </div>
+    <div class="varcard" data-var="glow">
+      <canvas data-vc="glow" width="0" height="0"></canvas>
+      <span class="vname">Spill</span>
+      <span class="vnote">Light blooms past the edge — the triangle is lit, not printed.</span>
+    </div>
+  </div>
+  <div class="markbox"><canvas id="cMock" width="0" height="0"></canvas></div>
   <div class="hword word rword">LightPlayer</div>
   <p class="tagline">Friendly shaders, everywhere</p>
   <div class="cards" data-minicards></div>
 </section>
 
-<h2><span class="n">5</span> Hero B · LED lattice — the triangle as addressable pixels</h2>
+<!-- ==================== 5 · lattice alternate ==================== -->
+<h2><span class="n">5</span> Alternate · LED lattice — kept for contrast</h2>
 <p class="sub">
-  The same shader sampled by a triangle of round LEDs — the hero shows not just a shader but
-  <b>the medium</b>: discrete addressable pixels. Closest to what the product actually does.
+  The strongest "this is a pixel medium" argument, but busier than the pure triangle and it
+  competes with the wordmark. Here to make the §4 comparison honest.
 </p>
 <section class="hero" id="heroB">
   <div class="markbox"><canvas id="cB" width="0" height="0"></canvas></div>
@@ -302,25 +339,11 @@
   <div class="cards" data-minicards></div>
 </section>
 
-<h2><span class="n">6</span> Hero C · Chip window — the package, lit from inside</h2>
+<!-- ==================== 6 · traced alternate ==================== -->
+<h2><span class="n">6</span> Alternate · Traced light — the calm fallback</h2>
 <p class="sub">
-  The full brand chip at hero scale, quiet fine strokes — but the triangle is an aperture
-  into the running shader. Keeps the hardware story on the marketing page.
-</p>
-<section class="hero" id="heroC">
-  <div class="markbox">
-    <canvas id="cC" width="0" height="0"></canvas>
-    <svg id="chipC" class="chipsvg" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"></svg>
-  </div>
-  <div class="hword word rword">LightPlayer</div>
-  <p class="tagline">Friendly shaders, everywhere</p>
-  <div class="cards" data-minicards></div>
-</section>
-
-<h2><span class="n">7</span> Hero D · Traced light — the calm option</h2>
-<p class="sub">
-  If a full shader is too loud for the landing page: the triangle outline traced by a moving
-  rainbow dash, a soft accent core breathing inside. All SVG/CSS, no canvas.
+  If a full shader fill turns out too loud in place: outline traced by a moving rainbow dash,
+  accent core breathing. All SVG/CSS.
 </p>
 <section class="hero" id="heroD">
   <div class="markbox">
@@ -377,52 +400,56 @@ function svgOpen(size, cls) {
 function pkg() {
   return `<rect class="pkg" x="5.5" y="5.5" width="21" height="21" rx="1.9" stroke-width="1.25"/>`;
 }
-function pads() {
-  return [[3.6, 8.2], [26.5, 8.2], [26.5, 19.6], [3.6, 19.6]].map(([x, y]) =>
-    `<rect class="pad" x="${x}" y="${y}" width="1.9" height="4.2" rx="0.6"/>`).join('');
-}
-function brackets() { // corner ticks in place of the full package outline
-  const L = 4.6, r = 1.9;
-  const c = (mx, my, sx, sy) => { // one corner: two legs meeting in a rounded elbow
-    const x0 = 5.5 + (sx < 0 ? 21 : 0), y0 = 5.5 + (sy < 0 ? 21 : 0);
-    return `<path class="pkg" stroke-width="1.25" d="M${x0 + sx * L} ${y0}` +
-      `H${x0 + sx * r}Q${x0} ${y0} ${x0} ${y0 + sy * r}V${y0 + sy * L}"/>`;
-  };
-  return c(0, 0, 1, 1) + c(0, 0, -1, 1) + c(0, 0, -1, -1) + c(0, 0, 1, -1);
+/* leg builders: [x-left, width, height, rx, opacity, y-centers] mirrored right */
+function legsAt(w, h, rx, op, centers) {
+  const xl = 5.5 - w - 0.0, xr = 26.5;
+  // legs sit flush against the package sides, straddling it like real pads
+  return centers.map(cy =>
+    `<rect class="pad" x="${(5.5 - w + 0.6).toFixed(2)}" y="${(cy - h / 2).toFixed(2)}" width="${w}" height="${h}" rx="${rx}" opacity="${op}"/>` +
+    `<rect class="pad" x="${(26.5 - 0.6).toFixed(2)}" y="${(cy - h / 2).toFixed(2)}" width="${w}" height="${h}" rx="${rx}" opacity="${op}"/>`
+  ).join('');
 }
 function grownTri(r) { return `<path class="play" d="${triPath(15.4, 16, r, r * 0.22)}"/>`; }
 
-/* ======================== the ladder (section 1) ==================== */
+/* ==================== leg treatments (section 1) ==================== */
 const MARKS = {
-  prod: { label: 'A · Production', tag: 'baseline',
-    note: 'The shipped mark: package + pads + lens ring + triangle. Four systems before the word even starts.',
-    build: (s, r) => svgOpen(s) + pkg() + pads() +
-      `<circle class="lens" cx="16" cy="16" r="7.6" stroke-width="1.05"/>` +
-      `<path class="play" d="${PLAY_D}"/></svg>` },
-  noring: { label: 'B · Ring dropped', tag: '− lens',
-    note: 'Just delete the circle. The triangle now floats small in an empty package — shows why deletion alone isn’t the answer.',
-    build: (s, r) => svgOpen(s) + pkg() + pads() + `<path class="play" d="${PLAY_D}"/></svg>` },
-  grown: { label: 'C · Grown triangle', tag: '− lens, tri fills',
-    note: 'The triangle grows to own the package. Two systems: chip + triangle. The straight triangle-in-chip read.',
-    build: (s, r) => svgOpen(s) + pkg() + pads() + grownTri(r) + `</svg>` },
-  padless: { label: 'D · Padless', tag: '− pads',
-    note: 'Drop the pads too: one rounded square, one triangle. Loses the "addressable LED" wink, keeps the chip silhouette.',
-    build: (s, r) => svgOpen(s) + pkg() + grownTri(r) + `</svg>` },
-  brackets: { label: 'E · Framed', tag: 'corners only',
-    note: 'The package reduced to four corner ticks — a viewfinder/silkscreen fiducial feel. Technical without the box.',
-    build: (s, r) => svgOpen(s) + brackets() + grownTri(Math.min(r, 7.6)) + `</svg>` },
-  solid: { label: 'F · Solid knockout', tag: 'filled chip',
-    note: 'The chip as a filled slab, triangle punched out. One shape, maximum contrast — the app-icon move.',
-    build: (s, r) => svgOpen(s) +
-      `<path class="solid" fill-rule="evenodd" d="${rrectPath(4.5, 4.5, 23, 23, 3.4)}${triPath(15.7, 16, Math.min(r, 7.9), Math.min(r, 7.9) * 0.22)}"/></svg>` },
-  trionly: { label: 'G · Triangle only', tag: 'no chip',
-    note: 'The rounded triangle alone. Simplest possible; the question is whether it’s ours or just a play button.',
-    build: (s, r) => svgOpen(s) + `<path class="play" d="${triPath(15, 16, 10.4, 2.3)}"/></svg>` },
+  full: { label: 'C1 · Full legs', tag: 'production pads',
+    note: 'The shipped pad geometry: two per side, full length. The strongest hardware read; the most ink at 16px.',
+    build: (s, r) => svgOpen(s) + pkg() +
+      `<g fill="currentColor" opacity="0.75">` +
+      [[3.6, 8.2], [26.5, 8.2], [26.5, 19.6], [3.6, 19.6]].map(([x, y]) =>
+        `<rect x="${x}" y="${y}" width="1.9" height="4.2" rx="0.6"/>`).join('') +
+      `</g>` + grownTri(r) + `</svg>` },
+  short: { label: 'C2 · Short legs', tag: 'hint',
+    note: 'Same positions, legs cut to stubs and faded. Reads "chip" at 40px, nearly disappears at 16 — the minimum viable hint.',
+    build: (s, r) => svgOpen(s) + pkg() + legsAt(1.6, 3.0, 0.55, 0.55, [10.3, 21.7]) + grownTri(r) + `</svg>` },
+  six: { label: 'C3 · Six legs', tag: 'true to the part',
+    note: 'Three slim legs per side — the actual WS2811 5050 pinout. More texture than C1 but each leg is lighter.',
+    build: (s, r) => svgOpen(s) + pkg() + legsAt(1.5, 2.9, 0.5, 0.7, [9.05, 16, 22.95]) + grownTri(r) + `</svg>` },
+  whisker: { label: 'C4 · Whiskers', tag: 'finest hint',
+    note: 'Legs as bare seating-plane ticks. Almost subliminal — the chip is implied rather than drawn.',
+    build: (s, r) => svgOpen(s) + pkg() + legsAt(1.15, 2.4, 0.4, 0.45, [10.3, 21.7]) + grownTri(r) + `</svg>` },
 };
+const REJECTED = [
+  { build: s => svgOpen(s) + pkg() +
+      `<g fill="currentColor" opacity="0.75">` +
+      [[3.6, 8.2], [26.5, 8.2], [26.5, 19.6], [3.6, 19.6]].map(([x, y]) =>
+        `<rect x="${x}" y="${y}" width="1.9" height="4.2" rx="0.6"/>`).join('') + `</g>` +
+      `<circle class="lens" cx="16" cy="16" r="7.6" stroke-width="1.05"/><path class="play" d="${PLAY_D}"/></svg>`,
+    name: 'A · Production', why: 'five systems; busy at small sizes — the complaint that started this' },
+  { build: s => svgOpen(s) + pkg() + grownTri(7.6).replace('class="play"', 'class="play"') + `</svg>`,
+    name: 'D · Padless', why: 'clean but loses the LED-chip story; legs wanted (gate-1)' },
+  { build: s => svgOpen(s) +
+      `<path class="solid" fill-rule="evenodd" d="${rrectPath(4.5, 4.5, 23, 23, 3.4)}${triPath(15.7, 16, 7.9, 1.74)}"/></svg>`,
+    name: 'F · Knockout', why: 'reads YouTube (gate-1); inverted slab is their icon grammar' },
+  { build: s => svgOpen(s) + `<path class="play" d="${triPath(15, 16, 10.4, 2.3)}"/></svg>`,
+    name: 'G · Triangle only', why: 'too generic as the everywhere-mark; survives as the favicon fallback (§2)' },
+];
 
-const state = { mark: 'padless' };
+const state = { mark: 'six', heroVar: 'pure' };
 const hash = new URLSearchParams(location.hash.slice(1));
 if (hash.get('mark') && MARKS[hash.get('mark')]) state.mark = hash.get('mark');
+if (hash.get('fill')) state.heroVar = hash.get('fill');
 for (const k of ['canvas', 'motion', 'tri', 'wt', 'tsz']) if (hash.get(k)) document.body.dataset[k] = hash.get(k);
 if (hash.get('spd')) document.body.style.setProperty('--spd', hash.get('spd'));
 let shader = hash.get('shader') || 'aurora';
@@ -450,23 +477,33 @@ function renderCards() {
     markcards.appendChild(el);
   }
 }
+const rejrow = document.getElementById('rejrow');
+for (const r of REJECTED) {
+  const el = document.createElement('div');
+  el.className = 'rej';
+  el.innerHTML = `<span class="lockup" style="color:var(--stage-mark)">${r.build(24)}</span>` +
+    `<span class="why"><b>${r.name}</b>${r.why}</span>`;
+  rejrow.appendChild(el);
+}
 
-/* ======================== favicon strip (section 2) ================= */
+/* ==================== favicon strip (section 2) ===================== */
 const tabrow = document.getElementById('tabrow');
 function renderTabs() {
   tabrow.innerHTML = '';
-  for (const [k, m] of Object.entries(MARKS)) {
+  const entries = Object.entries(MARKS).map(([k, m]) => [m.label, m.build]);
+  entries.push(['G · Triangle only (fallback)', s => svgOpen(s) + `<path class="play" d="${triPath(15, 16, 10.4, 2.3)}"/></svg>`]);
+  for (const [label, build] of entries) {
     const el = document.createElement('div');
     el.className = 'tabcell';
     el.innerHTML =
-      `<div class="tabmock"><span class="lockup" style="color:var(--stage-mark)">${m.build(16, triR())}</span>` +
+      `<div class="tabmock"><span class="lockup" style="color:var(--stage-mark)">${build(16, triR())}</span>` +
       ` LightPlayer Studio <span class="x">×</span></div>` +
-      `<span class="lab">${m.label}</span>`;
+      `<span class="lab">${label}</span>`;
     tabrow.appendChild(el);
   }
 }
 
-/* ======================== contexts (section 3) ====================== */
+/* ==================== contexts (section 3) ========================== */
 const ctxsheet = document.getElementById('ctxsheet');
 function renderContexts() {
   const m = MARKS[state.mark], r = triR();
@@ -553,17 +590,33 @@ const SHADERS = {
   },
 };
 
-/* one low-res buffer per continuous-fill canvas, upscaled through a clip */
-function makeFill(canvas, cssW, cssH, tri) {
+/* triangle-shader canvas; mode: 'pure' | 'px' | 'glow' (mode via getMode) */
+function makeTri(canvas, cssW, cssH, getMode) {
   const dpr = Math.min(devicePixelRatio || 1, 2);
   canvas.width = cssW * dpr; canvas.height = cssH * dpr;
   canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';
   const ctx = canvas.getContext('2d');
+  const R = cssH * 0.5, cx = cssW * 0.46, cy = cssH / 2;
+  const clip = new Path2D(triPath(cx, cy, R, R * 0.22));
   const buf = document.createElement('canvas');
   buf.width = 110; buf.height = Math.round(110 * cssH / cssW);
   const bctx = buf.getContext('2d');
   const img = bctx.createImageData(buf.width, buf.height);
-  const clip = new Path2D(tri);
+  // LED-dot mask for 'px' mode
+  const mask = document.createElement('canvas');
+  mask.width = cssW * dpr; mask.height = cssH * dpr;
+  const mctx = mask.getContext('2d');
+  mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  mctx.fillStyle = '#fff';
+  const s = 9;
+  for (let y = 4, row = 0; y < cssH; y += s * 0.87, row++)
+    for (let x = 4 + (row % 2) * s / 2; x < cssW; x += s) {
+      mctx.beginPath(); mctx.arc(x, y, 3.6, 0, 7); mctx.fill();
+    }
+  // sharp triangle rendered to a temp layer, composited per mode
+  const tmp = document.createElement('canvas');
+  tmp.width = cssW * dpr; tmp.height = cssH * dpr;
+  const tctx = tmp.getContext('2d');
   return t => {
     const d = img.data; let i = 0;
     for (let y = 0; y < buf.height; y++) for (let x = 0; x < buf.width; x++) {
@@ -571,21 +624,38 @@ function makeFill(canvas, cssW, cssH, tri) {
       d[i++] = c[0]; d[i++] = c[1]; d[i++] = c[2]; d[i++] = 255;
     }
     bctx.putImageData(img, 0, 0);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssW, cssH);
-    ctx.save(); ctx.clip(clip);
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(buf, 0, 0, cssW, cssH);
-    ctx.restore();
+    const mode = getMode();
+    tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    tctx.clearRect(0, 0, cssW, cssH);
+    tctx.save(); tctx.clip(clip);
+    tctx.imageSmoothingEnabled = true;
+    tctx.drawImage(buf, 0, 0, cssW, cssH);
+    tctx.restore();
+    if (mode === 'px') {
+      tctx.save(); tctx.globalCompositeOperation = 'destination-in';
+      tctx.setTransform(1, 0, 0, 1, 0, 0);
+      tctx.drawImage(mask, 0, 0);
+      tctx.restore();
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (mode === 'glow') {
+      ctx.save();
+      ctx.filter = 'blur(14px)'; ctx.globalAlpha = 0.55;
+      const g = 0.045;
+      ctx.drawImage(tmp, -canvas.width * g / 2, -canvas.height * g / 2,
+        canvas.width * (1 + g), canvas.height * (1 + g));
+      ctx.restore();
+    }
+    ctx.drawImage(tmp, 0, 0);
   };
 }
-/* dot-lattice renderer: triangle of round LEDs, one shader sample each */
+/* dot-lattice renderer (alternate hero): per-column layout, clean edges */
 function makeDots(canvas, cssW, cssH) {
   const dpr = Math.min(devicePixelRatio || 1, 2);
   canvas.width = cssW * dpr; canvas.height = cssH * dpr;
   canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';
   const ctx = canvas.getContext('2d');
-  // per-column layout: clean triangle edges, base left, tip right
   const m = 9, s = 13, dots = [];
   const W = cssW - 2 * m, H0 = cssH - 2 * m, cols = Math.floor(W / s);
   for (let i = 0; i <= cols; i++) {
@@ -604,38 +674,36 @@ function makeDots(canvas, cssW, cssH) {
   };
 }
 
-/* ---- hero A: pure shader triangle ---- */
-const A_W = 250, A_H = 232;
-const drawA = makeFill(document.getElementById('cA'), A_W, A_H,
-  triPath(A_W * .46, A_H / 2, A_H * .5, A_H * .1));
-/* ---- hero B: LED lattice ---- */
+/* §4: three fixed-mode variant thumbs + one mock that follows the selection */
+const variantDraws = [...document.querySelectorAll('[data-vc]')].map(c =>
+  makeTri(c, 170, 158, () => c.dataset.vc));
+const drawMock = makeTri(document.getElementById('cMock'), 250, 232, () => state.heroVar);
 const drawB = makeDots(document.getElementById('cB'), 270, 246);
-/* ---- hero C: chip window ---- */
-const C_S = 232, cScale = C_S / 32;
-const drawC = makeFill(document.getElementById('cC'), C_S, C_S,
-  triPath(15.7 * cScale, 16 * cScale, 8.6 * cScale, 1.9 * cScale));
-document.getElementById('chipC').innerHTML =
-  `<rect x="5.5" y="5.5" width="21" height="21" rx="1.9" stroke-width="0.15" stroke="currentColor" fill="none"/>` +
-  [[4.3, 8.4], [26.6, 8.4], [26.6, 19.8], [4.3, 19.8]].map(([x, y]) =>
-    `<rect x="${x}" y="${y}" width="1.1" height="3.8" rx="0.45" fill="currentColor" opacity="0.35"/>`).join('') +
-  `<path d="${triPath(15.7, 16, 8.6, 1.9)}" fill="none" stroke="currentColor" stroke-width="0.12" opacity="0.4"/>`;
-document.getElementById('chipC').setAttribute('width', C_S);
-document.getElementById('chipC').setAttribute('height', C_S);
-/* ---- hero D: traced light (SVG only) ---- */
+for (const vc of document.querySelectorAll('.varcard')) {
+  vc.setAttribute('aria-pressed', String(vc.dataset.var === state.heroVar));
+  vc.addEventListener('click', () => {
+    state.heroVar = vc.dataset.var;
+    for (const o of document.querySelectorAll('.varcard'))
+      o.setAttribute('aria-pressed', String(o.dataset.var === state.heroVar));
+    drawMock(tBase);
+  });
+}
+/* §6 traced geometry */
 document.getElementById('dGhost').setAttribute('d', triPath(14.6, 15, 12.2, 2.6));
 document.getElementById('dEdge').setAttribute('d', triPath(14.6, 15, 12.2, 2.6));
 document.getElementById('dCore').setAttribute('d', triPath(14.9, 15, 6.4, 1.4));
 
 /* ---- the loop: one clock drives all canvases ---- */
 let tBase = 2.5, last = performance.now();
+function drawAll(t) { variantDraws.forEach(d => d(t)); drawMock(t); drawB(t); }
 function frame(now) {
   const spd = parseFloat(getComputedStyle(document.body).getPropertyValue('--spd')) || 1;
   if (document.body.dataset.motion !== 'off') tBase += (now - last) / 1000 * spd;
   last = now;
-  drawA(tBase); drawB(tBase); drawC(tBase);
+  drawAll(tBase);
   requestAnimationFrame(frame);
 }
-drawA(tBase); drawB(tBase); drawC(tBase);  // synchronous first frame (screenshot safety)
+drawAll(tBase);  // synchronous first frame (screenshot safety)
 requestAnimationFrame(now => { last = now; requestAnimationFrame(frame); });
 
 /* ========================= controls ================================= */
@@ -644,7 +712,7 @@ document.querySelectorAll('.chip[data-ctl]').forEach(btn => {
     const ctl = btn.dataset.ctl, v = btn.dataset.v;
     document.querySelectorAll(`.chip[data-ctl=${ctl}]`).forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
     if (ctl === 'spd') document.body.style.setProperty('--spd', v);
-    else if (ctl === 'shader') { shader = v; drawA(tBase); drawB(tBase); drawC(tBase); }
+    else if (ctl === 'shader') { shader = v; drawAll(tBase); }
     else document.body.dataset[ctl] = v;
     if (ctl === 'tsz') { renderCards(); renderTabs(); renderContexts(); }
   });
