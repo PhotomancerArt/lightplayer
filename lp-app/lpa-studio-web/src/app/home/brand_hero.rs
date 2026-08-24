@@ -20,8 +20,9 @@
 //!    failed slot). Exactly the docs-hero pattern.
 //! 3. **Canvas** — the leased engine canvas, same clip, revealed once a
 //!    frame has landed so the gradient covers the boot.
-//! 4. **Badge** — the granted tier, quieted. Small, but never silent
-//!    (fidelity-tiers ADR).
+//! 4. **Badge** — failures only (issue-only policy, fidelity-tiers ADR
+//!    decision-4 note). The landing never announces its renderer; a broken
+//!    preview still says so out loud.
 //!
 //! The hero corner ratio is **tighter than the mark's** (0.10 vs 0.16):
 //! the fillet that reads as friendly at 22px reads balloon-y at 250px
@@ -117,8 +118,9 @@ pub(crate) fn BrandHero(#[props(default)] on_action: Option<EventHandler<UiActio
                         style: "{clip}",
                     }
                 }
-                // 4 · Badge: the tier, at hero volume — quiet, never absent.
-                if let Some(badge) = preview.badge {
+                // 4 · Badge: failures only — the landing never announces
+                // its renderer, but a broken preview must not just sit dark.
+                if let Some(badge) = preview.badge.and_then(ThumbPreviewBadge::issue) {
                     span {
                         class: "tw:absolute tw:bottom-0 tw:right-0 tw:rounded-sm tw:border tw:bg-background/60 tw:px-1 tw:text-[0.6rem] tw:font-bold tw:uppercase tw:leading-4 {hero_badge_class(&badge)}",
                         title: hero_badge_title(&badge),

@@ -98,6 +98,16 @@ pub(crate) enum ThumbPreviewBadge {
     },
 }
 
+impl ThumbPreviewBadge {
+    /// Badge policy for browsing surfaces (2026-08-24, fidelity-tiers ADR
+    /// decision-4 note): a badge appears only when something is actually
+    /// wrong. The granted tier is not news — it stays log/wire-visible and
+    /// belongs on diagnostic surfaces, not on cards a visitor is browsing.
+    pub(crate) fn issue(self) -> Option<Self> {
+        matches!(self, Self::Error { .. }).then_some(self)
+    }
+}
+
 /// How long a thumb is willing to render (see the module docs).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ThumbMode {
