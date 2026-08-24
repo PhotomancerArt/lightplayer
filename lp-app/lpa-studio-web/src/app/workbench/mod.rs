@@ -11,7 +11,9 @@
 //! - Panels with FIXED homes — left: Tree (one panel, one ROLE — the
 //!   view supplies the content: the project's node tree on Nodes, the
 //!   fixture tree on Mapping, D10); right: Device · Outputs · Props
-//!   (Mapping view only — the selection's properties, R4). The
+//!   (the selection's properties on Mapping, R4 — and THE PATCH PANEL on
+//!   Patching, round 2's D1: one panel role, two view-supplied bodies,
+//!   exactly like the Tree). The
 //!   assignment lives in [`PanelId::side`] and [`roster`], data tables
 //!   by design, so experiments are a constant edit — but there is
 //!   deliberately no user arrangement in v1 ("things have one home",
@@ -171,8 +173,10 @@ pub enum PanelId {
     /// box → port → wire-window cells (P2).
     Outputs,
     /// The selection's properties (R4, Figma prior art): the dived
-    /// object's fields, or the selected fixture's placement facts.
-    /// Mapping view only.
+    /// object's fields, or the selected fixture's placement facts — and,
+    /// on the Patching view, THE patch panel (round 2's D1: the patch
+    /// panel IS that view's properties, an explicit experiment toward a
+    /// possible Mapping/Patching merge).
     Props,
 }
 
@@ -215,7 +219,8 @@ impl PanelId {
 
 /// Panel order per (view, side), top to bottom — the strip and tab-row
 /// orders both read this one table. Total over [`VIEWS`]: Props exists
-/// only where a canvas selection exists to describe (the Mapping view).
+/// only where a canvas selection exists to describe (Mapping and
+/// Patching).
 pub fn roster(view: WorkbenchView, side: DockSide) -> &'static [PanelId] {
     match (side, view) {
         (DockSide::Left, _) => &[PanelId::Tree],
@@ -223,10 +228,11 @@ pub fn roster(view: WorkbenchView, side: DockSide) -> &'static [PanelId] {
         (DockSide::Right, WorkbenchView::Mapping) => {
             &[PanelId::Props, PanelId::Outputs, PanelId::Device]
         }
-        // Patching leads with the wire side: Outputs first (its default),
-        // Props for the selected patch target, Device in reach.
+        // The same order as Mapping, for the same reason: Props is the
+        // default and leads, and the two canvas views' right docks read
+        // alike so switching between them is not a re-scan.
         (DockSide::Right, WorkbenchView::Patching) => {
-            &[PanelId::Outputs, PanelId::Props, PanelId::Device]
+            &[PanelId::Props, PanelId::Outputs, PanelId::Device]
         }
     }
 }
@@ -245,11 +251,13 @@ pub fn defaults(view: WorkbenchView) -> DockState {
             left: Some(PanelId::Tree),
             right: Some(PanelId::Props),
         },
-        // Patching opens against the outputs (Q3): the resolved tree on
-        // the left, the wire on the right.
+        // Patching opens on the CONTROL ROOM (round 2's D1): the resolved
+        // tree on the left, THE patch panel — object over output, the
+        // verbs and the keys row — in Props on the right. Outputs is one
+        // tab away for the wire's own picture.
         WorkbenchView::Patching => DockState {
             left: Some(PanelId::Tree),
-            right: Some(PanelId::Outputs),
+            right: Some(PanelId::Props),
         },
     }
 }
@@ -853,6 +861,13 @@ fn PanelBody(
     now_secs: Option<f64>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    // The frame's cross-dock patching state, for the one body that needs it
+    // (the Patching view's Props panel is THE patch panel, and the panel
+    // shows the armed verb). Read here rather than threaded as a prop: the
+    // frame provides it two components up, and the panel itself stays plain
+    // data so stories can pose an arm.
+    let patching_ui =
+        use_hook(try_consume_context::<crate::app::editor_shell::patching::PatchingUi>);
     match (panel, view) {
         (PanelId::Tree, WorkbenchView::Nodes) => rsx! {
             div { class: "tw:grid tw:content-start tw:gap-3.5",
@@ -940,6 +955,32 @@ fn PanelBody(
                 }
             }
         },
+        // The Patching view's properties ARE the patch panel (round 2, D1).
+        // Its output section supersedes the wire readout leaves `PropsPanel`
+        // showed here before — in this view only; `PropsPanel` is unchanged
+        // everywhere else.
+        (PanelId::Props, WorkbenchView::Patching) => {
+            let armed = patching_ui.and_then(|ui| ui.armed.read().clone());
+            match surface {
+                Some(surface) => rsx! {
+                    crate::app::patch::patch_panel::PatchPanel {
+                        surface,
+                        selection: patch_selection,
+                        armed,
+                        docked: true,
+                        on_action,
+                    }
+                },
+                // The center's own empty state, said quietly at dock width:
+                // with no surface there is nothing to patch and no panel to
+                // draw, and an empty two-section frame would be a lie.
+                None => rsx! {
+                    p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground",
+                        "Nothing to patch yet — bind an output to a control bus and the patching view fills in."
+                    }
+                },
+            }
+        }
         (PanelId::Props, _) => rsx! {
             panels::PropsPanel {
                 surface,
@@ -1028,9 +1069,12 @@ mod tests {
             roster(WorkbenchView::Mapping, DockSide::Right),
             &[PanelId::Props, PanelId::Outputs, PanelId::Device]
         );
+        // Patching reads like Mapping: Props leads (it is the default and,
+        // in this view, THE patch panel — round 2's D1), Outputs one tab
+        // over for the wire, Device in reach.
         assert_eq!(
             roster(WorkbenchView::Patching, DockSide::Right),
-            &[PanelId::Outputs, PanelId::Props, PanelId::Device]
+            &[PanelId::Props, PanelId::Outputs, PanelId::Device]
         );
     }
 
@@ -1062,11 +1106,13 @@ mod tests {
                 right: Some(PanelId::Props),
             }
         );
+        // The control room greets you (D1): Patching opens on Props, whose
+        // body in this view is the patch panel itself.
         assert_eq!(
             defaults(WorkbenchView::Patching),
             DockState {
                 left: Some(PanelId::Tree),
-                right: Some(PanelId::Outputs),
+                right: Some(PanelId::Props),
             }
         );
     }

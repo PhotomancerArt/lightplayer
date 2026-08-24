@@ -1,6 +1,15 @@
-//! THE patch panel (pass 2, P4) — the Patching view's bottom region:
-//! OBJECT section over OUTPUT section, one selection, the counterpart
-//! following.
+//! THE patch panel (pass 2, P4) — the Patching view's control room: OBJECT
+//! section over OUTPUT section, one selection, the counterpart following.
+//!
+//! Its HOME is the Patching view's **Props dock panel** (round 2, D1) — the
+//! fixed dock width is what stops a panel-height change from reflowing the
+//! canvas and churning its refits. Below the workbench's ≤820px fold the
+//! docks are hidden entirely, so there the panel keeps its old center-bottom
+//! mount; [`use_fold_signal`] decides which, so exactly ONE mount exists at
+//! any moment (a second copy hidden with CSS would carry lamp-strip canvases
+//! that never get a box, never paint, and never stamp the
+//! `data-preview-painted` the story capture waits on). [`PatchPanel::docked`]
+//! is which of the two is rendering.
 //!
 //! Design record: `spikes/patching-controls/index.html` §1 (states
 //! `#armed` / `#paired` / `#derived` / `#objfirst`). The panel derives
@@ -101,16 +110,128 @@ pub(crate) fn surface_is_live(surface: &UiPatchSurface) -> bool {
         .any(|output| output_frame(surface, output.node).is_some())
 }
 
-/// Is the viewport at the mobile fold (the workbench's ≤820px breakpoint)?
-/// Runtime-checked at gesture time; host test builds never fire gestures.
+/// The workbench's mobile fold, in the two spellings this module needs. Both
+/// name the same breakpoint as the `tw:max-[820px]:*` utilities — change one
+/// and you change all three.
+const MOBILE_FOLD_PX: f64 = 820.0;
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(dead_code, reason = "asked by the wasm media-query listener only")
+)]
+const MOBILE_FOLD_QUERY: &str = "(max-width: 820px)";
+
+/// Is the viewport at the mobile fold, RIGHT NOW? A one-shot read, for
+/// gesture time ("the ports are in a summoned panel on this phone"); host
+/// test builds have no window and answer `false`.
+///
+/// Layout that must exist exactly once across the fold reads
+/// [`use_fold_signal`] instead — a one-shot answer would go stale the moment
+/// the window is resized.
 fn at_mobile_fold() -> bool {
     web_sys::window()
         .and_then(|window| window.inner_width().ok())
         .and_then(|width| width.as_f64())
-        .is_some_and(|width| width <= 820.0)
+        .is_some_and(|width| width <= MOBILE_FOLD_PX)
 }
+
+/// The fold as a REACTIVE signal: true while the viewport is at or below the
+/// workbench's fold breakpoint, kept current by a media-query listener
+/// installed for exactly as long as the caller is mounted.
+///
+/// This is how the patch panel keeps ONE mount across the fold. The tempting
+/// alternative — render both and hide one with `tw:max-[820px]:hidden` — is a
+/// trap here: the hidden copy still mounts its [`LampStrip`] canvases, a
+/// canvas with no box never measures and so never paints, and the story
+/// capture's ready gate waits forever on the `data-preview-painted` it will
+/// never stamp.
+pub(crate) fn use_fold_signal() -> Signal<bool> {
+    let fold = use_signal(at_mobile_fold);
+    let _listener = use_hook(move || install_fold_listener(fold));
+    fold
+}
+
+/// Watch the fold breakpoint. Keep the guard alive for as long as the signal
+/// is read; dropping it removes the listener.
+#[cfg(target_arch = "wasm32")]
+fn install_fold_listener(mut fold: Signal<bool>) -> Option<std::rc::Rc<FoldListener>> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::closure::Closure;
+
+    let query = web_sys::window()?.match_media(MOBILE_FOLD_QUERY).ok()??;
+    // Seed from the QUERY, not the width read: a scrollbar can put
+    // `innerWidth` and the media query a few pixels apart, and it is the
+    // query the docks' own `max-[820px]:hidden` answers to.
+    if *fold.peek() != query.matches() {
+        fold.set(query.matches());
+    }
+    let watched = query.clone();
+    let callback = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_| {
+        let now = watched.matches();
+        if *fold.peek() != now {
+            fold.set(now);
+        }
+    }));
+    query
+        .add_event_listener_with_callback("change", callback.as_ref().unchecked_ref())
+        .ok()?;
+    Some(std::rc::Rc::new(FoldListener { query, callback }))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn install_fold_listener(_fold: Signal<bool>) -> Option<std::rc::Rc<FoldListener>> {
+    None
+}
+
+pub(crate) struct FoldListener {
+    #[cfg(target_arch = "wasm32")]
+    query: web_sys::MediaQueryList,
+    #[cfg(target_arch = "wasm32")]
+    callback: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::Event)>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for FoldListener {
+    fn drop(&mut self) {
+        use wasm_bindgen::JsCast;
+        let _ = self
+            .query
+            .remove_event_listener_with_callback("change", self.callback.as_ref().unchecked_ref());
+    }
+}
+
 const SECTION: &str = "tw:grid tw:content-start tw:gap-1.5 tw:border-l-2 tw:border-l-transparent tw:px-2.5 tw:py-2 tw:max-[820px]:px-2 tw:max-[820px]:py-1.5";
 const SECTION_PRIMARY: &str = "tw:grid tw:content-start tw:gap-1.5 tw:border-l-2 tw:border-l-selection-border tw:bg-selection-bg tw:px-2.5 tw:py-2 tw:max-[820px]:px-2 tw:max-[820px]:py-1.5";
+/// The same two at DOCK width (~300px of content, 245px on the md middle):
+/// the fold's own tightness, applied unconditionally — a dock is exactly as
+/// narrow as a phone, and the dock body already supplies the outer gutter.
+const SECTION_DOCKED: &str =
+    "tw:grid tw:content-start tw:gap-1.5 tw:border-l-2 tw:border-l-transparent tw:px-1.5 tw:py-1.5";
+const SECTION_DOCKED_PRIMARY: &str = "tw:grid tw:content-start tw:gap-1.5 tw:border-l-2 tw:border-l-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1.5";
+
+/// Which section styling a pane wears: the fold pair or the dock pair.
+fn section_class(docked: bool, primary: bool) -> &'static str {
+    match (docked, primary) {
+        (true, true) => SECTION_DOCKED_PRIMARY,
+        (true, false) => SECTION_DOCKED,
+        (false, true) => SECTION_PRIMARY,
+        (false, false) => SECTION,
+    }
+}
+
+/// A transport row's group separator: a small gap on a wide row, a deliberate
+/// LINE BREAK in a dock. At 300px these rows wrap whatever we do — better
+/// they wrap where the grouping is than wherever the last button landed.
+fn group_break(docked: bool) -> Element {
+    if docked {
+        rsx! {
+            div { class: "tw:basis-full" }
+        }
+    } else {
+        rsx! {
+            span { class: "tw:w-2" }
+        }
+    }
+}
 const PROMPT: &str = "tw:flex tw:flex-wrap tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:px-2.5 tw:py-1.5 tw:text-[11.5px] tw:text-subtle-foreground";
 const STRIP: &str =
     "tw:relative tw:h-5 tw:overflow-hidden tw:rounded tw:bg-track tw:max-[820px]:h-4";
@@ -916,17 +1037,39 @@ fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
     ));
 }
 
-/// THE patch panel: the Patching center's bottom region (D8 — always
-/// present, empty states included).
+/// The keys row, as data: the grammar the panel PRINTS under itself (it
+/// replaced the help overlay, so it is readable without arming anything).
+///
+/// `wide` = the phrase claims both columns of the docked grid; half a dock is
+/// not enough room for it, and a chip that wraps mid-phrase reads as two.
+const KEYS: &[(&str, &str, bool)] = &[
+    ("a", "assign", false),
+    ("m", "next free", false),
+    ("[ ]", "shift", false),
+    ("- =", "narrow / widen", true),
+    ("r", "flip", false),
+    ("; '", "rotate", false),
+    ("s", "swap", false),
+    ("⌘Z", "undo", false),
+    ("esc", "disarm, then deselect", true),
+];
+
+/// THE patch panel (D8 — always present, empty states included): the Patching
+/// view's Props dock panel above the fold, its center-bottom region below.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PatchPanel(
     surface: UiPatchSurface,
     selection: Option<UiPatchTarget>,
-    /// The frame's armed verb, read in the center and passed down so the
+    /// The frame's armed verb, read at the mount site and passed down so the
     /// panel stays plain data (and stories can pose an armed state).
     #[props(default)]
     armed: Option<ArmedVerb>,
+    /// Rendering in the Props DOCK rather than the fold's center-bottom
+    /// region: no height cap (the dock body already scrolls), tighter
+    /// gutters, and the keys row in two deliberate columns.
+    #[props(default)]
+    docked: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let object = object_view(&surface, selection.as_ref());
@@ -940,17 +1083,42 @@ pub fn PatchPanel(
     let armed_assign = matches!(armed, Some(ArmedVerb::Assign));
     let attention_object = live && armed_assign && primary == Some(PanelSide::Output);
     let attention_output = live && armed_assign && primary == Some(PanelSide::Object);
+    // Two height models, one panel. In the DOCK the body above already
+    // scrolls (`min-h-0 flex-1 overflow-y-auto`) and a percentage cap against
+    // an indefinite height resolves to no cap at all, so the panel simply
+    // fills its column and the dock's own scrollbar does the rest. At the
+    // FOLD it is the center's bottom region again and keeps the 45% cap: it
+    // must never squeeze the canvas above it to nothing (the canvas re-fits
+    // on every resize — starving it would churn the fit reconciliation the
+    // story capture gates on).
+    let root = if docked {
+        "tw:flex tw:flex-col tw:bg-card-subtle"
+    } else {
+        "tw:flex tw:max-h-[45%] tw:flex-none tw:flex-col tw:overflow-y-auto tw:border-t tw:border-border-subtle tw:bg-card-subtle"
+    };
+    // The dock's gutter is the dock body's own padding; the panel adds only
+    // enough to keep its chrome rows off the section edges.
+    let gutter = if docked { "tw:px-1.5" } else { "tw:px-2.5" };
+    // The keys row REPLACES the help overlay: always visible, in the panel
+    // the gesture happens in. At dock width its nine chips are a deliberate
+    // TWO-COLUMN grid rather than a ragged wrap — the phrases are of very
+    // different lengths, and a free wrap at 300px reads as noise.
+    let keys = if docked {
+        format!(
+            "tw:grid tw:flex-none tw:grid-cols-2 tw:gap-x-2 tw:gap-y-0.5 tw:border-t tw:border-border-subtle tw:bg-card-muted {gutter} tw:py-1 tw:font-mono tw:text-[10px] tw:text-dim-foreground"
+        )
+    } else {
+        format!(
+            "tw:flex tw:flex-none tw:flex-wrap tw:gap-x-3.5 tw:gap-y-0.5 tw:border-t tw:border-border-subtle tw:bg-card-muted {gutter} tw:py-1 tw:font-mono tw:text-[10px] tw:text-dim-foreground"
+        )
+    };
     rsx! {
-        // Capped and self-scrolling: the panel is the center's bottom
-        // region, and it must never squeeze the canvas above it to nothing
-        // (the canvas re-fits on every resize — starving it would churn the
-        // fit reconciliation the story capture gates on).
-        div { class: "tw:flex tw:max-h-[45%] tw:flex-none tw:flex-col tw:overflow-y-auto tw:border-t tw:border-border-subtle tw:bg-card-subtle",
+        div { class: "{root}",
             // The armed state, absorbing P3's standalone banner: the panel
             // is where the walk-up user is looking, so the arm names itself
             // here (and the invitation buttons below echo it).
             if let Some(verb) = armed.as_ref() {
-                div { class: "tw:flex-none tw:border-b tw:border-border-subtle tw:bg-selection-bg tw:px-2.5 tw:py-1 tw:text-[11px] tw:text-selection-border",
+                div { class: "tw:flex-none tw:border-b tw:border-border-subtle tw:bg-selection-bg {gutter} tw:py-1 tw:text-[11px] tw:text-selection-border",
                     "{verb.banner()}"
                 }
             }
@@ -963,6 +1131,7 @@ pub fn PatchPanel(
                 primary: primary == Some(PanelSide::Object),
                 attention: attention_object,
                 animate: live,
+                docked,
                 on_action,
             }
             OutputPane {
@@ -973,46 +1142,17 @@ pub fn PatchPanel(
                 primary: primary == Some(PanelSide::Output),
                 attention: attention_output,
                 animate: live,
+                docked,
                 on_action,
             }
-            // The keys row REPLACES the help overlay: one line, always
-            // visible, in the panel the gesture happens in.
-            div { class: "tw:flex tw:flex-none tw:flex-wrap tw:gap-x-3.5 tw:gap-y-0.5 tw:border-t tw:border-border-subtle tw:bg-card-muted tw:px-2.5 tw:py-1 tw:font-mono tw:text-[10px] tw:text-dim-foreground",
-                span {
-                    span { class: "{KBD}", "a" }
-                    " assign"
-                }
-                span {
-                    span { class: "{KBD}", "m" }
-                    " next free"
-                }
-                span {
-                    span { class: "{KBD}", "[ ]" }
-                    " shift"
-                }
-                span {
-                    span { class: "{KBD}", "- =" }
-                    " narrow / widen"
-                }
-                span {
-                    span { class: "{KBD}", "r" }
-                    " flip"
-                }
-                span {
-                    span { class: "{KBD}", "; '" }
-                    " rotate"
-                }
-                span {
-                    span { class: "{KBD}", "s" }
-                    " swap"
-                }
-                span {
-                    span { class: "{KBD}", "⌘Z" }
-                    " undo"
-                }
-                span {
-                    span { class: "{KBD}", "esc" }
-                    " disarm, then deselect"
+            div { class: "{keys}",
+                for (key , label , wide) in KEYS.iter().copied() {
+                    span {
+                        key: "{key}",
+                        class: if docked && wide { "tw:col-span-2" } else { "" },
+                        span { class: "{KBD}", "{key}" }
+                        " {label}"
+                    }
                 }
             }
         }
@@ -1042,28 +1182,36 @@ fn SectionHead(
             }
             span { class: "tw:truncate tw:text-[12.5px] tw:font-medium tw:text-strong-foreground", "{name}" }
             span { class: "tw:truncate tw:font-mono tw:text-[10px] tw:text-dim-foreground", "{context}" }
-            span { class: "tw:ml-auto tw:flex tw:flex-none tw:items-baseline tw:gap-2",
+            // The head's right-hand cluster — the facts and the ×, ONE
+            // wrapping group. Both used to be `flex-none` siblings, which
+            // was fine while the head was as wide as the center; in a 300px
+            // dock (245px on the md middle) an "auto-mapped" flow value or a
+            // derived window note ran off the edge and was clipped, and the
+            // × was pushed onto a line of its own. Facts the panel bothered
+            // to state must be readable, so they take a second line and the
+            // × trails the last one wherever it lands.
+            span { class: "tw:ml-auto tw:flex tw:min-w-0 tw:flex-wrap tw:items-baseline tw:gap-x-2 tw:gap-y-0.5",
                 for (fact_label , value) in facts {
                     span { class: "tw:flex tw:items-baseline tw:gap-1",
                         span { class: "tw:text-[10px] tw:text-dim-foreground", "{fact_label}" }
                         span { class: "tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground", "{value}" }
                     }
                 }
-            }
-            if deselect {
-                button {
-                    class: "tw:ml-1 tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-1 tw:text-[11px] tw:leading-4 tw:text-dim-foreground tw:hover:text-strong-foreground",
-                    title: "Deselect (esc)",
-                    onclick: move |_| {
-                        // Same rung as esc's clear: the size override
-                        // belongs to the selection it was nudged on.
-                        if let Some(ui) = ui {
-                            let mut size = ui.segment_size;
-                            size.set(None);
-                        }
-                        select(&on_action, None);
-                    },
-                    "×"
+                if deselect {
+                    button {
+                        class: "tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-1 tw:text-[11px] tw:leading-4 tw:text-dim-foreground tw:hover:text-strong-foreground",
+                        title: "Deselect (esc)",
+                        onclick: move |_| {
+                            // Same rung as esc's clear: the size override
+                            // belongs to the selection it was nudged on.
+                            if let Some(ui) = ui {
+                                let mut size = ui.segment_size;
+                                size.set(None);
+                            }
+                            select(&on_action, None);
+                        },
+                        "×"
+                    }
                 }
             }
         }
@@ -1091,13 +1239,16 @@ fn ObjectPane(
     /// Frames are flowing — attention animations may run.
     #[props(default)]
     animate: bool,
+    /// Dock width: tighter gutters and deliberate transport-row breaks.
+    #[props(default)]
+    docked: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let ui = use_hook(try_consume_context::<PatchingUi>);
     // Nothing here animates itself any more (Q9): every picture the panel
     // paints — published bytes or the controller's unmapped-chase preview —
     // arrives as data on the surface, so the panel keeps no clock at all.
-    let base = if primary { SECTION_PRIMARY } else { SECTION };
+    let base = section_class(docked, primary);
     let class = if attention {
         format!("{base} ux-arm-attention")
     } else {
@@ -1221,7 +1372,7 @@ fn ObjectPane(
                                     },
                                     "unmap"
                                 }
-                                span { class: "tw:w-2" }
+                                {group_break(docked)}
                                 // Mock-level room only (plan): the lamp-count
                                 // edit is a mapping write, not a patch verb.
                                 button {
@@ -1530,6 +1681,9 @@ fn OutputPane(
     /// Frames are flowing — attention animations may run.
     #[props(default)]
     animate: bool,
+    /// Dock width: tighter gutters and deliberate transport-row breaks.
+    #[props(default)]
+    docked: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let ui = use_hook(try_consume_context::<PatchingUi>);
@@ -1537,7 +1691,7 @@ fn OutputPane(
     // fact line can name it (the spike's mode chip) — and so a walk-up gate
     // can see where the 7px threshold actually falls.
     let presentation = use_signal(StripPresentation::default);
-    let base = if primary { SECTION_PRIMARY } else { SECTION };
+    let base = section_class(docked, primary);
     let class = if attention {
         format!("{base} ux-arm-attention")
     } else {
@@ -1810,7 +1964,7 @@ fn OutputPane(
                                 {keyed("×10 ››", "]")}
                             }
                             if free {
-                                span { class: "tw:w-2" }
+                                {group_break(docked)}
                                 button {
                                     class: "{STEP}",
                                     title: "Narrow the segment one lamp (-)",
@@ -1831,7 +1985,7 @@ fn OutputPane(
                                 }
                             }
                             if matches!(selection, Some(UiPatchTarget::Port { .. })) || swap_armed {
-                                span { class: "tw:w-2" }
+                                {group_break(docked)}
                                 button {
                                     class: "{swap_class}",
                                     title: "Arm a port swap, then click the other port (s)",
@@ -1848,7 +2002,7 @@ fn OutputPane(
                                     {keyed("swap", "s")}
                                 }
                             }
-                            span { class: "tw:w-2" }
+                            {group_break(docked)}
                             button {
                                 class: "{STEP_ARM}",
                                 title: "Select the next free segment, keeping the arm (m)",

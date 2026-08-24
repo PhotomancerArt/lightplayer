@@ -23,6 +23,14 @@
 //! the creation-time default, and the lean panel is its own state worth
 //! pinning); [`mini_dome_walkup_surface`] is the manual counterpart with two
 //! objects still off the wire.
+//!
+//! **The two mounts.** The panel's home is the Patching view's Props DOCK
+//! (round 2, D1); below the workbench's ≤820px fold, where there are no
+//! docks, it keeps its old center-bottom mount instead. The two differ in
+//! height model and density, so most states pose at page width through
+//! [`panel_frame`] (the fold form, whole panel on screen) and the
+//! representative pair poses again in [`docked_frame`] — an exact 320px dock
+//! box, the width the restyle is actually for.
 
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
@@ -34,13 +42,14 @@ use super::patch_story_fixtures::{
 use crate::app::editor_shell::patching::ArmedVerb;
 use lpa_studio_core::{NodeId, UiPatchSurface, UiPatchTarget};
 
-/// The panel at page width, in its own height.
+/// The panel in its FOLD form, at page width: the center-bottom mount the
+/// workbench keeps below 820px, where there are no docks to live in.
 ///
-/// In the Patching view the panel is the center's bottom region and caps
-/// itself at 45% of that column so the canvas above always keeps room; a
-/// story has no canvas to protect, and a percentage cap against an indefinite
-/// height resolves to no cap at all — which is what we want here, the whole
-/// panel on screen rather than its top half over a scrollbar.
+/// That mount caps itself at 45% of the center column so the canvas above
+/// always keeps room; a story has no canvas to protect, and a percentage cap
+/// against an indefinite height resolves to no cap at all — which is what we
+/// want here, the whole panel on screen rather than its top half over a
+/// scrollbar. [`docked_frame`] poses the other form.
 fn panel_frame(
     surface: UiPatchSurface,
     selection: Option<UiPatchTarget>,
@@ -52,6 +61,32 @@ fn panel_frame(
                 surface,
                 selection,
                 armed,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+/// The panel in its HOME form, in an exact right-dock box (320px wide, its
+/// 2.5 padding, the dock's own fill and scroll) — the Patching view's Props
+/// panel as a user actually meets it. Same mount as the workbench stories'
+/// `dock_frame`, so the two sets of captures are comparable.
+///
+/// The docked variant drops the 45% cap and the top border: the dock body
+/// already scrolls, and a percentage of an indefinite height is no cap at
+/// all — it would silently do nothing where the fold mount really needs it.
+fn docked_frame(
+    surface: UiPatchSurface,
+    selection: Option<UiPatchTarget>,
+    armed: Option<ArmedVerb>,
+) -> Element {
+    rsx! {
+        div { class: "tw:flex tw:h-[520px] tw:w-[320px] tw:flex-col tw:overflow-y-auto tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:p-2.5",
+            PatchPanel {
+                surface,
+                selection,
+                armed,
+                docked: true,
                 on_action: move |_| {},
             }
         }
@@ -171,4 +206,33 @@ fn patch_panel_scarf() -> Element {
         }),
         None,
     )
+}
+
+#[story(
+    description = "PAIRED at DOCK width — the panel in its actual home, the Patching view's Props panel (round 2, D1). Same state as the paired story, restyled for a 320px column: no height cap and no top border (the dock body already scrolls, and a percentage cap against an indefinite height would silently be no cap at all), tighter section gutters, the fixture-side transport wrapping at a deliberate break rather than wherever the last button landed, and the keys row in two columns with the long phrases claiming both. The question at the gate is legibility at this width, not the state."
+)]
+fn patch_panel_docked_paired() -> Element {
+    docked_frame(
+        mini_dome_walkup_surface(),
+        Some(UiPatchTarget::Instance {
+            node: dome(),
+            path: "/sector/2".to_string(),
+        }),
+        None,
+    )
+}
+
+#[story(
+    description = "OBJECT-FIRST at DOCK width: the invitation state in the Props panel, the densest thing the panel has to fit — the object's frozen chase strip, the refusing transport, and the output section's arm plus the port cards that state each destination's occupancy. The cards are deliberately NOT restyled this pass (they are the next phase's subject); everything around them is what this width is being judged on."
+)]
+fn patch_panel_docked_objfirst() -> Element {
+    let mut surface = mini_dome_walkup_surface();
+    let selection = UiPatchTarget::Instance {
+        node: dome(),
+        path: "/sector/4".to_string(),
+    };
+    // The controller's own computation over the story's surface, frozen at
+    // zero frames — the same still the page-width objfirst story lands on.
+    surface.chase_preview = lpa_studio_core::chase_preview(&surface, Some(&selection), 0);
+    docked_frame(surface, Some(selection), None)
 }
