@@ -26,7 +26,7 @@ use dioxus::prelude::*;
 use lpa_mapping_editor::neutral_lamp_rgb;
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlSampleEncoding, UiControlProductPreview,
-    UiFixturePatch,
+    UiPatchSurface, UiPatchSurfaceFixture,
 };
 use wasm_bindgen::{Clamped, JsCast, closure::Closure};
 
@@ -138,18 +138,28 @@ pub(crate) fn LampView(
 /// the same space the canvas's `data-lamp` attributes and
 /// [`UiPatchCell::source_start`] use. Lamps no cell claims stay
 /// [`UNLIT_RGB`]: they never light on hardware, and the neutral reads as
-/// geometry rather than as black lamps. No frame yet = empty (no feed —
-/// the host keeps the last good one).
+/// geometry rather than as black lamps. No run could be read at all = empty
+/// (no feed — the host keeps the last good one).
 ///
-/// A fixture feeding two outputs decodes every cell from the ONE frame
-/// [`UiFixturePatch::frame`] carries (the first output's), the same
-/// honest limit the patch bay's fixture face draws with.
-pub(crate) fn fixture_live_colors(patch: &UiFixturePatch) -> Vec<[u8; 3]> {
-    let Some(frame) = patch.frame.as_ref() else {
-        return Vec::new();
-    };
+/// Each run decodes against ITS OWN output's published frame
+/// ([`cell_frame`]), never against one frame for the whole fixture: a
+/// fixture can drive two boxes (the mini dome drives both), and wire lamp
+/// 39 of one output is a different strand from wire lamp 39 of the other.
+/// Reading them all through one wire made two objects wear one object's
+/// light — the selected sector chased on its own sprite AND on whichever
+/// sector happened to sit at the same wire lamps of the other box.
+pub(crate) fn fixture_live_colors(
+    surface: &UiPatchSurface,
+    fixture: &UiPatchSurfaceFixture,
+) -> Vec<[u8; 3]> {
+    let patch = &fixture.patch;
     let mut colors = vec![UNLIT_RGB; patch.lamps as usize];
+    let mut fed = false;
     for cell in &patch.cells {
+        let Some(frame) = cell_frame(surface, &cell.id) else {
+            continue;
+        };
+        fed = true;
         for index in 0..cell.lamps {
             let Some(slot) = colors.get_mut(cell.source_start.saturating_add(index) as usize)
             else {
@@ -168,7 +178,34 @@ pub(crate) fn fixture_live_colors(patch: &UiFixturePatch) -> Vec<[u8; 3]> {
             }
         }
     }
-    colors
+    if fed { colors } else { Vec::new() }
+}
+
+/// The published frame of the output whose bay carries this RUN.
+///
+/// Per run, not per fixture: `UiFixturePatch::frame` carries only the first
+/// output a fixture drives, which is enough for the bay's own face and a lie
+/// for anything that must show one object's light. The wire a run landed on
+/// is the only wire that can answer for it — and a run keeps ONE id across
+/// both faces (and across a clip into two ports), so the bay that holds it
+/// names its output.
+pub(crate) fn cell_frame<'a>(
+    surface: &'a UiPatchSurface,
+    cell_id: &str,
+) -> Option<&'a UiControlProductPreview> {
+    surface
+        .outputs
+        .iter()
+        .find(|output| {
+            output
+                .bay
+                .ports
+                .iter()
+                .any(|port| port.cells.iter().any(|cell| cell.id == cell_id))
+        })?
+        .bay
+        .frame
+        .as_ref()
 }
 
 /// What a lamp with no frame sample behind it draws as — the same neutral
@@ -380,16 +417,59 @@ pub(crate) fn control_rgb_at_sample(
     preview: &UiControlProductPreview,
     sample_start: u32,
 ) -> Option<[u8; 3]> {
+    let color_order = control_color_order_at_sample(preview, sample_start)?;
+    Some(order_channels(
+        color_order,
+        sample_triple(preview, sample_start)?,
+    ))
+}
+
+/// The colour order the product's OWN layout declares at `sample_start`, or
+/// `None` where it declares none — a `Raw` run, or wire the layout says
+/// nothing about at all.
+///
+/// A wire's layout only covers the stretches a producer was PLACED on: free
+/// lamps between runs carry real samples (the engine's selection highlight
+/// paints them) that no span names. A reader that wants those lamps has to
+/// bring its own order — see [`wire_lamp_rgb`] and the panel's A1 decode
+/// line.
+pub(crate) fn control_color_order_at_sample(
+    preview: &UiControlProductPreview,
+    sample_start: u32,
+) -> Option<ColorOrder> {
     let span = preview.sample_layout.spans.iter().find(|span| {
         matches!(span.encoding, ControlSampleEncoding::RgbPixels { .. })
             && sample_start >= span.start
             && sample_start.saturating_add(3) <= span.start.saturating_add(span.len)
             && (sample_start - span.start).is_multiple_of(3)
     })?;
-    let color_order = match span.encoding {
-        ControlSampleEncoding::RgbPixels { color_order, .. } => color_order,
-        ControlSampleEncoding::Raw => return None,
-    };
+    match span.encoding {
+        ControlSampleEncoding::RgbPixels { color_order, .. } => Some(color_order),
+        ControlSampleEncoding::Raw => None,
+    }
+}
+
+/// One WIRE lamp's colour, decoded under the layout's own order where the
+/// layout declares one and under `assumed` where it does not (A1).
+///
+/// The honest shape of a walk-up port strip: mapped stretches decode by what
+/// the wire says about itself, and the free stretches between them decode by
+/// the lamp type of the fixture the user is about to put there. `None` means
+/// the sample is not on the wire at all (past the published extent) — a lamp
+/// with no signal behind it, not a black lamp.
+pub(crate) fn wire_lamp_rgb(
+    preview: &UiControlProductPreview,
+    wire_lamp: u32,
+    assumed: ColorOrder,
+) -> Option<[u8; 3]> {
+    let sample_start = wire_lamp.saturating_mul(3);
+    let order = control_color_order_at_sample(preview, sample_start).unwrap_or(assumed);
+    Some(order_channels(order, sample_triple(preview, sample_start)?))
+}
+
+/// Three consecutive samples as display sRGB8, in the order they ride the
+/// wire (no colour interpretation yet).
+fn sample_triple(preview: &UiControlProductPreview, sample_start: u32) -> Option<[u8; 3]> {
     let sample = |offset: u32| -> Option<u8> {
         let index = sample_start.checked_add(offset)? as usize;
         let byte_index = index.checked_mul(2)?;
@@ -397,17 +477,19 @@ pub(crate) fn control_rgb_at_sample(
         let hi = *preview.bytes.get(byte_index + 1)?;
         Some(linear_unorm16_to_srgb8(u16::from_le_bytes([lo, hi])))
     };
-    let a = sample(0)?;
-    let b = sample(1)?;
-    let c = sample(2)?;
-    Some(match color_order {
+    Some([sample(0)?, sample(1)?, sample(2)?])
+}
+
+/// Wire-order channels back into RGB.
+fn order_channels(color_order: ColorOrder, [a, b, c]: [u8; 3]) -> [u8; 3] {
+    match color_order {
         ColorOrder::Rgb => [a, b, c],
         ColorOrder::Grb => [b, a, c],
         ColorOrder::Rbg => [a, c, b],
         ColorOrder::Gbr => [c, a, b],
         ColorOrder::Brg => [b, c, a],
         ColorOrder::Bgr => [c, b, a],
-    })
+    }
 }
 
 /// Encode one LINEAR unorm16 control sample as display sRGB8.
@@ -419,7 +501,7 @@ pub(crate) fn control_rgb_at_sample(
 /// 2026-08-05 G1 finding: "much more saturated than the shader"). Same
 /// transfer as the engine's LUT, float form (non-embedded client; ~4.5k
 /// calls/frame is nothing here).
-fn linear_unorm16_to_srgb8(value: u16) -> u8 {
+pub(crate) fn linear_unorm16_to_srgb8(value: u16) -> u8 {
     let linear = value as f32 / 65535.0;
     let srgb = if linear <= 0.003_130_8 {
         12.92 * linear
@@ -487,7 +569,10 @@ impl Drop for LampResizeObserver {
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::{ControlExtent, ControlSampleLayout, ControlSampleSpan, UiPatchCell};
+    use lpa_studio_core::{
+        ControlExtent, ControlSampleLayout, ControlSampleSpan, NodeId, UiFixturePatch, UiPatchBay,
+        UiPatchCell, UiPatchPort, UiPatchSurfaceOutput,
+    };
 
     use super::*;
 
@@ -538,6 +623,9 @@ mod tests {
 
     fn run(source_start: u32, lamps: u32, wire_start: u32, reversed: bool) -> UiPatchCell {
         UiPatchCell {
+            // The bay's run identity (`node:output:source:wire`) — what a
+            // run is looked up by on the wire it landed on.
+            id: format!("2:0:{source_start}:{wire_start}"),
             source_start,
             lamps,
             wire_start,
@@ -546,37 +634,84 @@ mod tests {
         }
     }
 
+    /// One output: a single port carrying `cells`, with `frame` published
+    /// (or not). The surface's outputs are what a run's frame is resolved
+    /// through, so every test wire lists the runs that landed on it.
+    fn wire(
+        node: u32,
+        label: &str,
+        frame: Option<UiControlProductPreview>,
+        cells: &[UiPatchCell],
+    ) -> UiPatchSurfaceOutput {
+        UiPatchSurfaceOutput {
+            node: NodeId::new(node),
+            label: label.to_string(),
+            bay: UiPatchBay {
+                ports: vec![UiPatchPort {
+                    key: 0,
+                    pin_label: "IO2".to_string(),
+                    start: 0,
+                    lamps: 64,
+                    cells: cells.to_vec(),
+                }],
+                frame,
+                ..UiPatchBay::default()
+            },
+            ..UiPatchSurfaceOutput::default()
+        }
+    }
+
+    /// The fixture under test, on the wires its runs landed on.
+    fn surface(patch: UiFixturePatch, outputs: Vec<UiPatchSurfaceOutput>) -> UiPatchSurface {
+        UiPatchSurface {
+            fixtures: vec![UiPatchSurfaceFixture {
+                node: NodeId::new(2),
+                label: "dome".to_string(),
+                patch,
+                ..UiPatchSurfaceFixture::default()
+            }],
+            outputs,
+            ..UiPatchSurface::default()
+        }
+    }
+
     const RED: [u8; 3] = [255, 0, 0];
     const GREEN: [u8; 3] = [0, 255, 0];
     const BLUE: [u8; 3] = [0, 0, 255];
+    const BLACK: [u8; 3] = [0, 0, 0];
 
     /// The feed contract end to end: doc index = `source_start + offset`,
     /// wire index rebased per cell (reversed runs read the wire end-first),
     /// unclaimed lamps stay the unlit neutral, no frame = no feed.
     #[test]
     fn fixture_live_colors_rebase_doc_lamps_onto_the_wire() {
-        let mut patch = UiFixturePatch {
+        let cells = vec![
+            // Doc 0..3 land forward at wire 3..6: R G B from lamp 3 → B R G.
+            run(0, 3, 3, false),
+            // Doc 4..7 land REVERSED at wire 0..3: doc 4 reads wire 2.
+            run(4, 3, 0, true),
+        ];
+        let patch = UiFixturePatch {
             lamps: 7,
-            cells: vec![
-                // Doc 0..3 land forward at wire 3..6: R G B from lamp 3 → B R G.
-                run(0, 3, 3, false),
-                // Doc 4..7 land REVERSED at wire 0..3: doc 4 reads wire 2.
-                run(4, 3, 0, true),
-            ],
-            frame: Some(wire_frame(6)),
+            cells: cells.clone(),
             single_output: true,
+            ..UiFixturePatch::default()
         };
+        let lit = surface(
+            patch.clone(),
+            vec![wire(10, "1", Some(wire_frame(6)), &cells)],
+        );
         assert_eq!(
-            fixture_live_colors(&patch),
+            fixture_live_colors(&lit, &lit.fixtures[0]),
             vec![
                 RED, GREEN, BLUE,      // wire 3,4,5 (cycle restarts at wire 3 = red)
                 UNLIT_RGB, // doc 3: no cell claims it
                 BLUE, GREEN, RED, // wire 2,1,0
             ]
         );
-        patch.frame = None;
+        let unfed = surface(patch, vec![wire(10, "1", None, &cells)]);
         assert_eq!(
-            fixture_live_colors(&patch),
+            fixture_live_colors(&unfed, &unfed.fixtures[0]),
             Vec::<[u8; 3]>::new(),
             "no frame = no feed (the host keeps its last good one)"
         );
@@ -587,17 +722,125 @@ mod tests {
     /// own width is clipped.
     #[test]
     fn fixture_live_colors_survive_out_of_range_cells() {
-        let patch = UiFixturePatch {
-            lamps: 2,
-            cells: vec![run(0, 2, 5, false), run(1, 9, 1, false)],
-            frame: Some(wire_frame(6)),
-            single_output: true,
-        };
-        let colors = fixture_live_colors(&patch);
+        let cells = vec![run(0, 2, 5, false), run(1, 9, 1, false)];
+        let surface = surface(
+            UiFixturePatch {
+                lamps: 2,
+                cells: cells.clone(),
+                single_output: true,
+                ..UiFixturePatch::default()
+            },
+            vec![wire(10, "1", Some(wire_frame(6)), &cells)],
+        );
+        let colors = fixture_live_colors(&surface, &surface.fixtures[0]);
         assert_eq!(colors.len(), 2);
         // Doc 0 = wire 5 (blue); doc 1: wire 6 is past the frame, so the
         // second cell's wire 1 (green) wins the contested slot.
         assert_eq!(colors[0], BLUE);
         assert_eq!(colors[1], GREEN);
+    }
+
+    /// THE two-box defect (G1 round 3, the mini dome): a fixture driving two
+    /// outputs must read every run from ITS OWN wire.
+    ///
+    /// The dome's sectors sit at the SAME wire lamps on two different boxes —
+    /// wire 0–29 of "1" and wire 0–29 of "Box 2" are different strands. Read
+    /// through one frame for the whole fixture, the selected sector's chase
+    /// appeared on its own sprite AND on whichever sector happened to share
+    /// its wire numbers on the other box: one selection, two objects lit.
+    #[test]
+    fn each_run_reads_the_frame_of_the_output_it_landed_on() {
+        // Sector A on "1", sector B on "Box 2" — same wire lamps, different
+        // boxes, exactly as the mini-dome's walk-up patch lands them.
+        let a = run(0, 3, 0, false);
+        let b = run(3, 3, 0, false);
+        let dark = UiControlProductPreview {
+            bytes: vec![0_u8; 3 * 3 * 2].into(),
+            ..wire_frame(3)
+        };
+        let surface = surface(
+            UiFixturePatch {
+                lamps: 6,
+                cells: vec![a.clone(), b.clone()],
+                single_output: false,
+                // The DTO still carries the first output's frame; nothing
+                // here may read the second box's lamps through it.
+                frame: Some(wire_frame(3)),
+                ..UiFixturePatch::default()
+            },
+            vec![
+                wire(10, "1", Some(wire_frame(3)), &[a]),
+                wire(11, "Box 2", Some(dark), &[b]),
+            ],
+        );
+
+        assert_eq!(
+            fixture_live_colors(&surface, &surface.fixtures[0]),
+            vec![RED, GREEN, BLUE, BLACK, BLACK, BLACK],
+            "the lit box paints only its own sector; the dark box's sector stays dark",
+        );
+    }
+
+    /// One box has published and the other has not: the runs that CAN be
+    /// read still light, and the rest keep the unlit neutral rather than
+    /// borrowing the other wire's lamps.
+    #[test]
+    fn a_run_on_an_unpublished_output_stays_unlit() {
+        let a = run(0, 3, 0, false);
+        let b = run(3, 3, 0, false);
+        let surface = surface(
+            UiFixturePatch {
+                lamps: 6,
+                cells: vec![a.clone(), b.clone()],
+                single_output: false,
+                frame: Some(wire_frame(3)),
+                ..UiFixturePatch::default()
+            },
+            vec![
+                wire(10, "1", Some(wire_frame(3)), &[a]),
+                wire(11, "Box 2", None, &[b]),
+            ],
+        );
+
+        assert_eq!(
+            fixture_live_colors(&surface, &surface.fixtures[0]),
+            vec![RED, GREEN, BLUE, UNLIT_RGB, UNLIT_RGB, UNLIT_RGB],
+        );
+    }
+
+    /// A1's decode: the wire's own layout wins wherever it declares an
+    /// order, and the caller's assumption covers only the stretches it says
+    /// nothing about — the free lamps a walk-up user is about to spend.
+    /// Past the published extent there is no lamp at all, not a black one.
+    #[test]
+    fn undeclared_wire_decodes_under_the_assumed_lamp_type() {
+        let mut frame = wire_frame(4);
+        // Only the first two lamps are placed, and that run is GRB.
+        frame.sample_layout.spans = vec![ControlSampleSpan {
+            row: 0,
+            start: 0,
+            len: 6,
+            encoding: ControlSampleEncoding::RgbPixels {
+                count: 2,
+                color_order: ColorOrder::Grb,
+            },
+        }];
+        // Lamp 0's samples are (65535, 0, 0): GRB reads that as green.
+        assert_eq!(wire_lamp_rgb(&frame, 0, ColorOrder::Rgb), Some(GREEN));
+        assert_eq!(
+            control_color_order_at_sample(&frame, 0),
+            Some(ColorOrder::Grb)
+        );
+        // Lamp 3's samples are (65535, 0, 0) too, but nothing declares them:
+        // the assumption decides, and it is the caller's to state.
+        assert_eq!(control_color_order_at_sample(&frame, 9), None);
+        assert_eq!(wire_lamp_rgb(&frame, 3, ColorOrder::Rgb), Some(RED));
+        assert_eq!(wire_lamp_rgb(&frame, 3, ColorOrder::Grb), Some(GREEN));
+        assert_eq!(
+            control_rgb_at_sample(&frame, 9),
+            None,
+            "the layout-only decode still refuses to invent an order"
+        );
+        assert_eq!(wire_lamp_rgb(&frame, 9, ColorOrder::Rgb), None);
     }
 }

@@ -74,9 +74,23 @@ struct OutputFrameEntryState {
 #[derive(Debug, Default)]
 pub struct OutputFrameCache {
     outputs: BTreeMap<NodeId, OutputFrameEntryState>,
+    frames_seen: u64,
 }
 
 impl OutputFrameCache {
+    /// How many times a NEW frame has landed here — the lens's own frame
+    /// clock, and the only honest tick the controller has.
+    ///
+    /// Bumped once per probe answer that carried a moved revision on any
+    /// output, so it counts engine frames rather than reads: a repeated
+    /// revision (a patch edit re-cutting the wire without republishing) is
+    /// not a frame. Zero means no frame has EVER arrived, which is the
+    /// state every story renders in — see
+    /// [`super::patch_preview::preview_phase`].
+    pub fn frames_seen(&self) -> u64 {
+        self.frames_seen
+    }
+
     /// The newest frame one output published, if a read has carried one.
     pub fn frame(&self, node: NodeId) -> Option<&UiControlProductPreview> {
         self.outputs.get(&node)?.frame.as_ref()
@@ -133,12 +147,18 @@ impl OutputFrameCache {
 
     /// Fold one probe answer — every output entry it carried — into the cache.
     pub fn apply(&mut self, outputs: &[OutputFrameEntry]) {
+        let mut moved = false;
         for entry in outputs {
-            self.apply_entry(entry);
+            moved |= self.apply_entry(entry);
+        }
+        if moved {
+            self.frames_seen = self.frames_seen.wrapping_add(1);
         }
     }
 
-    fn apply_entry(&mut self, entry: &OutputFrameEntry) {
+    /// Returns whether this entry carried a NEW frame (a moved revision with
+    /// readable bytes) — what [`Self::frames_seen`] counts.
+    fn apply_entry(&mut self, entry: &OutputFrameEntry) -> bool {
         let output = self.outputs.entry(entry.node).or_default();
         // The cut, always: it is small, ungated, and moves under a repeated
         // frame revision whenever a patch is edited.
@@ -175,10 +195,10 @@ impl OutputFrameCache {
             if let Some(frame) = output.frame.as_mut() {
                 frame.display_layout = output.layout.clone();
             }
-            return;
+            return false;
         }
         if !readable {
-            return;
+            return false;
         }
         output.frame = Some(UiControlProductPreview {
             revision: entry.revision.0,
@@ -192,6 +212,7 @@ impl OutputFrameCache {
             // A fresh Rc per frame: the renderer's repaint key.
             bytes: Rc::from(entry.bytes.as_slice()),
         });
+        true
     }
 }
 
@@ -337,6 +358,39 @@ mod tests {
             cache.display_layout_read(),
             ControlDisplayLayoutRead::Always
         );
+    }
+
+    /// The lens's frame clock: it counts ENGINE frames, not reads. A
+    /// repeated revision (a patch edit re-cutting the wire under unchanged
+    /// bytes) must not advance it, or the unmapped-chase preview would
+    /// animate while nothing is playing — and stories would stop being
+    /// deterministic.
+    #[test]
+    fn frames_seen_counts_moved_revisions_only() {
+        let mut cache = OutputFrameCache::default();
+        assert_eq!(cache.frames_seen(), 0, "no frame has ever arrived");
+
+        cache.apply(&[entry(4, 1, vec![1, 0, 2, 0, 3, 0])]);
+        assert_eq!(cache.frames_seen(), 1);
+
+        cache.apply(&[entry(4, 1, vec![1, 0, 2, 0, 3, 0])]);
+        assert_eq!(cache.frames_seen(), 1, "a repeated revision is not a frame");
+
+        cache.apply(&[entry(4, 2, vec![9, 0, 8, 0, 7, 0])]);
+        assert_eq!(cache.frames_seen(), 2);
+
+        // Two outputs moving together are ONE frame of the show, not two.
+        cache.apply(&[
+            entry(4, 3, vec![9, 0, 8, 0, 7, 0]),
+            entry(5, 3, vec![1, 0, 1, 0, 1, 0]),
+        ]);
+        assert_eq!(cache.frames_seen(), 3);
+
+        // Unreadable bytes leave the last good frame — and the clock.
+        let mut garbage = entry(4, 4, vec![9, 0, 8, 0, 7, 0]);
+        garbage.sample_format = WireChannelSampleFormat::U8;
+        cache.apply(&[garbage]);
+        assert_eq!(cache.frames_seen(), 3);
     }
 
     fn entry(node: u32, revision: i64, bytes: Vec<u8>) -> OutputFrameEntry {
