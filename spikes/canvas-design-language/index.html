@@ -206,6 +206,11 @@
   viewer), <b>inside</b> (a strip wrapping a form), <b>outside</b> (edge-lit). Cells are the
   round-1 derivation (Voronoi ∩ disc); each lamp shifts by its own cell radius so the band's
   edge kisses the path, exactly like an aligned stroke; the pale core marks the true emitter.
+  <b>Round 4: the OUTLINE follows the alignment too</b> — for inside/outside the body is a
+  one-sided buffer whose edge <i>is</i> the lamp path, hanging off the aligned side. The
+  <b>letter P</b> specimen is the case that demands it: LEDs lining the inside (or outside)
+  of a channel letter's wall — the body must be the letter's face, not a capsule around the
+  strip.
   <b>Scope ruled IN:</b> an object formally provides <b>(1) an outline stroke</b> and
   <b>(2) a series of lamp polygons</b> (as lp2014 did) — derived today, customizable someday;
   this section is the look-spike for that model.
@@ -360,6 +365,13 @@ function peachPts() {
   for (let k=0; k<8; k++) { const th=k/8*2*Math.PI;
     out.push([cx+15*Math.cos(th), cy+9+15*Math.sin(th)]); }
   return out;
+}
+/* a channel-letter P: the letter case for aligned outlines — LEDs wrap the
+   inside (or outside) of the letter's wall, and the body must hang off the
+   aligned side of the path to read as the letter's face */
+function letterPts() {
+  const path=[[78,486],[78,358],[120,358],[133,371],[133,398],[120,411],[78,411]];
+  return sampleAlong(path, 34);
 }
 function combPts(x0, y0, dir, teethX, len) {
   /* spine along y0, teeth strands of `len` in direction dir */
@@ -639,6 +651,17 @@ function voronoiRibbon(o, side, dFixed) {
     h+=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="1.3" fill="#fffaf0" fill-opacity=".45"/>`;
   return h;
 }
+/* round 4: the OUTLINE follows the alignment too. For inside/outside, the
+   body is a ONE-SIDED buffer — the lamp path is its edge and the body hangs
+   off the aligned side (a channel letter: LEDs line the inside wall, the
+   letter's face is the body). side 0 keeps the symmetric union. */
+function alignedBody(o, side, r) {
+  r = r ?? S.pad;
+  if (!side) return unionLoops(o.pts, r);
+  const ds=beamDirs(o.pts);
+  const shifted=o.pts.map((p,i)=>[p[0]+ds[i][0]*side*r, p[1]+ds[i][1]*side*r]);
+  return unionLoops(shifted, r);
+}
 function sizedR(pts, i, lo=2, hi=7) {
   let nn=1/0;
   for (let k=0;k<pts.length;k++) { if (k===i) continue;
@@ -739,15 +762,17 @@ function renderS2() {
     pts: sampleAlong(RAW_DOORS[0].map(TX), 9).map(p=>[p[0]-115, p[1]-190]) };
   const carc = { fx:'arc', name:'C-arc', color:C('--obj-5'),
     pts: cArcPts().map(p=>[p[0]*.72+30, p[1]*.72+195]) };
-  const objs = [sector, door, carc];
-  const W=210, H=400;
+  const letter = { fx:'sign', name:'letter P', color:C('--obj-4'),
+    pts: letterPts() };
+  const objs = [sector, door, carc, letter];
+  const W=210, H=510;
   const inner = mode => objs.map(o=>{
     if (mode==='in')  return lampWedges(o, 1);
     if (mode==='out') return lampWedges(o, -1);
     return lampMarkup(o, mode);
   }).join('');
-  const stroke = () => objs.map(o=>
-    `<path d="${loopsD(unionLoops(o.pts, S.pad))}" fill-rule="evenodd"
+  const stroke = side => objs.map(o=>
+    `<path d="${loopsD(alignedBody(o, side))}" fill-rule="evenodd"
        fill="${mix(o.color,.05)}" stroke="${mix(o.color,.45)}" stroke-width="1.2"/>`).join('');
   const cell = (t, body) =>
     `<div class="cell"><h3>${t}</h3>
@@ -761,12 +786,12 @@ function renderS2() {
                     ['align: outside · edge-lit',-1]];
   const ribbon = side => objs.map(o=>voronoiRibbon(o, side)).join('');
   document.getElementById('s2-grid').innerHTML =
-    variants.map(([t,s])=>cell('stroke + voronoi · '+t, stroke()+ribbon(s))).join('') +
+    variants.map(([t,s])=>cell('stroke + voronoi · '+t, stroke(s)+ribbon(s))).join('') +
     cell('omni dots · shipped ref', inner('dots'));
   document.getElementById('s2-zoom').innerHTML =
-    variants.map(([t,s])=>mini('45% · '+t.split(' ·')[0], stroke()+ribbon(s))).join('') +
+    variants.map(([t,s])=>mini('45% · '+t.split(' ·')[0], stroke(s)+ribbon(s))).join('') +
     mini('45% · shipped dots', inner('dots')) +
-    mini('rejected · beams (not solid)', stroke()+inner('in'));
+    mini('rejected · beams (not solid)', stroke(0)+inner('in'));
 }
 
 /* =============================== §3 selection ======================== */
@@ -953,11 +978,12 @@ function renderS4() {
       letter-spacing=".08em" fill="rgba(153,162,173,.6)">MINI_DOME · DOORS</text>`;
   objs.forEach((o,i)=>{
     const s=st(i), tint=tintOf(i);
+    const body=alignedBody(o, 1);
     const fill = s==='sel'?'rgba(76,159,254,.13)': s==='hov'?mix(tint,.18):mix(tint,.07);
     const strk = s==='sel'?'#4c9ffe': s==='hov'?mix(tint,.85):mix(tint,.42);
-    if (s==='sel') B+=`<path d="${loopsD(o.body)}" fill="none"
+    if (s==='sel') B+=`<path d="${loopsD(body)}" fill="none"
         stroke="rgba(76,159,254,.28)" stroke-width="5.5" fill-rule="evenodd"/>`;
-    B+=`<path d="${loopsD(o.body)}" fill-rule="evenodd" fill="${fill}"
+    B+=`<path d="${loopsD(body)}" fill-rule="evenodd" fill="${fill}"
         stroke="${strk}" stroke-width="${s==='sel'?1.7:1.1}"/>`;
   });
   objs.forEach((o,i)=>{ B+=voronoiRibbon({...o, color:tintOf(i)}, 1); });
