@@ -160,6 +160,12 @@ impl PowerGateController {
             let active = gate.active_high();
             gate.pin.set_level(active);
             gate.asserted = true;
+            log::info!(
+                "[power-gate] assert {}: level={} settle={}ms",
+                gate.descriptor.gpio(),
+                if active { "high" } else { "low" },
+                gate.descriptor.settle_ms()
+            );
             let deadline = now + u64::from(gate.descriptor.settle_ms()) * 1_000;
             settled_at = Some(settled_at.map_or(deadline, |current: u64| current.max(deadline)));
         }
@@ -203,6 +209,7 @@ impl PowerGateController {
 
     /// Drop the rails in `mask`. Call only once their wires are drained.
     pub fn deassert(&mut self, mask: u32) {
+        let now = (self.now_us)();
         for gate in Self::selected_mut(&mut self.gates, mask) {
             if !gate.asserted {
                 continue;
@@ -210,6 +217,12 @@ impl PowerGateController {
             let inactive = !gate.active_high();
             gate.pin.set_level(inactive);
             gate.asserted = false;
+            log::info!(
+                "[power-gate] deassert {}: after {}ms all-black (debounce {}ms)",
+                gate.descriptor.gpio(),
+                now.saturating_sub(gate.last_lit_us) / 1_000,
+                gate.descriptor.off_debounce_ms()
+            );
         }
     }
 
