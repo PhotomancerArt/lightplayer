@@ -45,16 +45,16 @@
 //! into the slot.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{HomeOp, PreviewSource, UiAction};
+use lpa_studio_core::PreviewSource;
 
 use crate::app::home::card_thumb::thumb_swatch_style;
 use crate::app::home::gallery_preview::{ThumbPreviewBadge, use_preview_lease_raster};
-use crate::app::home::package_card::home_action;
 use crate::base::logo_mark::{BrandWord, fillet_tri_path};
 
 /// The landing hero's example and cadence. A constant on purpose: the
 /// future fixture-hero plan swaps this surface's source, not its shape.
-const HERO_EXAMPLE: &str = "examples/plasma";
+/// `pub(crate)` because the landing's edit-shader affordance opens it.
+pub(crate) const HERO_EXAMPLE: &str = "examples/plasma";
 /// Present cadence for the hero — the visitor is watching this one.
 const HERO_FPS: f32 = 30.0;
 
@@ -79,11 +79,13 @@ const WORD_BASELINE_Y: f32 = 292.0;
 /// own aspect.
 const HERO_CANVAS: (u32, u32) = (600, 616);
 
-/// The landing hero: brand triangle as a live shader window, wordmark
-/// under it, and a quiet way into the editor.
+/// The landing hero: brand triangle as a live shader window, the wordmark
+/// lit by the same surface. The way into the editor lives beside the
+/// slogan in `home_landing` (polish round: an edit link here fought the
+/// tagline for attention).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn BrandHero(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> Element {
+pub(crate) fn BrandHero() -> Element {
     // Raster-first on purpose: examples drive LEDs, so their products are
     // control-first and a plain lease would keep the raster hidden behind a
     // lamp view (G1 finding: the triangle sat dark on the gradient). The
@@ -138,7 +140,7 @@ pub(crate) fn BrandHero(#[props(default)] on_action: Option<EventHandler<UiActio
         .is_some_and(|canvas| canvas.revealed);
 
     rsx! {
-        div { class: "tw:flex tw:flex-col tw:items-center tw:gap-4",
+        div { class: "tw:flex tw:flex-col tw:items-center",
             div {
                 id: "{preview.frame_id}",
                 class: "tw:relative",
@@ -197,72 +199,31 @@ pub(crate) fn BrandHero(#[props(default)] on_action: Option<EventHandler<UiActio
                     }
                 }
             }
-            HeroEditLink { on_action }
         }
     }
 }
 
 /// The pre-reveal word wrapper: absolutely placed so its baseline sits on
 /// [`WORD_BASELINE_Y`] (the clip glyphs' line), fading out once the shader
-/// lights the glyphs.
+/// lights the glyphs. Same duration as the canvas reveal — the stage
+/// breathes as one surface, not two exchanges.
 fn hero_word_class(lit: bool) -> &'static str {
     if lit {
-        "tw:absolute tw:inset-x-0 tw:flex tw:justify-center tw:opacity-0 tw:transition-opacity tw:duration-500"
+        "tw:absolute tw:inset-x-0 tw:flex tw:justify-center tw:opacity-0 tw:transition-opacity tw:duration-700 tw:ease-out"
     } else {
-        "tw:absolute tw:inset-x-0 tw:flex tw:justify-center tw:opacity-100 tw:transition-opacity tw:duration-500"
-    }
-}
-
-/// The way out of the hero and into the editor: the Explore card's open
-/// path, worn quietly. Without a dispatcher (stories, host builds) it
-/// renders inert with a tooltip that says why — the `OpenInStudioButton`
-/// precedent.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn HeroEditLink(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> Element {
-    let live = on_action.is_some();
-    let title = if live {
-        "Opens this shader in the editor and keeps it in your projects"
-    } else {
-        "Only available in the running app"
-    };
-    rsx! {
-        button {
-            class: hero_edit_class(live),
-            r#type: "button",
-            disabled: !live,
-            title: "{title}",
-            onclick: move |_| {
-                if let Some(on_action) = on_action {
-                    on_action
-                        .call(
-                            home_action(HomeOp::OpenExample {
-                                id: HERO_EXAMPLE.to_string(),
-                            }),
-                        );
-                }
-            },
-            "edit this shader"
-        }
-    }
-}
-
-/// Quiet by design: text weight, no chrome until hover. The hero's own
-/// picture is the call to action; this is the door beside it.
-fn hero_edit_class(live: bool) -> &'static str {
-    if live {
-        "tw:cursor-pointer tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-2 tw:py-1 tw:text-xs tw:text-muted-foreground tw:transition-colors tw:hover:border-border tw:hover:text-strong-foreground"
-    } else {
-        "tw:cursor-not-allowed tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-2 tw:py-1 tw:text-xs tw:text-dim-foreground"
+        "tw:absolute tw:inset-x-0 tw:flex tw:justify-center tw:opacity-100 tw:transition-opacity tw:duration-700 tw:ease-out"
     }
 }
 
 /// Revealed only once a frame has landed, so the gradient covers the boot.
+/// The transition classes ride BOTH states so the fade is symmetric and
+/// slow enough to read as a reveal, not a swap (polish round: the 300ms
+/// one-sided fade registered as a jump).
 fn hero_canvas_class(revealed: bool) -> &'static str {
     if revealed {
-        "tw:absolute tw:inset-0 tw:h-full tw:w-full tw:opacity-100 tw:transition-opacity tw:duration-300"
+        "tw:absolute tw:inset-0 tw:h-full tw:w-full tw:opacity-100 tw:transition-opacity tw:duration-700 tw:ease-out"
     } else {
-        "tw:absolute tw:inset-0 tw:h-full tw:w-full tw:opacity-0"
+        "tw:absolute tw:inset-0 tw:h-full tw:w-full tw:opacity-0 tw:transition-opacity tw:duration-700 tw:ease-out"
     }
 }
 
