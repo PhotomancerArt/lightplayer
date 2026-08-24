@@ -3393,8 +3393,14 @@ impl ProjectController {
     /// [`Self::apply_patch_bays`] just wrote onto the faces: every output's
     /// bay, every patched fixture's row, and each fixture's instance table
     /// parsed from its OWN map2d body (the same bytes its mapping editor
-    /// holds). `None` when nothing patchable has answered — the surface
-    /// route then renders its empty state.
+    /// holds).
+    ///
+    /// An output belongs here whether or not anything is PATCHED onto it:
+    /// its ports are the def's own geometry, and their free space is what
+    /// walk-up assignment clicks — a project with every fixture manual and
+    /// unmapped is the state the flow exists for. `None` only when no
+    /// output answered at all (no live project, or a project that drives
+    /// nothing); the surface route then renders its empty state.
     fn build_patch_surface(&self, nodes: &[UiNodeView]) -> Option<crate::UiPatchSurface> {
         let mut surface = crate::UiPatchSurface::default();
         // Modules by KIND, not face: module faces deliberately derive
@@ -3453,10 +3459,21 @@ impl ProjectController {
                     .and_then(|editor| editor.content.as_ref())
                     .and_then(|content| content.text());
                 let mapping_loaded = body.is_some();
+                let patch_body = fixture
+                    .patch_editor
+                    .as_ref()
+                    .and_then(|editor| editor.content.as_ref())
+                    .and_then(|content| content.text());
                 let patch_loaded = fixture
                     .patch_editor
                     .as_ref()
                     .is_some_and(|editor| editor.content.is_some());
+                // The flow flag off the same bytes the verbs transform (P5b).
+                // A body that has not landed — or one this build cannot read
+                // — is AUTO: manual is a claim a document makes.
+                let manual_flow = patch_body
+                    .and_then(|text| lpc_mapping::PatchDoc::from_json(text).ok())
+                    .is_some_and(|doc| doc.flow == lpc_mapping::PatchFlow::Manual);
                 let mut instances = body
                     .map(super::ui_patch_surface::instances_from_map2d)
                     .unwrap_or_default();
@@ -3483,6 +3500,7 @@ impl ProjectController {
                         .map(|editor| editor.artifact.clone()),
                     mapping_loaded,
                     patch_loaded,
+                    manual_flow,
                     instances,
                     arrange: None,
                     module: None,
@@ -3612,11 +3630,22 @@ impl ProjectController {
                 name,
             ));
         }
+        // THE unmapped-selection chase (Q9), computed once for every view:
+        // the panel strip and the canvas sprites both paint these colors,
+        // riding the lens's own frame clock so they advance together and
+        // freeze together. Last, because it reads the finished fixtures.
+        surface.chase_preview = super::patch_preview::chase_preview(
+            &surface,
+            self.patch_selection.as_ref(),
+            self.sync.as_ref().map_or(0, |sync| sync.frames_seen()),
+        );
         (!surface.outputs.is_empty()).then_some(surface)
     }
 
     fn apply_patch_bays(&self, nodes: &mut [UiNodeView]) {
-        use super::patch_bay_derivation::{OutputWire, fixture_patch, output_bay};
+        use super::patch_bay_derivation::{
+            OutputWire, fixture_patch, output_bay, unplaced_fixture_patch,
+        };
 
         let Some(sync) = self.sync.as_ref() else {
             return;
@@ -3670,11 +3699,21 @@ impl ProjectController {
                     let Some(wire) = wires.iter().find(|wire| wire.node == id) else {
                         return;
                     };
-                    let bay = output_bay(wire, &producer);
-                    output.patch = (!bay.is_empty()).then_some(bay);
+                    // Even a bay with no cell on it: the ports are the
+                    // output def's own geometry, and an output driving
+                    // NOTHING is exactly the state walk-up assignment
+                    // starts from (every fixture manual and unmapped). The
+                    // card hides an empty bay at render time; the patch
+                    // surface needs the free space.
+                    output.patch = Some(output_bay(wire, &producer));
                 }
                 crate::UiNodeFace::Fixture(fixture) => {
-                    fixture.patch = fixture_patch(id, &wires, &producer);
+                    // A fixture with no run on any wire still gets its row:
+                    // under manual flow that is a real, reachable state, and
+                    // the objects it holds are what the walk-up user clicks
+                    // to put them somewhere (P5b).
+                    fixture.patch = fixture_patch(id, &wires, &producer)
+                        .or_else(|| unplaced_fixture_patch(&fixture.preview.preview));
                 }
                 _ => {}
             }
@@ -7100,6 +7139,10 @@ impl ProjectController {
                         patch_verbs::rotate(&ctx, &doc, &subject, *steps, *stride)
                     }
                     PatchVerbKind::Clear => patch_verbs::clear(&ctx, &doc, &subject),
+                    // Fixture-grain verbs: the selection picked the fixture,
+                    // not the thing inside it.
+                    PatchVerbKind::SetFlow { manual } => patch_verbs::set_flow(&ctx, &doc, *manual),
+                    PatchVerbKind::UnmapAll => patch_verbs::unmap_all(&ctx, &doc),
                     _ => unreachable!("port/undo verbs handled above"),
                 };
                 match result {
@@ -7139,7 +7182,7 @@ impl ProjectController {
                 .map(|(artifact, before, after)| {
                     (
                         artifact.clone(),
-                        before.clone().into_bytes(),
+                        format!("{before}\n").into_bytes(),
                         format!("{after}\n").into_bytes(),
                     )
                 })

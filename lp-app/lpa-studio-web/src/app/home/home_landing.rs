@@ -1,13 +1,20 @@
-//! The Home landing page (`/`, vision D14 / spike §5) — **the M3
-//! stub**: lockup, one-line tagline, three dive-in cards. Deliberately
-//! no marketing depth and no demo strip; the real landing pass is M3's.
-//! Reached through the logo only — there is no Home nav tab (D11).
+//! The Home landing page (`/`, vision D14 / spike §5): the brand hero, a
+//! one-line tagline, three dive-in cards. Still no marketing depth — but
+//! the stub's static lockup is gone: [`BrandHero`] makes the mark's
+//! triangle a window onto a live engine shader, so the landing demonstrates
+//! the product instead of describing it. Reached through the logo only —
+//! there is no Home nav tab (D11).
+//!
+//! Direction: the hero is the seed of the fixture-hero (a module panel
+//! under it, touch/sound driving it) — see the
+//! `2026-08-24-1100-logo-triangle-chip` plan, D1, and `brand_hero.rs`.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, UiAction};
 
+use crate::app::home::brand_hero::BrandHero;
 use crate::app::home::package_card::home_action;
-use crate::base::{LogoStacked, StudioIcon, StudioIconName};
+use crate::base::{StudioIcon, StudioIconName};
 use crate::cloud::SharedOpenState;
 
 /// The landing stub: the brand, what this is, and three ways in.
@@ -32,9 +39,15 @@ pub fn HomePage(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> 
                     "{line}"
                 }
             }
-            LogoStacked { size: 96 }
-            p { class: "tw:m-0 tw:max-w-md tw:text-sm tw:text-muted-foreground",
-                "Friendly shaders, everywhere"
+            BrandHero {}
+            // The slogan reads as a slogan — strong ink, a hair larger than
+            // body text — with the edit-shader door as a quiet pencil beside
+            // it (polish round: a text button here fought the tagline).
+            div { class: "tw:flex tw:items-center tw:justify-center tw:gap-1.5",
+                p { class: "tw:m-0 tw:max-w-md tw:text-[15px] tw:font-medium tw:text-strong-foreground",
+                    "Friendly shaders, everywhere"
+                }
+                EditShaderPencil { on_action }
             }
             nav { class: "tw:grid tw:w-[min(680px,100%)] tw:grid-cols-3 tw:gap-3 tw:max-[640px]:grid-cols-1",
                 DiveInCard {
@@ -65,6 +78,50 @@ pub fn HomePage(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> 
                 }
             }
         }
+    }
+}
+
+/// The door from the hero into the editor: a pencil beside the slogan,
+/// opening the hero's example via the Explore-card path. Inert with a
+/// says-why tooltip when there is no dispatcher (stories, host builds).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn EditShaderPencil(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> Element {
+    let live = on_action.is_some();
+    let title = if live {
+        "Edit this shader — opens it in the editor and keeps it in your projects"
+    } else {
+        "Only available in the running app"
+    };
+    rsx! {
+        button {
+            class: edit_pencil_class(live),
+            r#type: "button",
+            disabled: !live,
+            title: "{title}",
+            "aria-label": "Edit this shader",
+            onclick: move |_| {
+                if let Some(on_action) = on_action {
+                    on_action
+                        .call(
+                            home_action(HomeOp::OpenExample {
+                                id: crate::app::home::brand_hero::HERO_EXAMPLE.to_string(),
+                            }),
+                        );
+                }
+            },
+            StudioIcon { name: StudioIconName::Edited, size: 14 }
+        }
+    }
+}
+
+/// Quiet chrome: the slogan is the sentence, the pencil is a footnote
+/// that brightens on hover.
+fn edit_pencil_class(live: bool) -> &'static str {
+    if live {
+        "tw:flex tw:h-6 tw:w-6 tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:text-muted-foreground tw:transition-colors tw:hover:border-border tw:hover:text-strong-foreground"
+    } else {
+        "tw:flex tw:h-6 tw:w-6 tw:cursor-not-allowed tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:text-dim-foreground"
     }
 }
 

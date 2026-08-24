@@ -3,6 +3,7 @@
 //! and the Home landing stub — plus the cards they share. One combined
 //! gallery page lived here until the chrome C reorg split it.
 
+pub(crate) mod brand_hero;
 pub(crate) mod card_sheet;
 pub(crate) mod card_thumb;
 pub(crate) mod device_card;
@@ -16,6 +17,8 @@ pub(crate) mod gallery_preview;
 #[cfg(feature = "stories")]
 pub(crate) mod home_gallery_stories;
 pub mod home_landing;
+#[cfg(feature = "stories")]
+pub(crate) mod home_landing_stories;
 pub(crate) mod new_project_menu;
 #[cfg(feature = "stories")]
 pub(crate) mod new_project_menu_stories;

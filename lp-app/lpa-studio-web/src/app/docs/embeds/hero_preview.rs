@@ -11,9 +11,9 @@
 //! present cadence than a thumb: this is the surface a reader is actually
 //! watching, not a card in a grid.
 //!
-//! The tier badge is the gallery's, quieted: an article must still say out
-//! loud when it fell back to the CPU tier or failed (fidelity-tiers ADR —
-//! never silent), but it should not shout mid-sentence.
+//! The badge is the gallery's, quieted further by the issue-only policy
+//! (fidelity-tiers ADR, decision-4 note): an article says out loud when its
+//! preview FAILED, and says nothing about which tier is rendering it.
 
 use dioxus::prelude::*;
 use lpa_studio_core::PreviewSource;
@@ -53,7 +53,7 @@ pub(crate) fn DocsHeroPreview(
                     class: hero_canvas_class(canvas.revealed),
                 }
             }
-            if let Some(badge) = preview.badge {
+            if let Some(badge) = preview.badge.and_then(ThumbPreviewBadge::issue) {
                 span {
                     class: "tw:absolute tw:bottom-1.5 tw:right-1.5 tw:rounded-sm tw:border tw:bg-background/60 tw:px-1 tw:text-[0.6rem] tw:font-bold tw:uppercase tw:leading-4 {hero_badge_class(&badge)}",
                     title: hero_badge_title(&badge),

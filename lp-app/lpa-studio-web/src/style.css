@@ -1592,6 +1592,64 @@ label:has(> input:not(:disabled)) {
     stroke-dasharray: 6 5;
 }
 
+/* Object BODIES (patching round 3: an object is a THING). Rest state is
+   barely-there so the lamps stay the light's voice; hover lifts the body
+   under the pointer — pure CSS, no re-render, which is what keeps 150
+   dome objects cheap. Selected wears the accent. */
+.lpme-obj-hull {
+    fill: rgba(255, 255, 255, 0.025);
+    stroke: rgba(154, 151, 143, 0.35);
+    pointer-events: all;
+    transition:
+        fill 80ms ease,
+        stroke 80ms ease;
+}
+
+.lpme-obj-hull:hover {
+    fill: rgba(90, 169, 230, 0.08);
+    stroke: rgba(90, 169, 230, 0.6);
+}
+
+.lpme-obj-hull-on {
+    fill: rgba(76, 159, 254, 0.1);
+    stroke: #4c9ffe;
+}
+
+/* The ARM's attention language (patching round 3, #5): the armed button
+   PULSES instead of changing its text, and the COUNTERPART surface — the
+   place the next click belongs — wears a breathing ring. Both classes are
+   applied only while engine frames are flowing, so story captures (no
+   frames) render the settled state. */
+@keyframes ux-arm-pulse {
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(76, 159, 254, 0.55);
+    }
+    70% {
+        box-shadow: 0 0 0 5px rgba(76, 159, 254, 0);
+    }
+}
+
+.ux-arm-pulse {
+    animation: ux-arm-pulse 1.2s ease-out infinite;
+}
+
+@keyframes ux-arm-attention {
+    0%,
+    100% {
+        outline-color: rgba(76, 159, 254, 0.85);
+    }
+    50% {
+        outline-color: rgba(76, 159, 254, 0.3);
+    }
+}
+
+.ux-arm-attention {
+    outline: 2px solid rgba(76, 159, 254, 0.85);
+    outline-offset: -2px;
+    animation: ux-arm-attention 1.6s ease-in-out infinite;
+}
+
 .lpme-fit-rect {
     fill: rgba(90, 169, 230, 0.05);
     stroke: rgba(90, 169, 230, 0.75);
@@ -5188,11 +5246,13 @@ label:has(> input:not(:disabled)) {
 /* ==========================================================================
    Brand — LogoMark / LogoLockup (src/base/logo_mark.rs)
 
-   Motion rules from the logo spike (gates 1-3): in-app, ONLY the word
-   "Light" sweeps the LED rainbow; icon-only marks cycle the play triangle
-   instead; marketing surfaces run the full-rainbow wordmark. The triangle
-   cycle STARTS on the brand accent and the gradient rests at its left edge,
-   so frozen frames (story captures, reduced motion) look canonical.
+   Motion rules (2026-08-03 spike gates 1-3, amended by gate-4 post-merge:
+   the in-app/marketing split collapsed): the WHOLE wordmark sweeps the LED
+   rainbow everywhere; icon-only marks cycle the play triangle instead. The
+   triangle cycle STARTS on the brand accent and the gradient rests at its
+   left edge, so frozen frames (story captures, reduced motion) look
+   canonical. Mark anatomy is the 2026-08-24 simplification — see
+   spikes/logo-triangle-chip/index.html and base/logo_mark.rs.
    ========================================================================== */
 
 @keyframes lp-brand-play-cycle {

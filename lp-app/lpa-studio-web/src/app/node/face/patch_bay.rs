@@ -28,19 +28,12 @@
 //!
 //! Read-only by design this slice: no click target, no drag, no write.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use dioxus::prelude::*;
 use lpa_studio_core::{UiControlProductPreview, UiFixturePatch, UiPatchBay, UiPatchCell};
-use wasm_bindgen::{Clamped, JsCast};
 
 use crate::app::node::face::NodeCardSection;
 use crate::app::node::lamp_view::{UNLIT_RGB, control_rgb_at_sample};
-
-/// Monotonic cell-canvas element ids (one per mounted strip).
-static NEXT_CELL_CANVAS_ID: AtomicU64 = AtomicU64::new(0);
+use crate::app::patch::lamp_strip::{LampStrip, StripMode};
 
 /// The cell whose twin is currently lit, shared across cards.
 ///
@@ -211,13 +204,14 @@ fn PatchCellBox(
     }
 }
 
-/// The cell's live pixels: one canvas texel per lamp, CSS-scaled.
+/// The cell's live pixels: the shared [`LampStrip`], pinned to the gradient
+/// presentation.
 ///
 /// One texel per lamp and `image-rendering: pixelated` — a cell is a
 /// picture of DISCRETE lamps, and smoothing them would draw a gradient the
-/// strip is not showing. Reuses `ux-produced-product-pixel-canvas` so the
-/// story-capture ready-wait (which polls that class for
-/// `data-preview-painted`) covers these strips with no script change.
+/// strip is not showing. The bay does NOT take the reactive bulbs/gradient
+/// rule (spike §4): that is a panel-scale decision, and a cell box already
+/// says "discrete lamps" with its own border.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PatchCellStrip(
@@ -225,122 +219,18 @@ fn PatchCellStrip(
     frame: Option<UiControlProductPreview>,
     along_wire: bool,
 ) -> Element {
-    let canvas_id = use_hook(|| {
-        let id = NEXT_CELL_CANVAS_ID.fetch_add(1, Ordering::Relaxed);
-        format!("patch-cell-canvas-{id}")
-    });
-    let painted = use_hook(|| Rc::new(RefCell::new(None::<CellPaintKey>)));
-    let texels = cell.lamps.max(1);
-    let key = CellPaintKey {
-        revision: frame.as_ref().map_or(-1, |frame| frame.revision),
-        bytes: frame
-            .as_ref()
-            .map_or(0, |frame| frame.bytes.as_ptr() as usize),
-        wire_start: cell.wire_start,
-        lamps: cell.lamps,
-        reversed: cell.reversed,
-        contested: cell.contested,
-        along_wire,
-    };
-
-    if *painted.borrow() != Some(key) {
-        let canvas_id = canvas_id.clone();
-        let painted = painted.clone();
-        let cell = cell.clone();
-        let frame = frame.clone();
-        spawn(async move {
-            match paint_cell_strip(&canvas_id, &cell, frame.as_ref(), along_wire) {
-                Ok(()) => *painted.borrow_mut() = Some(key),
-                Err(error) => log::debug!("patch cell paint skipped: {error}"),
-            }
-        });
-    }
-
-    let mount_id = canvas_id.clone();
-    let mount_painted = painted.clone();
-    let mount_cell = cell.clone();
-    let mount_frame = frame.clone();
+    let colors = cell_strip_colors(&cell, frame.as_ref(), along_wire);
     rsx! {
-        // `ux-produced-product-pixel-canvas` positions absolutely and fills
-        // its container (that is what makes it a product preview's
-        // full-bleed frame), so the strip supplies the sized, relative box
-        // it fills — the same arrangement `GradientStripCanvas` uses.
+        // The strip's canvas positions absolutely and fills its container,
+        // so the cell supplies the sized, relative box it fills — the same
+        // arrangement `GradientStripCanvas` uses.
         div { class: "tw:relative tw:h-3.5 tw:w-full",
-            canvas {
-                id: "{canvas_id}",
-                class: "ux-produced-product-pixel-canvas",
-                width: "{texels}",
-                height: "1",
-                onmounted: move |_| {
-                    let canvas_id = mount_id.clone();
-                    let painted = mount_painted.clone();
-                    let cell = mount_cell.clone();
-                    let frame = mount_frame.clone();
-                    spawn(async move {
-                        match paint_cell_strip(&canvas_id, &cell, frame.as_ref(), along_wire) {
-                            Ok(()) => *painted.borrow_mut() = Some(key),
-                            Err(error) => log::debug!("patch cell mount paint failed: {error}"),
-                        }
-                    });
-                },
-            }
+            LampStrip { colors, mode: StripMode::Gradient }
         }
     }
 }
 
-/// Everything a cell's paint depends on. The frame is keyed by revision AND
-/// buffer pointer, the same pair the lamp canvas uses: two products can
-/// share a revision, and a fresh `Rc` is what a genuinely new frame carries.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct CellPaintKey {
-    revision: i64,
-    bytes: usize,
-    wire_start: u32,
-    lamps: u32,
-    reversed: bool,
-    contested: bool,
-    along_wire: bool,
-}
-
-// -- painting ------------------------------------------------------------------
-
-fn paint_cell_strip(
-    canvas_id: &str,
-    cell: &UiPatchCell,
-    frame: Option<&UiControlProductPreview>,
-    along_wire: bool,
-) -> Result<(), String> {
-    let canvas = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(canvas_id))
-        .ok_or_else(|| format!("canvas #{canvas_id} not mounted"))?
-        .dyn_into::<web_sys::HtmlCanvasElement>()
-        .map_err(|_| format!("element #{canvas_id} is not a canvas"))?;
-    let texels = cell.lamps.max(1);
-    if canvas.width() != texels || canvas.height() != 1 {
-        canvas.set_width(texels);
-        canvas.set_height(1);
-    }
-    let context = canvas
-        .get_context("2d")
-        .map_err(|error| format!("get 2d context: {error:?}"))?
-        .ok_or_else(|| "canvas has no 2d context".to_string())?
-        .dyn_into::<web_sys::CanvasRenderingContext2d>()
-        .map_err(|_| "2d context has an unexpected type".to_string())?;
-
-    let rgba = cell_strip_rgba(cell, frame, along_wire);
-    let image = web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&rgba), texels, 1)
-        .map_err(|error| format!("build ImageData: {error:?}"))?;
-    context
-        .put_image_data(&image, 0.0, 0.0)
-        .map_err(|error| format!("putImageData: {error:?}"))?;
-    canvas
-        .set_attribute("data-preview-painted", "1")
-        .map_err(|error| format!("mark painted: {error:?}"))?;
-    Ok(())
-}
-
-/// One RGBA quad per lamp of the cell, in the ROW's reading order.
+/// One RGB per lamp of the cell, in the ROW's reading order.
 ///
 /// The output row reads along the wire, so texel `j` is wire lamp
 /// `wire_start + j`. The fixture row reads along the producer's own
@@ -348,28 +238,26 @@ fn paint_cell_strip(
 /// whose wire lamp runs BACKWARDS when the run is reversed. That mapping is
 /// the whole reason a reversed strand looks continuous on its own card and
 /// end-first on the wire.
-fn cell_strip_rgba(
+fn cell_strip_colors(
     cell: &UiPatchCell,
     frame: Option<&UiControlProductPreview>,
     along_wire: bool,
-) -> Vec<u8> {
+) -> Vec<[u8; 3]> {
     let texels = cell.lamps.max(1) as usize;
-    let mut rgba = Vec::with_capacity(texels * 4);
-    for texel in 0..texels {
-        let index = texel as u32;
-        let wire_lamp = if along_wire || !cell.reversed {
-            cell.wire_start.saturating_add(index)
-        } else {
-            cell.wire_start
-                .saturating_add(cell.lamps.saturating_sub(1).saturating_sub(index))
-        };
-        let rgb = frame
-            .and_then(|frame| control_rgb_at_sample(frame, wire_lamp.saturating_mul(3)))
-            .unwrap_or(UNLIT_RGB);
-        rgba.extend_from_slice(&rgb);
-        rgba.push(255);
-    }
-    rgba
+    (0..texels)
+        .map(|texel| {
+            let index = texel as u32;
+            let wire_lamp = if along_wire || !cell.reversed {
+                cell.wire_start.saturating_add(index)
+            } else {
+                cell.wire_start
+                    .saturating_add(cell.lamps.saturating_sub(1).saturating_sub(index))
+            };
+            frame
+                .and_then(|frame| control_rgb_at_sample(frame, wire_lamp.saturating_mul(3)))
+                .unwrap_or(UNLIT_RGB)
+        })
+        .collect()
 }
 
 // -- derivations ---------------------------------------------------------------
@@ -464,6 +352,11 @@ fn port_caption(port: &lpa_studio_core::UiPatchPort) -> String {
 /// The fixture row's caption: how its own channel space arrives.
 fn fixture_caption(patch: &UiFixturePatch) -> String {
     let runs = patch.cells.len();
+    if runs == 0 {
+        // The manual-flow state (P5b): a fixture whose lamps are on no wire
+        // at all. "0 runs" would read as a bug; this is a choice.
+        return format!("{} lamps · not mapped", patch.lamps);
+    }
     if patch.is_single_run() {
         return format!("{} lamps · one run", patch.lamps);
     }
