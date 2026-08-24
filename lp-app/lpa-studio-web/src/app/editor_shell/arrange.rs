@@ -256,7 +256,7 @@ pub(crate) fn ProjectCanvasHost(
                 .fixtures
                 .iter()
                 .find(|fixture| fixture.node == dive.node)
-                .map(|fixture| fixture_live_colors(&fixture.patch))
+                .map(|fixture| fixture_live_colors(&surface, fixture))
                 .unwrap_or_default();
             if !colors.is_empty() && *arrange_live.peek() != colors {
                 arrange_live.set(colors);
@@ -281,7 +281,7 @@ pub(crate) fn ProjectCanvasHost(
             else {
                 continue;
             };
-            let mut colors = fixture_live_colors(&fixture.patch);
+            let mut colors = fixture_live_colors(&surface, fixture);
             // Keep-last-good across an apply gap — but only while the
             // fixture still HAS a run. A fixture with nothing on a wire
             // publishes no frame at all, and keeping its last good colors
@@ -1191,7 +1191,7 @@ mod tests {
         let fixture = &surface.fixtures[0];
         assert!(fixture.patch.cells.is_empty(), "nothing on a wire");
         assert!(
-            fixture_live_colors(&fixture.patch).is_empty(),
+            fixture_live_colors(&surface, fixture).is_empty(),
             "and so no frame, and so no colors to feed"
         );
 

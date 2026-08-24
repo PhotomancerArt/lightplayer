@@ -48,8 +48,8 @@ use crate::app::editor_shell::patching::{
     ArmedVerb, PatchingUi, arm_assign, arm_swap, assign_subject_target, is_armable,
 };
 use crate::app::node::lamp_view::{
-    UNLIT_RGB, control_color_order_at_sample, control_rgb_at_sample, linear_unorm16_to_srgb8,
-    wire_lamp_rgb,
+    UNLIT_RGB, cell_frame, control_color_order_at_sample, control_rgb_at_sample,
+    linear_unorm16_to_srgb8, wire_lamp_rgb,
 };
 use crate::app::patch::lamp_strip::{LampStrip, StripPresentation};
 use crate::app::patch::verb_ui::{
@@ -558,32 +558,6 @@ fn object_fixture<'a>(
     }
 }
 
-/// The published frame of the output whose bay carries this run.
-///
-/// Per RUN, not per fixture: a fixture can drive two boxes (the mini dome
-/// drives both), and `UiFixturePatch::frame` carries only the first one's —
-/// enough for the bay's own face, a lie for a panel that must show the
-/// object the user just selected. The wire a run landed on is the only wire
-/// that can answer for it.
-fn cell_frame<'a>(
-    surface: &'a UiPatchSurface,
-    cell_id: &str,
-) -> Option<&'a UiControlProductPreview> {
-    surface
-        .outputs
-        .iter()
-        .find(|output| {
-            output
-                .bay
-                .ports
-                .iter()
-                .any(|port| port.cells.iter().any(|cell| cell.id == cell_id))
-        })?
-        .bay
-        .frame
-        .as_ref()
-}
-
 /// The OBJECT strip: the object's lamps in the OBJECT's own order.
 ///
 /// Mapped, it is the published wire decoded back through the object's runs,
@@ -723,13 +697,20 @@ fn next_unmapped_object(surface: &UiPatchSurface) -> Option<(&UiPatchSurfaceFixt
 /// fixture with a run anywhere states its own lamp type; one with no run at
 /// all has never told anybody, and the panel says so rather than guessing in
 /// silence.
-fn fixture_color_order(fixture: &UiPatchSurfaceFixture) -> Option<ColorOrder> {
-    let frame = fixture.patch.frame.as_ref()?;
-    fixture
-        .patch
-        .cells
-        .iter()
-        .find_map(|cell| control_color_order_at_sample(frame, cell.wire_start.saturating_mul(3)))
+///
+/// Each run is asked of ITS OWN output's frame ([`cell_frame`]): a fixture
+/// driving two boxes has two wires, and a run's wire lamps mean nothing in
+/// the other one's layout.
+fn fixture_color_order(
+    surface: &UiPatchSurface,
+    fixture: &UiPatchSurfaceFixture,
+) -> Option<ColorOrder> {
+    fixture.patch.cells.iter().find_map(|cell| {
+        control_color_order_at_sample(
+            cell_frame(surface, &cell.id)?,
+            cell.wire_start.saturating_mul(3),
+        )
+    })
 }
 
 /// A1, said out loud: which lamp type the output strip decoded under, and
@@ -754,13 +735,16 @@ fn decode_line(
         && let Some(order) = output
             .window
             .and_then(|(start, _)| control_color_order_at_sample(frame, start.saturating_mul(3)))
-            .or_else(|| object_fixture(surface, &object.target).and_then(fixture_color_order))
+            .or_else(|| {
+                object_fixture(surface, &object.target)
+                    .and_then(|fixture| fixture_color_order(surface, fixture))
+            })
     {
         return (order, decoded_as(order, &object.name));
     }
     // Free space: the object that sized the segment (D6).
     if let Some((fixture, name)) = next_unmapped_object(surface)
-        && let Some(order) = fixture_color_order(fixture)
+        && let Some(order) = fixture_color_order(surface, fixture)
     {
         return (order, decoded_as(order, &name));
     }
