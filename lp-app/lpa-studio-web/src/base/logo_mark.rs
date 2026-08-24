@@ -20,8 +20,10 @@
 //! from the same geometry — `favicon_in_sync` fails on drift; regenerate via
 //! `cargo test -p lpa-studio-web favicon_regen -- --ignored`.
 //!
-//! Design record: `spikes/lightplayer-logo/index.html` (PR #304); heritage
-//! motifs from the 2014 Light at Play archive.
+//! Design record: `spikes/logo-triangle-chip/index.html` (PR #444 — the
+//! 2026-08-24 simplification: lens ring deleted, triangle grown to fillet
+//! corners, pads to full ink) on top of `spikes/lightplayer-logo/index.html`
+//! (PR #304); heritage motifs from the 2014 Light at Play archive.
 
 use dioxus::prelude::*;
 
