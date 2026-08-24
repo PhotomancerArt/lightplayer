@@ -80,6 +80,22 @@ fn docked_frame(
     selection: Option<UiPatchTarget>,
     armed: Option<ArmedVerb>,
 ) -> Element {
+    docked_frame_with_picker(surface, selection, armed, false)
+}
+
+/// [`docked_frame`], with the output-picker POPOVER posed open (round 2, P3).
+///
+/// The popover is a MOUNT of the real Outputs panel over the dock column, so
+/// posing it is exactly posing the panel's `picker_open` — there is no second
+/// surface to fixture. Deterministic like everything else here: the story
+/// fixtures publish no frames, so the Outputs panel's counterpart glow shows
+/// its settled colours without the breathing.
+fn docked_frame_with_picker(
+    surface: UiPatchSurface,
+    selection: Option<UiPatchTarget>,
+    armed: Option<ArmedVerb>,
+    picker_open: bool,
+) -> Element {
     rsx! {
         div { class: "tw:flex tw:h-[520px] tw:w-[320px] tw:flex-col tw:overflow-y-auto tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:p-2.5",
             PatchPanel {
@@ -87,6 +103,7 @@ fn docked_frame(
                 selection,
                 armed,
                 docked: true,
+                picker_open,
                 on_action: move |_| {},
             }
         }
@@ -223,7 +240,7 @@ fn patch_panel_docked_paired() -> Element {
 }
 
 #[story(
-    description = "OBJECT-FIRST at DOCK width: the invitation state in the Props panel, the densest thing the panel has to fit — the object's frozen chase strip, the refusing transport, and the output section's arm plus the port cards that state each destination's occupancy. The cards are deliberately NOT restyled this pass (they are the next phase's subject); everything around them is what this width is being judged on."
+    description = "OBJECT-FIRST at DOCK width: the invitation state in the Props panel, the densest thing the panel has to fit — the object's frozen chase strip, the refusing transport, and the output section's arm. The in-panel port list is GONE (round 2, P3): pressing assign arms the verb AND brings the real Outputs panel up, so this state says one thing rather than offering a second, poorer list of the same ports."
 )]
 fn patch_panel_docked_objfirst() -> Element {
     let mut surface = mini_dome_walkup_surface();
@@ -235,4 +252,17 @@ fn patch_panel_docked_objfirst() -> Element {
     // zero frames — the same still the page-width objfirst story lands on.
     surface.chase_preview = lpa_studio_core::chase_preview(&surface, Some(&selection), 0);
     docked_frame(surface, Some(selection), None)
+}
+
+#[story(
+    description = "THE OUTPUT PICKER, open over the dock (round 2, P3 — the experiment G1 reads out). Pressing assign on an unmapped object arms the verb and brings the ports up: the popover HOSTS the real Outputs panel — the same component the Outputs dock mounts, with the same patch_verbs grammar — so every free run in it is a click target that lands the object at the EXACT clicked lamp. That is why the panel's own flat port lists are gone: a destination you cannot judge is not a choice, and this surface shows the box/port tree, each port's occupancy, and the counterpart glow that a text row could only summarise. Dismissal is ONE rule at two sizes — a selection move or a patch write closes it, esc closes it (the ladder's new first rung), a click outside closes it. The card covers the panel's armed banner while it is up, so its header carries the arm instead — an armed thing always names itself. The free runs' counterpart glow is a live-frames animation and the story fixtures publish none, so this capture is the settled state. Below the fold the same panel arrives full-screen instead (see workbench_patching_mobile_pick)."
+)]
+fn patch_panel_docked_picker() -> Element {
+    let mut surface = mini_dome_walkup_surface();
+    let selection = UiPatchTarget::Instance {
+        node: dome(),
+        path: "/sector/4".to_string(),
+    };
+    surface.chase_preview = lpa_studio_core::chase_preview(&surface, Some(&selection), 0);
+    docked_frame_with_picker(surface, Some(selection), Some(ArmedVerb::Assign), true)
 }

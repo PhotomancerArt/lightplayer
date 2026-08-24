@@ -23,7 +23,8 @@
 //! Outputs dock, the Tree, or on a sprite) completes it as one real,
 //! undoable write. Plain clicks only ever select. `m` walks the next free
 //! segment and keeps the arm, `[`/`]` and `-`/`=` nudge that window
-//! (selection only), and Esc is a ladder: disarm, then deselect.
+//! (selection only), and Esc is a ladder: close the output picker, then
+//! disarm, then deselect.
 //!
 //! The grammar is a WINDOW listener, installed for exactly as long as this
 //! center is mounted (round 2, P1). It cannot be center-local: completing
@@ -95,6 +96,58 @@ pub(crate) struct PatchingUi {
     /// lives in that panel, so the panel comes to them (G1 round 3, #6).
     /// The workbench consumes and resets it.
     pub summon_outputs: Signal<bool>,
+    /// The DESKTOP half of that same idea (round 2, P3): the output-picker
+    /// POPOVER is open. Above the fold the docks are on screen, so the pick
+    /// surface does not need to replace the view — it floats over the patch
+    /// panel, hosting the very same Outputs panel. Frame-scoped like the
+    /// arm, never in the selection store: it is chrome, not document state.
+    pub picker_open: Signal<bool>,
+}
+
+/// The pick surfaces' ONE dismissal rule, at both sizes (round 2, P3).
+///
+/// A pick surface — the mobile summon overlay, the desktop picker popover —
+/// exists for exactly one gesture, so it goes away the moment the user makes
+/// it: "I expect it to go away once I do the only thing I can, which is
+/// select something" (G1 round 3, #6). Two things count as making it: the
+/// SELECTION moved, or a patch WRITE landed (an armed completion keeps the
+/// selection on the object, so the write is its own signal). Those two are
+/// the fingerprint this watches — one mechanism, so the overlay and the
+/// popover can never disagree about when a pick is over.
+pub(crate) fn use_dismiss_on_patch_pick(
+    selection: Option<UiPatchTarget>,
+    surface: Option<&UiPatchSurface>,
+    mut dismiss: impl FnMut() + 'static,
+) {
+    let fingerprint = (selection, placed_lamps(surface));
+    let mut last = use_signal(|| None::<(Option<UiPatchTarget>, u64)>);
+    use_effect(use_reactive!(|fingerprint| {
+        let changed = last
+            .peek()
+            .as_ref()
+            .is_some_and(|previous| *previous != fingerprint);
+        last.set(Some(fingerprint));
+        if changed {
+            dismiss();
+        }
+    }));
+}
+
+/// Every lamp any run has placed on any wire — the WRITE half of the pick
+/// fingerprint. A number, not a revision: it moves for exactly the edits a
+/// pick can make and stays put through frame traffic.
+fn placed_lamps(surface: Option<&UiPatchSurface>) -> u64 {
+    surface
+        .map(|surface| {
+            surface
+                .outputs
+                .iter()
+                .flat_map(|output| output.bay.ports.iter())
+                .flat_map(|port| port.cells.iter())
+                .map(|cell| u64::from(cell.lamps))
+                .sum::<u64>()
+        })
+        .unwrap_or(0)
 }
 
 /// Map the shared patch selection onto the pulse's subject vocabulary:
@@ -263,9 +316,14 @@ pub(crate) struct PatchKeyPress<'a> {
     allow(dead_code, reason = "decided for the wasm listener only")
 )]
 pub(crate) enum PatchKeyAction {
-    /// Escape rung 1: an arm is live, so the key spends it.
+    /// Escape rung 1: the output-picker popover is open, so the key shuts
+    /// it — and nothing else. A pick surface is the frontmost thing on
+    /// screen; spending the arm it was opened FOR in the same keystroke
+    /// would be two cancels for one press.
+    ClosePicker,
+    /// Escape rung 2: an arm is live, so the key spends it.
     Disarm,
-    /// Escape rung 2: nothing armed — clear the selection, and with it the
+    /// Escape rung 3: nothing armed — clear the selection, and with it the
     /// segment size the user had nudged.
     Deselect,
     Reverse,
@@ -289,18 +347,25 @@ pub(crate) enum PatchKeyAction {
 /// The keyboard grammar: `r` reverse · `;`/`'` rotate ∓/± stride · `a` arm
 /// assign · `s` arm swap · `m` next free segment · `[`/`]` shift the
 /// segment · `-`/`=` narrow/widen it · ⌘Z/⌘⇧Z undo/redo · Escape ladder
-/// (disarm, then deselect). The keys are printed in the panel's footer row.
+/// (close the picker, then disarm, then deselect). The keys are printed in
+/// the panel's footer row.
 #[cfg_attr(
     not(target_arch = "wasm32"),
     allow(dead_code, reason = "asked by the wasm listener only")
 )]
-pub(crate) fn patch_key_action(press: PatchKeyPress<'_>, armed: bool) -> Option<PatchKeyAction> {
+pub(crate) fn patch_key_action(
+    press: PatchKeyPress<'_>,
+    armed: bool,
+    picker_open: bool,
+) -> Option<PatchKeyAction> {
     if press.editable_target {
         return None;
     }
     let action = match press.key {
         "Escape" => {
-            if armed {
+            if picker_open {
+                PatchKeyAction::ClosePicker
+            } else if armed {
                 PatchKeyAction::Disarm
             } else {
                 PatchKeyAction::Deselect
@@ -358,6 +423,7 @@ fn apply_patch_key_action(
     env: &PatchKeyEnv,
     armed: &mut Signal<Option<ArmedVerb>>,
     segment_size: &mut Signal<Option<u32>>,
+    picker_open: &mut Signal<bool>,
 ) {
     let PatchKeyEnv {
         surface,
@@ -365,6 +431,7 @@ fn apply_patch_key_action(
         on_action,
     } = env;
     match action {
+        PatchKeyAction::ClosePicker => picker_open.set(false),
         PatchKeyAction::Disarm => armed.set(None),
         PatchKeyAction::Deselect => {
             segment_size.set(None);
@@ -426,6 +493,7 @@ fn install_patch_key_listener(
     env: Signal<Option<PatchKeyEnv>>,
     mut armed: Signal<Option<ArmedVerb>>,
     mut segment_size: Signal<Option<u32>>,
+    mut picker_open: Signal<bool>,
 ) -> Option<std::rc::Rc<PatchKeyListener>> {
     use wasm_bindgen::JsCast;
     use wasm_bindgen::closure::Closure;
@@ -440,14 +508,26 @@ fn install_patch_key_listener(
                 shift: event.shift_key(),
                 editable_target: target_is_editable(&event),
             };
-            let Some(action) = patch_key_action(press, armed.peek().is_some()) else {
+            let Some(action) = patch_key_action(press, armed.peek().is_some(), *picker_open.peek())
+            else {
                 return;
             };
+            // Closing the picker needs no world at all — it is chrome.
+            if action == PatchKeyAction::ClosePicker {
+                picker_open.set(false);
+                return;
+            }
             // No surface yet (the empty-state render) means no verbs.
             let Some(env) = env.peek().as_ref().cloned() else {
                 return;
             };
-            apply_patch_key_action(action, &env, &mut armed, &mut segment_size);
+            apply_patch_key_action(
+                action,
+                &env,
+                &mut armed,
+                &mut segment_size,
+                &mut picker_open,
+            );
         },
     ));
     window
@@ -461,6 +541,7 @@ fn install_patch_key_listener(
     _env: Signal<Option<PatchKeyEnv>>,
     _armed: Signal<Option<ArmedVerb>>,
     _segment_size: Signal<Option<u32>>,
+    _picker_open: Signal<bool>,
 ) -> Option<std::rc::Rc<PatchKeyListener>> {
     None
 }
@@ -519,6 +600,7 @@ pub fn PatchingShellCenter(
         armed,
         segment_size,
         summon_outputs: _,
+        picker_open,
     } = use_context::<PatchingUi>();
     // The pulse's echo guard: dispatch only when the mapped subject
     // actually changes (sweep-with-clear lives in the controller; this
@@ -535,7 +617,8 @@ pub fn PatchingShellCenter(
     // the Outputs dock and focus goes with it. The env carries the render's
     // half of the world; the guard drops the listener on view exit.
     let mut key_env = use_signal(|| Option::<PatchKeyEnv>::None);
-    let _keys = use_hook(move || install_patch_key_listener(key_env, armed, segment_size));
+    let _keys =
+        use_hook(move || install_patch_key_listener(key_env, armed, segment_size, picker_open));
     // Below the fold the docks are hidden, so the panel's Props home is not
     // on screen and this center keeps its old bottom mount. A SIGNAL, not a
     // media query in CSS: the panel carries lamp-strip canvases, and a hidden
@@ -1180,25 +1263,41 @@ mod tests {
             ("-", ResizeSegment { delta: -1 }),
             ("=", ResizeSegment { delta: 1 }),
         ] {
-            assert_eq!(patch_key_action(press(key), false), Some(action), "{key}");
+            assert_eq!(
+                patch_key_action(press(key), false, false),
+                Some(action),
+                "{key}"
+            );
             // An arm changes nothing outside the Escape ladder: `m` walking
             // the next segment while armed is the walk-up loop itself.
-            assert_eq!(patch_key_action(press(key), true), Some(action), "{key}");
+            assert_eq!(
+                patch_key_action(press(key), true, false),
+                Some(action),
+                "{key}"
+            );
+            // Nor does an open picker: the popover hosts the Outputs panel,
+            // and the walk-up loop (`m`, the nudges) runs INSIDE it.
+            assert_eq!(
+                patch_key_action(press(key), true, true),
+                Some(action),
+                "{key}"
+            );
         }
 
         // Undo is MODIFIED: a bare `z` is not a verb here.
-        assert_eq!(patch_key_action(press("z"), false), None);
+        assert_eq!(patch_key_action(press("z"), false, false), None);
         let undo = PatchKeyPress {
             meta: true,
             ..press("z")
         };
-        assert_eq!(patch_key_action(undo, false), Some(Undo));
+        assert_eq!(patch_key_action(undo, false, false), Some(Undo));
         assert_eq!(
             patch_key_action(
                 PatchKeyPress {
                     shift: true,
                     ..undo
                 },
+                false,
                 false
             ),
             Some(Redo)
@@ -1206,22 +1305,30 @@ mod tests {
 
         // Everything else the window hears is somebody else's key.
         for key in ["k", "l", "u", "Enter", "Tab", "ArrowLeft", " ", "R"] {
-            assert_eq!(patch_key_action(press(key), false), None, "{key}");
+            assert_eq!(patch_key_action(press(key), false, false), None, "{key}");
         }
     }
 
-    /// Escape is a LADDER, and the rungs are ordered: an armed verb is spent
-    /// first, and only a second press — with nothing armed — drops the
-    /// selection. Inverting them would cancel a gesture and the selection it
-    /// was aimed at in one keystroke.
+    /// Escape is a LADDER, and the rungs are ordered: the open pick surface
+    /// closes first, then an armed verb is spent, and only a press with
+    /// neither drops the selection. Inverting any pair would cancel more than
+    /// the user asked for in one keystroke — the popover is the frontmost
+    /// thing on screen, and it was opened FOR the arm it sits over.
     #[test]
-    fn escape_disarms_before_it_deselects() {
+    fn escape_closes_the_picker_then_disarms_then_deselects() {
+        for armed in [true, false] {
+            assert_eq!(
+                patch_key_action(press("Escape"), armed, true),
+                Some(PatchKeyAction::ClosePicker),
+                "an open picker owns the first rung whatever is armed"
+            );
+        }
         assert_eq!(
-            patch_key_action(press("Escape"), true),
+            patch_key_action(press("Escape"), true, false),
             Some(PatchKeyAction::Disarm)
         );
         assert_eq!(
-            patch_key_action(press("Escape"), false),
+            patch_key_action(press("Escape"), false, false),
             Some(PatchKeyAction::Deselect)
         );
     }
@@ -1236,9 +1343,9 @@ mod tests {
                 editable_target: true,
                 ..press(key)
             };
-            assert_eq!(patch_key_action(typing, false), None, "{key}");
+            assert_eq!(patch_key_action(typing, false, false), None, "{key}");
             assert_eq!(
-                patch_key_action(typing, true),
+                patch_key_action(typing, true, true),
                 None,
                 "{key}: not even the Escape ladder — the field owns the key"
             );
@@ -1249,7 +1356,7 @@ mod tests {
             editable_target: true,
             ..press("z")
         };
-        assert_eq!(patch_key_action(typing_undo, false), None);
+        assert_eq!(patch_key_action(typing_undo, false, false), None);
     }
 
     /// The banner names the armed verb — a walk-up user must never have to

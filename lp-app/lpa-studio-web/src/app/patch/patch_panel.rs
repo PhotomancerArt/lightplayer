@@ -24,8 +24,15 @@
 //! light language answering to the same authority.
 //!
 //! The section WITHOUT a counterpart shows the invitation: the assign arm
-//! (`a`) plus an inline picker that direct-assigns (pickers write — the
-//! ratified mobile path). Everything else in the panel is either a
+//! (`a`), plus — on the OBJECT side — an inline picker that direct-assigns
+//! (pickers write — the ratified mobile path). The WIRE side has no list of
+//! its own (round 2, P3): the ports live in the Outputs panel, which is a
+//! strict superset of any list this panel could draw (occupancy bars, free
+//! runs as click targets landing at the exact clicked lamp, the counterpart
+//! glow), so the invitation OPENS that panel instead — floating over the dock
+//! above the fold, full-screen below it. It is a mount of an existing
+//! surface, not a new write path: completion still happens inside the Outputs
+//! panel's own `on_port_click`. Everything else in the panel is either a
 //! selection nudge or one of the existing verbs; the panel never opens a
 //! second write path.
 //!
@@ -62,8 +69,8 @@ use crate::app::node::lamp_view::{
 };
 use crate::app::patch::lamp_strip::{LampStrip, StripPresentation};
 use crate::app::patch::verb_ui::{
-    dispatch_assign, dispatch_verb, free_runs, instance_target, next_free_segment, port_next_free,
-    resize_segment, segment_at_free_run, selection_stride, shift_segment, target_is_unmapped,
+    dispatch_assign, dispatch_verb, instance_target, next_free_segment, resize_segment,
+    selection_stride, shift_segment, target_is_unmapped,
 };
 use crate::base::option_cards::{OptionCard, OptionCards};
 use crate::base::{StudioIcon, StudioIconName};
@@ -958,78 +965,6 @@ pub(crate) fn unmapped_objects(surface: &UiPatchSurface) -> Vec<(UiPatchTarget, 
     rows
 }
 
-/// Every port on the surface as picker rows — the output side's inline
-/// picker. Value keys are `node:port`, parsed back by [`parse_port_key`].
-pub(crate) fn port_options(surface: &UiPatchSurface) -> Vec<(String, String)> {
-    surface
-        .outputs
-        .iter()
-        .flat_map(|output| {
-            output.bay.ports.iter().map(move |port| {
-                let pin = if port.pin_label.is_empty() {
-                    format!("port {}", port.key)
-                } else {
-                    format!("{} · port {}", port.pin_label, port.key)
-                };
-                // Occupancy IN the option (round 3, #6): a destination you
-                // cannot judge is not a choice.
-                (
-                    format!("{}:{}", output.node.0, port.key),
-                    format!(
-                        "{} · {pin} · {}",
-                        output.display_name(),
-                        port_occupancy(port)
-                    ),
-                )
-            })
-        })
-        .collect()
-}
-
-/// One terse occupancy phrase: where the free space is, or that none is.
-fn port_occupancy(port: &lpa_studio_core::UiPatchPort) -> String {
-    let used: u32 = port.cells.iter().map(|cell| cell.lamps).sum();
-    let free = port.lamps.saturating_sub(used);
-    if free == 0 {
-        "full".to_string()
-    } else if let Some((start, _)) = free_runs(port).into_iter().next() {
-        format!("{free} free @ {}", start + 1)
-    } else {
-        format!("{free} free")
-    }
-}
-
-/// The same choices as [`port_options`], as EXPLAINING CARDS (round 3, #6):
-/// title = the port, blurb = its occupancy, so picking a destination is an
-/// informed act rather than a name lottery.
-pub(crate) fn port_cards(surface: &UiPatchSurface) -> Vec<OptionCard> {
-    surface
-        .outputs
-        .iter()
-        .flat_map(|output| {
-            output.bay.ports.iter().map(move |port| {
-                let pin = if port.pin_label.is_empty() {
-                    format!("port {}", port.key)
-                } else {
-                    port.pin_label.clone()
-                };
-                OptionCard {
-                    id: format!("{}:{}", output.node.0, port.key),
-                    icon: StudioIconName::Usb,
-                    title: format!("{} · {pin}", output.display_name()),
-                    blurb: port_occupancy(port),
-                }
-            })
-        })
-        .collect()
-}
-
-/// `node:port` back into its parts.
-pub(crate) fn parse_port_key(value: &str) -> Option<(NodeId, u32)> {
-    let (node, port) = value.split_once(':')?;
-    Some((NodeId::new(node.parse().ok()?), port.parse().ok()?))
-}
-
 fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
     on_action.call(UiAction::from_op(
         lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
@@ -1070,8 +1005,30 @@ pub fn PatchPanel(
     /// gutters, and the keys row in two deliberate columns.
     #[props(default)]
     docked: bool,
+    /// The frame's output-picker popover is open (round 2, P3), read at the
+    /// mount site like `armed` so the panel stays plain data. Docked only:
+    /// below the fold the pick surface is the full-screen summon instead.
+    #[props(default)]
+    picker_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    let ui = use_hook(try_consume_context::<PatchingUi>);
+    // The popover follows the SHARED pick-dismissal rule (P3): a selection
+    // move or a patch write closes it, exactly as it dismisses the mobile
+    // summon overlay. One mechanism, two sizes — so the two pick surfaces
+    // cannot drift apart about when a pick is over.
+    crate::app::editor_shell::patching::use_dismiss_on_patch_pick(
+        selection.clone(),
+        Some(&surface),
+        move || {
+            if let Some(ui) = ui {
+                let mut open = ui.picker_open;
+                if *open.peek() {
+                    open.set(false);
+                }
+            }
+        },
+    );
     let object = object_view(&surface, selection.as_ref());
     let card = fixture_card(&surface, selection.as_ref());
     let output = output_view(&surface, selection.as_ref());
@@ -1092,7 +1049,11 @@ pub fn PatchPanel(
     // on every resize — starving it would churn the fit reconciliation the
     // story capture gates on).
     let root = if docked {
-        "tw:flex tw:flex-col tw:bg-card-subtle"
+        // `relative` is the popover's anchor: the picker card lays itself out
+        // over the panel's own column rather than in a floating layer, which
+        // is what keeps its position stable while the Outputs panel inside it
+        // re-renders on frame traffic (there is nothing to re-measure).
+        "tw:relative tw:flex tw:flex-col tw:bg-card-subtle"
     } else {
         "tw:flex tw:max-h-[45%] tw:flex-none tw:flex-col tw:overflow-y-auto tw:border-t tw:border-border-subtle tw:bg-card-subtle"
     };
@@ -1155,7 +1116,101 @@ pub fn PatchPanel(
                     }
                 }
             }
+            // THE OUTPUT PICKER (round 2, D1's ruling): the one-off port pick
+            // happens in the REAL Outputs panel — same component, same
+            // `patch_verbs` grammar, the same occupancy bars and free runs as
+            // click targets — mounted over the dock instead of re-listed as
+            // flat text in this panel. It is a MOUNT, never a second write
+            // path: completion still happens inside the Outputs panel's own
+            // `on_port_click` (the ADR's shared-completion-helpers rule).
+            //
+            // Docked only. Below the fold there are no docks to float over
+            // and the summoned full-screen Outputs panel is the same surface
+            // at phone size — one mechanism, two sizes.
+            if docked && picker_open {
+                // Click-outside: a transparent full-viewport sheet under the
+                // card. Only rendered where there is a signal to close —
+                // a story posing the popover has no frame state, and an
+                // invisible click-eater over a story page is a trap.
+                if let Some(ui) = ui {
+                    div {
+                        class: "tw:fixed tw:inset-0 tw:z-[60] tw:bg-transparent",
+                        aria_hidden: "true",
+                        onclick: move |event| {
+                            event.stop_propagation();
+                            let mut open = ui.picker_open;
+                            open.set(false);
+                        },
+                    }
+                }
+                div {
+                    class: "tw:absolute tw:inset-x-0 tw:top-0 tw:z-[61] tw:flex tw:max-h-[440px] tw:flex-col tw:overflow-hidden tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:shadow-lg",
+                    role: "dialog",
+                    "data-patch-picker": "open",
+                    onclick: move |event| event.stop_propagation(),
+                    // The header carries the ARM: the card covers the panel's
+                    // armed banner while it is up, and a walk-up user must
+                    // never lose track of which gesture the next click
+                    // completes (round 3, #5 — the armed thing names itself).
+                    div {
+                        class: if armed_assign { "tw:flex tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border-subtle tw:bg-selection-bg tw:px-2 tw:py-1" } else { "tw:flex tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2 tw:py-1" },
+                        span {
+                            class: if armed_assign { "tw:font-mono tw:text-[9.5px] tw:uppercase tw:tracking-[0.13em] tw:text-selection-border" } else { "tw:font-mono tw:text-[9.5px] tw:uppercase tw:tracking-[0.13em] tw:text-dim-foreground" },
+                            if armed_assign {
+                                "assign armed · pick a port"
+                            } else {
+                                "pick a port"
+                            }
+                        }
+                        span { class: "tw:ml-auto tw:flex tw:items-center tw:gap-1 tw:text-[10px] tw:text-dim-foreground",
+                            span { class: "{KBD}", "esc" }
+                            "closes"
+                        }
+                        button {
+                            class: "tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-1 tw:text-[11px] tw:leading-4 tw:text-dim-foreground tw:hover:text-strong-foreground",
+                            title: "Close the port picker (esc)",
+                            onclick: move |_| {
+                                if let Some(ui) = ui {
+                                    let mut open = ui.picker_open;
+                                    open.set(false);
+                                }
+                            },
+                            "×"
+                        }
+                    }
+                    // The panel's own body, scrolling inside the card: the
+                    // Outputs rail is a column, and a radiance-scale bay is
+                    // taller than any popover has a right to be. Its rows are
+                    // DOM boxes (no canvases), so nothing here can mount a
+                    // canvas that never paints.
+                    div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-1.5",
+                        crate::app::workbench::panels::OutputsPanel {
+                            surface: Some(surface.clone()),
+                            selection: selection.clone(),
+                            patch_verbs: true,
+                            on_action,
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+/// Open the port picker at whichever size the user is: the POPOVER over the
+/// dock above the fold, the full-screen summoned Outputs panel below it. Both
+/// are the same Outputs panel with the same grammar — the fold only decides
+/// whether it floats or takes the screen.
+fn open_port_picker(ui: Option<PatchingUi>) {
+    let Some(ui) = ui else {
+        return;
+    };
+    if at_mobile_fold() {
+        let mut summon = ui.summon_outputs;
+        summon.set(true);
+    } else {
+        let mut open = ui.picker_open;
+        open.set(true);
     }
 }
 
@@ -1725,7 +1780,6 @@ fn OutputPane(
         (Some(target), None) if is_armable(&surface, target) => Some(target.clone()),
         _ => None,
     };
-    let ports = port_options(&surface);
     rsx! {
         section { class: "{class}",
             match output {
@@ -1742,10 +1796,6 @@ fn OutputPane(
                             format!("left: {left}%; width: {width}%;")
                         });
                     let free = output.free;
-                    let selected_port = output
-                        .port
-                        .map(|key| format!("{}:{key}", output.node.0))
-                        .unwrap_or_default();
                     let object = object_view(&surface, selection.as_ref());
                     let frame = output_frame(&surface, output.node);
                     let (assumed, decode_note) = decode_line(
@@ -1756,7 +1806,6 @@ fn OutputPane(
                     );
                     let colors = output_strip_colors(frame, output.span, assumed);
                     let has_signal = !colors.is_empty();
-                    let object_target = object.map(|object| object.target);
                     let shift_window = output
                         .window
                         .filter(|_| !free)
@@ -1829,76 +1878,20 @@ fn OutputPane(
                             on_action,
                         }
                         div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1.5",
-                            // The port picker writes on pick when there is
-                            // an object to move; otherwise it walks the
-                            // selection to that port's first free segment.
-                            select {
-                                class: "{PICKER}",
-                                value: "{selected_port}",
-                                onchange: {
-                                    let surface = surface.clone();
-                                    let object_target = object_target.clone();
-                                    move |event: FormEvent| {
-                                        let Some((node, key)) = parse_port_key(&event.value()) else {
-                                            return;
-                                        };
-                                        let Some(entry) = surface
-                                            .outputs
-                                            .iter()
-                                            .find(|entry| entry.node == node)
-                                        else {
-                                            return;
-                                        };
-                                        match object_target.as_ref() {
-                                            Some(target) => {
-                                                let subject = assign_subject_target(
-                                                    &surface,
-                                                    target,
-                                                );
-                                                if let Some(lamp) = port_next_free(entry, key) {
-                                                    dispatch_assign(
-                                                        &on_action,
-                                                        &surface,
-                                                        &subject,
-                                                        entry,
-                                                        lamp,
-                                                    );
-                                                }
-                                            }
-                                            None => {
-                                                let run = entry
-                                                    .bay
-                                                    .ports
-                                                    .iter()
-                                                    .find(|port| port.key == key)
-                                                    .and_then(|port| free_runs(port).into_iter().next());
-                                                let target = match run {
-                                                    Some(run) => {
-                                                        segment_at_free_run(&surface, node, key, run, None)
-                                                    }
-                                                    None => UiPatchTarget::Port { node, port: key },
-                                                };
-                                                select(&on_action, Some(target));
-                                            }
-                                        }
-                                    }
-                                },
-                                // `selected` mirrors the bound value onto
-                                // each option: the select's own `value` is
-                                // applied before the options mount, so it
-                                // alone cannot restore the selection (see
-                                // select_mirror_lint).
-                                if selected_port.is_empty() {
-                                    option { value: "", selected: true, "pick a port…" }
-                                }
-                                for (value , label) in ports.iter().cloned() {
-                                    option {
-                                        key: "{value}",
-                                        value: "{value}",
-                                        selected: value == selected_port,
-                                        "{label}"
-                                    }
-                                }
+                            // RE-PICK: the flat port list that used to sit
+                            // here could not say what a destination was
+                            // worth. The Outputs panel can — occupancy bars,
+                            // free runs as click targets that land the run at
+                            // the EXACT clicked lamp — so this opens THAT
+                            // instead (the popover above the dock, or the
+                            // summoned panel below the fold). Clicks in there
+                            // do what they do in the dock: complete a live
+                            // arm, or plainly select.
+                            button {
+                                class: "{STEP}",
+                                title: "Pick a port in the Outputs panel (occupancy and free runs included)",
+                                onclick: move |_| open_port_picker(ui),
+                                "pick…"
                             }
                         }
                         // The port's WHOLE extent as published, with the
@@ -2027,9 +2020,9 @@ fn OutputPane(
                 }
                 None => {
                     match unmapped_object {
-                        // The invitation (#objfirst): arm, or pick the port
-                        // the object lands on.
-                        Some(target) => rsx! {
+                        // The invitation (#objfirst): arm, and open the pick
+                        // surface the counterpart lives in.
+                        Some(_) => rsx! {
                             SectionHead {
                                 label: "output",
                                 name: "—".to_string(),
@@ -2042,7 +2035,7 @@ fn OutputPane(
                                 span { "Not on any port segment." }
                                 button {
                                     class: "{arm_class}",
-                                    title: "Arm the assign — the next port click links it (a)",
+                                    title: "Arm the assign, and bring up the ports — the next port click links it (a)",
                                     onclick: {
                                         let surface = surface.clone();
                                         let selection = selection.clone();
@@ -2050,14 +2043,18 @@ fn OutputPane(
                                             if let Some(ui) = ui {
                                                 let mut armed = ui.armed;
                                                 arm_assign(&surface, &selection, &mut armed);
-                                                // At the mobile fold the ports
-                                                // live in the Outputs panel —
-                                                // bring it up (round 3, #6);
-                                                // picking there completes and
-                                                // dismisses it.
-                                                if armed.peek().is_some() && at_mobile_fold() {
-                                                    let mut summon = ui.summon_outputs;
-                                                    summon.set(true);
+                                                // The counterpart the user
+                                                // must now click lives in the
+                                                // Outputs panel, so the panel
+                                                // comes to them: the popover
+                                                // over the dock above the
+                                                // fold, the full-screen
+                                                // summon below it (round 3,
+                                                // #6 — one gesture, two
+                                                // sizes). Picking there
+                                                // completes and dismisses.
+                                                if armed.peek().is_some() {
+                                                    open_port_picker(Some(ui));
                                                 }
                                             }
                                         }
@@ -2065,49 +2062,6 @@ fn OutputPane(
                                     // The label never changes (round 3): armed
                                     // = pulse + the counterpart ring.
                                     {keyed("assign", "a")}
-                                }
-                            }
-                            // The destinations as EXPLAINING CARDS (#6):
-                            // occupancy on every option; picking writes (the
-                            // ratified picker rule) at the port's next free
-                            // lamp. At the fold the summoned Outputs panel is
-                            // the picker instead.
-                            div { class: "tw:max-[820px]:hidden",
-                                OptionCards {
-                                    label: "or pick a port".to_string(),
-                                    options: port_cards(&surface),
-                                    on_pick: {
-                                        let surface = surface.clone();
-                                        move |value: String| {
-                                            let Some((node, key)) = parse_port_key(&value) else {
-                                                return;
-                                            };
-                                            let Some(entry) = surface
-                                                .outputs
-                                                .iter()
-                                                .find(|entry| entry.node == node)
-                                            else {
-                                                return;
-                                            };
-                                            // The object lands at the port's next
-                                            // free lamp — the spike's picker
-                                            // transition.
-                                            let subject = assign_subject_target(&surface, &target);
-                                            if let Some(lamp) = port_next_free(entry, key)
-                                                && dispatch_assign(
-                                                    &on_action,
-                                                    &surface,
-                                                    &subject,
-                                                    entry,
-                                                    lamp,
-                                                )
-                                                && let Some(ui) = ui
-                                            {
-                                                let mut armed = ui.armed;
-                                                armed.set(None);
-                                            }
-                                        }
-                                    },
                                 }
                             }
                         },
@@ -2437,16 +2391,13 @@ mod tests {
         assert_eq!(output.window, None);
     }
 
-    /// The pickers' rows: unmapped objects on the object side, every port on
-    /// the output side (round-tripping its value key).
+    /// The surviving picker's rows: the unmapped objects, on the object side.
     ///
-    /// A port row carries its OCCUPANCY (round 3, #6) — where the free space
-    /// is and how much of it — because a destination the user cannot judge is
-    /// not a choice. The 1-based lamp in the phrase is the chips' convention,
-    /// so "30 free @ 31" is the tail of a 60-lamp port whose first half is
-    /// spoken for.
+    /// The output side has no list of its own any more (round 2, P3) — the
+    /// port pick opens the real Outputs panel, which states each
+    /// destination's occupancy in bars a flat text row never could.
     #[test]
-    fn the_pickers_list_the_two_sides_options() {
+    fn the_object_picker_lists_what_is_still_waiting() {
         let surface = half_patched_surface();
         let objects = unmapped_objects(&surface);
         assert_eq!(objects.len(), 1, "only sector 2 still wants a wire");
@@ -2458,13 +2409,6 @@ mod tests {
             }
         );
         assert_eq!(objects[0].1, "sector 2 · 30");
-
-        let ports = port_options(&surface);
-        assert_eq!(ports.len(), 1);
-        assert_eq!(ports[0].0, "10:0");
-        assert_eq!(ports[0].1, "1 · IO18 · port 0 · 30 free @ 31");
-        assert_eq!(parse_port_key(&ports[0].0), Some((output_node(), 0)));
-        assert_eq!(parse_port_key("nonsense"), None);
     }
 
     /// A published wire whose lamp `n` is saturated in channel `n % 3`, with

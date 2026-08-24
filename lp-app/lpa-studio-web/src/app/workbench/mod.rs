@@ -369,6 +369,7 @@ pub fn WorkbenchFrame(
         armed: Signal::new(None),
         segment_size: Signal::new(None),
         summon_outputs: Signal::new(false),
+        picker_open: Signal::new(false),
     });
     // The Fixtures/Outputs panels' slice of the editor view (#409 DTOs)
     // and the surface's one shared selection.
@@ -393,35 +394,30 @@ pub fn WorkbenchFrame(
             }
         });
     }
-    // A summoned panel is a full-screen pick surface: once a pick happens
-    // — the selection moved, or a patch write landed (an armed completion
-    // keeps the selection, so the write is its own signal) — it dismisses
-    // itself (G1 round 3, #6: "I expect it to go away once I do the only
-    // thing I can, which is select something").
-    {
-        let selection = patch_selection.clone();
-        let placed = surface
-            .as_ref()
-            .map(|surface| {
-                surface
-                    .outputs
-                    .iter()
-                    .flat_map(|output| output.bay.ports.iter())
-                    .flat_map(|port| port.cells.iter())
-                    .map(|cell| u64::from(cell.lamps))
-                    .sum::<u64>()
-            })
-            .unwrap_or(0);
-        let fingerprint = (selection, placed);
-        let mut last = use_signal(|| None::<(Option<UiPatchTarget>, u64)>);
-        use_effect(use_reactive!(|fingerprint| {
-            let changed = last
-                .peek()
-                .as_ref()
-                .is_some_and(|previous| *previous != fingerprint);
-            last.set(Some(fingerprint));
-            if changed && summoned.peek().is_some() {
+    // A summoned panel is a full-screen pick surface, so it dismisses itself
+    // once the pick happens — through the SHARED rule the desktop picker
+    // popover follows too (round 2, P3): one mechanism at two sizes, so the
+    // overlay and the popover can never disagree about when a pick is over.
+    crate::app::editor_shell::patching::use_dismiss_on_patch_pick(
+        patch_selection.clone(),
+        surface.as_ref(),
+        move || {
+            if summoned.peek().is_some() {
                 summoned.set(None);
+            }
+        },
+    );
+    // The desktop picker popover is chrome on ONE panel. If the patch panel
+    // is not on screen — another view, another right-dock tab, a collapsed
+    // side — there is nothing for it to float over, so it closes here rather
+    // than waiting to surprise the user on their way back.
+    {
+        let mut picker_open = patching_ui.picker_open;
+        let panel_on_screen =
+            view == WorkbenchView::Patching && docks.right == Some(PanelId::Props);
+        use_effect(use_reactive!(|panel_on_screen| {
+            if !panel_on_screen && *picker_open.peek() {
+                picker_open.set(false);
             }
         }));
     }
@@ -961,6 +957,10 @@ fn PanelBody(
         // everywhere else.
         (PanelId::Props, WorkbenchView::Patching) => {
             let armed = patching_ui.and_then(|ui| ui.armed.read().clone());
+            // The output-picker popover's open state, read here for the same
+            // reason the arm is: the panel stays plain data, so a story can
+            // pose the popover without a frame around it.
+            let picker_open = patching_ui.is_some_and(|ui| *ui.picker_open.read());
             match surface {
                 Some(surface) => rsx! {
                     crate::app::patch::patch_panel::PatchPanel {
@@ -968,6 +968,7 @@ fn PanelBody(
                         selection: patch_selection,
                         armed,
                         docked: true,
+                        picker_open,
                         on_action,
                     }
                 },
