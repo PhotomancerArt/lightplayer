@@ -7,5 +7,7 @@
 pub(crate) mod lamp_strip;
 pub(crate) mod patch_panel;
 #[cfg(feature = "stories")]
+pub(crate) mod patch_panel_stories;
+#[cfg(feature = "stories")]
 pub(crate) mod patch_story_fixtures;
 pub(crate) mod verb_ui;

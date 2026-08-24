@@ -91,7 +91,13 @@ impl UiPatchChasePreview {
 /// selection names no unmapped object (a mapped one already chases in its
 /// published bytes; a wire-side or context selection is not an object at
 /// all).
-pub(crate) fn chase_preview(
+///
+/// Public because the controller is not the only caller that must land on
+/// EXACTLY these colors: the studio's panel stories pose the object-first
+/// state by running this very function over their hand-built surface, so a
+/// story can never drift into showing a chase the controller would not
+/// produce.
+pub fn chase_preview(
     surface: &UiPatchSurface,
     selection: Option<&UiPatchTarget>,
     frames_seen: u64,

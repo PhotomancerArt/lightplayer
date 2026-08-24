@@ -10,7 +10,9 @@ use lpa_studio_web_story_macros::story;
 use super::panels::{FixturesPanel, OutputsPanel, PropsPanel, TreeGrain};
 use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchHrefs, WorkbenchView};
 use crate::app::StudioShell;
-use crate::app::patch::patch_story_fixtures::{mini_dome_surface, peach_surface};
+use crate::app::patch::patch_story_fixtures::{
+    mini_dome_surface, mini_dome_walkup_surface, peach_surface,
+};
 use crate::app::story_fixtures::{
     project_editor_fixture, project_ready_view, project_synced_pane_view, simulator_lens_card,
 };
@@ -244,10 +246,37 @@ fn workbench_mapping_view() -> Element {
 }
 
 #[story(
-    description = "The workbench's Patch view (R5): Nodes · Map · Patch in the band, the RESOLVED tree left (instances + wire chips — grain follows activity), Outputs attached right, and the patching center — verb toolbar with keys printed (r reverse · ;/' rotate · s swap · undo/redo · placed count) over the one project canvas. Sector 2 selected, so the verbs are live."
+    description = "The workbench's Patch view (R5, pass 2): Nodes · Map · Patch in the band, the RESOLVED tree left (instances + wire chips — grain follows activity), Outputs attached right, and the patching center — the SLIMMED toolbar (undo/redo and the placed count; the verbs moved down beside the thing they act on, D4) over the one project canvas, with THE panel as the center's bottom region (D8 — always present). Sector 2 of an auto-mapped fixture is selected, so the panel shows the lean state and its keys row: the grammar is printed in the panel now, and the help overlay is gone."
 )]
 fn workbench_patching_view() -> Element {
     workbench_story(ProjectView::Patch)
+}
+
+#[story(
+    description = "The mobile fold in the PATCHING view with the Outputs panel summoned — the destination of the object-first invitation below 820px (round 3, #6): the ports come to the user rather than an inline dropdown, and picking there completes the assign and dismisses the panel. The Patching view's Outputs panel carries the walk-up grammar (free runs are click targets), which is what makes it a pick surface rather than a readout. The surface is the walk-up pose: manual fixtures, sector 4 still waiting, IO13 empty. At lg the same mount shows the ordinary Patch workbench with that object selected — the invitation state in place."
+)]
+fn workbench_patching_mobile_pick() -> Element {
+    rsx! {
+        div { class: "tw:flex tw:h-[640px] tw:flex-col",
+            WorkbenchFrame {
+                view: WorkbenchView::Patching,
+                panes: vec![project_synced_pane_view()],
+                project_editor: project_editor_fixture(ProjectSyncPhase::Ready)
+                    .with_patch_surface(
+                        Some(labelled(mini_dome_walkup_surface())),
+                        Some(UiPatchTarget::Instance {
+                            node: NodeId::new(2),
+                            path: "/sector/4".to_string(),
+                        }),
+                    ),
+                lens_card: Some(simulator_lens_card()),
+                running: true,
+                hrefs: WorkbenchHrefs::inert_all(),
+                initial_summoned: Some(super::PanelId::Outputs),
+                on_action: move |_| {},
+            }
+        }
+    }
 }
 
 #[story(

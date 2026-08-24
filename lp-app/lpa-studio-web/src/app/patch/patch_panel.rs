@@ -1965,11 +1965,9 @@ mod tests {
     use super::*;
     use lpa_studio_core::{
         ControlExtent, ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan,
-        UiControlSampleFormat, UiFixturePatch, UiPatchBay, UiPatchInstance, UiPatchPort,
-        UiPatchSurfaceFixture, UiPatchSurfaceOutput,
+        UiControlSampleFormat, UiFixturePatch, UiPatchBay, UiPatchChasePreview, UiPatchInstance,
+        UiPatchPort, UiPatchSurfaceFixture, UiPatchSurfaceOutput,
     };
-
-    use lpa_studio_core::UiPatchChasePreview;
 
     fn dome_node() -> NodeId {
         NodeId::new(2)
@@ -2272,6 +2270,12 @@ mod tests {
 
     /// The pickers' rows: unmapped objects on the object side, every port on
     /// the output side (round-tripping its value key).
+    ///
+    /// A port row carries its OCCUPANCY (round 3, #6) — where the free space
+    /// is and how much of it — because a destination the user cannot judge is
+    /// not a choice. The 1-based lamp in the phrase is the chips' convention,
+    /// so "30 free @ 31" is the tail of a 60-lamp port whose first half is
+    /// spoken for.
     #[test]
     fn the_pickers_list_the_two_sides_options() {
         let surface = half_patched_surface();
@@ -2289,7 +2293,7 @@ mod tests {
         let ports = port_options(&surface);
         assert_eq!(ports.len(), 1);
         assert_eq!(ports[0].0, "10:0");
-        assert_eq!(ports[0].1, "1 · IO18 · port 0");
+        assert_eq!(ports[0].1, "1 · IO18 · port 0 · 30 free @ 31");
         assert_eq!(parse_port_key(&ports[0].0), Some((output_node(), 0)));
         assert_eq!(parse_port_key("nonsense"), None);
     }

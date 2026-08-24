@@ -84,6 +84,12 @@ lp2014's field-proven selection language, replacing the square blink.
   arm. That pass adds the engine chase mode (ordered,
   direction-carrying spans in the highlight slot) and the `Segment`
   target. `docs/design/walk-up-patching.md` is the flow record.
+- Pass 2 SHIPPED (2026-08-24). What it decided, including four rounds of
+  gate rework on top of the description above, is its own ADR:
+  `2026-08-20-walk-up-assignment-selection-model.md` (selection model,
+  arm grammar, the per-fixture flow flag, the fixture card, object-grain
+  canvas selection, one core-computed chase preview) — with the engine
+  side amended into `2026-08-10-patch-selection-pulse.md`.
 
 ## Alternatives Considered
 

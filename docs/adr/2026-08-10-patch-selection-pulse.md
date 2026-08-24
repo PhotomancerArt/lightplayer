@@ -173,3 +173,38 @@ above in code — so no surface can name a selection in the wrong tongue.
 A fixture-side subject's spans keep the OBJECT's order (they are sorted
 by source lamp, never by wire position) and are never merged: each join
 between two spans is a fact about the wiring the chase exists to show.
+
+## Amendment 2026-08-22 — a FIXTURE breathes (G1 round 3)
+
+The table above put every fixture-side selection in the chase. The feel
+gate's third walk found the cost on the mini-dome: selecting the whole
+`dome` fixture ran the chase across all five of its runs, so one
+selection painted five heads and five tails and read as several objects
+selected at once.
+
+**Chase is an OBJECT-ONLY language.** Direction is a property of one
+contiguous run in object order; a fixture is a bag of objects and has no
+single direction to claim. The matrix row for `Fixture` moves to BREATH —
+"these lamps are this fixture", no direction claim — and the amended
+table is:
+
+| selection | language |
+|---|---|
+| instance / range / cell (incl. a mapped run) | CHASE |
+| **fixture** | **BREATH** |
+| output / port / free segment | BREATH |
+| nothing | show content |
+
+Nothing in this ADR's wire format changes: breath for a fixture-side
+subject is the bare span list the v1 microformat already carries, so the
+engine needed no edit at all — the producer simply stops writing the
+`chase:` prefix for that one subject kind.
+
+The language now lives on `UiPatchTarget::pulse_language` (beside
+`pulse_space`, which stays the NUMBERING half), because after this
+amendment the two are no longer the same question: a fixture and a port
+count in different spaces and speak the same tongue. Reasoning and the
+companion chrome decision (a fixture selection renders a fixture CARD,
+not an object) are in
+`2026-08-20-walk-up-assignment-selection-model.md`, Amendments
+2026-08-22 and 2026-08-23.

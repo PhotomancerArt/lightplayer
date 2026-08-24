@@ -105,8 +105,8 @@ pub use app::project::{
     UiNodeRemovePreflight, UiPatchChasePreview, UiPatchInstance, UiPatchSurface,
     UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput, UiPatchTarget,
     UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiPreviewSpaces, UiProductSpaceRequest,
-    UiProjectManifest, UiShaderError, UiTimebaseRead, editor_meta_artifact, preview_phase,
-    visual_probe_request,
+    UiProjectManifest, UiShaderError, UiTimebaseRead, chase_preview, editor_meta_artifact,
+    preview_phase, visual_probe_request,
 };
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,

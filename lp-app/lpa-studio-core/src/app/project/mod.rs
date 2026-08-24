@@ -82,7 +82,7 @@ pub use node::{
 pub use node_card_ui_state::{
     ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,
 };
-pub use patch_preview::{FROZEN_PREVIEW_PHASE, UiPatchChasePreview, preview_phase};
+pub use patch_preview::{FROZEN_PREVIEW_PHASE, UiPatchChasePreview, chase_preview, preview_phase};
 pub use patch_pulse::{
     PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSpace, PatchPulseSubject,
 };

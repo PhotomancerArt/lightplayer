@@ -16,6 +16,15 @@ cadence below stays one-key-one-click. lp2014's tentative/commit lane
 collapses into immediate-write + undo. A contiguous run on a port is a
 **"segment"** (WLED's word). The pulse below is a breath, never a blink.
 
+**Implemented in pass 2** (2026-08-24) — the flow described here is the
+one that shipped, with the gate's four rounds of rework recorded as
+amendments in
+[`../adr/2026-08-20-walk-up-assignment-selection-model.md`](../adr/2026-08-20-walk-up-assignment-selection-model.md).
+Read that ADR for what the panel actually does today: the fixture CARD,
+object-grain canvas selection, the mode-gated grammar, the one
+core-computed chase preview, and the light-language matrix (chase =
+object, breath = everything else).
+
 This is one of the most important flows in LightPlayer and one of the
 trickiest to get right. lp2014's version represents **years of
 tweaking under the real conditions**: late at night at a festival, on
