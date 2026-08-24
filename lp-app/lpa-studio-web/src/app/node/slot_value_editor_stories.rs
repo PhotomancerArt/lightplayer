@@ -153,6 +153,24 @@ pub(crate) fn dropdown_field() -> Element {
 }
 
 #[story(
+    description = "The wired dropdown renders a real <select> pinned to a NON-FIRST option (\"Blast\"). Regression pin for the select-value mount order defect: a select's `value` alone lands before its options mount, so every option must mirror `selected` — if this capture ever reads \"Idle\", the mirror broke."
+)]
+pub(crate) fn dropdown_field_wired() -> Element {
+    rsx! {
+        SlotValueEditor {
+            value: UiSlotValue::string("blast").with_editor(UiSlotEditorHint::dropdown([
+                ("idle", "Idle"),
+                ("blast", "Blast"),
+                ("strobe", "Strobe"),
+            ])),
+            state: UiSlotFieldState::editable(),
+            address: story_slot_address("mode"),
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
     description = "The editable XY pad for Vec2 values: drag-to-edit pad, stacked fixed-width read-only component readouts (3-decimal display cap), and the raw-input popup affordance."
 )]
 pub(crate) fn xy_field() -> Element {
