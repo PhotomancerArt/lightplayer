@@ -51,6 +51,7 @@ impl FakeEsp32Device {
                 stalled_by_cut: false,
                 input_buf: Vec::new(),
                 premature_input_bytes: 0,
+                premature_input: Vec::new(),
                 failure: FakeFailurePlan::none(),
                 dtr_high_seen: false,
                 last_rts: None,
@@ -77,6 +78,14 @@ impl FakeEsp32Device {
     /// exactly the M5 pull-before-readiness hardware bug.
     pub fn premature_input_bytes(&self) -> usize {
         self.lock().premature_input_bytes
+    }
+
+    /// The dropped premature bytes themselves (lossy UTF-8), so a test can
+    /// tell DELIBERATELY loss-tolerant traffic (the readiness hello request,
+    /// re-sent until answered) from a request that must not be lost (the
+    /// M5 pull-before-readiness bug).
+    pub fn premature_input(&self) -> String {
+        String::from_utf8_lossy(&self.lock().premature_input).into_owned()
     }
 
     /// Scripted management transition: "flash firmware" — the device becomes
@@ -186,6 +195,7 @@ pub(crate) struct FakeDeviceCore {
     /// Host→device bytes not yet forming a complete line.
     input_buf: Vec<u8>,
     premature_input_bytes: usize,
+    premature_input: Vec<u8>,
     failure: FakeFailurePlan,
     dtr_high_seen: bool,
     last_rts: Option<bool>,
@@ -476,6 +486,7 @@ impl FakeDeviceCore {
         self.advance();
         if !matches!(self.phase, FakePhase::RunningLp { .. }) {
             self.premature_input_bytes += bytes.len();
+            self.premature_input.extend_from_slice(bytes);
             return Ok(());
         }
         self.input_buf.extend_from_slice(bytes);

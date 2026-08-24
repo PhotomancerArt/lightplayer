@@ -32,13 +32,23 @@ use super::device_client_io::DeviceClientIo;
 use super::device_event::{DeviceEvent, DeviceEventSink, DeviceLineOrigin};
 use super::device_link_mode::DeviceLinkMode;
 use super::device_mode::{ChannelUseGuard, DeviceMode, DeviceModeGuard};
-use super::device_readiness::{BootLineClassifier, HelloGate, gate_first_frame};
+use super::device_readiness::{BootLineClassifier, HelloGate, gate_frame};
 use super::device_snapshot::DeviceSnapshot;
 use super::device_state::{DeviceState, IncompatibleReason};
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 use super::device_timers::WIRE_FRAME_POLL_INTERVAL;
 use super::device_timers::{DeviceTimers, READINESS_POLL_INTERVAL};
 use super::device_wire::DeviceWire;
+
+/// How often the readiness engine re-sends `ClientRequest::Hello` while
+/// `Booting`. Periodic because the answer can be dropped under engine load;
+/// one second keeps re-asks well inside the readiness budget without
+/// spamming a booting device.
+const HELLO_REQUEST_INTERVAL: std::time::Duration = std::time::Duration::from_millis(1000);
+
+/// Request id for readiness hellos: reserved at the top of the id space so a
+/// late answer can never be mistaken for an app-protocol response.
+const READINESS_HELLO_REQUEST_ID: u64 = u64::MAX;
 
 /// One owned hardware device link: connector + link session/connection +
 /// state machine + the readiness-gated app-protocol channel.
@@ -376,6 +386,14 @@ impl DeviceShared {
 
     /// The readiness engine: pump lines + frames every poll interval until
     /// the state leaves `Booting` or the `ready` deadline expires.
+    ///
+    /// It also ASKS: `ClientRequest::Hello` goes out periodically, because
+    /// the unsolicited hello is emitted only at boot and a connect cannot
+    /// assume the power to cause one (Web Serial cannot reset a CH340
+    /// classic; a running server would otherwise never pass the gate).
+    /// Periodic rather than once: the running server's response path drops
+    /// frames under engine load (`docs/debt/shared-uart-io-task-starvation.md`),
+    /// so a lost answer must not strand an otherwise-healthy connect.
     pub(crate) async fn drive_readiness(&self) -> DeviceState {
         if !matches!(self.state(), DeviceState::Booting) {
             return self.state();
@@ -383,7 +401,19 @@ impl DeviceShared {
         let interval = READINESS_POLL_INTERVAL;
         let budget = self.timers.deadlines().ready;
         let attempts = (budget.as_micros() / interval.as_micros().max(1)).max(1);
-        for _ in 0..attempts {
+        let hello_request_every =
+            (HELLO_REQUEST_INTERVAL.as_micros() / interval.as_micros().max(1)).max(1);
+        for attempt in 0..attempts {
+            if attempt % hello_request_every == 0 {
+                // Best-effort: a write failure here is not terminal — the
+                // deadline still governs, and boot hellos arrive unasked.
+                let _ = self
+                    .send_frame(lpc_wire::ClientMessage {
+                        id: READINESS_HELLO_REQUEST_ID,
+                        msg: lpc_wire::ClientRequest::Hello,
+                    })
+                    .await;
+            }
             self.pump();
             let state = self.state();
             if !matches!(state, DeviceState::Booting) {
@@ -410,7 +440,7 @@ impl DeviceShared {
                     self.mark_gone("device stream ended before the session became ready");
                     return;
                 }
-                Some(Ok(frame)) => match gate_first_frame(frame) {
+                Some(Ok(frame)) => match gate_frame(frame) {
                     HelloGate::Ready(hello) => {
                         self.set_state(DeviceState::Ready { hello });
                         return;
@@ -418,6 +448,13 @@ impl DeviceShared {
                     HelloGate::Incompatible(reason) => {
                         self.set_state(DeviceState::Incompatible { reason });
                         return;
+                    }
+                    // A running server's unsolicited frames (heartbeat) beat
+                    // the hello answer on a mid-stream connect — absorb and
+                    // keep waiting; the deadline classifies frames-without-
+                    // hello as FrameBeforeHello.
+                    HelloGate::NotHello => {
+                        self.classifier.borrow_mut().observe_wire_frame();
                     }
                 },
             }
@@ -468,16 +505,25 @@ impl DeviceShared {
     }
 
     /// Deadline expiry while still `Booting`: a started-but-silent server is
-    /// pre-hello firmware (`Incompatible`); anything else is `Unresponsive`
-    /// with the classifier's diagnosis.
+    /// pre-hello firmware (`Incompatible`); so is a peer whose absorbed wire
+    /// frames never included a hello (it also ignored our hello request);
+    /// anything else is `Unresponsive` with the classifier's diagnosis.
     fn on_ready_deadline(&self) {
-        let (server_started, diagnosis) = {
+        let (server_started, wire_frames_seen, diagnosis) = {
             let classifier = self.classifier.borrow();
-            (classifier.server_started(), classifier.classify_timeout())
+            (
+                classifier.server_started(),
+                classifier.wire_frames_seen(),
+                classifier.classify_timeout(),
+            )
         };
         if server_started {
             self.set_state(DeviceState::Incompatible {
                 reason: IncompatibleReason::NoHello,
+            });
+        } else if wire_frames_seen > 0 {
+            self.set_state(DeviceState::Incompatible {
+                reason: IncompatibleReason::FrameBeforeHello,
             });
         } else {
             self.set_state(DeviceState::Unresponsive { diagnosis });
@@ -547,17 +593,31 @@ impl DeviceShared {
 
     /// Wait for one app-protocol frame on the current wire (no deadline —
     /// the caller wraps this in the `request_idle` budget).
+    ///
+    /// Late answers to the readiness hello request (sentinel id) are
+    /// swallowed here: the gate consumes hellos only while `Booting`, so a
+    /// second answer arriving after Ready would otherwise surface as a
+    /// stray app-protocol frame.
     pub(crate) async fn recv_frame(&self) -> Result<WireServerMessage, TransportError> {
         #[cfg(feature = "device-session-host")]
         if let Some(transport) = self.host_transport() {
             let mut transport = transport.lock().await;
-            return lpa_client::ClientTransport::receive(&mut **transport).await;
+            loop {
+                let frame = lpa_client::ClientTransport::receive(&mut **transport).await?;
+                if frame.id == READINESS_HELLO_REQUEST_ID {
+                    continue;
+                }
+                return Ok(frame);
+            }
         }
         #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
         if self.is_browser_wire() {
             loop {
                 self.pump_console_lines();
                 if let Some(frame) = self.pop_browser_frame() {
+                    if frame.id == READINESS_HELLO_REQUEST_ID {
+                        continue;
+                    }
                     return Ok(frame);
                 }
                 if let Some(message) = self.state().unavailable_message() {

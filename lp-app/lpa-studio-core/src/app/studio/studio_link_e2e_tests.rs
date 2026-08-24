@@ -333,9 +333,16 @@ fn card_native_stamp_and_push_through_the_link() {
 /// Row 2 (pull-before-readiness regression): with a boot delay long enough
 /// that a premature pull would race the server start, the pull must only
 /// happen after the server-started marker + first `M!` frame. The fake
-/// DISCARDS (and counts) bytes written before its server loop runs — real
+/// DISCARDS (and records) bytes written before its server loop runs — real
 /// ESP32 behavior, and the exact M5 hardware bug: a pull sent early was
 /// silently lost and the connect hung.
+///
+/// One category of early bytes is LEGAL: the readiness engine's
+/// `ClientRequest::Hello`, which is deliberately loss-tolerant (re-sent
+/// until answered; a running server answers it, a booting one emits the
+/// hello unasked — `docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`).
+/// The pin is therefore "nothing BUT hello requests before readiness",
+/// not "nothing".
 #[test]
 fn pull_waits_for_server_started_marker_and_first_frame() {
     let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
@@ -345,11 +352,14 @@ fn pull_waits_for_server_started_marker_and_first_frame() {
 
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
 
-    assert_eq!(
-        device.premature_input_bytes(),
-        0,
-        "no request bytes reached the wire before the server-started marker \
-         and the first M! frame"
+    let premature = device.premature_input();
+    assert!(
+        premature
+            .lines()
+            .all(|line| line.is_empty() || (line.starts_with("M!") && line.contains("\"hello\""))),
+        "only loss-tolerant readiness hello requests may reach the wire \
+         before the server-started marker and the first M! frame; saw: \
+         {premature:?}"
     );
     assert_eq!(
         studio.device_sync_for_test().map(|sync| &sync.content),
