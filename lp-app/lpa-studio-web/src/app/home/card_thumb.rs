@@ -70,7 +70,9 @@ pub(crate) fn CardThumb(
     static_poster: Option<String>,
 ) -> Element {
     let preview = use_thumb_preview(source, mode);
-    let badge = static_badge.or(preview.badge).and_then(ThumbPreviewBadge::issue);
+    let badge = static_badge
+        .or(preview.badge)
+        .and_then(ThumbPreviewBadge::issue);
     let lamps = static_lamps.or(preview.lamps);
     let poster = static_poster.or(preview.poster);
     let style = thumb_swatch_style(&seed, muted);
