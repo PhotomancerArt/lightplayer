@@ -38,7 +38,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, PreviewSource, UiAction};
 
 use crate::app::home::card_thumb::thumb_swatch_style;
-use crate::app::home::gallery_preview::{ThumbPreviewBadge, use_preview_lease};
+use crate::app::home::gallery_preview::{ThumbPreviewBadge, use_preview_lease_raster};
 use crate::app::home::package_card::home_action;
 use crate::base::logo_mark::{BrandWord, fillet_tri_path};
 
@@ -64,7 +64,11 @@ const HERO_CANVAS: (u32, u32) = (512, 476);
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn BrandHero(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> Element {
-    let preview = use_preview_lease(
+    // Raster-first on purpose: examples drive LEDs, so their products are
+    // control-first and a plain lease would keep the raster hidden behind a
+    // lamp view (G1 finding: the triangle sat dark on the gradient). The
+    // hero's triangle is a *screen* — it shows the shader surface itself.
+    let preview = use_preview_lease_raster(
         Some(PreviewSource::Example(HERO_EXAMPLE.to_string())),
         Some(HERO_FPS),
     );
