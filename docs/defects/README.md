@@ -349,6 +349,7 @@ values; statistical diffs are for the arithmetic in between.
 | silent-drop | 2026-08-03 | [dev-file-sync-drops-on-uart-rx-overflow](2026-08-03-dev-file-sync-drops-on-uart-rx-overflow.md) | **open** | lp-cli/src/commands/dev (fs sync) + fw-esp32v3 UART0 RX |
 | silent-drop | 2026-08-07 | [boot-compile-oom-crash-loop](2026-08-07-boot-compile-oom-crash-loop.md) | **open** | fw-esp32v3 boot-compile + lp-cli upload + lpfs partition |
 | timeout-scoped-to-sub-phase | 2026-08-07 | [upload-wait-timeout-unbounded-deploy](2026-08-07-upload-wait-timeout-unbounded-deploy.md) | **open** | lp-cli upload (deploy wait) |
+| timeout-scoped-to-sub-phase | 2026-08-24 | [request-idle-budget-blind-to-dropped-responses](2026-08-24-request-idle-budget-blind-to-dropped-responses.md) | **open** | lpa-link device_client_io + client correlation |
 | unbounded-restatement | 2026-07-28 | [tick-error-restated-every-frame](2026-07-28-tick-error-restated-every-frame.md) | fixed | lpa-server (advance_frame) |
 | unsynchronized-shared-artifact | 2026-07-29 | [builtins-elf-uplift-race](2026-07-29-builtins-elf-uplift-race.md) | fixed | justfile `test` + lpvm-cranelift/build.rs |
 | missing-coverage | 2026-07-29 | [uniform-struct-array-runtime-index](2026-07-29-uniform-struct-array-runtime-index.md) | fixed | examples/effects/meteor + lps-frontend lowering |

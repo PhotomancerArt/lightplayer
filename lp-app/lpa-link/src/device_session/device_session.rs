@@ -403,24 +403,43 @@ impl DeviceShared {
         let attempts = (budget.as_micros() / interval.as_micros().max(1)).max(1);
         let hello_request_every =
             (HELLO_REQUEST_INTERVAL.as_micros() / interval.as_micros().max(1)).max(1);
+        self.sink.emit(DeviceEvent::LogLine {
+            line: format!("readiness: engine start (budget {budget:?})"),
+            origin: DeviceLineOrigin::Link,
+        });
         for attempt in 0..attempts {
             if attempt % hello_request_every == 0 {
                 // Best-effort: a write failure here is not terminal — the
                 // deadline still governs, and boot hellos arrive unasked.
-                let _ = self
+                let outcome = self
                     .send_frame(lpc_wire::ClientMessage {
                         id: READINESS_HELLO_REQUEST_ID,
                         msg: lpc_wire::ClientRequest::Hello,
                     })
                     .await;
+                self.sink.emit(DeviceEvent::LogLine {
+                    line: match outcome {
+                        Ok(()) => "readiness: hello request sent".to_string(),
+                        Err(error) => format!("readiness: hello request not sent: {error}"),
+                    },
+                    origin: DeviceLineOrigin::Link,
+                });
             }
             self.pump();
             let state = self.state();
             if !matches!(state, DeviceState::Booting) {
+                self.sink.emit(DeviceEvent::LogLine {
+                    line: format!("readiness: settled at {state:?}"),
+                    origin: DeviceLineOrigin::Link,
+                });
                 return state;
             }
             self.timers.sleep(interval).await;
         }
+        self.sink.emit(DeviceEvent::LogLine {
+            line: "readiness: deadline expired".to_string(),
+            origin: DeviceLineOrigin::Link,
+        });
         self.on_ready_deadline();
         self.state()
     }
