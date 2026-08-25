@@ -1026,8 +1026,8 @@ async fn dropped_responses_on_a_heartbeating_wire_hit_the_total_deadline() {
     let session = DeviceSession::connect(connector, &endpoint_id, timers, DeviceEventSink::noop())
         .await
         .unwrap();
-    let mut client =
-        lpa_client::LpClient::new(session.client_io()).with_request_deadline(session.request_deadline());
+    let mut client = lpa_client::LpClient::new(session.client_io())
+        .with_request_deadline(session.request_deadline());
 
     // Readiness still works: the unsolicited id-0 hello flows through the
     // response drop. The correlated request is what starves.
