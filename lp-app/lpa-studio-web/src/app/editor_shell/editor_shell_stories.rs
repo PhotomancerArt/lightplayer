@@ -142,6 +142,70 @@ fn editor_shell_focused_mapping() -> Element {
     }
 }
 
+/// The peach-2d surface with its REAL map2d bytes: the scale-extreme
+/// regression case (pitch ≈ 39 own units at sample_diameter 26 — ~5×
+/// coarser than every other example). Both docs share one authored
+/// canvas, so identity transforms recreate the real overlay.
+fn peach_canvas_inputs() -> (UiPatchSurface, BTreeMap<ArtifactLocation, String>) {
+    let mut surface = peach_surface();
+    let mut bodies = BTreeMap::new();
+    let body_artifact = ArtifactLocation::file("/body/peach_body.map2d.json");
+    let leaf_artifact = ArtifactLocation::file("/leaf/peach_leaf.map2d.json");
+    bodies.insert(
+        body_artifact.clone(),
+        include_str!("../../../../../examples/peach-2d/body/peach_body.map2d.json").to_string(),
+    );
+    bodies.insert(
+        leaf_artifact.clone(),
+        include_str!("../../../../../examples/peach-2d/leaf/peach_leaf.map2d.json").to_string(),
+    );
+    surface.fixtures[0].mapping_artifact = Some(body_artifact);
+    surface.fixtures[1].mapping_artifact = Some(leaf_artifact);
+    // The peach docs are id-less (format 1): the real surface builder still
+    // derives one RANGE-grain instance per object span (empty path), and
+    // the canvas draws one body per instance — the story mirrors that.
+    surface.fixtures[0].instances = vec![
+        instance_range("body-leg-1", 0, 22),
+        instance_range("body-leg-2", 22, 22),
+    ];
+    surface.fixtures[1].instances = vec![instance_range("leaves", 0, 12)];
+    for fixture in &mut surface.fixtures {
+        fixture.arrange = Some(UiArrangeMeta {
+            arranged: true,
+            transform: UiArrangeTransform::default(),
+            footprint: None,
+        });
+    }
+    (surface, bodies)
+}
+
+/// A range-grain instance (id-less object): empty path, stride 1.
+fn instance_range(label: &str, start: u32, lamps: u32) -> lpa_studio_core::UiPatchInstance {
+    lpa_studio_core::UiPatchInstance {
+        path: String::new(),
+        label: label.to_string(),
+        start,
+        lamps,
+        stride: 1,
+        placed: true,
+    }
+}
+
+#[story(
+    description = "The peach's real map2d bytes on the canvas — the scale-extreme case: authored ~5× coarser than other docs, sample_diameter 26 at pitch ≈ 39. Cell and outline sizing derive from the doc's own numbers (median pitch, footprint floor), so the body strands read as a touching voronoi mesh at ANY authoring scale — the G1 regression that absolute clamps once broke."
+)]
+fn arrange_canvas_peach_scale() -> Element {
+    let (surface, bodies) = peach_canvas_inputs();
+    canvas_frame(rsx! {
+        ProjectCanvasHost {
+            surface,
+            bodies,
+            selection: None,
+            on_action: move |_| {},
+        }
+    })
+}
+
 #[story(
     description = "The canvas's three honesty levels in one space: the loaded dome (real geometry), the doors as a PLACEHOLDER block (body not loaded — the cached footprint's size and lamp count, clearly a block), and the peach fixtures as dashed range strips (no map2d at all). Everything unarranged auto-packs into the bottom row with dashed frames until first dragged."
 )]
