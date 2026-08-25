@@ -445,7 +445,7 @@ struct FirmwareApp {
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 #[inline(never)]
-fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
+fn boot_firmware() -> FirmwareApp {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
     // twice panics. This is the app path's ONLY call to `esp_hal::init`.
     let (sw_int, timg0, uart0, flash, rmt_peripheral, cpu_ctrl) = init_board();
@@ -467,13 +467,40 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     let boot_assessment = recovery::boot_report::init_and_report();
     let boot_guard = lp_recovery::enter(lp_recovery::FrameKind::Boot, "boot").ok();
 
-    start_runtime(timg0, sw_int);
+    let sw_int1 = start_runtime(timg0, sw_int);
     esp_println::println!("[INIT] runtime started");
 
     match uart0 {
         Ok(uart) => {
-            spawner.spawn(io_task(uart).unwrap());
-            esp_println::println!("[INIT] I/O task spawned (uart0 921600 8N1)");
+            // io_task runs on its own interrupt executor (swi1, Priority2)
+            // rather than as a cooperative peer of the server loop on the
+            // thread executor: a ~41 ms engine tick used to be a ~41 ms hole
+            // in UART servicing — the 128 B RX FIFO (~1.4 ms of line time at
+            // 921600) overflowed, and TX chunks hit their 250 ms timeout
+            // without the wire being the problem. See
+            // docs/debt/shared-uart-io-task-starvation.md.
+            //
+            // Priority2 is deliberate: strictly below the RMT ISR's
+            // Priority3, which binds on THIS core in the single-core
+            // fallback (`output::rmt::shared_driver::install_isr`). Two
+            // accepted pauses remain: esp-sync critical sections mask the
+            // SWI for their (µs-scale) duration, and esp-storage masks
+            // interrupts around each ROM flash call, so flash writes still
+            // pause io_task per-op — bounded, unlike per-frame starvation.
+            //
+            // SAFETY: the one and only reference ever taken to the executor
+            // static — `boot_firmware` runs once, and the executor it starts
+            // runs forever (the APP_CORE_STACK pattern).
+            static mut IO_EXECUTOR: Option<esp_rtos::embassy::InterruptExecutor<1>> = None;
+            let executor: &'static mut Option<esp_rtos::embassy::InterruptExecutor<1>> =
+                unsafe { &mut *core::ptr::addr_of_mut!(IO_EXECUTOR) };
+            let io_spawner = executor
+                .insert(esp_rtos::embassy::InterruptExecutor::new(sw_int1))
+                .start(esp_hal::interrupt::Priority::Priority2);
+            io_spawner.spawn(io_task(uart).unwrap());
+            esp_println::println!(
+                "[INIT] I/O task spawned (uart0 921600 8N1, interrupt executor swi1 prio2)"
+            );
         }
         Err(error) => {
             // The board keeps booting: `esp_println` writes UART0's FIFO
@@ -720,8 +747,10 @@ fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 #[esp_rtos::main]
-async fn main(spawner: embassy_executor::Spawner) {
-    let app = boot_firmware(spawner);
+// The thread executor's spawner goes unused: the server loop runs as this
+// main task itself, and io_task lives on the swi1 interrupt executor.
+async fn main(_spawner: embassy_executor::Spawner) {
+    let app = boot_firmware();
 
     // ⚠️ The substring "fw-esp32 initialized, starting server loop" is matched
     // literally by `lpa_link::device_session::device_readiness` (and by lp-cli

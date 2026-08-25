@@ -184,6 +184,16 @@ fn poll_rx_into(
 /// Runs independently of the server loop and converts between UART bytes and
 /// `M!`-prefixed JSON lines.
 ///
+/// `main.rs` spawns this on an `esp_rtos` interrupt executor (swi1,
+/// Priority2), NOT the thread executor the server loop runs on: the 1 ms
+/// poll cadence below must hold while a ~41 ms engine tick monopolizes the
+/// thread executor, or the 128 B RX FIFO (~1.4 ms at 921600) overflows and
+/// TX chunks time out unpolled (`docs/debt/shared-uart-io-task-starvation.md`).
+/// Two consequences to preserve: the future must stay `Send` (it is spawned
+/// through a `SendSpawner`), and everything it shares with the rest of the
+/// firmware must remain these static channels — cross-executor communication
+/// is the design, not an accident.
+///
 /// # Arguments
 ///
 /// * `uart` - UART0, already configured at 921600 8N1 by `init_board` (which

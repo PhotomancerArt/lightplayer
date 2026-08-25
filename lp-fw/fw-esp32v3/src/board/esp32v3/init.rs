@@ -19,7 +19,7 @@
 //! twice panics. It is the app path's **only** call to `esp_hal::init`.
 
 use esp_hal::clock::CpuClock;
-use esp_hal::interrupt::software::SoftwareInterruptControl;
+use esp_hal::interrupt::software::{SoftwareInterrupt, SoftwareInterruptControl};
 use esp_hal::timer::timg::{TimerGroup, TimerGroupInstance};
 use esp_hal::uart::{Config as UartConfig, Uart};
 use esp_hal::{Blocking, uart::ConfigError};
@@ -123,9 +123,15 @@ pub fn init_board() -> (
 }
 
 /// Start the Embassy runtime with the given timer and software interrupt.
+///
+/// Consumes software interrupt 0 (the esp-rtos scheduler's doorbell) and
+/// hands software interrupt 1 back to the caller — `main.rs` feeds it to the
+/// io interrupt executor that keeps `serial::io_task` scheduled through long
+/// engine ticks. Interrupts 2 and 3 stay unclaimed.
 pub fn start_runtime(
     timg0: TimerGroup<'static, impl TimerGroupInstance>,
     sw_int: SoftwareInterruptControl<'static>,
-) {
+) -> SoftwareInterrupt<'static, 1> {
     esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
+    sw_int.software_interrupt1
 }
