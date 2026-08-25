@@ -39,9 +39,9 @@ import time
 import urllib.request
 
 DEFAULT_SERVER = "http://localhost:29188"
-# 72 lines x 64 chars = 4608 B > the 4 KiB exit criterion, and comfortably
-# past the 128 B FIFO and the ~4.5 KB shape the 2026-08-21 baseline used.
-PAYLOAD_LINES = 72
+# 82 lines x 56 B = 4592 B > the 4 KiB exit criterion, and comfortably past
+# the 128 B FIFO and the ~4.5 KB shape the 2026-08-21 baseline used.
+PAYLOAD_LINES = 82
 BENCH_PATH = "/bench-inbound.txt"
 FRAME_ID_BASE = 9000  # clear of the lab page's own nextFrameId (100+)
 
