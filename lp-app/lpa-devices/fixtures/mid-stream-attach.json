@@ -1,0 +1,53 @@
+{
+  "name": "mid-stream attach: a running server heartbeats before it hellos",
+  "steps": [
+    {
+      "at_ms": 0,
+      "do": { "attach": { "link": 1, "endpoint": "usb-1", "label": "/dev/cu.usbmodem2101" } },
+      "expect": {
+        "devices": 0,
+        "pending": 1,
+        "pending_state": "New device found — identifying…",
+        "pending_can_adopt": true,
+        "pending_escapes": ["Forget"]
+      }
+    },
+    {
+      "at_ms": 20,
+      "do": { "opened": { "link": 1 } }
+    },
+    {
+      "at_ms": 500,
+      "do": { "heartbeat": { "link": 1 } },
+      "expect": {
+        "devices": 0,
+        "pending": 1,
+        "pending_state": "New device found — identifying…",
+        "journal_notes_absent": ["ActivityEnded", "Incompatible"]
+      }
+    },
+    {
+      "at_ms": 1200,
+      "do": { "heartbeat": { "link": 1 } },
+      "expect": {
+        "pending": 1,
+        "pending_state": "New device found — identifying…"
+      }
+    },
+    {
+      "at_ms": 1500,
+      "do": { "hello": { "link": 1, "uid": "dev_2f8a", "board": "dig-uno" } },
+      "expect": {
+        "devices": 1,
+        "pending": 0,
+        "device_state": "Ready",
+        "device_status": "Ready",
+        "busy": false,
+        "escapes": ["Disconnect", "Forget"],
+        "outcome_ok": true,
+        "outcome_contains": "dig-uno",
+        "journal_notes": ["IdentityPromoted", "DeviceCreated", "ActivityEnded"]
+      }
+    }
+  ]
+}
