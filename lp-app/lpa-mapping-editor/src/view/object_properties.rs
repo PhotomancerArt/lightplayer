@@ -20,7 +20,7 @@
 
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{ChevronDown, ChevronUp, Minimize2, RotateCw, Trash2, Ungroup};
-use lpc_mapping::{GridCorner, GridRouting, Map2dShape, RingDir, RingOrder, resolve};
+use lpc_mapping::{GridCorner, GridRouting, Map2dShape, PathAlign, RingDir, RingOrder, resolve};
 
 use crate::editor_core::editor_session::{DEFAULT_REPEAT_COUNT, MapEditorSession};
 use crate::editor_core::shape_path::ShapePath;
@@ -482,6 +482,13 @@ fn shape_fields(
                     current: dir_current,
                     apply: FieldApply::PathReversed,
                 }
+                SegField {
+                    session, on_committed, index, depth, label: "align",
+                    title: "where the lamps sit relative to the drawn path — inside = the strip wraps a form",
+                    options: vec![("on", "on path"), ("inside", "inside"), ("outside", "outside")],
+                    current: align_current(path.align),
+                    apply: FieldApply::PathAlign,
+                }
                 PathGapsField { session, on_committed, index, depth, gaps: path.gaps.clone() }
             }
         }
@@ -491,6 +498,13 @@ fn shape_fields(
             rsx! {
                 NumberField { session, on_committed, index, depth, label: "count", value: polygon.count as f32, min: 1.0, is_int: true,
                     apply: FieldApply::PolygonCount }
+                SegField {
+                    session, on_committed, index, depth, label: "align",
+                    title: "where the lamps sit relative to the drawn path — inside = the strip wraps a form",
+                    options: vec![("on", "on path"), ("inside", "inside"), ("outside", "outside")],
+                    current: align_current(polygon.align),
+                    apply: FieldApply::PolygonAlign,
+                }
             }
         }
         // A repeat's own parameters — "N copies, about here". The inner
@@ -508,6 +522,17 @@ fn shape_fields(
                     apply: FieldApply::RepeatCenterY }
             }
         }
+    }
+}
+
+/// The align segmented control's current-value token for a shape's
+/// [`PathAlign`] — the same three tokens the `align` `SegField`'s options
+/// and `apply_choice` arms use.
+fn align_current(align: PathAlign) -> &'static str {
+    match align {
+        PathAlign::On => "on",
+        PathAlign::Inside => "inside",
+        PathAlign::Outside => "outside",
     }
 }
 
@@ -544,7 +569,9 @@ pub enum FieldApply {
     RingDir,
     PathCount,
     PathReversed,
+    PathAlign,
     PolygonCount,
+    PolygonAlign,
     RepeatCount,
     RepeatCenterX,
     RepeatCenterY,
@@ -608,7 +635,25 @@ fn apply_choice(shape: &mut Map2dShape, apply: FieldApply, choice: &str) {
         (FieldApply::PathReversed, Map2dShape::Path(path)) => {
             path.reversed = choice == "rev";
         }
+        (FieldApply::PathAlign, Map2dShape::Path(path)) => {
+            path.align = choice_to_align(choice);
+        }
+        (FieldApply::PolygonAlign, Map2dShape::Polygon(polygon)) => {
+            polygon.align = choice_to_align(choice);
+        }
         _ => {}
+    }
+}
+
+/// The align `SegField`'s option token, parsed back to [`PathAlign`] —
+/// the inverse of [`align_current`]. An unrecognized token (there should
+/// never be one; the three options are the only buttons rendered) lands
+/// on the default `On` rather than panicking.
+fn choice_to_align(choice: &str) -> PathAlign {
+    match choice {
+        "inside" => PathAlign::Inside,
+        "outside" => PathAlign::Outside,
+        _ => PathAlign::On,
     }
 }
 
@@ -667,13 +712,17 @@ fn SegField(
     index: usize,
     depth: usize,
     label: &'static str,
+    /// Optional tooltip text for the label — same convention as a plain
+    /// `title` attribute elsewhere in the panel; empty renders no tooltip.
+    #[props(default)]
+    title: &'static str,
     options: Vec<(&'static str, &'static str)>,
     current: &'static str,
     apply: FieldApply,
 ) -> Element {
     rsx! {
         div { class: "lpme-field",
-            label { "{label}" }
+            label { title: "{title}", "{label}" }
             div { class: "lpme-seg",
                 for (value, text) in options {
                     button {

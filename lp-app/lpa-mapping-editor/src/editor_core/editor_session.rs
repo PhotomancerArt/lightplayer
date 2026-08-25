@@ -1421,6 +1421,29 @@ mod tests {
         assert_eq!(session.doc().format, 1);
     }
 
+    /// Aligning a path off `on` stamps format 4 on commit — the same
+    /// one-undo-step path the object-properties panel's `align` `SegField`
+    /// drives (`FieldApply::PathAlign` → `apply_choice` → this shape
+    /// mutation) — and dropping back to `on` releases it, mirroring the
+    /// gaps format-stamp/release round trip above.
+    #[test]
+    fn align_stamps_format_four_and_releases_it() {
+        let mut session = session_with_gapped_path();
+        assert_eq!(session.doc().format, 1);
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Path(path) = shape {
+                path.align = PathAlign::Inside;
+            }
+        });
+        assert_eq!(session.doc().format, 4);
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Path(path) = shape {
+                path.align = PathAlign::On;
+            }
+        });
+        assert_eq!(session.doc().format, 1);
+    }
+
     /// Inserting a vertex inside a jumper leaves both halves inert; segments
     /// after the insertion point shift up with their geometry.
     #[test]

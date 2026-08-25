@@ -1,5 +1,5 @@
 {
-  "format": 3,
+  "format": 4,
   "sample_diameter": 2.0,
   "canvas": [
     0.0,
@@ -31,7 +31,8 @@
                 ]
               ],
               "count": 9,
-              "reversed": false
+              "reversed": false,
+              "align": "inside"
             }
           },
           "center": [
