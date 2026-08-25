@@ -14,8 +14,10 @@
 //! or percentage clamp; doc units are arbitrary, see the
 //! canvas-object-renderables ADR), cached as `Path2d`s keyed by the layout
 //! `Rc`'s identity. A live frame is then one `clearRect` plus one solid
-//! `fill` per lit cell under a hint→canvas transform — no pixel buffer,
-//! no per-lamp math. Cells tile without overlap by construction, so plain
+//! `fill` per lit cell under one aspect-FIT transform — the cell bounds
+//! uniformly scaled and centered in the box (fit, never stretch, and an
+//! edge cell never clips; both G1 rulings) — no pixel buffer, no
+//! per-lamp math. Cells tile without overlap by construction, so plain
 //! source-over fills replace the old screen blending; unlit cells stay
 //! transparent and the black frame behind the canvas shows through, which
 //! is the same nothing the dot renderer drew.
@@ -242,9 +244,14 @@ pub(crate) fn control_sample_layout_has_rgb(preview: &UiControlProductPreview) -
 /// decodes from. Pure data — the `Path2d` form the painter fills is built
 /// from this by [`LampCellPaths`].
 pub(crate) struct LampFieldGeometry {
-    /// Hint-space extent the polygons were computed in — the draw-time
-    /// transform maps `[0, hint]` onto the canvas box.
-    pub hint: [f64; 2],
+    /// Hint-space bbox over every cell VERTEX (`[min_x, min_y, width,
+    /// height]`) — what the draw-time transform aspect-FITS into the
+    /// canvas box (G1 rulings): framing the polygons rather than the
+    /// `[0, hint]` extent means an edge lamp's cell can never be cut off
+    /// by the canvas border, and a field that occupies a sliver of its
+    /// texture (the fyeah sign in a square texture) fills its box.
+    /// All-zero when the layout has no drawable cell.
+    pub bounds: [f64; 4],
     /// Per displayed lamp: its sample offset and its cell polygon
     /// (possibly empty when coincident lamps shared all its territory).
     pub cells: Vec<(u32, Vec<[f32; 2]>)>,
@@ -286,12 +293,25 @@ pub(crate) fn lamp_field_geometry(layout: &lpa_studio_core::ControlLayout2d) -> 
             .get(radii.len() / 2)
             .map_or(f32::EPSILON, |radius| (radius * max_hint).max(f32::EPSILON))
     };
-    let cells = point_cells(&positions, floor)
+    let cells: Vec<(u32, Vec<[f32; 2]>)> = point_cells(&positions, floor)
         .into_iter()
         .zip(&layout.lamps)
         .map(|(cell, lamp)| (lamp.sample_start, cell.polygon))
         .collect();
-    LampFieldGeometry { hint, cells }
+    let mut min = [f64::INFINITY; 2];
+    let mut max = [f64::NEG_INFINITY; 2];
+    for vertex in cells.iter().flat_map(|(_, polygon)| polygon) {
+        min[0] = min[0].min(f64::from(vertex[0]));
+        min[1] = min[1].min(f64::from(vertex[1]));
+        max[0] = max[0].max(f64::from(vertex[0]));
+        max[1] = max[1].max(f64::from(vertex[1]));
+    }
+    let bounds = if min[0].is_finite() {
+        [min[0], min[1], max[0] - min[0], max[1] - min[1]]
+    } else {
+        [0.0; 4]
+    };
+    LampFieldGeometry { bounds, cells }
 }
 
 /// A layout's cells as ready-to-fill `Path2d`s, keyed by the layout
@@ -301,7 +321,9 @@ pub(crate) struct LampCellPaths {
     /// `Rc::as_ptr` of the `ControlDisplayLayout` these paths were built
     /// from (identity, not contents — same contract as [`LampPaintKey`]).
     layout_key: usize,
-    hint: [f64; 2],
+    /// Hint-space bbox of every cell vertex — see
+    /// [`LampFieldGeometry::bounds`].
+    bounds: [f64; 4],
     cells: Vec<(u32, web_sys::Path2d)>,
 }
 
@@ -337,7 +359,7 @@ impl LampCellPaths {
             }
             *slot = Some(LampCellPaths {
                 layout_key,
-                hint: geometry.hint,
+                bounds: geometry.bounds,
                 cells,
             });
         }
@@ -345,10 +367,14 @@ impl LampCellPaths {
     }
 
     /// Fill every lit cell into the `dest` box (`[x, y, width, height]`
-    /// in device pixels) on `context`. Background is the caller's: the
-    /// live canvas clears to transparent (the black frame behind it
-    /// shows through), the poster fills black first — either way this
-    /// only paints cells, so both stay the same picture.
+    /// in device pixels) on `context`, aspect-FITTING the cell bounds —
+    /// uniform scale, centered, never stretched (G1: a squished dome
+    /// read as an ellipse) and never clipped (the bounds include every
+    /// cell vertex, so an edge lamp's cell cannot be cut off by the
+    /// border). Background is the caller's: the live canvas clears to
+    /// transparent (the black frame behind it shows through), the poster
+    /// fills black first — either way this only paints cells, so both
+    /// stay the same picture.
     pub(crate) fn fill(
         &self,
         context: &web_sys::CanvasRenderingContext2d,
@@ -357,8 +383,20 @@ impl LampCellPaths {
         dest: [f64; 4],
     ) -> Result<(), String> {
         let [x, y, width, height] = dest;
+        let [bounds_x, bounds_y, bounds_w, bounds_h] = self.bounds;
+        if bounds_w <= 0.0 || bounds_h <= 0.0 {
+            return Ok(());
+        }
+        let scale = (width / bounds_w).min(height / bounds_h);
         context
-            .set_transform(width / self.hint[0], 0.0, 0.0, height / self.hint[1], x, y)
+            .set_transform(
+                scale,
+                0.0,
+                0.0,
+                scale,
+                x + (width - scale * bounds_w) / 2.0 - scale * bounds_x,
+                y + (height - scale * bounds_h) / 2.0 - scale * bounds_y,
+            )
             .map_err(|error| format!("set transform: {error:?}"))?;
         let neutral = neutral_lamp_rgb();
         let mut style = String::new();
@@ -631,8 +669,18 @@ mod tests {
         let layout =
             lpa_studio_core::ControlLayout2d::new(lpa_studio_core::Revision(7), 200, 100, lamps);
         let geometry = lamp_field_geometry(&layout);
-        assert_eq!(geometry.hint, [200.0, 100.0]);
         assert_eq!(geometry.cells.len(), 4);
+        // The bounds frame the CELLS, not the [0, hint] extent: seeds
+        // span x 0..150 at y 50, radius 0.92 × 50 — the bbox reaches
+        // (inset) beyond the first and last seed on both axes.
+        let [bounds_x, bounds_y, bounds_w, bounds_h] = geometry.bounds;
+        assert!(bounds_x < 0.0 && bounds_x > -50.0, "bx {bounds_x}");
+        assert!(bounds_y < 50.0 && bounds_y > 0.0, "by {bounds_y}");
+        assert!(
+            bounds_w > 150.0 && bounds_w < 250.0,
+            "bw {bounds_w} spans the seeds plus cell reach"
+        );
+        assert!(bounds_h > 0.0 && bounds_h < 100.0, "bh {bounds_h}");
         for (index, (sample_start, polygon)) in geometry.cells.iter().enumerate() {
             assert_eq!(*sample_start, index as u32 * 3);
             assert!(!polygon.is_empty(), "cell {index} vanished");
