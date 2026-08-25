@@ -50,6 +50,12 @@ curl -s -X POST localhost:29188/cmd -d '{"op":"eval","js":"return lab.S.rxBytes"
 curl -s localhost:29188/log?n=50                    # page lifecycle telemetry
 ```
 
+Scripted sequences live in `scripts/`: `starvation-bench.py` drives the
+whole io_task-starvation measurement (liveness → load → ≥4 KB inbound
+write under load → response round-trips → idle control → torn-frame
+session check) and prints a pass/fail table — the hardware-gate evidence
+for `docs/debt/shared-uart-io-task-starvation.md`.
+
 `capture` returns timestamped entries since command start, classified:
 `log` (text line), `frame` (`M!` JSON, parsed), `bin` (hex preview),
 `meta` (lab events). `buffer {since}` re-reads history without waiting.
