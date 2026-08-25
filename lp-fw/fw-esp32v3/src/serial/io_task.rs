@@ -2,8 +2,8 @@
 //!
 //! Responsibilities are the S3's:
 //! - Drain the outgoing log/message queue and write it (prefixed lines).
-//! - Drain accountable server write requests, serialize to JSON, write, and
-//!   report the outcome back to the transport.
+//! - Drain accountable server write requests (already-serialized framed
+//!   bytes), write them, and report the outcome back to the transport.
 //! - Read available bytes, split on newlines, push `M!` lines to the incoming
 //!   queue.
 //!
@@ -29,9 +29,10 @@
 //! ([`WritePolicy::UART_921600`]) is sized in *line time*, not syscall
 //! overhead — exactly the seam `chunked_write`'s docs promise this crate.
 //!
-//! The JSON-serialization half (stack buffer, `\nM!` framing) is the shared
-//! `fw_esp32_common::serial::server_msg` implementation, the same one
-//! fw-esp32c6 and fw-esp32s3 use.
+//! Serialization happens on the THREAD side (the transport, via the shared
+//! `fw_esp32_common::serial::server_msg`), never here: this task polls in
+//! interrupt context on a borrowed stack, so its per-poll footprint must stay
+//! at "chunked byte shuttling" scale. Same split as fw-esp32c6/fw-esp32s3.
 
 extern crate alloc;
 
@@ -60,11 +61,8 @@ static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 /// Each request carries a wrapping `u32` generation token that `io_task` echoes
 /// back on the result channel, so `transport.send()` can discard a result
 /// orphaned by a cancelled send instead of trusting arrival order.
-static SERVER_WRITE_REQUEST: Channel<
-    CriticalSectionRawMutex,
-    (u32, lpc_wire::WireServerMessage),
-    1,
-> = Channel::new();
+static SERVER_WRITE_REQUEST: Channel<CriticalSectionRawMutex, (u32, Vec<u8>), 1> =
+    Channel::new();
 
 static SERVER_WRITE_RESULT: Channel<
     CriticalSectionRawMutex,
@@ -104,8 +102,8 @@ static mut IO_PACER: Option<PeriodicTimer<'static, Blocking>> = None;
 /// Must be called before [`io_task`] is spawned would be ideal, but any order
 /// works: ticks signalled before io_task waits simply collapse into one.
 /// Priority1 is deliberate — the classic's single level-2 CPU interrupt slot
-/// is already claimed by the swi1 executor, and a P1 tick still wakes the P2
-/// executor (the wake path is signal → pender → swi1 raise, and a pending
+/// is already claimed by the swi2 executor, and a P1 tick still wakes the P2
+/// executor (the wake path is signal → pender → swi2 raise, and a pending
 /// swi fires as soon as the level allows).
 pub fn start_io_pacer(timer: AnyTimer<'static>) {
     // SAFETY: the one and only mutable reference taken outside the ISR, and
@@ -305,7 +303,7 @@ fn poll_rx_into(
 /// Runs independently of the server loop and converts between UART bytes and
 /// `M!`-prefixed JSON lines.
 ///
-/// `main.rs` spawns this on an `esp_rtos` interrupt executor (swi1,
+/// `main.rs` spawns this on an `esp_rtos` interrupt executor (swi2,
 /// Priority2), NOT the thread executor the server loop runs on: the 1 ms
 /// poll cadence below must hold while a ~41 ms engine tick monopolizes the
 /// thread executor, or the 128 B RX FIFO (~1.4 ms at 921600) overflows and
@@ -319,20 +317,42 @@ fn poll_rx_into(
 ///
 /// * `uart` - UART0, already configured at 921600 8N1 by `init_board` (which
 ///   is also where the baud divisor `esp-println` piggybacks on gets set).
+/// A `Uart<Async>` that may cross the `SendSpawner` boundary.
+///
+/// `Uart<Async>` is `!Send` (driver state is core-local). Moving it into
+/// io_task is sound HERE: `into_async()` runs on the PRO core in thread
+/// context, and io_task's executor (swi2) is bound to that same core — the
+/// driver never changes cores and the value moves exactly once.
+///
+/// Pre-converting is REQUIRED, not a convenience: `into_async()` registers
+/// and enables the UART interrupt, and doing that from inside the executor's
+/// handler's own poll does not survive the handler's exit (the interrupt
+/// epilogue restores the interrupt-enable state it entered with). The bench
+/// signature was async TX writes pending forever unless the bytes happened
+/// to fit the idle FIFO synchronously — one lucky boot flowed, the rest sat
+/// mute with io_task wedged inside its first `write_all` (2026-08-25).
+pub struct SendUart(pub Uart<'static, Async>);
+unsafe impl Send for SendUart {}
+
 #[embassy_executor::task]
-pub async fn io_task(uart: Uart<'static, Blocking>) {
-    // Direct-FIFO breadcrumbs (NOT the log router, which this task itself
-    // services): the first proves the interrupt executor polled the task at
-    // all, the second proves pacer-tick wakes reach it. If the second never
-    // prints, the pacer is dead and the host link will be mute — see
-    // `start_io_pacer` and the `IO_TICK` docs.
-    esp_println::println!("[INIT] io_task polled (interrupt executor entry)");
+pub async fn io_task(uart: SendUart) {
+    // ⚠️ No `esp_println!` anywhere in this task — it polls in interrupt
+    // context (the swi2 executor), and printing from there corrupted the
+    // system on the bench: a deterministic `InstrError` (PC in DRAM) fired
+    // seconds later in thread context whenever a diagnostic print ran in
+    // this task's entry poll (2026-08-25 dig2go; esp-sync's locks are
+    // priority-limited, per esp-rtos's own timer-priority comment, so an
+    // interrupt-context print can re-enter a lock the thread believes it
+    // holds). Liveness evidence belongs on the wire instead: the first
+    // heartbeat frame proves this task breathes.
     let router = MessageRouter::new(&INCOMING_MSG, &OUTGOING_MSG);
-    let mut link = UartLink::new(uart.into_async());
+    let mut link = UartLink::new(uart.0);
 
     // The old 100 ms boot settle, in ticks.
     wait_ticks(100).await;
-    esp_println::println!("[INIT] io_task first pacer ticks (io alive)");
+    // Through the router (drained by this task itself): self-proving — the
+    // line reaches the host only if the pacer wakes actually arrive.
+    log::info!("[io_task] live: pacer ticks flowing (swi2 executor)");
 
     loop {
         drain_server_write_request(&mut link, &router).await;
@@ -360,32 +380,23 @@ async fn drain_outgoing_messages(router: &MessageRouter, link: &mut UartLink) {
 }
 
 /// Drain accountable server write requests.
+///
+/// The request already carries the framed wire bytes — serialization happened
+/// thread-side in the transport, so this task's interrupt-context stack cost
+/// is one chunked byte write (see the module docs).
 async fn drain_server_write_request(link: &mut UartLink, router: &MessageRouter) {
     let receiver = SERVER_WRITE_REQUEST.receiver();
-    let Ok((generation, msg)) = receiver.try_receive() else {
+    let Ok((generation, bytes)) = receiver.try_receive() else {
         return;
     };
 
-    let result = timed_write_server_msg(link, msg, router).await;
+    let result = link.writer(router).write_framed(&bytes).await;
     // Echo the request generation so `transport.send()` can discard any stale
     // result left over from a cancelled send.
     SERVER_WRITE_RESULT
         .sender()
         .send((generation, result))
         .await;
-}
-
-/// Serialize and write one server message through the shared
-/// `fw_esp32_common::serial::server_msg` path — the same stack-buffer
-/// serialization and `\nM!` framing (and failure `\n` resync) the C6 and S3
-/// io tasks use. `connected` is unconditionally `true`: a UART has no
-/// cable/drain signal (see the module docs), so there is no verdict to pass.
-async fn timed_write_server_msg(
-    link: &mut UartLink,
-    msg: lpc_wire::WireServerMessage,
-    router: &MessageRouter,
-) -> Result<(), lpc_wire::TransportError> {
-    link.writer(router).write_server_msg(msg, true).await
 }
 
 /// Process the read buffer and extract complete lines.
@@ -458,7 +469,7 @@ pub fn get_message_channels() -> (
 
 /// Get the accountable server write channels for StreamingMessageRouterTransport.
 pub fn get_server_write_channels() -> (
-    &'static Channel<CriticalSectionRawMutex, (u32, lpc_wire::WireServerMessage), 1>,
+    &'static Channel<CriticalSectionRawMutex, (u32, Vec<u8>), 1>,
     &'static Channel<CriticalSectionRawMutex, (u32, Result<(), lpc_wire::TransportError>), 1>,
 ) {
     (&SERVER_WRITE_REQUEST, &SERVER_WRITE_RESULT)

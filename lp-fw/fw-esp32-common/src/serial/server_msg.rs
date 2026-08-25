@@ -1,191 +1,143 @@
-//! Wire-protocol server messages, serialized to JSON and written to a host link.
+//! Wire-protocol server messages, serialized to JSON for a host link.
 //!
-//! This is the chip-agnostic half of every firmware's `serial::io_task`: take a
-//! [`lpc_wire::WireServerMessage`], serialize it into a stack buffer with the
-//! `\nM!` framing, and hand the bytes to a [`ChunkedWriter`]. The io loop around
-//! it — connection monitoring, RX handling, the request/result channels — stays
-//! in the bin crate, because that is where the transport differs.
+//! This is the chip-agnostic serialization half of every firmware's server
+//! write path: take a [`lpc_wire::WireServerMessage`] and produce one framed
+//! wire line (`\nM!{json}\n`) on the heap. It runs in **thread context** (the
+//! transport), never in the io task: serialization recursion plus a
+//! frame-budget buffer must not ride an interrupt executor's borrowed stack —
+//! that exact mistake corrupted the classic ESP32 on the bench (see
+//! `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`). The io
+//! loop that writes the produced bytes — connection monitoring, RX handling,
+//! the request/result channels — stays in the bin crate, because that is
+//! where the transport differs.
 
-use alloc::{format, string::String};
+use alloc::{format, string::String, vec::Vec};
+use embedded_hal_async::delay::DelayNs;
+use embedded_io_async::Write;
 use ser_write_json::SerWrite;
 
 use super::chunked_write::ChunkedWriter;
 
-/// A [`SerWrite`] sink over a caller-provided stack buffer.
-///
-/// Fails rather than allocating when the buffer fills, which is what lets the
-/// serialization budget be a checked constant instead of a heap surprise.
-pub struct StackJsonWriter<'a> {
-    buf: &'a mut [u8],
-    len: usize,
-}
+/// A [`SerWrite`] sink over a growable heap buffer. Cannot fail: an
+/// allocation failure aborts through the firmware's `alloc_error_handler`,
+/// the same contract as every other heap use.
+struct VecJsonWriter<'a>(&'a mut Vec<u8>);
 
-/// The only way [`StackJsonWriter`] can fail: out of buffer.
-#[derive(Debug)]
-pub struct StackJsonError;
+impl ser_write_json::SerWrite for VecJsonWriter<'_> {
+    type Error = core::convert::Infallible;
 
-impl core::fmt::Display for StackJsonError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("stack JSON buffer full")
-    }
-}
-
-impl<'a> StackJsonWriter<'a> {
-    /// Wrap `buf`, writing from its start.
-    pub fn new(buf: &'a mut [u8]) -> Self {
-        Self { buf, len: 0 }
-    }
-
-    /// The bytes written so far.
-    pub fn bytes(&self) -> &[u8] {
-        &self.buf[..self.len]
-    }
-}
-
-impl ser_write_json::SerWrite for StackJsonWriter<'_> {
-    type Error = StackJsonError;
-
-    fn write(&mut self, buf: &[u8]) -> Result<(), StackJsonError> {
-        let end = self.len.checked_add(buf.len()).ok_or(StackJsonError)?;
-        if end > self.buf.len() {
-            return Err(StackJsonError);
-        }
-        self.buf[self.len..end].copy_from_slice(buf);
-        self.len = end;
+    fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        self.0.extend_from_slice(buf);
         Ok(())
     }
 }
 
-impl<W: embedded_io_async::Write, F: FnMut(), D: embedded_hal_async::delay::DelayNs>
-    ChunkedWriter<'_, W, F, D>
-{
-    /// Serialize `msg` and write it, framed, to the link.
-    ///
-    /// `connected` is the caller's connection verdict — the USB-Serial-JTAG
-    /// connection monitor is a chip fact and stays in the bin crate; links with
-    /// no such signal (a UART) pass `true`.
-    pub async fn write_server_msg(
-        &mut self,
-        msg: lpc_wire::WireServerMessage,
-        connected: bool,
-    ) -> Result<(), lpc_wire::TransportError> {
-        if !connected {
-            return Err(lpc_wire::TransportError::ConnectionLost);
-        }
+/// The serialized-frame budget: the shared `ProjectRead` frame budget plus
+/// room for the `\nM!` prefix and trailing `\n` (4 bytes, padded to 16).
+const SERVER_MSG_FRAMING_BYTES: usize = 16;
+const SERVER_MSG_JSON_BUFFER_SIZE: usize =
+    lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES + SERVER_MSG_FRAMING_BYTES;
 
-        let result = self.write_full_server_msg(msg).await;
-        if result.is_err() {
-            // If a timeout interrupts a JSON frame before the trailing newline, separate the
-            // next frame so host parsers can recover instead of concatenating two `M!` messages.
-            let _ = self.write_all(b"\n").await;
-        }
-        result
+/// Serialize `msg` into one framed wire line: `\nM!{json}\n`.
+///
+/// Thread-context by design (see the module docs): the caller is the
+/// transport's `send`, not the io task. The returned bytes are what the io
+/// task writes verbatim — its whole job shrinks to chunked byte shuttling,
+/// which is what keeps its interrupt-context stack footprint bounded.
+///
+/// The frame budget is enforced after the fact: a frame that serialized
+/// beyond [`SERVER_MSG_JSON_BUFFER_SIZE`] is refused with the same
+/// `Serialization` error (and log line) the old stack-buffer path produced,
+/// so the wire contract is unchanged.
+pub fn serialize_server_msg(
+    msg: &lpc_wire::WireServerMessage,
+) -> Result<Vec<u8>, lpc_wire::TransportError> {
+    let mut bytes = Vec::with_capacity(1024);
+    let mut writer = VecJsonWriter(&mut bytes);
+    let Ok(()) = writer.write(b"\nM!");
+    // Erased writer: shares one serializer instantiation per wire type with
+    // the frame-budget measurement path (lpc_wire::ser_write_json_len). The
+    // sink itself is infallible, so an error here is the serializer's.
+    if lpc_wire::ser_write_json_to(&mut writer, msg).is_err() {
+        let detail = server_message_detail(msg);
+        log::warn!(
+            "[io_task] server message id={} {} failed to serialize",
+            msg.id,
+            detail
+        );
+        return Err(lpc_wire::TransportError::Serialization(format!(
+            "server message id={} {} failed to serialize",
+            msg.id, detail
+        )));
     }
+    let Ok(()) = writer.write(b"\n");
+    if bytes.len() > SERVER_MSG_JSON_BUFFER_SIZE {
+        let detail = server_message_detail(msg);
+        log::warn!(
+            "[io_task] server message id={} {} exceeded frame budget: {} B > {} (frame_budget={})",
+            msg.id,
+            detail,
+            bytes.len(),
+            SERVER_MSG_JSON_BUFFER_SIZE,
+            lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
+        );
+        return Err(lpc_wire::TransportError::Serialization(format!(
+            "server message id={} {} exceeded frame budget ({} B)",
+            msg.id,
+            detail,
+            bytes.len()
+        )));
+    }
+    Ok(bytes)
+}
 
-    async fn write_full_server_msg(
-        &mut self,
-        msg: lpc_wire::WireServerMessage,
-    ) -> Result<(), lpc_wire::TransportError> {
-        // TODO(M3 stretch): this ~16.7 KiB stack buffer lives as async-fn state and
-        // is paid even for tiny acks. The preferred fix — a `SerWrite` that streams
-        // straight to the chunked+timeout USB writer — is blocked because
-        // `SerWrite::write` is synchronous while `timed_write_all` is `async`, so the
-        // streaming impl cannot `.await` the USB write without an internal buffer.
-        // The StaticCell fallback needs an aliasing/RAM measurement first (io_task is
-        // the sole writer, but drain paths interleave), so it is deferred rather than
-        // forced here. Revisit once an async-capable streaming writer exists.
-        //
-        // Derived from the shared budget: the serial buffer already reserves the
-        // frame budget plus `PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES`; this only adds
-        // room for the `\nM!` framing prefix and trailing `\n` written around the
-        // message (4 bytes, padded to 16 for alignment slack).
-        const SERVER_MSG_FRAMING_BYTES: usize = 16;
-        const SERVER_MSG_JSON_BUFFER_SIZE: usize =
-            lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES + SERVER_MSG_FRAMING_BYTES;
-        let mut buf = [0u8; SERVER_MSG_JSON_BUFFER_SIZE];
-        let mut writer = StackJsonWriter::new(&mut buf);
-        if writer.write(b"\nM!").is_err() {
-            log::warn!("[io_task] server message prefix exceeded JSON buffer");
-            return Err(lpc_wire::TransportError::Serialization(
-                "server message prefix exceeded JSON buffer".into(),
-            ));
-        }
-        // Erased writer: shares one serializer instantiation per wire type with the
-        // frame-budget measurement path (lpc_wire::ser_write_json_len), instead of
-        // emitting a second copy of every type's serializer for this sink.
-        if lpc_wire::ser_write_json_to(&mut writer, &msg).is_err() {
-            let detail = server_message_detail(&msg);
-            log::warn!(
-                "[io_task] server message id={} {} exceeded JSON buffer size={} frame_budget={}; write failed",
-                msg.id,
-                detail,
-                SERVER_MSG_JSON_BUFFER_SIZE,
-                lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
-            );
-            return Err(lpc_wire::TransportError::Serialization(format!(
-                "server message id={} {} exceeded JSON buffer",
-                msg.id, detail
-            )));
-        }
-        if writer.write(b"\n").is_err() {
-            let detail = server_message_detail(&msg);
-            log::warn!(
-                "[io_task] server message id={} {} suffix exceeded JSON buffer size={}; write failed",
-                msg.id,
-                detail,
-                SERVER_MSG_JSON_BUFFER_SIZE
-            );
-            return Err(lpc_wire::TransportError::Serialization(format!(
-                "server message id={} {} suffix exceeded JSON buffer",
-                msg.id, detail
-            )));
-        }
-        let id = msg.id;
-        let link_name = self.policy.link_name;
-        // `writer` borrows `buf`, which lives in this frame; the write must be
-        // driven from here rather than returned — which is also what makes
-        // retrying free: the serialized frame is still in hand, so a rewrite
-        // costs no re-serialization and no clone. The frame's own leading
-        // `\n` doubles as the resync after an aborted partial write, so the
-        // peer's line parser drops the torn prefix instead of splicing it
-        // onto the rewrite. Retry count is a policy (chip) fact —
-        // [`WritePolicy::server_msg_retries`] is 0 on USB, where a failed
-        // write means nobody is draining.
+
+impl<W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'_, W, F, D> {
+    /// Write one framed server line (`\nM!{json}\n`) with the policy's retry
+    /// budget, resyncing the peer's line parser on failure.
+    ///
+    /// The frame's own leading `\n` doubles as the resync after an aborted
+    /// partial write, so a rewrite never splices onto a torn prefix. On final
+    /// failure one more bare `\n` goes out so the *next* frame starts clean.
+    /// Retry count is a policy (chip) fact — 0 on USB, where a failed write
+    /// means nobody is draining and rewriting would only stall the io loop.
+    pub async fn write_framed(&mut self, bytes: &[u8]) -> Result<(), lpc_wire::TransportError> {
         let attempts = 1 + self.policy.server_msg_retries;
         let mut last_failure = None;
         for attempt in 1..=attempts {
             if attempt > 1 {
                 // Brief backoff: if the first write died to a masked-interrupt
                 // window (a flash op) or a transient stall, give it a moment
-                // rather than immediately re-timing-out. Uses the writer's
-                // delay seam, never embassy-time directly (see
-                // `ChunkedWriter::new` — on the v3 an embassy-time await here
-                // would park the io task forever).
+                // rather than immediately re-timing-out.
                 self.delay.delay_ms(10).await;
             }
-            match self.try_write_all(writer.bytes()).await {
+            match self.try_write_all(bytes).await {
                 Ok(()) => {
                     if attempt > 1 {
                         log::info!(
-                            "[io_task] server message id={id} written on attempt {attempt}/{attempts}"
+                            "[io_task] server frame written on attempt {attempt}/{attempts}"
                         );
                     }
                     return Ok(());
                 }
                 Err(failure) => {
                     log::warn!(
-                        "[io_task] server message id={id} {link_name} write {failure} (attempt {attempt}/{attempts})"
+                        "[io_task] server frame {} write {failure} (attempt {attempt}/{attempts})",
+                        self.policy.link_name
                     );
                     last_failure = Some(failure);
                 }
             }
         }
+        // Separate the torn frame from whatever comes next.
+        let _ = self.write_all(b"\n").await;
         // The failure's chunk/elapsed detail is what distinguishes a wedged
         // peripheral from a starved io task; keep it in the error so the
         // transport's log (and any peer-visible error) carries it.
         let failure = last_failure.expect("attempts >= 1");
         Err(lpc_wire::TransportError::Other(format!(
-            "server message id={id} {link_name} write {failure} ({attempts} attempts)"
+            "{} write {failure} ({attempts} attempts)",
+            self.policy.link_name
         )))
     }
 }

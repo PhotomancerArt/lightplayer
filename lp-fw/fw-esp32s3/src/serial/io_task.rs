@@ -46,7 +46,7 @@ static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 #[cfg(feature = "server")]
 static SERVER_WRITE_REQUEST: Channel<
     CriticalSectionRawMutex,
-    (u32, lpc_wire::WireServerMessage),
+    (u32, alloc::vec::Vec<u8>),
     1,
 > = Channel::new();
 
@@ -203,13 +203,17 @@ async fn read_serial<R: Read>(
 #[cfg(feature = "server")]
 async fn drain_server_write_request<W: Write>(tx: &mut W, conn: &mut UsbConnectionMonitor) {
     let receiver = SERVER_WRITE_REQUEST.receiver();
-    let Ok((generation, msg)) = receiver.try_receive() else {
+    let Ok((generation, bytes)) = receiver.try_receive() else {
         return;
     };
 
-    let result = link_writer(tx)
-        .write_server_msg(msg, conn.is_connected())
-        .await;
+    // Serialization happened thread-side in the transport; this task writes
+    // the framed bytes. The connection verdict is a chip fact and stays here.
+    let result = if conn.is_connected() {
+        link_writer(tx).write_framed(&bytes).await
+    } else {
+        Err(lpc_wire::TransportError::ConnectionLost)
+    };
     match &result {
         Ok(()) => conn.note_host_active(),
         // Only a USB write timeout/failure is draining evidence; fail-fast
@@ -265,7 +269,7 @@ pub fn get_message_channels() -> (
 /// Get accountable server write channels for StreamingMessageRouterTransport.
 #[cfg(feature = "server")]
 pub fn get_server_write_channels() -> (
-    &'static Channel<CriticalSectionRawMutex, (u32, lpc_wire::WireServerMessage), 1>,
+    &'static Channel<CriticalSectionRawMutex, (u32, alloc::vec::Vec<u8>), 1>,
     &'static Channel<CriticalSectionRawMutex, (u32, Result<(), lpc_wire::TransportError>), 1>,
 ) {
     (&SERVER_WRITE_REQUEST, &SERVER_WRITE_RESULT)

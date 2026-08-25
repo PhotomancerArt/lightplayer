@@ -1,9 +1,15 @@
-//! Accountable transport: serializes WireServerMessage in io_task, minimal buffering.
+//! Accountable transport: serializes in thread context, io_task writes bytes.
 //!
-//! Sends a server write request to io_task and waits for io_task to serialize
-//! and write the message before returning success.
+//! `send` serializes the WireServerMessage HERE (thread context), submits the
+//! framed bytes to io_task, and waits for io_task to report the write's
+//! outcome before returning. io_task never serializes: on the classic its
+//! polls run in interrupt context on a borrowed stack, and serialization
+//! recursion there corrupted the system on the bench (see
+//! `serial::server_msg`'s module docs and the 2026-08-25 ADR).
 
 use alloc::vec::Vec;
+
+use crate::serial::server_msg::serialize_server_msg;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use lpc_shared::transport::ServerTransport;
@@ -16,7 +22,7 @@ use lpc_wire::{ClientMessage, TransportError, json};
 /// until io_task reports that the message was fully written or failed.
 pub struct StreamingMessageRouterTransport {
     incoming: &'static Channel<CriticalSectionRawMutex, alloc::string::String, 32>,
-    server_write_request: &'static Channel<CriticalSectionRawMutex, (u32, WireServerMessage), 1>,
+    server_write_request: &'static Channel<CriticalSectionRawMutex, (u32, Vec<u8>), 1>,
     server_write_result:
         &'static Channel<CriticalSectionRawMutex, (u32, Result<(), TransportError>), 1>,
     /// Wrapping generation stamped on each write request. `send()` discards any
@@ -30,11 +36,7 @@ impl StreamingMessageRouterTransport {
     /// channel plus the single-slot write request/result pair.
     pub fn new(
         incoming: &'static Channel<CriticalSectionRawMutex, alloc::string::String, 32>,
-        server_write_request: &'static Channel<
-            CriticalSectionRawMutex,
-            (u32, WireServerMessage),
-            1,
-        >,
+        server_write_request: &'static Channel<CriticalSectionRawMutex, (u32, Vec<u8>), 1>,
         server_write_result: &'static Channel<
             CriticalSectionRawMutex,
             (u32, Result<(), TransportError>),
@@ -51,17 +53,21 @@ impl StreamingMessageRouterTransport {
 }
 
 impl StreamingMessageRouterTransport {
-    /// One accountable write through io_task: submit the request, then await
-    /// the generation-matched result. A mismatched result is a stale response
-    /// orphaned by a previously cancelled send; discard it and keep waiting
-    /// for the one io_task produced for this request.
+    /// One accountable write through io_task: serialize HERE (thread
+    /// context — serialization recursion and the frame buffer must never ride
+    /// the io task's interrupt-context stack; see `serial::server_msg`),
+    /// submit the framed bytes, then await the generation-matched result. A
+    /// mismatched result is a stale response orphaned by a previously
+    /// cancelled send; discard it and keep waiting for the one io_task
+    /// produced for this request.
     async fn write_once(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
+        let bytes = serialize_server_msg(&msg)?;
         let generation = self.generation;
         self.generation = self.generation.wrapping_add(1);
         self.server_write_request
             .sender()
-            .send((generation, msg))
+            .send((generation, bytes))
             .await;
         loop {
             let (result_generation, result) = self.server_write_result.receiver().receive().await;

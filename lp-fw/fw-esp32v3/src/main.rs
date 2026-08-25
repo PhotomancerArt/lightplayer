@@ -472,7 +472,9 @@ fn boot_firmware() -> FirmwareApp {
 
     match uart0 {
         Ok(uart) => {
-            // io_task runs on its own interrupt executor (swi1, Priority2)
+            // io_task runs on its own interrupt executor (swi2, Priority2 —
+            // NOT swi1, which is the APP core wire-pusher's frame doorbell;
+            // see start_runtime's docs for the collision this avoids)
             // rather than as a cooperative peer of the server loop on the
             // thread executor: a ~41 ms engine tick used to be a ~41 ms hole
             // in UART servicing — the 128 B RX FIFO (~1.4 ms of line time at
@@ -497,16 +499,20 @@ fn boot_firmware() -> FirmwareApp {
             // SAFETY: the one and only reference ever taken to the executor
             // static — `boot_firmware` runs once, and the executor it starts
             // runs forever (the APP_CORE_STACK pattern).
-            static mut IO_EXECUTOR: Option<esp_rtos::embassy::InterruptExecutor<1>> = None;
-            let executor: &'static mut Option<esp_rtos::embassy::InterruptExecutor<1>> =
+            static mut IO_EXECUTOR: Option<esp_rtos::embassy::InterruptExecutor<2>> = None;
+            let executor: &'static mut Option<esp_rtos::embassy::InterruptExecutor<2>> =
                 unsafe { &mut *core::ptr::addr_of_mut!(IO_EXECUTOR) };
             let io_spawner = executor
                 .insert(esp_rtos::embassy::InterruptExecutor::new(sw_int1))
                 .start(esp_hal::interrupt::Priority::Priority2);
             serial::io_task::start_io_pacer(io_pacer_timer);
+            // `into_async` HERE, in thread context: it registers and enables
+            // the UART interrupt, which does not survive being done inside
+            // the executor handler's poll (see `SendUart`'s docs).
+            let uart = serial::io_task::SendUart(uart.into_async());
             io_spawner.spawn(io_task(uart).unwrap());
             esp_println::println!(
-                "[INIT] I/O task spawned (uart0 921600 8N1, swi1 executor prio2, timg0t1 pacer 1ms)"
+                "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)"
             );
         }
         Err(error) => {
@@ -755,7 +761,7 @@ fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 #[esp_rtos::main]
 // The thread executor's spawner goes unused: the server loop runs as this
-// main task itself, and io_task lives on the swi1 interrupt executor.
+// main task itself, and io_task lives on the swi2 interrupt executor.
 async fn main(_spawner: embassy_executor::Spawner) {
     let app = boot_firmware();
 
