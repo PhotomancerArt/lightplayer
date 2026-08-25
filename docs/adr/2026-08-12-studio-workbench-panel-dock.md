@@ -136,3 +136,25 @@ the lensed session's chip, which read as near-duplicates on a sim
 session; Yona's direction is one grouped device+project cluster
 (possibly absorbing Save/Revert). Tracked as a separate task, not part
 of this change.
+
+## Amended 2026-08-24 — the fold's tablet rung (summon sheet)
+
+Flagged at the patching round-2 G1 gate: below the 820px fold a
+summoned panel replaced the ENTIRE main view at every width — phone
+behavior at tablet width ("at md-breakpoint the panels take up the
+whole width of the view"). The summon model now has two rungs:
+
+- **Phone (<560px** — the site chrome's phone rung**):** unchanged —
+  the summoned panel replaces main under a "‹ back" header.
+- **Tablet (560–820px):** the summoned panel is a side-anchored
+  **sheet** at its dock's full desktop width (270/320), sliding over
+  the canvas from the panel's home side (`PanelId::side` — Tree from
+  the left, Device/Outputs/Props from the right). It wears the dock's
+  fill with a hairline inner border and shadow; the canvas stays
+  visible and live beside it, and the header's dismissal is a ✕. No
+  scrim — a pick surface (the Patching object-first invitation) wants
+  the canvas's waiting object in view while picking.
+
+The summon strip, radio semantics, per-view memory, and the
+dismiss-on-pick behavior are unchanged; the rungs are presentation
+only (`summon_overlay_class` in `workbench/mod.rs`).
