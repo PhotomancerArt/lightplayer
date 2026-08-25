@@ -26,6 +26,14 @@ pub struct WritePolicy {
     /// What to call the link in error text (`"USB"`, `"UART"`). Surfaces to the
     /// host inside `TransportError::Other`.
     pub link_name: &'static str,
+    /// How many times [`ChunkedWriter::write_server_msg`] rewrites a server
+    /// frame whose write failed, beyond the first attempt. A chip fact like
+    /// the rest of the policy: on a UART a failed write means a transient
+    /// stall (a wedged peripheral, or the io task masked through a flash
+    /// window) and a rewrite is cheap and honest; on USB-Serial-JTAG a failed
+    /// write means the host stopped draining, and rewriting at a dead FIFO
+    /// only stalls the io loop the connection monitor is about to latch.
+    pub server_msg_retries: usize,
 }
 
 impl WritePolicy {
@@ -43,6 +51,7 @@ impl WritePolicy {
         timeout: Duration::from_millis(250),
         chunk_size: 256,
         link_name: "USB",
+        server_msg_retries: 0,
     };
 
     /// The UART0 policy used by `fw-esp32v3` (921600 baud through the CH340K).
@@ -66,6 +75,7 @@ impl WritePolicy {
         timeout: Duration::from_millis(250),
         chunk_size: 64,
         link_name: "UART",
+        server_msg_retries: 2,
     };
 }
 
@@ -161,7 +171,9 @@ impl<'a, W: Write, F: FnMut()> ChunkedWriter<'a, W, F> {
     ///
     /// Returns false on the first chunk that times out or errors.
     pub async fn write_all(&mut self, data: &[u8]) -> bool {
-        self.try_write_all_with(data, self.policy.timeout).await.is_ok()
+        self.try_write_all_with(data, self.policy.timeout)
+            .await
+            .is_ok()
     }
 
     /// [`write_all`](Self::write_all) with an explicit per-chunk timeout, for

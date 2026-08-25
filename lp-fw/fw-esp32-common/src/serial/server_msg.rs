@@ -141,16 +141,47 @@ impl<W: embedded_io_async::Write, F: FnMut()> ChunkedWriter<'_, W, F> {
         let id = msg.id;
         let link_name = self.policy.link_name;
         // `writer` borrows `buf`, which lives in this frame; the write must be
-        // driven from here rather than returned.
-        match self.try_write_all(writer.bytes()).await {
-            Ok(()) => Ok(()),
-            // The failure's chunk/elapsed detail is what distinguishes a
-            // wedged peripheral from a starved io task; keep it in the error
-            // so the transport's warn (and any peer-visible error) carries it.
-            Err(failure) => Err(lpc_wire::TransportError::Other(format!(
-                "server message id={id} {link_name} write {failure}"
-            ))),
+        // driven from here rather than returned — which is also what makes
+        // retrying free: the serialized frame is still in hand, so a rewrite
+        // costs no re-serialization and no clone. The frame's own leading
+        // `\n` doubles as the resync after an aborted partial write, so the
+        // peer's line parser drops the torn prefix instead of splicing it
+        // onto the rewrite. Retry count is a policy (chip) fact —
+        // [`WritePolicy::server_msg_retries`] is 0 on USB, where a failed
+        // write means nobody is draining.
+        let attempts = 1 + self.policy.server_msg_retries;
+        let mut last_failure = None;
+        for attempt in 1..=attempts {
+            if attempt > 1 {
+                // Brief backoff: if the first write died to a masked-interrupt
+                // window (a flash op) or a transient stall, give it a moment
+                // rather than immediately re-timing-out.
+                embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
+            }
+            match self.try_write_all(writer.bytes()).await {
+                Ok(()) => {
+                    if attempt > 1 {
+                        log::info!(
+                            "[io_task] server message id={id} written on attempt {attempt}/{attempts}"
+                        );
+                    }
+                    return Ok(());
+                }
+                Err(failure) => {
+                    log::warn!(
+                        "[io_task] server message id={id} {link_name} write {failure} (attempt {attempt}/{attempts})"
+                    );
+                    last_failure = Some(failure);
+                }
+            }
         }
+        // The failure's chunk/elapsed detail is what distinguishes a wedged
+        // peripheral from a starved io task; keep it in the error so the
+        // transport's log (and any peer-visible error) carries it.
+        let failure = last_failure.expect("attempts >= 1");
+        Err(lpc_wire::TransportError::Other(format!(
+            "server message id={id} {link_name} write {failure} ({attempts} attempts)"
+        )))
     }
 }
 

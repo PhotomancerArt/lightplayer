@@ -50,8 +50,12 @@ impl StreamingMessageRouterTransport {
     }
 }
 
-impl ServerTransport for StreamingMessageRouterTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+impl StreamingMessageRouterTransport {
+    /// One accountable write through io_task: submit the request, then await
+    /// the generation-matched result. A mismatched result is a stale response
+    /// orphaned by a previously cancelled send; discard it and keep waiting
+    /// for the one io_task produced for this request.
+    async fn write_once(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
         let generation = self.generation;
         self.generation = self.generation.wrapping_add(1);
@@ -59,10 +63,7 @@ impl ServerTransport for StreamingMessageRouterTransport {
             .sender()
             .send((generation, msg))
             .await;
-        // Await the result matching this generation. A mismatched result is a
-        // stale response orphaned by a previously cancelled send; discard it and
-        // keep waiting for the one io_task produced for this request.
-        let result = loop {
+        loop {
             let (result_generation, result) = self.server_write_result.receiver().receive().await;
             if result_generation == generation {
                 break result;
@@ -71,14 +72,47 @@ impl ServerTransport for StreamingMessageRouterTransport {
                 "StreamingMessageRouterTransport: discarding stale write result \
                  generation={result_generation} (awaiting {generation}) for id={id}"
             );
-        };
+        }
+    }
+}
+
+impl ServerTransport for StreamingMessageRouterTransport {
+    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+        let id = msg.id;
+        // Captured before the message moves: a failed Error notice must not
+        // recurse into another notice.
+        let is_error_frame = matches!(msg.msg, lpc_wire::server::ServerMsgBody::Error { .. });
+        let result = self.write_once(msg).await;
         match &result {
             Ok(()) => log::debug!(
                 "StreamingMessageRouterTransport: wrote message id={id} through io_task"
             ),
-            Err(error) => log::warn!(
-                "StreamingMessageRouterTransport: failed to write message id={id}: {error}"
-            ),
+            Err(error) => {
+                // io_task has already retried per its link's write policy, so
+                // this drop is final — say so at error level, never as a
+                // debuggable-away warn (the debt entry's "no silent drop with
+                // responses=0" criterion).
+                log::error!("StreamingMessageRouterTransport: dropping message id={id}: {error}");
+                // Best-effort: tell the peer its response was dropped, with
+                // the original request id so the client can fail that call
+                // instead of timing out. Skipped when the link is gone
+                // (nobody to tell) and for Error frames themselves (no
+                // recursion); a failed notice is only logged.
+                if !is_error_frame && !matches!(error, TransportError::ConnectionLost) {
+                    let notice = WireServerMessage::new(
+                        id,
+                        lpc_wire::server::ServerMsgBody::Error {
+                            error: alloc::format!("response id={id} dropped: {error}"),
+                        },
+                    );
+                    if self.write_once(notice).await.is_err() {
+                        log::error!(
+                            "StreamingMessageRouterTransport: error notice for id={id} \
+                             also failed; peer left waiting"
+                        );
+                    }
+                }
+            }
         }
         result
     }

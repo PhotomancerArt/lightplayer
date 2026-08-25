@@ -38,7 +38,7 @@ extern crate alloc;
 use alloc::{string::String, vec::Vec};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use esp_hal::Async;
 use esp_hal::uart::{Uart, UartRx, UartTx};
 use fw_core::message_router::MessageRouter;
@@ -73,12 +73,24 @@ static SERVER_WRITE_RESULT: Channel<
 /// full FIFO.
 const READ_CHUNK_SIZE: usize = 128;
 
+/// How long a non-empty partial line may sit with no further RX bytes before
+/// it is declared a dead session's remnant and discarded. Real frames stream
+/// at line rate (a full 16 KiB frame takes ~175 ms at 921600), so a one-second
+/// intra-frame silence is not a live client — it is a host that died or
+/// disconnected mid-frame, whose half-frame would otherwise prefix-corrupt
+/// the next session's first line (the hello, typically; observed on the
+/// 2026-08-21 dig2go bench, see
+/// `docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`).
+const STALE_PARTIAL_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// The split UART plus the partial-line buffer, held together because writing
 /// and reading interleave (see the module docs).
 struct UartLink {
     rx: UartRx<'static, Async>,
     tx: UartTx<'static, Async>,
     read_buffer: Vec<u8>,
+    /// When RX bytes last arrived, for [`Self::flush_stale_partial`].
+    last_rx: Instant,
 }
 
 impl UartLink {
@@ -88,12 +100,35 @@ impl UartLink {
             rx,
             tx,
             read_buffer: Vec::new(),
+            last_rx: Instant::now(),
         }
     }
 
     /// [`poll_rx_into`] over this link's RX half and line buffer.
     fn poll_rx(&mut self, router: &MessageRouter) {
-        poll_rx_into(&mut self.rx, &mut self.read_buffer, router);
+        poll_rx_into(
+            &mut self.rx,
+            &mut self.read_buffer,
+            &mut self.last_rx,
+            router,
+        );
+    }
+
+    /// Discard a partial line that stopped growing: a dead session's remnant.
+    ///
+    /// Without this, a host that vanished mid-frame leaves its half-line in
+    /// `read_buffer`, and the next session's first frame is glued onto it —
+    /// one corrupt line whose parse failure eats the new session's hello.
+    /// See [`STALE_PARTIAL_TIMEOUT`] for the threshold rationale.
+    fn flush_stale_partial(&mut self) {
+        if !self.read_buffer.is_empty() && self.last_rx.elapsed() >= STALE_PARTIAL_TIMEOUT {
+            log::warn!(
+                "[io_task] discarding {} B partial line (no RX for {} ms) — dead session remnant",
+                self.read_buffer.len(),
+                self.last_rx.elapsed().as_millis()
+            );
+            self.read_buffer.clear();
+        }
     }
 
     /// A [`ChunkedWriter`] over this link's TX half whose per-chunk hook
@@ -111,9 +146,10 @@ impl UartLink {
             rx,
             tx,
             read_buffer,
+            last_rx,
         } = self;
         ChunkedWriter::new(tx, WritePolicy::UART_921600, || {
-            poll_rx_into(rx, read_buffer, router)
+            poll_rx_into(rx, read_buffer, last_rx, router)
         })
     }
 
@@ -152,6 +188,7 @@ impl UartLink {
 fn poll_rx_into(
     rx: &mut UartRx<'static, Async>,
     read_buffer: &mut Vec<u8>,
+    last_rx: &mut Instant,
     router: &MessageRouter,
 ) {
     let mut temp = [0u8; READ_CHUNK_SIZE];
@@ -159,6 +196,7 @@ fn poll_rx_into(
         match rx.read_buffered(&mut temp) {
             Ok(0) => break,
             Ok(n) => {
+                *last_rx = Instant::now();
                 read_buffer.extend_from_slice(&temp[..n]);
                 // A short read means the FIFO is empty; anything else and
                 // there may be more waiting.
@@ -209,6 +247,7 @@ pub async fn io_task(uart: Uart<'static, esp_hal::Blocking>) {
         drain_server_write_request(&mut link, &router).await;
         drain_outgoing_messages(&router, &mut link).await;
         link.poll_rx(&router);
+        link.flush_stale_partial();
 
         Timer::after(Duration::from_millis(1)).await;
     }
@@ -269,6 +308,13 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
         if let Ok(line_str) = core::str::from_utf8(&line_bytes[..line_bytes.len() - 1])
             && line_str.starts_with("M!")
         {
+            // An inbound hello is the firmware's only "new client attached"
+            // signal (a UART has no cable event), so it doubles as the
+            // session boundary: whatever is still queued outbound was
+            // addressed to a session that no longer exists.
+            if line_str.contains("\"msg\":\"hello\"") {
+                drain_stale_outgoing(router);
+            }
             use alloc::string::ToString;
             if router
                 .incoming()
@@ -279,6 +325,32 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
                 log::warn!("[io_task] incoming queue full, dropping M! message");
             }
         }
+    }
+}
+
+/// Drop every queued fire-and-forget outbound line at a session boundary.
+///
+/// These are log/telemetry lines a previous session never drained (they only
+/// accumulate when io_task itself was blocked, e.g. across a flash window) —
+/// flushing them keeps a new session's first exchange from being preceded by
+/// a dead session's backlog. Accountable server writes
+/// (`SERVER_WRITE_REQUEST`) are deliberately NOT touched: dropping one
+/// without posting its result would leave the server task awaiting forever.
+///
+/// The `"msg":"hello"` substring test is sound because both wire clients
+/// (lp-app and serial-lab) emit compact JSON, and inside a JSON string value
+/// those quotes would be escaped — the raw byte sequence only occurs as the
+/// envelope's own field.
+fn drain_stale_outgoing(router: &MessageRouter) {
+    let receiver = router.outgoing().receiver();
+    let mut dropped = 0usize;
+    while receiver.try_receive().is_ok() {
+        dropped += 1;
+    }
+    if dropped > 0 {
+        log::info!(
+            "[io_task] hello: dropped {dropped} outbound lines queued for a previous session"
+        );
     }
 }
 
