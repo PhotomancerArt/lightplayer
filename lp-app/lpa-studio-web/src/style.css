@@ -1546,6 +1546,106 @@ label:has(> input:not(:disabled)) {
     touch-action: none;
 }
 
+/* The candidate menu (P5): what a HOLD or a right-click on an ambiguous
+   spot offers instead of guessing. Sibling of the canvas svg inside the
+   wrap, so it positions in plain canvas pixels.
+
+   The scrim is the click-away: while the menu is up it is the thing under
+   the pointer, which is what makes "click away", "wheel away" and "a drag
+   closes it" true without the canvas knowing the menu exists. Above the
+   canvas floats (z-index 6/7) — a menu opened near the zoom float must not
+   disappear behind it. */
+.lpme-cmenu-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+}
+
+.lpme-cmenu {
+    position: absolute;
+    z-index: 9;
+    /* The press point is the menu's top-left corner, nudged clear of the
+       cursor so the first row is never under the fingertip that summoned
+       it (the mobile long-press case). */
+    transform: translate(6px, 6px);
+    min-width: 132px;
+    max-width: 240px;
+    padding: 3px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    font-family: var(--studio-font-mono);
+    font-size: 11px;
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: var(--studio-radius-sm);
+    background: var(--studio-color-surface-raised);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.34);
+}
+
+.lpme-cmenu-head {
+    padding: 3px 6px 4px;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--studio-color-text-muted);
+    border-bottom: 1px solid var(--studio-color-border);
+    margin-bottom: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lpme-cmenu-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 4px 6px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--studio-color-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.lpme-cmenu-row:hover {
+    background: rgba(90, 169, 230, 0.14);
+    border-color: rgba(90, 169, 230, 0.5);
+}
+
+/* A near-miss: inside the click slop, outside the body. It is an offer,
+   not something the pointer is actually on, so it reads quieter — and its
+   lamp count wears a `~`. */
+.lpme-cmenu-row-near {
+    color: var(--studio-color-text-muted);
+}
+
+.lpme-cmenu-row-near .lpme-cmenu-swatch {
+    opacity: 0.45;
+}
+
+.lpme-cmenu-swatch {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+}
+
+.lpme-cmenu-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lpme-cmenu-lamps {
+    flex: none;
+    color: var(--studio-color-text-muted);
+}
+
 .lpme-hitline {
     fill: none;
     stroke: transparent;
