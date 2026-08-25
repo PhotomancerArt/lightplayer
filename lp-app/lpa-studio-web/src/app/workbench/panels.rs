@@ -139,11 +139,6 @@ fn chip_text(cell: &UiPatchCell) -> String {
 const CHIP: &str = "tw:whitespace-nowrap tw:rounded tw:border tw:border-border-strong tw:bg-card-muted tw:px-1 tw:font-mono tw:text-[9.5px] tw:text-subtle-foreground";
 const ROW_IDLE: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash";
 const ROW_SELECTED: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1";
-// The undived authored rows are structure, not selection targets (the
-// authored tree is edited through the dive) — same look, no affordance.
-const ROW_STATIC: &str = "tw:flex tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1";
-const ROW_STATIC_SELECTED: &str = "tw:flex tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1";
-
 /// Indent per tree level as an inline style — arbitrary depth (nested
 /// modules, nested repeats) must never outrun a generated tailwind class.
 fn indent_style(level: usize) -> String {
@@ -544,12 +539,13 @@ fn FixtureRows(
                 }
             }
         } else if grain == TreeGrain::Authored {
-            // The UNDIVED authored tree (Mapping grain): structure from the
-            // loaded body — display rows, not selection targets (authored
-            // editing goes through the dive). The one highlight is DERIVED
-            // from the shared patch selection (`/sector/2` → the object
-            // whose sticky id matches — the D46 bridge, never a second
-            // selection store).
+            // The UNDIVED authored tree (Mapping grain), CLICKABLE
+            // (unified-selection P5 — tree parity): a row click selects
+            // the object's instance targets through the ONE selection,
+            // which ENTERS the fixture (scope derives) — the tree is an
+            // alternate way in, no double-click needed. An id-less object
+            // is not addressable (A1) and selects its fixture instead.
+            // The highlight is the same D46 bridge, run backward.
             if let Some(doc) = authored_doc {
                 {
                     let highlighted: std::collections::BTreeSet<usize> = selection
@@ -568,12 +564,37 @@ fn FixtureRows(
                             row.selected = true;
                         }
                     }
+                    let doc = std::rc::Rc::new(doc);
                     rsx! {
                         for row in rows {
                             div {
                                 key: "auth-{row.object_index}-{row.path.descent:?}",
-                                class: if row.selected { "{ROW_STATIC_SELECTED} tw:py-0.5" } else { "{ROW_STATIC} tw:py-0.5" },
+                                class: if row.selected { "{ROW_SELECTED} tw:py-0.5" } else { "{ROW_IDLE} tw:py-0.5" },
                                 style: indent_style(indent + 1 + row.depth),
+                                onclick: {
+                                    let doc = doc.clone();
+                                    let instances = fixture.instances.clone();
+                                    let node = fixture.node;
+                                    let object_index = row.object_index;
+                                    move |_| {
+                                        let targets =
+                                            crate::app::editor_shell::selection::instance_targets_for_object(
+                                                node,
+                                                &doc,
+                                                &instances,
+                                                object_index,
+                                            );
+                                        let mut next = UiSelection::empty();
+                                        if targets.is_empty() {
+                                            next.select_one(UiPatchTarget::Fixture { node });
+                                        } else {
+                                            next.set_siblings(targets);
+                                        }
+                                        crate::app::editor_shell::selection::dispatch_selection(
+                                            &on_action, next,
+                                        );
+                                    }
+                                },
                                 if row.path.is_root() {
                                     span {
                                         class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-[2px]",
@@ -1711,11 +1732,15 @@ fn PlacementCard(
                 class: "lpme-lvl-head",
                 title: if dived { "select the fixture level" } else { "" },
                 onclick: move |_| {
-                    // Dived: pop the document selection — the fixture level
-                    // becomes the top card. Not dived, the fixture already
+                    // Dived: ASCEND the one selection — the fixture becomes
+                    // the selection at project level (the dive closes,
+                    // scope being derived). Not dived, the fixture already
                     // IS the selection.
                     if dived {
                         dive_session.write().selection.clear();
+                        let mut next = lpa_studio_core::UiSelection::empty();
+                        next.select_one(UiPatchTarget::Fixture { node });
+                        crate::app::editor_shell::selection::dispatch_selection(&on_action, next);
                     }
                 },
                 span { class: "tw:w-3 tw:flex-none tw:text-center tw:text-[10px] tw:text-dim-foreground",

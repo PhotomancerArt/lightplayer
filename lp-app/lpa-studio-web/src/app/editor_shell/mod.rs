@@ -22,6 +22,7 @@ pub(crate) mod editor_shell_stories;
 pub(crate) mod hotkeys;
 pub(crate) mod mapping_session;
 pub(crate) mod patching;
+pub(crate) mod selection;
 pub(crate) mod toolbar;
 
 use std::collections::BTreeMap;
@@ -165,59 +166,17 @@ pub fn EditorShellCenter(
             }
         }
     }
-    {
-        // Seed the session selection from the core selection while the
-        // dive is entered: the object named at enter time (an Instance
-        // path) becomes the session's selected root. Change-guarded and
-        // effect-scoped so in-dive session clicks are never clobbered —
-        // the deps are the CORE facts, not the session.
-        let core_paths: Vec<String> = selection
-            .targets()
-            .iter()
-            .filter_map(|target| match target {
-                UiPatchTarget::Instance { node, path } if Some(*node) == focused => {
-                    Some(path.clone())
-                }
-                _ => None,
-            })
-            .collect();
-        let entered_now = focused;
-        let mut session = dive_session;
-        let state = dive_state;
-        use_effect(use_reactive!(|(entered_now, core_paths)| {
-            // Re-run when the pipeline settles a body (the doc arrives
-            // after the selection names it).
-            let _ready = state.read().clone();
-            if entered_now.is_none() || core_paths.is_empty() {
-                return;
-            }
-            let indices: Vec<usize> = {
-                let s = session.peek();
-                core_paths
-                    .iter()
-                    .filter_map(|path| {
-                        crate::app::workbench::panels::authored_object_for_instance_path(
-                            s.doc(),
-                            path,
-                        )
-                    })
-                    .collect()
-            };
-            if indices.is_empty() {
-                return;
-            }
-            let current: Vec<usize> = session
-                .peek()
-                .selection
-                .paths()
-                .filter(|path| path.is_root())
-                .map(|path| path.object)
-                .collect();
-            if current != indices {
-                session.write().selection.set_roots(indices);
-            }
-        }));
-    }
+    // The selection COORDINATOR (P5): the two-way core ↔ session bridge —
+    // seed on entry, mirror session writes up as instance targets. See
+    // `selection.rs` for the direction rules.
+    selection::use_selection_bridge(
+        focused,
+        &selection,
+        &surface,
+        dive_session,
+        dive_state,
+        on_action,
+    );
     // The focused fixture's face-editor DTO (fetch/refusal/apply wiring
     // rides it); a fixture that loses its editor (node removed) drops
     // focus honestly.
