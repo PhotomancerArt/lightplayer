@@ -83,11 +83,15 @@ redeploying.
   DTR-only pulses do NOTHING. Assert **DTR+RTS together, hold ~120 ms,
   drop both together** (`sequence both_high_low`) → clean power-on reset.
   Native CLI tools (espflash) reset fine via the OS driver.
-- **The device is lossy under load** (`docs/debt/shared-uart-io-task-starvation.md`):
-  while a project plays (~41 ms ticks), inbound frames >~128 B are
-  silently dropped (`FifoOverflowed`) and outbound responses die on TX
-  timeouts (`responses=0`). **Send `stopAllProjects` before any big
-  write**; pacing alone does not help. Requests answered fine when idle.
+- **The device WAS lossy under load** (`docs/debt/shared-uart-io-task-starvation.md`):
+  on firmware before PR #448 (2026-08-25), inbound frames >~128 B were
+  silently dropped (`FifoOverflowed`) while a project played and
+  outbound responses died on TX timeouts (`responses=0`) — **send
+  `stopAllProjects` before any big write on OLD firmware**. Fixed by
+  the io_task executor isolation (ADR
+  2026-08-25-classic-uart-io-task-executor-isolation): current firmware
+  lands ≥4 KB frames and answers requests under dome-scale load.
+  `scripts/starvation-bench.py` verifies either way.
 - The boot hello arrives ~2–3 s after reset. A running server heartbeats
   every 5 s — connecting mid-stream means heartbeat-before-hello (this
   broke the wizard's gate; see the defect entry).
