@@ -118,10 +118,7 @@ pub(crate) fn confirm_discarding_unsaved(_message: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::{
-        DeviceController, DeviceOp, DeviceTarget, HOME_NODE_ID, HomeOp, ProjectController,
-        ProjectOp, UiAction,
-    };
+    use lpa_studio_core::{HOME_NODE_ID, HomeOp, ProjectController, ProjectOp, UiAction};
 
     use super::action_replaces_loaded_project;
 
@@ -160,24 +157,19 @@ mod tests {
         assert!(!action_replaces_loaded_project(&detach));
     }
 
-    /// Leaving the studio now ENDS the session (studio-or-site
-    /// navigation) instead of detaching the lens — and it must inherit
-    /// the detach's property exactly: the draft overlay is durable, so
-    /// neither teardown verb may raise the discard prompt. This is the
-    /// regression guard for someone widening the gate to "anything that
-    /// closes a runtime".
+    /// Leaving the studio ENDS the session (studio-or-site navigation)
+    /// instead of detaching the lens — and it must inherit the detach's
+    /// property exactly: the draft overlay is durable, so the teardown
+    /// verb may not raise the discard prompt. This is the regression
+    /// guard for someone widening the gate to "anything that closes a
+    /// runtime".
     #[test]
     fn ending_the_session_is_not_a_replacement() {
-        let stop = UiAction::from_op(DeviceController::NODE_ID, DeviceOp::StopSimulator);
-        assert!(!action_replaces_loaded_project(&stop));
-
-        let disconnect = UiAction::from_op(
-            DeviceController::NODE_ID,
-            DeviceOp::DisconnectDevice {
-                target: DeviceTarget::card("dev7k2"),
-            },
+        let stop = UiAction::from_op(
+            lpa_studio_core::RuntimeOp::NODE_ID,
+            lpa_studio_core::RuntimeOp::StopSimulator,
         );
-        assert!(!action_replaces_loaded_project(&disconnect));
+        assert!(!action_replaces_loaded_project(&stop));
     }
 
     #[test]

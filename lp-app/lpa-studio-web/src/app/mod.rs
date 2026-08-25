@@ -23,7 +23,6 @@ pub mod patch;
 pub mod project;
 #[cfg(feature = "stories")]
 pub(crate) mod readme_stories;
-pub mod roster;
 /// The owner's sharing surface: the Share pill, its panel, and the archive.
 pub mod share;
 #[cfg(feature = "stories")]

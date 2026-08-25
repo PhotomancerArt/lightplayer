@@ -5,24 +5,21 @@
 //! deliberately small — it establishes the seam (kind + capacity) — and
 //! the ops live on the concrete types until real callers shape the
 //! abstraction (`RuntimePlace` still has none; see its module doc and
-//! the runtime-pool ADR). The load-bearing content of this module is the
-//! connect-as-pull machinery (`device_session`), the device registry,
-//! and device identity.
+//! the runtime-pool ADR).
+//!
+//! What survives the device-system teardown (M2 of the device-model
+//! rebuild) is the durable half: the device REGISTRY (the remembered-board
+//! record store and its on-disk format) and [`HardwareId`], the canonical
+//! identity format that store persists. The connect-as-pull machinery and
+//! the connect-time identity resolution went with the old device flows —
+//! the rebuilt model owns those.
 
-pub mod device_identity;
 pub mod device_registry;
-pub mod device_session;
 pub mod hardware_id;
-pub mod identity_resolution;
 pub mod place;
 pub mod runtime_place;
 
-pub use device_identity::{DEVICE_HARDWARE_MANIFEST_PATH, DEVICE_IDENTITY_PATH, DeviceIdentity};
 pub use device_registry::{DeviceRegistry, RegisteredDevice};
-pub use device_session::{
-    DeviceContent, DeviceSyncState, PulledDeviceCopy, pull_device_copy, registry_entry_for,
-};
 pub use hardware_id::{HardwareId, HardwareIdParseError};
-pub use identity_resolution::{IdentityEvidence, ResolvedIdentity, resolve_identity};
 pub use place::{Place, PlaceDescriptor, PlaceKind};
 pub use runtime_place::{RuntimePlace, relate_runtime_content};

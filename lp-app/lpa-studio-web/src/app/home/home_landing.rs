@@ -56,19 +56,14 @@ pub fn HomePage(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> 
                     detail: "Your boards and the simulator — set up, connect, play.",
                     href: "/devices",
                 }
-                // The sim path: land on Devices WITH the wizard already
-                // walking the simulate-a-device flow (same op as the
-                // Devices page's entry card).
+                // Opening any example puts a project on the simulator,
+                // which is what "try the simulator" now means: the
+                // setup wizard went with M2 of the device-model rebuild.
                 DiveInCard {
                     icon: StudioIconName::Simulator,
                     title: "Try the simulator",
-                    detail: "Set up the simulator as a board — no hardware needed.",
-                    href: "/devices",
-                    on_press: on_action.map(|on_action| {
-                        EventHandler::new(move |()| {
-                            on_action.call(home_action(HomeOp::StartSetup { sim: true }));
-                        })
-                    }),
+                    detail: "Open an example and watch it run — no hardware needed.",
+                    href: "/explore",
                 }
                 DiveInCard {
                     icon: StudioIconName::Play,

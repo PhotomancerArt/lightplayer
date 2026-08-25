@@ -44,7 +44,7 @@ pub(crate) mod workbench_stories;
 use dioxus::prelude::*;
 use lpa_mapping_editor::MapEditorSession;
 use lpa_studio_core::{
-    NodeId, ProjectEditorView, UiAction, UiDeviceCard, UiPaneView, UiPatchSurface, UiPatchTarget,
+    NodeId, ProjectEditorView, UiAction, UiPaneView, UiPatchSurface, UiPatchTarget, UiSimCard,
     UiViewContent,
 };
 
@@ -326,7 +326,7 @@ pub fn WorkbenchFrame(
     /// The lens session's device card — the Device panel's body. Pinned
     /// present by the core whenever panes render; an unplugged device
     /// fades rather than vanishes.
-    lens_card: Option<UiDeviceCard>,
+    lens_card: Option<UiSimCard>,
     running: bool,
     #[props(default)] now_secs: Option<f64>,
     /// The view tabs' targets, one slot per [`VIEWS`] row.
@@ -780,7 +780,7 @@ fn PanelDock(
     panel: PanelId,
     view: WorkbenchView,
     panes: Vec<UiPaneView>,
-    lens_card: Option<UiDeviceCard>,
+    lens_card: Option<UiSimCard>,
     surface: Option<UiPatchSurface>,
     patch_selection: Option<UiPatchTarget>,
     dive_focused: Signal<Option<NodeId>>,
@@ -876,7 +876,7 @@ fn PanelBody(
     panel: PanelId,
     view: WorkbenchView,
     panes: Vec<UiPaneView>,
-    lens_card: Option<UiDeviceCard>,
+    lens_card: Option<UiSimCard>,
     surface: Option<UiPatchSurface>,
     patch_selection: Option<UiPatchTarget>,
     dive_focused: Signal<Option<NodeId>>,
@@ -966,11 +966,9 @@ fn PanelBody(
         },
         (PanelId::Device, _) => rsx! {
             if let Some(card) = lens_card {
-                crate::app::home::device_card::DeviceCard {
-                    sim: card.sim,
+                crate::app::home::sim_card::SimCard {
                     pane: true,
                     card,
-                    now_secs,
                     on_action,
                 }
             }

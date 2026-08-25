@@ -138,38 +138,6 @@ pub enum HomeOp {
     ImportJson {
         text: String,
     },
-    /// Rename a device (D34, inline on the card): registry always; a live
-    /// session also writes the identity back to the device.
-    RenameDevice {
-        uid: String,
-        name: String,
-    },
-    /// Forget a remembered device (D34 hygiene, offline-card popup).
-    ForgetDevice {
-        uid: String,
-    },
-    /// Name an anonymous connected device (the Needs-a-name card's inline
-    /// form): mints a `dev` uid and stamps the identity over the wire —
-    /// card-anchored, never a dialog. `target` is that card (M4): with
-    /// two blank boards attached, naming one must not stamp the other.
-    NameDevice {
-        target: crate::DeviceTarget,
-        name: String,
-    },
-    /// Open the setup wizard on a target — the two half-height entry
-    /// cards, "connect a device" and "simulate a device". The wizard is a
-    /// card in the devices grid (flow design, F5b); this is what puts it
-    /// there. Exactly one runs at a time.
-    StartSetup {
-        /// THE simulator rather than a board on the wire. The MACHINE
-        /// never asks this — it asks the target's capabilities — but the
-        /// gesture has to say which target it means.
-        sim: bool,
-    },
-    /// One gesture on the open setup wizard. The reducer decides what it
-    /// means; a gesture in a state that has no arm for it is inert by
-    /// design (`docs/design/device-setup-flow.md` §2).
-    Setup(crate::app::setup_flow::SetupGesture),
     /// Mutate a card's UI VIEW-STATE (select tab / open or close a sheet).
     /// A pure, synchronous view-state change — no wire, no library — kept
     /// core-owned so it survives the card ⇄ pane growth and is
@@ -288,43 +256,6 @@ impl ControllerOp for HomeOp {
                 ActionPriority::Secondary,
             )
             .with_icon("upload"),
-            Self::RenameDevice { .. } => ActionMeta::new(
-                "Rename device",
-                "Rename this device; a connected device is updated too.",
-                ActionPriority::Secondary,
-            )
-            .with_icon("edit"),
-            Self::ForgetDevice { .. } => ActionMeta::new(
-                "Forget device",
-                "Disconnect this device, remove it from the list, and give up the \
-                 browser's permission for its port; reconnecting it asks again.",
-                ActionPriority::Tertiary,
-            )
-            .with_icon("remove")
-            .destructive(),
-            Self::NameDevice { .. } => ActionMeta::new(
-                "Name device",
-                "Name this device so Studio remembers it.",
-                ActionPriority::Primary,
-            )
-            .with_icon("edit"),
-            Self::StartSetup { sim: false } => ActionMeta::new(
-                "Connect a device",
-                "Set up a board on the end of a USB cable.",
-                ActionPriority::Primary,
-            )
-            .with_icon("usb"),
-            Self::StartSetup { sim: true } => ActionMeta::new(
-                "Simulate a device",
-                "Set up the simulator as a board — no hardware needed.",
-                ActionPriority::Secondary,
-            )
-            .with_icon("play"),
-            Self::Setup(_) => ActionMeta::new(
-                "Set up",
-                "Take the next step in setting up this device.",
-                ActionPriority::Primary,
-            ),
             Self::CardUi(_) => ActionMeta::new(
                 "Card view",
                 "Change what this card is showing.",
@@ -351,29 +282,15 @@ impl ControllerOp for HomeOp {
             | Self::DuplicatePackage { .. }
             | Self::DeletePackage { .. }
             | Self::ImportZip { .. }
-            | Self::ImportJson { .. }
-            | Self::RenameDevice { .. }
-            | Self::NameDevice { .. } => ActionClass::Foreground {
+            | Self::ImportJson { .. } => ActionClass::Foreground {
                 deadline: PROJECT_ACTION_DEADLINE,
             },
-            // A forget takes the live session down and revokes the
-            // transport's access before touching the registry, so it owns
-            // the connection for the duration — the same reason every
-            // `DeviceOp` is recovery-class. Under the local-CRUD budget it
-            // shared with the renames, a slow disconnect would time out
-            // mid-teardown.
-            Self::ForgetDevice { .. } => ActionClass::Recovery,
             // A pure view-state flip — synchronous, no wire; run it
             // inline like any local gesture (the standard budget never
             // engages because the handler never awaits).
-            Self::CardUi(_) | Self::StartSetup { .. } => ActionClass::Foreground {
+            Self::CardUi(_) => ActionClass::Foreground {
                 deadline: PROJECT_ACTION_DEADLINE,
             },
-            // A wizard gesture can turn into a flash, a probe, or a
-            // bootloader connect — the device-flow class, for the same
-            // reason every `DeviceOp` carries it: those own the connection
-            // until they finish, and a deadline would fire mid-write.
-            Self::Setup(_) => ActionClass::Recovery,
         }
     }
 
@@ -493,10 +410,6 @@ mod tests {
                 file_name: "a.zip".to_string(),
                 bytes: ZipBytes(vec![1, 2]),
             },
-            HomeOp::RenameDevice {
-                uid: "dev1".to_string(),
-                name: "n".to_string(),
-            },
         ] {
             assert_eq!(
                 op.action_class(),
@@ -506,22 +419,6 @@ mod tests {
                 "{op:?}"
             );
         }
-    }
-
-    /// Forget is a DEVICE flow, not library CRUD: it takes the live
-    /// session down and revokes the transport's access to the board before
-    /// the registry row goes, so it owns the connection and carries no
-    /// deadline — the local-CRUD budget it used to share could expire
-    /// mid-teardown.
-    #[test]
-    fn forgetting_a_device_owns_the_connection() {
-        assert_eq!(
-            HomeOp::ForgetDevice {
-                uid: "dev1".to_string(),
-            }
-            .action_class(),
-            ActionClass::Recovery,
-        );
     }
 
     #[test]

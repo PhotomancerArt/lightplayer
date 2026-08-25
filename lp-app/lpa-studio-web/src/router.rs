@@ -191,10 +191,6 @@ pub(crate) enum StudioRoute {
         /// different document (`same_session` ignores it).
         view: ProjectView,
     },
-    /// The editor as a lens on this device's runtime session (`dev…`
-    /// uid). Reload connects the granted port (M1) and attaches.
-    /// `play` renders that same session as play mode (`/play` suffix).
-    Device { uid: String, play: bool },
     /// The story book; `None` selects the book's default story.
     Stories { story_id: Option<String> },
     /// The public boards catalog (project-free, renders the checked-in
@@ -262,17 +258,11 @@ impl StudioRoute {
         let (path, _query) = path.split_once('?').unwrap_or((path, ""));
         let mut segments = path.split('/').filter(|s| !s.is_empty());
         match segments.next() {
-            Some("device") => match (segments.next(), segments.next(), segments.next()) {
-                (Some(uid), None, _) => StudioRoute::Device {
-                    uid: uid.to_string(),
-                    play: false,
-                },
-                (Some(uid), Some("play"), None) => StudioRoute::Device {
-                    uid: uid.to_string(),
-                    play: true,
-                },
-                _ => StudioRoute::Home,
-            },
+            // `/device/<uid>` used to address a board's runtime session.
+            // Device support is being rebuilt (M2 of the device-model
+            // rebuild), so an old bookmark lands on the Devices page,
+            // which says so — never on a blank Home.
+            Some("device") => StudioRoute::Devices,
             // The project route. Exactly one link segment, optionally
             // followed by `play` — depth junk is not a guess at some
             // project, it is an unknown path. The segment itself is as
@@ -375,8 +365,6 @@ impl StudioRoute {
                     ProjectView::Mapping => format!("{path}/mapping"),
                 }
             }
-            StudioRoute::Device { uid, play: false } => format!("/device/{uid}"),
-            StudioRoute::Device { uid, play: true } => format!("/device/{uid}/play"),
             StudioRoute::Stories { story_id: None } => "/stories".to_string(),
             StudioRoute::Stories { story_id: Some(id) } => format!("/stories/{id}"),
             StudioRoute::Boards { board: None } => "/boards".to_string(),
@@ -423,7 +411,6 @@ impl StudioRoute {
     pub(crate) fn same_session(&self, other: &StudioRoute) -> bool {
         match (self, other) {
             (StudioRoute::Project { uid: a, .. }, StudioRoute::Project { uid: b, .. }) => a == b,
-            (StudioRoute::Device { uid: a, .. }, StudioRoute::Device { uid: b, .. }) => a == b,
             _ => self == other,
         }
     }
@@ -453,10 +440,6 @@ impl StudioRoute {
             } else {
                 ProjectView::Workspace
             }),
-            StudioRoute::Device { uid, .. } => StudioRoute::Device {
-                uid: uid.clone(),
-                play,
-            },
             other => other.clone(),
         }
     }
@@ -468,7 +451,7 @@ impl StudioRoute {
             StudioRoute::Project {
                 view: ProjectView::Play,
                 ..
-            } | StudioRoute::Device { play: true, .. }
+            }
         )
     }
 
@@ -484,10 +467,7 @@ impl StudioRoute {
     /// Whether this route is a lens on a runtime session (the routes that
     /// have a play variant at all).
     pub(crate) fn is_lens(&self) -> bool {
-        matches!(
-            self,
-            StudioRoute::Project { .. } | StudioRoute::Device { .. }
-        )
+        matches!(self, StudioRoute::Project { .. })
     }
 }
 
@@ -626,9 +606,6 @@ pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
                 view: ProjectView::Workspace,
             })
         }
-        UiLensRuntime::Device { uid } => uid
-            .clone()
-            .map(|uid| StudioRoute::Device { uid, play: false }),
     }
 }
 
@@ -1035,14 +1012,6 @@ mod tests {
                 slug: None,
                 view: ProjectView::Workspace,
             },
-            StudioRoute::Device {
-                uid: "devaaaaaaaaaaaaaaaa".to_string(),
-                play: false,
-            },
-            StudioRoute::Device {
-                uid: "devaaaaaaaaaaaaaaaa".to_string(),
-                play: true,
-            },
             StudioRoute::Stories { story_id: None },
             StudioRoute::Stories {
                 story_id: Some("base/detail-popover/open-sections".to_string()),
@@ -1143,23 +1112,39 @@ mod tests {
             "/sim/2026-07-09-1421-basic",
             "/sim/prjh7kq9xy2mq4tb8wz",
             "/sim/prjh7kq9xy2mq4tb8wz/play",
-            "/device",
-            "/device/devx/extra",
-            "/device/devx/play/extra",
             "/mapping/extra",
             // the same, in the legacy dialect
             "#",
             "#/",
             "#/nope",
             "#/sim/2026-07-09-1421-basic",
-            "#/device/devx/extra",
-            "#/device/devx/play/extra",
             "#/mapping/extra",
             "#/home/extra",
             "#/explore/extra",
             "#/account/extra",
         ] {
             assert_eq!(StudioRoute::parse(path), StudioRoute::Home, "{path:?}");
+        }
+    }
+
+    /// Every `/device…` shape lands on the Devices page rather than the
+    /// landing: device support is being rebuilt (M2 of the device-model
+    /// rebuild) and that page says so, which is a better answer to an old
+    /// bookmark than a blank Home. Depth junk included — there is no
+    /// device route left to be malformed against.
+    #[test]
+    fn device_paths_land_on_the_devices_page() {
+        for path in [
+            "/device",
+            "/device/devx",
+            "/device/devx/play",
+            "/device/devx/extra",
+            "/device/devx/play/extra",
+            "#/device/devx",
+            "#/device/devx/extra",
+            "#/device/devx/play/extra",
+        ] {
+            assert_eq!(StudioRoute::parse(path), StudioRoute::Devices, "{path:?}");
         }
     }
 
@@ -1206,13 +1191,14 @@ mod tests {
                 view: ProjectView::Play
             }
         );
+        // `/device/<uid>` no longer addresses a runtime: device support
+        // is being rebuilt, so an old bookmark lands on the page that
+        // says so.
         assert_eq!(
             StudioRoute::parse("/device/deva/play"),
-            StudioRoute::Device {
-                uid: "deva".to_string(),
-                play: true
-            }
+            StudioRoute::Devices
         );
+        assert_eq!(StudioRoute::parse("/device/deva"), StudioRoute::Devices);
         // `play` is a suffix, never a link: it names no project, so it is
         // the landing rather than a guess
         assert_eq!(StudioRoute::parse("/p/play"), StudioRoute::Home);
@@ -1418,11 +1404,6 @@ mod tests {
             slug: Some("basic".to_string()),
             view: ProjectView::Play
         }));
-        // and a device is never a project
-        assert!(!playing.same_session(&StudioRoute::Device {
-            uid: "basic".to_string(),
-            play: true
-        }));
         // non-lens routes have no play zoom and compare by equality
         assert_eq!(StudioRoute::Home.with_play(true), StudioRoute::Home);
         assert!(!StudioRoute::Home.is_lens());
@@ -1610,30 +1591,11 @@ mod tests {
     }
 
     #[test]
-    fn lens_on_a_device_binds_the_device_route_by_uid() {
-        let view = editor_view(Some(UiLensRuntime::Device {
-            uid: Some("devaaaaaaaaaaaaaaaa".to_string()),
-        }));
-        assert_eq!(
-            lens_route(&view),
-            Some(StudioRoute::Device {
-                uid: "devaaaaaaaaaaaaaaaa".to_string(),
-                play: false
-            })
-        );
-    }
-
-    #[test]
     fn unaddressable_lenses_bind_nothing() {
         // detached editor: no lens, no route
         assert_eq!(lens_route(&editor_view(None)), None);
-        // a device whose identity has not landed has no honest address
-        assert_eq!(
-            lens_route(&editor_view(Some(UiLensRuntime::Device { uid: None }))),
-            None
-        );
         // a sim-run project with no library identity (the storeless demo
-        // path) has no honest address either
+        // path) has no honest address
         assert_eq!(
             lens_route(&editor_view(Some(UiLensRuntime::Sim { project_uid: None }))),
             None
@@ -1641,7 +1603,7 @@ mod tests {
     }
 
     #[test]
-    fn a_project_route_matches_the_view_by_uid_and_device_routes_never_frame() {
+    fn a_project_route_matches_the_view_by_uid() {
         let view = editor_view(Some(UiLensRuntime::Sim {
             project_uid: Some(SHARE_UID.to_string()),
         }))
@@ -1664,15 +1626,6 @@ mod tests {
                 uid: "prj0000000000000000".parse().expect("a project uid"),
                 slug: Some("2026-07-09-1421-basic".to_string()),
                 view: ProjectView::Workspace
-            }
-            .project_matches_view(&view)
-        );
-        // device routes render the gallery honestly, never the opening
-        // frame — project_matches_view is deliberately false for them
-        assert!(
-            !StudioRoute::Device {
-                uid: "devaaaaaaaaaaaaaaaa".to_string(),
-                play: false
             }
             .project_matches_view(&view)
         );

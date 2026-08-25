@@ -19,7 +19,8 @@ pub enum ActionClass {
     /// Recovery / device flows: preempt an in-flight passive pull **and** any
     /// foreground op, and carry no deadline (they own the connection until they
     /// finish). Seeded from the web policy's preemption set:
-    /// every `DeviceOp` variant plus `ServerOp::DisconnectServer`.
+    /// `RuntimeOp::StopSimulator` (and, before the device teardown, every
+    /// `DeviceOp` variant).
     Recovery,
     /// Normal foreground ops: preempt a passive pull but not another foreground
     /// op, timed by a quiet-gap `deadline`.
