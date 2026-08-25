@@ -91,7 +91,6 @@ pub fn serialize_server_msg(
     Ok(bytes)
 }
 
-
 impl<W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'_, W, F, D> {
     /// Write one framed server line (`\nM!{json}\n`) with the policy's retry
     /// budget, resyncing the peer's line parser on failure.

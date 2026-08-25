@@ -222,17 +222,16 @@ impl<'a, W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'a, W, F, D> {
             (self.on_chunk)();
             let chunk_end = (offset + self.policy.chunk_size).min(data.len());
             let chunk = &data[offset..chunk_end];
-            let io_error = match select(self.delay.delay_ms(timeout_ms), self.tx.write_all(chunk))
-                .await
-            {
-                Either::First(_) => None,
-                Either::Second(Err(error)) => Some(format!("{error:?}")),
-                Either::Second(Ok(())) => {
-                    offset = chunk_end;
-                    chunk_index += 1;
-                    continue;
-                }
-            };
+            let io_error =
+                match select(self.delay.delay_ms(timeout_ms), self.tx.write_all(chunk)).await {
+                    Either::First(_) => None,
+                    Either::Second(Err(error)) => Some(format!("{error:?}")),
+                    Either::Second(Ok(())) => {
+                        offset = chunk_end;
+                        chunk_index += 1;
+                        continue;
+                    }
+                };
             return Err(WriteFailure {
                 chunk_index,
                 chunks_total,

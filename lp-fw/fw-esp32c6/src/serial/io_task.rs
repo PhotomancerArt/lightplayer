@@ -44,11 +44,8 @@ static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 /// result would be consumed by the next send and misattributed. The generation
 /// lets `transport.send()` discard any stale result instead of trusting order.
 #[cfg(feature = "server")]
-static SERVER_WRITE_REQUEST: Channel<
-    CriticalSectionRawMutex,
-    (u32, alloc::vec::Vec<u8>),
-    1,
-> = Channel::new();
+static SERVER_WRITE_REQUEST: Channel<CriticalSectionRawMutex, (u32, alloc::vec::Vec<u8>), 1> =
+    Channel::new();
 
 #[cfg(feature = "server")]
 static SERVER_WRITE_RESULT: Channel<

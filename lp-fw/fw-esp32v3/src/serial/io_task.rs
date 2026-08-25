@@ -61,8 +61,7 @@ static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 /// Each request carries a wrapping `u32` generation token that `io_task` echoes
 /// back on the result channel, so `transport.send()` can discard a result
 /// orphaned by a cancelled send instead of trusting arrival order.
-static SERVER_WRITE_REQUEST: Channel<CriticalSectionRawMutex, (u32, Vec<u8>), 1> =
-    Channel::new();
+static SERVER_WRITE_REQUEST: Channel<CriticalSectionRawMutex, (u32, Vec<u8>), 1> = Channel::new();
 
 static SERVER_WRITE_RESULT: Channel<
     CriticalSectionRawMutex,
@@ -114,7 +113,9 @@ pub fn start_io_pacer(timer: AnyTimer<'static>) {
     if let Err(error) = pacer.start(IO_TICK_PERIOD) {
         // A dead pacer means a mute io_task; say so loudly while esp_println
         // still reaches the wire directly.
-        esp_println::println!("[ERROR] io pacer failed to start ({error:?}); host link will be mute");
+        esp_println::println!(
+            "[ERROR] io pacer failed to start ({error:?}); host link will be mute"
+        );
         return;
     }
     pacer.listen();
