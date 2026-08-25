@@ -17,8 +17,8 @@ use std::collections::BTreeMap;
 use lpc_mapping::{Map2dDoc, Map2dShape, PathAlign, ResolvedMap2d, path_gap_breaks};
 
 use super::cells::{LampCell, lamp_cells};
-use super::hull::hull_path_d;
 use super::outline::aligned_outline;
+use super::outline::hull_path_d;
 
 /// Reach of the band off the lamps, as a fraction of the strand pitch —
 /// arrange.rs's `sprite_objects` derivation, kept in step by hand (it works

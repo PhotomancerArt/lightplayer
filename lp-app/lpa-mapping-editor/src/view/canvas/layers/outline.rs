@@ -530,6 +530,25 @@ fn point_segment_dist(p: P, a: P, b: P) -> f64 {
     norm(sub(p, add(a, mul(ab, t))))
 }
 
+/// One closed polygon as an SVG subpath — the single serializer every
+/// body/cell path shares (moved here when hull.rs retired with the
+/// convex-hull era; one path element per body is the dome-scale budget).
+#[must_use]
+pub(crate) fn hull_path_d(polygon: &[[f32; 2]]) -> String {
+    let mut d = String::with_capacity(polygon.len() * 16);
+    for (index, point) in polygon.iter().enumerate() {
+        d.push_str(if index == 0 { "M" } else { "L" });
+        d.push_str(&format!("{:.2},{:.2}", point[0], point[1]));
+        if index + 1 < polygon.len() {
+            d.push(' ');
+        }
+    }
+    if !d.is_empty() {
+        d.push('Z');
+    }
+    d
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

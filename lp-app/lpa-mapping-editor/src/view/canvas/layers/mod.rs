@@ -11,7 +11,6 @@ pub(crate) mod cells;
 pub(crate) mod doc;
 pub(crate) mod draft;
 pub(crate) mod fixtures;
-pub(crate) mod hull;
 pub(crate) mod marquee;
 pub(crate) mod outline;
 pub(crate) mod selection;

@@ -24,7 +24,7 @@
 use dioxus::prelude::*;
 
 use super::cells::LampCell;
-use super::hull::hull_path_d;
+use super::outline::hull_path_d;
 use super::outline::{dist_to_loops, point_in_loops};
 use crate::editor_core::placement::Placement;
 

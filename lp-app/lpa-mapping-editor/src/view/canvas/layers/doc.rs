@@ -12,7 +12,7 @@ use crate::editor_core::map_selection::MapSelection;
 use crate::editor_core::map_tool::MapTool;
 use crate::editor_core::view_geometry::MapArrowOverlay;
 use crate::view::canvas::layers::bodies::{ObjectBody, loops_path_d};
-use crate::view::canvas::layers::hull::hull_path_d;
+use crate::view::canvas::layers::outline::hull_path_d;
 use crate::view::canvas::palette::{OBJECT_COLORS, SELECTION_COLOR, object_color};
 use crate::view::canvas::{CanvasInteract, secondary_button, select_and_start_move};
 use crate::view::reference::ReferenceImage;
