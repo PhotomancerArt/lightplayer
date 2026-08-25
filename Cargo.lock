@@ -5977,6 +5977,7 @@ dependencies = [
  "littlefs-rust",
  "lp-bootctl",
  "lpa-client",
+ "lpa-devices",
  "lpc-model",
  "lpc-wire",
  "lpfs",
