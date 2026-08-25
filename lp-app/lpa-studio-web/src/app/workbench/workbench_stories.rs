@@ -246,14 +246,14 @@ fn workbench_mapping_view() -> Element {
 }
 
 #[story(
-    description = "The workbench's Patch view (R5, pass 2): Nodes · Map · Patch in the band, the RESOLVED tree left (instances + wire chips — grain follows activity), Outputs attached right, and the patching center — the SLIMMED toolbar (undo/redo and the placed count; the verbs moved down beside the thing they act on, D4) over the one project canvas, with THE panel as the center's bottom region (D8 — always present). Sector 2 of an auto-mapped fixture is selected, so the panel shows the lean state and its keys row: the grammar is printed in the panel now, and the help overlay is gone."
+    description = "The workbench's Patch view (R5, round 2 after the G1 re-gate): Nodes · Map · Patch in the band, the RESOLVED tree left (instances + wire chips — grain follows activity), the OUTPUTS panel open right — its default, because a free-run click there is how a patch is made — and THE patch panel across the center's bottom. Patching and matching in ONE view: the wire's own picture and the selection's readout are visible at the same time, which is why the panel is not a dock tab competing for that slot. Its height is FIXED, so the canvas box above never moves when the selection changes; the SLIMMED toolbar (undo/redo and the placed count; the verbs moved down beside the thing they act on, D4) sits over the canvas. Sector 2 of an auto-mapped fixture is selected, so the panel shows the lean state over its keys row — the grammar is printed in the panel, and the help overlay is gone."
 )]
 fn workbench_patching_view() -> Element {
     workbench_story(ProjectView::Patch)
 }
 
 #[story(
-    description = "The mobile fold in the PATCHING view with the Outputs panel summoned — the destination of the object-first invitation below 820px (round 3, #6): the ports come to the user rather than an inline dropdown, and picking there completes the assign and dismisses the panel. The Patching view's Outputs panel carries the walk-up grammar (free runs are click targets), which is what makes it a pick surface rather than a readout. The surface is the walk-up pose: manual fixtures, sector 4 still waiting, IO13 empty. At lg the same mount shows the ordinary Patch workbench with that object selected — the invitation state in place."
+    description = "The mobile fold in the PATCHING view with the Outputs panel summoned — the destination of the object-first invitation below 820px (round 3, #6): the ports come to the user rather than an inline dropdown, and picking there completes the assign and dismisses the panel. The Patching view's Outputs panel carries the walk-up grammar (free runs are click targets), which is what makes it a pick surface rather than a readout. The surface is the walk-up pose: manual fixtures, sector 4 still waiting, IO13 empty. The patch panel is the center's bottom region here exactly as it is above the fold — ONE mount at every width, at a fixed height — so the phone differs only in how the pick surface arrives: full-screen instead of a popover. At lg the same mount shows the ordinary Patch workbench with that object selected."
 )]
 fn workbench_patching_mobile_pick() -> Element {
     rsx! {

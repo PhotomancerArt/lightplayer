@@ -23,6 +23,14 @@
 //! the creation-time default, and the lean panel is its own state worth
 //! pinning); [`mini_dome_walkup_surface`] is the manual counterpart with two
 //! objects still off the wire.
+//!
+//! **The height.** The panel is the Patching center's bottom region at every
+//! width, at a FIXED height (G1 round 2): the canvas edge above it must not
+//! move when the selection does, so the box is a constant per breakpoint and
+//! poses that outgrow it scroll inside it. These stories pose the panel on its
+//! own through [`panel_frame`], which gives it no definite height to take a
+//! percentage of — so what you see is the fixed 300px box, scrollbar and dead
+//! space included, exactly as the workbench mounts it.
 
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
@@ -34,13 +42,14 @@ use super::patch_story_fixtures::{
 use crate::app::editor_shell::patching::ArmedVerb;
 use lpa_studio_core::{NodeId, UiPatchSurface, UiPatchTarget};
 
-/// The panel at page width, in its own height.
+/// The panel alone, at page width — the center-bottom mount, without the
+/// canvas above it.
 ///
-/// In the Patching view the panel is the center's bottom region and caps
-/// itself at 45% of that column so the canvas above always keeps room; a
-/// story has no canvas to protect, and a percentage cap against an indefinite
-/// height resolves to no cap at all — which is what we want here, the whole
-/// panel on screen rather than its top half over a scrollbar.
+/// The frame gives no definite height on purpose: the panel's `max-h-[45%]`
+/// short-window guard resolves to no cap at all against an indefinite parent,
+/// so the capture shows the FIXED box itself (300px above the fold, 260 below)
+/// rather than some fraction of a story page. A pose that outgrows it scrolls
+/// inside it, which is the point of the box.
 fn panel_frame(
     surface: UiPatchSurface,
     selection: Option<UiPatchTarget>,
@@ -52,6 +61,35 @@ fn panel_frame(
                 surface,
                 selection,
                 armed,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+/// [`panel_frame`], with the output-picker POPOVER posed open (round 2, P3)
+/// and room above the panel for it to rise into.
+///
+/// The void stands in for the canvas: the card is anchored to the panel's
+/// bottom and grows UPWARD over it, which is the relationship the gate is
+/// reading. The popover is a MOUNT of the real Outputs panel, so posing it is
+/// exactly posing the panel's `picker_open` — there is no second surface to
+/// fixture. Deterministic like everything else here: the story fixtures
+/// publish no frames, so the Outputs panel's counterpart glow shows its
+/// settled colours without the breathing.
+fn panel_frame_with_picker(
+    surface: UiPatchSurface,
+    selection: Option<UiPatchTarget>,
+    armed: Option<ArmedVerb>,
+) -> Element {
+    rsx! {
+        div { class: "tw:flex tw:w-full tw:flex-col tw:overflow-hidden tw:rounded-md tw:border tw:border-border-strong tw:bg-background",
+            div { class: "tw:h-[220px] tw:flex-none" }
+            PatchPanel {
+                surface,
+                selection,
+                armed,
+                picker_open: true,
                 on_action: move |_| {},
             }
         }
@@ -171,4 +209,17 @@ fn patch_panel_scarf() -> Element {
         }),
         None,
     )
+}
+
+#[story(
+    description = "THE OUTPUT PICKER, open over the bottom panel (round 2, P3). Pressing assign on an unmapped object arms the verb and brings the ports up: the popover HOSTS the real Outputs panel — the same component the Outputs dock mounts, with the same patch_verbs grammar — so every free run in it is a click target that lands the object at the EXACT clicked lamp. That is why the panel's own flat port lists are gone: a destination you cannot judge is not a choice, and this surface shows the box/port tree, each port's occupancy, and the counterpart glow that a text row could only summarise. The card is anchored to the panel's bottom and WIDTH-CAPPED at 420px, rising over the canvas (the void above stands in for it) rather than spanning the panel's full width as a wall of rows. Dismissal is ONE rule at two sizes — a selection move or a patch write closes it, esc closes it (the ladder's first rung), a click outside closes it. The card covers the panel's armed banner while it is up, so its header carries the arm instead — an armed thing always names itself. The free runs' counterpart glow is a live-frames animation and the story fixtures publish none, so this capture is the settled state. Below the fold the same panel arrives full-screen instead (see workbench_patching_mobile_pick)."
+)]
+fn patch_panel_picker() -> Element {
+    let mut surface = mini_dome_walkup_surface();
+    let selection = UiPatchTarget::Instance {
+        node: dome(),
+        path: "/sector/4".to_string(),
+    };
+    surface.chase_preview = lpa_studio_core::chase_preview(&surface, Some(&selection), 0);
+    panel_frame_with_picker(surface, Some(selection), Some(ArmedVerb::Assign))
 }
