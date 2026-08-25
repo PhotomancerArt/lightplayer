@@ -55,5 +55,6 @@ pub use device_snapshot::DeviceSnapshot;
 pub use device_state::{DeviceState, IncompatibleReason};
 pub use device_timers::{
     DEFAULT_CONNECT_DEADLINE, DEFAULT_READY_DEADLINE, DEFAULT_REQUEST_IDLE_DEADLINE,
-    DeviceDeadlines, DeviceTimerFuture, DeviceTimers, READINESS_POLL_INTERVAL,
+    DEFAULT_REQUEST_TOTAL_DEADLINE, DeviceDeadlines, DeviceTimerFuture, DeviceTimers,
+    READINESS_POLL_INTERVAL,
 };

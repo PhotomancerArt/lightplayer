@@ -1,6 +1,10 @@
 //! Portable LightPlayer server protocol client.
 
+use core::future::Future;
+use core::pin::Pin;
+use core::task::Poll;
 use core::time::Duration;
+use std::rc::Rc;
 
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::{
@@ -50,6 +54,58 @@ impl<T> ClientOutcome<T> {
     }
 }
 
+/// A caller-provided sleep future, boxed so [`RequestDeadline`] adds no
+/// generic parameter to [`LpClient`].
+pub type ClientTimerFuture = Pin<Box<dyn Future<Output = ()>>>;
+
+/// Total deadline for one single-response request.
+///
+/// This bounds the WHOLE of [`LpClient::send_request`] — the send plus the
+/// response-correlation loop — with one timer built at request start.
+/// Unrelated frames (heartbeats, logs, stale responses) arriving while the
+/// request waits never extend it: liveness of the wire is not progress on
+/// this request. Contrast [`ProgressDeadline`], the quiet-gap deadline for
+/// streamed project reads — those run through
+/// [`run_project_read`](crate::pull_loop::run_project_read), not
+/// `send_request`, and reset their timer on every received frame.
+///
+/// On expiry the request id is abandoned (its late frames classify as
+/// [`ResponseDisposition::StaleAbandoned`] — an expected quiet discard) and
+/// the caller sees the same "device did not respond" transport error a dead
+/// wire produces, so downstream handling is identical either way.
+///
+/// Carries a timer FACTORY rather than a concrete timer so the client stays
+/// runtime-neutral: native callers back it with `tokio::time::sleep`, wasm
+/// callers with a `setTimeout` future.
+pub struct RequestDeadline {
+    budget: Duration,
+    make_timer: Rc<dyn Fn(Duration) -> ClientTimerFuture>,
+}
+
+impl RequestDeadline {
+    /// A total-request budget of `budget`, with timers from `make_timer`.
+    pub fn new(
+        budget: Duration,
+        make_timer: impl Fn(Duration) -> ClientTimerFuture + 'static,
+    ) -> Self {
+        Self {
+            budget,
+            make_timer: Rc::new(make_timer),
+        }
+    }
+
+    /// The total time one request may take, send included.
+    pub fn budget(&self) -> Duration {
+        self.budget
+    }
+
+    /// One timer covering a whole request. Built once per request and never
+    /// reset — that is the contract that keeps the composite wait bounded.
+    fn request_timer(&self) -> ClientTimerFuture {
+        (self.make_timer)(self.budget)
+    }
+}
+
 /// Runtime-neutral client for communicating with `LpServer`.
 ///
 /// The core client owns request ids, response correlation, server errors, and
@@ -59,6 +115,10 @@ impl<T> ClientOutcome<T> {
 pub struct LpClient<Io> {
     io: Io,
     protocol: ProtocolSession,
+    /// Total per-request deadline, when the transport can silently drop a
+    /// response (real devices under engine load). `None` for transports
+    /// that answer every request by construction (in-process sim, tests).
+    request_deadline: Option<RequestDeadline>,
 }
 
 impl<Io> LpClient<Io>
@@ -69,7 +129,15 @@ where
         Self {
             io,
             protocol: ProtocolSession::new(),
+            request_deadline: None,
         }
+    }
+
+    /// Bound every single-response request with a total deadline.
+    #[must_use]
+    pub fn with_request_deadline(mut self, deadline: RequestDeadline) -> Self {
+        self.request_deadline = Some(deadline);
+        self
     }
 
     pub fn into_io(self) -> Io {
@@ -86,6 +154,51 @@ where
         request: ClientRequest,
     ) -> ClientResult<ClientOutcome<WireServerMessage>> {
         let request_id = self.protocol.next_request_id();
+        let deadline = self
+            .request_deadline
+            .as_ref()
+            .map(|deadline| (deadline.budget(), deadline.request_timer()));
+        let Some((budget, timer)) = deadline else {
+            return self.correlate_request(request_id, request).await;
+        };
+        let raced = {
+            let mut timer = timer;
+            let mut body = core::pin::pin!(self.correlate_request(request_id, request));
+            // Hand-rolled race (no executor `select!`), body polled first so
+            // a response that is ready alongside the timer still wins.
+            core::future::poll_fn(move |cx| {
+                if let Poll::Ready(result) = body.as_mut().poll(cx) {
+                    return Poll::Ready(Some(result));
+                }
+                if timer.as_mut().poll(cx).is_ready() {
+                    return Poll::Ready(None);
+                }
+                Poll::Pending
+            })
+            .await
+        };
+        match raced {
+            Some(result) => result,
+            None => {
+                // The server may still deliver this response; mark it so a
+                // late arrival is an expected stale drop, not a warning.
+                self.protocol.abandon_request(request_id);
+                Err(ClientError::from(lpc_wire::TransportError::Other(format!(
+                    "device did not respond within {:.1}s",
+                    budget.as_secs_f64()
+                ))))
+            }
+        }
+    }
+
+    /// Send one request and drain frames until its response arrives: the
+    /// correlation loop [`Self::send_request`] bounds with the optional
+    /// [`RequestDeadline`].
+    async fn correlate_request(
+        &mut self,
+        request_id: u64,
+        request: ClientRequest,
+    ) -> ClientResult<ClientOutcome<WireServerMessage>> {
         self.io
             .send(ClientMessage {
                 id: request_id,
