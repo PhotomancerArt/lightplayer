@@ -158,7 +158,7 @@ pub struct ProjectController {
     editor_meta_absent: bool,
     /// The patch surface's one shared selection (D36; core-owned so e2e
     /// can drive it and the P6 verbs can read it).
-    patch_selection: Option<crate::UiPatchTarget>,
+    patch_selection: crate::UiSelection,
     /// Monotonic correlation-id source for overlay mutation commands.
     next_mutation_cmd_id: u64,
     /// Staged node removals recorded from `RemoveNode` acks, keyed by the
@@ -425,7 +425,7 @@ impl ProjectController {
             slot_shapes: SlotShapeRegistry::default(),
             root_shape_ids: BTreeMap::new(),
             node_card_ui: BTreeMap::new(),
-            patch_selection: None,
+            patch_selection: crate::UiSelection::empty(),
             patch_undo: Vec::new(),
             patch_redo: Vec::new(),
             arrange_undo: Vec::new(),
@@ -3128,8 +3128,8 @@ impl ProjectController {
             }
             // The patch surface's one shared selection — local and
             // synchronous like the card ops.
-            ProjectEditorOp::PatchSelect { target } => {
-                self.patch_selection = target;
+            ProjectEditorOp::PatchSelect { selection } => {
+                self.patch_selection = selection;
                 Ok(UiNotices::new())
             }
             // Undo-correlation journal events from the shell (P2
@@ -3636,7 +3636,7 @@ impl ProjectController {
         // freeze together. Last, because it reads the finished fixtures.
         surface.chase_preview = super::patch_preview::chase_preview(
             &surface,
-            self.patch_selection.as_ref(),
+            self.patch_selection.single(),
             self.sync.as_ref().map_or(0, |sync| sync.frames_seen()),
         );
         (!surface.outputs.is_empty()).then_some(surface)
@@ -5105,10 +5105,12 @@ impl ProjectController {
         server: &mut StudioServerClient,
         op: crate::PatchPulseOp,
     ) -> Result<ProjectEditRun, UiError> {
-        use super::patch_pulse::{PulseWire, pulse_highlights, wire_extent_lamps};
+        use super::patch_pulse::{
+            PulseWire, merge_highlight_texts, pulse_highlights, wire_extent_lamps,
+        };
 
-        let writes: Vec<(NodeId, String)> = match (&op.subject, self.sync.as_ref()) {
-            (Some(subject), Some(sync)) => {
+        let writes: Vec<(NodeId, String)> = match (op.subjects.as_slice(), self.sync.as_ref()) {
+            (subjects @ [_, ..], Some(sync)) => {
                 let outputs: Vec<NodeId> = sync.published_outputs().collect();
                 let wires: Vec<PulseWire<'_>> = outputs
                     .iter()
@@ -5121,7 +5123,21 @@ impl ProjectController {
                         ),
                     })
                     .collect();
-                pulse_highlights(subject, &wires)
+                // The multi-selection union: each subject maps alone, and
+                // same-output texts merge (breath span lists — the sibling
+                // invariant keeps chase single-subject).
+                let mut merged: Vec<(NodeId, String)> = Vec::new();
+                for subject in subjects {
+                    for (node, text) in pulse_highlights(subject, &wires) {
+                        match merged.iter_mut().find(|(n, _)| *n == node) {
+                            Some((_, existing)) => {
+                                *existing = merge_highlight_texts(existing, &text);
+                            }
+                            None => merged.push((node, text)),
+                        }
+                    }
+                }
+                merged
             }
             _ => Vec::new(),
         };

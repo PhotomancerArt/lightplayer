@@ -96,11 +96,7 @@ pub(crate) struct PatchingUi {
 /// ([`UiPatchTarget::pulse_language`]), applied by
 /// [`UiPatchTarget::pulse_subject`] — so the UI cannot name a selection in
 /// the wrong tongue.
-fn pulse_subject(
-    surface: &UiPatchSurface,
-    selection: &Option<UiPatchTarget>,
-) -> Option<PatchPulseSubject> {
-    let target = selection.as_ref()?;
+fn pulse_subject(surface: &UiPatchSurface, target: &UiPatchTarget) -> Option<PatchPulseSubject> {
     let (node, range) = match target {
         UiPatchTarget::Fixture { node } => (*node, None),
         UiPatchTarget::Instance { node, path } => {
@@ -148,17 +144,19 @@ fn pulse_subject(
     target.pulse_subject(node, range)
 }
 
-fn send_pulse(on_action: &EventHandler<UiAction>, subject: Option<PatchPulseSubject>) {
+fn send_pulse(on_action: &EventHandler<UiAction>, subjects: Vec<PatchPulseSubject>) {
     on_action.call(UiAction::from_op(
         ProjectController::NODE_ID,
-        PatchPulseOp { subject },
+        PatchPulseOp { subjects },
     ));
 }
 
 fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
     on_action.call(UiAction::from_op(
         lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
-        ProjectEditorOp::PatchSelect { target },
+        ProjectEditorOp::PatchSelect {
+            selection: lpa_studio_core::UiSelection::from_option(target),
+        },
     ));
 }
 
@@ -289,7 +287,7 @@ fn patch_toolbar(surface: &UiPatchSurface) -> Vec<ToolbarGroup> {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PatchingShellCenter(
     surface: Option<UiPatchSurface>,
-    selection: Option<UiPatchTarget>,
+    selection: lpa_studio_core::UiSelection,
     /// The full editor view — the canvas resolves fixture map2d bodies out
     /// of the snapshot's node views, exactly like the Mapping center.
     project_editor: ProjectEditorView,
@@ -303,12 +301,12 @@ pub fn PatchingShellCenter(
     // The pulse's echo guard: dispatch only when the mapped subject
     // actually changes (sweep-with-clear lives in the controller; this
     // just keeps renders from re-sending the same subject).
-    let mut pulsed = use_signal(|| Option::<PatchPulseSubject>::None);
+    let mut pulsed = use_signal(Vec::<PatchPulseSubject>::new);
     // View-exit clears the pulse: a highlight pointing at a selection the
     // user can no longer see is actively misleading (#411's own rule).
     use_drop({
         let on_action = on_action;
-        move || send_pulse(&on_action, None)
+        move || send_pulse(&on_action, Vec::new())
     });
     let Some(surface) = surface else {
         return rsx! {
@@ -333,10 +331,17 @@ pub fn PatchingShellCenter(
         pack_slots.set(next);
     }
     let pack = pack_slots.read().clone();
-    let subject = pulse_subject(&surface, &selection);
-    if *pulsed.peek() != subject {
-        pulsed.set(subject.clone());
-        send_pulse(&on_action, subject);
+    // The pulse union (P2): every selected target maps to a subject; a
+    // multi-selection is breath-only by the sibling invariant, and the
+    // controller merges same-output spans.
+    let subjects: Vec<PatchPulseSubject> = selection
+        .targets()
+        .iter()
+        .filter_map(|target| pulse_subject(&surface, target))
+        .collect();
+    if *pulsed.peek() != subjects {
+        pulsed.set(subjects.clone());
+        send_pulse(&on_action, subjects);
     }
     // The keyboard grammar rides a view-scoped WINDOW listener (see
     // `hotkeys.rs`): the walk-up loop's dock clicks — a port free-run, a
@@ -346,7 +351,9 @@ pub fn PatchingShellCenter(
     // unit-tested; this closure is only the executor.
     {
         let surface = surface.clone();
-        let selection = selection.clone();
+        // The verbs and the arm are single-subject by ruling — a
+        // multi-selection is not an armable end and has no one stride.
+        let selection = selection.single().cloned();
         let on_action = on_action;
         super::hotkeys::use_window_keydown(move |event: web_sys::KeyboardEvent| {
             let meta = event.meta_key() || event.ctrl_key();
@@ -415,11 +422,11 @@ pub fn PatchingShellCenter(
     let groups = patch_toolbar(&surface);
     let on_item = {
         let surface = surface.clone();
-        let selection = selection.clone();
+        let single = selection.single().cloned();
         let on_action = on_action;
         move |id: &'static str| match id {
-            "patch-undo" => dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Undo),
-            "patch-redo" => dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Redo),
+            "patch-undo" => dispatch_verb(&on_action, &surface, &single, PatchVerbKind::Undo),
+            "patch-redo" => dispatch_verb(&on_action, &surface, &single, PatchVerbKind::Redo),
             _ => {}
         }
     };
@@ -708,7 +715,7 @@ mod tests {
         let output = surface.outputs[0].node;
 
         assert_eq!(
-            pulse_subject(&surface, &Some(UiPatchTarget::Fixture { node })),
+            pulse_subject(&surface, &UiPatchTarget::Fixture { node }),
             Some(PatchPulseSubject {
                 lamps: PatchPulseLamps::Fixture { node, range: None },
                 language: PatchPulseLanguage::Breath,
@@ -719,7 +726,7 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Instance {
+                &(UiPatchTarget::Instance {
                     node,
                     path: instance.path.clone(),
                 })
@@ -736,7 +743,7 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Port {
+                &(UiPatchTarget::Port {
                     node: output,
                     port: port.key,
                 })
@@ -750,7 +757,7 @@ mod tests {
             })
         );
         assert_eq!(
-            pulse_subject(&surface, &Some(UiPatchTarget::Output { node: output })),
+            pulse_subject(&surface, &UiPatchTarget::Output { node: output }),
             Some(PatchPulseSubject {
                 lamps: PatchPulseLamps::Output {
                     node: output,
@@ -762,14 +769,13 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Module {
+                &(UiPatchTarget::Module {
                     node: NodeId::new(1)
                 })
             ),
             None,
             "a module selection clears the pulse"
         );
-        assert_eq!(pulse_subject(&surface, &None), None);
     }
 
     /// A free SEGMENT is already wire-space: it pulses its own window, and
@@ -798,7 +804,7 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Segment {
+                &(UiPatchTarget::Segment {
                     node: output,
                     port: port.key,
                     start: 12,
@@ -812,7 +818,7 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Segment {
+                &(UiPatchTarget::Segment {
                     node: output,
                     port: port.key,
                     start: 30,
@@ -826,7 +832,7 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Segment {
+                &(UiPatchTarget::Segment {
                     node: output,
                     port: 7,
                     start: 0,

@@ -103,7 +103,7 @@ fn view_with_surface(selection: Option<UiPatchTarget>) -> UiStudioView {
     for pane in &mut view.panes {
         if let UiViewContent::ProjectEditor(editor) = &mut pane.body {
             editor.patch_surface = Some(labelled(mini_dome_surface(false)));
-            editor.patch_selection = selection.clone();
+            editor.patch_selection = lpa_studio_core::UiSelection::from_option(selection.clone());
         }
     }
     view
@@ -147,7 +147,7 @@ fn fixtures_panel_mini_dome() -> Element {
     dock_frame(rsx! {
         FixturesPanel {
             surface: Some(labelled(mini_dome_surface(false))),
-            selection: Some(UiPatchTarget::Instance {
+            selection: lpa_studio_core::UiSelection::one(UiPatchTarget::Instance {
                 node: NodeId::new(2),
                 path: "/sector/2".to_string(),
             }),
@@ -165,7 +165,7 @@ fn fixtures_panel_mapping_authored() -> Element {
     dock_frame(rsx! {
         FixturesPanel {
             surface: Some(surface),
-            selection: Some(UiPatchTarget::Instance {
+            selection: lpa_studio_core::UiSelection::one(UiPatchTarget::Instance {
                 node: NodeId::new(2),
                 path: "/sector/2".to_string(),
             }),
@@ -193,7 +193,7 @@ fn fixtures_panel_dived_dome_tree() -> Element {
     dock_frame(rsx! {
         FixturesPanel {
             surface: Some(surface),
-            selection: None,
+            selection: lpa_studio_core::UiSelection::empty(),
             grain: TreeGrain::Authored,
             bodies,
             dive: Some((NodeId::new(2), session)),
@@ -209,7 +209,7 @@ fn fixtures_panel_peach_range() -> Element {
     dock_frame(rsx! {
         FixturesPanel {
             surface: Some(labelled(peach_surface())),
-            selection: None,
+            selection: lpa_studio_core::UiSelection::empty(),
             grain: TreeGrain::Resolved,
             on_action: move |_| {},
         }
@@ -223,7 +223,7 @@ fn outputs_panel_mini_dome() -> Element {
     dock_frame(rsx! {
         OutputsPanel {
             surface: Some(labelled(mini_dome_surface(false))),
-            selection: Some(UiPatchTarget::Cell {
+            selection: lpa_studio_core::UiSelection::one(UiPatchTarget::Cell {
                 id: "dome:0:60:0".to_string(),
             }),
             on_action: move |_| {},
@@ -264,7 +264,7 @@ fn workbench_patching_mobile_pick() -> Element {
                 project_editor: project_editor_fixture(ProjectSyncPhase::Ready)
                     .with_patch_surface(
                         Some(labelled(mini_dome_walkup_surface())),
-                        Some(UiPatchTarget::Instance {
+                        lpa_studio_core::UiSelection::one(UiPatchTarget::Instance {
                             node: NodeId::new(2),
                             path: "/sector/4".to_string(),
                         }),
@@ -291,7 +291,7 @@ fn workbench_mobile_outputs_summoned() -> Element {
                 project_editor: project_editor_fixture(ProjectSyncPhase::Ready)
                     .with_patch_surface(
                         Some(labelled(mini_dome_surface(false))),
-                        Some(UiPatchTarget::Instance {
+                        lpa_studio_core::UiSelection::one(UiPatchTarget::Instance {
                             node: NodeId::new(2),
                             path: "/sector/2".to_string(),
                         }),
@@ -415,7 +415,7 @@ fn PropsStackStory(
     #[props(default)] select: Option<ShapePath>,
     #[props(default)] multi_roots: Vec<usize>,
     #[props(default = true)] dived: bool,
-    #[props(default)] selection: Option<UiPatchTarget>,
+    #[props(default)] selection: lpa_studio_core::UiSelection,
 ) -> Element {
     let session = use_signal(move || {
         let mut session = MapEditorSession::new(doc.clone());
@@ -493,7 +493,7 @@ fn props_stack_fixture_selected() -> Element {
             doc: Map2dDoc::new(),
             surface: props_stack_surface(),
             dived: false,
-            selection: Some(UiPatchTarget::Fixture { node: NodeId::new(2) }),
+            selection: lpa_studio_core::UiSelection::one(UiPatchTarget::Fixture { node: NodeId::new(2) }),
         }
     }
 }
@@ -507,7 +507,7 @@ fn props_stack_port_selected() -> Element {
             doc: Map2dDoc::new(),
             surface: labelled(mini_dome_surface(false)),
             dived: false,
-            selection: Some(UiPatchTarget::Port {
+            selection: lpa_studio_core::UiSelection::one(UiPatchTarget::Port {
                 node: NodeId::new(10),
                 port: 0,
             }),
@@ -524,7 +524,7 @@ fn props_stack_cell_selected() -> Element {
             doc: Map2dDoc::new(),
             surface: labelled(mini_dome_surface(false)),
             dived: false,
-            selection: Some(UiPatchTarget::Cell {
+            selection: lpa_studio_core::UiSelection::one(UiPatchTarget::Cell {
                 id: "dome:0:60:0".to_string(),
             }),
         }

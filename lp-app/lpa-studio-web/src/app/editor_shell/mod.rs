@@ -53,7 +53,7 @@ static NEXT_UPLOAD_INPUT_ID: AtomicU64 = AtomicU64::new(0);
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn EditorShellCenter(
     surface: Option<UiPatchSurface>,
-    selection: Option<UiPatchTarget>,
+    selection: lpa_studio_core::UiSelection,
     /// The full editor view — the canvas resolves fixture map2d bodies out
     /// of the snapshot's node views (the same bytes the face embeds hold).
     project_editor: ProjectEditorView,
@@ -146,8 +146,10 @@ pub fn EditorShellCenter(
         })
         .count();
 
-    // The selected fixture's arrange facts, for the transform verbs.
-    let selected: Option<(String, NodeId, UiArrangeTransform)> = match &selection {
+    // The selected fixture's arrange facts, for the transform verbs (a
+    // single-subject affordance: a multi-selection rotates/scales nothing
+    // from the toolbar in P2 — the canvas gestures own the set).
+    let selected: Option<(String, NodeId, UiArrangeTransform)> = match selection.single() {
         Some(
             UiPatchTarget::Fixture { node }
             | UiPatchTarget::Instance { node, .. }
@@ -851,16 +853,26 @@ fn selected_has_mapping(
 fn prefetch_selected_body(
     on_action: &EventHandler<UiAction>,
     surface: &UiPatchSurface,
-    selection: &Option<UiPatchTarget>,
+    selection: &lpa_studio_core::UiSelection,
 ) {
-    let node = match selection {
-        Some(
+    // Lazy per-node loads follow the selection (any member — a multi
+    // selection prefetches each fixture it names).
+    for target in selection.targets() {
+        let node = match target {
             UiPatchTarget::Fixture { node }
             | UiPatchTarget::Instance { node, .. }
-            | UiPatchTarget::Range { node, .. },
-        ) => *node,
-        _ => return,
-    };
+            | UiPatchTarget::Range { node, .. } => *node,
+            _ => continue,
+        };
+        prefetch_fixture_body(on_action, surface, node);
+    }
+}
+
+fn prefetch_fixture_body(
+    on_action: &EventHandler<UiAction>,
+    surface: &UiPatchSurface,
+    node: NodeId,
+) {
     let Some(fixture) = surface.fixtures.iter().find(|fixture| fixture.node == node) else {
         return;
     };

@@ -87,9 +87,10 @@ pub struct ProjectEditorView {
     /// ports/cells and every fixture's runs/instances, derived in the same
     /// pass as the face bays. `None` while nothing patchable has answered.
     pub patch_surface: Option<crate::UiPatchSurface>,
-    /// The surface's one shared selection (core-owned so e2e can drive it
-    /// and P6's verbs can read it; hover stays a web-side context).
-    pub patch_selection: Option<crate::UiPatchTarget>,
+    /// The surface's ONE selection (core-owned so e2e can drive it and the
+    /// verbs can read it; hover stays a web-side context). A sibling-level
+    /// set plus the derived entered scope — see [`crate::UiSelection`].
+    pub patch_selection: crate::UiSelection,
     /// The undo-correlation journal's retained entries (unified-editor P2:
     /// substrate for future tooling and the e2e proofs; v1 UI ignores it).
     pub edit_journal: Vec<crate::UiEditJournalEntry>,
@@ -124,7 +125,7 @@ impl ProjectEditorView {
             add_node_menu: None,
             edits_in_flight: 0,
             patch_surface: None,
-            patch_selection: None,
+            patch_selection: crate::UiSelection::empty(),
             edit_journal: Vec::new(),
         }
     }
@@ -200,7 +201,7 @@ impl ProjectEditorView {
     pub fn with_patch_surface(
         mut self,
         surface: Option<crate::UiPatchSurface>,
-        selection: Option<crate::UiPatchTarget>,
+        selection: crate::UiSelection,
     ) -> Self {
         self.patch_surface = surface;
         self.patch_selection = selection;

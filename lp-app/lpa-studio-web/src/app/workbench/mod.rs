@@ -44,7 +44,7 @@ pub(crate) mod workbench_stories;
 use dioxus::prelude::*;
 use lpa_mapping_editor::MapEditorSession;
 use lpa_studio_core::{
-    NodeId, ProjectEditorView, UiAction, UiDeviceCard, UiPaneView, UiPatchSurface, UiPatchTarget,
+    NodeId, ProjectEditorView, UiAction, UiDeviceCard, UiPaneView, UiPatchSurface, UiSelection,
     UiViewContent,
 };
 
@@ -405,7 +405,7 @@ pub fn WorkbenchFrame(
             })
             .unwrap_or(0);
         let fingerprint = (selection, placed);
-        let mut last = use_signal(|| None::<(Option<UiPatchTarget>, u64)>);
+        let mut last = use_signal(|| None::<(UiSelection, u64)>);
         use_effect(use_reactive!(|fingerprint| {
             let changed = last
                 .peek()
@@ -747,7 +747,7 @@ fn PanelDock(
     panes: Vec<UiPaneView>,
     lens_card: Option<UiDeviceCard>,
     surface: Option<UiPatchSurface>,
-    patch_selection: Option<UiPatchTarget>,
+    patch_selection: UiSelection,
     dive_focused: Signal<Option<NodeId>>,
     dive_session: Signal<MapEditorSession>,
     dive_commits: Signal<u64>,
@@ -843,7 +843,7 @@ fn PanelBody(
     panes: Vec<UiPaneView>,
     lens_card: Option<UiDeviceCard>,
     surface: Option<UiPatchSurface>,
-    patch_selection: Option<UiPatchTarget>,
+    patch_selection: UiSelection,
     dive_focused: Signal<Option<NodeId>>,
     dive_session: Signal<MapEditorSession>,
     dive_commits: Signal<u64>,

@@ -20,7 +20,7 @@ use lpa_mapping_editor::{
 };
 use lpa_studio_core::{
     ArtifactLocation, EditorMetaFixture, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
-    ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchSurface, UiPatchTarget,
+    ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchSurface, UiPatchTarget, UiSelection,
 };
 use lpc_mapping::Bounds2d;
 
@@ -106,7 +106,7 @@ pub(crate) fn ProjectCanvasHost(
     /// map2d bodies by artifact (extracted from the snapshot's node views;
     /// stories inject embedded-example bytes directly).
     bodies: BTreeMap<ArtifactLocation, String>,
-    selection: Option<UiPatchTarget>,
+    selection: UiSelection,
     /// Sticky auto-pack slots (shell-owned; see [`PackSlots`]). Stories
     /// omit it and get the ad-hoc packing.
     #[props(default)]
@@ -369,13 +369,16 @@ pub(crate) fn ProjectCanvasHost(
     let select = move |target: Option<UiPatchTarget>| {
         on_action.call(UiAction::from_op(
             lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
-            ProjectEditorOp::PatchSelect { target },
+            ProjectEditorOp::PatchSelect {
+                selection: UiSelection::from_option(target),
+            },
         ));
     };
     let on_fixture = {
         let nodes = nodes.clone();
         let grammar_surface = surface.clone();
-        let grammar_selection = selection.clone();
+        // The arm completes against a SINGLE end (multi is not armable).
+        let grammar_selection = selection.single().cloned();
         move |event: FixtureEvent| match event {
             FixtureEvent::Select(Some(pick)) => {
                 if let Some(node) = nodes.get(&pick.key) {
@@ -615,7 +618,7 @@ fn transforms_close(a: &UiArrangeTransform, b: &UiArrangeTransform) -> bool {
 }
 
 /// A render's canvas sprite, selection flags applied.
-fn sprite_of(render: &FixtureRender, selection: &Option<UiPatchTarget>) -> FixtureSprite {
+fn sprite_of(render: &FixtureRender, selection: &UiSelection) -> FixtureSprite {
     FixtureSprite {
         key: render.key.clone(),
         label: render.label.clone(),
@@ -639,7 +642,7 @@ fn sprite_of(render: &FixtureRender, selection: &Option<UiPatchTarget>) -> Fixtu
 /// Computed once per sprite build (selection changes rebuild sprites
 /// anyway); the per-object cost is a hull over its drawn lamps, so a
 /// dome-scale fixture stays one pass over its (display-subsampled) points.
-fn sprite_objects(render: &FixtureRender, selection: &Option<UiPatchTarget>) -> Vec<SpriteObject> {
+fn sprite_objects(render: &FixtureRender, selection: &UiSelection) -> Vec<SpriteObject> {
     let FixtureBody::Lamps { points, total } = &render.body else {
         return Vec::new();
     };
@@ -688,51 +691,49 @@ fn sprite_objects(render: &FixtureRender, selection: &Option<UiPatchTarget>) -> 
 /// id-less rows select at range grain (`instance_target`), so the window
 /// is the identity there.
 fn object_selected(
-    selection: &Option<UiPatchTarget>,
+    selection: &UiSelection,
     node: NodeId,
     path: &str,
     start: u32,
     lamps: u32,
 ) -> bool {
-    match selection {
-        Some(UiPatchTarget::Instance { node: n, path: p }) => {
-            *n == node && !path.is_empty() && p == path
-        }
-        Some(UiPatchTarget::Range {
+    selection.targets().iter().any(|target| match target {
+        UiPatchTarget::Instance { node: n, path: p } => *n == node && !path.is_empty() && p == path,
+        UiPatchTarget::Range {
             node: n,
             start: s,
             count,
-        }) => *n == node && *s == start && *count == Some(lamps),
+        } => *n == node && *s == start && *count == Some(lamps),
         _ => false,
-    }
+    })
 }
 
-/// Does the selection concern this fixture (any grain)?
-fn selection_touches(selection: &Option<UiPatchTarget>, node: NodeId) -> bool {
-    match selection {
-        Some(UiPatchTarget::Fixture { node: n })
-        | Some(UiPatchTarget::Instance { node: n, .. })
-        | Some(UiPatchTarget::Range { node: n, .. }) => *n == node,
+/// Does the selection concern this fixture (any grain, any member)?
+fn selection_touches(selection: &UiSelection, node: NodeId) -> bool {
+    selection.targets().iter().any(|target| match target {
+        UiPatchTarget::Fixture { node: n }
+        | UiPatchTarget::Instance { node: n, .. }
+        | UiPatchTarget::Range { node: n, .. } => *n == node,
         _ => false,
-    }
+    })
 }
 
 /// The selected instance's lamp window on this fixture, when one is.
-fn selected_instance_range(
-    selection: &Option<UiPatchTarget>,
-    render: &FixtureRender,
-) -> Option<(u32, u32)> {
-    match selection {
-        Some(UiPatchTarget::Instance { node, path }) if *node == render.node => render
+fn selected_instance_range(selection: &UiSelection, render: &FixtureRender) -> Option<(u32, u32)> {
+    // One window per sprite (the first member's): the per-object rings
+    // already mark every selected hull, so the range highlight stays a
+    // single-window affordance.
+    selection.targets().iter().find_map(|target| match target {
+        UiPatchTarget::Instance { node, path } if *node == render.node => render
             .instances
             .iter()
             .find(|(p, _, _)| p == path)
             .map(|(_, start, lamps)| (*start, *lamps)),
-        Some(UiPatchTarget::Range { node, start, count }) if *node == render.node => {
+        UiPatchTarget::Range { node, start, count } if *node == render.node => {
             Some((*start, count.unwrap_or(u32::MAX)))
         }
         _ => None,
-    }
+    })
 }
 
 /// Sticky auto-pack slots, keyed by editor key. Owned by the shell; a
@@ -1130,7 +1131,7 @@ mod tests {
             render("b", false, [0.0, 0.0, 20.0, 20.0]),
         ]
         .iter()
-        .map(|r| sprite_of(r, &None))
+        .map(|r| sprite_of(r, &UiSelection::empty()))
         .collect();
         let bounds = fit_bounds(&sprites).expect("bounds");
         assert!(bounds.min_x <= 0.0 && bounds.min_y <= 0.0);
@@ -1334,7 +1335,7 @@ mod tests {
                 ("/gap".into(), 40, 5), // past the drawn points: no body
             ],
         };
-        let objects = sprite_objects(&render, &None);
+        let objects = sprite_objects(&render, &UiSelection::empty());
         assert_eq!(objects.len(), 3, "one entry per instance, always");
         assert!(objects[0].hull.len() >= 3, "a real span grows a body");
         assert!(objects[1].hull.len() >= 3);

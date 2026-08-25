@@ -1760,14 +1760,14 @@ fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
     // object language; a whole-FIXTURE target breathes instead).
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
-        crate::PatchPulseOp {
-            subject: crate::UiPatchTarget::Range {
+        crate::PatchPulseOp::from_option(
+            crate::UiPatchTarget::Range {
                 node: leaf_node,
                 start: 0,
                 count: None,
             }
             .pulse_subject(leaf_node, None),
-        },
+        ),
     )));
     drive(actor.run_one_batch_for_test());
     let snapshot = refresh!();
@@ -1800,13 +1800,13 @@ fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
         .node;
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
-        crate::PatchPulseOp {
-            subject: crate::UiPatchTarget::Port {
+        crate::PatchPulseOp::from_option(
+            crate::UiPatchTarget::Port {
                 node: output_node,
                 port: 0,
             }
             .pulse_subject(output_node, Some((22, 12))),
-        },
+        ),
     )));
     drive(actor.run_one_batch_for_test());
     let snapshot = refresh!();
@@ -1822,7 +1822,9 @@ fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
     // Clear the pulse: the leaf's own color is back.
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
-        crate::PatchPulseOp { subject: None },
+        crate::PatchPulseOp {
+            subjects: Vec::new(),
+        },
     )));
     drive(actor.run_one_batch_for_test());
     let snapshot = refresh!();
@@ -3786,7 +3788,7 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
             .send(StudioCommand::Action(crate::UiAction::from_op(
                 crate::ProjectEditorTarget::NodeTree.node_id(),
                 crate::ProjectEditorOp::PatchSelect {
-                    target: Some(target.clone()),
+                    selection: crate::UiSelection::one(target.clone()),
                 },
             )));
         drive(actor.run_one_batch_for_test());
@@ -3799,7 +3801,7 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
         let snapshot = latest.expect("selection emits a snapshot");
         assert_eq!(
             project_editor(&snapshot).patch_selection,
-            Some(target),
+            crate::UiSelection::one(target),
             "{id}: the selection is core state, not view-local"
         );
     }
@@ -4712,7 +4714,7 @@ fn every_patch_target_arm_round_trips_through_selection() {
             .send(StudioCommand::Action(crate::UiAction::from_op(
                 crate::ProjectEditorTarget::NodeTree.node_id(),
                 ProjectEditorOp::PatchSelect {
-                    target: Some(target.clone()),
+                    selection: crate::UiSelection::one(target.clone()),
                 },
             )));
         drive(actor.run_one_batch_for_test());
@@ -4725,7 +4727,7 @@ fn every_patch_target_arm_round_trips_through_selection() {
         let snapshot = latest.expect("selection emits a snapshot");
         assert_eq!(
             project_editor(&snapshot).patch_selection,
-            Some(target),
+            crate::UiSelection::one(target),
             "the arm echoes through core state"
         );
     }
