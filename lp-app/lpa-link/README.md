@@ -168,7 +168,10 @@ Key contracts:
   non-ready states and never grants readiness.
 - **Injected timers.** `DeviceTimers` wraps a caller-supplied sleep factory
   (tokio on host, gloo on wasm) plus per-operation deadlines
-  (connect / ready / request-idle). `lpa-link` has no executor dependency;
+  (connect / ready / request-idle / request-total — the last consumed via
+  `DeviceSession::request_deadline()` by the `lpa-client` correlation
+  layer, since a frame-gap budget cannot see a dropped response on a
+  heartbeating wire). `lpa-link` has no executor dependency;
   readiness runs inside the session's own async methods — `wait_ready()` or
   the channel's first use — with no background task.
 - **Readiness-gated channel.** `client_io()` returns a `ClientIo` that

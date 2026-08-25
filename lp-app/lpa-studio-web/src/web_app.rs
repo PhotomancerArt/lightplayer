@@ -230,9 +230,9 @@ pub fn App() -> Element {
         // Device event trace (M0): persist lifecycle records across
         // refreshes and stream to a capture sink when the URL asks.
         crate::device_events_io::install(&mut controller);
-        // Device-session deadlines (connect / readiness / request-idle) run
-        // on browser timers; without this the core default fires every
-        // deadline immediately.
+        // Device-session deadlines (connect / readiness / request-idle /
+        // request-total) run on browser timers; without this the core
+        // default fires every deadline immediately.
         controller.set_device_timers(make_device_timers());
         // Crypto randomness for identity minting (`dev` uids). Host
         // builds keep the core's clock-derived fallback.

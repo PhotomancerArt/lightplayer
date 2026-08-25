@@ -628,6 +628,64 @@ fn stall_during_connect_times_out_with_no_serial_output() {
     );
 }
 
+/// The 2026-08-24 request-idle defect's real wedge, bounded: a device that
+/// reaches Ready but drops every correlated response while heartbeating
+/// (real firmware under engine load). The first wire request —
+/// `list_loaded_projects` in `probe_server_readiness` — used to wait
+/// FOREVER: the per-frame `request_idle` budget restarted on every 5 s
+/// heartbeat, and the hung connect wedged the actor queue until page
+/// refresh. With the session's total request deadline installed by
+/// `from_device_session`, the connect settles to a clean retryable
+/// failure and the controller keeps serving commands.
+#[test]
+fn dropped_responses_during_connect_settle_to_a_bounded_failure() {
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_dropped_responses()
+            // Heartbeat far inside the request_idle budget below: the
+            // frame-gap backstop provably never fires, so only the total
+            // deadline can end the wait.
+            .with_heartbeat_interval(Duration::from_millis(50)),
+    ));
+    let (mut studio, device, endpoint_id) = studio_with_fake_device(script);
+    studio.set_device_timers(DeviceController::test_poll_timers().with_deadlines(
+        DeviceDeadlines {
+            request_idle: Duration::from_millis(400),
+            request_total: Duration::from_millis(800),
+            ..DeviceDeadlines::default()
+        },
+    ));
+
+    let error = connect_through_link(&mut studio, &endpoint_id)
+        .expect_err("a response-starved device cannot finish the connect");
+
+    let message = match &error {
+        UiError::Transport(message) => message.clone(),
+        other => other.to_string(),
+    };
+    assert!(
+        message.contains("did not respond"),
+        "the bounded connect surfaces the did-not-respond error: {message}"
+    );
+    assert!(
+        matches!(studio.snapshot().server.state, ServerState::Failed { .. }),
+        "server state reflects the failed attach"
+    );
+
+    // The wedge criterion itself: the actor keeps serving commands after
+    // the bounded failure (the defect left the whole page dead here).
+    // Recovery on a healed wire is pinned at the session layer
+    // (`device_session::tests::dropped_responses_on_a_heartbeating_wire_hit_the_total_deadline`);
+    // a full studio reconnect against the fake is timing-sensitive — the
+    // reset dance can tear a heartbeat frame mid-wire — so queue liveness
+    // is asserted with a plain follow-up dispatch instead.
+    let _ = device;
+    drive(studio.dispatch(device_action(DeviceOp::OpenProvider {
+        provider_id: LinkProviderKind::Fake,
+    })))
+    .expect("the controller must keep serving commands after the bounded failure");
+}
+
 /// Row 5c (the failed connect's own narration, bench 2026-08-08): a connect
 /// that ends in a failed attach leaves its link lines on the SESSION's
 /// console tail, not in the global ring.

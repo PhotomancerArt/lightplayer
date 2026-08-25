@@ -1044,4 +1044,172 @@ mod tests {
             probes: Vec::new(),
         }
     }
+
+    // --- RequestDeadline: the total per-request bound ---
+
+    /// A wire that paces frames in real (tokio) time and can be steered
+    /// mid-test through the shared handle: heartbeat forever (the
+    /// response-starved device of the 2026-08-24 request-idle defect),
+    /// or serve scripted frames.
+    #[derive(Clone)]
+    struct PacedIo(std::rc::Rc<std::cell::RefCell<PacedState>>);
+
+    struct PacedState {
+        sent: Vec<ClientMessage>,
+        responses: VecDeque<WireServerMessage>,
+        heartbeat_forever: bool,
+        pace: Duration,
+    }
+
+    impl PacedIo {
+        fn heartbeating(pace: Duration) -> Self {
+            Self(std::rc::Rc::new(std::cell::RefCell::new(PacedState {
+                sent: Vec::new(),
+                responses: VecDeque::new(),
+                heartbeat_forever: true,
+                pace,
+            })))
+        }
+
+        fn serve(&self, frames: impl IntoIterator<Item = WireServerMessage>) {
+            let mut state = self.0.borrow_mut();
+            state.heartbeat_forever = false;
+            state.responses.extend(frames);
+        }
+
+        fn sent_ids(&self) -> Vec<u64> {
+            self.0.borrow().sent.iter().map(|msg| msg.id).collect()
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl ClientIo for PacedIo {
+        async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
+            self.0.borrow_mut().sent.push(msg);
+            Ok(())
+        }
+
+        async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
+            let pace = self.0.borrow().pace;
+            tokio::time::sleep(pace).await;
+            let mut state = self.0.borrow_mut();
+            if let Some(frame) = state.responses.pop_front() {
+                return Ok(frame);
+            }
+            if state.heartbeat_forever {
+                return Ok(heartbeat_frame());
+            }
+            Err(TransportError::ConnectionLost)
+        }
+
+        async fn close(&mut self) -> Result<(), TransportError> {
+            Ok(())
+        }
+    }
+
+    fn heartbeat_frame() -> WireServerMessage {
+        WireServerMessage::new(
+            0,
+            WireServerMsgBody::Heartbeat {
+                fps: lpc_wire::server::SampleStats {
+                    avg: 0.0,
+                    sdev: 0.0,
+                    min: 0.0,
+                    max: 0.0,
+                },
+                frame_count: 0,
+                loaded_projects: Vec::new(),
+                uptime_ms: 0,
+                memory: None,
+                recovery: None,
+                outputs: None,
+            },
+        )
+    }
+
+    fn test_deadline(budget: Duration) -> RequestDeadline {
+        RequestDeadline::new(budget, |duration| {
+            Box::pin(tokio::time::sleep(duration)) as ClientTimerFuture
+        })
+    }
+
+    #[tokio::test]
+    async fn request_deadline_fires_through_endless_heartbeats() {
+        // Heartbeats every 2 ms would restart any frame-gap budget forever;
+        // the total deadline must fire regardless.
+        let io = PacedIo::heartbeating(Duration::from_millis(2));
+        let mut client = LpClient::new(io.clone())
+            .with_request_deadline(test_deadline(Duration::from_millis(50)));
+
+        let error = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.send_request(ClientRequest::StopAllProjects),
+        )
+        .await
+        .expect("the deadline must bound the request — this used to hang forever")
+        .unwrap_err();
+
+        assert!(
+            matches!(&error, ClientError::Transport(msg) if msg.contains("did not respond within")),
+            "expected the did-not-respond transport error, got {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn late_response_after_deadline_classifies_stale_not_uncorrelated() {
+        let io = PacedIo::heartbeating(Duration::from_millis(2));
+        let mut client = LpClient::new(io.clone())
+            .with_request_deadline(test_deadline(Duration::from_millis(30)));
+
+        client
+            .send_request(ClientRequest::StopAllProjects)
+            .await
+            .unwrap_err();
+
+        // The device "heals" and delivers the timed-out request's response
+        // (id 1) late, ahead of the follow-up's own response (id 2).
+        io.serve([
+            WireServerMessage::new(1, WireServerMsgBody::StopAllProjects),
+            WireServerMessage::new(2, WireServerMsgBody::StopAllProjects),
+        ]);
+        let outcome = client
+            .send_request(ClientRequest::StopAllProjects)
+            .await
+            .expect("the session must survive a timed-out request");
+
+        assert_eq!(outcome.value.id, 2);
+        assert!(
+            outcome
+                .events
+                .iter()
+                .any(|event| matches!(event, ClientEvent::StaleResponseDropped { response_id: 1 })),
+            "the abandoned id's late frame must be an expected stale drop, got {:?}",
+            outcome.events
+        );
+        assert!(
+            !outcome
+                .events
+                .iter()
+                .any(|event| matches!(event, ClientEvent::UncorrelatedResponse { .. })),
+            "a late frame for an abandoned request must not warn as uncorrelated"
+        );
+        assert_eq!(io.sent_ids(), vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn response_within_deadline_succeeds() {
+        let io = ScriptedClientIo::new([WireServerMessage::new(
+            1,
+            WireServerMsgBody::StopAllProjects,
+        )]);
+        let mut client =
+            LpClient::new(io).with_request_deadline(test_deadline(Duration::from_secs(30)));
+
+        let outcome = client
+            .send_request(ClientRequest::StopAllProjects)
+            .await
+            .expect("an answered request must be unaffected by the deadline");
+
+        assert_eq!(outcome.value.id, 1);
+    }
 }
