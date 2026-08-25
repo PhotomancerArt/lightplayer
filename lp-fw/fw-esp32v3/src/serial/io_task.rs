@@ -38,9 +38,12 @@ extern crate alloc;
 use alloc::{string::String, vec::Vec};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use embassy_time::{Duration, Instant, Timer};
-use esp_hal::Async;
+use embassy_sync::signal::Signal;
+use embassy_time::{Duration, Instant};
+use esp_hal::interrupt::{InterruptHandler, Priority};
+use esp_hal::timer::{AnyTimer, PeriodicTimer};
 use esp_hal::uart::{Uart, UartRx, UartTx};
+use esp_hal::{Async, Blocking};
 use fw_core::message_router::MessageRouter;
 use fw_esp32_common::serial::chunked_write::{ChunkedWriter, WritePolicy};
 
@@ -72,6 +75,83 @@ static SERVER_WRITE_RESULT: Channel<
 /// RX drain buffer. One FIFO's worth, so a single `read_buffered` empties a
 /// full FIFO.
 const READ_CHUNK_SIZE: usize = 128;
+
+/// The io pacer tick period. Sized like the old `Timer::after(1 ms)` loop
+/// pacing was: the 128 B RX FIFO holds ~1.4 ms of line at 921600 baud, so a
+/// 1 ms poll cadence drains it with margin.
+const IO_TICK_PERIOD: esp_hal::time::Duration = esp_hal::time::Duration::from_millis(1);
+
+/// ⚠️ io_task must NEVER await embassy-time (`Timer::after`, `Delay`).
+///
+/// It runs on an esp-rtos interrupt executor, and esp-rtos 0.3.0 never
+/// delivers embassy-time wakes to tasks on interrupt executors: the task
+/// parks at its first timed await forever, and processing its entry in the
+/// shared timer queue while the engine runs has crashed the chip on the bench
+/// (`InstrError`, PC in DRAM — 2026-08-25 dig2go). Every wake io_task relies
+/// on must be a *direct* waker wake: channel/signal sends, and this pacer —
+/// a hardware timer (TIMG0's second timer, which esp-rtos does not use)
+/// whose ISR signals [`IO_TICK`] every millisecond. See
+/// `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`.
+static IO_TICK: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
+/// The pacer timer, parked in a static so [`io_pacer_isr`] can clear its
+/// interrupt. Written once by [`start_io_pacer`] before the interrupt is
+/// enabled; only the ISR touches it afterwards.
+static mut IO_PACER: Option<PeriodicTimer<'static, Blocking>> = None;
+
+/// Start the 1 ms io pacer on `timer` (TIMG0's timer1 — see `start_runtime`).
+///
+/// Must be called before [`io_task`] is spawned would be ideal, but any order
+/// works: ticks signalled before io_task waits simply collapse into one.
+/// Priority1 is deliberate — the classic's single level-2 CPU interrupt slot
+/// is already claimed by the swi1 executor, and a P1 tick still wakes the P2
+/// executor (the wake path is signal → pender → swi1 raise, and a pending
+/// swi fires as soon as the level allows).
+pub fn start_io_pacer(timer: AnyTimer<'static>) {
+    // SAFETY: the one and only mutable reference taken outside the ISR, and
+    // the ISR cannot run yet — `listen` below is what enables it.
+    let slot = unsafe { &mut *core::ptr::addr_of_mut!(IO_PACER) };
+    let pacer = slot.insert(PeriodicTimer::new(timer));
+    pacer.set_interrupt_handler(InterruptHandler::new(io_pacer_isr, Priority::Priority1));
+    if let Err(error) = pacer.start(IO_TICK_PERIOD) {
+        // A dead pacer means a mute io_task; say so loudly while esp_println
+        // still reaches the wire directly.
+        esp_println::println!("[ERROR] io pacer failed to start ({error:?}); host link will be mute");
+        return;
+    }
+    pacer.listen();
+}
+
+extern "C" fn io_pacer_isr() {
+    // SAFETY: sole accessor once the interrupt is live (see `start_io_pacer`).
+    if let Some(pacer) = unsafe { (*core::ptr::addr_of_mut!(IO_PACER)).as_mut() } {
+        pacer.clear_interrupt();
+    }
+    IO_TICK.signal(());
+}
+
+/// Wait for `n` pacer ticks (≈ `n` milliseconds).
+///
+/// Ticks that arrive while io_task is busy collapse (a `Signal` latches one),
+/// so this is a lower bound in wall time — exactly what loop pacing and
+/// timeouts want, and never a scheduling dependency on embassy-time.
+async fn wait_ticks(n: u32) {
+    for _ in 0..n {
+        IO_TICK.wait().await;
+    }
+}
+
+/// The io task's delay source for [`ChunkedWriter`]: pacer ticks, not
+/// embassy-time (see [`IO_TICK`] for why that distinction is load-bearing).
+struct TickDelay;
+
+impl embedded_hal_async::delay::DelayNs for TickDelay {
+    async fn delay_ns(&mut self, ns: u32) {
+        // Round up to whole ticks; a delay is a minimum, and 1 ms resolution
+        // is the pacer's grain.
+        wait_ticks(ns.div_ceil(1_000_000).max(1)).await;
+    }
+}
 
 /// How long a non-empty partial line may sit with no further RX bytes before
 /// it is declared a dead session's remnant and discarded. Real frames stream
@@ -141,16 +221,19 @@ impl UartLink {
     fn writer<'a>(
         &'a mut self,
         router: &'a MessageRouter,
-    ) -> ChunkedWriter<'a, UartTx<'static, Async>, impl FnMut() + 'a> {
+    ) -> ChunkedWriter<'a, UartTx<'static, Async>, impl FnMut() + 'a, TickDelay> {
         let Self {
             rx,
             tx,
             read_buffer,
             last_rx,
         } = self;
-        ChunkedWriter::new(tx, WritePolicy::UART_921600, || {
-            poll_rx_into(rx, read_buffer, last_rx, router)
-        })
+        ChunkedWriter::new(
+            tx,
+            WritePolicy::UART_921600,
+            || poll_rx_into(rx, read_buffer, last_rx, router),
+            TickDelay,
+        )
     }
 
     /// Write everything in `data`, draining RX between chunks.
@@ -237,11 +320,19 @@ fn poll_rx_into(
 /// * `uart` - UART0, already configured at 921600 8N1 by `init_board` (which
 ///   is also where the baud divisor `esp-println` piggybacks on gets set).
 #[embassy_executor::task]
-pub async fn io_task(uart: Uart<'static, esp_hal::Blocking>) {
+pub async fn io_task(uart: Uart<'static, Blocking>) {
+    // Direct-FIFO breadcrumbs (NOT the log router, which this task itself
+    // services): the first proves the interrupt executor polled the task at
+    // all, the second proves pacer-tick wakes reach it. If the second never
+    // prints, the pacer is dead and the host link will be mute — see
+    // `start_io_pacer` and the `IO_TICK` docs.
+    esp_println::println!("[INIT] io_task polled (interrupt executor entry)");
     let router = MessageRouter::new(&INCOMING_MSG, &OUTGOING_MSG);
     let mut link = UartLink::new(uart.into_async());
 
-    Timer::after(Duration::from_millis(100)).await;
+    // The old 100 ms boot settle, in ticks.
+    wait_ticks(100).await;
+    esp_println::println!("[INIT] io_task first pacer ticks (io alive)");
 
     loop {
         drain_server_write_request(&mut link, &router).await;
@@ -249,7 +340,8 @@ pub async fn io_task(uart: Uart<'static, esp_hal::Blocking>) {
         link.poll_rx(&router);
         link.flush_stale_partial();
 
-        Timer::after(Duration::from_millis(1)).await;
+        // Pace on the hardware tick, never on embassy-time (see `IO_TICK`).
+        IO_TICK.wait().await;
     }
 }
 

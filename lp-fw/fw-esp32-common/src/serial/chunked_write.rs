@@ -7,7 +7,8 @@
 
 use alloc::format;
 use alloc::string::String;
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Duration, Instant};
+use embedded_hal_async::delay::DelayNs;
 use embedded_io_async::Write;
 
 /// How a link chunks and bounds its writes.
@@ -132,17 +133,18 @@ impl core::fmt::Display for WriteFailure {
 ///
 /// Construct one per write; it borrows the transmitter and holds no state of
 /// its own, so the cost is nothing and the borrow stays as short as the write.
-pub struct ChunkedWriter<'a, W, F> {
+pub struct ChunkedWriter<'a, W, F, D> {
     pub(crate) tx: &'a mut W,
     pub(crate) policy: WritePolicy,
     on_chunk: F,
+    pub(crate) delay: D,
 }
 
-impl<'a, W: Write, F: FnMut()> ChunkedWriter<'a, W, F> {
-    /// Wrap `tx` with a write policy and a per-chunk hook.
+impl<'a, W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'a, W, F, D> {
+    /// Wrap `tx` with a write policy, a per-chunk hook, and a delay source.
     ///
-    /// `on_chunk` runs **before every chunk**, including the first, and is the
-    /// single crate-specific seam in this module. It exists because a bounded
+    /// `on_chunk` runs **before every chunk**, including the first, and is one
+    /// of two crate-specific seams in this module. It exists because a bounded
     /// in-flight write is healthy, not silence, and each firmware has its own
     /// thing to do about that:
     ///
@@ -155,11 +157,22 @@ impl<'a, W: Write, F: FnMut()> ChunkedWriter<'a, W, F> {
     ///
     /// A `FnMut` rather than a `fn()` precisely so the second kind — which
     /// needs the RX half and the line buffer — fits without a second writer.
-    pub fn new(tx: &'a mut W, policy: WritePolicy, on_chunk: F) -> Self {
+    ///
+    /// `delay` is the second seam: the source of the per-chunk timeout and the
+    /// retry backoff. On the C6/S3 it is `embassy_time::Delay`. On the v3 it
+    /// must NOT be — that io task runs on an esp-rtos interrupt executor, and
+    /// esp-rtos 0.3.0 never delivers embassy-time wakes to tasks on interrupt
+    /// executors (a task that awaits `Timer::after` there parks forever, and
+    /// processing such a queue entry while the engine runs can crash the
+    /// chip). The v3 passes a delay backed by its own hardware pacer tick,
+    /// whose wakes are plain signal wakes. See
+    /// `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`.
+    pub fn new(tx: &'a mut W, policy: WritePolicy, on_chunk: F, delay: D) -> Self {
         Self {
             tx,
             policy,
             on_chunk,
+            delay,
         }
     }
 
@@ -190,6 +203,10 @@ impl<'a, W: Write, F: FnMut()> ChunkedWriter<'a, W, F> {
     }
 
     /// The one real write loop: every other write method delegates here.
+    ///
+    /// The per-chunk timeout comes from the `delay` seam, not `embassy_time`
+    /// directly — see [`ChunkedWriter::new`] for why that distinction is
+    /// load-bearing on the v3.
     pub async fn try_write_all_with(
         &mut self,
         data: &[u8],
@@ -197,6 +214,7 @@ impl<'a, W: Write, F: FnMut()> ChunkedWriter<'a, W, F> {
     ) -> Result<(), WriteFailure> {
         use embassy_futures::select::{Either, select};
         let started = Instant::now();
+        let timeout_ms = timeout.as_millis().max(1) as u32;
         let chunks_total = data.len().div_ceil(self.policy.chunk_size).max(1);
         let mut chunk_index = 0;
         let mut offset = 0;
@@ -204,7 +222,9 @@ impl<'a, W: Write, F: FnMut()> ChunkedWriter<'a, W, F> {
             (self.on_chunk)();
             let chunk_end = (offset + self.policy.chunk_size).min(data.len());
             let chunk = &data[offset..chunk_end];
-            let io_error = match select(Timer::after(timeout), self.tx.write_all(chunk)).await {
+            let io_error = match select(self.delay.delay_ms(timeout_ms), self.tx.write_all(chunk))
+                .await
+            {
                 Either::First(_) => None,
                 Either::Second(Err(error)) => Some(format!("{error:?}")),
                 Either::Second(Ok(())) => {

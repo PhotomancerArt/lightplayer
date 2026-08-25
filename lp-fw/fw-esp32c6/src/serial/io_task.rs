@@ -78,11 +78,14 @@ const PROBE_INTERVAL: Duration = Duration::from_millis(2000);
 /// — rather than a `fn()` pointer. Naming it `fn()` compiles and reads a little
 /// plainer, and costs 256 B of un-inlinable indirect calls in this image
 /// (measured with `just fw-esp32c6-size-check`).
-fn link_writer<W: Write>(tx: &mut W) -> ChunkedWriter<'_, W, impl FnMut()> {
+fn link_writer<W: Write>(tx: &mut W) -> ChunkedWriter<'_, W, impl FnMut(), embassy_time::Delay> {
     ChunkedWriter::new(
         tx,
         WritePolicy::USB_SERIAL_JTAG,
         crate::recovery::watchdog::note_io_alive,
+        // embassy-time is the right delay source on a thread executor; the
+        // v3's io task can't use it (see ChunkedWriter::new).
+        embassy_time::Delay,
     )
 }
 

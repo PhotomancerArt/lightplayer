@@ -56,7 +56,9 @@ impl ser_write_json::SerWrite for StackJsonWriter<'_> {
     }
 }
 
-impl<W: embedded_io_async::Write, F: FnMut()> ChunkedWriter<'_, W, F> {
+impl<W: embedded_io_async::Write, F: FnMut(), D: embedded_hal_async::delay::DelayNs>
+    ChunkedWriter<'_, W, F, D>
+{
     /// Serialize `msg` and write it, framed, to the link.
     ///
     /// `connected` is the caller's connection verdict — the USB-Serial-JTAG
@@ -155,8 +157,11 @@ impl<W: embedded_io_async::Write, F: FnMut()> ChunkedWriter<'_, W, F> {
             if attempt > 1 {
                 // Brief backoff: if the first write died to a masked-interrupt
                 // window (a flash op) or a transient stall, give it a moment
-                // rather than immediately re-timing-out.
-                embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
+                // rather than immediately re-timing-out. Uses the writer's
+                // delay seam, never embassy-time directly (see
+                // `ChunkedWriter::new` — on the v3 an embassy-time await here
+                // would park the io task forever).
+                self.delay.delay_ms(10).await;
             }
             match self.try_write_all(writer.bytes()).await {
                 Ok(()) => {

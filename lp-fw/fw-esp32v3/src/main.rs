@@ -467,7 +467,7 @@ fn boot_firmware() -> FirmwareApp {
     let boot_assessment = recovery::boot_report::init_and_report();
     let boot_guard = lp_recovery::enter(lp_recovery::FrameKind::Boot, "boot").ok();
 
-    let sw_int1 = start_runtime(timg0, sw_int);
+    let (sw_int1, io_pacer_timer) = start_runtime(timg0, sw_int);
     esp_println::println!("[INIT] runtime started");
 
     match uart0 {
@@ -488,6 +488,12 @@ fn boot_firmware() -> FirmwareApp {
             // interrupts around each ROM flash call, so flash writes still
             // pause io_task per-op — bounded, unlike per-frame starvation.
             //
+            // The pacer is io_task's ONLY time source: esp-rtos 0.3.0 never
+            // delivers embassy-time wakes to interrupt-executor tasks (and
+            // processing such a queue entry under engine load crashed the
+            // chip on the bench) — see serial::io_task::IO_TICK and the ADR
+            // 2026-08-25-classic-uart-io-task-executor-isolation.
+            //
             // SAFETY: the one and only reference ever taken to the executor
             // static — `boot_firmware` runs once, and the executor it starts
             // runs forever (the APP_CORE_STACK pattern).
@@ -497,9 +503,10 @@ fn boot_firmware() -> FirmwareApp {
             let io_spawner = executor
                 .insert(esp_rtos::embassy::InterruptExecutor::new(sw_int1))
                 .start(esp_hal::interrupt::Priority::Priority2);
+            serial::io_task::start_io_pacer(io_pacer_timer);
             io_spawner.spawn(io_task(uart).unwrap());
             esp_println::println!(
-                "[INIT] I/O task spawned (uart0 921600 8N1, interrupt executor swi1 prio2)"
+                "[INIT] I/O task spawned (uart0 921600 8N1, swi1 executor prio2, timg0t1 pacer 1ms)"
             );
         }
         Err(error) => {

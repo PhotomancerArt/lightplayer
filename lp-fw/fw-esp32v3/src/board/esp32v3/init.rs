@@ -125,13 +125,20 @@ pub fn init_board() -> (
 /// Start the Embassy runtime with the given timer and software interrupt.
 ///
 /// Consumes software interrupt 0 (the esp-rtos scheduler's doorbell) and
-/// hands software interrupt 1 back to the caller — `main.rs` feeds it to the
-/// io interrupt executor that keeps `serial::io_task` scheduled through long
-/// engine ticks. Interrupts 2 and 3 stay unclaimed.
+/// TIMG0's timer0 (the scheduler's alarm), and hands back the runtime pieces
+/// `main.rs` builds the io side from: software interrupt 1 for the io
+/// interrupt executor that keeps `serial::io_task` scheduled through long
+/// engine ticks, and TIMG0's *second* timer for that task's 1 ms pacer
+/// (io_task cannot use embassy-time — see `serial::io_task::IO_TICK`).
+/// Software interrupts 2 and 3 stay unclaimed.
 pub fn start_runtime(
     timg0: TimerGroup<'static, impl TimerGroupInstance>,
     sw_int: SoftwareInterruptControl<'static>,
-) -> SoftwareInterrupt<'static, 1> {
+) -> (
+    SoftwareInterrupt<'static, 1>,
+    esp_hal::timer::AnyTimer<'static>,
+) {
+    let io_pacer_timer = timg0.timer1.into();
     esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
-    sw_int.software_interrupt1
+    (sw_int.software_interrupt1, io_pacer_timer)
 }
