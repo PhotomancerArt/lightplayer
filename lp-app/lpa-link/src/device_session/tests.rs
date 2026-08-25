@@ -1000,3 +1000,60 @@ async fn probe_link_mode_is_refused_while_management_holds_the_wire() {
     );
     drop(guard);
 }
+
+/// The 2026-08-24 request-idle defect, end to end: a device that drops
+/// every correlated response but keeps heartbeating defeats the per-frame
+/// `request_idle` budget forever (each heartbeat restarts it). The
+/// session's total `request_total` deadline must bound the request — and
+/// the session must survive it: heal the device and the SAME client
+/// completes a follow-up request.
+#[tokio::test]
+async fn dropped_responses_on_a_heartbeating_wire_hit_the_total_deadline() {
+    let (connector, endpoint_id, device) =
+        fake_device_connector(FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new()
+                .with_dropped_responses()
+                // Heartbeat far inside the request_idle budget below, so the
+                // frame-gap backstop provably never fires and only the total
+                // deadline can end the wait.
+                .with_heartbeat_interval(Duration::from_millis(50)),
+        )));
+    let timers = test_timers().with_deadlines(DeviceDeadlines {
+        request_idle: Duration::from_millis(400),
+        request_total: Duration::from_millis(800),
+        ..DeviceDeadlines::default()
+    });
+    let session = DeviceSession::connect(connector, &endpoint_id, timers, DeviceEventSink::noop())
+        .await
+        .unwrap();
+    let mut client = lpa_client::LpClient::new(session.client_io())
+        .with_request_deadline(session.request_deadline());
+
+    // Readiness still works: the unsolicited id-0 hello flows through the
+    // response drop. The correlated request is what starves.
+    let error = tokio::time::timeout(Duration::from_secs(10), client.hello())
+        .await
+        .expect("the total deadline must bound the request — this used to hang forever")
+        .unwrap_err();
+
+    // "0.8s" is the total budget, not the 0.4s idle budget: proof the idle
+    // backstop was heartbeat-blind and the total deadline did the bounding.
+    assert!(
+        matches!(
+            &error,
+            lpa_client::ClientError::Transport(msg)
+                if msg.contains("did not respond within") && msg.contains("0.8s")
+        ),
+        "expected the total-deadline did-not-respond error, got {error:?}"
+    );
+
+    // Heal the device: the same session and client complete the next
+    // request (a timed-out request must not poison the channel).
+    device.set_drop_responses(false);
+    let hello = client
+        .hello()
+        .await
+        .expect("a follow-up request on the healed wire must succeed")
+        .value;
+    assert_eq!(hello.proto, WIRE_PROTO_VERSION);
+}

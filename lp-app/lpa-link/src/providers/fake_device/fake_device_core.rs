@@ -49,6 +49,7 @@ impl FakeEsp32Device {
                 served_bytes: 0,
                 frames_emitted: 0,
                 stalled_by_cut: false,
+                last_heartbeat: None,
                 input_buf: Vec::new(),
                 premature_input_bytes: 0,
                 premature_input: Vec::new(),
@@ -118,6 +119,15 @@ impl FakeEsp32Device {
     /// state's boot.
     pub fn reset_runtime(&self) {
         self.lock().reset_current();
+    }
+
+    /// Toggle correlated-response dropping at runtime (no reboot): lets a
+    /// test starve requests, then heal the device and prove the same
+    /// session recovers. No-op outside the LightPlayer boot state.
+    pub fn set_drop_responses(&self, drop: bool) {
+        if let FakeBootState::LightPlayer(lp) = &mut self.lock().script.boot {
+            lp.drop_responses = drop;
+        }
     }
 
     /// The scripted LightPlayer state, when the device is in that boot
@@ -192,6 +202,9 @@ pub(crate) struct FakeDeviceCore {
     frames_emitted: usize,
     /// A mid-frame cut happened: stop responding, no EOF.
     stalled_by_cut: bool,
+    /// When the last synthetic heartbeat was emitted (scripts with
+    /// `heartbeat_interval`; the host server never heartbeats on its own).
+    last_heartbeat: Option<Instant>,
     /// Host→device bytes not yet forming a complete line.
     input_buf: Vec<u8>,
     premature_input_bytes: usize,
@@ -209,6 +222,7 @@ impl FakeDeviceCore {
         self.out_since = None;
         self.input_buf.clear();
         self.stalled_by_cut = false;
+        self.last_heartbeat = None;
         // Dropping a RunningLp phase drops the HostRuntime, which joins the
         // server thread (bounded).
         self.phase = FakePhase::fresh(&self.script.boot);
@@ -276,7 +290,11 @@ impl FakeDeviceCore {
                     let lp = lp.clone();
                     self.finish_light_player_boot(&lp);
                 }
-                FakePhase::RunningLp { .. } => self.pump_server_frames(),
+                FakePhase::RunningLp { .. } => {
+                    let heartbeat_interval = lp.heartbeat_interval;
+                    self.emit_heartbeat_if_due(heartbeat_interval);
+                    self.pump_server_frames();
+                }
                 FakePhase::Passive { .. } => {}
             },
         }
@@ -389,27 +407,85 @@ impl FakeDeviceCore {
             if suppress_hello && matches!(frame.msg, lpc_wire::ServerMsgBody::Hello(_)) {
                 continue;
             }
-            let json = match lpc_wire::json::to_string(&frame) {
-                Ok(json) => json,
-                Err(error) => {
-                    eprintln!("[fake-device] failed to serialize frame: {error}");
-                    continue;
-                }
-            };
-            if let Some(flood) = self.failure.log_flood_line.clone() {
-                // Logs and frames share the wire on real hardware.
-                self.push_line(&flood);
+            // Scripted response starvation: correlated responses (id != 0)
+            // die at the wire while unsolicited frames keep flowing —
+            // firmware dropping responses under engine load.
+            let drop_responses = matches!(
+                &self.script.boot,
+                FakeBootState::LightPlayer(lp) if lp.drop_responses
+            );
+            if drop_responses && frame.id != 0 {
+                continue;
             }
-            let frame_line = format!("M!{json}\n");
-            if self.failure.cut_mid_frame_after_frames == Some(self.frames_emitted) {
-                let cut = frame_line.len() / 2;
-                self.push_bytes(&frame_line.as_bytes()[..cut]);
-                self.stalled_by_cut = true;
+            if !self.emit_wire_frame(&frame) {
                 return;
             }
-            self.push_bytes(frame_line.as_bytes());
-            self.frames_emitted += 1;
         }
+    }
+
+    /// Emit one synthetic unsolicited id-0 heartbeat when the script's
+    /// cadence says it is due. Real firmware's server loop heartbeats every
+    /// 5 s; the fake's host `LpServer` never does, so scripts that need a
+    /// live-but-not-answering wire opt in via `heartbeat_interval`.
+    fn emit_heartbeat_if_due(&mut self, interval: Option<Duration>) {
+        let Some(interval) = interval else {
+            return;
+        };
+        if self.stalled_by_cut {
+            return;
+        }
+        let due = self
+            .last_heartbeat
+            .is_none_or(|at| at.elapsed() >= interval);
+        if !due {
+            return;
+        }
+        self.last_heartbeat = Some(Instant::now());
+        let frame = lpc_wire::WireServerMessage::new(
+            0,
+            lpc_wire::ServerMsgBody::Heartbeat {
+                fps: lpc_wire::server::SampleStats {
+                    avg: 0.0,
+                    sdev: 0.0,
+                    min: 0.0,
+                    max: 0.0,
+                },
+                frame_count: 0,
+                loaded_projects: Vec::new(),
+                uptime_ms: 0,
+                memory: None,
+                recovery: None,
+                outputs: None,
+            },
+        );
+        self.emit_wire_frame(&frame);
+    }
+
+    /// Serialize one protocol frame onto the byte wire as an `M!<json>\n`
+    /// line, applying the frame-level injection knobs (log flood,
+    /// mid-frame cut). Returns `false` when the wire stalled on a cut.
+    fn emit_wire_frame(&mut self, frame: &lpc_wire::WireServerMessage) -> bool {
+        let json = match lpc_wire::json::to_string(frame) {
+            Ok(json) => json,
+            Err(error) => {
+                eprintln!("[fake-device] failed to serialize frame: {error}");
+                return true;
+            }
+        };
+        if let Some(flood) = self.failure.log_flood_line.clone() {
+            // Logs and frames share the wire on real hardware.
+            self.push_line(&flood);
+        }
+        let frame_line = format!("M!{json}\n");
+        if self.failure.cut_mid_frame_after_frames == Some(self.frames_emitted) {
+            let cut = frame_line.len() / 2;
+            self.push_bytes(&frame_line.as_bytes()[..cut]);
+            self.stalled_by_cut = true;
+            return false;
+        }
+        self.push_bytes(frame_line.as_bytes());
+        self.frames_emitted += 1;
+        true
     }
 
     /// Serve up to `buf.len()` bytes from the device, applying the failure

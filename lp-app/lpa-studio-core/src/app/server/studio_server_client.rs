@@ -94,9 +94,17 @@ impl StudioServerClient {
     /// A client over a hardware [`lpa_link::DeviceSession`]'s
     /// readiness-gated app-protocol channel. Device console lines flow
     /// through the session's event sink, not this client's pending logs.
+    ///
+    /// Hardware clients carry the session's total per-request deadline:
+    /// real firmware can drop a response while heartbeating, and only a
+    /// total bound in the correlation layer turns that into an error
+    /// instead of an unbounded wait. The sim/test constructors stay
+    /// deadline-free — those transports answer every request by
+    /// construction.
     pub fn from_device_session(session: &lpa_link::DeviceSession) -> Self {
         Self {
-            client: LpClient::new(session.client_io()),
+            client: LpClient::new(session.client_io())
+                .with_request_deadline(session.request_deadline()),
             protocol: connection_protocol(&session.connection().kind),
             pending_logs: Rc::new(RefCell::new(Vec::new())),
             last_recovery: None,
