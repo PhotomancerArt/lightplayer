@@ -274,6 +274,7 @@ values; statistical diffs are for the arithmetic in between.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| unit-mismatch | 2026-08-24 | [map2d-sample-diameter-unit-mismatch](2026-08-24-map2d-sample-diameter-unit-mismatch.md) | fixed | lpc-engine map2d resolve + ResolvedMappingCompact consumers |
 | lifecycle-ownership | 2026-08-14 | [post-acquire-open-failure-leaks-the-project-lock](2026-08-14-post-acquire-open-failure-leaks-the-project-lock.md) | fixed | lpa-studio-web library_host_opfs + lpa-studio-core project_controller |
 | lock-held-across-foreign-latency | 2026-08-14 | [sync-holds-the-project-lock-across-the-network](2026-08-14-sync-holds-the-project-lock-across-the-network.md) | fixed | lpa-studio-web cloud/sync + library_host_opfs |
 | fixed-budget-over-variable-work | 2026-08-14 | [worker-boot-timeout-races-the-wasm-fetch](2026-08-14-worker-boot-timeout-races-the-wasm-fetch.md) | fixed (P3 recovery, P4 scheduling, P5 inactivity budget) | lpa-link browser_worker + lpa-studio-core preview_host |

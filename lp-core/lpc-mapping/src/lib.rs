@@ -56,7 +56,7 @@ pub use map2d_doc::{
     RingOrder, RingShape,
 };
 pub use map2d_error::Map2dError;
-pub use map2d_fit::{Bounds2d, bounds_of_points, fit_points};
+pub use map2d_fit::{Bounds2d, bounds_of_points, fit_points, fit_scale};
 pub use map2d_object_id::{MAP2D_OBJECT_ID_MAX_LEN, Map2dObjectId, ensure_object_ids};
 pub use map2d_resolve::{
     ObjectInstanceSpan, ObjectSpan, ResolvedLamp, ResolvedMap2d, Rotation2d, object_instance_spans,

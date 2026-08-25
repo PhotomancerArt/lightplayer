@@ -5586,14 +5586,19 @@ mod mapping_representation_differential {
     use lp_collection::VecMap;
     use lpc_mapping::{
         GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathAlign,
-        PathShape, RingDir, RingOrder, RingShape, fit_points, resolve,
+        PathShape, RingDir, RingOrder, RingShape, fit_points, fit_scale, resolve,
     };
     use lpc_model::{EnumSlot, MapSlot};
 
-    /// The pre-P3 `mapping_from_map2d_doc`, verbatim: resolve, aspect-fit,
-    /// then expand into one `PathSpec::PointList` slot path per document
-    /// object. This is the behaviour the compact carrier replaced; it exists
-    /// here only to be differenced against.
+    /// The pre-P3 `mapping_from_map2d_doc`: resolve, aspect-fit, then
+    /// expand into one `PathSpec::PointList` slot path per document
+    /// object. This is the behaviour the compact carrier replaced; it
+    /// exists here only to be differenced against. One deliberate
+    /// departure from the verbatim original: the slot form's
+    /// `sample_diameter` is texture pixels by contract, so the oracle
+    /// carries the doc's diameter through the same fit as the positions
+    /// (the verbatim copy predated that fix and passed doc units through
+    /// — the unit-mismatch defect, 2026-08-24).
     fn expand_doc_into_slots(
         doc: &Map2dDoc,
         texture_width: u32,
@@ -5601,14 +5606,23 @@ mod mapping_representation_differential {
     ) -> MappingConfig {
         let resolved = resolve(doc).expect("resolve document");
         let mut paths = VecMap::new();
+        let mut sample_diameter = doc.sample_diameter;
         if !resolved.lamps.is_empty() {
+            let positions = resolved.positions();
             let fitted = fit_points(
-                &resolved.positions(),
+                &positions,
                 doc.canvas_bounds(),
                 texture_width,
                 texture_height,
             )
             .expect("fit points");
+            sample_diameter *= fit_scale(
+                &positions,
+                doc.canvas_bounds(),
+                texture_width,
+                texture_height,
+            )
+            .expect("fit scale");
             for span in &resolved.spans {
                 let start = span.start as usize;
                 let end = start + span.count as usize;
@@ -5621,7 +5635,7 @@ mod mapping_representation_differential {
                 );
             }
         }
-        MappingConfig::path_points(MapSlot::new(paths), doc.sample_diameter)
+        MappingConfig::path_points(MapSlot::new(paths), sample_diameter)
     }
 
     fn object(shape: Map2dShape) -> Map2dObject {
