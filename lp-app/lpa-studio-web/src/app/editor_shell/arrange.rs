@@ -56,6 +56,10 @@ struct FixtureRender {
     /// from — how each run of lamps is drawn (see [`StrandMeta`]). Empty for
     /// bodies with no document behind them.
     strands: Vec<StrandMeta>,
+    /// The doc's declared lamp footprint, in ITS OWN (arbitrary) units —
+    /// the only physical length a document states, so every derived render
+    /// length floors on it rather than on some absolute constant.
+    sample_diameter: f32,
 }
 
 /// One physical strand of a fixture's map2d document, as the CANVAS needs
@@ -691,18 +695,22 @@ fn sprite_objects(render: &FixtureRender, selection: &Option<UiPatchTarget>) -> 
     // The same subsample arithmetic the live-fill hooks use: drawn point i
     // is TRUE lamp i × stride.
     let stride = (*total as usize).div_ceil(points.len()).max(1);
-    // The band's reach off the lamps, in own-space units: a fraction of the
-    // fixture's own extent reads consistently across docs drawn at wildly
-    // different scales. ONE constant — hit body, visual outline and cells all
-    // stand off the lamps by the same amount, so they agree by construction.
-    let [_, _, bw, bh] = render.bounds;
-    let reach = (bw.max(bh) * 0.035).clamp(0.75, 14.0) as f32;
     render
         .instances
         .iter()
         .map(|(path, start, lamps)| {
             let end = start.saturating_add(*lamps);
             let (strands, displayed) = instance_strands(render, points, stride, *start, end);
+            // The band's reach off the lamps, derived from THIS instance's
+            // own numbers — doc units are arbitrary (G1 ruling), so nothing
+            // absolute may appear here: a fraction of the strand pitch,
+            // floored by the doc's declared lamp footprint. ONE value — hit
+            // body, visual outline and cells all stand off the lamps by the
+            // same amount, so they agree by construction.
+            let reach = instance_pitch(&strands)
+                .map_or(0.0, |pitch| 0.65 * pitch)
+                .max(0.55 * f64::from(render.sample_diameter))
+                .max(f64::EPSILON) as f32;
             // How this instance draws: from the first strand of the document
             // inside its window (an instance never spans two objects, so one
             // answer covers it). Unknown — a body with no document behind it
@@ -724,7 +732,9 @@ fn sprite_objects(render: &FixtureRender, selection: &Option<UiPatchTarget>) -> 
                 _ => strands.clone(),
             };
             let cells = match meta {
-                Some(meta) if meta.cells => object_cells(&strands, align, &displayed),
+                Some(meta) if meta.cells => {
+                    object_cells(&strands, align, &displayed, render.sample_diameter)
+                }
                 _ => Vec::new(),
             };
             let label = if path.is_empty() {
@@ -784,8 +794,13 @@ fn instance_strands(
 /// display stride to name a true lamp, exactly as the circles do. Cells
 /// clipped away to nothing carry no polygon and are dropped here rather than
 /// emitting an empty path element.
-fn object_cells(strands: &[Vec<[f32; 2]>], align: PathAlign, displayed: &[usize]) -> Vec<LampCell> {
-    lamp_cells(strands, align)
+fn object_cells(
+    strands: &[Vec<[f32; 2]>],
+    align: PathAlign,
+    displayed: &[usize],
+    sample_diameter: f32,
+) -> Vec<LampCell> {
+    lamp_cells(strands, align, sample_diameter)
         .into_iter()
         .filter(|cell| cell.polygon.len() >= 3)
         .filter_map(|cell| {
@@ -795,6 +810,26 @@ fn object_cells(strands: &[Vec<[f32; 2]>], align: PathAlign, displayed: &[usize]
             })
         })
         .collect()
+}
+
+/// Median of the consecutive drawn-point gaps across an instance's strands
+/// — its pitch as displayed. `None` when no strand has two distinct points.
+fn instance_pitch(strands: &[Vec<[f32; 2]>]) -> Option<f64> {
+    let mut gaps: Vec<f64> = strands
+        .iter()
+        .flat_map(|strand| {
+            strand.windows(2).map(|w| {
+                let (dx, dy) = (f64::from(w[1][0] - w[0][0]), f64::from(w[1][1] - w[0][1]));
+                (dx * dx + dy * dy).sqrt()
+            })
+        })
+        .filter(|gap| *gap > 1e-9)
+        .collect();
+    if gaps.is_empty() {
+        return None;
+    }
+    gaps.sort_by(f64::total_cmp);
+    Some(gaps[gaps.len() / 2])
 }
 
 /// Every strand of a resolved document, in wiring order — the drawing facts
@@ -953,10 +988,10 @@ fn build_renders(
                 // draw a body, and nothing downstream may read the document
                 // a second time to get them.
                 let strands = strand_metas(&doc, &resolved);
-                Some((resolved, strands))
+                Some((resolved, strands, doc.sample_diameter))
             });
-        let (body, bounds, strands) = match resolved {
-            Some((resolved, strands)) => {
+        let (body, bounds, strands, sample_diameter) = match resolved {
+            Some((resolved, strands, sample_diameter)) => {
                 let total = resolved.lamps.len() as u32;
                 let stride = resolved.lamps.len().div_ceil(MAX_DISPLAY_LAMPS).max(1);
                 let points: Vec<[f32; 2]> = resolved
@@ -975,7 +1010,12 @@ fn build_renders(
                         ]
                     })
                     .unwrap_or([0.0, 0.0, 40.0, 40.0]);
-                (FixtureBody::Lamps { points, total }, bounds, strands)
+                (
+                    FixtureBody::Lamps { points, total },
+                    bounds,
+                    strands,
+                    sample_diameter,
+                )
             }
             None if fixture.mapping_artifact.is_some() => {
                 // A map2d exists but is not loaded: the footprint block.
@@ -984,7 +1024,12 @@ fn build_renders(
                     .footprint
                     .map(|fp| fp.bbox)
                     .unwrap_or_else(|| placeholder_bounds(lamps));
-                (FixtureBody::Placeholder { lamps }, bounds, Vec::new())
+                (
+                    FixtureBody::Placeholder { lamps },
+                    bounds,
+                    Vec::new(),
+                    lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
+                )
             }
             None => {
                 // The peach: no map2d document at all — the range strip.
@@ -994,6 +1039,7 @@ fn build_renders(
                     FixtureBody::Strip { lamps },
                     [0.0, 0.0, width, 10.0],
                     Vec::new(),
+                    lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
                 )
             }
         };
@@ -1012,6 +1058,7 @@ fn build_renders(
                 .map(|instance| (instance.path.clone(), instance.start, instance.lamps))
                 .collect(),
             strands,
+            sample_diameter,
         });
     }
     for render in renders.iter_mut().filter(|render| !render.arranged) {
@@ -1143,6 +1190,7 @@ mod tests {
             body: FixtureBody::Placeholder { lamps: 10 },
             instances: Vec::new(),
             strands: Vec::new(),
+            sample_diameter: lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
         }
     }
 
@@ -1499,6 +1547,7 @@ mod tests {
             body: FixtureBody::Lamps { points, total },
             instances: Vec::new(),
             strands: Vec::new(),
+            sample_diameter: lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
         }
     }
 
