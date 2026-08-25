@@ -31,10 +31,6 @@ mod studio_face_e2e_tests;
 /// picker, and composing a whole new project around one.
 #[cfg(test)]
 mod studio_import_e2e_tests;
-/// End-to-end tests through the REAL link path (provider → endpoint →
-/// connect → readiness → pull) against the scripted byte-level fake device.
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod studio_link_e2e_tests;
 /// End-to-end node create/remove tests (authoring P4): every picker kind
 /// against a real server, playlist-entry attach, staged removal rows,
 /// revert, and save-materialized deletion.

@@ -46,7 +46,6 @@ fn pattern_card(exports: Vec<String>) -> UiPackageCard {
         provenance: None,
         on_device: None,
         open_elsewhere: false,
-        connected_device: None,
         running_in_sim: false,
         target: None,
         health: PackageHealth::Ready,
