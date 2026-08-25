@@ -5,14 +5,15 @@
 //! of #411's `PatchPulseOp` (select pulses the live sim/hardware,
 //! deselect and view-exit clear).
 //!
-//! THE patch panel (`app::patch::patch_panel`) — the verbs' visible home,
-//! the invitations, and the keys row that replaced the help overlay — used
-//! to be this center's bottom region. Since round 2 (D1) its home is the
-//! view's **Props dock panel**, where a fixed width keeps a panel-height
-//! change from reflowing the canvas. Below the ≤820px fold the docks are
-//! gone, so the center still mounts it there, gated on the panel's own
-//! reactive fold signal: exactly ONE mount exists at a time, never two with
-//! one hidden by CSS. The toolbar above keeps only history and status (D4).
+//! Its bottom region is THE patch panel (pass 2, P4:
+//! `app::patch::patch_panel`) — the verbs' visible home, the invitations,
+//! and the keys row that replaced the help overlay. The toolbar above
+//! keeps only history and status (D4). Round 2 tried moving it into the
+//! view's Props dock and the G1 gate sent it back down here: patching and
+//! matching want to be in ONE view, and the Outputs dock is a working
+//! surface, not a slot the readout can borrow. The defect that move was
+//! chasing — a panel-height change reflowing the canvas — is fixed in
+//! place instead, by the panel's fixed, content-independent height.
 //!
 //! Same canvas, different furniture (the one-project-canvas ADR): no
 //! dive here — the authored tree is Mapping's activity; this center
@@ -42,7 +43,7 @@ use lpa_studio_core::{
 use super::arrange::{PackSlots, ProjectCanvasHost, refresh_pack_slots};
 use super::toolbar::{StatusKind, ToolbarGroup, ToolbarItem, ToolbarStrip};
 use super::{mapping_assets, prefetch_editor_meta};
-use crate::app::patch::patch_panel::{PatchPanel, use_fold_signal};
+use crate::app::patch::patch_panel::PatchPanel;
 use crate::app::patch::verb_ui::{
     dispatch_assign, dispatch_verb, next_free_segment, port_window, resize_segment,
     selection_stride, shift_segment, target_is_unmapped,
@@ -619,11 +620,6 @@ pub fn PatchingShellCenter(
     let mut key_env = use_signal(|| Option::<PatchKeyEnv>::None);
     let _keys =
         use_hook(move || install_patch_key_listener(key_env, armed, segment_size, picker_open));
-    // Below the fold the docks are hidden, so the panel's Props home is not
-    // on screen and this center keeps its old bottom mount. A SIGNAL, not a
-    // media query in CSS: the panel carries lamp-strip canvases, and a hidden
-    // second copy would never paint (see `use_fold_signal`).
-    let fold = use_fold_signal();
     let Some(surface) = surface else {
         // Nothing to patch: the listener stays installed but has no world to
         // act on, so every verb is a no-op until a surface arrives.
@@ -708,18 +704,17 @@ pub fn PatchingShellCenter(
                     }
                 }
             }
-            // THE panel (D8), at the fold only: above it the panel is the
-            // view's Props dock panel (round 2, D1 — a fixed dock width is
-            // what stops its height from reflowing the canvas), and below it
-            // there are no docks to live in. Either way it is a sibling
-            // consumer of the ONE selection above it.
-            if fold() {
-                PatchPanel {
-                    surface: surface.clone(),
-                    selection: selection.clone(),
-                    armed: armed_verb,
-                    on_action,
-                }
+            // THE panel (D8): always the center's bottom region, at every
+            // width, empty states included — never a dock, never a popover.
+            // It is a sibling consumer of the ONE selection above it, which
+            // is what puts patching and matching in one view. Its height is
+            // FIXED, so nothing it says can move the canvas edge above it.
+            PatchPanel {
+                surface: surface.clone(),
+                selection: selection.clone(),
+                armed: armed_verb,
+                picker_open: picker_open(),
+                on_action,
             }
         }
     }

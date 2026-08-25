@@ -1,15 +1,16 @@
-//! THE patch panel (pass 2, P4) — the Patching view's control room: OBJECT
-//! section over OUTPUT section, one selection, the counterpart following.
+//! THE patch panel (pass 2, P4) — the Patching view's control room, and its
+//! center's BOTTOM region at every width: OBJECT section over OUTPUT section,
+//! one selection, the counterpart following.
 //!
-//! Its HOME is the Patching view's **Props dock panel** (round 2, D1) — the
-//! fixed dock width is what stops a panel-height change from reflowing the
-//! canvas and churning its refits. Below the workbench's ≤820px fold the
-//! docks are hidden entirely, so there the panel keeps its old center-bottom
-//! mount; [`use_fold_signal`] decides which, so exactly ONE mount exists at
-//! any moment (a second copy hidden with CSS would carry lamp-strip canvases
-//! that never get a box, never paint, and never stamp the
-//! `data-preview-painted` the story capture waits on). [`PatchPanel::docked`]
-//! is which of the two is rendering.
+//! Round 2 moved it into the view's Props dock to stop a panel-height change
+//! from reflowing the canvas; the G1 gate sent it back down here, because
+//! patching and matching belong in one view and the Outputs dock is a working
+//! surface rather than a slot this readout can borrow. The churn defect is
+//! fixed IN PLACE instead: the panel's height is FIXED per breakpoint
+//! ([`PANEL_HEIGHT`]) rather than content-driven, so no selection change can
+//! move the canvas edge above it. Content that outgrows the box scrolls
+//! inside it; content that under-fills it leaves dead space, which is the
+//! accepted cost of a constant canvas box.
 //!
 //! Design record: `spikes/patching-controls/index.html` §1 (states
 //! `#armed` / `#paired` / `#derived` / `#objfirst`). The panel derives
@@ -29,8 +30,8 @@
 //! its own (round 2, P3): the ports live in the Outputs panel, which is a
 //! strict superset of any list this panel could draw (occupancy bars, free
 //! runs as click targets landing at the exact clicked lamp, the counterpart
-//! glow), so the invitation OPENS that panel instead — floating over the dock
-//! above the fold, full-screen below it. It is a mount of an existing
+//! glow), so the invitation OPENS that panel instead — floating over this
+//! panel above the fold, full-screen below it. It is a mount of an existing
 //! surface, not a new write path: completion still happens inside the Outputs
 //! panel's own `on_port_click`. Everything else in the panel is either a
 //! selection nudge or one of the existing verbs; the panel never opens a
@@ -117,23 +118,13 @@ pub(crate) fn surface_is_live(surface: &UiPatchSurface) -> bool {
         .any(|output| output_frame(surface, output.node).is_some())
 }
 
-/// The workbench's mobile fold, in the two spellings this module needs. Both
-/// name the same breakpoint as the `tw:max-[820px]:*` utilities — change one
-/// and you change all three.
+/// The workbench's mobile fold, as a number — the same breakpoint the
+/// `tw:max-[820px]:*` utilities name; change one and you change both.
 const MOBILE_FOLD_PX: f64 = 820.0;
-#[cfg_attr(
-    not(target_arch = "wasm32"),
-    allow(dead_code, reason = "asked by the wasm media-query listener only")
-)]
-const MOBILE_FOLD_QUERY: &str = "(max-width: 820px)";
 
 /// Is the viewport at the mobile fold, RIGHT NOW? A one-shot read, for
 /// gesture time ("the ports are in a summoned panel on this phone"); host
 /// test builds have no window and answer `false`.
-///
-/// Layout that must exist exactly once across the fold reads
-/// [`use_fold_signal`] instead — a one-shot answer would go stale the moment
-/// the window is resized.
 fn at_mobile_fold() -> bool {
     web_sys::window()
         .and_then(|window| window.inner_width().ok())
@@ -141,102 +132,20 @@ fn at_mobile_fold() -> bool {
         .is_some_and(|width| width <= MOBILE_FOLD_PX)
 }
 
-/// The fold as a REACTIVE signal: true while the viewport is at or below the
-/// workbench's fold breakpoint, kept current by a media-query listener
-/// installed for exactly as long as the caller is mounted.
-///
-/// This is how the patch panel keeps ONE mount across the fold. The tempting
-/// alternative — render both and hide one with `tw:max-[820px]:hidden` — is a
-/// trap here: the hidden copy still mounts its [`LampStrip`] canvases, a
-/// canvas with no box never measures and so never paints, and the story
-/// capture's ready gate waits forever on the `data-preview-painted` it will
-/// never stamp.
-pub(crate) fn use_fold_signal() -> Signal<bool> {
-    let fold = use_signal(at_mobile_fold);
-    let _listener = use_hook(move || install_fold_listener(fold));
-    fold
-}
-
-/// Watch the fold breakpoint. Keep the guard alive for as long as the signal
-/// is read; dropping it removes the listener.
-#[cfg(target_arch = "wasm32")]
-fn install_fold_listener(mut fold: Signal<bool>) -> Option<std::rc::Rc<FoldListener>> {
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen::closure::Closure;
-
-    let query = web_sys::window()?.match_media(MOBILE_FOLD_QUERY).ok()??;
-    // Seed from the QUERY, not the width read: a scrollbar can put
-    // `innerWidth` and the media query a few pixels apart, and it is the
-    // query the docks' own `max-[820px]:hidden` answers to.
-    if *fold.peek() != query.matches() {
-        fold.set(query.matches());
-    }
-    let watched = query.clone();
-    let callback = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_| {
-        let now = watched.matches();
-        if *fold.peek() != now {
-            fold.set(now);
-        }
-    }));
-    query
-        .add_event_listener_with_callback("change", callback.as_ref().unchecked_ref())
-        .ok()?;
-    Some(std::rc::Rc::new(FoldListener { query, callback }))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn install_fold_listener(_fold: Signal<bool>) -> Option<std::rc::Rc<FoldListener>> {
-    None
-}
-
-pub(crate) struct FoldListener {
-    #[cfg(target_arch = "wasm32")]
-    query: web_sys::MediaQueryList,
-    #[cfg(target_arch = "wasm32")]
-    callback: wasm_bindgen::closure::Closure<dyn FnMut(web_sys::Event)>,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl Drop for FoldListener {
-    fn drop(&mut self) {
-        use wasm_bindgen::JsCast;
-        let _ = self
-            .query
-            .remove_event_listener_with_callback("change", self.callback.as_ref().unchecked_ref());
-    }
-}
-
 const SECTION: &str = "tw:grid tw:content-start tw:gap-1.5 tw:border-l-2 tw:border-l-transparent tw:px-2.5 tw:py-2 tw:max-[820px]:px-2 tw:max-[820px]:py-1.5";
 const SECTION_PRIMARY: &str = "tw:grid tw:content-start tw:gap-1.5 tw:border-l-2 tw:border-l-selection-border tw:bg-selection-bg tw:px-2.5 tw:py-2 tw:max-[820px]:px-2 tw:max-[820px]:py-1.5";
-/// The same two at DOCK width (~300px of content, 245px on the md middle):
-/// the fold's own tightness, applied unconditionally — a dock is exactly as
-/// narrow as a phone, and the dock body already supplies the outer gutter.
-const SECTION_DOCKED: &str =
-    "tw:grid tw:content-start tw:gap-1.5 tw:border-l-2 tw:border-l-transparent tw:px-1.5 tw:py-1.5";
-const SECTION_DOCKED_PRIMARY: &str = "tw:grid tw:content-start tw:gap-1.5 tw:border-l-2 tw:border-l-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1.5";
 
-/// Which section styling a pane wears: the fold pair or the dock pair.
-fn section_class(docked: bool, primary: bool) -> &'static str {
-    match (docked, primary) {
-        (true, true) => SECTION_DOCKED_PRIMARY,
-        (true, false) => SECTION_DOCKED,
-        (false, true) => SECTION_PRIMARY,
-        (false, false) => SECTION,
-    }
+/// Which section styling a pane wears — the selection's own side gets the
+/// blue edge.
+fn section_class(primary: bool) -> &'static str {
+    if primary { SECTION_PRIMARY } else { SECTION }
 }
 
-/// A transport row's group separator: a small gap on a wide row, a deliberate
-/// LINE BREAK in a dock. At 300px these rows wrap whatever we do — better
-/// they wrap where the grouping is than wherever the last button landed.
-fn group_break(docked: bool) -> Element {
-    if docked {
-        rsx! {
-            div { class: "tw:basis-full" }
-        }
-    } else {
-        rsx! {
-            span { class: "tw:w-2" }
-        }
+/// A transport row's group separator: a small gap between verb groups on a
+/// row as wide as the center.
+fn group_break() -> Element {
+    rsx! {
+        span { class: "tw:w-2" }
     }
 }
 const PROMPT: &str = "tw:flex tw:flex-wrap tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:px-2.5 tw:py-1.5 tw:text-[11.5px] tw:text-subtle-foreground";
@@ -973,24 +882,34 @@ fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
 }
 
 /// The keys row, as data: the grammar the panel PRINTS under itself (it
-/// replaced the help overlay, so it is readable without arming anything).
-///
-/// `wide` = the phrase claims both columns of the docked grid; half a dock is
-/// not enough room for it, and a chip that wraps mid-phrase reads as two.
-const KEYS: &[(&str, &str, bool)] = &[
-    ("a", "assign", false),
-    ("m", "next free", false),
-    ("[ ]", "shift", false),
-    ("- =", "narrow / widen", true),
-    ("r", "flip", false),
-    ("; '", "rotate", false),
-    ("s", "swap", false),
-    ("⌘Z", "undo", false),
-    ("esc", "disarm, then deselect", true),
+/// replaced the help overlay, so it is readable without arming anything). One
+/// wrapping row at the panel's width, in the order a walk-up user meets them.
+const KEYS: &[(&str, &str)] = &[
+    ("a", "assign"),
+    ("m", "next free"),
+    ("[ ]", "shift"),
+    ("- =", "narrow / widen"),
+    ("r", "flip"),
+    ("; '", "rotate"),
+    ("s", "swap"),
+    ("⌘Z", "undo"),
+    ("esc", "disarm, then deselect"),
 ];
 
+/// The panel's FIXED box (G1 round 2's ruling). Tall enough for the paired
+/// pose — the tallest everyday state — without a scrollbar at desktop width,
+/// and a little shorter below the fold where the sections are tighter and the
+/// canvas has less room to spare. The `max-h` only ever bites on a SHORT
+/// window, where 45% of the center is less than the fixed height; that is a
+/// per-viewport number, not a per-selection one, so it cannot churn either.
+///
+/// The whole point is content-independence: the canvas edge above must not
+/// move when the selection changes, which is exactly what the old
+/// `max-h-[45%]`-over-content box did every time a pose grew a row.
+const PANEL_HEIGHT: &str = "tw:h-[300px] tw:max-h-[45%] tw:max-[820px]:h-[260px]";
+
 /// THE patch panel (D8 — always present, empty states included): the Patching
-/// view's Props dock panel above the fold, its center-bottom region below.
+/// center's bottom region, at every width.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PatchPanel(
@@ -1000,14 +919,10 @@ pub fn PatchPanel(
     /// panel stays plain data (and stories can pose an armed state).
     #[props(default)]
     armed: Option<ArmedVerb>,
-    /// Rendering in the Props DOCK rather than the fold's center-bottom
-    /// region: no height cap (the dock body already scrolls), tighter
-    /// gutters, and the keys row in two deliberate columns.
-    #[props(default)]
-    docked: bool,
     /// The frame's output-picker popover is open (round 2, P3), read at the
-    /// mount site like `armed` so the panel stays plain data. Docked only:
-    /// below the fold the pick surface is the full-screen summon instead.
+    /// mount site like `armed` so the panel stays plain data. Above the fold
+    /// only: below it the pick surface is the full-screen summon instead, so
+    /// nothing ever sets this there.
     #[props(default)]
     picker_open: bool,
     on_action: EventHandler<UiAction>,
@@ -1040,94 +955,74 @@ pub fn PatchPanel(
     let armed_assign = matches!(armed, Some(ArmedVerb::Assign));
     let attention_object = live && armed_assign && primary == Some(PanelSide::Output);
     let attention_output = live && armed_assign && primary == Some(PanelSide::Object);
-    // Two height models, one panel. In the DOCK the body above already
-    // scrolls (`min-h-0 flex-1 overflow-y-auto`) and a percentage cap against
-    // an indefinite height resolves to no cap at all, so the panel simply
-    // fills its column and the dock's own scrollbar does the rest. At the
-    // FOLD it is the center's bottom region again and keeps the 45% cap: it
-    // must never squeeze the canvas above it to nothing (the canvas re-fits
-    // on every resize — starving it would churn the fit reconciliation the
-    // story capture gates on).
-    let root = if docked {
-        // `relative` is the popover's anchor: the picker card lays itself out
-        // over the panel's own column rather than in a floating layer, which
-        // is what keeps its position stable while the Outputs panel inside it
-        // re-renders on frame traffic (there is nothing to re-measure).
-        "tw:relative tw:flex tw:flex-col tw:bg-card-subtle"
-    } else {
-        "tw:flex tw:max-h-[45%] tw:flex-none tw:flex-col tw:overflow-y-auto tw:border-t tw:border-border-subtle tw:bg-card-subtle"
-    };
-    // The dock's gutter is the dock body's own padding; the panel adds only
-    // enough to keep its chrome rows off the section edges.
-    let gutter = if docked { "tw:px-1.5" } else { "tw:px-2.5" };
-    // The keys row REPLACES the help overlay: always visible, in the panel
-    // the gesture happens in. At dock width its nine chips are a deliberate
-    // TWO-COLUMN grid rather than a ragged wrap — the phrases are of very
-    // different lengths, and a free wrap at 300px reads as noise.
-    let keys = if docked {
-        format!(
-            "tw:grid tw:flex-none tw:grid-cols-2 tw:gap-x-2 tw:gap-y-0.5 tw:border-t tw:border-border-subtle tw:bg-card-muted {gutter} tw:py-1 tw:font-mono tw:text-[10px] tw:text-dim-foreground"
-        )
-    } else {
-        format!(
-            "tw:flex tw:flex-none tw:flex-wrap tw:gap-x-3.5 tw:gap-y-0.5 tw:border-t tw:border-border-subtle tw:bg-card-muted {gutter} tw:py-1 tw:font-mono tw:text-[10px] tw:text-dim-foreground"
-        )
-    };
     rsx! {
-        div { class: "{root}",
+        // The center's bottom region, at a FIXED height so the canvas above
+        // keeps the same box whatever the selection says (the canvas re-fits
+        // on every resize — a moving edge churned the fit reconciliation the
+        // story capture gates on). `relative` is the popover's anchor: the
+        // picker card lays itself out over this panel rather than in a
+        // floating layer, which keeps its position stable while the Outputs
+        // panel inside it re-renders on frame traffic. Note the panel itself
+        // does NOT scroll — its BODY does, below — so the card is free to
+        // rise over the canvas instead of being clipped into a 300px box.
+        div { class: "tw:relative tw:flex {PANEL_HEIGHT} tw:flex-none tw:flex-col tw:border-t tw:border-border-subtle tw:bg-card-subtle",
             // The armed state, absorbing P3's standalone banner: the panel
             // is where the walk-up user is looking, so the arm names itself
             // here (and the invitation buttons below echo it).
             if let Some(verb) = armed.as_ref() {
-                div { class: "tw:flex-none tw:border-b tw:border-border-subtle tw:bg-selection-bg {gutter} tw:py-1 tw:text-[11px] tw:text-selection-border",
+                div { class: "tw:flex-none tw:border-b tw:border-border-subtle tw:bg-selection-bg tw:px-2.5 tw:py-1 tw:text-[11px] tw:text-selection-border",
                     "{verb.banner()}"
                 }
             }
-            ObjectPane {
-                surface: surface.clone(),
-                selection: selection.clone(),
-                object,
-                card,
-                armed: armed.clone(),
-                primary: primary == Some(PanelSide::Object),
-                attention: attention_object,
-                animate: live,
-                docked,
-                on_action,
+            // The two sections scroll INSIDE the fixed box: a pose taller
+            // than the panel (the scarf's flow selector, say) reaches its own
+            // scrollbar rather than pushing the canvas edge up.
+            div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:flex-col tw:overflow-y-auto",
+                ObjectPane {
+                    surface: surface.clone(),
+                    selection: selection.clone(),
+                    object,
+                    card,
+                    armed: armed.clone(),
+                    primary: primary == Some(PanelSide::Object),
+                    attention: attention_object,
+                    animate: live,
+                    on_action,
+                }
+                OutputPane {
+                    surface: surface.clone(),
+                    selection: selection.clone(),
+                    output,
+                    armed,
+                    primary: primary == Some(PanelSide::Output),
+                    attention: attention_output,
+                    animate: live,
+                    on_action,
+                }
             }
-            OutputPane {
-                surface: surface.clone(),
-                selection: selection.clone(),
-                output,
-                armed,
-                primary: primary == Some(PanelSide::Output),
-                attention: attention_output,
-                animate: live,
-                docked,
-                on_action,
-            }
-            div { class: "{keys}",
-                for (key , label , wide) in KEYS.iter().copied() {
-                    span {
-                        key: "{key}",
-                        class: if docked && wide { "tw:col-span-2" } else { "" },
+            // The keys row REPLACES the help overlay: always visible, in the
+            // panel the gesture happens in — so it is pinned under the
+            // scrolling body rather than scrolling away with it.
+            div { class: "tw:flex tw:flex-none tw:flex-wrap tw:gap-x-3.5 tw:gap-y-0.5 tw:border-t tw:border-border-subtle tw:bg-card-muted tw:px-2.5 tw:py-1 tw:font-mono tw:text-[10px] tw:text-dim-foreground",
+                for (key , label) in KEYS.iter().copied() {
+                    span { key: "{key}",
                         span { class: "{KBD}", "{key}" }
                         " {label}"
                     }
                 }
             }
-            // THE OUTPUT PICKER (round 2, D1's ruling): the one-off port pick
-            // happens in the REAL Outputs panel — same component, same
-            // `patch_verbs` grammar, the same occupancy bars and free runs as
-            // click targets — mounted over the dock instead of re-listed as
-            // flat text in this panel. It is a MOUNT, never a second write
-            // path: completion still happens inside the Outputs panel's own
-            // `on_port_click` (the ADR's shared-completion-helpers rule).
+            // THE OUTPUT PICKER (round 2, P3): the one-off port pick happens
+            // in the REAL Outputs panel — same component, same `patch_verbs`
+            // grammar, the same occupancy bars and free runs as click targets
+            // — floated over this panel instead of re-listed as flat text in
+            // it. It is a MOUNT, never a second write path: completion still
+            // happens inside the Outputs panel's own `on_port_click` (the
+            // ADR's shared-completion-helpers rule).
             //
-            // Docked only. Below the fold there are no docks to float over
-            // and the summoned full-screen Outputs panel is the same surface
-            // at phone size — one mechanism, two sizes.
-            if docked && picker_open {
+            // Above the fold only. Below it the summoned full-screen Outputs
+            // panel is the same surface at phone size — one mechanism, two
+            // sizes — so `open_port_picker` never sets this flag there.
+            if picker_open {
                 // Click-outside: a transparent full-viewport sheet under the
                 // card. Only rendered where there is a signal to close —
                 // a story posing the popover has no frame state, and an
@@ -1143,8 +1038,13 @@ pub fn PatchPanel(
                         },
                     }
                 }
+                // Anchored to the panel's own bottom-left and WIDTH-CAPPED:
+                // the panel is as wide as the center now, and a full-width
+                // card of port rows would be a wall. It grows UPWARD over the
+                // canvas from the section it is about, which is also where
+                // the eye already is.
                 div {
-                    class: "tw:absolute tw:inset-x-0 tw:top-0 tw:z-[61] tw:flex tw:max-h-[440px] tw:flex-col tw:overflow-hidden tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:shadow-lg",
+                    class: "tw:absolute tw:bottom-0 tw:left-0 tw:z-[61] tw:flex tw:max-h-[440px] tw:w-full tw:max-w-[420px] tw:flex-col tw:overflow-hidden tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:shadow-lg",
                     role: "dialog",
                     "data-patch-picker": "open",
                     onclick: move |event| event.stop_propagation(),
@@ -1197,8 +1097,8 @@ pub fn PatchPanel(
     }
 }
 
-/// Open the port picker at whichever size the user is: the POPOVER over the
-/// dock above the fold, the full-screen summoned Outputs panel below it. Both
+/// Open the port picker at whichever size the user is: the POPOVER over this
+/// panel above the fold, the full-screen summoned Outputs panel below it. Both
 /// are the same Outputs panel with the same grammar — the fold only decides
 /// whether it floats or takes the screen.
 fn open_port_picker(ui: Option<PatchingUi>) {
@@ -1294,16 +1194,13 @@ fn ObjectPane(
     /// Frames are flowing — attention animations may run.
     #[props(default)]
     animate: bool,
-    /// Dock width: tighter gutters and deliberate transport-row breaks.
-    #[props(default)]
-    docked: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let ui = use_hook(try_consume_context::<PatchingUi>);
     // Nothing here animates itself any more (Q9): every picture the panel
     // paints — published bytes or the controller's unmapped-chase preview —
     // arrives as data on the surface, so the panel keeps no clock at all.
-    let base = section_class(docked, primary);
+    let base = section_class(primary);
     let class = if attention {
         format!("{base} ux-arm-attention")
     } else {
@@ -1427,7 +1324,7 @@ fn ObjectPane(
                                     },
                                     "unmap"
                                 }
-                                {group_break(docked)}
+                                {group_break()}
                                 // Mock-level room only (plan): the lamp-count
                                 // edit is a mapping write, not a patch verb.
                                 button {
@@ -1736,9 +1633,6 @@ fn OutputPane(
     /// Frames are flowing — attention animations may run.
     #[props(default)]
     animate: bool,
-    /// Dock width: tighter gutters and deliberate transport-row breaks.
-    #[props(default)]
-    docked: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let ui = use_hook(try_consume_context::<PatchingUi>);
@@ -1746,7 +1640,7 @@ fn OutputPane(
     // fact line can name it (the spike's mode chip) — and so a walk-up gate
     // can see where the 7px threshold actually falls.
     let presentation = use_signal(StripPresentation::default);
-    let base = section_class(docked, primary);
+    let base = section_class(primary);
     let class = if attention {
         format!("{base} ux-arm-attention")
     } else {
@@ -1957,7 +1851,7 @@ fn OutputPane(
                                 {keyed("×10 ››", "]")}
                             }
                             if free {
-                                {group_break(docked)}
+                                {group_break()}
                                 button {
                                     class: "{STEP}",
                                     title: "Narrow the segment one lamp (-)",
@@ -1978,7 +1872,7 @@ fn OutputPane(
                                 }
                             }
                             if matches!(selection, Some(UiPatchTarget::Port { .. })) || swap_armed {
-                                {group_break(docked)}
+                                {group_break()}
                                 button {
                                     class: "{swap_class}",
                                     title: "Arm a port swap, then click the other port (s)",
@@ -1995,7 +1889,7 @@ fn OutputPane(
                                     {keyed("swap", "s")}
                                 }
                             }
-                            {group_break(docked)}
+                            {group_break()}
                             button {
                                 class: "{STEP_ARM}",
                                 title: "Select the next free segment, keeping the arm (m)",
