@@ -412,13 +412,12 @@ pub(crate) fn ProjectCanvasHost(
                         dispatch_selection(&on_action, next);
                         return;
                     }
-                    // Q10: a sprite click names the OBJECT under the cursor,
-                    // not the whole fixture — the sprite already knows which
-                    // true lamp was hit, and the surface knows which object
-                    // owns it. The fixture stays the honest fallback where a
-                    // body draws no lamps (placeholder, strip) or no object
-                    // covers the one clicked.
-                    let target = sprite_target(&grammar_surface, *node, pick.object, pick.lamp);
+                    // The PICK GRAIN is view policy (grain follows
+                    // activity): Patching names the OBJECT under the
+                    // cursor (Q10 — the walk-up loop taps physical
+                    // pieces); Mapping selects the FIXTURE (D4 — click
+                    // selects at scope level, double-click descends).
+                    let target = plain_click_target(patch_verbs, &grammar_surface, *node, &pick);
                     // The same fixture-side completion the tree's rows
                     // carry: armed assign + a free segment → the clicked
                     // OBJECT takes it (stronger than the old next-unmapped
@@ -498,11 +497,37 @@ pub(crate) fn ProjectCanvasHost(
                     }));
                 }
             }
-            FixtureEvent::Dive(key) => {
-                if let Some(node) = nodes.get(&key)
-                    && let Some(on_focus) = &on_focus
+            FixtureEvent::Dive { key, lamp, object } => {
+                // Entering selects the CLICKED object (D4: double-click
+                // descends to what you pointed at), else the fixture's
+                // first object, else the entered-empty drawing state. The
+                // dispatch is the whole entry — the dive derives from the
+                // selection's scope. `on_focus` stays the host's
+                // dive-capable gate (stories omit it).
+                if on_focus.is_some()
+                    && let Some(node) = nodes.get(&key)
                 {
-                    on_focus.call(*node);
+                    drag_override.set(None);
+                    let clicked = match sprite_target(&grammar_surface, *node, object, lamp) {
+                        UiPatchTarget::Fixture { .. } => None,
+                        target => Some(target),
+                    };
+                    let first = clicked.or_else(|| {
+                        grammar_surface
+                            .fixtures
+                            .iter()
+                            .find(|fixture| fixture.node == *node)
+                            .and_then(|fixture| fixture.instances.first())
+                            .map(|instance| {
+                                crate::app::patch::verb_ui::instance_target(*node, instance)
+                            })
+                    });
+                    let mut next = UiSelection::empty();
+                    match first {
+                        Some(target) => next.select_one(target),
+                        None => next.enter(*node),
+                    }
+                    dispatch_selection(&on_action, next);
                 }
             }
         }
@@ -593,6 +618,24 @@ fn with_chase_preview(
         }
     }
     colors
+}
+
+/// The plain-click pick grain, per view policy (unified-selection D4 /
+/// walk-up Q10): patch-verb hosts (Patching) resolve the OBJECT under the
+/// cursor — the walk-up loop taps physical pieces and "a click says
+/// WHICH"; everything else (Mapping, stories) selects the FIXTURE — click
+/// selects at scope level, and descent is the double-click's job.
+fn plain_click_target(
+    pick_objects: bool,
+    surface: &UiPatchSurface,
+    node: NodeId,
+    pick: &lpa_mapping_editor::FixturePick,
+) -> UiPatchTarget {
+    if pick_objects {
+        sprite_target(surface, node, pick.object, pick.lamp)
+    } else {
+        UiPatchTarget::Fixture { node }
+    }
 }
 
 /// What a sprite click selects (Q10): the OBJECT owning the clicked lamp,
@@ -1230,6 +1273,35 @@ mod tests {
             }],
             ..Default::default()
         }
+    }
+
+    /// The pick grain is VIEW POLICY (the one grammar, two activities):
+    /// Patching (`patch_verbs`) resolves the object under the cursor —
+    /// Q10's "a click says WHICH" — while Mapping selects the fixture,
+    /// because at root scope a click selects at scope level (D4) and
+    /// descent belongs to the double-click.
+    #[test]
+    fn plain_click_grain_follows_the_view() {
+        let surface = dome_surface();
+        let node = NodeId::new(2);
+        let pick = lpa_mapping_editor::FixturePick {
+            key: "k".into(),
+            lamp: Some(35),
+            object: None,
+        };
+        assert_eq!(
+            plain_click_target(true, &surface, node, &pick),
+            UiPatchTarget::Instance {
+                node,
+                path: "/sector/1".to_string(),
+            },
+            "Patching: the object under the cursor"
+        );
+        assert_eq!(
+            plain_click_target(false, &surface, node, &pick),
+            UiPatchTarget::Fixture { node },
+            "Mapping: click selects at scope level"
+        );
     }
 
     /// Q10: a sprite click names the OBJECT the clicked lamp belongs to.

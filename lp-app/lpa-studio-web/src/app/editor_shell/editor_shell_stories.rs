@@ -214,7 +214,6 @@ fn editor_toolbar_dived() -> Element {
     rsx! {
         ToolbarStrip {
             groups: super::dive_toolbar(
-                "dome",
                 &MapTool::Select,
                 Default::default(),
                 &story_asset_editor(),

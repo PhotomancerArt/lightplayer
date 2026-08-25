@@ -150,11 +150,14 @@ pub fn handle_editor_key(
         }
         Key::Escape => {
             let mut s = session.write();
-            // The ladder (D6 + the selection/tree ADR, extended by Q4):
-            // back out one path vertex, then drop a vertex sub-selection,
-            // then ASCEND out of a descended group, then clear selection,
-            // then reset the tool — and with nothing left, the dive itself
-            // is the thing esc leaves.
+            // The ladder (D6 + the selection/tree ADR, reshaped by the
+            // unified-selection model): back out one path vertex, then
+            // drop a vertex sub-selection, then ASCEND out of a descended
+            // group, then reset the tool — and then esc ASCENDS OUT of
+            // the document itself (`ExitDive`: the host selects the
+            // fixture at project level). The old clear-selection rung is
+            // gone: "dived with nothing selected" is no longer a state —
+            // scope derives from selection, so leaving IS the next rung.
             if s.path_backout() {
                 return EditorKeyResult::handled(false);
             }
@@ -163,10 +166,6 @@ pub fn handle_editor_key(
                 return EditorKeyResult::handled(false);
             }
             if s.ascend() {
-                return EditorKeyResult::handled(false);
-            }
-            if !s.selection.is_empty() {
-                s.selection.clear();
                 return EditorKeyResult::handled(false);
             }
             if !matches!(s.tool, MapTool::Select) {

@@ -427,7 +427,7 @@ fn PropsStackStory(
         }
         session
     });
-    let dive_focused = use_signal(move || dived.then(|| NodeId::new(2)));
+    let dive_focused = dived.then(|| NodeId::new(2));
     let dive_commits = use_signal(|| 0u64);
     dock_frame(rsx! {
         PropsPanel {

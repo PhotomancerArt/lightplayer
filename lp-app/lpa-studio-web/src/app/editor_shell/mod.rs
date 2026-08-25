@@ -57,14 +57,16 @@ pub fn EditorShellCenter(
     /// The full editor view — the canvas resolves fixture map2d bodies out
     /// of the snapshot's node views (the same bytes the face embeds hold).
     project_editor: ProjectEditorView,
-    /// The workbench-owned dive state, shared with the Fixtures tree and
-    /// the Props pane (R4): focused fixture, session, Props commit bumps.
-    dive_focused: Signal<Option<NodeId>>,
+    /// The DERIVED dive (unified-selection P4): the selection's entered
+    /// fixture, computed by the workbench from the one core selection —
+    /// never independent state. The session and Props commit bumps stay
+    /// workbench-owned signals.
+    dive_focused: Option<NodeId>,
     dive_session: Signal<lpa_mapping_editor::MapEditorSession>,
     dive_commits: Signal<u64>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let mut focused = dive_focused;
+    let focused = dive_focused;
     // Dive-scoped UI state: the asset pipeline's verdict, the view
     // toggles, the fit request, and upload plumbing. Held here (not in the
     // canvas host) so the toolbar and keyboard read the same signals.
@@ -108,24 +110,118 @@ pub fn EditorShellCenter(
             ProjectEditorOp::EditorJournal { event, node, mode },
         ));
     };
-    let enter_focus = move |on_action: &EventHandler<UiAction>, node: NodeId| {
-        enter_dive(on_action, focused, node)
-    };
-    let mut exit_focus = move |on_action: &EventHandler<UiAction>| {
-        if focused.peek().is_some() {
-            focus_journal(
-                on_action,
-                UiEditJournalEvent::ModeSwitch,
-                None,
-                UiEditorMode::Arrange,
-            );
+    let enter_focus = {
+        let surface = surface.clone();
+        move |on_action: &EventHandler<UiAction>, node: NodeId| {
+            enter_dive(on_action, &surface, node)
         }
-        focused.set(None);
     };
+    // Leaving the dive = ASCENDING the one selection (the fixture stays
+    // selected at project level); the journal rides the entered-transition
+    // tracker below, not this dispatch.
+    let exit_focus = {
+        let selection = selection.clone();
+        move |on_action: &EventHandler<UiAction>| {
+            let mut next = selection.clone();
+            next.ascend();
+            on_action.call(UiAction::from_op(
+                lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
+                ProjectEditorOp::PatchSelect { selection: next },
+            ));
+        }
+    };
+    // The entered-transition tracker: ONE journal home for every way the
+    // scope can change (double-click, tree row, toolbar, esc, empty-click
+    // ascend, even a selection carried over from the Patching view). It
+    // also seeds the SESSION's own selection from the core selection on
+    // entry — the enter gesture names the object, the session speaks
+    // paths (one-way for now; the P5 coordinator generalizes).
+    {
+        let mut last_entered = use_signal(|| None::<NodeId>);
+        let entered_now = focused;
+        if *last_entered.peek() != entered_now {
+            let previous = *last_entered.peek();
+            last_entered.set(entered_now);
+            match (previous, entered_now) {
+                (None, Some(node)) => focus_journal(
+                    &on_action,
+                    UiEditJournalEvent::ModeSwitch,
+                    Some(node),
+                    UiEditorMode::Mapping,
+                ),
+                (Some(_), Some(node)) => focus_journal(
+                    &on_action,
+                    UiEditJournalEvent::NodeSwitch,
+                    Some(node),
+                    UiEditorMode::Mapping,
+                ),
+                (Some(_), None) => focus_journal(
+                    &on_action,
+                    UiEditJournalEvent::ModeSwitch,
+                    None,
+                    UiEditorMode::Arrange,
+                ),
+                (None, None) => {}
+            }
+        }
+    }
+    {
+        // Seed the session selection from the core selection while the
+        // dive is entered: the object named at enter time (an Instance
+        // path) becomes the session's selected root. Change-guarded and
+        // effect-scoped so in-dive session clicks are never clobbered —
+        // the deps are the CORE facts, not the session.
+        let core_paths: Vec<String> = selection
+            .targets()
+            .iter()
+            .filter_map(|target| match target {
+                UiPatchTarget::Instance { node, path } if Some(*node) == focused => {
+                    Some(path.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        let entered_now = focused;
+        let mut session = dive_session;
+        let state = dive_state;
+        use_effect(use_reactive!(|(entered_now, core_paths)| {
+            // Re-run when the pipeline settles a body (the doc arrives
+            // after the selection names it).
+            let _ready = state.read().clone();
+            if entered_now.is_none() || core_paths.is_empty() {
+                return;
+            }
+            let indices: Vec<usize> = {
+                let s = session.peek();
+                core_paths
+                    .iter()
+                    .filter_map(|path| {
+                        crate::app::workbench::panels::authored_object_for_instance_path(
+                            s.doc(),
+                            path,
+                        )
+                    })
+                    .collect()
+            };
+            if indices.is_empty() {
+                return;
+            }
+            let current: Vec<usize> = session
+                .peek()
+                .selection
+                .paths()
+                .filter(|path| path.is_root())
+                .map(|path| path.object)
+                .collect();
+            if current != indices {
+                session.write().selection.set_roots(indices);
+            }
+        }));
+    }
     // The focused fixture's face-editor DTO (fetch/refusal/apply wiring
     // rides it); a fixture that loses its editor (node removed) drops
     // focus honestly.
-    let focused_editor: Option<(NodeId, String, UiAssetEditor)> = focused.read().and_then(|node| {
+    let focused_editor: Option<(NodeId, String, UiAssetEditor)> = focused.and_then(|node| {
         let fixture = surface
             .fixtures
             .iter()
@@ -221,10 +317,9 @@ pub fn EditorShellCenter(
 
     // The toolbar: one strip, per-activity item lists (D1 — the morph is
     // a data swap).
-    let groups = if let Some((_, label, editor)) = &focused_editor {
+    let groups = if let Some((_, _label, editor)) = &focused_editor {
         let session_read = dive_session.read();
         dive_toolbar(
-            label,
             &session_read.tool,
             *view_opts.read(),
             editor,
@@ -241,6 +336,7 @@ pub fn EditorShellCenter(
     };
     let on_toolbar_item = {
         let adjust = adjust.clone();
+        let enter_focus = enter_focus.clone();
         let arrange_verb = arrange_verb.clone();
         let selected = selected.clone();
         let focused_editor = focused_editor.clone();
@@ -252,7 +348,6 @@ pub fn EditorShellCenter(
         let upload_input_id = upload_input_id.clone();
         let mut dive_session = dive_session;
         move |id: &'static str| match id {
-            "dive.exit" => exit_focus(&on_action),
             "arrange.edit-mapping" => {
                 if let Some((_, node, _)) = &selected
                     && surface_fixtures.iter().any(|(n, has)| n == node && *has)
@@ -346,7 +441,7 @@ pub fn EditorShellCenter(
         let arrange_verb = arrange_verb.clone();
         hotkeys::use_window_keydown(move |event: web_sys::KeyboardEvent| {
             let input = hotkeys::editor_key_input(&event);
-            if focused.peek().is_some() {
+            if focused.is_some() {
                 if dived && dive_ready {
                     let result = handle_editor_key(
                         dive_session,
@@ -365,6 +460,13 @@ pub fn EditorShellCenter(
                     // A refused or still-loading dive: esc still leaves.
                     exit_focus(&on_action);
                 }
+                return;
+            }
+            if matches!(input.key, Key::Escape) {
+                // The root rung of the one ladder (D3): a fixture-grain
+                // selection ascends to nothing — esc deselects at project
+                // level exactly as empty-click does.
+                exit_focus(&on_action);
                 return;
             }
             let meta = input.modifiers.meta() || input.modifiers.ctrl();
@@ -483,14 +585,6 @@ fn fixture_toolbar(
 ) -> Vec<ToolbarGroup> {
     vec![
         ToolbarGroup {
-            id: "breadcrumb",
-            trailing: false,
-            items: vec![ToolbarItem::Status {
-                text: "Project".to_string(),
-                kind: StatusKind::Label,
-            }],
-        },
-        ToolbarGroup {
             id: "arrange",
             trailing: false,
             items: vec![
@@ -571,10 +665,11 @@ fn fixture_toolbar(
     ]
 }
 
-/// The dive's toolbar: breadcrumb (root exits), tools, view toggles, and
-/// the save cluster — ONE chrome row total.
+/// The dive's toolbar: tools, view toggles, and the save cluster — ONE
+/// chrome row total. The `‹ Project ▸ fixture` breadcrumb is GONE
+/// (unified-selection P4): scope reads from the dimmed neighbours, the
+/// Props stack, and the tree highlight; esc and empty-click ascend.
 fn dive_toolbar(
-    label: &str,
     tool: &MapTool,
     opts: EditorViewOptions,
     editor: &UiAssetEditor,
@@ -644,21 +739,6 @@ fn dive_toolbar(
         },
     ]);
     vec![
-        ToolbarGroup {
-            id: "breadcrumb",
-            trailing: false,
-            items: vec![
-                ToolbarItem::Link {
-                    id: "dive.exit",
-                    label: "‹ Project".to_string(),
-                    title: "Leave the dive — back to the project canvas (esc)".to_string(),
-                },
-                ToolbarItem::Status {
-                    text: format!("▸ {label}"),
-                    kind: StatusKind::Label,
-                },
-            ],
-        },
         ToolbarGroup {
             id: "tools",
             trailing: false,
@@ -743,32 +823,33 @@ fn dive_toolbar(
     ]
 }
 
-/// Enter the dive on `node`, stamping the edit journal exactly like the
-/// toolbar path — ONE truth for the transition, shared by the center's
-/// "edit mapping"/double-click and the Props placement card's action.
+/// Enter the dive on `node` — ONE truth for the transition, shared by the
+/// center's "edit mapping" and the Props placement card's action: the
+/// entering SELECTION is dispatched (the fixture's first object, or the
+/// entered-empty drawing state for a document with nothing to name) and
+/// the scope derives from it. The double-click path selects the CLICKED
+/// object instead (D4) — see the canvas host's Dive arm. The journal
+/// rides the center's entered-transition tracker.
 pub(crate) fn enter_dive(
     on_action: &EventHandler<UiAction>,
-    mut dive_focused: Signal<Option<NodeId>>,
+    surface: &UiPatchSurface,
     node: NodeId,
 ) {
-    let event = if dive_focused.peek().is_none() {
-        Some(UiEditJournalEvent::ModeSwitch)
-    } else if *dive_focused.peek() != Some(node) {
-        Some(UiEditJournalEvent::NodeSwitch)
-    } else {
-        None
-    };
-    if let Some(event) = event {
-        on_action.call(UiAction::from_op(
-            lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
-            ProjectEditorOp::EditorJournal {
-                event,
-                node: Some(node),
-                mode: UiEditorMode::Mapping,
-            },
-        ));
+    let first = surface
+        .fixtures
+        .iter()
+        .find(|fixture| fixture.node == node)
+        .and_then(|fixture| fixture.instances.first())
+        .map(|instance| crate::app::patch::verb_ui::instance_target(node, instance));
+    let mut next = lpa_studio_core::UiSelection::empty();
+    match first {
+        Some(target) => next.select_one(target),
+        None => next.enter(node),
     }
-    dive_focused.set(Some(node));
+    on_action.call(UiAction::from_op(
+        lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
+        ProjectEditorOp::PatchSelect { selection: next },
+    ));
 }
 
 /// Prebuild the arrange-op factory: `editor.json` artifact + the fixture

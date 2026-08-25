@@ -350,7 +350,14 @@ pub fn WorkbenchFrame(
     // session (one selection/document for the canvas, the Fixtures tree,
     // and the Props pane), and the Props pane's commit bump (plain data
     // across the dock boundary; the session host applies on change).
-    let dive_focused = use_signal(|| None::<NodeId>);
+    // The DERIVED dive (unified-selection P4): the entered fixture IS the
+    // selection's scope — no independent dive state to drift. Rendering
+    // the scope as a dive is MAPPING's activity (grain follows activity):
+    // Patching reads the same selection with no dive, so an object picked
+    // there simply arrives already-entered when the view switches here.
+    let dive_focused = matches!(view, WorkbenchView::Mapping)
+        .then(|| project_editor.patch_selection.entered())
+        .flatten();
     let dive_session = use_signal(|| MapEditorSession::new(lpc_mapping::Map2dDoc::new()));
     let dive_commits = use_signal(|| 0u64);
     // The patching activity's cross-dock state: verbs arm in the center
@@ -748,7 +755,7 @@ fn PanelDock(
     lens_card: Option<UiDeviceCard>,
     surface: Option<UiPatchSurface>,
     patch_selection: UiSelection,
-    dive_focused: Signal<Option<NodeId>>,
+    dive_focused: Option<NodeId>,
     dive_session: Signal<MapEditorSession>,
     dive_commits: Signal<u64>,
     /// The Nodes view's route — the Props stack's context-strip link.
@@ -844,7 +851,7 @@ fn PanelBody(
     lens_card: Option<UiDeviceCard>,
     surface: Option<UiPatchSurface>,
     patch_selection: UiSelection,
-    dive_focused: Signal<Option<NodeId>>,
+    dive_focused: Option<NodeId>,
     dive_session: Signal<MapEditorSession>,
     dive_commits: Signal<u64>,
     /// The Nodes view's route — the Props stack's context-strip link.
@@ -906,7 +913,7 @@ fn PanelBody(
                             })
                             .unwrap_or_default(),
                     ),
-                    dive: (*dive_focused.read()).map(|node| (node, dive_session)),
+                    dive: dive_focused.map(|node| (node, dive_session)),
                     on_action,
                 }
             }

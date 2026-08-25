@@ -142,8 +142,14 @@ pub enum FixtureEvent {
         commit: bool,
     },
     /// Double-click on a fixture when not dived, or on a NEIGHBOUR while
-    /// dived (D2: dive-switch).
-    Dive(String),
+    /// dived (D2: dive-switch). Carries the press-resolved pick facts so
+    /// the shell can select the OBJECT the user pointed at on entry
+    /// (unified-selection D4: double-click descends to the click).
+    Dive {
+        key: String,
+        lamp: Option<u32>,
+        object: Option<usize>,
+    },
 }
 
 /// The placed frame's project-space AABB — the marquee's intersection

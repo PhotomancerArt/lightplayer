@@ -427,7 +427,10 @@ fn dive_rows(doc: &Map2dDoc, selection: &MapSelection) -> Vec<DiveRow> {
 /// matches the first segment — never a second selection store. The
 /// instance number stays implied (the authored tree has one row per
 /// repeat interior, not per instance).
-fn authored_object_for_instance_path(doc: &Map2dDoc, instance_path: &str) -> Option<usize> {
+pub(crate) fn authored_object_for_instance_path(
+    doc: &Map2dDoc,
+    instance_path: &str,
+) -> Option<usize> {
     let first = instance_path
         .split('/')
         .find(|segment| !segment.is_empty())?;
@@ -1197,7 +1200,7 @@ fn PortCell(
 pub fn PropsPanel(
     surface: Option<UiPatchSurface>,
     selection: UiSelection,
-    dive_focused: Signal<Option<NodeId>>,
+    dive_focused: Option<NodeId>,
     dive_session: Signal<MapEditorSession>,
     mut dive_commits: Signal<u64>,
     /// The Nodes view's route — the context strip's "Nodes ↗" link.
@@ -1206,7 +1209,7 @@ pub fn PropsPanel(
 ) -> Element {
     // Dived: the full stack. A dive whose fixture vanished from the
     // surface falls through to the arranged-level arms honestly.
-    if let Some(node) = *dive_focused.read()
+    if let Some(node) = dive_focused
         && let Some(surface_now) = surface.as_ref()
         && let Some(fixture) = surface_now
             .fixtures
@@ -1665,7 +1668,7 @@ fn PlacementCard(
     dived: bool,
     /// Whether this card is the stack's top/selected card.
     selected: bool,
-    dive_focused: Signal<Option<NodeId>>,
+    dive_focused: Option<NodeId>,
     mut dive_session: Signal<MapEditorSession>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
@@ -1769,8 +1772,11 @@ fn PlacementCard(
                             class: "lpme-btn",
                             title: "Edit this fixture's mapping (double-click on the canvas does too)",
                             disabled: !can_edit_mapping,
-                            onclick: move |_| {
-                                crate::app::editor_shell::enter_dive(&on_action, dive_focused, node);
+                            onclick: {
+                                let surface = surface.clone();
+                                move |_| {
+                                    crate::app::editor_shell::enter_dive(&on_action, &surface, node);
+                                }
                             },
                             "edit mapping"
                         }

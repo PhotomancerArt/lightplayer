@@ -283,6 +283,7 @@ pub fn EditorCanvas(
     let fixtures_down = fixtures.clone();
     let fixtures_dbl = fixtures.clone();
     let fixtures_up = fixtures.clone();
+    let focused_down = focused.clone();
     let focused_dbl = focused.clone();
     let cam = camera();
     // Screen-constant sizing folds in the placement scale: a doc unit
@@ -627,14 +628,39 @@ pub fn EditorCanvas(
                     }
                     return;
                 }
+                // D4 (unified selection): while dived, a NEIGHBOUR
+                // fixture's sprite takes single clicks — click selects at
+                // scope level, so the shell ascends to that fixture. The
+                // focused document's own elements stop propagation before
+                // this, and the focused sprite's body is hidden.
+                if on_fixture.is_some() {
+                    let view = event_view_point(&anchor, &evt);
+                    let project = camera.peek().view_to_doc(view);
+                    let project_point = [f64::from(project[0]), f64::from(project[1])];
+                    if let Some(sprite) = hit_fixture(&fixtures_down, project_point)
+                        .filter(|sprite| focused_down.as_deref() != Some(sprite.key.as_str()))
+                    {
+                        if let Some(handler) = &on_fixture {
+                            handler.call(FixtureEvent::Select {
+                                pick: Some(FixturePick {
+                                    key: sprite.key.clone(),
+                                    lamp: nearest_lamp(sprite, project_point),
+                                    object: hit_object(sprite, project_point),
+                                }),
+                                toggle: evt.data().modifiers().shift(),
+                            });
+                        }
+                        return;
+                    }
+                }
                 let doc_point = event_doc_point(&interact, &evt);
                 let shift = evt.data().modifiers().shift();
                 let tool_now = session.read().tool.clone();
                 match tool_now {
                     MapTool::Select => {
-                        if !shift {
-                            session.write().selection.clear();
-                        }
+                        // The press no longer clears eagerly: a tap's full
+                        // ascend (D3) and a marquee's replace both resolve
+                        // at RELEASE, so an aborted band loses nothing.
                         drag.set(Some(CanvasDrag::Marquee {
                             start: doc_point,
                             current: doc_point,
@@ -947,11 +973,15 @@ pub fn EditorCanvas(
                 let origin = anchor.peek().origin();
                 let view = [point.x as f32 - origin[0], point.y as f32 - origin[1]];
                 let project = camera.peek().view_to_doc(view);
-                if let Some(sprite) =
-                    hit_fixture(&fixtures_dbl, [f64::from(project[0]), f64::from(project[1])])
+                let project_point = [f64::from(project[0]), f64::from(project[1])];
+                if let Some(sprite) = hit_fixture(&fixtures_dbl, project_point)
                     && focused_dbl.as_deref() != Some(sprite.key.as_str())
                 {
-                    handler.call(FixtureEvent::Dive(sprite.key.clone()));
+                    handler.call(FixtureEvent::Dive {
+                        key: sprite.key.clone(),
+                        lamp: nearest_lamp(sprite, project_point),
+                        object: hit_object(sprite, project_point),
+                    });
                 }
             },
             onwheel: move |evt| {
