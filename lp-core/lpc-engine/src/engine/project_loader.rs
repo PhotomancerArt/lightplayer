@@ -2458,9 +2458,14 @@ mod tests {
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
+        // The supported number tracks MAP2D_FORMAT so a format bump cannot
+        // silently stale this pin (it did once, at the 3→4 bump).
         assert_fixture_node_error(
             &rt,
-            "unsupported map2d format 99 (this build reads up to 3)",
+            &format!(
+                "unsupported map2d format 99 (this build reads up to {})",
+                lpc_mapping::MAP2D_FORMAT
+            ),
         );
     }
 
