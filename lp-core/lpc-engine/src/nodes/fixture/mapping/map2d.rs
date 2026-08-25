@@ -17,7 +17,7 @@
 
 use alloc::vec::Vec;
 
-use lpc_mapping::{Map2dDoc, Map2dError, ResolvedMap2d, fit_points, resolve};
+use lpc_mapping::{Map2dDoc, Map2dError, ResolvedMap2d, fit_points, fit_scale, resolve};
 use lpc_model::nodes::fixture::{ResolvedMappingCompact, ResolvedSpan};
 
 /// Resolve a map2d document into the compact mapping carrier for a
@@ -39,6 +39,19 @@ pub fn mapping_from_map2d_doc(
     }
 
     let positions: Vec<[f32; 2]> = lamps.iter().map(|lamp| lamp.pos).collect();
+    // The doc's sample_diameter is a doc-space LENGTH; the carrier's is
+    // texture pixels (that is what the sampling footprint and the display
+    // layout's lamp radius read). It must ride the same fit as the
+    // positions — passed through unscaled it wore whatever unit the doc
+    // chose as pixels, which the old preview's absolute clamps masked
+    // (docs/defects/2026-08-24-map2d-sample-diameter-unit-mismatch.md).
+    let sample_diameter = doc.sample_diameter
+        * fit_scale(
+            &positions,
+            doc.canvas_bounds(),
+            texture_width,
+            texture_height,
+        )?;
     // The 20 B/lamp resolver output has nothing left to say once the
     // positions are copied out; dropping it here keeps the load-time peak to
     // two 8 B/lamp buffers instead of three.
@@ -70,7 +83,7 @@ pub fn mapping_from_map2d_doc(
     Ok(ResolvedMappingCompact {
         spans: compact_spans,
         points,
-        sample_diameter: doc.sample_diameter,
+        sample_diameter,
     })
 }
 
@@ -128,6 +141,21 @@ mod tests {
                 .sum::<usize>(),
             mapping.points.len()
         );
+    }
+
+    /// The defect pin: a doc-space diameter must shrink by the same fit
+    /// as the positions. A 20-unit-wide doc into a 10 px texture halves
+    /// lengths; the diameter is a length.
+    #[test]
+    fn sample_diameter_rides_the_position_fit() {
+        let svg = r#"
+<svg viewBox="0 0 20 10">
+  <g><polyline points="0 0 20 10"/><text>path:1,count:2</text></g>
+</svg>
+"#;
+        let doc = svg_to_doc(svg, 2.0).expect("import");
+        let mapping = mapping_from_map2d_doc(&doc, 10, 10).expect("resolve");
+        assert!((mapping.sample_diameter - 1.0).abs() < 1e-6);
     }
 
     #[test]

@@ -38,6 +38,34 @@ pub fn bounds_of_points(points: &[[f32; 2]]) -> Option<Bounds2d> {
     })
 }
 
+/// Texture pixels per doc unit under the same aspect-preserving fit
+/// [`fit_points`] applies — the factor that carries any doc-space LENGTH
+/// (a lamp's `sample_diameter`) into texture space alongside the fitted
+/// positions. Uniform by construction: an aspect-preserving fit scales
+/// both axes identically in pixels.
+///
+/// Same `frame`-else-geometry-bounds rule and the same degenerate-input
+/// refusals as [`fit_points`], so a caller can never fit positions by one
+/// bounds and lengths by another.
+pub fn fit_scale(
+    points: &[[f32; 2]],
+    frame: Option<Bounds2d>,
+    target_width: u32,
+    target_height: u32,
+) -> Result<f32, Map2dError> {
+    let bounds = frame
+        .or_else(|| bounds_of_points(points))
+        .ok_or(Map2dError::EmptyBounds)?;
+    if bounds.width <= f32::EPSILON
+        || bounds.height <= f32::EPSILON
+        || target_width == 0
+        || target_height == 0
+    {
+        return Err(Map2dError::EmptyBounds);
+    }
+    Ok((target_width as f32 / bounds.width).min(target_height as f32 / bounds.height))
+}
+
 /// Fit doc-space points into a `target_width` × `target_height` texture,
 /// preserving aspect, centered on the short axis, normalized to `[0, 1]`.
 ///
@@ -88,6 +116,29 @@ pub fn fit_points(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The scale that carries lengths is the same one that carried the
+    /// positions: wide-into-square is width-bound (10 px / 20 units),
+    /// tall-into-square is height-bound, and a frame overrides geometry.
+    #[test]
+    fn fit_scale_matches_the_position_fit() {
+        let scale = fit_scale(&[[0.0, 0.0], [20.0, 10.0]], None, 10, 10).unwrap();
+        assert!((scale - 0.5).abs() < 1e-6);
+        let scale = fit_scale(&[[0.0, 0.0], [10.0, 20.0]], None, 10, 10).unwrap();
+        assert!((scale - 0.5).abs() < 1e-6);
+        let frame = Bounds2d {
+            min_x: 0.0,
+            min_y: 0.0,
+            width: 100.0,
+            height: 10.0,
+        };
+        let scale = fit_scale(&[[0.0, 5.0], [20.0, 5.0]], Some(frame), 40, 10).unwrap();
+        assert!((scale - 0.4).abs() < 1e-6);
+        assert_eq!(
+            fit_scale(&[[1.0, 1.0], [1.0, 1.0]], None, 10, 10),
+            Err(Map2dError::EmptyBounds)
+        );
+    }
 
     #[test]
     fn fits_wide_bounds_into_square_with_vertical_padding() {
