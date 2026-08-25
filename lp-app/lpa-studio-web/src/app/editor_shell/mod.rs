@@ -517,6 +517,9 @@ pub fn EditorShellCenter(
                         bodies,
                         selection: selection.clone(),
                         pack,
+                        // The Mapping view's transform furniture: the
+                        // fixture selection box wears corner scale handles.
+                        transform_handles: true,
                         dive: focused_editor.as_ref().map(|(node, _, _)| DiveHost {
                             node: *node,
                             session: dive_session,
