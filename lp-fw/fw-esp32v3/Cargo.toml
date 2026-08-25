@@ -58,7 +58,6 @@ server = [
     "dep:embassy-futures",
     "dep:embassy-sync",
     "dep:embassy-time",
-    "dep:embedded-io-async",
     "dep:embedded-storage",
     "dep:esp-rtos",
     "dep:esp-storage",
@@ -74,7 +73,6 @@ server = [
     "dep:lpfs",
     "dep:lp-ws281x",
     "dep:fw-core",
-    "dep:ser-write-json",
 ]
 
 # Periodic WS281x telemetry over the serial link — OFF by default.
@@ -292,10 +290,12 @@ embedded-storage = { version = "0.3", optional = true }
 esp-storage = { version = "0.9", default-features = false, features = ["critical-section", "esp32", "panic-unaligned-buffer"], optional = true }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
 
-# io_task's wire-serialization path plus the boot-time `ServerHello`.
+# io_task's wire-serialization path plus the boot-time `ServerHello`. The
+# `ser-write-json` sink itself lives in `fw_esp32_common::serial::server_msg`
+# (the same lift the S3 and C6 already took), so there is no direct dep here —
+# only lpc-wire's serializer feature.
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
-ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 
 # ⚠️ Two of eight node gates, the same pair fw-esp32s3 lists. `node-fixture` is
 # not optional alongside `node-shader`: `OutputNode::consume` requires a

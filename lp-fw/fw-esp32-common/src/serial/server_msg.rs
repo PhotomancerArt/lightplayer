@@ -142,12 +142,14 @@ impl<W: embedded_io_async::Write, F: FnMut()> ChunkedWriter<'_, W, F> {
         let link_name = self.policy.link_name;
         // `writer` borrows `buf`, which lives in this frame; the write must be
         // driven from here rather than returned.
-        if self.write_all(writer.bytes()).await {
-            Ok(())
-        } else {
-            Err(lpc_wire::TransportError::Other(format!(
-                "server message id={id} {link_name} write timed out or failed"
-            )))
+        match self.try_write_all(writer.bytes()).await {
+            Ok(()) => Ok(()),
+            // The failure's chunk/elapsed detail is what distinguishes a
+            // wedged peripheral from a starved io task; keep it in the error
+            // so the transport's warn (and any peer-visible error) carries it.
+            Err(failure) => Err(lpc_wire::TransportError::Other(format!(
+                "server message id={id} {link_name} write {failure}"
+            ))),
         }
     }
 }
