@@ -28,10 +28,25 @@ pub const DEFAULT_READY_DEADLINE: Duration = Duration::from_secs(5);
 
 /// Maximum quiet gap while waiting for one app-protocol response frame.
 ///
-/// This is the BACKSTOP, not the mechanism: every request gets a response
-/// frame (including handler failures, which answer `ServerMsgBody::Error`),
-/// so this only fires when the wire itself died mid-request.
+/// A frame-gap backstop for a DEAD wire, not a bound on any request: real
+/// firmware heartbeats every 5 s, and each heartbeat restarts this budget —
+/// so a device that drops a response while heartbeating passes it forever
+/// (the 2026-08-24 request-idle defect). The per-request bound is
+/// [`request_total`](DeviceDeadlines::request_total), enforced by
+/// `lpa_client::RequestDeadline`. This one also bounds each receive inside
+/// streamed project reads, which the total deadline deliberately skips.
 pub const DEFAULT_REQUEST_IDLE_DEADLINE: Duration = Duration::from_secs(10);
+
+/// Total budget for one single-response request: send plus the whole
+/// response-correlation wait, unrelated frames included.
+///
+/// Sized for the interactive Studio path: the slowest legitimate
+/// single-response requests are device-side work measured in seconds
+/// (`LoadProject` compile, `HashPackage`); file writes chunk at 4 KiB per
+/// request, and streamed project reads are bounded per frame by their own
+/// quiet-gap deadline instead. Twice the idle backstop; the host CLI's
+/// `TokioLpClient` keeps its separate 60 s batch-oriented total.
+pub const DEFAULT_REQUEST_TOTAL_DEADLINE: Duration = Duration::from_secs(20);
 
 /// Gap between readiness pump passes (matches the browser adapter's 10 ms
 /// poll interval).
@@ -62,6 +77,9 @@ pub struct DeviceDeadlines {
     pub ready: Duration,
     /// Quiet gap per app-protocol response frame (expiry ⇒ request error).
     pub request_idle: Duration,
+    /// Total per single-response request, send included (expiry ⇒ request
+    /// error + abandoned id).
+    pub request_total: Duration,
 }
 
 impl Default for DeviceDeadlines {
@@ -70,6 +88,7 @@ impl Default for DeviceDeadlines {
             connect: DEFAULT_CONNECT_DEADLINE,
             ready: DEFAULT_READY_DEADLINE,
             request_idle: DEFAULT_REQUEST_IDLE_DEADLINE,
+            request_total: DEFAULT_REQUEST_TOTAL_DEADLINE,
         }
     }
 }

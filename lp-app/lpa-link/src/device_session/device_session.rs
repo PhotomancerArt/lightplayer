@@ -169,6 +169,21 @@ impl DeviceSession {
         Box::new(DeviceClientIo::new(Rc::clone(&self.shared)))
     }
 
+    /// The total per-request deadline a client over [`Self::client_io`]
+    /// should install (`LpClient::with_request_deadline`), built from this
+    /// session's injected timers and its `request_total` budget.
+    ///
+    /// Real firmware can drop a response while heartbeating (UART TX
+    /// starvation under engine load); the channel's own `request_idle` gap
+    /// budget restarts on every heartbeat, so only a total deadline in the
+    /// correlation layer bounds the request.
+    pub fn request_deadline(&self) -> lpa_client::RequestDeadline {
+        let timers = self.shared.timers().clone();
+        lpa_client::RequestDeadline::new(timers.deadlines().request_total, move |duration| {
+            timers.sleep(duration)
+        })
+    }
+
     /// Current wire ownership mode.
     pub fn mode(&self) -> DeviceMode {
         self.shared.mode.get()
