@@ -76,7 +76,11 @@ static SERVER_WRITE_RESULT: Channel<
 /// Write timeout per chunk. A UART TX FIFO drains at line rate unconditionally,
 /// so this is not a host-liveness signal the way the S3's is — it is a
 /// backstop against a wedged peripheral, sized to be far above the ~5.6 ms a
-/// full chunk costs at 921600 baud.
+/// full chunk costs at 921600 baud. In practice it also fires when this task
+/// goes unpolled for 250 ms — executor starvation under a long engine tick,
+/// which is what the 2026-08-21 dig2go bench measured on every timeout (see
+/// `docs/debt/shared-uart-io-task-starvation.md`). The timeout log's
+/// chunk/elapsed numbers exist to tell the two apart.
 const WRITE_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// Chunk size for large writes, in *line time* rather than syscall overhead:
@@ -153,6 +157,9 @@ impl UartLink {
     /// peripheral is wedged rather than that a host went away.
     async fn write_chunked(&mut self, data: &[u8], router: &MessageRouter) -> bool {
         use embassy_futures::select::{Either, select};
+        let started = embassy_time::Instant::now();
+        let chunks_total = data.len().div_ceil(WRITE_CHUNK_SIZE).max(1);
+        let mut chunk_index = 0;
         let mut offset = 0;
         while offset < data.len() {
             let chunk_end = (offset + WRITE_CHUNK_SIZE).min(data.len());
@@ -163,9 +170,15 @@ impl UartLink {
             .await
             {
                 Either::First(_) => {
+                    // A wedged peripheral crawls through every chunk, so
+                    // elapsed ≈ chunk × timeout; a starved task sails through
+                    // its chunks and then stalls once, so elapsed ≈ one
+                    // timeout regardless of chunk. See `WRITE_TIMEOUT`.
                     log::warn!(
-                        "[io_task] UART TX timed out after {offset} of {} B",
-                        data.len()
+                        "[io_task] UART TX timed out at chunk {}/{chunks_total} ({offset} of {} B) after {} ms",
+                        chunk_index + 1,
+                        data.len(),
+                        started.elapsed().as_millis()
                     );
                     return false;
                 }
@@ -176,6 +189,7 @@ impl UartLink {
                 Either::Second(Ok(())) => {}
             }
             offset = chunk_end;
+            chunk_index += 1;
             self.poll_rx(router);
         }
         true
