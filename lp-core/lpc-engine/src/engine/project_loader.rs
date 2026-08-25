@@ -2424,6 +2424,12 @@ mod tests {
     /// "unsupported format" message, not with an opaque parse error. The
     /// format peek in `Map2dDoc::from_json` is what makes that true; this
     /// pins the message a user actually sees on the device.
+    ///
+    /// Feature-gated because the expected message names
+    /// `lpc_mapping::MAP2D_FORMAT`, and the crate is only linked when
+    /// fixture nodes are — the behavior under test doesn't exist without
+    /// them anyway.
+    #[cfg(feature = "node-fixture")]
     #[test]
     fn fixture_map2d_mapping_rejects_newer_format() {
         let fs = fixture_project_fs();
@@ -2493,6 +2499,8 @@ mod tests {
         assert_node_for_def_error(&rt, "/output.json", "empty part");
     }
 
+    // Only the gated fixture-format test calls this; it inherits the gate.
+    #[cfg(feature = "node-fixture")]
     fn assert_fixture_node_error(rt: &Engine, expected: &str) {
         assert_node_for_def_error(rt, "/fixture.json", expected);
     }
