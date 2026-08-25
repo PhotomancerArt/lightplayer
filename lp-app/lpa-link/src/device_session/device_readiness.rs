@@ -1,8 +1,12 @@
 //! Hello gate (readiness) + boot-line classifier (diagnosis).
 //!
-//! **Readiness is granted by exactly one thing**: the unsolicited wire
-//! [`ServerHello`] whose `proto` matches [`WIRE_PROTO_VERSION`]
-//! ([`gate_first_frame`]). Everything else in this file is DIAGNOSIS: the
+//! **Readiness is granted by exactly one thing**: a wire [`ServerHello`]
+//! whose `proto` matches [`WIRE_PROTO_VERSION`] ([`gate_frame`]) — either
+//! the unsolicited boot hello or the answer to the session's own
+//! `ClientRequest::Hello` (sent during readiness, because only a boot emits
+//! the unsolicited one and a connect cannot assume the power to cause a
+//! boot — `docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`).
+//! Everything else in this file is DIAGNOSIS: the
 //! [`BootLineClassifier`] watches non-protocol serial lines to explain why a
 //! device is not ready (blank flash, ROM bootloader, known foreign firmware,
 //! silence) and never grants readiness itself.
@@ -25,26 +29,34 @@ const RECENT_LINE_LIMIT: usize = 80;
 const FAILURE_SNIPPET_LINE_LIMIT: usize = 6;
 const SAFE_TO_REPLACE_FIRMWARE_BOOT_STRINGS: &[&str] = &["hello from seeed studio xiao esp32-c6"];
 
-/// Outcome of gating the first protocol frame seen while booting.
+/// Outcome of gating one protocol frame seen while booting.
 #[derive(Debug)]
 pub(crate) enum HelloGate {
     /// The frame is a hello with the wire proto this build speaks.
     Ready(ServerHello),
-    /// The peer speaks `M!` frames but is not a compatible LightPlayer
-    /// server: wrong proto, or a non-hello frame before any hello.
+    /// A hello arrived, but for a different wire proto — terminal.
     Incompatible(IncompatibleReason),
+    /// A decoded non-hello frame. NOT terminal: a RUNNING server emits
+    /// unsolicited frames (heartbeat every 5 s), so a mid-stream connect
+    /// legitimately sees them before the hello ANSWER arrives (the session
+    /// asks via `ClientRequest::Hello`). Absorbed and counted; a deadline
+    /// expiry with only these seen classifies as
+    /// [`IncompatibleReason::FrameBeforeHello`] — the same pre-hello-firmware
+    /// verdict as before, just decided at the deadline instead of on first
+    /// sight (`docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`).
+    NotHello,
 }
 
-/// Hello-first readiness: only a proto-matching [`ServerHello`] grants
-/// readiness; any other decoded frame before a hello means an incompatible
-/// (pre-hello or foreign-proto) peer.
-pub(crate) fn gate_first_frame(frame: WireServerMessage) -> HelloGate {
+/// Hello readiness: only a proto-matching [`ServerHello`] grants readiness —
+/// whether the unsolicited boot hello or the answer to the session's own
+/// hello request. Non-hello frames are absorbed, never condemned on sight.
+pub(crate) fn gate_frame(frame: WireServerMessage) -> HelloGate {
     match frame.msg {
         ServerMsgBody::Hello(hello) if hello.proto == WIRE_PROTO_VERSION => HelloGate::Ready(hello),
         ServerMsgBody::Hello(hello) => {
             HelloGate::Incompatible(IncompatibleReason::ProtoMismatch { hello })
         }
-        _ => HelloGate::Incompatible(IncompatibleReason::FrameBeforeHello),
+        _ => HelloGate::NotHello,
     }
 }
 
@@ -61,6 +73,7 @@ pub struct BootLineClassifier {
     safe_to_replace_firmware_count: usize,
     server_started: bool,
     detected_chip: Option<String>,
+    wire_frames_seen: usize,
 }
 
 impl BootLineClassifier {
@@ -124,6 +137,18 @@ impl BootLineClassifier {
     /// firmware ([`IncompatibleReason::NoHello`]), not readiness.
     pub fn server_started(&self) -> bool {
         self.server_started
+    }
+
+    /// Record one decoded non-hello wire frame absorbed while booting.
+    /// Diagnosis-only: frames-but-never-a-hello at the deadline is the
+    /// [`IncompatibleReason::FrameBeforeHello`] verdict.
+    pub fn observe_wire_frame(&mut self) {
+        self.wire_frames_seen += 1;
+    }
+
+    /// How many non-hello wire frames were absorbed while booting.
+    pub fn wire_frames_seen(&self) -> usize {
+        self.wire_frames_seen
     }
 
     pub fn recent_lines(&self) -> &[String] {
@@ -263,7 +288,7 @@ mod tests {
         let frame = ServerMessage::new(0, ServerMsgBody::Hello(hello.clone()));
 
         assert!(matches!(
-            gate_first_frame(frame),
+            gate_frame(frame),
             HelloGate::Ready(gated) if gated == hello
         ));
     }
@@ -274,19 +299,38 @@ mod tests {
         let frame = ServerMessage::new(0, ServerMsgBody::Hello(hello.clone()));
 
         assert!(matches!(
-            gate_first_frame(frame),
+            gate_frame(frame),
             HelloGate::Incompatible(IncompatibleReason::ProtoMismatch { hello: gated })
                 if gated == hello
         ));
     }
 
     #[test]
-    fn non_hello_frame_before_hello_is_incompatible() {
+    fn non_hello_frame_is_absorbed_not_condemned() {
+        // A RUNNING server heartbeats; a mid-stream connect sees one before
+        // any hello answer. The gate absorbs it — the deadline, not the
+        // first frame, decides FrameBeforeHello.
         let frame = ServerMessage::new(3, ServerMsgBody::UnloadProject);
 
+        assert!(matches!(gate_frame(frame), HelloGate::NotHello));
+    }
+
+    #[test]
+    fn hello_after_absorbed_frames_still_passes() {
+        // heartbeat → heartbeat → hello answer: the running-server connect.
+        let mut classifier = BootLineClassifier::new();
+        for _ in 0..2 {
+            let heartbeat = ServerMessage::new(0, ServerMsgBody::UnloadProject);
+            assert!(matches!(gate_frame(heartbeat), HelloGate::NotHello));
+            classifier.observe_wire_frame();
+        }
+        assert_eq!(classifier.wire_frames_seen(), 2);
+
+        let hello = test_hello(WIRE_PROTO_VERSION);
+        let frame = ServerMessage::new(0, ServerMsgBody::Hello(hello.clone()));
         assert!(matches!(
-            gate_first_frame(frame),
-            HelloGate::Incompatible(IncompatibleReason::FrameBeforeHello)
+            gate_frame(frame),
+            HelloGate::Ready(gated) if gated == hello
         ));
     }
 

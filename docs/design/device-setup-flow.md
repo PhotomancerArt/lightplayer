@@ -41,23 +41,49 @@ entry — flow-spec called that state `SIM_BOARD_PICK`; see §7).
 
 ```text
 CONNECT_INTRO                    "connect your device now" — two stacked full-width CTAs
-  —ItsConnected→                 PORT_PICKING          [RequestPort]
+  —ItsConnected→                 PORT_PICKING          [RequestPort{AutoAdopt|ListOnly}]
+                                 (AutoAdopt on first arrival; ANY hint = a return trip,
+                                  which never silently adopts again — §2a)
   —PickBoardFirst→               BOARD_FIRST
                                  (cancel hints escalate toward the secondary CTA)
 BOARD_FIRST                      full-catalog board pick, then board-specific connect
                                  guidance — driver steps for CH340-class boards,
                                  cable/port tips otherwise
   —BoardChosen→                  BOARD_FIRST           (records the choice; pre-seeds BOARD_PICK)
-  —ItsPluggedIn→                 PORT_PICKING          [RequestPort]
+  —ItsPluggedIn→                 PORT_PICKING          [RequestPort{AutoAdopt, board_hint}]
+                                 (the pick narrows the grant sweep to the board's
+                                  usb_bridge VID:PID — §2a)
   —Back→                         CONNECT_INTRO
-PORT_PICKING
+PORT_PICKING                     asking for a port: the browser's chooser when `grants`
+                                 is empty, the in-app granted-ports picker otherwise (§2a)
+  —PortChosen{via_grant?}→       CONNECTING            (the chooser answered — or a grant was
+                                 adopted, carrying its label; the connect it started is
+                                 already running, so this asks for nothing)
+  —GrantedPortsListed→           PORT_PICKING          (several authorized ports: the state
+                                 now carries the in-app picker's rows; never a guess)
+  —GrantChosen→                  CONNECTING            [ConnectGrantedPort]
+                                 (a listed row; an unlisted endpoint_id is a stale click)
+  —PickDifferentPort→            PORT_PICKING          [RequestPort{ChooserOnly}]
+                                 ("Another port…" — the grant list stands down)
   —PortGranted→                  PROBING               [ProbeBoard]
+                                 (a grant with no CONNECTING in between: the port was
+                                  already open, or a caller that does not split the phases)
   —PortPickerCancelled→          CONNECT_INTRO         (hint: picker closed)
   —PortPickerEmpty→              CONNECT_INTRO         (hint escalates to BOARD_FIRST)
+CONNECTING                       opening the port, resetting, waiting for the hello —
+                                 the SECONDS that used to wear PORT_PICKING's copy.
+                                 Carries `via_grant` when a grant was adopted: the card
+                                 names the port and offers "Not this one?" (§2a)
+  —PortGranted→                  PROBING               [ProbeBoard]
+  —PortPickerCancelled→          CONNECT_INTRO         (the connect ended with no session;
+                                 hint: GrantConnectFailed when via_grant — names the adopted
+                                 port as the suspect AND demotes the next attempt to ListOnly)
+  —PickDifferentPort→            PORT_PICKING          [ReleasePort, RequestPort{ChooserOnly}]
 PROBING                          chip probe + board-state detection, one spinner
   —ProbeCompleted(Blank)→        BOARD_PICK            (chip known → catalog filtered + Generic)
   —ProbeCompleted(Wled)→         WLED_FOUND
   —ProbeCompleted(LightPlayer)→  ALREADY_LP
+  —ProbeCompleted(StaleLightPlayer)→ STALE_LP
   —ProbeCompleted(Unresponsive)→ PROBE_FAILED
   —PortLost→                     CONNECT_INTRO         (hint: device disconnected)
 BOARD_PICK                       picker filtered to the detected chip + Generic;
@@ -87,6 +113,9 @@ ALREADY_LP                       "Already running LightPlayer" + identity card
   —AdoptAndOpen→                 DEVICE_HOME           [RecordSighting?, OpenDeviceHome]
                                  (secondary "Open in the editor →" — what Done used to do)
   —SetUpFresh→                   BOARD_PICK            (re-flash path; warns before writing)
+STALE_LP                         "Running an older LightPlayer" + identity card
+  —UpdateFirmware→               BOARD_PICK            (the update IS a flash; warns before writing)
+  —Back→                         CONNECT_INTRO         [ReleasePort]
 FLASHING                         activity view + step checklist
   —FlashSucceeded→               PROVISION
   —FlashFailed→                  FLASH_FAILED
@@ -120,6 +149,15 @@ CLOSED                           terminal
 
 ### Cross-cutting
 
+- `PickDifferentPort` in any port-holding state before the flash
+  (CONNECTING, PROBING, and the five verdict states) → PORT_PICKING
+  `[ReleasePort, RequestPort{ChooserOnly}]`. The link that means it lives
+  on CONNECTING, but gestures queue behind the in-flight connect — by the
+  time the click runs, the flow has usually probed through the wrong port
+  and landed on a verdict. Wherever it lands, the meaning is the same:
+  drop this port, ask the browser's chooser. The flash states exclude it
+  (a write in progress outranks a second thought), and PROVISION is
+  post-flash — the wrong-port doubt has no business there.
 - `CloseRequested` anywhere outside FLASHING / FLASH_FAILED /
   ABANDON_GUARD / PROVISION → `CLOSED(Cancelled)`, no guard, state
   discarded (nothing was written before FLASHING; adopt writes nothing).
@@ -158,6 +196,48 @@ CLOSED                           terminal
   and `FlashSucceeded`: no component can name it, only the controller
   reporting what the world did. `gesture.rs`'s partition test enforces it.
 
+## 2a · Grant-aware port picking (D7, ratified 2026-08-08)
+
+**The problem.** `requestPort()` always shows Chrome's native chooser by
+spec; grants only affect `getPorts()`. So every wizard walk cost a human
+click in a dialog no agent can drive, even when the origin already held
+the exact port. The constraint Yona set: **silent adoption is only safe
+when unambiguous.**
+
+**The ladder** (`plan_for_granted_ports`, pure and host-tested; the
+executor walks it inside `RequestPort` before any chooser):
+
+- **0 granted ports** → the native chooser, exactly as before.
+- **Exactly 1** (under `AutoAdopt`) → adopt it, *visibly and reversibly*:
+  `PortChosen{via_grant: label}` puts the port's name on the CONNECTING
+  card ("Using your previously-authorized port — …") with "Not this one?
+  Pick a different port" one click away.
+- **Several** → never guess. `GrantedPortsListed` renders the in-app
+  picker: one row per grant, "Another port… (browser chooser)" as the
+  last row. Better for humans (it can later carry registry recognition,
+  which Chrome's dialog cannot) and synthetically clickable for agents.
+- **Board-first refinement**: with a board already picked, the sweep is
+  narrowed to that board's `usb_bridge` VID:PID first. Exactly one match
+  adopts even when unrelated grants exist; zero matches means the board's
+  own port was never granted, and only the chooser can grant it.
+- **Honesty**: `getInfo()` exposes only VID:PID, so two identical bridge
+  chips are indistinguishable until opened. The picker says so;
+  disambiguation-by-probe is a v2.
+
+**Adopt only once.** Any return to CONNECT_INTRO (a hint is set) demotes
+the next request to `ListOnly`: a failed or refused adoption is exactly
+what makes the grant ambiguous, so it is listed, never re-adopted. The
+list keeps single-grant retries one deliberate click for agents without
+ever re-adopting in silence. `ChooserOnly` is the user demanding the
+native dialog by name; note `requestPort()` needs transient user
+activation, so the chooser is only ever commanded off a click.
+
+**Plumbing.** VID:PID travels as data, not label prose:
+`getGrantedPorts()`/`requestPort()` (JS) → `BrowserSerialPortHandle` →
+`BrowserSerialEsp32Provider::discover_granted_endpoints_with_usb` →
+`GrantedPortSummary`. The wizard-facing rows are `SetupGrantedPort`
+(endpoint id + label only — components stay provider-blind).
+
 ## 3 · Provision step (shared)
 
 **New project only.** Load-existing is deferred; compose/enhance later. The
@@ -187,14 +267,15 @@ in silicon and an erase keeps it (`docs/adr/2026-08-04-device-identity-anchored-
 
 ## 4 · Board-state detection (Flash step, hardware)
 
-One probe pass, four verdicts — a first-class enum, not scattered ifs:
+One probe pass, one verdict — a first-class enum, not scattered ifs:
 
 | Verdict | Evidence | Flow |
 |---|---|---|
 | `LightPlayer { known }` | a proto-matching `ServerHello` arrived — **and nothing else** | ALREADY_LP |
+| `StaleLightPlayer { known }` | the link classified the peer `DeviceState::Incompatible` — LightPlayer framing, no proto-matching hello | STALE_LP |
 | `Wled { known }` | a serial/Improv line names WLED | WLED_FOUND |
-| `Blank { known }` | a no-firmware boot signature (`invalid header: 0xffffffff`, ROM download mode, a known replaceable banner) | BOARD_PICK |
-| `Unresponsive { known }` | nothing intelligible | PROBE_FAILED |
+| `Blank { known }` | a no-firmware boot signature (`invalid header: 0xffffffff`, ROM download mode, a known replaceable banner) — **or** a bootloader that ANSWERED the escalation's SYNC handshake | BOARD_PICK |
+| `Unresponsive { known }` | nothing intelligible, and no bootloader answered either | PROBE_FAILED |
 
 `known: Option<RegisteredDevice>` comes from one registry lookup keyed by
 the probed MAC's derived uid. `Unresponsive` carries the field for
@@ -208,6 +289,28 @@ and the flash confirmation still guards the data. Over-claiming
 board into ALREADY_LP and offers to adopt it. So the hello is the ONLY
 evidence that yields `LightPlayer`, and WLED detection is deliberately
 conservative (a banner match; ambiguous Improv traffic alone is not enough).
+
+**A successful escalation is never `Unresponsive`.** The escalation (§8)
+runs only on `Unresponsive`, so its whole purpose is to move a board off
+that verdict; `ProbeEvidence::bootloader_conversation` is what carries the
+answer, and it is Blank-class evidence. It has to be carried explicitly
+because the escalation ends by rebuilding the link, and
+`DeviceSnapshot::link_mode` is recomputed PASSIVELY from a boot-line
+classifier the rebuild clears — the conversation is invisible in the
+snapshot one line later. On the bench (2026-08-08) a dig2go parked in the
+esptool stub answered the probe in full (chip identified, MAC read) and the
+wizard still said "nothing intelligible answered" and offered BOOT-hold
+advice. The probe's `chip_name` is banked with it: it is authoritative, and
+it is what filters the board pick.
+
+`StaleLightPlayer` is the one verdict that reads LightPlayer-ish and still
+must not be `LightPlayer`: the board speaks our framing but offers no
+protocol this Studio can use, so there is nothing to adopt. It outranks the
+WLED banner and the no-firmware signature because it names the firmware
+exactly, and it lands on STALE_LP — whose one affordance is the reflash the
+link layer already prescribes (`DeviceState::Incompatible`). Before it
+existed, a board on old firmware fell through to `Unresponsive` and was told
+to hold BOOT, which fixes nothing.
 
 ## 5 · Device home
 
@@ -377,8 +480,8 @@ nothing. Each `SetupCommand` names machinery that already exists:
 
 | Command | Existing machinery |
 |---|---|
-| `RequestPort` | `DeviceOp::OpenProvider { BrowserSerialEsp32 }` |
-| `ProbeBoard` | read `DeviceSession::snapshot()` (`detected_chip`, `probed_mac`, `recent_lines`) → `classify_board`; escalate with `DeviceOp::ProbeBootloaderMode` only when the passive read is `Unresponsive` |
+| `RequestPort` | `DeviceOp::OpenProvider { BrowserSerialEsp32 }` — run as its two phases (`DeviceController::choose_provider_endpoint`, then `connect_endpoint`) so the executor can report `PortChosen` between them; that interim event is the one thing a command reports before it finishes, and it is state-only by construction (there is no queue to run commands on from inside a command) |
+| `ProbeBoard` | read `DeviceSession::snapshot()` (`detected_chip`, `probed_mac`, `recent_lines`) → `classify_board`; escalate with `DeviceSession::probe_link_mode` only when the passive read is `Unresponsive`, folding that call's RETURN VALUE (a `SyncHandshake` bootloader + its chip) into the evidence — the snapshot cannot carry it (§4) — and its log lines into the bound session's console tail |
 | `ReleasePort` | `DeviceOp::DisconnectDevice { target }` |
 | `Flash` | `DeviceOp::ProvisionFirmware { target, setup_name: None, board_id }` — `setup_name` is `None` because naming is a Provision-time registry write |
 | `GenerateProject` | `CatalogOp::GenerateForBoard { board_id }` |
@@ -397,8 +500,8 @@ of the flow. Two frames, one seam:
 
 | Frame | When | What it is |
 |---|---|---|
-| **Standalone** | no verdict yet: CONNECT_INTRO, BOARD_FIRST, PORT_PICKING, PROBING — and the whole simulator path until the sim session starts | a card of its own in the entry-cards slot, at the roster's card width, where the setup form used to sit. There is no device card to be the body of. |
-| **Takeover** | from the VERDICT on: BOARD_PICK, WLED_FOUND, ALREADY_LP, PROBE_FAILED, FLASHING, FLASH_FAILED, ABANDON_GUARD, PROVISION | the bound board's OWN roster card renders the wizard as its body: same card, same identity key, same grid slot (pinned first). The header stays the device's and grows real facts as they land; the ✕ moves to the steps rail. |
+| **Standalone** | no verdict yet: CONNECT_INTRO, BOARD_FIRST, PORT_PICKING, CONNECTING, PROBING — and the whole simulator path until the sim session starts | a card of its own in the entry-cards slot, at the roster's card width, where the setup form used to sit. There is no device card to be the body of. |
+| **Takeover** | from the VERDICT on: BOARD_PICK, WLED_FOUND, ALREADY_LP, STALE_LP, PROBE_FAILED, FLASHING, FLASH_FAILED, ABANDON_GUARD, PROVISION | the bound board's OWN roster card renders the wizard as its body: same card, same identity key, same grid slot (pinned first). The header stays the device's and grows real facts as they land; the ✕ moves to the steps rail. |
 
 **Why the verdict is the seam.** Between the port grant and the probe's
 answer the live session is anonymous, so a board the registry already
@@ -426,11 +529,13 @@ state beside it.
 |---|---|
 | CONNECT_INTRO | headline + two stacked full-width CTAs; the `ConnectHint` line escalates toward the secondary |
 | BOARD_FIRST | the shipped board picker (full catalog, no Generic) + board-specific connect guidance (CH340 driver steps or cable/port tips) + "it's plugged in" |
-| PORT_PICKING | indeterminate wait — the browser owns the dialog |
-| PROBING | indeterminate wait, one line about what is being read |
+| PORT_PICKING | indeterminate wait when `grants` is empty (the browser owns the dialog); the in-app granted-ports picker otherwise — rows + "Another port…" + the identical-twins honesty note (§2a) |
+| CONNECTING | indeterminate wait ("Connecting to the board…"), with the op overlay's own TERMINAL under it — from the grant on, the link has lines to show. With `via_grant`: the adopted port's name and "Not this one? Pick a different port" above the wait (§2a) |
+| PROBING | indeterminate wait, one line about what is being read, the same terminal under it |
 | BOARD_PICK | recognition line, chip-filtered picker + Generic, picked-board bio, the forward verb (armed only when something is picked), Back |
 | WLED_FOUND | verdict + the wipe warning (migration is future work) + wipe / keep-WLED |
 | ALREADY_LP | registry name + chip, "Done writes nothing and you stay here", Done (primary) / Open in the editor → (secondary) / set-up-fresh |
+| STALE_LP | registry name + chip, "this firmware is too old for this Studio", update-the-firmware (the only verb, and it is a flash) / back |
 | PROBE_FAILED | the failure, the BOOT-button hint, retry / driver help / back |
 | FLASHING | the card-owned op flow's OWN activity view, verbatim; attempt number when > 1 |
 | FLASH_FAILED | the detail, "retry re-runs from erase", replug guidance from attempt 2, retry / abandon |
@@ -438,6 +543,22 @@ state beside it.
 | PROVISION | project box (compact line + ⓘ) + derived name field (hardware only) + the forward verb; any §7.10 failure above it |
 | DEVICE_HOME | nothing is drawn: the takeover ends and the board's own card body returns while the editor lens attaches (the component is kept for the exhaustive match) |
 | CLOSED | nothing is drawn: the flow is over and the card — if the flow had one — is already back to itself |
+
+**What the terminal is, and where its lines come from.** It renders the
+bound SESSION's console tail (D42's per-device console — the same tail the
+card's Console tab shows), not the global log ring. Everything that narrates
+a connect is a `UiLogDraft` already: the link session's own log/diagnostic
+surface, the device event sink's `[link]` lines, and the escalation probe's
+esptool terminal. So the whole job is routing them to the session rather
+than the ring, at every point the connect can end — including the FAILED
+attach, which used to record all of it to the ring on its way out and leave
+the wizard's terminal empty (bench, 2026-08-08: every line the user needed
+existed, in the browser console only).
+
+The tail fills at PHASE BOUNDARIES, not continuously: a setup op holds the
+controller across its awaits, so nothing can interleave, and
+`pump_setup_console` advances the tail where the flow asks. Streaming
+mid-connect needs a deeper pass.
 
 The two entry cards (**connect a device** / **simulate a device**, half
 height, one grid cell) are the only way in; the bare "open the port

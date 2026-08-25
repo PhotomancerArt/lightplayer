@@ -333,9 +333,16 @@ fn card_native_stamp_and_push_through_the_link() {
 /// Row 2 (pull-before-readiness regression): with a boot delay long enough
 /// that a premature pull would race the server start, the pull must only
 /// happen after the server-started marker + first `M!` frame. The fake
-/// DISCARDS (and counts) bytes written before its server loop runs — real
+/// DISCARDS (and records) bytes written before its server loop runs — real
 /// ESP32 behavior, and the exact M5 hardware bug: a pull sent early was
 /// silently lost and the connect hung.
+///
+/// One category of early bytes is LEGAL: the readiness engine's
+/// `ClientRequest::Hello`, which is deliberately loss-tolerant (re-sent
+/// until answered; a running server answers it, a booting one emits the
+/// hello unasked — `docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`).
+/// The pin is therefore "nothing BUT hello requests before readiness",
+/// not "nothing".
 #[test]
 fn pull_waits_for_server_started_marker_and_first_frame() {
     let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
@@ -345,11 +352,14 @@ fn pull_waits_for_server_started_marker_and_first_frame() {
 
     connect_through_link(&mut studio, &endpoint_id).expect("connect succeeds");
 
-    assert_eq!(
-        device.premature_input_bytes(),
-        0,
-        "no request bytes reached the wire before the server-started marker \
-         and the first M! frame"
+    let premature = device.premature_input();
+    assert!(
+        premature
+            .lines()
+            .all(|line| line.is_empty() || (line.starts_with("M!") && line.contains("\"hello\""))),
+        "only loss-tolerant readiness hello requests may reach the wire \
+         before the server-started marker and the first M! frame; saw: \
+         {premature:?}"
     );
     assert_eq!(
         studio.device_sync_for_test().map(|sync| &sync.content),
@@ -618,6 +628,49 @@ fn stall_during_connect_times_out_with_no_serial_output() {
     );
 }
 
+/// Row 5c (the failed connect's own narration, bench 2026-08-08): a connect
+/// that ends in a failed attach leaves its link lines on the SESSION's
+/// console tail, not in the global ring.
+///
+/// D42 already says session streams do not ride the ring, and the failure
+/// path was the exception that broke the setup wizard: the connect narrated
+/// itself (open, reset, read window, the readiness diagnosis), the attach
+/// failure recorded every line to the ring on its way out, and the wizard's
+/// terminal — which renders the bound session's tail — then found nothing.
+#[test]
+fn a_failed_attach_leaves_the_connects_lines_on_the_session_console() {
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new()));
+    let (mut studio, device, endpoint_id) = studio_with_fake_device(script);
+    shorten_ready_deadline(&mut studio, Duration::from_millis(700));
+    device.set_failure_plan(FakeFailurePlan::none().with_stall_after_bytes(0));
+
+    connect_through_link(&mut studio, &endpoint_id).expect_err("a silent device cannot attach");
+
+    let tail: Vec<String> = studio
+        .runtime_pool_for_test()
+        .oldest_device_session()
+        .expect("the failed attach still installed its session")
+        .console_tail()
+        .iter()
+        .map(|entry| entry.message.clone())
+        .collect();
+    assert!(
+        !tail.is_empty(),
+        "the wizard's terminal has the connect's lines to show"
+    );
+    let ring: Vec<String> = studio
+        .logs()
+        .iter()
+        .map(|entry| entry.message.clone())
+        .collect();
+    for line in &tail {
+        assert!(
+            !ring.contains(line),
+            "session streams stay off the global ring (D42): {line}"
+        );
+    }
+}
+
 /// Row 6 (Incompatible: hello suppressed): an `M!`-speaking device whose
 /// firmware predates the wire hello classifies `Incompatible` through the
 /// real path; the card surfaces reflash as the affordance; a flash
@@ -792,6 +845,78 @@ fn unresponsive_device_reconnects_to_ready_after_unstall() {
         studio.snapshot().server.state,
         ServerState::Connected { .. }
     ));
+}
+
+/// Row 8b (setup escalation, the bench defect of 2026-08-08): a silent
+/// board reads `Unresponsive` passively, so `ProbeBoard` escalates to the
+/// SYNC handshake — and when a bootloader answers it, the verdict is
+/// `Blank`, never `Unresponsive`.
+///
+/// The escalation's answer exists ONLY in `probe_link_mode`'s return value:
+/// the probe rebuilds the link on its way out and `DeviceSnapshot::link_mode`
+/// is recomputed passively from a boot-line classifier the rebuild clears.
+/// Re-reading the snapshot alone landed back on `Unresponsive` — the bench
+/// board was parked in the esptool stub, held a full conversation (chip
+/// identified, MAC read), and was told to hold BOOT.
+#[test]
+fn a_bootloader_that_answers_the_escalation_lands_blank_not_unresponsive() {
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(FakeLightPlayerState::new()));
+    let (mut studio, device, endpoint_id) = studio_with_fake_device(script);
+    shorten_ready_deadline(&mut studio, Duration::from_millis(700));
+    device.set_failure_plan(FakeFailurePlan::none().with_stall_after_bytes(0));
+
+    connect_through_link(&mut studio, &endpoint_id).expect_err("a silent device cannot attach");
+    assert!(
+        matches!(
+            studio.device_state_for_test(),
+            Some(DeviceState::Unresponsive { .. })
+        ),
+        "the passive read has nothing to go on, got {:?}",
+        studio.device_state_for_test()
+    );
+
+    let probe = drive(studio.setup_probe_for_test());
+    assert_eq!(
+        probe.verdict.label(),
+        "blank",
+        "a successful escalation routes to the board pick, got {:?}",
+        probe.verdict
+    );
+    assert_eq!(
+        probe.detected_chip.as_deref(),
+        Some("ESP32-C6 (fake)"),
+        "the probe's chip identity is what filters the board pick"
+    );
+}
+
+/// Row 8c (the escalation's gate): a board the link already diagnosed
+/// `Incompatible` is `StaleLightPlayer` on the FIRST read, and the probe
+/// that would reboot it never runs — §8 escalates only on `Unresponsive`.
+/// The fake's scripted handshake answer ("ESP32-C6 (fake)") is the
+/// fingerprint: a chip identity nothing but an escalation can produce.
+#[test]
+fn a_stale_lightplayer_verdict_never_escalates() {
+    let script = FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new().with_suppressed_hello(),
+    ));
+    let (mut studio, _device, endpoint_id) = studio_with_fake_device(script);
+    shorten_ready_deadline(&mut studio, Duration::from_millis(700));
+
+    connect_through_link(&mut studio, &endpoint_id)
+        .expect("incompatible connect resolves without error");
+
+    let probe = drive(studio.setup_probe_for_test());
+    assert_eq!(
+        probe.verdict.label(),
+        "stale-lightplayer",
+        "old firmware names itself on the first read, got {:?}",
+        probe.verdict
+    );
+    assert_ne!(
+        probe.detected_chip.as_deref(),
+        Some("ESP32-C6 (fake)"),
+        "a named firmware must not be rebooted to ask a bootloader"
+    );
 }
 
 /// Row 9 (reconnect after Gone): the device vanishing mid-session marks the

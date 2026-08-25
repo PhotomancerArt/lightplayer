@@ -53,13 +53,26 @@ export async function getGrantedPorts() {
 function sessionForPort(BrowserEsp32DeviceController, port, label) {
   for (const [id, session] of sessions) {
     if (session.port === port) {
-      return { id, label: session.label };
+      return describeSession(id, session);
     }
   }
   const id = nextSessionId++;
   const session = new BrowserEsp32DeviceController({ port, label });
   sessions.set(id, session);
-  return { id, label: session.label };
+  return describeSession(id, session);
+}
+
+// The descriptor handed to Rust. VID:PID travel as their own fields (D7,
+// grant-aware port picking): the label bakes them into prose, and prose is
+// not something a board's usb_bridge can be matched against.
+function describeSession(id, session) {
+  const info = session.port?.getInfo?.() ?? {};
+  return {
+    id,
+    label: session.label,
+    usbVendorId: info.usbVendorId ?? null,
+    usbProductId: info.usbProductId ?? null,
+  };
 }
 
 export async function requestPort() {
