@@ -20,12 +20,22 @@
 //! edge kisses the path like an aligned stroke. Neighbour distances are
 //! measured at CELL CENTERS, so a shifted ribbon tiles against itself.
 //!
-//! Neighbour searches are brute force per object: after subsampling an
-//! object displays at most a few hundred lamps (dome scale is ~150
-//! objects × ≤60 displayed lamps), so O(n·k) clipping plus an O(n²)
-//! nearest-neighbour pass with a tiny constant beats any spatial index it
-//! could build. Coincident lamps have no bisector and simply share
-//! territory.
+//! Two seeding modes share one clipping core:
+//!
+//! - [`lamp_cells`] — the mapping canvas: strand-seeded, per-strand
+//!   median pitch, alignment shift along the strand normal.
+//! - [`point_cells`] — product previews (`lamp_view.rs`): the display
+//!   layout carries positions only (strand grain is invisible at preview
+//!   size, ruled at the design-language G1), so every seed shares one
+//!   radius — 0.92 × the median nearest-neighbour distance, floored by
+//!   the layout's own lamp footprint. Still scale-free: both inputs ride
+//!   whatever unit the layout chose.
+//!
+//! Neighbour candidates come from a uniform grid ([`SeedGrid`]) sized by
+//! the largest seed radius, so clipping stays O(n·k) at whole-product
+//! scale (a dome preview is ~1500 lamps — the editor's per-object few
+//! hundred never needed the grid, but takes it harmlessly). Coincident
+//! lamps have no bisector and simply share territory.
 
 use lpc_mapping::PathAlign;
 
@@ -181,8 +191,78 @@ pub fn lamp_cells(
     align: PathAlign,
     sample_diameter: f32,
 ) -> Vec<LampCell> {
-    let seeds = cell_seeds(strands, align, f64::from(sample_diameter));
+    cells_from_seeds(&cell_seeds(strands, align, f64::from(sample_diameter)))
+}
+
+/// The voronoi cells of a bare point field — a product preview's display
+/// layout, which knows lamp positions and the physical footprint but no
+/// strand structure. One shared radius: 0.92 × the median
+/// nearest-neighbour distance (coincident pairs excluded), floored by
+/// `floor_radius` (the layout's own lamp footprint — however sparse the
+/// field, a cell never shrinks below the lamp itself). One cell per
+/// position, in input order.
+#[must_use]
+pub fn point_cells(positions: &[[f32; 2]], floor_radius: f32) -> Vec<LampCell> {
+    let positions: Vec<[f64; 2]> = positions
+        .iter()
+        .map(|p| [f64::from(p[0]), f64::from(p[1])])
+        .collect();
+    let floor = f64::from(floor_radius).max(f64::EPSILON);
+    let radius = median_nearest_neighbour(&positions)
+        .map_or(floor, |nn| (NN_FRACTION * nn).max(floor));
+    let seeds: Vec<Seed> = positions
+        .into_iter()
+        .map(|center| Seed { center, radius })
+        .collect();
+    cells_from_seeds(&seeds)
+}
+
+/// Median over points of the distance to their nearest non-coincident
+/// neighbour — the field's pitch as laid out, immune to per-lamp jitter.
+/// `None` when no point has a non-coincident neighbour.
+fn median_nearest_neighbour(positions: &[[f64; 2]]) -> Option<f64> {
+    let grid = SeedGrid::over(positions.iter().map(|p| (*p, 0.0)));
+    let mut nearest: Vec<f64> = Vec::with_capacity(positions.len());
+    for (index, position) in positions.iter().enumerate() {
+        let mut best = f64::INFINITY;
+        // Expand the candidate ring until a hit exists and the ring
+        // already covers its distance — the standard grid NN walk.
+        let mut ring = 1_usize;
+        loop {
+            for other in grid.candidates(*position, ring) {
+                if other == index {
+                    continue;
+                }
+                let gap = dist(*position, positions[other]);
+                if gap > COINCIDENT_EPS {
+                    best = best.min(gap);
+                }
+            }
+            let covered = grid.cell * ring as f64;
+            if (best <= covered) || !grid.can_grow(*position, ring) {
+                break;
+            }
+            ring += 1;
+        }
+        if best.is_finite() {
+            nearest.push(best);
+        }
+    }
+    if nearest.is_empty() {
+        return None;
+    }
+    nearest.sort_by(f64::total_cmp);
+    Some(nearest[nearest.len() / 2])
+}
+
+/// Grow every seed's 12-gon and clip it against the bisector of each
+/// close-enough neighbour — the shared core of both seeding modes.
+/// Candidates come from the grid; they are visited in index order so the
+/// result is independent of bucket layout.
+fn cells_from_seeds(seeds: &[Seed]) -> Vec<LampCell> {
     let tau = std::f64::consts::TAU;
+    let grid = SeedGrid::over(seeds.iter().map(|s| (s.center, s.radius)));
+    let mut candidates: Vec<usize> = Vec::new();
     seeds
         .iter()
         .enumerate()
@@ -197,10 +277,16 @@ pub fn lamp_cells(
                     ]
                 })
                 .collect();
-            for (other_index, other) in seeds.iter().enumerate() {
+            // Any clipping neighbour satisfies gap < 2·radius ≤ the
+            // grid's coverage at ring 1, so ring 1 sees them all.
+            candidates.clear();
+            candidates.extend(grid.candidates(seed.center, 1));
+            candidates.sort_unstable();
+            for &other_index in &candidates {
                 if other_index == index {
                     continue;
                 }
+                let other = &seeds[other_index];
                 let gap = dist(seed.center, other.center);
                 if gap <= COINCIDENT_EPS || gap >= 2.0 * seed.radius {
                     continue;
@@ -233,6 +319,104 @@ pub fn lamp_cells(
             }
         })
         .collect()
+}
+
+/// A uniform bucket grid over seed centers. The cell edge is at least
+/// 2 × the largest seed radius, so every pair that can interact (bisector
+/// clip needs `gap < 2·radius`) sits within one ring of buckets; `ring`
+/// widens the walk for nearest-neighbour searches that must look
+/// further. Bucket count is capped so a pathological spread cannot
+/// allocate unbounded memory — a coarser grid only adds candidates,
+/// never loses one.
+struct SeedGrid {
+    origin: [f64; 2],
+    cell: f64,
+    cols: usize,
+    rows: usize,
+    buckets: Vec<Vec<usize>>,
+}
+
+impl SeedGrid {
+    fn over(seeds: impl Iterator<Item = ([f64; 2], f64)> + Clone) -> Self {
+        let mut min = [f64::INFINITY; 2];
+        let mut max = [f64::NEG_INFINITY; 2];
+        let mut max_radius = 0.0_f64;
+        let mut count = 0_usize;
+        for (center, radius) in seeds.clone() {
+            min[0] = min[0].min(center[0]);
+            min[1] = min[1].min(center[1]);
+            max[0] = max[0].max(center[0]);
+            max[1] = max[1].max(center[1]);
+            max_radius = max_radius.max(radius);
+            count += 1;
+        }
+        if count == 0 {
+            return Self {
+                origin: [0.0; 2],
+                cell: 1.0,
+                cols: 1,
+                rows: 1,
+                buckets: vec![Vec::new()],
+            };
+        }
+        let span = [(max[0] - min[0]).max(0.0), (max[1] - min[1]).max(0.0)];
+        // ≥ 2·max radius (the interaction reach), and never finer than
+        // ~1 bucket per point per axis.
+        let per_axis = ((count as f64).sqrt().ceil()).max(1.0);
+        let cell = (2.0 * max_radius)
+            .max(span[0] / per_axis)
+            .max(span[1] / per_axis)
+            .max(f64::EPSILON);
+        let cols = ((span[0] / cell).floor() as usize + 1).max(1);
+        let rows = ((span[1] / cell).floor() as usize + 1).max(1);
+        let mut buckets = vec![Vec::new(); cols * rows];
+        for (index, (center, _)) in seeds.enumerate() {
+            let (col, row) = Self::bucket_of(min, cell, cols, rows, center);
+            buckets[row * cols + col].push(index);
+        }
+        Self {
+            origin: min,
+            cell,
+            cols,
+            rows,
+            buckets,
+        }
+    }
+
+    fn bucket_of(
+        origin: [f64; 2],
+        cell: f64,
+        cols: usize,
+        rows: usize,
+        p: [f64; 2],
+    ) -> (usize, usize) {
+        let col = (((p[0] - origin[0]) / cell).floor() as isize).clamp(0, cols as isize - 1);
+        let row = (((p[1] - origin[1]) / cell).floor() as isize).clamp(0, rows as isize - 1);
+        (col as usize, row as usize)
+    }
+
+    /// Indices in the `(2·ring + 1)²` bucket block around `p`.
+    fn candidates(&self, p: [f64; 2], ring: usize) -> impl Iterator<Item = usize> + '_ {
+        let (col, row) = Self::bucket_of(self.origin, self.cell, self.cols, self.rows, p);
+        let ring = ring as isize;
+        let col0 = (col as isize - ring).max(0) as usize;
+        let col1 = ((col as isize + ring) as usize).min(self.cols - 1);
+        let row0 = (row as isize - ring).max(0) as usize;
+        let row1 = ((row as isize + ring) as usize).min(self.rows - 1);
+        (row0..=row1).flat_map(move |r| {
+            (col0..=col1).flat_map(move |c| self.buckets[r * self.cols + c].iter().copied())
+        })
+    }
+
+    /// Whether widening the ring around `p` can reach any new bucket.
+    fn can_grow(&self, p: [f64; 2], ring: usize) -> bool {
+        let (col, row) = Self::bucket_of(self.origin, self.cell, self.cols, self.rows, p);
+        let ring = ring as isize;
+        col as isize - ring > 0
+            || row as isize - ring > 0
+            || ((col as isize + ring) as usize) < self.cols - 1
+            || ((row as isize + ring) as usize) < self.rows - 1
+    }
 }
 
 #[cfg(test)]
@@ -394,6 +578,152 @@ mod tests {
                 seed.radius
             );
         }
+    }
+
+    /// On a uniform line the two seeding modes agree: the median
+    /// nearest-neighbour distance IS the strand pitch, alignment is On,
+    /// so `point_cells` reproduces `lamp_cells` exactly.
+    #[test]
+    fn point_cells_match_lamp_cells_on_a_uniform_line() {
+        let strands = line_lamps(6, 4.0);
+        let positions: Vec<[f32; 2]> = strands[0].clone();
+        let from_points = point_cells(&positions, 1.0);
+        let from_strands = lamp_cells(&strands, PathAlign::On, 2.0);
+        assert_eq!(from_points.len(), from_strands.len());
+        for (a, b) in from_points.iter().zip(&from_strands) {
+            assert_eq!(a.lamp, b.lamp);
+            assert_eq!(a.polygon.len(), b.polygon.len(), "cell {}", a.lamp);
+            for (va, vb) in a.polygon.iter().zip(&b.polygon) {
+                assert!(
+                    (va[0] - vb[0]).abs() < 1e-4 && (va[1] - vb[1]).abs() < 1e-4,
+                    "cell {}: {va:?} vs {vb:?}",
+                    a.lamp
+                );
+            }
+        }
+    }
+
+    /// A lone point (and an all-coincident field) has no neighbour
+    /// distance to measure: the floor is the whole radius, and coincident
+    /// seeds share territory rather than clipping each other away.
+    #[test]
+    fn point_cells_fall_back_to_the_floor_footprint() {
+        let lone = point_cells(&[[5.0, 5.0]], 4.0);
+        assert_eq!(lone.len(), 1);
+        assert_eq!(lone[0].polygon.len(), CELL_SIDES);
+        for v in &lone[0].polygon {
+            let d = dist([f64::from(v[0]), f64::from(v[1])], [5.0, 5.0]);
+            assert!((d - 4.0 * INSET_KEEP).abs() < 1e-3, "{v:?} at {d}");
+        }
+        let coincident = point_cells(&[[5.0, 5.0], [5.0, 5.0]], 4.0);
+        assert_eq!(coincident.len(), 2);
+        for cell in &coincident {
+            assert_eq!(cell.polygon.len(), CELL_SIDES, "shared territory");
+        }
+    }
+
+    /// The footprint floor wins over a tighter pitch — a dense field of
+    /// physically large lamps keeps lamp-sized cells (the bisector clip,
+    /// not the radius, prevents overlap). The fyeah sign's numbers:
+    /// pitch ~17.5, diameter 26.
+    #[test]
+    fn point_cells_floor_beats_a_tighter_median_pitch() {
+        let positions: Vec<[f32; 2]> = (0..6).map(|i| [i as f32 * 17.5, 0.0]).collect();
+        let cells = point_cells(&positions, 13.0);
+        // 0.92 × 17.5 = 16.1 > 13: the median wins here. Shrink the
+        // pitch below the floor and the floor takes over.
+        let tight: Vec<[f32; 2]> = (0..6).map(|i| [i as f32 * 10.0, 0.0]).collect();
+        let tight_cells = point_cells(&tight, 13.0);
+        // An end cell's outward vertex sits at the full radius (nothing
+        // clips it): footprint 13 × inset, not 0.92 × 10 × inset.
+        let end = tight_cells.last().expect("cells");
+        let max_reach = end
+            .polygon
+            .iter()
+            .map(|v| dist([f64::from(v[0]), f64::from(v[1])], [50.0, 0.0]))
+            .fold(0.0, f64::max);
+        assert!(
+            (max_reach - 13.0 * INSET_KEEP).abs() < 1e-3,
+            "floor radius should shape the cell, got reach {max_reach}"
+        );
+        assert!(!cells.is_empty());
+        for cell in [&cells, &tight_cells].into_iter().flatten() {
+            assert!(!cell.polygon.is_empty(), "cell {} vanished", cell.lamp);
+        }
+    }
+
+    /// Grid-accelerated clipping keeps the brute-force guarantees on a
+    /// jittered 2D field: no cell overlaps another, none vanishes, and
+    /// every cell contains its own seed.
+    #[test]
+    fn point_cells_tile_a_jittered_field_without_overlap() {
+        // Deterministic jitter — no RNG in tests.
+        let mut state = 0x2F6E_2B1Fu32;
+        let mut jitter = || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (f64::from(state >> 8) / f64::from(1u32 << 24) - 0.5) as f32
+        };
+        let positions: Vec<[f32; 2]> = (0..120)
+            .map(|i| {
+                let (col, row) = (i % 12, i / 12);
+                [
+                    col as f32 * 5.0 + jitter() * 2.0,
+                    row as f32 * 5.0 + jitter() * 2.0,
+                ]
+            })
+            .collect();
+        let cells = point_cells(&positions, 0.5);
+        assert_eq!(cells.len(), positions.len());
+        for (i, cell) in cells.iter().enumerate() {
+            assert!(!cell.polygon.is_empty(), "cell {i} vanished");
+            assert!(
+                point_in_loops(from_ref(&cell.polygon), positions[i]),
+                "cell {i} lost its seed"
+            );
+            for (j, other) in cells.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                for v in &cell.polygon {
+                    assert!(
+                        !point_in_loops(from_ref(&other.polygon), *v),
+                        "cell {i} vertex {v:?} inside cell {j}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The preview perf contract: a dome-scale point field (1500 lamps)
+    /// builds its cells far under a frame even in debug — the uniform
+    /// grid is what keeps the neighbour searches from going quadratic.
+    #[test]
+    fn a_dome_scale_point_field_computes_cells_quickly() {
+        let mut state = 0x00C0_FFEEu32;
+        let mut jitter = || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (f64::from(state >> 8) / f64::from(1u32 << 24) - 0.5) as f32
+        };
+        let positions: Vec<[f32; 2]> = (0..1500)
+            .map(|i| {
+                let (col, row) = (i % 50, i / 50);
+                [
+                    col as f32 * 4.0 + jitter() * 1.5,
+                    row as f32 * 4.0 + jitter() * 1.5,
+                ]
+            })
+            .collect();
+        let start = std::time::Instant::now();
+        let cells = point_cells(&positions, 1.0);
+        let elapsed = start.elapsed();
+        assert_eq!(cells.len(), 1500);
+        for (i, cell) in cells.iter().enumerate() {
+            assert!(!cell.polygon.is_empty(), "cell {i} vanished");
+        }
+        assert!(
+            elapsed < std::time::Duration::from_millis(50),
+            "grid failed to keep the build sub-frame: {elapsed:?}"
+        );
     }
 
     /// The perf contract: outline + cells for a dome-scale strand stay
