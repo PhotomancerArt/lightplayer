@@ -127,6 +127,17 @@ every-request-gets-a-response server invariant (failed handlers answer
 with an `Error` frame) — a deadline expiry therefore means a genuinely
 unresponsive wire, not a slow handler.
 
+> **Amended 2026-08-24.** The every-request-gets-a-response invariant is
+> false on real firmware: responses drop under engine load while the 5 s
+> heartbeat keeps the wire alive, and each heartbeat restarts the
+> request-idle frame-gap budget — the composite wait was unbounded (see
+> `docs/defects/2026-08-24-request-idle-budget-blind-to-dropped-responses.md`).
+> Deadlines are now four: `request_total` bounds each single-response
+> request end to end, enforced in `lpa-client`'s correlation layer via
+> `DeviceSession::request_deadline()`. `request-idle` remains as the
+> frame-gap backstop for a dead wire; its expiry surfaces a request
+> error (readiness-level `Unresponsive` is not re-entered).
+
 Terminal states (`Gone`, `Incompatible`, `Unresponsive`, the diagnosis
 states) are sticky under passive observation. The one way out is an
 explicit rebuild: `reconnect()` — and `manage()`'s post-operation step —

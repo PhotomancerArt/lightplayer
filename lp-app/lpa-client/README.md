@@ -63,7 +63,19 @@ as the native timeout owner — so both pass a never-firing deadline into the
 shared loop today. Real deadlines live in the callers: the studio actor wires a
 `ProgressDeadline`, `CancelSignal`, and `BackoffPolicy` around its pulls, and
 `lpa-link`'s `DeviceSession` wraps every channel send/receive in its own
-injected request-idle budget (expiry lands the device on `Unresponsive`).
+injected request-idle budget (expiry surfaces a request error).
+
+Single-response requests get a separate bound: `RequestDeadline`, an optional
+TOTAL per-request deadline on `LpClient` covering the whole of `send_request`
+(send plus the response-correlation loop) with one timer built at request
+start. Unrelated frames — heartbeats, logs — never extend it, which is the
+point: a device can drop a response while heartbeating (the 2026-08-24
+request-idle defect), and only a total bound in the correlation layer turns
+that into an error. On expiry the request id is abandoned (late frames
+classify as expected stale drops) and the caller sees the same "did not
+respond" transport error a dead wire produces. Device-session-backed clients
+install it via `DeviceSession::request_deadline()`; transports that answer
+every request by construction (in-process sim, tests) run without one.
 
 ## Server Hello
 

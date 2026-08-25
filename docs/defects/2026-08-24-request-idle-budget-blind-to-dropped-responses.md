@@ -1,5 +1,6 @@
 ---
-status: open
+status: fixed          # total per-request deadline in the correlation layer
+fixed: this change
 found: 2026-08-24      # how: hardware-walk (dig2go editor gate; hung connect + wedged page)
 area: lpa-link device_client_io (request_idle) + client request correlation
 class: timeout-scoped-to-sub-phase
@@ -38,22 +39,41 @@ server died at the gate before issuing any request; now it reaches
 Ready, issues the first pull against a playing (response-dropping)
 device, and waits forever, kept "alive" by heartbeats.
 
-**Fix direction** — bound the REQUEST, not the gap: a per-request total
-deadline in the correlation layer (arrival of unrelated frames must not
-extend it), surfaced as the same "did not respond" error. Independently:
-a hung connect must not wedge the page — the connect flow needs an
-overall watchdog and a user-visible cancel (the actor-queue coupling is
-its own UX defect). The true paydown is firmware-side: responses that
-survive engine load (see the debt entry's exit criteria).
+**Fix** (this change) — bound the REQUEST, not the gap:
+`lpa_client::RequestDeadline`, an optional total per-request deadline on
+`LpClient` racing the whole send + correlation loop against ONE timer
+built at request start — unrelated frames never extend it. On expiry the
+request id is abandoned (late frames classify `StaleAbandoned`) and the
+caller sees the same "device did not respond" transport error the idle
+backstop uses, so every caller settles to the same retryable failure.
+The budget is `DeviceDeadlines::request_total` (20 s default);
+`DeviceSession::request_deadline()` builds it from the session's
+injected timers and `StudioServerClient::from_device_session` installs
+it. `request_idle` stays as the frame-gap backstop for a dead wire (it
+also bounds each receive inside streamed reads, which keep their own
+quiet-gap `ProgressDeadline` and deliberately skip the total deadline).
+Still open elsewhere: a user-visible cancel for a slow connect (the
+actor-queue coupling, owned by the planned device-management rewrite),
+and the firmware-side paydown — responses that survive engine load (see
+the debt entry's exit criteria).
 
 **Bench workaround** — idle the device before connecting
 (`stopAllProjects` over the wire): with tick=0 no responses drop and
 every pull completes.
 
-**Regression coverage** — none yet: the fake device answers every
-request. A fake failure mode "drop responses but keep heartbeating"
-would have caught this exactly; it belongs next to the existing
-premature-input machinery.
+**Regression coverage** — the fake device now scripts exactly this
+failure mode (`FakeLightPlayerState::drop_responses` +
+`heartbeat_interval`; the fake's host `LpServer` never heartbeats on its
+own, so the cadence is synthesized), covered at three layers:
+`lpa-client` `request_deadline_fires_through_endless_heartbeats` /
+`late_response_after_deadline_classifies_stale_not_uncorrelated`
+(mechanism + abandon contract), `lpa-link`
+`dropped_responses_on_a_heartbeating_wire_hit_the_total_deadline`
+(end-to-end against the fake, plus same-session recovery after heal),
+and `lpa-studio-core`
+`dropped_responses_during_connect_settle_to_a_bounded_failure` (the
+real wedge: connect settles to a retryable failure and the actor keeps
+serving commands).
 
 **Lesson** — sibling of `2026-08-07-upload-wait-timeout-unbounded-deploy`
 (same class): a timeout placed on the easily-measured sub-phase silently
