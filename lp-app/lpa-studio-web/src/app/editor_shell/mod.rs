@@ -19,6 +19,7 @@
 pub(crate) mod arrange;
 #[cfg(feature = "stories")]
 pub(crate) mod editor_shell_stories;
+pub(crate) mod hotkeys;
 pub(crate) mod mapping_session;
 pub(crate) mod patching;
 pub(crate) mod toolbar;
@@ -334,53 +335,57 @@ pub fn EditorShellCenter(
 
     let upload_editor = focused_editor.as_ref().map(|(_, _, editor)| editor.clone());
 
+    // Mode-scoped keys (ratified), on a view-scoped WINDOW listener (see
+    // `hotkeys.rs` — the center-div `onkeydown` died silently whenever
+    // focus landed in a dock): dived, the session owns the whole editor
+    // grammar — and esc's last rung exits the dive (Q4). Not dived, the
+    // arrange byte stack answers ⌘Z alone.
+    {
+        let arrange_verb = arrange_verb.clone();
+        hotkeys::use_window_keydown(move |event: web_sys::KeyboardEvent| {
+            let input = hotkeys::editor_key_input(&event);
+            if focused.peek().is_some() {
+                if dived && dive_ready {
+                    let result = handle_editor_key(
+                        dive_session,
+                        view_opts,
+                        fit_pending,
+                        on_committed,
+                        &input,
+                    );
+                    if result.prevent_default {
+                        event.prevent_default();
+                    }
+                    if result.outcome == EditorKeyOutcome::ExitDive {
+                        exit_focus(&on_action);
+                    }
+                } else if matches!(input.key, Key::Escape) {
+                    // A refused or still-loading dive: esc still leaves.
+                    exit_focus(&on_action);
+                }
+                return;
+            }
+            let meta = input.modifiers.meta() || input.modifiers.ctrl();
+            // Shift+z arrives as "Z", so match case-insensitively.
+            let is_z = matches!(
+                &input.key,
+                Key::Character(c) if c.eq_ignore_ascii_case("z")
+            );
+            if meta && is_z {
+                event.prevent_default();
+                let verb = if input.modifiers.shift() {
+                    EditorMetaVerb::Redo
+                } else {
+                    EditorMetaVerb::Undo
+                };
+                arrange_verb(&on_action, verb);
+            }
+        });
+    }
+
     rsx! {
         div {
             class: "tw:flex tw:min-h-0 tw:flex-1 tw:flex-col tw:outline-none",
-            tabindex: 0,
-            onkeydown: {
-                let arrange_verb = arrange_verb.clone();
-                move |evt: KeyboardEvent| {
-                    // Mode-scoped keys (ratified): dived, the session owns
-                    // the whole editor grammar — and esc's last rung exits
-                    // the dive (Q4). Not dived, the arrange byte stack
-                    // answers ⌘Z alone.
-                    if focused.peek().is_some() {
-                        if dived && dive_ready {
-                            let outcome = handle_editor_key(
-                                dive_session,
-                                view_opts,
-                                fit_pending,
-                                on_committed,
-                                &evt,
-                            );
-                            if outcome == EditorKeyOutcome::ExitDive {
-                                exit_focus(&on_action);
-                            }
-                        } else if matches!(evt.data().key(), Key::Escape) {
-                            // A refused or still-loading dive: esc still
-                            // leaves.
-                            exit_focus(&on_action);
-                        }
-                        return;
-                    }
-                    let meta = evt.data().modifiers().meta() || evt.data().modifiers().ctrl();
-                    // Shift+z arrives as "Z", so match case-insensitively.
-                    let is_z = matches!(
-                        evt.data().key(),
-                        Key::Character(c) if c.eq_ignore_ascii_case("z")
-                    );
-                    if meta && is_z {
-                        evt.prevent_default();
-                        let verb = if evt.data().modifiers().shift() {
-                            EditorMetaVerb::Redo
-                        } else {
-                            EditorMetaVerb::Undo
-                        };
-                        arrange_verb(&on_action, verb);
-                    }
-                }
-            },
             ToolbarStrip { groups, on_item: on_toolbar_item }
             if let Some(error) = surface.editor_meta_error.clone() {
                 div { class: "tw:flex-none tw:border-b tw:border-border-subtle tw:bg-status-attention-bg tw:px-2.5 tw:py-1 tw:text-[11px] tw:text-status-attention-foreground",

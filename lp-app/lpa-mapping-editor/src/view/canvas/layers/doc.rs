@@ -11,7 +11,7 @@ use crate::editor_core::map_selection::MapSelection;
 use crate::editor_core::map_tool::MapTool;
 use crate::editor_core::view_geometry::MapArrowOverlay;
 use crate::view::canvas::palette::{OBJECT_COLORS, SELECTION_COLOR, object_color};
-use crate::view::canvas::{CanvasInteract, secondary_button, select_and_start_move};
+use crate::view::canvas::{CanvasInteract, pan_takes_press, select_and_start_move};
 use crate::view::reference::ReferenceImage;
 use crate::view::view_options::EditorViewOptions;
 
@@ -179,7 +179,7 @@ pub(crate) fn doc_layers(input: &DocLayersInput<'_>) -> Element {
                             points: points.iter().map(|p| format!("{},{}", p[0], p[1])).collect::<Vec<_>>().join(" "),
                             stroke_width: "{14.0 / eff}",
                             onpointerdown: move |evt| {
-                                if secondary_button(&evt) {
+                                if pan_takes_press(&interact, &evt) {
                                     return;
                                 }
                                 evt.stop_propagation();
@@ -246,7 +246,7 @@ pub(crate) fn doc_layers(input: &DocLayersInput<'_>) -> Element {
                         },
                         cursor: if inert { "default" } else if tool_is_select { "move" } else { "crosshair" },
                         onpointerdown: move |evt| {
-                            if secondary_button(&evt) {
+                            if pan_takes_press(&interact, &evt) {
                                 return;
                             }
                             if matches!(interact.session.read().tool, MapTool::Select) {
@@ -276,7 +276,7 @@ pub(crate) fn doc_layers(input: &DocLayersInput<'_>) -> Element {
                             r: "{hit_radius}",
                             cursor: if tool_is_select { "move" } else { "crosshair" },
                             onpointerdown: move |evt| {
-                                if secondary_button(&evt) {
+                                if pan_takes_press(&interact, &evt) {
                                     return;
                                 }
                                 if matches!(interact.session.read().tool, MapTool::Select) {

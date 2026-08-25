@@ -118,6 +118,17 @@ pub(crate) struct CanvasInteract {
     pub(crate) drag: Signal<Option<CanvasDrag>>,
     pub(crate) anchor: Signal<CanvasAnchor>,
     pub(crate) placement: Placement,
+    /// Space-bar held (window-tracked): the press belongs to the PAN, so
+    /// element handlers step aside and let the svg-level grammar take it.
+    pub(crate) space_held: Signal<bool>,
+}
+
+/// Does this press belong to the canvas PAN rather than the element's own
+/// grammar? True for the secondary (right) and auxiliary (middle) buttons
+/// and while the space bar is held — element handlers return early
+/// WITHOUT stopping propagation, so the svg-level handler arms the pan.
+pub(crate) fn pan_takes_press(interact: &CanvasInteract, evt: &Event<PointerData>) -> bool {
+    pan_button(evt) || *interact.space_held.peek()
 }
 
 #[component]
@@ -235,12 +246,15 @@ pub fn EditorCanvas(
         });
     }
 
+    // Space-bar pan state (window-tracked; cleared on keyup and blur).
+    let space_held = crate::view::window_keys::use_space_held();
     let interact = CanvasInteract {
         session,
         camera,
         drag,
         anchor,
         placement,
+        space_held,
     };
     // The activity discriminator: the fixture grammar owns svg-level
     // presses when the shell listens for fixture events and nothing is
@@ -479,7 +493,7 @@ pub fn EditorCanvas(
     rsx! {
         svg {
             id: "{canvas_dom_id}",
-            class: if tool_is_select { "lpme-canvas" } else { "lpme-canvas lpme-canvas-tool" },
+            class: if space_held() { "lpme-canvas lpme-canvas-pan" } else if tool_is_select { "lpme-canvas" } else { "lpme-canvas lpme-canvas-tool" },
             onmounted: move |evt| {
                 #[cfg(target_arch = "wasm32")]
                 if let Some(element) = evt.data().downcast::<web_sys::Element>() {
@@ -491,10 +505,11 @@ pub fn EditorCanvas(
                 let _ = (&evt, &measure_cb);
                 measure();
             },
-            // Right-drag pans regardless of tool (the context menu is
-            // suppressed below); left button keeps the tool grammar.
+            // Right-drag, middle-drag, and space+drag pan regardless of
+            // tool (the context menu is suppressed below); a plain left
+            // button keeps the tool grammar.
             onpointerdown: move |evt| {
-                if secondary_button(&evt) {
+                if pan_button(&evt) || *space_held.peek() {
                     capture_pointer(&evt);
                     drag.set(Some(CanvasDrag::Pan {
                         last: event_view_point(&anchor, &evt),
@@ -908,13 +923,21 @@ pub fn EditorCanvas(
     }
 }
 
-/// True for the secondary (right) button — those pointerdowns fall through
-/// to the canvas pan instead of tool/selection actions.
-pub(crate) fn secondary_button(evt: &Event<PointerData>) -> bool {
-    evt.data().trigger_button() == Some(dioxus::html::input_data::MouseButton::Secondary)
+/// True for the secondary (right) or auxiliary (middle) button — those
+/// pointerdowns fall through to the canvas pan instead of tool/selection
+/// actions.
+pub(crate) fn pan_button(evt: &Event<PointerData>) -> bool {
+    matches!(
+        evt.data().trigger_button(),
+        Some(
+            dioxus::html::input_data::MouseButton::Secondary
+                | dioxus::html::input_data::MouseButton::Auxiliary
+        )
+    )
 }
 
 /// Select `object_index` (respecting shift-toggle) and arm a move drag.
+/// Callers have already checked [`pan_takes_press`].
 pub(crate) fn select_and_start_move(
     interact: CanvasInteract,
     object_index: usize,

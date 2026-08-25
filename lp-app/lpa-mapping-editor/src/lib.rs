@@ -41,11 +41,13 @@ pub use view::canvas::{
     SpriteObject, capture_pointer, convex_hull, object_color, pad_hull,
 };
 pub use view::floats::{HelpFloat, ZoomFloat, tool_hint};
-pub use view::keys::{EditorKeyOutcome, handle_editor_key};
+pub use view::keys::{EditorKeyInput, EditorKeyOutcome, EditorKeyResult, handle_editor_key};
 pub use view::object_properties::{ObjectPropertiesPane, shape_kind_label};
 pub use view::reference::ReferenceImage;
 pub use view::view_options::EditorViewOptions;
 pub use view::wheel::{WheelGesture, wheel_gesture};
+#[cfg(target_arch = "wasm32")]
+pub use view::window_keys::event_targets_editable;
 // The document type IS the component input type; re-exported so hosts that
 // only embed the editor need no direct lpc-mapping dependency.
 pub use lpc_mapping::Map2dDoc;
