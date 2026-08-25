@@ -2087,7 +2087,9 @@ mod tests {
     /// resolver: strand order, ids, instance addresses.
     #[test]
     fn object_instance_spans_agree_with_the_resolver() {
-        use crate::map2d_doc::{Map2dDoc, Map2dObject, Map2dShape, PathShape, RepeatShape};
+        use crate::map2d_doc::{
+            Map2dDoc, Map2dObject, Map2dShape, PathAlign, PathShape, RepeatShape,
+        };
         use crate::map2d_resolve::{object_instance_spans, resolve};
         use alloc::boxed::Box;
 
@@ -2102,6 +2104,7 @@ mod tests {
                     count: 4,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: PathAlign::On,
                 })),
                 center: [0.0, 0.0],
                 count: 3,
@@ -2116,6 +2119,7 @@ mod tests {
                 count: 5,
                 reversed: false,
                 gaps: Vec::new(),
+                align: PathAlign::On,
             }),
         });
         let resolved = resolve(&doc).unwrap();

@@ -31,6 +31,7 @@
 //! | 1 | grids, rings, plain paths |
 //! | 2 | [`PathShape::gaps`], [`RepeatShape`] |
 //! | 3 | [`Map2dObject::id`], [`Map2dObject::stride`], [`PolygonShape`] |
+//! | 4 | [`PathShape::align`], [`PolygonShape::align`] |
 
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
@@ -43,7 +44,7 @@ use crate::map2d_fit::Bounds2d;
 use crate::map2d_object_id::Map2dObjectId;
 
 /// Newest document format this crate can read.
-pub const MAP2D_FORMAT: u32 = 3;
+pub const MAP2D_FORMAT: u32 = 4;
 
 /// The format every document using only the original constructs declares.
 /// [`Map2dDoc::required_format`] returns this unless the content needs more.
@@ -72,6 +73,12 @@ const MAP2D_FORMAT_OBJECT_IDS: u32 = 3;
 /// The format a document needs once any object is a [`PolygonShape`] —
 /// an unknown variant, same reasoning as [`MAP2D_FORMAT_REPEAT`].
 const MAP2D_FORMAT_POLYGON: u32 = 3;
+
+/// Format 4: authored stroke alignment on path/polygon objects. An
+/// older build parses such a doc fine but DROPS `align` on round-trip —
+/// silently reverting authored rendering — so docs that use it must
+/// be refused by older builds (the same rationale as format-3 ids).
+const MAP2D_FORMAT_ALIGN: u32 = 4;
 
 /// Largest [`RepeatShape::count`] an editor may author. The resolver itself
 /// has no ceiling — a hand-authored document is the author's business — but a
@@ -213,6 +220,26 @@ pub enum RingDir {
     Ccw,
 }
 
+/// Where an object's lamps sit relative to the path it draws —
+/// Illustrator-style stroke alignment. Render-only: lamp positions are
+/// unaffected. `on` = the strip faces the viewer; `inside` = the strip
+/// wraps a form (LEDs line the inner wall — a channel letter); `outside`
+/// = edge-lit (LEDs ring the outer wall).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PathAlign {
+    #[default]
+    On,
+    Inside,
+    Outside,
+}
+
+impl PathAlign {
+    pub fn is_on(&self) -> bool {
+        matches!(self, PathAlign::On)
+    }
+}
+
 /// `count` lamps sampled evenly by arc length along a polyline; the first and
 /// last lamps sit exactly on the endpoints.
 ///
@@ -237,6 +264,13 @@ pub struct PathShape {
     /// also the document that stamps format 2.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gaps: Vec<u32>,
+    /// Stroke alignment (format 4); see [`PathAlign`].
+    ///
+    /// `skip_serializing_if` keeps pre-format-4 documents byte-identical: the
+    /// field only ever appears on a document that actually authors it — which
+    /// is also the document that stamps format 4.
+    #[serde(default, skip_serializing_if = "PathAlign::is_on")]
+    pub align: PathAlign,
 }
 
 /// A closed outline through `points`, with `count` lamps distributed evenly
@@ -255,6 +289,9 @@ pub struct PolygonShape {
     pub points: Vec<[f32; 2]>,
     /// Lamps distributed along the closed perimeter.
     pub count: u32,
+    /// Stroke alignment (format 4); see [`PathAlign`].
+    #[serde(default, skip_serializing_if = "PathAlign::is_on")]
+    pub align: PathAlign,
 }
 
 /// `count` rotated instances of an inner shape, equally spaced over a full
@@ -420,13 +457,32 @@ fn format_gate(found: u32, supported: u32) -> Result<(), Map2dError> {
 fn shape_required_format(shape: &Map2dShape) -> u32 {
     match shape {
         // Inert path segments (format 2): an old build would parse `gaps`
-        // away and light the jumper wire.
-        Map2dShape::Path(path) if !path.gaps.is_empty() => MAP2D_FORMAT_PATH_GAPS,
+        // away and light the jumper wire. Non-default alignment (format 4)
+        // is checked alongside: an old build would parse `align` away and
+        // silently revert the authored rendering.
+        Map2dShape::Path(path) => {
+            let mut required = MAP2D_FORMAT_BASE;
+            if !path.gaps.is_empty() {
+                required = required.max(MAP2D_FORMAT_PATH_GAPS);
+            }
+            if !path.align.is_on() {
+                required = required.max(MAP2D_FORMAT_ALIGN);
+            }
+            required
+        }
         // The rotational repeat (format 2): an unknown variant cannot be
         // ignored — the whole object's lamps would vanish.
         Map2dShape::Repeat(repeat) => MAP2D_FORMAT_REPEAT.max(shape_required_format(&repeat.shape)),
         // The closed polygon (format 3): unknown variant, same reasoning.
-        Map2dShape::Polygon(_) => MAP2D_FORMAT_POLYGON,
+        // Non-default alignment (format 4) is checked alongside, same
+        // rationale as the path case above.
+        Map2dShape::Polygon(polygon) => {
+            let mut required = MAP2D_FORMAT_POLYGON;
+            if !polygon.align.is_on() {
+                required = required.max(MAP2D_FORMAT_ALIGN);
+            }
+            required
+        }
         _ => MAP2D_FORMAT_BASE,
     }
 }
@@ -500,9 +556,9 @@ mod tests {
     #[test]
     fn rejects_newer_and_zero_formats() {
         assert!(matches!(
-            Map2dDoc::from_json(r#"{"format":4}"#),
+            Map2dDoc::from_json(r#"{"format":5}"#),
             Err(Map2dError::UnsupportedFormat {
-                found: 4,
+                found: 5,
                 supported: MAP2D_FORMAT
             })
         ));
@@ -578,6 +634,7 @@ mod tests {
                 count: 4,
                 reversed: false,
                 gaps: vec![1],
+                align: PathAlign::On,
             }),
         });
         assert_eq!(doc.required_format(), 2);
@@ -737,6 +794,7 @@ mod tests {
             shape: Map2dShape::Polygon(PolygonShape {
                 points: vec![[0.0, 0.0], [12.0, 0.0], [6.0, 9.0]],
                 count: 9,
+                align: PathAlign::On,
             }),
         });
         assert_eq!(doc.required_format(), 3);
@@ -765,6 +823,7 @@ mod tests {
                     shape: Box::new(Map2dShape::Polygon(PolygonShape {
                         points: vec![[0.0, 0.0], [12.0, 0.0], [6.0, 9.0]],
                         count: 9,
+                        align: PathAlign::On,
                     })),
                     center: [50.0, 50.0],
                     count: 3,
@@ -773,6 +832,104 @@ mod tests {
             ..Map2dDoc::new()
         };
         assert_eq!(doc.required_format(), 3);
+    }
+
+    /// Non-default alignment is the format-4 construct on `PathShape`: a path
+    /// that authors `inside`/`outside` stamps 4, and clearing it back to `on`
+    /// releases the document to whatever floor its other content needs.
+    #[test]
+    fn path_align_requires_format_four_and_releases_it() {
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(Map2dObject {
+            name: "channel".to_string(),
+            id: None,
+            stride: None,
+            shape: plain_path_aligned(PathAlign::Inside),
+        });
+        assert_eq!(doc.required_format(), 4);
+        doc.normalize_format();
+        assert_eq!(doc.format, 4);
+        assert_eq!(Map2dDoc::from_json(&doc.to_json()).unwrap(), doc);
+        assert_eq!(
+            format_gate(doc.format, 3),
+            Err(Map2dError::UnsupportedFormat {
+                found: 4,
+                supported: 3
+            })
+        );
+
+        let Map2dShape::Path(path) = &mut doc.objects[0].shape else {
+            panic!("expected path");
+        };
+        path.align = PathAlign::On;
+        doc.normalize_format();
+        assert_eq!(doc.format, 1);
+    }
+
+    /// The polygon variant of the same round-trip: `outside` alignment on a
+    /// closed outline stamps 4, and clearing it releases back to 3 (the
+    /// polygon variant itself is still a format-3 construct).
+    #[test]
+    fn polygon_align_requires_format_four_and_releases_it() {
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(Map2dObject {
+            name: "door".to_string(),
+            id: None,
+            stride: None,
+            shape: Map2dShape::Polygon(PolygonShape {
+                points: vec![[0.0, 0.0], [12.0, 0.0], [6.0, 9.0]],
+                count: 9,
+                align: PathAlign::Outside,
+            }),
+        });
+        assert_eq!(doc.required_format(), 4);
+        doc.normalize_format();
+        assert_eq!(doc.format, 4);
+        assert_eq!(Map2dDoc::from_json(&doc.to_json()).unwrap(), doc);
+        assert_eq!(
+            format_gate(doc.format, 3),
+            Err(Map2dError::UnsupportedFormat {
+                found: 4,
+                supported: 3
+            })
+        );
+
+        let Map2dShape::Polygon(polygon) = &mut doc.objects[0].shape else {
+            panic!("expected polygon");
+        };
+        polygon.align = PathAlign::On;
+        doc.normalize_format();
+        assert_eq!(doc.format, 3);
+    }
+
+    /// Byte-stability for `align`: `on` is skipped, so every pre-format-4
+    /// document round-trips byte-identically through the current writer.
+    #[test]
+    fn documents_with_default_align_serialize_without_the_align_field() {
+        for doc in [corpus::cat_ears(), corpus::repeated_sector()] {
+            let json = doc.to_json();
+            assert!(!json.contains("\"align\""), "{json}");
+        }
+    }
+
+    /// `required_format` walks into repeats for `align` too — an aligned path
+    /// nested inside a repeat still counts, same as the format-2 gap case.
+    #[test]
+    fn the_format_walk_recurses_through_repeat_for_align() {
+        let doc = Map2dDoc {
+            objects: vec![Map2dObject {
+                name: "sector".to_string(),
+                id: None,
+                stride: None,
+                shape: Map2dShape::Repeat(RepeatShape {
+                    shape: Box::new(plain_path_aligned(PathAlign::Outside)),
+                    center: [0.0, 0.0],
+                    count: 5,
+                }),
+            }],
+            ..Map2dDoc::new()
+        };
+        assert_eq!(doc.required_format(), 4);
     }
 
     /// Two objects claiming one id are refused whole at parse: patch entries
@@ -823,6 +980,18 @@ mod tests {
             count: 4,
             reversed: false,
             gaps,
+            align: PathAlign::On,
+        })
+    }
+
+    /// The same three-point path, with authored stroke alignment.
+    fn plain_path_aligned(align: PathAlign) -> Map2dShape {
+        Map2dShape::Path(PathShape {
+            points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
+            count: 4,
+            reversed: false,
+            gaps: Vec::new(),
+            align,
         })
     }
 

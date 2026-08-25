@@ -4900,7 +4900,9 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
     /// — this test is what actually proves that for the compact carrier
     /// instead of assuming the differential test implies it.
     fn map2d_scarf_doc() -> lpc_mapping::Map2dDoc {
-        use lpc_mapping::{Map2dObject, Map2dShape, PathShape, RingDir, RingOrder, RingShape};
+        use lpc_mapping::{
+            Map2dObject, Map2dShape, PathAlign, PathShape, RingDir, RingOrder, RingShape,
+        };
         lpc_mapping::Map2dDoc {
             format: lpc_mapping::MAP2D_FORMAT,
             sample_diameter: 1.0,
@@ -4930,6 +4932,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
                         count: 2,
                         reversed: false,
                         gaps: Vec::new(),
+                        align: PathAlign::On,
                     }),
                 },
             ],
@@ -5582,8 +5585,8 @@ mod mapping_representation_differential {
     use alloc::vec;
     use lp_collection::VecMap;
     use lpc_mapping::{
-        GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathShape, RingDir,
-        RingOrder, RingShape, fit_points, resolve,
+        GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathAlign,
+        PathShape, RingDir, RingOrder, RingShape, fit_points, resolve,
     };
     use lpc_model::{EnumSlot, MapSlot};
 
@@ -5663,6 +5666,7 @@ mod mapping_representation_differential {
             count,
             reversed: false,
             gaps: Vec::new(),
+            align: PathAlign::On,
         }))
     }
 

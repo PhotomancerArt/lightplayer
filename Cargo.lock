@@ -5991,6 +5991,7 @@ dependencies = [
  "base64 0.22.1",
  "dioxus",
  "dioxus-icons",
+ "gloo-timers",
  "lpc-mapping",
  "serde_json",
  "wasm-bindgen",

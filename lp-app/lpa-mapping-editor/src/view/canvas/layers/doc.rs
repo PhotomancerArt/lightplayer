@@ -1,6 +1,7 @@
 //! Document content layers: reference image, authored canvas rect, the
-//! fit-preview overlay, wiring arrows, repeat ghosts, jumper gap lines,
-//! path hit lines, lamps (with hit rings), and wiring numbers.
+//! fit-preview overlay, object bodies (aligned outline + lamp cells),
+//! wiring arrows, repeat ghosts, jumper gap lines, path hit lines, lamps
+//! (with hit rings), and wiring numbers.
 
 use std::collections::BTreeSet;
 
@@ -10,6 +11,8 @@ use lpc_mapping::{Bounds2d, ResolvedMap2d};
 use crate::editor_core::map_selection::MapSelection;
 use crate::editor_core::map_tool::MapTool;
 use crate::editor_core::view_geometry::MapArrowOverlay;
+use crate::view::canvas::layers::bodies::{ObjectBody, loops_path_d};
+use crate::view::canvas::layers::outline::hull_path_d;
 use crate::view::canvas::palette::{OBJECT_COLORS, SELECTION_COLOR, object_color};
 use crate::view::canvas::{CanvasInteract, secondary_button, select_and_start_move};
 use crate::view::reference::ReferenceImage;
@@ -26,6 +29,10 @@ pub(crate) struct DocLayersInput<'a> {
     pub ghost_outlines: &'a [Vec<[f32; 2]>],
     pub gap_segments: &'a [[[f32; 2]; 2]],
     pub path_objects: &'a [(usize, Vec<[f32; 2]>)],
+    /// Each object instance's BODY — the aligned outline and lamp cells the
+    /// Arrange view draws, derived from THIS document so the properties
+    /// panel's `align` control repaints as it is edited.
+    pub bodies: &'a [ObjectBody],
     pub resolved: &'a ResolvedMap2d,
     /// Each object's authored strand as `(start, count)` — the wiring
     /// numbers' coverage (arrows are pre-filtered to the same grain).
@@ -52,6 +59,19 @@ pub(crate) fn doc_layers(input: &DocLayersInput<'_>) -> Element {
     let hit_radius = input.hit_radius;
     let tool_is_select = input.tool_is_select;
     let span_instances = input.span_instances;
+    // A body wears its object's colour — or, while a repeat tessellates,
+    // its instance's hue, exactly as that instance's lamp dots do.
+    let body_color = |body: &ObjectBody| -> String {
+        if input.tessellating.contains(&body.object) {
+            OBJECT_COLORS[(body.object + body.instance) % OBJECT_COLORS.len()].to_string()
+        } else {
+            object_color(body.object).to_string()
+        }
+    };
+    // While DESCENDED into a repeat, the non-primary instances are inert
+    // previews (the dots dim the same way).
+    let body_inert =
+        |body: &ObjectBody| input.scoped_object == Some(body.object) && body.instance > 0;
     let instance_of = |lamp_index: u32| -> Option<usize> {
         let slot = span_instances.partition_point(|(start, count, _)| start + count <= lamp_index);
         span_instances
@@ -130,6 +150,59 @@ pub(crate) fn doc_layers(input: &DocLayersInput<'_>) -> Element {
                 y: "{rect.min_y + rect.height - 8.0 / eff}",
                 font_size: "{11.0 / eff}",
                 "1,1"
+            }
+        }
+        // The object BODIES, under every authored mark and every editing
+        // handle: the language the Arrange view speaks — the aligned band
+        // the lamp strand sweeps, plus its voronoi lamp cells. Here they are
+        // CONTEXT (the dots stay the editing affordance), so the cells go in
+        // at reduced opacity and nothing takes pointer events: the canvas
+        // root still owns every gesture, and the inline `pointer-events`
+        // beats `.lpme-obj-hull`'s own `pointer-events: all`.
+        //
+        // Outlines first, then cells, so no object's cells are tinted by a
+        // neighbour's band fill.
+        for (index, body) in input.bodies.iter().enumerate() {
+            if !body.outline.is_empty() {
+                {
+                    let selected = input.selection.object_selected(body.object);
+                    let inert = body_inert(body);
+                    let color = body_color(body);
+                    rsx! {
+                        path {
+                            key: "body{index}",
+                            class: if selected { "lpme-obj-hull lpme-obj-hull-on" } else { "lpme-obj-hull" },
+                            d: loops_path_d(&body.outline),
+                            // Overlapping strand loops merge and a closed
+                            // shape's hole stays a hole.
+                            fill_rule: "nonzero",
+                            stroke_width: if selected { "{1.4 / eff}" } else { "{1.0 / eff}" },
+                            opacity: if inert { "0.5" } else { "1" },
+                            // The object's own colour tints the at-rest
+                            // stroke (`.lpme-obj-hull` mixes it down).
+                            style: "--lpme-obj-c: {color}; pointer-events: none;",
+                        }
+                    }
+                }
+            }
+        }
+        for (index, body) in input.bodies.iter().enumerate() {
+            {
+                let inert = body_inert(body);
+                let color = body_color(body);
+                // Calm enough that the lamp dots keep reading through them.
+                let fill_opacity = if inert { "0.22" } else { "0.4" };
+                rsx! {
+                    for cell in body.cells.iter() {
+                        path {
+                            key: "cell{index}-{cell.lamp}",
+                            d: hull_path_d(&cell.polygon),
+                            fill: "{color}",
+                            fill_opacity,
+                            pointer_events: "none",
+                        }
+                    }
+                }
             }
         }
         if let Some(overlay) = input.arrows {

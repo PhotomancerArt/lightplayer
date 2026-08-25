@@ -16,6 +16,10 @@ lpc-mapping = { path = "../../lp-core/lpc-mapping" }
 serde_json = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# The hold-to-menu timer (a press that sits still for ~420ms). Browser-only
+# by nature — the host build has no pointer to hold. Same version the rest
+# of lp-app pins.
+gloo-timers = { version = "0.3", features = ["futures"] }
 # The standalone page's persistence + open-dialog plumbing only; the editor
 # itself is DOM-free.
 wasm-bindgen = "0.2"
@@ -29,6 +33,8 @@ web-sys = { version = "0.3", features = [
     "EventTarget",
     "HtmlElement",
     "HtmlImageElement",
+    # Escape closes the candidate menu, heard at the document.
+    "KeyboardEvent",
     "NodeList",
     "PointerEvent",
     "ResizeObserver",
