@@ -85,6 +85,19 @@ pub struct FakeLightPlayerState {
     /// itself. The device session's hello gate classifies this as
     /// `Incompatible`.
     pub suppress_hello: bool,
+    /// Swallow every correlated response frame (`id != 0`) at the wire while
+    /// unsolicited id-0 frames keep flowing: mimics firmware dropping
+    /// responses under engine load (`[io_task] UART TX timed out` — the
+    /// shared-UART starvation debt). Combined with
+    /// [`heartbeat_interval`](Self::heartbeat_interval) this reproduces the
+    /// wire that defeats any frame-gap timeout: alive, but never answering.
+    pub drop_responses: bool,
+    /// Emit synthetic unsolicited id-0 heartbeat frames on this cadence,
+    /// like real firmware's server loop (every 5 s on hardware). The fake's
+    /// host `LpServer` never heartbeats on its own — heartbeat assembly
+    /// lives in the firmware loop — so scripts that need a "live" wire
+    /// opt in here.
+    pub heartbeat_interval: Option<Duration>,
     /// Report this wire proto version in the hello instead of the build's
     /// [`lpc_wire::WIRE_PROTO_VERSION`]: mimics firmware built from an
     /// incompatible wire revision.
@@ -108,6 +121,8 @@ impl FakeLightPlayerState {
             base_mac: None,
             provenance: fake_provenance("fake-firmware"),
             suppress_hello: false,
+            drop_responses: false,
+            heartbeat_interval: None,
             proto_override: None,
             load_project_at_boot: false,
             project_dir: FAKE_DEVICE_PROJECT_DIR.to_string(),
@@ -137,6 +152,19 @@ impl FakeLightPlayerState {
 
     pub fn with_suppressed_hello(mut self) -> Self {
         self.suppress_hello = true;
+        self
+    }
+
+    /// Drop every correlated response at the wire (id-0 frames still flow):
+    /// the response-starved device of the 2026-08-24 request-idle defect.
+    pub fn with_dropped_responses(mut self) -> Self {
+        self.drop_responses = true;
+        self
+    }
+
+    /// Heartbeat on `interval` like real firmware's server loop.
+    pub fn with_heartbeat_interval(mut self, interval: Duration) -> Self {
+        self.heartbeat_interval = Some(interval);
         self
     }
 

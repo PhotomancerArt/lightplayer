@@ -253,7 +253,7 @@ fn workbench_patching_view() -> Element {
 }
 
 #[story(
-    description = "The mobile fold in the PATCHING view with the Outputs panel summoned — the destination of the object-first invitation below 820px (round 3, #6): the ports come to the user rather than an inline dropdown, and picking there completes the assign and dismisses the panel. The Patching view's Outputs panel carries the walk-up grammar (free runs are click targets), which is what makes it a pick surface rather than a readout. The surface is the walk-up pose: manual fixtures, sector 4 still waiting, IO13 empty. At lg the same mount shows the ordinary Patch workbench with that object selected — the invitation state in place."
+    description = "The fold in the PATCHING view with the Outputs panel summoned — the destination of the object-first invitation below 820px (round 3, #6): the ports come to the user rather than an inline dropdown, and picking there completes the assign and dismisses the panel. At sm the panel replaces main outright (phone); at md it is the TABLET SHEET — dock width, anchored right, the canvas with the waiting object still visible beside the pick (the G1 2026-08-24 fix: full-width panels at md were phone behavior at tablet width). The Patching view's Outputs panel carries the walk-up grammar (free runs are click targets), which is what makes it a pick surface rather than a readout. The surface is the walk-up pose: manual fixtures, sector 4 still waiting, IO13 empty. At lg the same mount shows the ordinary Patch workbench with that object selected — the invitation state in place."
 )]
 fn workbench_patching_mobile_pick() -> Element {
     rsx! {
@@ -280,7 +280,7 @@ fn workbench_patching_mobile_pick() -> Element {
 }
 
 #[story(
-    description = "The mobile fold (≤820px — the G1 ruling moved it down from 960 so md widths keep real docks) with a panel summoned: the summon strip carries the view switch plus the view's ROSTERED panel toggles, and the summoned Outputs panel replaces the main view under a back header. The sm capture is the point — at lg the same mount shows the band and docks."
+    description = "The fold (≤820px — the G1 ruling moved it down from 960 so md widths keep real docks) with a panel summoned: the summon strip carries the view switch plus the view's ROSTERED panel toggles. At sm the summoned Outputs panel replaces the main view under a back header (phone); at md it is the tablet sheet — dock width, anchored to its home side (right), dock fill + hairline + shadow, the canvas live beside it, dismissed by ✕. At lg the same mount shows the band and docks."
 )]
 fn workbench_mobile_outputs_summoned() -> Element {
     rsx! {
@@ -300,6 +300,33 @@ fn workbench_mobile_outputs_summoned() -> Element {
                 running: true,
                 hrefs: WorkbenchHrefs::inert_all(),
                 initial_summoned: Some(super::PanelId::Outputs),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The tablet sheet's LEFT anchor: the Tree summoned on the Map view at md — the sheet slides from the panel's home side (Tree lives in the left dock), so the fixture tree comes up on the left at its dock's width with the canvas beside it, mirroring the right-side sheet's grammar. At sm the same summon is the full phone replace; at lg the ordinary docks."
+)]
+fn workbench_tablet_tree_summoned() -> Element {
+    rsx! {
+        div { class: "tw:flex tw:h-[640px] tw:flex-col",
+            WorkbenchFrame {
+                view: WorkbenchView::Mapping,
+                panes: vec![project_synced_pane_view()],
+                project_editor: project_editor_fixture(ProjectSyncPhase::Ready)
+                    .with_patch_surface(
+                        Some(labelled(mini_dome_surface(false))),
+                        lpa_studio_core::UiSelection::one(UiPatchTarget::Instance {
+                            node: NodeId::new(2),
+                            path: "/sector/2".to_string(),
+                        }),
+                    ),
+                lens_card: Some(simulator_lens_card()),
+                running: true,
+                hrefs: WorkbenchHrefs::inert_all(),
+                initial_summoned: Some(super::PanelId::Tree),
                 on_action: move |_| {},
             }
         }

@@ -15,14 +15,14 @@ use std::collections::BTreeMap;
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
     Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FitReconcile, FixtureBody, FixtureEvent,
-    FixtureSprite, HelpFloat, MapEditorSession, Placement, SpriteObject, ZoomFloat, convex_hull,
-    display_inset_padding, object_color, pad_hull, tool_hint,
+    FixtureSprite, HelpFloat, LampCell, MapEditorSession, Placement, SpriteObject, ZoomFloat,
+    aligned_outline, display_inset_padding, hit_body, lamp_cells, object_color, tool_hint,
 };
 use lpa_studio_core::{
     ArtifactLocation, EditorMetaFixture, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
     ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchSurface, UiPatchTarget, UiSelection,
 };
-use lpc_mapping::Bounds2d;
+use lpc_mapping::{Bounds2d, Map2dDoc, Map2dShape, PathAlign, ResolvedMap2d};
 
 use crate::app::node::lamp_view::{UNLIT_RGB, fixture_live_colors};
 use crate::app::patch::patch_panel::srgb8;
@@ -52,6 +52,47 @@ struct FixtureRender {
     body: FixtureBody,
     /// `(path, start, lamps)` for instance selection rings.
     instances: Vec<(String, u32, u32)>,
+    /// The document's physical strands, from the SAME parse the body came
+    /// from — how each run of lamps is drawn (see [`StrandMeta`]). Empty for
+    /// bodies with no document behind them.
+    strands: Vec<StrandMeta>,
+    /// The doc's declared lamp footprint, in ITS OWN (arbitrary) units —
+    /// the only physical length a document states, so every derived render
+    /// length floors on it rather than on some absolute constant.
+    sample_diameter: f32,
+}
+
+/// One physical strand of a fixture's map2d document, as the CANVAS needs
+/// it: which lamps it covers, and the facts its body is drawn from.
+///
+/// A strand is a resolver span (a repeat's instance is already its own) cut
+/// again at the path's jumper gaps — a jumper is a physical break, so no
+/// body may bridge one, exactly as no body bridges two objects.
+#[derive(Clone, PartialEq)]
+struct StrandMeta {
+    /// Lamp range in the fixture's TRUE numbering.
+    start: u32,
+    count: u32,
+    /// Authored stroke alignment (map2d format 4).
+    align: PathAlign,
+    /// These lamps read as a RIBBON and wear voronoi cells (path, polygon);
+    /// grid and ring lamps are a field and keep their dots.
+    cells: bool,
+    /// The lamps close their own loop (a polygon's perimeter wraps), so the
+    /// outline repeats the first lamp and the band comes out an annulus
+    /// rather than a ribbon with a mouth at the seam.
+    closed: bool,
+}
+
+impl StrandMeta {
+    fn owns(&self, lamp: u32) -> bool {
+        lamp >= self.start && lamp < self.start.saturating_add(self.count)
+    }
+
+    /// Does this strand fall inside `start..end` (an instance's window)?
+    fn within(&self, start: u32, end: u32) -> bool {
+        self.start >= start && self.start < end
+    }
 }
 
 /// A committed gesture held on screen until the snapshot confirms it: the
@@ -738,14 +779,19 @@ fn sprite_of(render: &FixtureRender, selection: &UiSelection) -> FixtureSprite {
 }
 
 /// The fixture's objects as canvas BODIES (G1 round 3: an object is a
-/// THING, not a field of dots): one padded convex hull per instance, in the
+/// THING, not a field of dots): one aligned outline per instance, in the
 /// sprite's own space, ONE ENTRY PER INSTANCE IN SURFACE ORDER — a
-/// `FixturePick::object` is an index into this list, so degenerate hulls
+/// `FixturePick::object` is an index into this list, so bodyless instances
 /// stay as empty placeholders rather than shifting everyone after them.
 ///
+/// The design-language round replaced the padded convex hull with the band
+/// the lamp strand sweeps, aligned as the document authored it, plus voronoi
+/// CELLS for the ribbon-like kinds; the hit body stays the symmetric on-path
+/// band whatever the visual alignment (planning Q7).
+///
 /// Computed once per sprite build (selection changes rebuild sprites
-/// anyway); the per-object cost is a hull over its drawn lamps, so a
-/// dome-scale fixture stays one pass over its (display-subsampled) points.
+/// anyway); the per-object cost is one offset pass plus the cell clipping
+/// over its DRAWN lamps, which display subsampling already bounds.
 fn sprite_objects(render: &FixtureRender, selection: &UiSelection) -> Vec<SpriteObject> {
     let FixtureBody::Lamps { points, total } = &render.body else {
         return Vec::new();
@@ -756,26 +802,48 @@ fn sprite_objects(render: &FixtureRender, selection: &UiSelection) -> Vec<Sprite
     // The same subsample arithmetic the live-fill hooks use: drawn point i
     // is TRUE lamp i × stride.
     let stride = (*total as usize).div_ceil(points.len()).max(1);
-    // The hull should stand off the lamps by a hair more than a lamp dot,
-    // in own-space units: a fraction of the fixture's own extent reads
-    // consistently across docs drawn at wildly different scales.
-    let [_, _, bw, bh] = render.bounds;
-    let pad = (bw.max(bh) * 0.035).clamp(0.75, 14.0) as f32;
     render
         .instances
         .iter()
         .map(|(path, start, lamps)| {
             let end = start.saturating_add(*lamps);
-            let member: Vec<[f32; 2]> = points
-                .iter()
-                .enumerate()
-                .filter(|(index, _)| {
-                    let lamp = (index * stride) as u32;
-                    lamp >= *start && lamp < end
-                })
-                .map(|(_, point)| *point)
-                .collect();
-            let hull = pad_hull(&convex_hull(&member), pad);
+            let (strands, displayed) = instance_strands(render, points, stride, *start, end);
+            // The band's reach off the lamps, derived from THIS instance's
+            // own numbers — doc units are arbitrary (G1 ruling), so nothing
+            // absolute may appear here: a fraction of the strand pitch,
+            // floored by the doc's declared lamp footprint. ONE value — hit
+            // body, visual outline and cells all stand off the lamps by the
+            // same amount, so they agree by construction.
+            let reach = instance_pitch(&strands)
+                .map_or(0.0, |pitch| 0.65 * pitch)
+                .max(0.55 * f64::from(render.sample_diameter))
+                .max(f64::EPSILON) as f32;
+            // How this instance draws: from the first strand of the document
+            // inside its window (an instance never spans two objects, so one
+            // answer covers it). Unknown — a body with no document behind it
+            // — draws the neutral symmetric band with dots.
+            let meta = render.strands.iter().find(|meta| meta.within(*start, end));
+            let align = meta.map_or(PathAlign::On, |meta| meta.align);
+            // A closed shape's outline wraps: repeat the first lamp so the
+            // band is an annulus, not a ribbon with a mouth at the seam. The
+            // CELLS stay on the open run — one cell per drawn lamp, always.
+            let outline_strands: Vec<Vec<[f32; 2]>> = match meta {
+                Some(meta) if meta.closed => strands
+                    .iter()
+                    .map(|strand| {
+                        let mut closed = strand.clone();
+                        closed.extend(strand.first().copied());
+                        closed
+                    })
+                    .collect(),
+                _ => strands.clone(),
+            };
+            let cells = match meta {
+                Some(meta) if meta.cells => {
+                    object_cells(&strands, align, &displayed, render.sample_diameter)
+                }
+                _ => Vec::new(),
+            };
             let label = if path.is_empty() {
                 format!("lamps {start}\u{2013}{}", end.saturating_sub(1))
             } else {
@@ -783,12 +851,132 @@ fn sprite_objects(render: &FixtureRender, selection: &UiSelection) -> Vec<Sprite
             };
             SpriteObject {
                 label,
-                hull,
+                hull: hit_body(&outline_strands, reach),
+                outline: aligned_outline(&outline_strands, align, reach),
+                cells,
                 lamps: (*start, *lamps),
                 selected: object_selected(selection, render.node, path, *start, *lamps),
             }
         })
         .collect()
+}
+
+/// One instance's DRAWN lamps, cut into physical strands: a new run wherever
+/// the owning [`StrandMeta`] changes (a repeat's next instance, the far side
+/// of a jumper), so no body ever bridges a break in the wire.
+///
+/// Returns the runs and, alongside them, the sprite-displayed index of every
+/// point in run order — the mapping the cells' live-fill hooks stride
+/// through.
+fn instance_strands(
+    render: &FixtureRender,
+    points: &[[f32; 2]],
+    stride: usize,
+    start: u32,
+    end: u32,
+) -> (Vec<Vec<[f32; 2]>>, Vec<usize>) {
+    let mut strands: Vec<Vec<[f32; 2]>> = Vec::new();
+    let mut displayed: Vec<usize> = Vec::new();
+    let mut run: Option<Option<usize>> = None;
+    for (index, point) in points.iter().enumerate() {
+        let lamp = (index * stride) as u32;
+        if lamp < start || lamp >= end {
+            continue;
+        }
+        let owner = render.strands.iter().position(|meta| meta.owns(lamp));
+        if run != Some(owner) {
+            strands.push(Vec::new());
+            run = Some(owner);
+        }
+        if let Some(strand) = strands.last_mut() {
+            strand.push(*point);
+        }
+        displayed.push(index);
+    }
+    (strands, displayed)
+}
+
+/// The instance's cells, re-indexed from its own lamp order onto the
+/// SPRITE's displayed points — the index the canvas multiplies by the
+/// display stride to name a true lamp, exactly as the circles do. Cells
+/// clipped away to nothing carry no polygon and are dropped here rather than
+/// emitting an empty path element.
+fn object_cells(
+    strands: &[Vec<[f32; 2]>],
+    align: PathAlign,
+    displayed: &[usize],
+    sample_diameter: f32,
+) -> Vec<LampCell> {
+    lamp_cells(strands, align, sample_diameter)
+        .into_iter()
+        .filter(|cell| cell.polygon.len() >= 3)
+        .filter_map(|cell| {
+            displayed.get(cell.lamp).map(|index| LampCell {
+                lamp: *index,
+                polygon: cell.polygon,
+            })
+        })
+        .collect()
+}
+
+/// Median of the consecutive drawn-point gaps across an instance's strands
+/// — its pitch as displayed. `None` when no strand has two distinct points.
+fn instance_pitch(strands: &[Vec<[f32; 2]>]) -> Option<f64> {
+    let mut gaps: Vec<f64> = strands
+        .iter()
+        .flat_map(|strand| {
+            strand.windows(2).map(|w| {
+                let (dx, dy) = (f64::from(w[1][0] - w[0][0]), f64::from(w[1][1] - w[0][1]));
+                (dx * dx + dy * dy).sqrt()
+            })
+        })
+        .filter(|gap| *gap > 1e-9)
+        .collect();
+    if gaps.is_empty() {
+        return None;
+    }
+    gaps.sort_by(f64::total_cmp);
+    Some(gaps[gaps.len() / 2])
+}
+
+/// Every strand of a resolved document, in wiring order — the drawing facts
+/// the canvas cannot recover from lamp positions alone.
+fn strand_metas(doc: &Map2dDoc, resolved: &ResolvedMap2d) -> Vec<StrandMeta> {
+    let mut metas = Vec::with_capacity(resolved.spans.len());
+    for span in &resolved.spans {
+        let Some(object) = doc.objects.get(span.object as usize) else {
+            continue;
+        };
+        // A repeat rotates an inner shape: it is the innermost LEAF that says
+        // how the lamps run.
+        let mut shape = &object.shape;
+        while let Map2dShape::Repeat(repeat) = shape {
+            shape = &repeat.shape;
+        }
+        let (align, cells, closed, breaks) = match shape {
+            Map2dShape::Path(path) => (path.align, true, false, lpc_mapping::path_gap_breaks(path)),
+            Map2dShape::Polygon(polygon) => (polygon.align, true, true, Vec::new()),
+            // Grid and ring lamps are a FIELD, not a ribbon: they wear the
+            // neutral on-path band and keep their dots.
+            _ => (PathAlign::On, false, false, Vec::new()),
+        };
+        // Cut the span at each jumper: one meta per lit run.
+        let mut cursor = 0;
+        for offset in breaks.into_iter().chain([span.count]) {
+            if offset <= cursor || offset > span.count {
+                continue;
+            }
+            metas.push(StrandMeta {
+                start: span.start + cursor,
+                count: offset - cursor,
+                align,
+                cells,
+                closed,
+            });
+            cursor = offset;
+        }
+    }
+    metas
 }
 
 /// Is THIS object the selection? Path-addressed instances match by path;
@@ -900,10 +1088,15 @@ fn build_renders(
             .and_then(|text| {
                 let doc = lpc_mapping::Map2dDoc::from_json(text).ok()?;
                 let resolved = lpc_mapping::resolve(&doc).ok()?;
-                Some(resolved)
+                // The strand facts ride out of the SAME parse: the canvas
+                // needs the authored alignment and the physical breaks to
+                // draw a body, and nothing downstream may read the document
+                // a second time to get them.
+                let strands = strand_metas(&doc, &resolved);
+                Some((resolved, strands, doc.sample_diameter))
             });
-        let (body, bounds) = match resolved {
-            Some(resolved) => {
+        let (body, bounds, strands, sample_diameter) = match resolved {
+            Some((resolved, strands, sample_diameter)) => {
                 let total = resolved.lamps.len() as u32;
                 let stride = resolved.lamps.len().div_ceil(MAX_DISPLAY_LAMPS).max(1);
                 let points: Vec<[f32; 2]> = resolved
@@ -922,7 +1115,12 @@ fn build_renders(
                         ]
                     })
                     .unwrap_or([0.0, 0.0, 40.0, 40.0]);
-                (FixtureBody::Lamps { points, total }, bounds)
+                (
+                    FixtureBody::Lamps { points, total },
+                    bounds,
+                    strands,
+                    sample_diameter,
+                )
             }
             None if fixture.mapping_artifact.is_some() => {
                 // A map2d exists but is not loaded: the footprint block.
@@ -931,13 +1129,23 @@ fn build_renders(
                     .footprint
                     .map(|fp| fp.bbox)
                     .unwrap_or_else(|| placeholder_bounds(lamps));
-                (FixtureBody::Placeholder { lamps }, bounds)
+                (
+                    FixtureBody::Placeholder { lamps },
+                    bounds,
+                    Vec::new(),
+                    lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
+                )
             }
             None => {
                 // The peach: no map2d document at all — the range strip.
                 let lamps = fixture.patch.lamps;
                 let width = f64::from(lamps.max(8)) * 3.0;
-                (FixtureBody::Strip { lamps }, [0.0, 0.0, width, 10.0])
+                (
+                    FixtureBody::Strip { lamps },
+                    [0.0, 0.0, width, 10.0],
+                    Vec::new(),
+                    lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
+                )
             }
         };
         renders.push(FixtureRender {
@@ -954,6 +1162,8 @@ fn build_renders(
                 .iter()
                 .map(|instance| (instance.path.clone(), instance.start, instance.lamps))
                 .collect(),
+            strands,
+            sample_diameter,
         });
     }
     for render in renders.iter_mut().filter(|render| !render.arranged) {
@@ -1084,6 +1294,8 @@ mod tests {
             bounds,
             body: FixtureBody::Placeholder { lamps: 10 },
             instances: Vec::new(),
+            strands: Vec::new(),
+            sample_diameter: lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
         }
     }
 
@@ -1445,12 +1657,20 @@ mod tests {
         assert_eq!(transform_of(&placement_of(&transform)), transform);
     }
 
-    /// Objects become canvas BODIES (round 3): one hull per instance, IN
-    /// SURFACE ORDER — a pick's index must line up — and a degenerate span
-    /// stays as an empty placeholder rather than shifting its neighbours.
-    #[test]
-    fn sprite_objects_are_one_hull_per_instance_in_order() {
-        let render = FixtureRender {
+    /// A path strand of `count` lamps from `start`, drawn like a document
+    /// path (cells, symmetric band).
+    fn path_strand(start: u32, count: u32) -> StrandMeta {
+        StrandMeta {
+            start,
+            count,
+            align: PathAlign::On,
+            cells: true,
+            closed: false,
+        }
+    }
+
+    fn lamp_render(points: Vec<[f32; 2]>, total: u32) -> FixtureRender {
+        FixtureRender {
             node: NodeId::new(7),
             key: "k".into(),
             label: "fx".into(),
@@ -1458,25 +1678,218 @@ mod tests {
             transform: UiArrangeTransform::default(),
             arranged: true,
             bounds: [0.0, 0.0, 100.0, 10.0],
-            body: FixtureBody::Lamps {
-                points: (0..20).map(|i| [i as f32 * 5.0, 0.0]).collect(),
-                total: 20,
-            },
-            instances: vec![
-                ("/a/0".into(), 0, 10),
-                ("/a/1".into(), 10, 10),
-                ("/gap".into(), 40, 5), // past the drawn points: no body
-            ],
-        };
+            body: FixtureBody::Lamps { points, total },
+            instances: Vec::new(),
+            strands: Vec::new(),
+            sample_diameter: lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
+        }
+    }
+
+    /// Objects become canvas BODIES (round 3): one body per instance, IN
+    /// SURFACE ORDER — a pick's index must line up — and a degenerate span
+    /// stays as an empty placeholder rather than shifting its neighbours.
+    #[test]
+    fn sprite_objects_are_one_hull_per_instance_in_order() {
+        let mut render = lamp_render((0..20).map(|i| [i as f32 * 5.0, 0.0]).collect(), 20);
+        render.instances = vec![
+            ("/a/0".into(), 0, 10),
+            ("/a/1".into(), 10, 10),
+            ("/gap".into(), 40, 5), // past the drawn points: no body
+        ];
+        render.strands = vec![path_strand(0, 10), path_strand(10, 10)];
         let objects = sprite_objects(&render, &UiSelection::empty());
         assert_eq!(objects.len(), 3, "one entry per instance, always");
-        assert!(objects[0].hull.len() >= 3, "a real span grows a body");
-        assert!(objects[1].hull.len() >= 3);
+        assert!(!objects[0].hull.is_empty(), "a real span grows a body");
+        assert!(!objects[0].outline.is_empty(), "…and something to paint");
+        assert!(!objects[1].hull.is_empty());
         assert!(
-            objects[2].hull.is_empty(),
+            objects[2].hull.is_empty() && objects[2].outline.is_empty(),
             "no lamps drawn in the span = no body, but the SLOT remains"
         );
+        assert!(objects[2].cells.is_empty());
         assert_eq!(objects[1].lamps, (10, 10), "true numbering rides along");
+    }
+
+    /// The cells a path object wears are indexed in the SPRITE's displayed
+    /// space, so the canvas's `index × stride` names the same true lamp the
+    /// circles would have named — the live-fill feed's whole contract.
+    #[test]
+    fn cells_are_indexed_in_the_sprites_displayed_space() {
+        // 40 true lamps drawn as 20 points: stride 2.
+        let mut render = lamp_render((0..20).map(|i| [i as f32 * 5.0, 0.0]).collect(), 40);
+        render.instances = vec![("/a/0".into(), 0, 20), ("/a/1".into(), 20, 20)];
+        render.strands = vec![path_strand(0, 20), path_strand(20, 20)];
+        let objects = sprite_objects(&render, &UiSelection::empty());
+        assert_eq!(objects[0].cells.len(), 10, "one cell per DRAWN lamp");
+        let first: Vec<usize> = objects[0].cells.iter().map(|cell| cell.lamp).collect();
+        assert_eq!(first, (0..10).collect::<Vec<_>>());
+        let second: Vec<usize> = objects[1].cells.iter().map(|cell| cell.lamp).collect();
+        assert_eq!(
+            second,
+            (10..20).collect::<Vec<_>>(),
+            "the second instance continues the sprite's own indexing"
+        );
+    }
+
+    /// A physical break inside one instance (a repeat's next strand, the far
+    /// side of a jumper) splits the body: two loops, and nothing bridging
+    /// the gap between them.
+    #[test]
+    fn a_strand_break_inside_an_instance_splits_the_body() {
+        let points: Vec<[f32; 2]> = (0..10)
+            .map(|i| {
+                if i < 5 {
+                    [i as f32, 0.0]
+                } else {
+                    [i as f32 + 40.0, 0.0]
+                }
+            })
+            .collect();
+        let mut render = lamp_render(points, 10);
+        render.instances = vec![("/a".into(), 0, 10)];
+        render.strands = vec![path_strand(0, 5), path_strand(5, 5)];
+        let objects = sprite_objects(&render, &UiSelection::empty());
+        assert_eq!(objects[0].outline.len(), 2, "one loop per lit run");
+        assert!(
+            !lpa_mapping_editor::point_in_loops(&objects[0].hull, [25.0, 0.0]),
+            "the jumper stays open — no body bridges it"
+        );
+        assert!(lpa_mapping_editor::point_in_loops(
+            &objects[0].hull,
+            [2.0, 0.0]
+        ));
+    }
+
+    /// Grid and ring lamps are a FIELD: they get the neutral on-path band
+    /// and keep their dots, so the canvas draws no cells for them.
+    #[test]
+    fn field_kinds_get_a_body_but_no_cells() {
+        let mut render = lamp_render((0..10).map(|i| [i as f32 * 5.0, 0.0]).collect(), 10);
+        render.instances = vec![("/g".into(), 0, 10)];
+        render.strands = vec![StrandMeta {
+            start: 0,
+            count: 10,
+            align: PathAlign::On,
+            cells: false,
+            closed: false,
+        }];
+        let objects = sprite_objects(&render, &UiSelection::empty());
+        assert!(!objects[0].outline.is_empty());
+        assert!(objects[0].cells.is_empty(), "dots stay dots");
+    }
+
+    /// The whole seam on REAL bytes: the mini-dome's own document through
+    /// resolve → strand facts → sprite bodies. Its sector is a repeat of a
+    /// jumpered path, so each instance must come out as one body of eight
+    /// lit runs wearing a cell per drawn lamp — and nothing painted across a
+    /// jumper.
+    #[test]
+    fn the_mini_dome_sectors_draw_as_jumpered_runs_of_cells() {
+        let example = lpa_studio_core::app::home::embedded_example("examples/mini-dome")
+            .expect("the mini-dome example is embedded");
+        let text = example
+            .files
+            .iter()
+            .find(|(file, _)| *file == "dome/dome.map2d.json")
+            .map(|(_, bytes)| std::str::from_utf8(bytes).expect("utf8"))
+            .expect("the dome document");
+        let doc = Map2dDoc::from_json(text).expect("the dome parses");
+        let resolved = lpc_mapping::resolve(&doc).expect("the dome resolves");
+        let points: Vec<[f32; 2]> = resolved.lamps.iter().map(|lamp| lamp.pos).collect();
+        let total = points.len() as u32;
+        let mut render = lamp_render(points.clone(), total);
+        let bounds = lpc_mapping::bounds_of_points(&points).expect("bounds");
+        render.bounds = [
+            f64::from(bounds.min_x),
+            f64::from(bounds.min_y),
+            f64::from(bounds.width),
+            f64::from(bounds.height),
+        ];
+        render.strands = strand_metas(&doc, &resolved);
+        render.instances = (0..5)
+            .map(|instance| (format!("/sector/{instance}"), instance * 30, 30))
+            .collect();
+
+        let objects = sprite_objects(&render, &UiSelection::empty());
+        assert_eq!(objects.len(), 5, "one body per sector instance");
+        for (index, object) in objects.iter().enumerate() {
+            assert_eq!(
+                object.outline.len(),
+                8,
+                "sector {index}: the path's seven jumpers leave eight lit runs"
+            );
+            assert_eq!(object.cells.len(), 30, "sector {index}: a cell per lamp");
+            // The cells name this instance's lamps, in the sprite's own
+            // displayed indexing (stride 1 here — 150 lamps, all drawn).
+            let lamps: Vec<usize> = object.cells.iter().map(|cell| cell.lamp).collect();
+            assert_eq!(lamps, (index * 30..index * 30 + 30).collect::<Vec<_>>());
+            // Every lamp of the sector lands inside its own hit body.
+            for lamp in index * 30..index * 30 + 30 {
+                assert!(
+                    lpa_mapping_editor::point_in_loops(&object.hull, points[lamp]),
+                    "sector {index} lamp {lamp} fell outside its own body"
+                );
+            }
+        }
+    }
+
+    /// The drawing facts reach the sprite build from the ONE parse the
+    /// resolver already did: alignment per object, cells only for the ribbon
+    /// kinds, a repeat's instances as separate strands, and a jumper cutting
+    /// its path's span in two.
+    #[test]
+    fn strand_metas_carry_alignment_kind_and_the_physical_breaks() {
+        use lpc_mapping::{Map2dObject, PathShape, PolygonShape, RepeatShape, RingShape};
+
+        let object = |shape| Map2dObject {
+            name: String::new(),
+            id: None,
+            stride: None,
+            shape,
+        };
+        let doc = Map2dDoc {
+            objects: vec![
+                object(Map2dShape::Path(PathShape {
+                    points: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [20.0, 10.0]],
+                    count: 5,
+                    reversed: false,
+                    gaps: vec![1],
+                    align: PathAlign::Inside,
+                })),
+                object(Map2dShape::Repeat(RepeatShape {
+                    shape: Box::new(Map2dShape::Polygon(PolygonShape {
+                        points: vec![[0.0, 0.0], [10.0, 0.0], [5.0, 8.0]],
+                        count: 3,
+                        align: PathAlign::Outside,
+                    })),
+                    center: [0.0, 0.0],
+                    count: 2,
+                })),
+                object(Map2dShape::Ring(RingShape {
+                    center: [0.0, 0.0],
+                    radius: 10.0,
+                    outer_count: 4,
+                    rings: 1,
+                    counts: Vec::new(),
+                    order: Default::default(),
+                    start_angle_deg: -90.0,
+                    dir: Default::default(),
+                })),
+            ],
+            ..Map2dDoc::new()
+        };
+        let resolved = lpc_mapping::resolve(&doc).expect("the document resolves");
+        let metas = strand_metas(&doc, &resolved);
+        // The gapped path is TWO runs of its one span; the repeat is one
+        // strand per instance; the ring is one field.
+        let shape: Vec<(u32, u32)> = metas.iter().map(|meta| (meta.start, meta.count)).collect();
+        assert_eq!(shape, vec![(0, 3), (3, 2), (5, 3), (8, 3), (11, 4)]);
+        assert!(metas[0].align == PathAlign::Inside && metas[0].cells);
+        assert_eq!(metas[1].align, PathAlign::Inside, "both sides of a jumper");
+        assert!(metas[2].closed, "a polygon's perimeter wraps");
+        assert_eq!(metas[3].align, PathAlign::Outside, "through the repeat");
+        assert!(!metas[4].cells, "a ring keeps its dots");
+        assert_eq!(metas[4].align, PathAlign::On);
     }
 
     /// A pick's hull index resolves to THAT instance; the nearest lamp

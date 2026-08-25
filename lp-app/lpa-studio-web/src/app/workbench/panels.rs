@@ -1931,7 +1931,7 @@ mod tests {
     /// position — and nested instance steps don't confuse it.
     #[test]
     fn instance_paths_derive_their_authored_object() {
-        use lpc_mapping::{Map2dObject, Map2dObjectId, Map2dShape, PathShape};
+        use lpc_mapping::{Map2dObject, Map2dObjectId, Map2dShape, PathAlign, PathShape};
         let object = |name: &str, id: Option<&str>| Map2dObject {
             name: name.to_string(),
             id: id.map(|id| Map2dObjectId::new(id).expect("test id")),
@@ -1941,6 +1941,7 @@ mod tests {
                 count: 10,
                 gaps: Vec::new(),
                 reversed: false,
+                align: PathAlign::On,
             }),
         };
         let mut doc = Map2dDoc::new();

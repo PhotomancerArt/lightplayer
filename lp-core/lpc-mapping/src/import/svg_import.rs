@@ -9,7 +9,7 @@
 use alloc::format;
 use alloc::vec::Vec;
 
-use crate::map2d_doc::{Map2dDoc, Map2dObject, Map2dShape, PathShape};
+use crate::map2d_doc::{Map2dDoc, Map2dObject, Map2dShape, PathAlign, PathShape};
 
 use super::svg_error::SvgImportError;
 use super::svg_group::SvgPathGeometry;
@@ -39,6 +39,7 @@ pub fn svg_to_doc(svg: &str, sample_diameter: f32) -> Result<Map2dDoc, SvgImport
                 count: group.count,
                 reversed: false,
                 gaps: Vec::new(),
+                align: PathAlign::On,
             }),
         });
     }

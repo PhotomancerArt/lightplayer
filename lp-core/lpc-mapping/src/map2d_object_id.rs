@@ -170,7 +170,7 @@ fn uniquify(base: &Map2dObjectId, taken: &BTreeSet<String>) -> Map2dObjectId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map2d_doc::{Map2dObject, Map2dShape, PathShape};
+    use crate::map2d_doc::{Map2dObject, Map2dShape, PathAlign, PathShape};
     use alloc::vec;
     use alloc::vec::Vec;
 
@@ -252,6 +252,7 @@ mod tests {
                     count: 2,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: PathAlign::On,
                 }),
             });
         }

@@ -26,7 +26,7 @@
 //! it regenerates.
 
 use lpc_mapping::{
-    Map2dDoc, Map2dObject, Map2dObjectId, Map2dShape, PathShape, RepeatShape, resolve,
+    Map2dDoc, Map2dObject, Map2dObjectId, Map2dShape, PathAlign, PathShape, RepeatShape, resolve,
 };
 use std::path::Path;
 
@@ -175,6 +175,7 @@ fn dome_doc() -> Map2dDoc {
                 count: SECTOR_LAMPS,
                 reversed: false,
                 gaps,
+                align: PathAlign::Inside,
             })),
             center: CENTER,
             count: 5,
@@ -199,6 +200,7 @@ fn doors_doc() -> Map2dDoc {
                 count: DOOR_LAMPS,
                 reversed: false,
                 gaps: Vec::new(),
+                align: PathAlign::Inside,
             })),
             center: CENTER,
             count: 3,
@@ -211,6 +213,33 @@ fn doors_doc() -> Map2dDoc {
 /// Every invariant the example depends on, checked against the real
 /// resolver so a tweak here cannot silently break the shipped patch grain.
 fn validate(dome: &Map2dDoc, doors: &Map2dDoc) {
+    // The sectors and doors line their forms rather than facing the
+    // viewer — inset lamps read as a glowing panel/chevron edge rather
+    // than a bare dot trail. That authored choice is what stamps format 4;
+    // assert it directly so a generator edit that drops back to `On`
+    // (silently releasing the format) fails loudly here.
+    assert_eq!(dome.format, 4, "inside-aligned dome stamps format 4");
+    assert_eq!(doors.format, 4, "inside-aligned doors stamp format 4");
+    for (doc, label) in [(dome, "dome"), (doors, "doors")] {
+        for object in &doc.objects {
+            let inner = match &object.shape {
+                Map2dShape::Repeat(repeat) => repeat.shape.as_ref(),
+                other => other,
+            };
+            match inner {
+                Map2dShape::Path(path) => {
+                    assert_eq!(
+                        path.align,
+                        PathAlign::Inside,
+                        "{label} object {:?} should align inside",
+                        object.name
+                    );
+                }
+                other => panic!("{label} object {:?} is not a path: {other:?}", object.name),
+            }
+        }
+    }
+
     let resolved = resolve(dome).expect("dome resolves");
     assert_eq!(resolved.lamps.len(), 150, "the dome is 150 lamps");
     assert_eq!(resolved.spans.len(), 5, "five sector strands");

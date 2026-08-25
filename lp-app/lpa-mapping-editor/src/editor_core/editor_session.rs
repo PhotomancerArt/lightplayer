@@ -10,8 +10,8 @@
 use std::collections::BTreeSet;
 
 use lpc_mapping::{
-    Bounds2d, GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathShape,
-    PolygonShape, RepeatShape, ResolvedMap2d, RingDir, RingOrder, RingShape, Rotation2d,
+    Bounds2d, GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathAlign,
+    PathShape, PolygonShape, RepeatShape, ResolvedMap2d, RingDir, RingOrder, RingShape, Rotation2d,
     bounds_of_points, resolve,
 };
 
@@ -456,6 +456,7 @@ impl MapEditorSession {
                     count,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: PathAlign::On,
                 });
             }
         });
@@ -676,6 +677,7 @@ impl MapEditorSession {
                 count,
                 reversed: false,
                 gaps: Vec::new(),
+                align: PathAlign::On,
             }),
         }))
     }
@@ -765,11 +767,13 @@ fn rotate_shape(shape: &Map2dShape, rotation: Rotation2d, degrees: f32) -> Optio
             count: path.count,
             reversed: path.reversed,
             gaps: path.gaps.clone(),
+            align: path.align,
         }),
         // A polygon carries its turn in its points, exactly like a path.
         Map2dShape::Polygon(polygon) => Map2dShape::Polygon(PolygonShape {
             points: polygon.points.iter().map(|p| rotation.apply(*p)).collect(),
             count: polygon.count,
+            align: polygon.align,
         }),
         Map2dShape::Ring(ring) => Map2dShape::Ring(RingShape {
             center: rotation.apply(ring.center),
@@ -800,6 +804,7 @@ fn bake_path(positions: &[[f32; 2]]) -> Map2dShape {
         count: (positions.len() as u32).max(1),
         reversed: false,
         gaps: Vec::new(),
+        align: PathAlign::On,
     })
 }
 
@@ -1416,6 +1421,29 @@ mod tests {
         assert_eq!(session.doc().format, 1);
     }
 
+    /// Aligning a path off `on` stamps format 4 on commit — the same
+    /// one-undo-step path the object-properties panel's `align` `SegField`
+    /// drives (`FieldApply::PathAlign` → `apply_choice` → this shape
+    /// mutation) — and dropping back to `on` releases it, mirroring the
+    /// gaps format-stamp/release round trip above.
+    #[test]
+    fn align_stamps_format_four_and_releases_it() {
+        let mut session = session_with_gapped_path();
+        assert_eq!(session.doc().format, 1);
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Path(path) = shape {
+                path.align = PathAlign::Inside;
+            }
+        });
+        assert_eq!(session.doc().format, 4);
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::Path(path) = shape {
+                path.align = PathAlign::On;
+            }
+        });
+        assert_eq!(session.doc().format, 1);
+    }
+
     /// Inserting a vertex inside a jumper leaves both halves inert; segments
     /// after the insertion point shift up with their geometry.
     #[test]
@@ -1777,6 +1805,7 @@ mod tests {
                         count: 3,
                         reversed: false,
                         gaps: Vec::new(),
+                        align: PathAlign::On,
                     })),
                     center: [100.0, 60.0],
                     count: 3,
@@ -1883,6 +1912,7 @@ mod tests {
                 count: 4,
                 reversed: false,
                 gaps: Vec::new(),
+                align: PathAlign::On,
             }),
         });
         MapEditorSession::new(doc)
@@ -1901,6 +1931,7 @@ mod tests {
                     count: 4,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: PathAlign::On,
                 })),
                 center: [100.0, 100.0],
                 count,

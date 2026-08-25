@@ -21,6 +21,7 @@
 //! at pointer-up, so one drag is one undo step; `on_committed` fires after
 //! every committed change so the host can persist.
 
+pub(crate) mod candidate_menu;
 pub(crate) mod canvas_anchor;
 pub(crate) mod lamp_metrics;
 pub(crate) mod layers;
@@ -41,15 +42,18 @@ pub use canvas_anchor::{CanvasAnchor, capture_pointer};
 pub use lamp_metrics::{authored_spans, fit_region, lamp_display_radius};
 pub use palette::object_color;
 
+pub use layers::cells::{LampCell, lamp_cells, point_cells};
 pub use layers::fixtures::{FixtureBody, FixtureEvent, FixturePick, FixtureSprite, SpriteObject};
-pub use layers::hull::{convex_hull, pad_hull};
+pub use layers::outline::{aligned_outline, dist_to_loops, hit_body, point_in_loops};
 
+use candidate_menu::CandidateMenu;
+use layers::bodies::object_bodies;
 use layers::doc::{DocLayersInput, doc_layers};
 use layers::draft::{DraftLayerInput, draft_layer};
 use layers::fixtures::{
-    FixtureLayerInput, clamp_scale_factor, dragged_placements, exceeds_drag_threshold,
-    fixture_layer, hit_fixture, hit_object, nearest_lamp, scaled_placements, sprite_project_aabb,
-    sprites_in_rect,
+    FixtureLayerInput, SELECT_SLOP_PX, clamp_scale_factor, dragged_placements,
+    exceeds_drag_threshold, fixture_layer, hit_fixture, nearest_lamp, resolve_object_pick,
+    scaled_placements, sprite_project_aabb, sprites_in_rect, within_cycle_radius,
 };
 use layers::marquee::marquee_layer;
 use layers::selection::{SelectionLayerInput, selection_layer};
@@ -70,9 +74,11 @@ pub enum CanvasDrag {
         /// the whole fixture. Resolved at PRESS time, from the point the
         /// pointer actually went down on.
         lamp: Option<u32>,
-        /// The object HULL the press landed inside ([`hit_object`]), when
-        /// one claimed the point — the round-3 "objects are THINGS" hit
-        /// target. Resolved at PRESS time like the lamp.
+        /// The object the press RESOLVED to ([`resolve_object_pick`]) —
+        /// the round-3 "objects are THINGS" hit target, now decided out of
+        /// the whole candidate stack (slop ring included) and cycled when
+        /// the press repeats the last one. Resolved at PRESS time like the
+        /// lamp, so what the pointer went down on is what gets selected.
         object: Option<usize>,
         start_client: [f64; 2],
         /// The MOVING SET's press-time placements: the whole selected set
@@ -119,6 +125,26 @@ pub enum CanvasDrag {
         current: [f32; 2],
         additive: bool,
     },
+}
+
+/// Where the last resolved fixture pick was pressed. The click-CYCLE needs
+/// exactly this much memory: a second press near the same spot, on the same
+/// sprite, advances through the stack instead of re-deciding.
+///
+/// Canvas-local on purpose — which of several overlapping objects a click
+/// means is a VIEW policy, and the controller has no business holding it.
+#[derive(Clone, Debug, PartialEq)]
+struct LastPress {
+    key: String,
+    client: [f64; 2],
+}
+
+/// A right-button press in flight. Right-DRAG is the canvas pan, so the
+/// context menu may only open for a right press that never moved.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RightPress {
+    start_client: [f64; 2],
+    moved: bool,
 }
 
 /// The Copy bundle event handlers close over: the canvas's signals plus
@@ -266,6 +292,45 @@ pub fn EditorCanvas(
 
     // Space-bar pan state (window-tracked; cleared on keyup and blur).
     let space_held = crate::view::window_keys::use_space_held();
+    // Overlap-selection state (P5). All of it is ephemeral view policy:
+    // where the last pick was pressed (the cycle's whole memory), the open
+    // candidate menu, the hold timer's ticket, and the right-press travel
+    // that tells a context menu from a pan.
+    let mut last_press = use_signal(|| None::<LastPress>);
+    let mut menu = use_signal(|| None::<CandidateMenu>);
+    // Read reactively exactly once: the menu is the only one of these the
+    // render depends on. The rest are peeked from handlers, so writing them
+    // never costs a re-render.
+    let menu_open = menu();
+    let hold_gen = use_signal(|| 0_u64);
+    let mut right_press = use_signal(|| None::<RightPress>);
+    let menu_close = use_callback(move |()| menu.set(None));
+    // Escape closes the menu, heard at the document rather than by focusing
+    // the overlay (see `candidate_menu::MenuEscListener`). Same
+    // install-on-open / drop-on-close shape as the ResizeObserver above,
+    // and the same reason for routing through a `Callback`: a signal write
+    // from a raw JS callback needs the Dioxus runtime.
+    #[cfg(target_arch = "wasm32")]
+    let esc_listener = use_hook(|| {
+        std::rc::Rc::new(std::cell::RefCell::new(
+            None::<candidate_menu::MenuEscListener>,
+        ))
+    });
+    use_effect(move || {
+        let open = menu().is_some();
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut slot = esc_listener.borrow_mut();
+            if !open {
+                *slot = None;
+            } else if slot.is_none() {
+                *slot = candidate_menu::MenuEscListener::install(move || menu_close.call(()));
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = (open, menu_close);
+    });
+
     let interact = CanvasInteract {
         session,
         camera,
@@ -284,6 +349,7 @@ pub fn EditorCanvas(
     let fixtures_dbl = fixtures.clone();
     let fixtures_up = fixtures.clone();
     let focused_down = focused.clone();
+    let fixtures_menu = fixtures.clone();
     let focused_dbl = focused.clone();
     let cam = camera();
     // Screen-constant sizing folds in the placement scale: a doc unit
@@ -357,6 +423,12 @@ pub fn EditorCanvas(
         lamps: Vec::new(),
         spans: Vec::new(),
     });
+    // The object BODIES: the aligned band + lamp cells the Arrange view
+    // draws, derived HERE from the live document, so editing `align` in the
+    // properties panel repaints the picture on the next render. One pass
+    // over the resolved lamps per render — the doc layer never recomputes
+    // any of it inside an element.
+    let bodies = object_bodies(doc, &resolved);
     // Tessellation context (selection/tree ADR): a selected or scoped
     // repeat renders instance-by-instance — a distinct hue per span so the
     // tessellation reads at a glance — and while DESCENDED, non-primary
@@ -481,6 +553,7 @@ pub fn EditorCanvas(
                     count,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: lpc_mapping::PathAlign::On,
                 }),
             }],
             ..lpc_mapping::Map2dDoc::new()
@@ -538,6 +611,16 @@ pub fn EditorCanvas(
         on_committed.call(());
     };
 
+    // The candidate menu, as a SIBLING of the svg inside
+    // `.lpme-canvas-wrap`: it is HTML (rows of names), the two elements
+    // share a box, and keeping it out of the svg means nothing about the
+    // canvas's DOM — or its story captures — changes when it is closed.
+    // Gated on fixture mode, so a dived canvas can never grow one.
+    let menu_overlay: Element = match (fixture_mode, menu_open, on_fixture) {
+        (true, Some(open), Some(handler)) => candidate_menu::menu_overlay(open, menu, handler),
+        _ => rsx! {},
+    };
+
     rsx! {
         svg {
             id: "{canvas_dom_id}",
@@ -557,6 +640,34 @@ pub fn EditorCanvas(
             // tool (the context menu is suppressed below); a plain left
             // button keeps the tool grammar.
             onpointerdown: move |evt| {
+                // Any new press supersedes a pending hold timer and puts
+                // an open menu away. This press's own ticket is what the
+                // hold timer below is armed with.
+                let generation = bump(hold_gen);
+                if menu.peek().is_some() {
+                    menu.set(None);
+                }
+                if secondary_button(&evt) {
+                    capture_pointer(&evt);
+                    let point = evt.data().client_coordinates();
+                    right_press.set(Some(RightPress {
+                        start_client: [point.x, point.y],
+                        moved: false,
+                    }));
+                    drag.set(Some(CanvasDrag::Pan {
+                        last: event_view_point(&anchor, &evt),
+                    }));
+                    return;
+                }
+                // Not the right button, so any remembered right-press
+                // travel is stale: a SYNTHESIZED `contextmenu` (the mobile
+                // long-press, the menu key) must never inherit an old
+                // pan's "this was a drag" verdict.
+                if right_press.peek().is_some() {
+                    right_press.set(None);
+                }
+                // Middle-drag and space+drag pan too (the right button was
+                // taken above, with its context-menu bookkeeping).
                 if pan_button(&evt) || *space_held.peek() {
                     capture_pointer(&evt);
                     drag.set(Some(CanvasDrag::Pan {
@@ -577,44 +688,66 @@ pub fn EditorCanvas(
                     let project = camera.peek().view_to_doc(view);
                     let project_point = [f64::from(project[0]), f64::from(project[1])];
                     let shift = evt.data().modifiers().shift();
-                    let hit = hit_fixture(&fixtures_down, project_point).map(|sprite| {
-                        (
-                            sprite.key.clone(),
-                            sprite.placement,
-                            sprite.selected,
-                            nearest_lamp(sprite, project_point),
-                            hit_object(sprite, project_point),
-                        )
-                    });
-                    match hit {
-                        Some((key, original, selected, lamp, object)) => {
+                    match hit_fixture(&fixtures_down, project_point) {
+                        Some(sprite) => {
+                            // Cycling is a claim about AIM, so it is judged
+                            // in client pixels against the previous pick —
+                            // and only on the same sprite.
+                            let repeat_press = last_press.peek().as_ref().is_some_and(|last| {
+                                last.key == sprite.key && within_cycle_radius(last.client, client)
+                            });
+                            let pick = resolve_object_pick(
+                                sprite,
+                                project_point,
+                                own_space_slop(camera.peek().scale, sprite.placement.s),
+                                repeat_press,
+                            );
+                            let lamp = nearest_lamp(sprite, project_point);
                             if shift {
                                 // Shift-click is pure selection intent —
-                                // no drag arms, the shell toggles the
-                                // sibling.
+                                // no drag arms, no hold menu; the shell
+                                // toggles the sibling.
                                 if let Some(handler) = &on_fixture {
                                     handler.call(FixtureEvent::Select {
-                                        pick: Some(FixturePick { key, lamp, object }),
+                                        pick: Some(FixturePick {
+                                            key: sprite.key.clone(),
+                                            lamp,
+                                            object: pick.index,
+                                        }),
                                         toggle: true,
                                     });
                                 }
                                 return;
                             }
+                            // Hold-to-menu, but only where the point is
+                            // genuinely AMBIGUOUS: with one candidate the
+                            // menu would say nothing the press has not
+                            // already decided, and arming it would only
+                            // steal a slow, deliberate drag.
+                            if pick.candidates.len() >= 2 {
+                                candidate_menu::arm_hold_menu(
+                                    generation,
+                                    hold_gen,
+                                    drag,
+                                    menu,
+                                    candidate_menu::build(sprite, &pick.candidates, view, lamp),
+                                );
+                            }
                             // A press on a SELECTED sprite drags the whole
                             // selected set; an unselected one drags alone.
-                            let originals: Vec<(String, Placement)> = if selected {
+                            let originals: Vec<(String, Placement)> = if sprite.selected {
                                 fixtures_down
                                     .iter()
                                     .filter(|sprite| sprite.selected)
                                     .map(|sprite| (sprite.key.clone(), sprite.placement))
                                     .collect()
                             } else {
-                                vec![(key.clone(), original)]
+                                vec![(sprite.key.clone(), sprite.placement)]
                             };
                             drag.set(Some(CanvasDrag::FixturePress {
-                                key,
+                                key: sprite.key.clone(),
                                 lamp,
-                                object,
+                                object: pick.index,
                                 start_client: client,
                                 originals,
                                 moved: false,
@@ -641,11 +774,17 @@ pub fn EditorCanvas(
                         .filter(|sprite| focused_down.as_deref() != Some(sprite.key.as_str()))
                     {
                         if let Some(handler) = &on_fixture {
+                            let pick = resolve_object_pick(
+                                sprite,
+                                project_point,
+                                own_space_slop(camera.peek().scale, sprite.placement.s),
+                                false,
+                            );
                             handler.call(FixtureEvent::Select {
                                 pick: Some(FixturePick {
                                     key: sprite.key.clone(),
                                     lamp: nearest_lamp(sprite, project_point),
-                                    object: hit_object(sprite, project_point),
+                                    object: pick.index,
                                 }),
                                 toggle: evt.data().modifiers().shift(),
                             });
@@ -697,6 +836,12 @@ pub fn EditorCanvas(
                         let point = evt.data().client_coordinates();
                         let client = [point.x, point.y];
                         let now_moved = moved || exceeds_drag_threshold(start_client, client);
+                        if now_moved && !moved {
+                            // The press became a drag: the hold's ticket
+                            // goes stale, so a menu can never open over a
+                            // fixture move.
+                            bump(hold_gen);
+                        }
                         if now_moved && let Some(handler) = &on_fixture {
                             handler.call(FixtureEvent::Move {
                                 moves: dragged_placements(
@@ -758,6 +903,23 @@ pub fn EditorCanvas(
                         }));
                     }
                     CanvasDrag::Pan { last } => {
+                        // A right-drag past the threshold is a PAN, and a
+                        // pan is never a context menu — remember that for
+                        // the `oncontextmenu` that may still be coming.
+                        let point = evt.data().client_coordinates();
+                        let tracked = *right_press.peek();
+                        if let Some(press) = tracked
+                            && !press.moved
+                            && exceeds_drag_threshold(press.start_client, [point.x, point.y])
+                        {
+                            right_press.set(Some(RightPress { moved: true, ..press }));
+                        }
+                        // Any drag puts the menu away (the scrim normally
+                        // eats the press first; a captured pointer can
+                        // still reach here).
+                        if menu.peek().is_some() {
+                            menu.set(None);
+                        }
                         let view_point = event_view_point(&anchor, &evt);
                         camera.write().pan(view_point[0] - last[0], view_point[1] - last[1]);
                         drag.set(Some(CanvasDrag::Pan { last: view_point }));
@@ -795,6 +957,10 @@ pub fn EditorCanvas(
                 }
             },
             onpointerup: move |evt| {
+                // The release cancels any pending hold — including the one
+                // whose press was already consumed by a fired menu, whose
+                // drag is `None` and which therefore returns below.
+                bump(hold_gen);
                 let Some(current_drag) = drag() else {
                     return;
                 };
@@ -826,6 +992,12 @@ pub fn EditorCanvas(
                                     commit: true,
                                 });
                             } else {
+                                // The pick landed: remember WHERE, so the
+                                // next press on the same spot cycles.
+                                last_press.set(Some(LastPress {
+                                    key: key.clone(),
+                                    client: start_client,
+                                }));
                                 handler.call(FixtureEvent::Select {
                                     pick: Some(FixturePick { key, lamp, object }),
                                     toggle: false,
@@ -834,7 +1006,8 @@ pub fn EditorCanvas(
                         }
                     }
                     // The fixture marquee: a real rect selects what it
-                    // crossed; a tap-sized one deselects (non-additive).
+                    // crossed; a tap-sized one deselects (non-additive) —
+                    // and ends the cycle: the stack it walked is gone.
                     CanvasDrag::FixtureMarquee {
                         start,
                         current,
@@ -853,6 +1026,7 @@ pub fn EditorCanvas(
                         } else if !additive
                             && let Some(handler) = &on_fixture
                         {
+                            last_press.set(None);
                             handler.call(FixtureEvent::Select {
                                 pick: None,
                                 toggle: false,
@@ -912,11 +1086,26 @@ pub fn EditorCanvas(
                         let scale = camera().scale * placement.scale_f32();
                         if (max[0] - min[0]) * scale > 4.0 || (max[1] - min[1]) * scale > 4.0 {
                             session.write().marquee_select(min, max, additive);
+                        } else if !additive {
+                            // A background TAP fully ascends (D3, the Figma
+                            // rule): deselect and leave the scope. Hosts
+                            // without fixture events (the plain editor)
+                            // keep the old clear-in-place.
+                            match &on_fixture {
+                                Some(handler) => handler.call(FixtureEvent::Select {
+                                    pick: None,
+                                    toggle: false,
+                                }),
+                                None => session.write().selection.clear(),
+                            }
                         }
                     }
                 }
             },
             onpointerleave: move |_| {
+                // The pointer left the canvas: whatever the hold was
+                // about, it is no longer being held here.
+                bump(hold_gen);
                 if matches!(
                     drag(),
                     Some(CanvasDrag::Pan { .. })
@@ -927,6 +1116,7 @@ pub fn EditorCanvas(
                 }
             },
             onpointercancel: move |_| {
+                bump(hold_gen);
                 // A cancelled fixture drag resets the shell's override to
                 // the press-time placements (nothing was committed).
                 match drag.peek().clone() {
@@ -953,7 +1143,67 @@ pub fn EditorCanvas(
                 }
                 drag.set(None);
             },
-            oncontextmenu: move |evt| evt.prevent_default(),
+            oncontextmenu: move |evt| {
+                // The browser menu never belongs on the canvas — right-drag
+                // is the pan, and this is the one keystroke-free way to
+                // reach the candidate list on a mouse.
+                evt.prevent_default();
+                if !fixture_mode {
+                    return;
+                }
+                // A mobile long-press often SYNTHESIZES a contextmenu on
+                // top of the hold that already opened the menu; a menu
+                // that is up means this event has nothing left to do.
+                if menu.peek().is_some() {
+                    return;
+                }
+                // A right press that travelled was a pan, not a request.
+                if right_press.peek().is_some_and(|press| press.moved) {
+                    return;
+                }
+                let point = evt.data().client_coordinates();
+                let view = event_view_point_mouse(&anchor, &evt);
+                let project = camera.peek().view_to_doc(view);
+                let project_point = [f64::from(project[0]), f64::from(project[1])];
+                let Some(sprite) = hit_fixture(&fixtures_menu, project_point) else {
+                    return;
+                };
+                let pick = resolve_object_pick(
+                    sprite,
+                    project_point,
+                    own_space_slop(camera.peek().scale, sprite.placement.s),
+                    false,
+                );
+                let lamp = nearest_lamp(sprite, project_point);
+                match pick.candidates.len() {
+                    // Nothing to disambiguate: leave the background alone.
+                    0 => {}
+                    // One candidate is not a choice — a menu with a single
+                    // row is noise, so name it outright.
+                    1 => {
+                        if let Some(handler) = &on_fixture {
+                            last_press.set(Some(LastPress {
+                                key: sprite.key.clone(),
+                                client: [point.x, point.y],
+                            }));
+                            handler.call(FixtureEvent::Select {
+                                pick: Some(FixturePick {
+                                    key: sprite.key.clone(),
+                                    lamp,
+                                    object: pick.index,
+                                }),
+                                toggle: false,
+                            });
+                        }
+                    }
+                    _ => menu.set(Some(candidate_menu::build(
+                        sprite,
+                        &pick.candidates,
+                        view,
+                        lamp,
+                    ))),
+                }
+            },
             ondoubleclick: move |evt| {
                 // Path-tool finish keeps priority (editor grammar; never
                 // in fixture mode — there is no tool without a session).
@@ -977,10 +1227,16 @@ pub fn EditorCanvas(
                 if let Some(sprite) = hit_fixture(&fixtures_dbl, project_point)
                     && focused_dbl.as_deref() != Some(sprite.key.as_str())
                 {
+                    let pick = resolve_object_pick(
+                        sprite,
+                        project_point,
+                        own_space_slop(camera.peek().scale, sprite.placement.s),
+                        false,
+                    );
                     handler.call(FixtureEvent::Dive {
                         key: sprite.key.clone(),
                         lamp: nearest_lamp(sprite, project_point),
-                        object: hit_object(sprite, project_point),
+                        object: pick.index,
                     });
                 }
             },
@@ -1140,6 +1396,7 @@ pub fn EditorCanvas(
                         ghost_outlines: &ghost_outlines,
                         gap_segments: &gap_segments,
                         path_objects: &path_objects,
+                        bodies: &bodies,
                         resolved: &resolved,
                         annotation_spans: &annotation_spans,
                         selection: &selection,
@@ -1174,7 +1431,35 @@ pub fn EditorCanvas(
                 }
             }
         }
+        {menu_overlay}
     }
+}
+
+/// Advance a generation counter and return the new value.
+///
+/// The hold timer's whole cancellation story: every path that ends a press
+/// (a move past the drag threshold, pointer-up, pointer-leave, cancel, a
+/// new press) bumps the counter, and a timer that fires holding a stale
+/// ticket does nothing. Peeked, never read reactively — bumping it on
+/// every gesture must not cost a render.
+fn bump(mut counter: Signal<u64>) -> u64 {
+    let next = *counter.peek() + 1;
+    counter.set(next);
+    next
+}
+
+/// The ruled ~10 px selection slop, converted into one sprite's OWN space:
+/// a doc unit reaches the screen through the camera scale and the sprite's
+/// placement scale, so dividing by both keeps the ring a constant number of
+/// pixels at every zoom and on every sprite.
+fn own_space_slop(cam_scale: f32, placement_scale: f64) -> f64 {
+    SELECT_SLOP_PX / (f64::from(cam_scale) * placement_scale).max(1e-6)
+}
+
+/// True for the secondary (right) button — its pointerdown is the pan
+/// with context-menu bookkeeping.
+pub(crate) fn secondary_button(evt: &Event<PointerData>) -> bool {
+    evt.data().trigger_button() == Some(dioxus::html::input_data::MouseButton::Secondary)
 }
 
 /// True for the secondary (right) or auxiliary (middle) button — those
@@ -1246,6 +1531,14 @@ pub(crate) fn event_doc_point(interact: &CanvasInteract, evt: &Event<PointerData
     interact
         .placement
         .inverse_f32(interact.camera.peek().view_to_doc(view))
+}
+
+/// Same anchoring for the plain-mouse events (`contextmenu`), which carry
+/// [`MouseData`] rather than pointer data.
+fn event_view_point_mouse(anchor: &Signal<CanvasAnchor>, evt: &Event<MouseData>) -> [f32; 2] {
+    let point = evt.data().client_coordinates();
+    let origin = anchor.peek().origin();
+    [point.x as f32 - origin[0], point.y as f32 - origin[1]]
 }
 
 fn event_view_point_wheel(anchor: &Signal<CanvasAnchor>, evt: &Event<WheelData>) -> [f32; 2] {

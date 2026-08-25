@@ -55,9 +55,13 @@ impl ClientIo for DeviceClientIo {
         self.shared.pump_console_lines();
         let result = match received {
             Some(result) => result,
-            // The idle backstop: every request gets a response frame, so a
-            // quiet gap this long means the wire died mid-request. Surfaced
-            // to the caller; readiness-level Unresponsive is not re-entered.
+            // The idle backstop: a quiet gap this long means the wire died
+            // mid-request. It bounds only ONE frame gap — heartbeats restart
+            // it — so it cannot see a dropped response on a live wire; the
+            // per-request bound is the session's `request_total` deadline,
+            // installed on `LpClient` (see `DeviceSession::request_deadline`).
+            // Surfaced to the caller; readiness-level Unresponsive is not
+            // re-entered.
             None => {
                 return Err(TransportError::Other(format!(
                     "device did not respond within {:.1}s",

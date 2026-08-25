@@ -30,7 +30,7 @@ pub mod transport_serial;
 pub mod transport_ws;
 
 // Re-export main types
-pub use client::{ClientOutcome, LpClient};
+pub use client::{ClientOutcome, ClientTimerFuture, LpClient, RequestDeadline};
 pub use client_error::{ClientError, ClientResult};
 pub use client_event::ClientEvent;
 pub use client_io::ClientIo;

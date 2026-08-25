@@ -374,11 +374,12 @@ pub fn WorkbenchFrame(
     let surface = project_editor.patch_surface.clone();
     let patch_selection = project_editor.patch_selection.clone();
     // The mobile fold's summoned panel: below the fold breakpoint the
-    // summon strip replaces the edge strips, and a summoned panel
-    // temporarily REPLACES the main view (an overlay with a back
-    // header). Desktop never reads this — the overlay is display-gated
-    // to the fold, so widening the window simply reveals the desktop
-    // docks again.
+    // summon strip replaces the edge strips, and a summoned panel comes
+    // up over the main view — a full replace at phone width, a
+    // side-anchored sheet in the tablet band (see
+    // [`summon_overlay_class`]). Desktop never reads this — the overlay
+    // is display-gated to the fold, so widening the window simply
+    // reveals the desktop docks again.
     let mut summoned = use_signal(move || initial_summoned);
     // The panel's summon request (mobile object-first invitation): the
     // counterpart to click lives in the Outputs panel, so it comes up.
@@ -507,13 +508,21 @@ pub fn WorkbenchFrame(
                         },
                     }
                     if let Some(panel) = *summoned.read() {
-                        // The summoned panel, replacing main below the fold.
-                        div { class: "tw:absolute tw:inset-0 tw:z-10 tw:hidden tw:flex-col tw:bg-background tw:max-[820px]:flex",
+                        // The summoned panel below the fold, in two rungs
+                        // (G1 2026-08-24: full-width panels at md read as
+                        // phone behavior at tablet width). At PHONE width
+                        // it replaces main outright; in the TABLET band it
+                        // is a side-anchored SHEET over the canvas.
+                        div { class: summon_overlay_class(panel),
                             div { class: "tw:flex tw:min-h-[32px] tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border-subtle tw:bg-card-subtle tw:px-2.5",
                                 button {
                                     class: "tw:cursor-pointer tw:border-none tw:bg-transparent tw:p-0 tw:text-xs tw:text-selection-border",
                                     onclick: move |_| summoned.set(None),
-                                    "‹ back"
+                                    // The dismissal wears the rung's grammar:
+                                    // a full-screen page goes BACK, a sheet
+                                    // closes in place.
+                                    span { class: "tw:min-[560px]:hidden", "‹ back" }
+                                    span { class: "tw:hidden tw:min-[560px]:inline", "✕" }
                                 }
                                 span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-muted-foreground",
                                     "{panel.title()}"
@@ -628,6 +637,32 @@ fn SummonStrip(
 /// opened would be the room rearranging itself.
 const LEFT_DOCK_WIDTH: &str = "tw:w-[270px] tw:max-[1240px]:w-[225px]";
 const RIGHT_DOCK_WIDTH: &str = "tw:w-[320px] tw:max-[1240px]:w-[265px]";
+
+/// The summoned overlay's classes, in the fold's two rungs (G1 2026-08-24:
+/// a full-width panel at md read as phone behavior at tablet width). At
+/// PHONE width (<560 — the site chrome's phone rung) the panel replaces
+/// main outright; in the TABLET band (560–820) it is a side-anchored SHEET
+/// at its dock's full desktop width (270/320, the un-narrowed
+/// [`LEFT_DOCK_WIDTH`]/[`RIGHT_DOCK_WIDTH`]), sliding over the canvas from
+/// its home side — the dock come to visit, wearing the dock's fill, with
+/// the canvas still visible (and live) beside it. The tablet overrides
+/// ride plain `min-[560px]:` variants because the base display gate
+/// already ends the overlay at 820; above that the element is
+/// display:none, so the overrides never reach the desktop docks.
+fn summon_overlay_class(panel: PanelId) -> String {
+    let sheet = match panel.side() {
+        DockSide::Left => {
+            "tw:min-[560px]:right-auto tw:min-[560px]:w-[270px] tw:min-[560px]:border-r"
+        }
+        DockSide::Right => {
+            "tw:min-[560px]:left-auto tw:min-[560px]:w-[320px] tw:min-[560px]:border-l"
+        }
+    };
+    format!(
+        "tw:absolute tw:inset-0 tw:z-10 tw:hidden tw:flex-col tw:bg-background tw:max-[820px]:flex \
+         tw:min-[560px]:border-border-strong tw:min-[560px]:bg-card-subtle tw:min-[560px]:shadow-lg {sheet}"
+    )
+}
 
 /// The workbench band (D7): ONE chrome row across the workbench top —
 /// each dock's tab row in a segment sized to its dock, the view tabs

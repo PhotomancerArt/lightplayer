@@ -342,6 +342,65 @@ fn resolve_path(
     Ok(positions)
 }
 
+/// The lamp offsets INSIDE a path's strand where a jumper wire breaks it.
+///
+/// A gap segment carries no lamps and no active length, so the lamps either
+/// side of one are physically separate runs — a renderer drawing the strand
+/// as a BODY must not bridge them, the way it must not bridge two objects.
+/// Offsets are into the path's own lamp list (`0 < offset < count`),
+/// ascending and deduplicated; a gap before the first lamp or after the last
+/// breaks nothing and is omitted.
+///
+/// Lives beside [`resolve_path`] on purpose: it walks the same reversed and
+/// inert orientation over the same lengths, so the answer cannot drift from
+/// where the lamps actually land.
+#[must_use]
+pub fn path_gap_breaks(path: &PathShape) -> Vec<u32> {
+    if path.gaps.is_empty() || path.count < 2 || path.points.len() < 2 {
+        return Vec::new();
+    }
+    let mut points = path.points.clone();
+    let inert = inert_segments(path);
+    if path.reversed {
+        points.reverse();
+    }
+    let total = active_length(&points, &inert);
+    if total <= f32::EPSILON {
+        return Vec::new();
+    }
+    // One walk: every inert segment sits at the active distance walked so
+    // far (it consumes none of its own).
+    let mut boundaries = Vec::new();
+    let mut walked = 0.0;
+    for (index, pair) in points.windows(2).enumerate() {
+        if is_inert(&inert, index) {
+            boundaries.push(walked);
+        } else {
+            walked += distance(pair[0], pair[1]);
+        }
+    }
+    // Lamp `n` sits at `total * n / (count - 1)`, so the break falls before
+    // the first lamp PAST the boundary. A lamp exactly on it sits at the
+    // gap's near end and stays with the run before.
+    let mut breaks = Vec::new();
+    for boundary in boundaries {
+        // A jumper before the first lamp or after the last one breaks
+        // nothing: every lamp is on one side of it.
+        if boundary <= f32::EPSILON || boundary >= total - f32::EPSILON {
+            continue;
+        }
+        let past = (0..path.count)
+            .find(|lamp| total * (*lamp as f32 / (path.count - 1) as f32) > boundary)
+            .unwrap_or(0);
+        if past > 0 {
+            breaks.push(past);
+        }
+    }
+    breaks.sort_unstable();
+    breaks.dedup();
+    breaks
+}
+
 /// `count` lamps evenly spaced along a closed outline's perimeter.
 ///
 /// The outline closes implicitly (last point → first point is a real
@@ -608,7 +667,7 @@ fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map2d_doc::{Map2dObject, Map2dShape};
+    use crate::map2d_doc::{Map2dObject, Map2dShape, PathAlign};
     use alloc::boxed::Box;
     use alloc::string::String;
     use alloc::vec;
@@ -713,6 +772,7 @@ mod tests {
             count: 5,
             reversed: false,
             gaps: Vec::new(),
+            align: PathAlign::On,
         }));
         let positions: Vec<_> = resolved.lamps.iter().map(|l| l.pos).collect();
         assert_eq!(positions[0], [0.0, 0.0]);
@@ -727,6 +787,7 @@ mod tests {
             count: 2,
             reversed: true,
             gaps: Vec::new(),
+            align: PathAlign::On,
         }));
         assert_eq!(resolved.lamps[0].pos, [10.0, 0.0]);
         assert_eq!(resolved.lamps[1].pos, [0.0, 0.0]);
@@ -813,6 +874,33 @@ mod tests {
         ));
     }
 
+    /// The jumper's lamp-index seam, as a renderer drawing the strand as a
+    /// BODY needs it: the lamps split exactly where the resolver's positions
+    /// jump the gap, and a jumper with every lamp on one side of it splits
+    /// nothing.
+    #[test]
+    fn path_gap_breaks_name_the_lamp_the_jumper_resumes_at() {
+        let path = gapped_l(vec![1], 5, false);
+        assert_eq!(path_gap_breaks(&path), vec![3]);
+        // The break is where the positions themselves jump: lamps 0..3 walk
+        // the first run, 3..5 the far side.
+        let positions = resolve_shape(Map2dShape::Path(path)).positions();
+        assert_eq!(positions[2], [10.0, 0.0]);
+        assert_eq!(positions[3], [15.0, 10.0]);
+
+        // Entered from the other end the same physical segment is the
+        // jumper, and the seam lamp still ends the run it is walking INTO
+        // the gap — so the break lands at the same offset, counted along
+        // the reversed travel.
+        assert_eq!(path_gap_breaks(&gapped_l(vec![1], 5, true)), vec![3]);
+        // Leading and trailing jumpers carry no lamps past them.
+        assert!(path_gap_breaks(&gapped_l(vec![0], 3, false)).is_empty());
+        assert!(path_gap_breaks(&gapped_l(vec![2], 3, false)).is_empty());
+        // A gapless path never breaks, nor does a one-lamp strand.
+        assert!(path_gap_breaks(&gapped_l(Vec::new(), 5, false)).is_empty());
+        assert!(path_gap_breaks(&gapped_l(vec![1], 1, false)).is_empty());
+    }
+
     /// Out-of-range gap indices name no segment; the document still resolves
     /// (the editor sanitizes them away, a hand-edit should not brick a load).
     #[test]
@@ -856,6 +944,7 @@ mod tests {
                 Map2dShape::Polygon(PolygonShape {
                     points: vec![[0.0, 0.0], [1.0, 0.0]],
                     count: 3,
+                    align: PathAlign::On,
                 }),
                 "at least 3 points",
             ),
@@ -863,6 +952,7 @@ mod tests {
                 Map2dShape::Polygon(PolygonShape {
                     points: vec![[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]],
                     count: 0,
+                    align: PathAlign::On,
                 }),
                 "count",
             ),
@@ -870,6 +960,7 @@ mod tests {
                 Map2dShape::Polygon(PolygonShape {
                     points: vec![[2.0, 2.0], [2.0, 2.0], [2.0, 2.0]],
                     count: 3,
+                    align: PathAlign::On,
                 }),
                 "zero perimeter",
             ),
@@ -916,6 +1007,7 @@ mod tests {
             shape_stride(&Map2dShape::Polygon(PolygonShape {
                 points: vec![[0.0, 0.0], [12.0, 0.0], [6.0, 10.392305]],
                 count: 10,
+                align: PathAlign::On,
             })),
             1
         );
@@ -975,6 +1067,7 @@ mod tests {
         PolygonShape {
             points: vec![[0.0, 0.0], [12.0, 0.0], [6.0, 10.392305]],
             count: 9,
+            align: PathAlign::On,
         }
     }
 
@@ -992,6 +1085,7 @@ mod tests {
                 count: 2,
                 reversed: false,
                 gaps: Vec::new(),
+                align: PathAlign::On,
             })),
             center: [0.0, 0.0],
             count: 4,
@@ -1162,6 +1256,7 @@ mod tests {
                     count: 2,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: PathAlign::On,
                 })),
                 object(Map2dShape::Repeat(RepeatShape {
                     shape: Box::new(Map2dShape::Path(PathShape {
@@ -1169,6 +1264,7 @@ mod tests {
                         count: 2,
                         reversed: false,
                         gaps: Vec::new(),
+                        align: PathAlign::On,
                     })),
                     center: [0.0, 0.0],
                     count: 3,
@@ -1191,6 +1287,7 @@ mod tests {
                     count: 3,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: PathAlign::On,
                 })),
                 object(Map2dShape::Ring(button_rings())),
             ],
@@ -1217,6 +1314,7 @@ mod tests {
                     count: 2,
                     reversed: false,
                     gaps: Vec::new(),
+                    align: PathAlign::On,
                 }),
             }],
             ..Map2dDoc::new()
@@ -1259,6 +1357,7 @@ mod tests {
             count,
             reversed,
             gaps,
+            align: PathAlign::On,
         }
     }
 
@@ -1270,6 +1369,7 @@ mod tests {
             count: 4,
             reversed: false,
             gaps: Vec::new(),
+            align: PathAlign::On,
         }
     }
 
@@ -1282,6 +1382,7 @@ mod tests {
                 count: 4,
                 reversed: false,
                 gaps: Vec::new(),
+                align: PathAlign::On,
             })),
             center: [0.0, 0.0],
             count: instances,
