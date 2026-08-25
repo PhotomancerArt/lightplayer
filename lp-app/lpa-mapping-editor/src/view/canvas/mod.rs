@@ -48,6 +48,7 @@ pub use layers::hull::{convex_hull, pad_hull};
 pub use layers::outline::{aligned_outline, dist_to_loops, hit_body, point_in_loops};
 
 use candidate_menu::CandidateMenu;
+use layers::bodies::object_bodies;
 use layers::doc::{DocLayersInput, doc_layers};
 use layers::draft::{DraftLayerInput, draft_layer};
 use layers::fixtures::{
@@ -389,6 +390,12 @@ pub fn EditorCanvas(
         lamps: Vec::new(),
         spans: Vec::new(),
     });
+    // The object BODIES: the aligned band + lamp cells the Arrange view
+    // draws, derived HERE from the live document, so editing `align` in the
+    // properties panel repaints the picture on the next render. One pass
+    // over the resolved lamps per render — the doc layer never recomputes
+    // any of it inside an element.
+    let bodies = object_bodies(doc, &resolved);
     // Tessellation context (selection/tree ADR): a selected or scoped
     // repeat renders instance-by-instance — a distinct hue per span so the
     // tessellation reads at a glance — and while DESCENDED, non-primary
@@ -1082,6 +1089,7 @@ pub fn EditorCanvas(
                         ghost_outlines: &ghost_outlines,
                         gap_segments: &gap_segments,
                         path_objects: &path_objects,
+                        bodies: &bodies,
                         resolved: &resolved,
                         annotation_spans: &annotation_spans,
                         selection: &selection,
