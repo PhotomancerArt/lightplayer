@@ -125,17 +125,57 @@ pub struct FixturePick {
 #[derive(Clone, Debug, PartialEq)]
 pub enum FixtureEvent {
     /// Tap on a fixture selects it; a background tap deselects (`None`).
-    Select(Option<FixturePick>),
-    /// Live during a drag (`commit: false`), once at pointer-up
-    /// (`commit: true`) — one committed move per gesture.
+    /// `toggle` = shift held: the shell toggles the pick within its
+    /// sibling set instead of replacing the selection.
+    Select {
+        pick: Option<FixturePick>,
+        toggle: bool,
+    },
+    /// A marquee's verdict: every sprite whose placed frame intersected
+    /// the rect (project space). `additive` = shift held.
+    Marquee { keys: Vec<String>, additive: bool },
+    /// One gesture's placement updates — a single drag, a multi-move, or
+    /// a shared-box scale. Live during the drag (`commit: false`), once
+    /// at pointer-up (`commit: true`) — one committed write per gesture.
     Move {
-        key: String,
-        placement: Placement,
+        moves: Vec<(String, Placement)>,
         commit: bool,
     },
     /// Double-click on a fixture when not dived, or on a NEIGHBOUR while
     /// dived (D2: dive-switch).
     Dive(String),
+}
+
+/// The placed frame's project-space AABB — the marquee's intersection
+/// unit (a rotated sprite tests by its transformed corners' box, matching
+/// the frame the user sees).
+pub(crate) fn sprite_project_aabb(sprite: &FixtureSprite) -> [f64; 4] {
+    let corners = sprite.placement.corners(sprite.bounds);
+    let min_x = corners.iter().map(|c| c[0]).fold(f64::MAX, f64::min);
+    let min_y = corners.iter().map(|c| c[1]).fold(f64::MAX, f64::min);
+    let max_x = corners.iter().map(|c| c[0]).fold(f64::MIN, f64::max);
+    let max_y = corners.iter().map(|c| c[1]).fold(f64::MIN, f64::max);
+    [min_x, min_y, max_x, max_y]
+}
+
+/// Sprites whose placed frames intersect the project-space rect
+/// (min/max corners) — the fixture-grain marquee's answer.
+pub(crate) fn sprites_in_rect(
+    sprites: &[FixtureSprite],
+    min: [f32; 2],
+    max: [f32; 2],
+) -> Vec<String> {
+    sprites
+        .iter()
+        .filter(|sprite| {
+            let [sx0, sy0, sx1, sy1] = sprite_project_aabb(sprite);
+            sx0 <= f64::from(max[0])
+                && sx1 >= f64::from(min[0])
+                && sy0 <= f64::from(max[1])
+                && sy1 >= f64::from(min[1])
+        })
+        .map(|sprite| sprite.key.clone())
+        .collect()
 }
 
 /// The display-subsample stride: with `total` true lamps drawn as `drawn`
@@ -269,6 +309,75 @@ pub(crate) fn dragged_placement(
         ],
         ..original
     }
+}
+
+/// The whole moving set, translated by one pointer's travel — the
+/// multi-fixture drag (every member keeps its own rotation/scale).
+pub(crate) fn dragged_placements(
+    originals: &[(String, Placement)],
+    start_client: [f64; 2],
+    client: [f64; 2],
+    cam_scale: f32,
+) -> Vec<(String, Placement)> {
+    originals
+        .iter()
+        .map(|(key, original)| {
+            (
+                key.clone(),
+                dragged_placement(*original, start_client, client, cam_scale),
+            )
+        })
+        .collect()
+}
+
+/// The per-fixture arrange-scale clamp (matches the toolbar verbs).
+const ARRANGE_SCALE_MIN: f64 = 0.05;
+const ARRANGE_SCALE_MAX: f64 = 20.0;
+
+/// Clamp a shared-box scale factor so EVERY member's own scale stays in
+/// the arrange clamp — the whole set scales by one factor or not at all
+/// (uniform about the shared box, D5).
+pub(crate) fn clamp_scale_factor(originals: &[(String, Placement)], factor: f64) -> f64 {
+    let mut lo = 1e-3_f64;
+    let mut hi = f64::MAX;
+    for (_, placement) in originals {
+        let s = placement.s.max(1e-6);
+        lo = lo.max(ARRANGE_SCALE_MIN / s);
+        hi = hi.min(ARRANGE_SCALE_MAX / s);
+    }
+    if lo > hi {
+        return 1.0;
+    }
+    factor.clamp(lo, hi)
+}
+
+/// The set scaled uniformly by `factor` about the project-space `anchor`
+/// (the shared box's fixed corner): every translation interpolates toward
+/// the anchor and every own-scale multiplies — the box scales as one
+/// object.
+pub(crate) fn scaled_placements(
+    originals: &[(String, Placement)],
+    anchor: [f32; 2],
+    factor: f64,
+) -> Vec<(String, Placement)> {
+    let ax = f64::from(anchor[0]);
+    let ay = f64::from(anchor[1]);
+    originals
+        .iter()
+        .map(|(key, placement)| {
+            (
+                key.clone(),
+                Placement {
+                    t: [
+                        ax + (placement.t[0] - ax) * factor,
+                        ay + (placement.t[1] - ay) * factor,
+                    ],
+                    r: placement.r,
+                    s: placement.s * factor,
+                },
+            )
+        })
+        .collect()
 }
 
 /// The fixture layer's render input.
@@ -628,5 +737,97 @@ mod tests {
         assert!((dragged.t[1] - (6.0 - 10.0)).abs() < 1e-9);
         assert_eq!(dragged.r, original.r);
         assert_eq!(dragged.s, original.s);
+    }
+
+    /// The shared-box scale (D5): every member's translation interpolates
+    /// toward the anchor and its own scale multiplies — relative layout
+    /// preserved, one factor for the whole set.
+    #[test]
+    fn scaled_placements_are_uniform_about_the_anchor() {
+        let originals = vec![
+            (
+                "a".to_string(),
+                Placement {
+                    t: [10.0, 10.0],
+                    r: 0.0,
+                    s: 1.0,
+                },
+            ),
+            (
+                "b".to_string(),
+                Placement {
+                    t: [30.0, 10.0],
+                    r: 45.0,
+                    s: 2.0,
+                },
+            ),
+        ];
+        let scaled = scaled_placements(&originals, [0.0, 10.0], 2.0);
+        assert_eq!(scaled[0].1.t, [20.0, 10.0]);
+        assert_eq!(scaled[0].1.s, 2.0);
+        assert_eq!(scaled[1].1.t, [60.0, 10.0]);
+        assert_eq!(scaled[1].1.s, 4.0);
+        assert_eq!(scaled[1].1.r, 45.0, "rotation never changes under scale");
+        // Distances scale together: |a-b| doubled.
+        let dx = scaled[1].1.t[0] - scaled[0].1.t[0];
+        assert_eq!(dx, 40.0);
+    }
+
+    /// The factor clamp: no member may leave the arrange scale clamp, so
+    /// the shared factor narrows to the intersection of every member's
+    /// legal range (and a degenerate intersection scales by 1).
+    #[test]
+    fn scale_factor_clamps_to_every_members_range() {
+        let member = |s: f64| {
+            (
+                "k".to_string(),
+                Placement {
+                    t: [0.0, 0.0],
+                    r: 0.0,
+                    s,
+                },
+            )
+        };
+        // One member near the top of the clamp: factor caps at 20/10.
+        let originals = vec![member(1.0), member(10.0)];
+        assert_eq!(clamp_scale_factor(&originals, 5.0), 2.0);
+        // Near the bottom: factor floors at 0.05/0.1.
+        let originals = vec![member(0.1)];
+        assert_eq!(clamp_scale_factor(&originals, 0.001), 0.5);
+        // In range passes through.
+        let originals = vec![member(1.0)];
+        assert_eq!(clamp_scale_factor(&originals, 1.5), 1.5);
+    }
+
+    /// The marquee intersects placed frames in project space, corners
+    /// transformed — a translated sprite is found where it SITS.
+    #[test]
+    fn sprites_in_rect_intersects_placed_frames() {
+        let sprite = |key: &str, tx: f64| FixtureSprite {
+            key: key.to_string(),
+            label: key.to_string(),
+            color: "#fff".to_string(),
+            placement: Placement {
+                t: [tx, 0.0],
+                r: 0.0,
+                s: 1.0,
+            },
+            bounds: [0.0, 0.0, 20.0, 20.0],
+            body: FixtureBody::Placeholder { lamps: 4 },
+            arranged: true,
+            selected: false,
+            selected_range: None,
+            objects: Vec::new(),
+        };
+        let sprites = vec![sprite("near", 0.0), sprite("far", 100.0)];
+        assert_eq!(
+            sprites_in_rect(&sprites, [-5.0, -5.0], [25.0, 25.0]),
+            vec!["near".to_string()]
+        );
+        assert_eq!(
+            sprites_in_rect(&sprites, [-5.0, -5.0], [150.0, 25.0]),
+            vec!["near".to_string(), "far".to_string()]
+        );
+        assert!(sprites_in_rect(&sprites, [40.0, 40.0], [60.0, 60.0]).is_empty());
     }
 }

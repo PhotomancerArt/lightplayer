@@ -4447,6 +4447,115 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
         "redo replays the arrangement byte-for-byte"
     );
 
+    // A MULTI-fixture gesture (unified-selection P3): SetMany lands BOTH
+    // placements in one document round-trip and ONE undo step. The save
+    // dropped the local cache, so fetch the doc back first (page-parity —
+    // a write against an unfetched doc refuses).
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            crate::EditorMetaFetchOp {
+                artifact: editor_artifact.clone(),
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = refresh_snapshot!(snapshot);
+    let (doors_key, doors_node, doors_artifact) = {
+        let editor = project_editor(&snapshot);
+        let surface = editor.patch_surface.as_ref().expect("surface");
+        let doors = surface
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.node != dome.node)
+            .expect("mini-dome has a second fixture");
+        (
+            doors.address.clone().expect("doors address"),
+            doors.node,
+            doors.mapping_artifact.clone(),
+        )
+    };
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            EditorMetaOp {
+                artifact: editor_artifact.clone(),
+                fixtures: vec![
+                    EditorMetaFixture {
+                        node_key: dome_key.clone(),
+                        mapping_artifact: dome.mapping_artifact.clone(),
+                    },
+                    EditorMetaFixture {
+                        node_key: doors_key.clone(),
+                        mapping_artifact: doors_artifact,
+                    },
+                ],
+                verb: EditorMetaVerb::SetMany {
+                    entries: vec![
+                        crate::EditorMetaSet {
+                            node_key: dome_key.clone(),
+                            node: Some(dome.node),
+                            transform: UiArrangeTransform {
+                                t: [80.0, 25.0],
+                                r: 90.0,
+                                s: 2.0,
+                            },
+                        },
+                        crate::EditorMetaSet {
+                            node_key: doors_key.clone(),
+                            node: Some(doors_node),
+                            transform: UiArrangeTransform {
+                                t: [-30.0, 5.0],
+                                r: 0.0,
+                                s: 0.5,
+                            },
+                        },
+                    ],
+                },
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    let multi_written = editor_json().expect("editor.json after SetMany");
+    let multi_parsed =
+        lpc_mapping::EditorMetaDoc::from_json(&multi_written).expect("canonical doc parses");
+    assert_eq!(
+        multi_parsed
+            .mapping_surface(&dome_key)
+            .expect("dome entry")
+            .transform
+            .s,
+        2.0
+    );
+    assert_eq!(
+        multi_parsed
+            .mapping_surface(&doors_key)
+            .expect("doors entry")
+            .transform
+            .t,
+        [-30.0, 5.0]
+    );
+    handle
+        .tx
+        .send(StudioCommand::Action(crate::UiAction::from_op(
+            ProjectController::NODE_ID,
+            EditorMetaOp {
+                artifact: editor_artifact.clone(),
+                fixtures: Vec::new(),
+                verb: EditorMetaVerb::Undo,
+            },
+        )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    assert_eq!(
+        editor_json().expect("editor.json exists"),
+        written,
+        "ONE undo restored BOTH fixtures — SetMany snapshots once"
+    );
+
     // The correlation journal recorded every step with increasing seq.
     let snapshot = refresh_snapshot!(snapshot);
     let journal = &project_editor(&snapshot).edit_journal;

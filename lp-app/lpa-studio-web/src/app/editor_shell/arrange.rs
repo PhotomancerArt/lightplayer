@@ -54,15 +54,15 @@ struct FixtureRender {
     instances: Vec<(String, u32, u32)>,
 }
 
-/// A committed drag held on screen until the snapshot confirms it: the
-/// override survives pointer-up so the fixture never snaps back while the
-/// write round-trips (the jump-back bug).
+/// A committed gesture held on screen until the snapshot confirms it: the
+/// override survives pointer-up so the fixtures never snap back while the
+/// write round-trips (the jump-back bug). One gesture = one override,
+/// possibly many fixtures (the multi move/scale).
 #[derive(Clone, PartialEq)]
 pub(crate) struct DragOverride {
-    key: String,
-    transform: UiArrangeTransform,
+    transforms: std::collections::BTreeMap<String, UiArrangeTransform>,
     /// True after pointer-up: the override retires once the surface
-    /// carries (approximately — the kernel quantizes) this transform.
+    /// carries (approximately — the kernel quantizes) every transform.
     committed: bool,
 }
 
@@ -143,6 +143,11 @@ pub(crate) fn ProjectCanvasHost(
     /// is unchanged either way — plain clicks never write.
     #[props(default)]
     patch_verbs: bool,
+    /// The Mapping view passes true: the fixture selection box wears
+    /// corner scale handles (transform furniture is that view's
+    /// activity; Patching multi-selects without it).
+    #[props(default)]
+    transform_handles: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // The frame-scoped arm; absent outside the workbench frame (stories).
@@ -197,14 +202,16 @@ pub(crate) fn ProjectCanvasHost(
     let mut drag_override = use_signal(|| None::<DragOverride>);
 
     let (base_sprites, nodes) = renders.read().clone();
-    // Retire a committed override once the surface caught up (the kernel
-    // quantizes to 4 decimals, so compare loosely).
+    // Retire a committed override once the surface caught up on EVERY
+    // member (the kernel quantizes to 4 decimals, so compare loosely).
     let retire_override = {
         let over = drag_override.peek().clone();
         matches!(over, Some(over) if over.committed
-        && base_sprites.iter().any(|sprite| {
-            sprite.key == over.key
-                && transforms_close(&transform_of(&sprite.placement), &over.transform)
+        && over.transforms.iter().all(|(key, transform)| {
+            base_sprites.iter().any(|sprite| {
+                sprite.key == *key
+                    && transforms_close(&transform_of(&sprite.placement), transform)
+            })
         }))
     };
     if retire_override {
@@ -212,10 +219,12 @@ pub(crate) fn ProjectCanvasHost(
     }
     // Effective sprites: the override wins while it lives.
     let mut sprites = base_sprites;
-    if let Some(over) = drag_override.read().as_ref()
-        && let Some(sprite) = sprites.iter_mut().find(|sprite| sprite.key == over.key)
-    {
-        sprite.placement = placement_of(&over.transform);
+    if let Some(over) = drag_override.read().as_ref() {
+        for sprite in sprites.iter_mut() {
+            if let Some(transform) = over.transforms.get(&sprite.key) {
+                sprite.placement = placement_of(transform);
+            }
+        }
     }
 
     // The dive as the canvas sees it: the focused fixture's key, effective
@@ -365,7 +374,7 @@ pub(crate) fn ProjectCanvasHost(
         }
     }
 
-    let dispatch_set = arrange_set_dispatch(&surface);
+    let dispatch_set_many = arrange_set_many_dispatch(&surface);
     let select = move |target: Option<UiPatchTarget>| {
         on_action.call(UiAction::from_op(
             lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
@@ -374,15 +383,35 @@ pub(crate) fn ProjectCanvasHost(
             },
         ));
     };
+    let dispatch_selection = |on_action: &EventHandler<UiAction>, selection: UiSelection| {
+        on_action.call(UiAction::from_op(
+            lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
+            ProjectEditorOp::PatchSelect { selection },
+        ));
+    };
     let on_fixture = {
         let nodes = nodes.clone();
         let grammar_surface = surface.clone();
+        let full_selection = selection.clone();
         // The arm completes against a SINGLE end (multi is not armable).
         let grammar_selection = selection.single().cloned();
         move |event: FixtureEvent| match event {
-            FixtureEvent::Select(Some(pick)) => {
+            FixtureEvent::Select {
+                pick: Some(pick),
+                toggle,
+            } => {
                 if let Some(node) = nodes.get(&pick.key) {
                     drag_override.set(None);
+                    if toggle {
+                        // Shift-click: toggle the FIXTURE within the root
+                        // sibling set — the multi-selection gesture. The
+                        // finer object grain stays the plain click's
+                        // answer; a set is built of fixtures.
+                        let mut next = full_selection.clone();
+                        next.toggle_sibling(UiPatchTarget::Fixture { node: *node });
+                        dispatch_selection(&on_action, next);
+                        return;
+                    }
                     // Q10: a sprite click names the OBJECT under the cursor,
                     // not the whole fixture — the sprite already knows which
                     // true lamp was hit, and the surface knows which object
@@ -407,34 +436,64 @@ pub(crate) fn ProjectCanvasHost(
                     select(Some(target));
                 }
             }
-            FixtureEvent::Select(None) => {
+            FixtureEvent::Select { pick: None, .. } => {
                 drag_override.set(None);
                 select(None);
             }
-            FixtureEvent::Move {
-                key,
-                placement,
-                commit,
-            } => {
-                let transform = transform_of(&placement);
+            FixtureEvent::Marquee { keys, additive } => {
+                drag_override.set(None);
+                // The marquee selects at FIXTURE grain (root siblings).
+                // Additive keeps the current fixture-grain members and
+                // adds the swept ones; plain replaces.
+                let mut targets: Vec<UiPatchTarget> = if additive {
+                    full_selection
+                        .targets()
+                        .iter()
+                        .filter(|target| matches!(target, UiPatchTarget::Fixture { .. }))
+                        .cloned()
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                for key in &keys {
+                    if let Some(node) = nodes.get(key) {
+                        let target = UiPatchTarget::Fixture { node: *node };
+                        if !targets.contains(&target) {
+                            targets.push(target);
+                        }
+                    }
+                }
+                let mut next = full_selection.clone();
+                next.set_siblings(targets);
+                dispatch_selection(&on_action, next);
+            }
+            FixtureEvent::Move { moves, commit } => {
+                let transforms: std::collections::BTreeMap<String, UiArrangeTransform> = moves
+                    .iter()
+                    .map(|(key, placement)| (key.clone(), transform_of(placement)))
+                    .collect();
                 if commit {
-                    // One gesture = one op = one undo step. The override
-                    // stays up (committed) until the snapshot echoes the
-                    // write — no snap-back.
+                    // One gesture = one op = one undo step — however many
+                    // fixtures moved. The override stays up (committed)
+                    // until the snapshot echoes the write — no snap-back.
                     drag_override.set(Some(DragOverride {
-                        key: key.clone(),
-                        transform,
+                        transforms: transforms.clone(),
                         committed: true,
                     }));
-                    if let Some(node) = nodes.get(&key)
-                        && let Some(op) = dispatch_set(&key, *node, transform)
-                    {
+                    let entries: Vec<lpa_studio_core::EditorMetaSet> = transforms
+                        .iter()
+                        .map(|(key, transform)| lpa_studio_core::EditorMetaSet {
+                            node_key: key.clone(),
+                            node: nodes.get(key).copied(),
+                            transform: *transform,
+                        })
+                        .collect();
+                    if let Some(op) = dispatch_set_many(entries) {
                         on_action.call(UiAction::from_op(ProjectController::NODE_ID, op));
                     }
                 } else {
                     drag_override.set(Some(DragOverride {
-                        key,
-                        transform,
+                        transforms,
                         committed: false,
                     }));
                 }
@@ -484,6 +543,7 @@ pub(crate) fn ProjectCanvasHost(
                 fixtures: sprites,
                 focused: focused_key,
                 on_fixture,
+                transform_handles,
             }
             if let Some(hint) = hint {
                 div { class: "lpme-hint", "{hint}" }
@@ -580,12 +640,14 @@ fn sprite_target(
     }
 }
 
-/// Prebuild the `EditorMetaOp::Set` factory: `editor.json` artifact + the
-/// fixture facts every write refreshes footprints through. `None` = the
-/// artifact is unknown (surface not settled), so moves no-op honestly.
-fn arrange_set_dispatch(
+/// Prebuild the `EditorMetaOp::SetMany` factory: `editor.json` artifact +
+/// the fixture facts every write refreshes footprints through. `None` =
+/// the artifact is unknown (surface not settled), so moves no-op
+/// honestly. A single-fixture gesture is simply a set of one — same op,
+/// same one undo step.
+fn arrange_set_many_dispatch(
     surface: &UiPatchSurface,
-) -> impl Fn(&str, NodeId, UiArrangeTransform) -> Option<EditorMetaOp> + Clone + 'static {
+) -> impl Fn(Vec<lpa_studio_core::EditorMetaSet>) -> Option<EditorMetaOp> + Clone + 'static {
     let artifact = surface.editor_meta_artifact.clone();
     let fixtures: Vec<EditorMetaFixture> = surface
         .fixtures
@@ -597,15 +659,14 @@ fn arrange_set_dispatch(
             })
         })
         .collect();
-    move |key, node, transform| {
+    move |entries| {
+        if entries.is_empty() {
+            return None;
+        }
         Some(EditorMetaOp {
             artifact: artifact.clone()?,
             fixtures: fixtures.clone(),
-            verb: EditorMetaVerb::Set {
-                node_key: key.to_string(),
-                node: Some(node),
-                transform,
-            },
+            verb: EditorMetaVerb::SetMany { entries },
         })
     }
 }

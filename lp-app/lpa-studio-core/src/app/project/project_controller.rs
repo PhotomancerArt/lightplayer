@@ -7432,55 +7432,88 @@ impl ProjectController {
                 node,
                 transform,
             } => {
-                let (mut doc, before) = match self.editor_meta_read() {
-                    Ok(loaded) => loaded,
-                    Err(reason) => return blocked(reason),
-                };
-                let surface = doc.mapping_surface_mut(node_key);
-                surface.transform = lpc_mapping::EditorTransform {
-                    t: transform.t,
-                    r: transform.r,
-                    s: transform.s,
-                };
-                // Opportunistic footprint refresh: every fixture whose map2d
-                // is locally cached gets its cached footprint trued up as
-                // part of this write (never an unprompted write). Only
-                // ARRANGED fixtures get entries — a footprint alone must not
-                // arrange a node.
-                for fixture in &op.fixtures {
-                    let fresh = self.arrange_footprint(fixture.mapping_artifact.as_ref());
-                    let Some(fresh) = fresh else { continue };
-                    let entry_exists = fixture.node_key == *node_key
-                        || doc.mapping_surface(&fixture.node_key).is_some();
-                    if entry_exists {
-                        let surface = doc.mapping_surface_mut(&fixture.node_key);
-                        if surface.footprint != Some(fresh) {
-                            surface.footprint = Some(fresh);
-                        }
-                    }
-                }
-                doc.normalize_format();
-                let after = format!("{}\n", doc.to_json_pretty()).into_bytes();
-                if after == before {
-                    return Ok(ProjectEditRun {
-                        notices: UiNotices::new(),
-                        logs: Vec::new(),
-                    });
-                }
-                let seq = self.record_edit(*node, crate::UiEditorMode::Arrange);
-                self.arrange_undo.push(EditStep {
-                    seq,
+                let entries = vec![crate::EditorMetaSet {
+                    node_key: node_key.clone(),
                     node: *node,
-                    mode: crate::UiEditorMode::Arrange,
-                    writes: vec![(op.artifact.clone(), before, after.clone())],
-                });
-                self.arrange_redo.clear();
-                // The file exists (in the overlay) from here on.
-                self.editor_meta_absent = false;
-                self.apply_asset_body(server, op.artifact.clone(), after)
-                    .await
+                    transform: *transform,
+                }];
+                self.apply_editor_meta_set(server, &op, &entries).await
+            }
+            crate::EditorMetaVerb::SetMany { entries } => {
+                if entries.is_empty() {
+                    return blocked("nothing to arrange".into());
+                }
+                let entries = entries.clone();
+                self.apply_editor_meta_set(server, &op, &entries).await
             }
         }
+    }
+
+    /// The shared Set/SetMany body: every entry's transform lands in ONE
+    /// document round-trip and ONE byte-stack snapshot, so a multi-fixture
+    /// gesture is exactly one undo step (unified-selection P3).
+    async fn apply_editor_meta_set(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: &crate::EditorMetaOp,
+        entries: &[crate::EditorMetaSet],
+    ) -> Result<ProjectEditRun, UiError> {
+        let (mut doc, before) = match self.editor_meta_read() {
+            Ok(loaded) => loaded,
+            Err(reason) => {
+                return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                    "Arrange edit blocked: {reason}"
+                ))));
+            }
+        };
+        for entry in entries {
+            let surface = doc.mapping_surface_mut(&entry.node_key);
+            surface.transform = lpc_mapping::EditorTransform {
+                t: entry.transform.t,
+                r: entry.transform.r,
+                s: entry.transform.s,
+            };
+        }
+        // Opportunistic footprint refresh: every fixture whose map2d
+        // is locally cached gets its cached footprint trued up as
+        // part of this write (never an unprompted write). Only
+        // ARRANGED fixtures get entries — a footprint alone must not
+        // arrange a node.
+        for fixture in &op.fixtures {
+            let fresh = self.arrange_footprint(fixture.mapping_artifact.as_ref());
+            let Some(fresh) = fresh else { continue };
+            let entry_exists = entries
+                .iter()
+                .any(|entry| entry.node_key == fixture.node_key)
+                || doc.mapping_surface(&fixture.node_key).is_some();
+            if entry_exists {
+                let surface = doc.mapping_surface_mut(&fixture.node_key);
+                if surface.footprint != Some(fresh) {
+                    surface.footprint = Some(fresh);
+                }
+            }
+        }
+        doc.normalize_format();
+        let after = format!("{}\n", doc.to_json_pretty()).into_bytes();
+        if after == before {
+            return Ok(ProjectEditRun {
+                notices: UiNotices::new(),
+                logs: Vec::new(),
+            });
+        }
+        let node = entries.first().and_then(|entry| entry.node);
+        let seq = self.record_edit(node, crate::UiEditorMode::Arrange);
+        self.arrange_undo.push(EditStep {
+            seq,
+            node,
+            mode: crate::UiEditorMode::Arrange,
+            writes: vec![(op.artifact.clone(), before, after.clone())],
+        });
+        self.arrange_redo.clear();
+        // The file exists (in the overlay) from here on.
+        self.editor_meta_absent = false;
+        self.apply_asset_body(server, op.artifact.clone(), after)
+            .await
     }
 
     /// Stage `bytes` as the pending body for `artifact` and send it as a

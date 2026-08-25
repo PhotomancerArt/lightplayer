@@ -47,8 +47,9 @@ pub use layers::hull::{convex_hull, pad_hull};
 use layers::doc::{DocLayersInput, doc_layers};
 use layers::draft::{DraftLayerInput, draft_layer};
 use layers::fixtures::{
-    FixtureLayerInput, dragged_placement, exceeds_drag_threshold, fixture_layer, hit_fixture,
-    hit_object, nearest_lamp,
+    FixtureLayerInput, clamp_scale_factor, dragged_placements, exceeds_drag_threshold,
+    fixture_layer, hit_fixture, hit_object, nearest_lamp, scaled_placements, sprite_project_aabb,
+    sprites_in_rect,
 };
 use layers::marquee::marquee_layer;
 use layers::selection::{SelectionLayerInput, selection_layer};
@@ -74,13 +75,25 @@ pub enum CanvasDrag {
         /// target. Resolved at PRESS time like the lamp.
         object: Option<usize>,
         start_client: [f64; 2],
-        original: Placement,
+        /// The MOVING SET's press-time placements: the whole selected set
+        /// when the press landed on a selected sprite (drag moves them
+        /// together), else just the pressed one.
+        originals: Vec<(String, Placement)>,
         moved: bool,
     },
-    /// Background press under the fixture grammar: pointer-up without
-    /// movement deselects.
-    FixtureTap {
-        start_client: [f64; 2],
+    /// Background press under the fixture grammar: a rubber-band over the
+    /// sprites. Tiny at release = a deselect tap (non-additive only).
+    FixtureMarquee {
+        start: [f32; 2],
+        current: [f32; 2],
+        additive: bool,
+    },
+    /// Corner drag of the fixture selection box: uniform scale of the
+    /// whole selected set about the shared box's opposite corner (D5).
+    FixtureScale {
+        anchor: [f32; 2],
+        start: [f32; 2],
+        originals: Vec<(String, Placement)>,
         moved: bool,
     },
     /// Group move: totals from the gesture-start doc point.
@@ -174,6 +187,11 @@ pub fn EditorCanvas(
     /// editor grammar needs a dived session.
     #[props(default)]
     on_fixture: Option<EventHandler<FixtureEvent>>,
+    /// Render the fixture selection box + corner scale handles around the
+    /// selected sprites (Mapping furniture — the Patching host omits it;
+    /// transforms are not that view's activity).
+    #[props(default)]
+    transform_handles: bool,
     /// Host-owned reference image, rendered doc-space at the origin between
     /// the dot grid and the authored canvas rect when `view_opts.reference`.
     #[props(default)]
@@ -264,6 +282,7 @@ pub fn EditorCanvas(
     let fixture_mode = on_fixture.is_some() && focused.is_none();
     let fixtures_down = fixtures.clone();
     let fixtures_dbl = fixtures.clone();
+    let fixtures_up = fixtures.clone();
     let focused_dbl = focused.clone();
     let cam = camera();
     // Screen-constant sizing folds in the placement scale: a doc unit
@@ -476,13 +495,41 @@ pub fn EditorCanvas(
         .flatten();
 
     let marquee_rect = match drag() {
-        Some(CanvasDrag::Marquee { start, current, .. }) => {
+        Some(
+            CanvasDrag::Marquee { start, current, .. }
+            | CanvasDrag::FixtureMarquee { start, current, .. },
+        ) => {
             let min = [start[0].min(current[0]), start[1].min(current[1])];
             let max = [start[0].max(current[0]), start[1].max(current[1])];
             Some((min, [max[0] - min[0], max[1] - min[1]]))
         }
         _ => None,
     };
+    // The fixture selection box (unified-selection P3): the shared
+    // project-space AABB of the selected sprites, wearing corner scale
+    // handles when the host asked for transform furniture.
+    let fixture_box: Option<([f64; 4], Vec<(String, Placement)>)> = fixture_mode
+        .then(|| {
+            let selected: Vec<&FixtureSprite> =
+                fixtures.iter().filter(|sprite| sprite.selected).collect();
+            if selected.is_empty() {
+                return None;
+            }
+            let mut bbox = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+            for sprite in &selected {
+                let [x0, y0, x1, y1] = sprite_project_aabb(sprite);
+                bbox[0] = bbox[0].min(x0);
+                bbox[1] = bbox[1].min(y0);
+                bbox[2] = bbox[2].max(x1);
+                bbox[3] = bbox[3].max(y1);
+            }
+            let originals: Vec<(String, Placement)> = selected
+                .iter()
+                .map(|sprite| (sprite.key.clone(), sprite.placement))
+                .collect();
+            Some((bbox, originals))
+        })
+        .flatten();
     drop(session_read);
 
     let commit_drag = move |mut session: Signal<MapEditorSession>| {
@@ -519,35 +566,63 @@ pub fn EditorCanvas(
                 capture_pointer(&evt);
                 if fixture_mode {
                     // Fixture grammar, one canvas-level hit test: press on
-                    // a sprite arms a maybe-move, background press arms a
-                    // deselect tap. No editor grammar runs — no session.
+                    // a sprite arms a maybe-move (of the whole selected set
+                    // when the sprite is in it), shift-click toggles the
+                    // sibling, background press arms the marquee. No
+                    // editor grammar runs — no session.
                     let point = evt.data().client_coordinates();
                     let client = [point.x, point.y];
                     let view = event_view_point(&anchor, &evt);
                     let project = camera.peek().view_to_doc(view);
                     let project_point = [f64::from(project[0]), f64::from(project[1])];
+                    let shift = evt.data().modifiers().shift();
                     let hit = hit_fixture(&fixtures_down, project_point).map(|sprite| {
                         (
                             sprite.key.clone(),
                             sprite.placement,
+                            sprite.selected,
                             nearest_lamp(sprite, project_point),
                             hit_object(sprite, project_point),
                         )
                     });
                     match hit {
-                        Some((key, original, lamp, object)) => {
+                        Some((key, original, selected, lamp, object)) => {
+                            if shift {
+                                // Shift-click is pure selection intent —
+                                // no drag arms, the shell toggles the
+                                // sibling.
+                                if let Some(handler) = &on_fixture {
+                                    handler.call(FixtureEvent::Select {
+                                        pick: Some(FixturePick { key, lamp, object }),
+                                        toggle: true,
+                                    });
+                                }
+                                return;
+                            }
+                            // A press on a SELECTED sprite drags the whole
+                            // selected set; an unselected one drags alone.
+                            let originals: Vec<(String, Placement)> = if selected {
+                                fixtures_down
+                                    .iter()
+                                    .filter(|sprite| sprite.selected)
+                                    .map(|sprite| (sprite.key.clone(), sprite.placement))
+                                    .collect()
+                            } else {
+                                vec![(key.clone(), original)]
+                            };
                             drag.set(Some(CanvasDrag::FixturePress {
                                 key,
                                 lamp,
                                 object,
                                 start_client: client,
-                                original,
+                                originals,
                                 moved: false,
                             }));
                         }
-                        None => drag.set(Some(CanvasDrag::FixtureTap {
-                            start_client: client,
-                            moved: false,
+                        None => drag.set(Some(CanvasDrag::FixtureMarquee {
+                            start: project,
+                            current: project,
+                            additive: shift,
                         })),
                     }
                     return;
@@ -590,7 +665,7 @@ pub fn EditorCanvas(
                         lamp,
                         object,
                         start_client,
-                        original,
+                        originals,
                         moved,
                     } => {
                         let point = evt.data().client_coordinates();
@@ -598,9 +673,8 @@ pub fn EditorCanvas(
                         let now_moved = moved || exceeds_drag_threshold(start_client, client);
                         if now_moved && let Some(handler) = &on_fixture {
                             handler.call(FixtureEvent::Move {
-                                key: key.clone(),
-                                placement: dragged_placement(
-                                    original,
+                                moves: dragged_placements(
+                                    &originals,
                                     start_client,
                                     client,
                                     camera.peek().scale,
@@ -613,21 +687,49 @@ pub fn EditorCanvas(
                             lamp,
                             object,
                             start_client,
-                            original,
+                            originals,
                             moved: now_moved,
                         }));
                     }
-                    CanvasDrag::FixtureTap {
-                        start_client,
-                        moved,
+                    CanvasDrag::FixtureMarquee {
+                        start, additive, ..
                     } => {
-                        let point = evt.data().client_coordinates();
-                        if !moved && exceeds_drag_threshold(start_client, [point.x, point.y]) {
-                            drag.set(Some(CanvasDrag::FixtureTap {
-                                start_client,
-                                moved: true,
-                            }));
+                        drag.set(Some(CanvasDrag::FixtureMarquee {
+                            start,
+                            current: doc_point,
+                            additive,
+                        }));
+                    }
+                    CanvasDrag::FixtureScale {
+                        anchor,
+                        start,
+                        originals,
+                        ..
+                    } => {
+                        let start_dist = ((start[0] - anchor[0]).powi(2)
+                            + (start[1] - anchor[1]).powi(2))
+                        .sqrt();
+                        if start_dist > 1e-3 {
+                            let now_dist = ((doc_point[0] - anchor[0]).powi(2)
+                                + (doc_point[1] - anchor[1]).powi(2))
+                            .sqrt();
+                            let factor = clamp_scale_factor(
+                                &originals,
+                                f64::from(now_dist / start_dist),
+                            );
+                            if let Some(handler) = &on_fixture {
+                                handler.call(FixtureEvent::Move {
+                                    moves: scaled_placements(&originals, anchor, factor),
+                                    commit: false,
+                                });
+                            }
                         }
+                        drag.set(Some(CanvasDrag::FixtureScale {
+                            anchor,
+                            start,
+                            originals,
+                            moved: true,
+                        }));
                     }
                     CanvasDrag::Pan { last } => {
                         let view_point = event_view_point(&anchor, &evt);
@@ -678,19 +780,19 @@ pub fn EditorCanvas(
                         lamp,
                         object,
                         start_client,
-                        original,
+                        originals,
                         moved,
                     } => {
                         if let Some(handler) = &on_fixture {
                             if moved {
-                                // One gesture = one committed move. The
-                                // shell holds the override until the write
-                                // echoes — no snap-back.
+                                // One gesture = one committed move (the
+                                // whole set together). The shell holds the
+                                // override until the write echoes — no
+                                // snap-back.
                                 let point = evt.data().client_coordinates();
                                 handler.call(FixtureEvent::Move {
-                                    key,
-                                    placement: dragged_placement(
-                                        original,
+                                    moves: dragged_placements(
+                                        &originals,
                                         start_client,
                                         [point.x, point.y],
                                         camera.peek().scale,
@@ -698,18 +800,64 @@ pub fn EditorCanvas(
                                     commit: true,
                                 });
                             } else {
-                                handler.call(FixtureEvent::Select(Some(FixturePick {
-                                    key,
-                                    lamp,
-                                    object,
-                                })));
+                                handler.call(FixtureEvent::Select {
+                                    pick: Some(FixturePick { key, lamp, object }),
+                                    toggle: false,
+                                });
                             }
                         }
                     }
-                    // A background tap that never moved deselects.
-                    CanvasDrag::FixtureTap { moved, .. } => {
-                        if !moved && let Some(handler) = &on_fixture {
-                            handler.call(FixtureEvent::Select(None));
+                    // The fixture marquee: a real rect selects what it
+                    // crossed; a tap-sized one deselects (non-additive).
+                    CanvasDrag::FixtureMarquee {
+                        start,
+                        current,
+                        additive,
+                    } => {
+                        let min = [start[0].min(current[0]), start[1].min(current[1])];
+                        let max = [start[0].max(current[0]), start[1].max(current[1])];
+                        let scale = camera().scale;
+                        if (max[0] - min[0]) * scale > 4.0 || (max[1] - min[1]) * scale > 4.0 {
+                            if let Some(handler) = &on_fixture {
+                                handler.call(FixtureEvent::Marquee {
+                                    keys: sprites_in_rect(&fixtures_up, min, max),
+                                    additive,
+                                });
+                            }
+                        } else if !additive
+                            && let Some(handler) = &on_fixture
+                        {
+                            handler.call(FixtureEvent::Select {
+                                pick: None,
+                                toggle: false,
+                            });
+                        }
+                    }
+                    CanvasDrag::FixtureScale {
+                        anchor,
+                        start,
+                        originals,
+                        moved,
+                    } => {
+                        if moved && let Some(handler) = &on_fixture {
+                            // Commit at the release point's factor — the
+                            // same arithmetic the live preview ran.
+                            let release = event_doc_point(&interact, &evt);
+                            let start_dist = ((start[0] - anchor[0]).powi(2)
+                                + (start[1] - anchor[1]).powi(2))
+                            .sqrt();
+                            let factor = if start_dist > 1e-3 {
+                                let now_dist = ((release[0] - anchor[0]).powi(2)
+                                    + (release[1] - anchor[1]).powi(2))
+                                .sqrt();
+                                clamp_scale_factor(&originals, f64::from(now_dist / start_dist))
+                            } else {
+                                1.0
+                            };
+                            handler.call(FixtureEvent::Move {
+                                moves: scaled_placements(&originals, anchor, factor),
+                                commit: true,
+                            });
                         }
                     }
                     CanvasDrag::Move { moved, collapse, .. } => {
@@ -745,27 +893,37 @@ pub fn EditorCanvas(
             onpointerleave: move |_| {
                 if matches!(
                     drag(),
-                    Some(CanvasDrag::Pan { .. }) | Some(CanvasDrag::Marquee { .. })
+                    Some(CanvasDrag::Pan { .. })
+                        | Some(CanvasDrag::Marquee { .. })
+                        | Some(CanvasDrag::FixtureMarquee { .. })
                 ) {
                     drag.set(None);
                 }
             },
             onpointercancel: move |_| {
                 // A cancelled fixture drag resets the shell's override to
-                // the press-time placement (nothing was committed).
-                if let Some(CanvasDrag::FixturePress {
-                    key,
-                    original,
-                    moved: true,
-                    ..
-                }) = drag.peek().clone()
-                    && let Some(handler) = &on_fixture
-                {
-                    handler.call(FixtureEvent::Move {
-                        key,
-                        placement: original,
-                        commit: false,
-                    });
+                // the press-time placements (nothing was committed).
+                match drag.peek().clone() {
+                    Some(
+                        CanvasDrag::FixturePress {
+                            originals,
+                            moved: true,
+                            ..
+                        }
+                        | CanvasDrag::FixtureScale {
+                            originals,
+                            moved: true,
+                            ..
+                        },
+                    ) => {
+                        if let Some(handler) = &on_fixture {
+                            handler.call(FixtureEvent::Move {
+                                moves: originals,
+                                commit: false,
+                            });
+                        }
+                    }
+                    _ => {}
                 }
                 drag.set(None);
             },
@@ -871,6 +1029,72 @@ pub fn EditorCanvas(
                     focused: focused.as_deref(),
                     cam_scale: cam.scale,
                 })}
+                // Fixture-grain furniture, project space (unified-selection
+                // P3): the selection box + corner scale handles (when the
+                // host asked for transform furniture) and the marquee.
+                if fixture_mode {
+                    if transform_handles && let Some((bbox, _)) = &fixture_box {
+                        {
+                            let margin = 8.0 / f64::from(cam.scale);
+                            let x = bbox[0] - margin;
+                            let y = bbox[1] - margin;
+                            let w = (bbox[2] - bbox[0]) + 2.0 * margin;
+                            let h = (bbox[3] - bbox[1]) + 2.0 * margin;
+                            let half = 5.0 / f64::from(cam.scale);
+                            let stroke = 1.4 / f64::from(cam.scale);
+                            let originals = fixture_box
+                                .as_ref()
+                                .map(|(_, originals)| originals.clone())
+                                .unwrap_or_default();
+                            rsx! {
+                                rect {
+                                    class: "lpme-sel-outline",
+                                    x: "{x}",
+                                    y: "{y}",
+                                    width: "{w}",
+                                    height: "{h}",
+                                    stroke_width: "{stroke}",
+                                    stroke_dasharray: "{5.0 / f64::from(cam.scale)} {4.0 / f64::from(cam.scale)}",
+                                }
+                                for (name, corner_x, corner_y, anchor_x, anchor_y) in [
+                                    ("tl", x, y, x + w, y + h),
+                                    ("tr", x + w, y, x, y + h),
+                                    ("bl", x, y + h, x + w, y),
+                                    ("br", x + w, y + h, x, y),
+                                ] {
+                                    rect {
+                                        key: "fh{name}",
+                                        class: "lpme-handle",
+                                        x: "{corner_x - half}",
+                                        y: "{corner_y - half}",
+                                        width: "{2.0 * half}",
+                                        height: "{2.0 * half}",
+                                        stroke_width: "{stroke}",
+                                        onpointerdown: {
+                                            let originals = originals.clone();
+                                            move |evt: Event<PointerData>| {
+                                                if pan_takes_press(&interact, &evt) {
+                                                    return;
+                                                }
+                                                evt.stop_propagation();
+                                                capture_pointer(&evt);
+                                                let doc_point = event_doc_point(&interact, &evt);
+                                                let mut drag = interact.drag;
+                                                drag.set(Some(CanvasDrag::FixtureScale {
+                                                    anchor: [anchor_x as f32, anchor_y as f32],
+                                                    start: doc_point,
+                                                    originals: originals.clone(),
+                                                    moved: false,
+                                                }));
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    {marquee_layer(cam.scale, marquee_rect)}
+                }
                 // Doc layers render only with a session to show: dived, or
                 // hosted without the fixture grammar (the plain editor).
                 if !fixture_mode {
