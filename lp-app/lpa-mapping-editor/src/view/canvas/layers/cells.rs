@@ -208,8 +208,8 @@ pub fn point_cells(positions: &[[f32; 2]], floor_radius: f32) -> Vec<LampCell> {
         .map(|p| [f64::from(p[0]), f64::from(p[1])])
         .collect();
     let floor = f64::from(floor_radius).max(f64::EPSILON);
-    let radius = median_nearest_neighbour(&positions)
-        .map_or(floor, |nn| (NN_FRACTION * nn).max(floor));
+    let radius =
+        median_nearest_neighbour(&positions).map_or(floor, |nn| (NN_FRACTION * nn).max(floor));
     let seeds: Vec<Seed> = positions
         .into_iter()
         .map(|center| Seed { center, radius })

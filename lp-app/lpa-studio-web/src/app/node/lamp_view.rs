@@ -2,33 +2,46 @@
 //!
 //! A control product is up to dome scale today (1500 lamps) and Radiance
 //! scale tomorrow (~30k), so one DOM node per lamp is not an option: the
-//! positioned-`<span>` renderer this replaces rebuilt the whole lamp field
-//! through the vdom on every live frame. Here the field is one `<canvas>`:
-//! lamps are rasterized into an RGBA buffer in Rust and blitted with
-//! `putImageData` (the [`ProductPreviewCanvas`] precedent), so a live frame
-//! costs one JS call regardless of lamp count.
+//! positioned-`<span>` renderer this replaced rebuilt the whole lamp field
+//! through the vdom on every live frame. Here the field is one `<canvas>`,
+//! and each lamp is a **voronoi cell** — the same seam-inset polygons the
+//! mapping canvas draws ([`point_cells`]), so the product display speaks
+//! the design language instead of a row of blurred dots.
+//!
+//! Geometry is scale-free and computed ONCE per layout: cell polygons live
+//! in the layout's own hint space (all lengths derived from the field's
+//! median lamp pitch and its declared footprint — never an absolute pixel
+//! or percentage clamp; doc units are arbitrary, see the
+//! canvas-object-renderables ADR), cached as `Path2d`s keyed by the layout
+//! `Rc`'s identity. A live frame is then one `clearRect` plus one solid
+//! `fill` per lit cell under a hint→canvas transform — no pixel buffer,
+//! no per-lamp math. Cells tile without overlap by construction, so plain
+//! source-over fills replace the old screen blending; unlit cells stay
+//! transparent and the black frame behind the canvas shows through, which
+//! is the same nothing the dot renderer drew.
 //!
 //! View mode is a product display, not a wiring tool — no numbers, no
 //! arrows. Those are authoring instruments and live in the mapping editor.
 //!
-//! Upgrade path: the software rasterizer's per-frame fill is the cost that
-//! scales, and at Radiance scale this component grows a WebGL/instanced
-//! backend behind the same props. Not yet — 1500 lamps rasterize in well
-//! under a millisecond, and a GPU context per card is its own bill.
+//! Upgrade path: the per-frame fill count is the cost that scales, and at
+//! Radiance scale this component grows a WebGL/instanced backend behind
+//! the same props (the cached cell polygons carry over as instanced fans).
+//! Not yet — 1500 path fills are well under a frame, and a GPU context per
+//! card is its own bill.
 //!
-//! [`ProductPreviewCanvas`]: crate::app::node::ProductPreviewCanvas
+//! [`point_cells`]: lpa_mapping_editor::point_cells
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-use lpa_mapping_editor::neutral_lamp_rgb;
+use lpa_mapping_editor::{neutral_lamp_rgb, point_cells};
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlSampleEncoding, UiControlProductPreview,
     UiPatchSurface, UiPatchSurfaceFixture,
 };
-use wasm_bindgen::{Clamped, JsCast, closure::Closure};
+use wasm_bindgen::{JsCast, closure::Closure};
 
 /// Monotonic lamp-canvas element ids (one per mounted lamp view).
 static NEXT_LAMP_CANVAS_ID: AtomicU64 = AtomicU64::new(0);
@@ -68,10 +81,10 @@ pub(crate) fn LampView(
         let id = NEXT_LAMP_CANVAS_ID.fetch_add(1, Ordering::Relaxed);
         format!("lamp-view-canvas-{id}")
     });
-    // Reused across paints: at DPR 2 a card-sized field is a couple of
-    // megabytes, and reallocating that per live frame is the only allocation
-    // this renderer would otherwise make.
-    let scratch = use_hook(|| Rc::new(RefCell::new(Vec::<u8>::new())));
+    // The layout's cell polygons as Path2ds, rebuilt only when the
+    // producer publishes a new layout — a live frame reuses them and
+    // allocates nothing.
+    let cell_paths = use_hook(|| Rc::new(RefCell::new(None::<LampCellPaths>)));
     let painted = use_hook(|| Rc::new(Cell::new(None::<LampPaintKey>)));
     let observer = use_hook(|| Rc::new(RefCell::new(None::<LampResizeObserver>)));
     // A box resize moves no prop, so the observer bumps this instead.
@@ -93,7 +106,7 @@ pub(crate) fn LampView(
         // stable across diffs, so painting never fights the vdom.
         let canvas_id = canvas_id.clone();
         let preview = preview.clone();
-        let scratch = scratch.clone();
+        let cell_paths = cell_paths.clone();
         let painted = painted.clone();
         let observer = observer.clone();
         spawn(async move {
@@ -104,8 +117,8 @@ pub(crate) fn LampView(
             };
             for attempt in 0..attempts {
                 let result = {
-                    let mut buffer = scratch.borrow_mut();
-                    paint_lamp_canvas(&canvas_id, &preview, live, &mut buffer)
+                    let mut paths = cell_paths.borrow_mut();
+                    paint_lamp_canvas(&canvas_id, &preview, live, &mut paths)
                 };
                 match result {
                     Ok(()) => {
@@ -224,81 +237,161 @@ pub(crate) fn control_sample_layout_has_rgb(preview: &UiControlProductPreview) -
     })
 }
 
-/// The box one lamp field rasterizes into: backing-store size in device
-/// pixels, plus the CSS width and device-pixel ratio the dot geometry is
-/// measured in.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct LampRasterBox {
-    /// CSS width of the lamp box — lamp diameter is a percentage of it.
-    pub css_width: f64,
-    /// Device pixels per CSS pixel for this rasterization.
-    pub dpr: f64,
-    /// Backing-store width in device pixels.
-    pub width: u32,
-    /// Backing-store height in device pixels.
-    pub height: u32,
+/// One lamp field's cell geometry: seam-inset voronoi polygons in the
+/// layout's hint space, each carrying the `sample_start` its live colour
+/// decodes from. Pure data — the `Path2d` form the painter fills is built
+/// from this by [`LampCellPaths`].
+pub(crate) struct LampFieldGeometry {
+    /// Hint-space extent the polygons were computed in — the draw-time
+    /// transform maps `[0, hint]` onto the canvas box.
+    pub hint: [f64; 2],
+    /// Per displayed lamp: its sample offset and its cell polygon
+    /// (possibly empty when coincident lamps shared all its territory).
+    pub cells: Vec<(u32, Vec<[f32; 2]>)>,
 }
 
-/// Rasterize `preview`'s lamps into `buffer` as RGBA at the box's
-/// device-pixel size, screen-blended over transparent black.
+/// Compute a layout's cell geometry — once per layout, not per frame.
 ///
-/// Geometry matches the renderer [`LampView`] replaces so the view ⇄ edit
-/// flip lands on the same framing: lamp centers are fractions of the
-/// (already inset) box, and diameter is a percentage of its width floored
-/// at 5 CSS px.
-///
-/// Split out of [`paint_lamp_canvas`] so a gallery poster capture can
-/// rasterize the same field into an offscreen canvas of its own size: the
-/// card's live lamp layer and the poster standing in for it must be the
-/// same picture, or the hover swap would jump.
-pub(crate) fn rasterize_lamp_field(
-    preview: &UiControlProductPreview,
-    live: bool,
-    raster: LampRasterBox,
-    buffer: &mut Vec<u8>,
-) -> Result<(), String> {
-    let Some(ControlDisplayLayout::Layout2d(layout)) = preview.display_layout.as_deref() else {
-        return Err("control preview has no 2D display layout".to_string());
+/// Positions leave normalized space for **hint space** (`x·width_hint`,
+/// `y·height_hint`) so distances mean one thing on both axes, and every
+/// length derives from the field's own numbers: cell radius is 0.92 × the
+/// median nearest-neighbour distance ([`point_cells`]), floored by the
+/// footprint the layout itself declares (`ControlLamp2d::radius` is
+/// normalized against the larger hint dimension). No absolute clamps —
+/// the old dot renderer's %-of-box diameter and 5 px floor assumed a
+/// scale the layout never promised.
+pub(crate) fn lamp_field_geometry(layout: &lpa_studio_core::ControlLayout2d) -> LampFieldGeometry {
+    let hint = [
+        f64::from(layout.width_hint.max(1)),
+        f64::from(layout.height_hint.max(1)),
+    ];
+    let positions: Vec<[f32; 2]> = layout
+        .lamps
+        .iter()
+        .map(|lamp| {
+            [
+                lamp.center[0].clamp(0.0, 1.0) * hint[0] as f32,
+                lamp.center[1].clamp(0.0, 1.0) * hint[1] as f32,
+            ]
+        })
+        .collect();
+    // The footprint floor in hint units. Median across lamps: today every
+    // producer declares one uniform radius, and a mixed field should not
+    // let one outsized declaration inflate everyone else's floor.
+    let floor = {
+        let mut radii: Vec<f32> = layout.lamps.iter().map(|lamp| lamp.radius).collect();
+        radii.sort_by(f32::total_cmp);
+        let max_hint = hint[0].max(hint[1]) as f32;
+        radii
+            .get(radii.len() / 2)
+            .map_or(f32::EPSILON, |radius| (radius * max_hint).max(f32::EPSILON))
     };
-    let LampRasterBox {
-        css_width,
-        dpr,
-        width,
-        height,
-    } = raster;
-
-    // Transparent black: the frame behind the canvas is black, so unlit
-    // background needs no fill and lamp pixels blend as they did under
-    // `mix-blend-mode: screen`.
-    buffer.clear();
-    buffer.resize(width as usize * height as usize * 4, 0);
-    let neutral = neutral_lamp_rgb();
-    for lamp in &layout.lamps {
-        let color = if live {
-            control_rgb_at_sample(preview, lamp.sample_start).unwrap_or([0, 0, 0])
-        } else {
-            neutral
-        };
-        // A black lamp screen-blends to nothing over the black frame — the
-        // same nothing the div renderer drew, at none of the cost.
-        if color == [0, 0, 0] {
-            continue;
-        }
-        let diameter_pct = f64::from(lamp.radius.max(0.006) * 96.0).clamp(3.5, 18.0);
-        let radius = (diameter_pct / 100.0 * css_width).max(5.0) / 2.0 * dpr;
-        let center_x = f64::from(lamp.center[0].clamp(0.0, 1.0)) * f64::from(width);
-        let center_y = f64::from(lamp.center[1].clamp(0.0, 1.0)) * f64::from(height);
-        paint_lamp_dot(buffer, width, height, [center_x, center_y], radius, color);
-    }
-    Ok(())
+    let cells = point_cells(&positions, floor)
+        .into_iter()
+        .zip(&layout.lamps)
+        .map(|(cell, lamp)| (lamp.sample_start, cell.polygon))
+        .collect();
+    LampFieldGeometry { hint, cells }
 }
 
-/// Rasterize the lamp field into `buffer` and blit it onto the canvas.
+/// A layout's cells as ready-to-fill `Path2d`s, keyed by the layout
+/// `Rc`'s identity so [`LampView`] rebuilds geometry only when the
+/// producer publishes a new layout — never on a live frame.
+pub(crate) struct LampCellPaths {
+    /// `Rc::as_ptr` of the `ControlDisplayLayout` these paths were built
+    /// from (identity, not contents — same contract as [`LampPaintKey`]).
+    layout_key: usize,
+    hint: [f64; 2],
+    cells: Vec<(u32, web_sys::Path2d)>,
+}
+
+impl LampCellPaths {
+    /// Build (or reuse) the paths for `preview`'s current layout.
+    pub(crate) fn ensure<'a>(
+        slot: &'a mut Option<LampCellPaths>,
+        preview: &UiControlProductPreview,
+    ) -> Result<&'a LampCellPaths, String> {
+        let Some(layout_rc) = preview.display_layout.as_ref() else {
+            return Err("control preview has no 2D display layout".to_string());
+        };
+        let layout_key = Rc::as_ptr(layout_rc) as *const u8 as usize;
+        if slot
+            .as_ref()
+            .is_none_or(|paths| paths.layout_key != layout_key)
+        {
+            let ControlDisplayLayout::Layout2d(layout) = layout_rc.as_ref();
+            let geometry = lamp_field_geometry(layout);
+            let mut cells = Vec::with_capacity(geometry.cells.len());
+            for (sample_start, polygon) in geometry.cells {
+                if polygon.len() < 3 {
+                    continue;
+                }
+                let path =
+                    web_sys::Path2d::new().map_err(|error| format!("build Path2d: {error:?}"))?;
+                path.move_to(f64::from(polygon[0][0]), f64::from(polygon[0][1]));
+                for vertex in &polygon[1..] {
+                    path.line_to(f64::from(vertex[0]), f64::from(vertex[1]));
+                }
+                path.close_path();
+                cells.push((sample_start, path));
+            }
+            *slot = Some(LampCellPaths {
+                layout_key,
+                hint: geometry.hint,
+                cells,
+            });
+        }
+        Ok(slot.as_ref().expect("just ensured"))
+    }
+
+    /// Fill every lit cell into the `dest` box (`[x, y, width, height]`
+    /// in device pixels) on `context`. Background is the caller's: the
+    /// live canvas clears to transparent (the black frame behind it
+    /// shows through), the poster fills black first — either way this
+    /// only paints cells, so both stay the same picture.
+    pub(crate) fn fill(
+        &self,
+        context: &web_sys::CanvasRenderingContext2d,
+        preview: &UiControlProductPreview,
+        live: bool,
+        dest: [f64; 4],
+    ) -> Result<(), String> {
+        let [x, y, width, height] = dest;
+        context
+            .set_transform(width / self.hint[0], 0.0, 0.0, height / self.hint[1], x, y)
+            .map_err(|error| format!("set transform: {error:?}"))?;
+        let neutral = neutral_lamp_rgb();
+        let mut style = String::new();
+        for (sample_start, path) in &self.cells {
+            let color = if live {
+                control_rgb_at_sample(preview, *sample_start).unwrap_or([0, 0, 0])
+            } else {
+                neutral
+            };
+            // A black cell over the black frame is the same nothing the
+            // dot renderer drew, at none of the cost.
+            if color == [0, 0, 0] {
+                continue;
+            }
+            style.clear();
+            use std::fmt::Write as _;
+            let _ = write!(style, "rgb({},{},{})", color[0], color[1], color[2]);
+            context.set_fill_style_str(&style);
+            context.fill_with_path_2d(path);
+        }
+        context
+            .reset_transform()
+            .map_err(|error| format!("reset transform: {error:?}"))?;
+        Ok(())
+    }
+}
+
+/// Size the canvas backing store and fill the lamp cells onto it.
 fn paint_lamp_canvas(
     canvas_id: &str,
     preview: &UiControlProductPreview,
     live: bool,
-    buffer: &mut Vec<u8>,
+    paths: &mut Option<LampCellPaths>,
 ) -> Result<(), String> {
     let canvas = web_sys::window()
         .and_then(|window| window.document())
@@ -332,24 +425,17 @@ fn paint_lamp_canvas(
         .dyn_into::<web_sys::CanvasRenderingContext2d>()
         .map_err(|_| "2d context has an unexpected type".to_string())?;
 
-    rasterize_lamp_field(
+    let paths = LampCellPaths::ensure(paths, preview)?;
+    // Transparent clear: the frame behind the canvas is black, so unlit
+    // territory needs no fill — the same backdrop the poster bakes in.
+    context.reset_transform().ok();
+    context.clear_rect(0.0, 0.0, f64::from(width), f64::from(height));
+    paths.fill(
+        &context,
         preview,
         live,
-        LampRasterBox {
-            css_width,
-            dpr,
-            width,
-            height,
-        },
-        buffer,
+        [0.0, 0.0, f64::from(width), f64::from(height)],
     )?;
-
-    let image =
-        web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(buffer), width, height)
-            .map_err(|error| format!("build ImageData: {error:?}"))?;
-    context
-        .put_image_data(&image, 0.0, 0.0)
-        .map_err(|error| format!("putImageData: {error:?}"))?;
     // Paint runs async after mount, so an unpainted canvas is a possible page
     // state; the story-capture ready-wait polls this marker so a baseline can
     // never freeze that state (set imperatively — Dioxus never writes this
@@ -358,55 +444,6 @@ fn paint_lamp_canvas(
         .set_attribute("data-preview-painted", "1")
         .map_err(|error| format!("mark painted: {error:?}"))?;
     Ok(())
-}
-
-/// One lamp: solid to 75% of the radius, then a linear fade — the radial
-/// gradient the div renderer carried in CSS — screen-blended into `buffer`
-/// so overlapping lamps add up instead of overwriting.
-fn paint_lamp_dot(
-    buffer: &mut [u8],
-    width: u32,
-    height: u32,
-    center: [f64; 2],
-    radius: f64,
-    color: [u8; 3],
-) {
-    let [center_x, center_y] = center;
-    let x0 = (center_x - radius).floor().max(0.0) as u32;
-    let y0 = (center_y - radius).floor().max(0.0) as u32;
-    let x1 = (center_x + radius)
-        .ceil()
-        .clamp(0.0, f64::from(width) - 1.0) as u32;
-    let y1 = (center_y + radius)
-        .ceil()
-        .clamp(0.0, f64::from(height) - 1.0) as u32;
-    let core = radius * 0.75;
-    let fade = (radius - core).max(f64::EPSILON);
-    let radius_sq = radius * radius;
-
-    for y in y0..=y1 {
-        let dy = f64::from(y) + 0.5 - center_y;
-        for x in x0..=x1 {
-            let dx = f64::from(x) + 0.5 - center_x;
-            let distance_sq = dx * dx + dy * dy;
-            if distance_sq > radius_sq {
-                continue;
-            }
-            let coverage = if distance_sq <= core * core {
-                1.0
-            } else {
-                (radius - distance_sq.sqrt()) / fade
-            };
-            let index = (y as usize * width as usize + x as usize) * 4;
-            for channel in 0..3 {
-                let source = f64::from(color[channel]) * coverage;
-                let destination = f64::from(buffer[index + channel]);
-                buffer[index + channel] =
-                    (255.0 - (255.0 - destination) * (255.0 - source) / 255.0).round() as u8;
-            }
-            buffer[index + 3] = 255;
-        }
-    }
 }
 
 /// One lamp's display colour, decoded from a control preview's own samples
@@ -575,6 +612,63 @@ mod tests {
     };
 
     use super::*;
+
+    /// The layout→geometry contract: positions leave normalized space
+    /// for hint space (per-axis), every cell keeps its lamp's
+    /// `sample_start`, and the footprint floor comes from the layout's
+    /// own numbers (radius × the larger hint dimension) — no absolute
+    /// clamps anywhere.
+    #[test]
+    fn lamp_field_geometry_scales_into_hint_space() {
+        let lamps: Vec<lpa_studio_core::ControlLamp2d> = (0..4)
+            .map(|i| lpa_studio_core::ControlLamp2d {
+                lamp_index: i,
+                sample_start: i * 3,
+                center: [i as f32 * 0.25, 0.5],
+                radius: 0.02,
+            })
+            .collect();
+        let layout =
+            lpa_studio_core::ControlLayout2d::new(lpa_studio_core::Revision(7), 200, 100, lamps);
+        let geometry = lamp_field_geometry(&layout);
+        assert_eq!(geometry.hint, [200.0, 100.0]);
+        assert_eq!(geometry.cells.len(), 4);
+        for (index, (sample_start, polygon)) in geometry.cells.iter().enumerate() {
+            assert_eq!(*sample_start, index as u32 * 3);
+            assert!(!polygon.is_empty(), "cell {index} vanished");
+            // Pitch in hint space is 0.25 × 200 = 50; a cell reaches at
+            // most its radius (0.92 × 50, inset) from its seed — hint-
+            // space scale, not a % of some box.
+            let seed = [index as f32 * 50.0, 50.0];
+            for v in polygon {
+                let dx = v[0] - seed[0];
+                let dy = v[1] - seed[1];
+                let d = f64::from(dx * dx + dy * dy).sqrt();
+                assert!(d <= 0.92 * 50.0 + 1e-3, "cell {index} vertex {v:?} at {d}");
+            }
+        }
+        // A sparse field falls back to the declared footprint: radius
+        // 0.02 × max(200, 100) = 4 in hint units.
+        let lone = lpa_studio_core::ControlLayout2d::new(
+            lpa_studio_core::Revision(7),
+            200,
+            100,
+            vec![lpa_studio_core::ControlLamp2d {
+                lamp_index: 0,
+                sample_start: 0,
+                center: [0.5, 0.5],
+                radius: 0.02,
+            }],
+        );
+        let geometry = lamp_field_geometry(&lone);
+        let (_, polygon) = &geometry.cells[0];
+        for v in polygon {
+            let dx = f64::from(v[0] - 100.0);
+            let dy = f64::from(v[1] - 50.0);
+            let d = (dx * dx + dy * dy).sqrt();
+            assert!((d - 4.0 * 0.9).abs() < 1e-3, "footprint floor, got {d}");
+        }
+    }
 
     /// Endpoints exact; the linear midtone must brighten (linear 0.2 →
     /// sRGB ≈ 0.48), which is the whole point of the conversion — shown
