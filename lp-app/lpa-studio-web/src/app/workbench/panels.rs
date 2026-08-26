@@ -577,22 +577,26 @@ fn FixtureRows(
                                     let node = fixture.node;
                                     let object_index = row.object_index;
                                     move |_| {
-                                        let targets =
-                                            crate::app::editor_shell::selection::instance_targets_for_object(
-                                                node,
-                                                &doc,
-                                                &instances,
-                                                object_index,
-                                            );
-                                        let mut next = UiSelection::empty();
-                                        if targets.is_empty() {
-                                            next.select_one(UiPatchTarget::Fixture { node });
-                                        } else {
-                                            next.set_siblings(targets);
-                                        }
-                                        crate::app::editor_shell::selection::dispatch_selection(
-                                            &on_action, next,
+                                        use crate::app::editor_shell::selection as coord;
+                                        let targets = coord::instance_targets_for_object(
+                                            node,
+                                            &doc,
+                                            &instances,
+                                            object_index,
                                         );
+                                        let mut next = UiSelection::empty();
+                                        if !targets.is_empty() {
+                                            next.set_siblings(targets);
+                                        } else if let Some(range) =
+                                            coord::range_target_for_object(node, &doc, object_index)
+                                        {
+                                            // Id-less object (fyeah): the
+                                            // Range grain addresses it.
+                                            next.select_one(range);
+                                        } else {
+                                            next.select_one(UiPatchTarget::Fixture { node });
+                                        }
+                                        coord::dispatch_selection(&on_action, next);
                                     }
                                 },
                                 if row.path.is_root() {

@@ -72,23 +72,71 @@ pub(crate) fn instance_targets_for_object(
 }
 
 /// The object indices a core selection names on `node` (the D46 bridge
-/// run backward), deduplicated in order.
+/// run backward), deduplicated in order. `Range` targets — the id-less
+/// documents' grain — resolve through the strand that owns their first
+/// lamp, so fyeah-class docs bridge too (G1 round 1).
 pub(crate) fn core_object_indices(
     node: NodeId,
     doc: &Map2dDoc,
     selection: &UiSelection,
 ) -> Vec<usize> {
     let mut indices: Vec<usize> = Vec::new();
+    let mut resolved: Option<lpc_mapping::ResolvedMap2d> = None;
     for target in selection.targets() {
-        if let UiPatchTarget::Instance { node: n, path } = target
-            && *n == node
-            && let Some(index) = authored_object_for_instance_path(doc, path)
+        let index = match target {
+            UiPatchTarget::Instance { node: n, path } if *n == node => {
+                authored_object_for_instance_path(doc, path)
+            }
+            UiPatchTarget::Range { node: n, start, .. } if *n == node => {
+                if resolved.is_none() {
+                    resolved = lpc_mapping::resolve(doc).ok();
+                }
+                resolved.as_ref().and_then(|resolved| {
+                    resolved
+                        .spans
+                        .iter()
+                        .find(|span| {
+                            *start >= span.start && *start < span.start.saturating_add(span.count)
+                        })
+                        .map(|span| span.object as usize)
+                })
+            }
+            _ => None,
+        };
+        if let Some(index) = index
             && !indices.contains(&index)
         {
             indices.push(index);
         }
     }
     indices
+}
+
+/// One object's whole lamp window as a `Range` target — the id-less
+/// document's addressable grain (an object's instances are contiguous in
+/// wiring order, pinned by the resolver's span ordering). `None` when the
+/// object resolves no lamps.
+pub(crate) fn range_target_for_object(
+    node: NodeId,
+    doc: &Map2dDoc,
+    object_index: usize,
+) -> Option<UiPatchTarget> {
+    let resolved = lpc_mapping::resolve(doc).ok()?;
+    let mut start: Option<u32> = None;
+    let mut count: u32 = 0;
+    for span in resolved
+        .spans
+        .iter()
+        .filter(|span| span.object as usize == object_index)
+    {
+        start = Some(start.map_or(span.start, |s: u32| s.min(span.start)));
+        count += span.count;
+    }
+    Some(UiPatchTarget::Range {
+        node,
+        start: start?,
+        count: Some(count),
+    })
 }
 
 /// The session's selected ROOT objects, deduplicated in order (descended
@@ -124,44 +172,46 @@ pub(crate) fn use_selection_bridge(
         .unwrap_or_default();
 
     // core → session: seed the session's selected roots from the core
-    // paths. Keyed on the core facts + the pipeline's readiness — never
+    // targets. Keyed on the core facts + the pipeline's readiness — never
     // on the session, so in-dive clicks are not clobbered.
     {
-        let core_paths: Vec<String> = selection
+        let core_targets: Vec<UiPatchTarget> = selection
             .targets()
             .iter()
-            .filter_map(|target| match target {
-                UiPatchTarget::Instance { node, path } if Some(*node) == focused => {
-                    Some(path.clone())
-                }
-                _ => None,
+            .filter(|target| {
+                matches!(target,
+                    UiPatchTarget::Instance { node, .. } | UiPatchTarget::Range { node, .. }
+                        if Some(*node) == focused)
             })
+            .cloned()
             .collect();
         let entered_now = focused;
         let mut session = dive_session;
         let state = dive_state;
-        use_effect(use_reactive!(|(entered_now, core_paths)| {
+        use_effect(use_reactive!(|(entered_now, core_targets)| {
             // Re-run when the pipeline settles a body (the doc arrives
             // after the selection names it).
             let _ready = state.read().clone();
-            if entered_now.is_none() || core_paths.is_empty() {
+            let Some(node) = entered_now else {
+                return;
+            };
+            if core_targets.is_empty() {
                 return;
             }
             let indices: Vec<usize> = {
                 let s = session.peek();
-                let mut indices: Vec<usize> = Vec::new();
-                for path in &core_paths {
-                    if let Some(index) = authored_object_for_instance_path(s.doc(), path)
-                        && !indices.contains(&index)
-                    {
-                        indices.push(index);
-                    }
-                }
-                indices
+                let mut probe = UiSelection::empty();
+                probe.set_siblings(core_targets.clone());
+                core_object_indices(node, s.doc(), &probe)
             };
             if indices.is_empty() {
                 return;
             }
+            // Compare OBJECT SETS over every selected path — descended
+            // paths included (G1 round 1: comparing only roots clobbered
+            // a repeat-child click back to its parent). If the session
+            // already names these objects at any depth, its finer
+            // positional truth stands.
             let current = session_object_indices(&session.peek());
             if current != indices {
                 session.write().selection.set_roots(indices);
@@ -195,7 +245,17 @@ pub(crate) fn use_selection_bridge(
             let targets: Vec<UiPatchTarget> = roots
                 .iter()
                 .flat_map(|index| {
-                    instance_targets_for_object(node, session_read.doc(), &instances, *index)
+                    let named =
+                        instance_targets_for_object(node, session_read.doc(), &instances, *index);
+                    if named.is_empty() {
+                        // Id-less object: the Range grain is the
+                        // addressable projection (G1 round 1 — fyeah).
+                        range_target_for_object(node, session_read.doc(), *index)
+                            .into_iter()
+                            .collect()
+                    } else {
+                        named
+                    }
                 })
                 .collect();
             drop(session_read);

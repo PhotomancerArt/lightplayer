@@ -65,6 +65,10 @@ pub fn EditorShellCenter(
     dive_focused: Option<NodeId>,
     dive_session: Signal<lpa_mapping_editor::MapEditorSession>,
     dive_commits: Signal<u64>,
+    /// The workbench-owned auto-pack slots, SHARED with the Patching
+    /// center (G1 round 1: per-center slots computed at different mount
+    /// times diverged — one conceptual space, one slot truth).
+    pack_slots: Signal<PackSlots>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let focused = dive_focused;
@@ -96,7 +100,7 @@ pub fn EditorShellCenter(
     // Sticky auto-pack slots: grown only when a never-slotted fixture
     // appears, and never re-packed — arranging one fixture must not move
     // another, and an undone arrange returns to the retained slot.
-    let mut pack_slots = use_signal(PackSlots::new);
+    let mut pack_slots = pack_slots;
     let refreshed = refresh_pack_slots(&surface, &bodies, &pack_slots.peek());
     if let Some(next) = refreshed {
         pack_slots.set(next);

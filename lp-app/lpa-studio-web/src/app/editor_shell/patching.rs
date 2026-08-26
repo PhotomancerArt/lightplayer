@@ -291,6 +291,9 @@ pub fn PatchingShellCenter(
     /// The full editor view — the canvas resolves fixture map2d bodies out
     /// of the snapshot's node views, exactly like the Mapping center.
     project_editor: ProjectEditorView,
+    /// The workbench-owned auto-pack slots, SHARED with the Mapping
+    /// center (G1 round 1: one conceptual space, one slot truth).
+    pack_slots: Signal<PackSlots>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let PatchingUi {
@@ -323,9 +326,10 @@ pub fn PatchingShellCenter(
     // edit blocks with "still loading" (the interim page's lesson).
     prefetch_bodies(&on_action, &surface);
     let (bodies, _) = mapping_assets(&project_editor);
-    // Sticky auto-pack slots, same policy as the Mapping center: the two
-    // views must show the SAME arrangement (one conceptual space).
-    let mut pack_slots = use_signal(PackSlots::new);
+    // Sticky auto-pack slots, the WORKBENCH-owned store both views share
+    // (one conceptual space — and since G1 round 1, one signal, so the
+    // views can never pack the same fixture two ways).
+    let mut pack_slots = pack_slots;
     let refreshed = refresh_pack_slots(&surface, &bodies, &pack_slots.peek());
     if let Some(next) = refreshed {
         pack_slots.set(next);

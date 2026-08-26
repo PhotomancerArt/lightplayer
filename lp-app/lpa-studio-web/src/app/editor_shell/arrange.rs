@@ -50,6 +50,12 @@ struct FixtureRender {
     /// Own-space bounds the frame is drawn around.
     bounds: [f64; 4],
     body: FixtureBody,
+    /// Are this render's BOUNDS the real ones — a resolved body, a
+    /// shape-less strip, or a footprint-backed placeholder? A bare
+    /// placeholder's guessed block must never be baked into a held pack
+    /// slot (G1 round 1: slots computed from guessed bounds diverged
+    /// between views and shifted once the body arrived).
+    settled: bool,
     /// `(path, start, lamps)` for instance selection rings.
     instances: Vec<(String, u32, u32)>,
     /// The document's physical strands, from the SAME parse the body came
@@ -365,34 +371,40 @@ pub(crate) fn ProjectCanvasHost(
     // `0` key, waiting for a real viewport measurement and real bounds.
     // Dived, fit frames the FOCUSED fixture's placed bounds (the optional
     // "snap viewport to fixture" affordance); otherwise it fits all.
-    // The fit ALSO re-runs when the measurement moves while the camera is
-    // still exactly the value the last fit produced: the first
-    // measurement races container layout settling (docks, the mobile
-    // fold), and freezing the camera on it baked a nondeterministic zoom
-    // into story baselines (the churner —
-    // docs/debt/story-capture-pipeline.md). Once the user pans or zooms,
-    // the camera is theirs and reconciliation stops.
+    // The fit ALSO re-runs when either MEASUREMENT moves while the camera
+    // is still exactly the value the last fit produced: the first
+    // viewport measurement races container layout settling (docks, the
+    // mobile fold — the story-baseline churner,
+    // docs/debt/story-capture-pipeline.md), and the CONTENT races its own
+    // async loads (bodies, the arrangement document — the peach opened
+    // out of view, G1 round 1). Once the user pans or zooms, the camera
+    // is theirs and reconciliation stops.
     {
+        let bounds = match &dive_focus {
+            Some((_, placement, own_bounds)) => {
+                let corners = placement.corners(*own_bounds);
+                let min_x = corners.iter().map(|c| c[0]).fold(f64::MAX, f64::min);
+                let min_y = corners.iter().map(|c| c[1]).fold(f64::MAX, f64::min);
+                let max_x = corners.iter().map(|c| c[0]).fold(f64::MIN, f64::max);
+                let max_y = corners.iter().map(|c| c[1]).fold(f64::MIN, f64::max);
+                Some(lpc_mapping::Bounds2d {
+                    min_x: min_x as f32,
+                    min_y: min_y as f32,
+                    width: (max_x - min_x).max(1.0) as f32,
+                    height: (max_y - min_y).max(1.0) as f32,
+                })
+            }
+            None => fit_bounds(&sprites),
+        };
+        let bounds_key =
+            bounds.map(|bounds| [bounds.min_x, bounds.min_y, bounds.width, bounds.height]);
         let viewport_now = *viewport.read();
         if let Some([width, height]) = viewport_now
-            && (*fit_pending.read() || fit_done.read().stale([width, height], &camera.peek()))
+            && (*fit_pending.read()
+                || fit_done
+                    .read()
+                    .stale([width, height], &camera.peek(), bounds_key))
         {
-            let bounds = match &dive_focus {
-                Some((_, placement, own_bounds)) => {
-                    let corners = placement.corners(*own_bounds);
-                    let min_x = corners.iter().map(|c| c[0]).fold(f64::MAX, f64::min);
-                    let min_y = corners.iter().map(|c| c[1]).fold(f64::MAX, f64::min);
-                    let max_x = corners.iter().map(|c| c[0]).fold(f64::MIN, f64::max);
-                    let max_y = corners.iter().map(|c| c[1]).fold(f64::MIN, f64::max);
-                    Some(lpc_mapping::Bounds2d {
-                        min_x: min_x as f32,
-                        min_y: min_y as f32,
-                        width: (max_x - min_x).max(1.0) as f32,
-                        height: (max_y - min_y).max(1.0) as f32,
-                    })
-                }
-                None => fit_bounds(&sprites),
-            };
             if let Some(bounds) = bounds {
                 let padding = match &dive_focus {
                     Some(_) => display_inset_padding(bounds, width, height),
@@ -408,7 +420,7 @@ pub(crate) fn ProjectCanvasHost(
             // empty canvas. Change-guarded: a bare signal write at render
             // would re-render forever.
             let mut next = *fit_done.peek();
-            next.record([width, height], *camera.peek());
+            next.record([width, height], *camera.peek(), bounds_key);
             if *fit_done.peek() != next {
                 fit_done.set(next);
             }
@@ -1040,12 +1052,17 @@ pub(crate) type PackSlots = BTreeMap<String, UiArrangeTransform>;
 /// every unarranged fixture already has a slot (keep them — stability is
 /// the point), else the held slots plus freshly packed positions for the
 /// fixtures that have NEVER had one. Existing slots are never moved or
-/// dropped.
+/// dropped — which is exactly why a slot may only be ADOPTED from settled
+/// facts: the arrangement document must have answered (before that,
+/// arranged-ness is unknown) and the fixture's bounds must be real.
 pub(crate) fn refresh_pack_slots(
     surface: &UiPatchSurface,
     bodies: &BTreeMap<ArtifactLocation, String>,
     held: &PackSlots,
 ) -> Option<PackSlots> {
+    if !surface.editor_meta_loaded {
+        return None;
+    }
     let renders = build_renders(surface, bodies, held);
     merge_pack_slots(&renders, held)
 }
@@ -1055,7 +1072,7 @@ pub(crate) fn refresh_pack_slots(
 fn merge_pack_slots(renders: &[FixtureRender], held: &PackSlots) -> Option<PackSlots> {
     let fresh: Vec<&FixtureRender> = renders
         .iter()
-        .filter(|render| !render.arranged && !held.contains_key(&render.key))
+        .filter(|render| render.settled && !render.arranged && !held.contains_key(&render.key))
         .collect();
     if fresh.is_empty() {
         return None;
@@ -1095,7 +1112,7 @@ fn build_renders(
                 let strands = strand_metas(&doc, &resolved);
                 Some((resolved, strands, doc.sample_diameter))
             });
-        let (body, bounds, strands, sample_diameter) = match resolved {
+        let (body, bounds, strands, sample_diameter, settled) = match resolved {
             Some((resolved, strands, sample_diameter)) => {
                 let total = resolved.lamps.len() as u32;
                 let stride = resolved.lamps.len().div_ceil(MAX_DISPLAY_LAMPS).max(1);
@@ -1120,20 +1137,23 @@ fn build_renders(
                     bounds,
                     strands,
                     sample_diameter,
+                    true,
                 )
             }
             None if fixture.mapping_artifact.is_some() => {
                 // A map2d exists but is not loaded: the footprint block.
+                // Settled only when a cached footprint backs the bounds —
+                // a guessed block must never seed a held pack slot.
                 let lamps = fixture.patch.lamps;
-                let bounds = arrange
-                    .footprint
-                    .map(|fp| fp.bbox)
-                    .unwrap_or_else(|| placeholder_bounds(lamps));
+                let footprint = arrange.footprint.map(|fp| fp.bbox);
+                let settled = footprint.is_some();
+                let bounds = footprint.unwrap_or_else(|| placeholder_bounds(lamps));
                 (
                     FixtureBody::Placeholder { lamps },
                     bounds,
                     Vec::new(),
                     lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
+                    settled,
                 )
             }
             None => {
@@ -1145,6 +1165,7 @@ fn build_renders(
                     [0.0, 0.0, width, 10.0],
                     Vec::new(),
                     lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
+                    true,
                 )
             }
         };
@@ -1157,6 +1178,7 @@ fn build_renders(
             arranged: arrange.arranged,
             bounds,
             body,
+            settled,
             instances: fixture
                 .instances
                 .iter()
@@ -1293,6 +1315,7 @@ mod tests {
             arranged,
             bounds,
             body: FixtureBody::Placeholder { lamps: 10 },
+            settled: true,
             instances: Vec::new(),
             strands: Vec::new(),
             sample_diameter: lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
@@ -1320,6 +1343,27 @@ mod tests {
         assert_eq!(
             renders.iter().map(|r| r.transform).collect::<Vec<_>>(),
             again.iter().map(|r| r.transform).collect::<Vec<_>>(),
+        );
+    }
+
+    /// A guessed placeholder must never seed a HELD slot (G1 round 1):
+    /// the slot would bake bounds that move when the body arrives, and
+    /// two views packing at different load times then disagree about the
+    /// same fixture. Unsettled renders keep packing ad hoc — visible, but
+    /// never adopted.
+    #[test]
+    fn unsettled_bounds_never_become_held_slots() {
+        let mut unsettled = render("b", false, [0.0, 0.0, 24.0, 16.0]);
+        unsettled.settled = false;
+        assert_eq!(
+            merge_pack_slots(&[unsettled.clone()], &PackSlots::new()),
+            None,
+            "no slot adopted from guessed bounds"
+        );
+        let settled = render("b", false, [0.0, 0.0, 24.0, 16.0]);
+        assert!(
+            merge_pack_slots(&[settled], &PackSlots::new()).is_some(),
+            "the same fixture with real bounds adopts its slot"
         );
     }
 
@@ -1679,6 +1723,7 @@ mod tests {
             arranged: true,
             bounds: [0.0, 0.0, 100.0, 10.0],
             body: FixtureBody::Lamps { points, total },
+            settled: true,
             instances: Vec::new(),
             strands: Vec::new(),
             sample_diameter: lpc_mapping::DEFAULT_SAMPLE_DIAMETER,

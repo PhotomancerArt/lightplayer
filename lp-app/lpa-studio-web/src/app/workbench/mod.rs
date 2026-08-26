@@ -360,6 +360,11 @@ pub fn WorkbenchFrame(
         .flatten();
     let dive_session = use_signal(|| MapEditorSession::new(lpc_mapping::Map2dDoc::new()));
     let dive_commits = use_signal(|| 0u64);
+    // ONE auto-pack slot store for BOTH canvas-bearing views (G1 round 1):
+    // per-center signals computed at different mount times diverged — the
+    // peach's body packed differently in Map and Patch. One conceptual
+    // space means one slot truth.
+    let pack_slots = use_signal(crate::app::editor_shell::arrange::PackSlots::new);
     // The patching activity's cross-dock state: verbs arm in the center
     // (`a` / `s`) and complete on a counterpart click in the Outputs or
     // Tree dock — frame scope, like the dive signals, so every side reads
@@ -488,6 +493,7 @@ pub fn WorkbenchFrame(
                             crate::app::editor_shell::EditorShellCenter {
                                 surface: surface.clone(),
                                 selection: patch_selection.clone(),
+                                pack_slots,
                                 project_editor,
                                 dive_focused,
                                 dive_session,
@@ -502,6 +508,7 @@ pub fn WorkbenchFrame(
                             crate::app::editor_shell::patching::PatchingShellCenter {
                                 surface: surface.clone(),
                                 selection: patch_selection.clone(),
+                                pack_slots,
                                 project_editor,
                                 on_action,
                             }
