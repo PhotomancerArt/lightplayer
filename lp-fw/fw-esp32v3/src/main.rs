@@ -795,7 +795,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
 /// each: the clock, and legibility. Everything else the app boots (filesystem,
 /// server, RMT, recovery ledger) is dead weight to a harness that executes FP
 /// instructions and prints, and is gated off.
-#[cfg(fw_harness)]
+#[cfg(all(fw_harness, feature = "test_interrupt_executor"))]
+#[esp_rtos::main]
+async fn main(spawner: embassy_executor::Spawner) {
+    tests::interrupt_executor::init();
+    tests::interrupt_executor::run(spawner).await
+}
+
+#[cfg(all(fw_harness, not(feature = "test_interrupt_executor")))]
 #[esp_hal::main]
 fn main() -> ! {
     let peripherals =

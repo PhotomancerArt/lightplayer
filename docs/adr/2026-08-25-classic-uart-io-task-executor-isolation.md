@@ -76,52 +76,71 @@ This section is the reason this ADR exists — each finding invalidates a
 on the bench dig2go (CH34x, quinled/dig2go, project "studio" at
 103–114 ms ticks) via `spikes/serial-lab`, 2026-08-25.
 
-### 1. esp-rtos 0.3.0 never delivers embassy-time wakes to interrupt-executor tasks
+**Confidence honesty**: finding 3 (the swi1 collision) was discovered
+LAST, and it retroactively confounds parts of findings 1 and 2 — several
+crashes and wake losses attributed to them are equally well explained by
+the collision, and the changes were not A/B-isolated at the bench. Each
+finding below carries its evidence grade. The interrupt-executor
+disciplines stand regardless (they are correct ISR hygiene); what is
+graded is the *causal attribution*. A dedicated fwcheck harness
+(`test_interrupt_executor`, below) exists to test the load-bearing
+claim in isolation.
+
+### 1. embassy-time wakes did not reach the interrupt-executor task [grade: strong for the behavior; mechanism attribution pending isolation]
 
 The naive port — io_task unchanged, spawned on the interrupt executor,
-paced by `Timer::after(1 ms)` — parks at its first timed await forever.
-Proof: a probe task on the *thread* executor received 5/5 timer wakes
-while io_task's expired entry in the same timer queue received none.
-esp-rtos's time driver (`SCHEDULER`-locked queue, processed in the
-Priority1 tick handler) demonstrably wakes thread-executor tasks and
-loses interrupt-executor ones; upstream never noticed because
-esp-radio — the only real consumer of esp-rtos interrupt executors —
-runs purely event-driven tasks there. Worse, with the engine playing,
-timer-queue processing with such an entry present produced a
-deterministic `InstrError` crash loop (PC in DRAM) until recovery's
-safe mode disarmed the project. Consequence: **every wake io_task
-depends on must be a direct waker wake** (channel/signal/ISR), which is
-what the pacer provides. An upstream issue is warranted; until then the
-`IO_TICK` docs carry the prohibition.
+paced by `Timer::after(1 ms)` — parked at its first timed await forever.
+A probe task on the *thread* executor received 5/5 timer wakes while
+io_task's expired entry in the same timer queue received none. The
+first missed wake fell due *before* the APP core (and hence the swi1
+doorbell collision of finding 3) started, which argues this is a real
+esp-rtos time-driver gap for interrupt executors — plausible, since
+esp-radio (the only real upstream consumer of them) runs purely
+event-driven tasks there. But the executor under test sat on swi1, so
+the collision cannot be fully excluded from these observations; the
+`test_interrupt_executor` harness re-asks the question on swi3,
+collision-free. The associated engine-load `InstrError` crash loop is
+*not* confidently attributable here — the collision explains it at
+least as well. Consequence either way: **every wake io_task depends on
+is a direct waker wake** (channel/signal/ISR), which the pacer
+provides, and which is robust under both explanations. If the harness
+shows upstream timer wakes are actually fine on a clean SWI, the pacer
+becomes a simplification candidate (back to `Timer::after`) — do that
+deliberately, with the harness as the gate, not by assumption.
 
-### 2. Interrupt-executor polls run on the interrupted task's stack
+### 2. Interrupt-executor polls run on the interrupted task's stack [grade: architecturally certain; crash attribution ~40%]
 
 esp-rtos's SWI handler polls the executor on whatever stack the
 interrupt landed on — usually the main task's, whose budget on this
 chip is 47,136 B (already 6 KB tighter than the S3's proven stack).
-io_task's old write path materialized a 16.7 KiB serialization buffer
-and ran serde recursion per frame; landing that on the main stack
-mid-project-load (shader-compile recursion is its deepest moment)
-corrupted memory — the InstrError's faulting PC was *inside the stack
-region* with a zeroed return register. The durable rule: **work done on
-an interrupt executor must have ISR-scale stack budgets.** Hence byte
-shuttling: serialization/parse live thread-side; all three chips also
-shed the 16.7 KiB async-state buffer from their io tasks (a TODO the
-code had carried since the S3).
+That much is a fact of the mechanism, not an inference. io_task's old
+write path materialized a 16.7 KiB serialization buffer and ran serde
+recursion per frame; the observed `InstrError`'s faulting PC sat
+*inside the stack region* with a zeroed return register, consistent
+with that path landing on a deep main stack mid-project-load. BUT the
+crash is equally consistent with the swi1 doorbell collision (frame
+doorbells begin exactly at project load), and the byte-shuttle change
+and the swi2 move landed together, un-A/B'd. The rule stands on
+architecture, not on the crash: **work done on an interrupt executor
+must have ISR-scale stack budgets** — hence byte shuttling
+(serialization/parse thread-side), which also shed the 16.7 KiB
+async-state buffer from all three chips' io tasks (a TODO the code had
+carried since the S3).
 
-Registration side of the same coin: `into_async()` enables the UART
-interrupt, and an interrupt-enable performed *inside* the executor's
-handler does not survive the handler's exit — async TX writes then pend
-forever unless the bytes happen to fit the idle FIFO synchronously (one
-lucky boot flowed; the rest sat mute). Interrupt registration belongs
-in thread context, before spawn. The same discipline applies to
-`esp_println` in interrupt-executor context: a diagnostic print there
-produced its own deterministic post-hoc `InstrError` (esp-sync's locks
-are priority-limited — esp-rtos's own timer handler runs at Priority1
-"to prevent accidentally interrupting priority limited locks", a
-constraint a Priority2 print path violates).
+Two adjacent disciplines, kept as hygiene with the same honesty about
+attribution: `into_async()` (interrupt registration) now happens
+thread-side before spawn — the "enable does not survive the handler's
+exit" mechanism is *conjecture* (the hoist alone did not change the
+symptom; the collision later explained it), but registering interrupts
+from ISR context is wrong on principle and costs nothing to avoid.
+`esp_println` is banned in interrupt-executor context — the crash
+correlated with a diagnostic print there was confounded with
+timer-queue processing, but esp-sync's locks are priority-limited
+(esp-rtos's own timer handler runs at Priority1 "to prevent
+accidentally interrupting priority limited locks"), so the ban is
+sound regardless.
 
-### 3. swi1 was never free: `steal()` hides ownership
+### 3. swi1 was never free: `steal()` hides ownership [grade: ~95%, mechanism read in code + fix confirmed]
 
 The plan chose swi1 because `init_board` demonstrably dropped software
 interrupts 1–3 unused. But `output::rmt::wire_pusher` raises and resets
@@ -187,3 +206,10 @@ frame doorbells died under the executor. The fix is swi2; the lesson is
   no interrupt registration, ISR-scale stack only) are documented at
   `IO_TICK`, `SendUart`, and `serialize_server_msg` — the places a
   future editor will actually touch.
+- **Post-facto validation**: the `test_interrupt_executor` fwcheck
+  harness (fw-esp32v3, `just fwtest-iexec-esp32v3`) tests finding 1 in
+  isolation on swi3 — no doorbell, no io_task, no engine. Run it after
+  every esp-rtos bump: it is the canary that says when the pacer
+  workaround can be retired (upstream fixed) or when executor semantics
+  shifted. Its current silicon verdict is recorded below in
+  "Harness verdict".

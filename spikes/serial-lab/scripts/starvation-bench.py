@@ -15,6 +15,9 @@ Checks, in order (summary table at the end):
                   listAvailableProjects + loadProject (or --project) itself.
   C3 inbound    — a >=4 KB filesystem write lands intact UNDER LOAD and reads
                   back byte-identical (the debt entry's inbound criterion).
+  C3b inbound   — the same at ~12 KiB: the ProjectRead-scale frame shape
+                  Studio actually sends, kept under the ~16.7 KiB server
+                  frame budget so the readback response fits the wire.
   C4 outbound   — request/response round-trips flow UNDER LOAD (the
                   responses=0 criterion): N pings, all answered.
   C5 idle       — regression control: the same ops stay perfect when idle
@@ -27,8 +30,8 @@ Checks, in order (summary table at the end):
 Evidence lines (FifoOverflowed, TX write timed out/failed, retry attempts,
 stale-partial/hello-drain flushes) are counted per phase and printed.
 
-Exit code 0 iff C1, C3, C4, C5, C6 all pass (C2 is advisory: if the script
-cannot start a load, the bench human loads one and re-runs)."""
+Exit code 0 iff C1, C3, C3b, C4, C5, C6 all pass (C2 is advisory: if the
+script cannot start a load, the bench human loads one and re-runs)."""
 
 import argparse
 import base64
@@ -135,12 +138,17 @@ def find_string(obj, wanted):
     return False
 
 
-def payload_text():
+def payload_text(n_lines=PAYLOAD_LINES):
     lines = []
-    for i in range(PAYLOAD_LINES):
+    for i in range(n_lines):
         line = f"bench line {i:03d} " + "abcdefghij" * 4
         lines.append(line[:63])
     return "\n".join(lines) + "\n"
+
+
+# ~12 KiB: ProjectRead-scale, yet the readback response (payload + JSON
+# framing) stays under the ~16.7 KiB server frame budget.
+BIG_PAYLOAD_LINES = 215
 
 
 def measure_tick(lab, seconds=6):
@@ -225,16 +233,16 @@ def main():
 
     payload = payload_text()
 
-    def inbound_check(label):
+    def inbound_check(label, payload=payload, timeout_s=20):
         since = lab.seq()
         fid = lab.send_frame({"filesystem": {"write": {"path": BENCH_PATH, "data": payload}}})
-        wframe, wlat, wentries = lab.await_response(fid, since, timeout_s=20)
+        wframe, wlat, wentries = lab.await_response(fid, since, timeout_s=timeout_s)
         count_evidence(wentries, evidence)
         if not wframe:
             return False, f"write ({len(payload)} B): NO response in {wlat:.1f} s"
         since = lab.seq()
         fid = lab.send_frame({"filesystem": {"read": {"path": BENCH_PATH}}})
-        rframe, rlat, rentries = lab.await_response(fid, since, timeout_s=20)
+        rframe, rlat, rentries = lab.await_response(fid, since, timeout_s=timeout_s)
         count_evidence(rentries, evidence)
         if not rframe:
             return False, f"write ok {wlat:.1f}s; read: NO response in {rlat:.1f} s"
@@ -258,9 +266,14 @@ def main():
             detail += f", median {sorted(lats)[len(lats) // 2]:.2f}s"
         return got == pings, detail
 
-    # C3/C4 — under load ------------------------------------------------------
+    # C3/C3b/C4 — under load --------------------------------------------------
     results["C3 inbound/load"] = inbound_check("load") if under_load else (
         False, "SKIPPED: no load (see C2)")
+    results["C3b inbound12k/load"] = (
+        inbound_check("load-12k", payload=payload_text(BIG_PAYLOAD_LINES), timeout_s=40)
+        if under_load
+        else (False, "SKIPPED: no load (see C2)")
+    )
     results["C4 outbound/load"] = outbound_check("load", args.pings) if under_load else (
         False, "SKIPPED: no load (see C2)")
 
@@ -293,7 +306,7 @@ def main():
     critical_ok = True
     for name, (ok, detail) in results.items():
         mark = "PASS" if ok else "FAIL"
-        if name.startswith(("C1", "C3", "C4", "C5", "C6")) and not ok:
+        if name.startswith(("C1", "C3", "C3b", "C4", "C5", "C6")) and not ok:
             critical_ok = False
         print(f"  {name:<{width}}  {mark}  {detail}")
     print("  evidence:", json.dumps(evidence) if evidence else "none")

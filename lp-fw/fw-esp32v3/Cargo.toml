@@ -191,6 +191,10 @@ fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core?/fixture-no-hello"]
 # harness loop in `just clippy-fw-esp32v3` — harness code is cfg'd out of the
 # default build, and 13 harnesses once rotted uncompiled in this repo.
 test_xt_fp_conformance = ["dep:lp-xt-fp-harness"]
+# Interrupt-executor wake rig (ADR 2026-08-25) + esp-rtos upgrade canary.
+# Empty on purpose: it rides the default features' dependency cohort (esp-rtos,
+# embassy) and only swaps the entrypoint — run `just fwtest-iexec-esp32v3`.
+test_interrupt_executor = []
 
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`

@@ -19,3 +19,9 @@ pub mod xt_fp_conformance {
         })
     }
 }
+
+/// Silicon rig for the interrupt-executor wake assumptions (ADR
+/// 2026-08-25-classic-uart-io-task-executor-isolation) — and the esp-rtos
+/// upgrade canary. See the module docs.
+#[cfg(feature = "test_interrupt_executor")]
+pub mod interrupt_executor;
