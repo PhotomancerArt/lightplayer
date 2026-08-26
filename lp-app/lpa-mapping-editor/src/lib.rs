@@ -30,7 +30,7 @@ pub use editor_core::doc_refusal::{DocOpen, DocRefusal};
 pub use editor_core::editor_session::MapEditorSession;
 pub use editor_core::fit_reconcile::FitReconcile;
 pub use editor_core::map_selection::MapSelection;
-pub use editor_core::map_tool::MapTool;
+pub use editor_core::map_tool::{MapTool, PolygonMode};
 pub use editor_core::placement::Placement;
 pub use editor_core::shape_path::{ShapePath, structural_child, structural_child_count};
 pub use editor_core::view_geometry::{

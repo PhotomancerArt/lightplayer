@@ -41,6 +41,9 @@ pub fn tool_hint(session: &MapEditorSession) -> &'static str {
         MapTool::Path { .. } => {
             "click to place lamps · ⏎ or double-click finishes · esc backs out one point"
         }
+        MapTool::Polygon { .. } => {
+            "click to place outline points · ⏎ or click the first point closes · esc backs out one point"
+        }
     }
 }
 

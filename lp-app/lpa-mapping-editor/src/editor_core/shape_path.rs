@@ -101,9 +101,9 @@ impl ShapePath {
     }
 }
 
-/// Number of structural children of a shape node. `Repeat` has one; leaf
-/// shapes have none. A future `Group` slots in here and everything above
-/// keeps working.
+/// Number of structural children of a shape node. `Repeat` has one; every
+/// leaf shape — grid, ring, path, polygon, filled polygon — has none. A
+/// future `Group` slots in here and everything above keeps working.
 #[must_use]
 pub fn structural_child_count(shape: &Map2dShape) -> usize {
     match shape {

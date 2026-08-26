@@ -683,6 +683,9 @@ pub fn EditorCanvas(
                     MapTool::Path { .. } => {
                         session.write().path_add_point(doc_point);
                     }
+                    MapTool::Polygon { .. } => {
+                        session.write().polygon_add_point(doc_point);
+                    }
                 }
             },
             onpointermove: move |evt| {
