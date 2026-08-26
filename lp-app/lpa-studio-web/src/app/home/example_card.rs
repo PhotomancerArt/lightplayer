@@ -3,6 +3,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, PreviewSource, UiAction, UiExampleCard};
 
+use crate::app::home::card_footer::{CardContextLine, CardGlassFooter, ContextTone};
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::gallery_preview::{ThumbMode, card_hover_handlers};
 use crate::app::home::package_card::home_action;
@@ -56,18 +57,21 @@ pub(crate) fn ExampleCard(
                 // go. Explore shows a dozen of these at once.
                 mode: ThumbMode::PosterFirst,
             }
-            div { class: "tw:grid tw:gap-0.5 tw:p-3",
-                p { class: "tw:m-0 tw:truncate tw:text-sm tw:font-semibold tw:text-strong-foreground",
-                    "{card.name}"
-                }
+            // The face is the art; the words are one shallow glass bar
+            // (card-overlay redesign). No menu, no glyphs — an example
+            // has nothing behind a second click.
+            CardGlassFooter {
+                title: card.name.clone(),
+                context: (!opening).then(|| CardContextLine {
+                    text: "Example".to_string(),
+                    tone: ContextTone::Dim,
+                }),
                 if opening {
                     // The live pipeline, not a static "Opening…": an example
                     // open never routes to the full opening frame, so on a
                     // slow connection this line is the only honest indicator
                     // of the engine download it is waiting on.
                     OpeningProgressLine {}
-                } else {
-                    p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "Example" }
                 }
             }
         }
@@ -77,15 +81,16 @@ pub(crate) fn ExampleCard(
 /// The card's treatment while an open runs. Busy is a DIMMING, not a
 /// disabling: the cursor stays a pointer because the card still acts.
 fn example_card_class(opening: bool, busy: bool) -> &'static str {
+    // tw:relative anchors the glass footer over the art box
     match (opening, busy) {
         (true, _) => {
-            "tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
+            "tw:relative tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
         }
         (false, true) => {
-            "tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
+            "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
         }
         (false, false) => {
-            "tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+            "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
         }
     }
 }

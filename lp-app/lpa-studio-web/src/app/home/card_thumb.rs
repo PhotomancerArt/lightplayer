@@ -93,7 +93,7 @@ pub(crate) fn CardThumb(
     rsx! {
         div {
             id: "{preview.frame_id}",
-            class: "tw:relative tw:aspect-[4/3] tw:w-full tw:overflow-hidden tw:rounded-t-md",
+            class: "tw:relative tw:aspect-[4/3] tw:w-full tw:overflow-hidden",
             // base layer: identity gradient + the name's initial
             div {
                 class: "tw:absolute tw:inset-0 tw:flex tw:items-center tw:justify-center",
@@ -135,9 +135,12 @@ pub(crate) fn CardThumb(
                     }
                 }
             }
+            // top-LEFT: the ⋯ menu owns the top-right corner on the
+            // full-art card face (package_card.rs), and the two must
+            // never collide
             if let Some(badge) = badge {
                 span {
-                    class: "tw:absolute tw:right-1.5 tw:top-1.5 tw:rounded-sm tw:border tw:bg-background/70 tw:px-1 tw:text-[0.6rem] tw:font-bold tw:uppercase tw:leading-4 {thumb_badge_class(&badge)}",
+                    class: "tw:absolute tw:left-1.5 tw:top-1.5 tw:rounded-sm tw:border tw:bg-background/70 tw:px-1 tw:text-[0.6rem] tw:font-bold tw:uppercase tw:leading-4 {thumb_badge_class(&badge)}",
                     title: thumb_badge_title(&badge),
                     {thumb_badge_text(&badge)}
                 }
