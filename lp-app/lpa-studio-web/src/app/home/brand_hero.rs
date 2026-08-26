@@ -61,20 +61,23 @@ const HERO_FPS: f32 = 30.0;
 /// The triangle window in CSS pixels, and the triangle inside it:
 /// circumradius and center, from the spike's landing mock (250×232,
 /// r = h/2, cx = 0.46w).
-const HERO_BOX: (f32, f32) = (250.0, 232.0);
-const HERO_TRI: (f32, f32, f32) = (115.0, 116.0, 116.0);
+/// `pub(crate)` from here down: the `examples/logo-sign` map2d generator
+/// (`app::home::logo_sign_gen`) lays its canvas out on exactly this stage,
+/// so the artwork the pencil opens is the artwork the hero shows.
+pub(crate) const HERO_BOX: (f32, f32) = (250.0, 232.0);
+pub(crate) const HERO_TRI: (f32, f32, f32) = (115.0, 116.0, 116.0);
 /// Hero-specific fillet ratio (the mark keeps 0.16 — spike gate-4).
-const HERO_CORNER_RATIO: f32 = 0.10;
+pub(crate) const HERO_CORNER_RATIO: f32 = 0.10;
 /// The stage: ONE canvas behind BOTH brand objects. The triangle and the
 /// wordmark are two windows onto the same running shader — one visual
 /// signal, multiple mapped objects, which is the product's mapping story
 /// told by the landing page (gate follow-up, 2026-08-24).
-const STAGE: (f32, f32) = (300.0, 308.0);
+pub(crate) const STAGE: (f32, f32) = (300.0, 308.0);
 /// Wordmark inside the stage: size, and the SVG text baseline the clip
 /// glyphs sit on. The HTML word (the pre-reveal rainbow sweep) is placed
 /// to land its baseline on the same line, so the crossfade doesn't jump.
-const WORD_PX: f32 = 40.0;
-const WORD_BASELINE_Y: f32 = 292.0;
+pub(crate) const WORD_PX: f32 = 40.0;
+pub(crate) const WORD_BASELINE_Y: f32 = 292.0;
 /// Canvas backing store: the stage at 2× device pixels, in the stage's
 /// own aspect.
 const HERO_CANVAS: (u32, u32) = (600, 616);

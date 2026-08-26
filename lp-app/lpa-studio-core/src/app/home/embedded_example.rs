@@ -91,6 +91,48 @@ pub static FYEAH_SIGN_FILES: &[ExampleFile] = &[
     ),
 ];
 
+/// `examples/logo-sign` — the brand as a buildable LED piece: a shaped
+/// PCB matrix in the outline of the play triangle (map2d `filled_polygon`,
+/// count derived from the outline and the pitch) plus "LightPlayer" as a
+/// string of single-stroke letter strands, on one canvas that is the
+/// landing hero's own stage. Generated from the brand geometry — see
+/// `logo_sign_gen.rs` in `lpa-studio-web`, whose in-sync test fails if this
+/// package's mapping falls behind the mark.
+pub static LOGO_SIGN_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/logo-sign/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/logo-sign/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/logo-sign/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/logo-sign/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/logo-sign/output.json"),
+    ),
+    (
+        "shader.json",
+        include_bytes!("../../../../../examples/logo-sign/shader.json"),
+    ),
+    (
+        "shader.glsl",
+        include_bytes!("../../../../../examples/logo-sign/shader.glsl"),
+    ),
+    (
+        "sign.map2d.json",
+        include_bytes!("../../../../../examples/logo-sign/sign.map2d.json"),
+    ),
+];
+
 /// `examples/plasma` — one shader, two public knobs. The smallest module
 /// whose root panel is not empty: `scale` and the phasor slot's period
 /// (bound to the `speed` channel, which carries the whole `PhasorConfig`)
@@ -621,6 +663,12 @@ static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
         name: "Fyeah Sign",
         kind: "Module",
         files: FYEAH_SIGN_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/logo-sign",
+        name: "Logo Sign",
+        kind: "Module",
+        files: LOGO_SIGN_FILES,
     },
     EmbeddedExample {
         id: "examples/plasma",

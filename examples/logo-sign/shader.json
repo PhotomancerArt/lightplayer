@@ -1,0 +1,73 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "phase": {
+      "source": "bus:speed"
+    },
+    "bands": {
+      "source": "bus:bands"
+    },
+    "tilt": {
+      "source": "bus:tilt"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "phase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 12.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default_bind": "bus:speed",
+      "default": 0,
+      "label": "Speed",
+      "description": "How long the light takes to cross the sign once"
+    },
+    "bands": {
+      "kind": "value",
+      "value": "f32",
+      "default": 2.5,
+      "min": 0.5,
+      "max": 8,
+      "label": "Bands",
+      "description": "How many palette repeats fit across the sign"
+    },
+    "tilt": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.08,
+      "min": 0,
+      "max": 1,
+      "label": "Tilt",
+      "description": "Direction the light travels, as a turn (0 runs left to right)"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "The ramp the travelling bands read their colors from",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "set": [
+          {
+            "space": "oklab",
+            "method": "linear",
+            "stops": "(0.8326,-0.1112,0.0346) (0.806,-0.0978,-0.0121) (0.7794,-0.0845,-0.0587) (0.7495,-0.0361,-0.0914) (0.7196,0.0124,-0.1241) (0.7351,0.0649,-0.1098) (0.7505,0.1175,-0.0955) (0.7713,0.1056,-0.006) (0.7921,0.0937,0.0836) (0.8384,0.0541,0.1003) (0.8847,0.0145,0.1171) (0.8586,-0.0483,0.0758) (0.8326,-0.1112,0.0346)"
+          }
+        ]
+      }
+    }
+  }
+}
