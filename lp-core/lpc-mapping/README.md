@@ -62,6 +62,35 @@ innermost instances are the strands), and the editor clamps `count` to
 an old build cannot ignore an unknown shape variant without losing every lamp
 the object carries.
 
+A polygon outline can also be **filled** with a lamp lattice — the shaped
+matrix (a custom PCB cut to a silhouette), where the count is not authored at
+all:
+
+```json
+{ "name": "badge", "shape": { "filled_polygon": {
+  "points": [[0, 0], [96, 0], [48, 83]],
+  "pitch": 16, "angle_deg": 0, "origin": [0, 0],
+  "routing": "snake", "start_corner": "tl" } } }
+```
+
+A cell is populated iff its center falls inside the outline, and no closer
+than ε = `pitch × 1e-3` to any edge. That inset is the determinism tie-break —
+a center exactly on an edge is always out, so the count never turns on which
+way a float rounded — and the damper that stops the lattice blinking while a
+vertex is dragged. `angle_deg` turns the *lattice*, not the outline (about the
+outline's bbox center); `origin` slides its phase. Routing walks populated
+cells row by row exactly as `grid` does, except that snake parity counts only
+rows that actually hold cells: an empty row is not a row the chain reaches, so
+it does not flip the next row's direction.
+
+The count being derived is the load-bearing part. `filled_polygon_cells` is
+the single walk both `resolve` and `shape_lamp_count` run, so the two cannot
+disagree; an outline that admits no cell is a resolve-time error naming the
+object, never a silently empty span. Stride is 1 (rows vary in length — no
+honest period), and `align` is deliberately absent: stroke alignment says
+nothing about a field of lamps. `filled_polygon` is a format-5 construct, the
+unknown-variant case again.
+
 Shapes are externally tagged (`"shape": {"grid": {...}}`) rather than using a
 `kind` field: the repo bans serde `tag`/`untagged`/`flatten` in the firmware
 dependency graph (Content-machinery flash cost — `scripts/check-serde-content.sh`).

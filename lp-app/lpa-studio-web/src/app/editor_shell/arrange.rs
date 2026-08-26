@@ -849,8 +849,10 @@ fn strand_metas(doc: &Map2dDoc, resolved: &ResolvedMap2d) -> Vec<StrandMeta> {
         let (align, cells, closed, breaks) = match shape {
             Map2dShape::Path(path) => (path.align, true, false, lpc_mapping::path_gap_breaks(path)),
             Map2dShape::Polygon(polygon) => (polygon.align, true, true, Vec::new()),
-            // Grid and ring lamps are a FIELD, not a ribbon: they wear the
-            // neutral on-path band and keep their dots.
+            // Grid, ring and filled-polygon lamps are a FIELD, not a ribbon:
+            // they wear the neutral on-path band and keep their dots. A
+            // shaped matrix's body would otherwise trace the serpentine
+            // chain through its lattice rather than its outline.
             _ => (PathAlign::On, false, false, Vec::new()),
         };
         // Cut the span at each jumper: one meta per lit run.

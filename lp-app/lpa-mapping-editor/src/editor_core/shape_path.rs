@@ -111,7 +111,8 @@ pub fn structural_child_count(shape: &Map2dShape) -> usize {
         Map2dShape::Grid(_)
         | Map2dShape::Ring(_)
         | Map2dShape::Path(_)
-        | Map2dShape::Polygon(_) => 0,
+        | Map2dShape::Polygon(_)
+        | Map2dShape::FilledPolygon(_) => 0,
     }
 }
 

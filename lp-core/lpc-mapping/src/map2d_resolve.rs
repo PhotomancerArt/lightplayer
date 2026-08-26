@@ -14,8 +14,8 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use crate::map2d_doc::{
-    GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathShape, PolygonShape,
-    RepeatShape, RingDir, RingOrder, RingShape,
+    FilledPolygonShape, GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape,
+    PathShape, PolygonShape, RepeatShape, RingDir, RingOrder, RingShape,
 };
 use crate::map2d_error::Map2dError;
 
@@ -140,6 +140,7 @@ fn resolve_shape(
         Map2dShape::Ring(ring) => resolve_ring(ring, invalid)?,
         Map2dShape::Path(path) => resolve_path(path, invalid)?,
         Map2dShape::Polygon(polygon) => resolve_polygon(polygon, invalid)?,
+        Map2dShape::FilledPolygon(filled) => resolve_filled_polygon(filled, invalid)?,
         Map2dShape::Repeat(repeat) => return resolve_repeat(repeat, invalid),
     };
     let strands = alloc::vec![positions.len() as u32];
@@ -434,6 +435,238 @@ fn resolve_polygon(
     Ok(positions)
 }
 
+/// A polygon outline filled with a lamp lattice — the shaped-matrix
+/// primitive, and the first shape whose lamp count is DERIVED rather than
+/// authored.
+///
+/// The walk itself lives in [`filled_polygon_cells`], shared verbatim with
+/// [`shape_lamp_count`]; this wrapper only names the ways it can come back
+/// empty, as the same object-naming error every other shape gives. It checks
+/// the malformed cases FIRST so each gets its own reason — the walk itself
+/// answers "empty" to all of them alike.
+fn resolve_filled_polygon(
+    filled: &FilledPolygonShape,
+    invalid: &impl Fn(&str) -> Map2dError,
+) -> Result<Vec<[f32; 2]>, Map2dError> {
+    if filled.points.len() < 3 {
+        return Err(invalid("filled polygon needs at least 3 points"));
+    }
+    // Written as a negated comparison on purpose: NaN fails it too.
+    if !(filled.pitch > 0.0) || !filled.pitch.is_finite() {
+        return Err(invalid("filled polygon pitch must be positive"));
+    }
+    if !filled
+        .points
+        .iter()
+        .all(|point| point[0].is_finite() && point[1].is_finite())
+    {
+        return Err(invalid("filled polygon outline has a non-finite point"));
+    }
+    let cells = filled_polygon_cells(filled);
+    if cells.is_empty() {
+        // A pitch coarser than the outline (or an outline with no interior)
+        // places nothing. An object that cannot light a single lamp is a
+        // load-time error naming the object, exactly like a zero-perimeter
+        // polygon — never a silently empty span.
+        return Err(invalid("filled polygon contains no lattice cells"));
+    }
+    Ok(cells)
+}
+
+/// The populated cell centers of a filled polygon, in wiring order.
+///
+/// Shared **verbatim** by the resolver and [`shape_lamp_count`] so the derived
+/// count can never drift from the resolved lamps — with no authored `count` to
+/// cross-check against, agreement between the two has to come from there being
+/// only one walk, not from two derivations that ought to match.
+///
+/// Returns empty for input the resolver rejects (fewer than 3 points, a
+/// non-positive or non-finite pitch, non-finite vertices); the resolver checks
+/// those first so it can name each one.
+///
+/// The walk, in order:
+///
+/// 1. **Lattice frame.** The lattice is laid out in a frame rotated by
+///    `-angle_deg` about the outline's doc-space bbox center, using the shared
+///    [`Rotation2d`] so an editor previewing the lattice lands on the resolver's
+///    exact floats instead of its own re-derived trig. The outline is carried
+///    into that frame; everything below happens there, and only the finished
+///    centers come back out.
+/// 2. **Cells.** Centers sit at `frame_bbox.min + origin + [(i + 0.5) * pitch,
+///    (j + 0.5) * pitch]` for every `i`/`j` landing inside the frame bbox. The
+///    half-cell offset is what makes a pitch-aligned outline populate
+///    symmetrically rather than crowding one edge; `origin` slides the whole
+///    lattice for the cases where the board wants a different phase.
+/// 3. **Inclusion** — the ε-inset (`ε = pitch * 1e-3`): a center counts iff it
+///    is inside the outline (even-odd ray cast) AND at least ε from every
+///    outline segment. The inset is doing two jobs. It is the determinism
+///    tie-break — a center landing exactly on an edge is *always* excluded, so
+///    the count never depends on which side a float rounds to — and it is the
+///    drag damper: while a vertex is being dragged, cells near the edge leave
+///    and return across a band rather than blinking on the exact crossing.
+/// 4. **Routing.** Rows run top-to-bottom, cells left-to-right, then
+///    `start_corner` flips rows/columns and `Snake` alternates direction —
+///    the same walk as [`resolve_grid`], but over populated cells only.
+///    Snake parity counts **visited** rows (rows with at least one populated
+///    cell): a serpentine chain on a shaped board reverses at the end of each
+///    row of *copper*, so a row the outline skips entirely does not flip the
+///    direction of the next one.
+#[must_use]
+pub fn filled_polygon_cells(filled: &FilledPolygonShape) -> Vec<[f32; 2]> {
+    let pitch = filled.pitch;
+    if filled.points.len() < 3 || !(pitch > 0.0) || !pitch.is_finite() {
+        return Vec::new();
+    }
+    if !filled
+        .points
+        .iter()
+        .all(|point| point[0].is_finite() && point[1].is_finite())
+    {
+        return Vec::new();
+    }
+
+    // 1. The lattice frame. `-angle_deg` enters it, `+angle_deg` leaves.
+    let doc_bbox = point_bounds(&filled.points);
+    let center = [
+        (doc_bbox[0] + doc_bbox[2]) * 0.5,
+        (doc_bbox[1] + doc_bbox[3]) * 0.5,
+    ];
+    let into_frame = Rotation2d::about(center, -filled.angle_deg);
+    let out_of_frame = Rotation2d::about(center, filled.angle_deg);
+    let outline: Vec<[f32; 2]> = filled
+        .points
+        .iter()
+        .map(|point| into_frame.apply(*point))
+        .collect();
+    let [min_x, min_y, max_x, max_y] = point_bounds(&outline);
+
+    // 2. Cell indices whose centers land inside the frame bbox. Solving
+    // `min <= base + (n + 0.5) * pitch <= max` for `n` keeps the span
+    // proportional to bbox/pitch however far `origin` slides the lattice.
+    let base_x = min_x + filled.origin[0];
+    let base_y = min_y + filled.origin[1];
+    let (first_col, last_col) = index_span(min_x, max_x, base_x, pitch);
+    let (first_row, last_row) = index_span(min_y, max_y, base_y, pitch);
+    if last_col < first_col || last_row < first_row {
+        return Vec::new();
+    }
+
+    // 3. Populated cells, gathered row by row so the routing walk below can
+    // reverse a row without re-testing inclusion.
+    let epsilon = pitch * 1e-3;
+    let mut rows: Vec<Vec<[f32; 2]>> = Vec::new();
+    for row in first_row..=last_row {
+        let y = base_y + (row as f32 + 0.5) * pitch;
+        let mut cells = Vec::new();
+        for col in first_col..=last_col {
+            let center = [base_x + (col as f32 + 0.5) * pitch, y];
+            if cell_is_populated(center, &outline, epsilon) {
+                cells.push(center);
+            }
+        }
+        // Only VISITED rows are recorded — an empty row is not a row the
+        // chain ever reaches, so it must not consume a snake parity step.
+        if !cells.is_empty() {
+            rows.push(cells);
+        }
+    }
+
+    // 4. The routing walk, mirroring `resolve_grid`: the start corner flips
+    // the row order and the column order, and snake alternates on the
+    // traversal index.
+    let flip_rows = matches!(filled.start_corner, GridCorner::Bl | GridCorner::Br);
+    let flip_cols = matches!(filled.start_corner, GridCorner::Tr | GridCorner::Br);
+    let mut positions = Vec::new();
+    for row_step in 0..rows.len() {
+        let row = if flip_rows {
+            rows.len() - 1 - row_step
+        } else {
+            row_step
+        };
+        let odd_row = filled.routing == GridRouting::Snake && row_step % 2 == 1;
+        let forward = flip_cols == odd_row;
+        let cells = &rows[row];
+        for col_step in 0..cells.len() {
+            let cell = if forward {
+                cells[col_step]
+            } else {
+                cells[cells.len() - 1 - col_step]
+            };
+            positions.push(out_of_frame.apply(cell));
+        }
+    }
+    positions
+}
+
+/// The inclusive index span of lattice lines whose centers fall in
+/// `[low, high]`, for a lattice anchored at `base` with spacing `pitch`.
+fn index_span(low: f32, high: f32, base: f32, pitch: f32) -> (i32, i32) {
+    let first = libm::ceilf((low - base) / pitch - 0.5);
+    let last = libm::floorf((high - base) / pitch - 0.5);
+    // The inputs are finite and `pitch > 0`, so these are finite; the casts
+    // saturate rather than wrap, and an empty span is caught by the caller.
+    (first as i32, last as i32)
+}
+
+/// Is a lattice cell center populated? Inside the outline, and no closer than
+/// `epsilon` to any of its segments — see [`filled_polygon_cells`] step 3.
+fn cell_is_populated(center: [f32; 2], outline: &[[f32; 2]], epsilon: f32) -> bool {
+    if !point_inside_outline(center, outline) {
+        return false;
+    }
+    let mut previous = outline[outline.len() - 1];
+    for point in outline {
+        if distance_to_segment(center, previous, *point) < epsilon {
+            return false;
+        }
+        previous = *point;
+    }
+    true
+}
+
+/// Even-odd ray cast against a closed outline (the last point joins the
+/// first). Points exactly on an edge are undefined here on purpose — the
+/// ε-inset in [`cell_is_populated`] rejects them before the answer matters.
+fn point_inside_outline(point: [f32; 2], outline: &[[f32; 2]]) -> bool {
+    let mut inside = false;
+    let mut previous = outline[outline.len() - 1];
+    for current in outline {
+        if (previous[1] > point[1]) != (current[1] > point[1]) {
+            let t = (point[1] - previous[1]) / (current[1] - previous[1]);
+            if point[0] < previous[0] + t * (current[0] - previous[0]) {
+                inside = !inside;
+            }
+        }
+        previous = *current;
+    }
+    inside
+}
+
+/// Distance from a point to a segment: project, clamp to the segment, measure.
+fn distance_to_segment(point: [f32; 2], start: [f32; 2], end: [f32; 2]) -> f32 {
+    let vx = end[0] - start[0];
+    let vy = end[1] - start[1];
+    let length_squared = vx * vx + vy * vy;
+    let t = if length_squared <= 0.0 {
+        0.0
+    } else {
+        (((point[0] - start[0]) * vx + (point[1] - start[1]) * vy) / length_squared).clamp(0.0, 1.0)
+    };
+    distance(point, [start[0] + t * vx, start[1] + t * vy])
+}
+
+/// `[min_x, min_y, max_x, max_y]` over a non-empty point list.
+fn point_bounds(points: &[[f32; 2]]) -> [f32; 4] {
+    let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+    for point in points {
+        bounds[0] = bounds[0].min(point[0]);
+        bounds[1] = bounds[1].min(point[1]);
+        bounds[2] = bounds[2].max(point[0]);
+        bounds[3] = bounds[3].max(point[1]);
+    }
+    bounds
+}
+
 /// One physical strand with its full patch-path address: which object (by
 /// stable id, when the object has one), which repeat-instance chain, and
 /// the fixture-relative lamp range it occupies.
@@ -537,6 +770,10 @@ pub fn object_stride(object: &Map2dObject) -> u32 {
 /// - Polygon: lamps per side (`count / points.len()`) when the perimeter
 ///   divides evenly, else 1 (override territory) — a triangular door of 9
 ///   lamps rotates by 3, one side at a time.
+/// - FilledPolygon: 1. A shaped matrix's rows are exactly what the outline
+///   makes them — a triangle's rows grow one cell at a time — so no single
+///   number is an honest period, the way `cols` is for a grid. Override
+///   territory, like the non-divisible polygon.
 /// - Repeat: the inner shape's whole lamp count — rotating a repeat-object
 ///   entry by its stride steps one instance.
 #[must_use]
@@ -553,16 +790,19 @@ pub fn shape_stride(shape: &Map2dShape) -> u32 {
                 1
             }
         }
+        Map2dShape::FilledPolygon(_) => 1,
         Map2dShape::Repeat(repeat) => shape_lamp_count(&repeat.shape).max(1),
     }
 }
 
-/// The lamp count one shape resolves to, by pure parameter arithmetic.
+/// The lamp count one shape resolves to.
 ///
-/// Mirrors [`resolve`] exactly (the ring case reuses the same
-/// [`derived_ring_count`] derivation); a test pins the two together over
-/// every shape kind, so a resolver change that moved a count would fail
-/// loudly rather than skew stride math.
+/// Mirrors [`resolve`] exactly: most kinds are pure parameter arithmetic, the
+/// ring reuses the same [`derived_ring_count`] derivation, and the filled
+/// polygon runs the resolver's own lattice walk ([`filled_polygon_cells`]) —
+/// its count is derived, so there is no arithmetic that could mirror it. A
+/// test pins all of them together over every shape kind, so a resolver change
+/// that moved a count would fail loudly rather than skew stride math.
 #[must_use]
 pub fn shape_lamp_count(shape: &Map2dShape) -> u32 {
     match shape {
@@ -582,6 +822,7 @@ pub fn shape_lamp_count(shape: &Map2dShape) -> u32 {
         }
         Map2dShape::Path(path) => path.count,
         Map2dShape::Polygon(polygon) => polygon.count,
+        Map2dShape::FilledPolygon(filled) => filled_polygon_cells(filled).len() as u32,
         Map2dShape::Repeat(repeat) => repeat.count * shape_lamp_count(&repeat.shape),
     }
 }
@@ -977,6 +1218,364 @@ mod tests {
         }
     }
 
+    // ---- filled polygon --------------------------------------------------
+
+    /// The lattice walk, hand-computed. A right triangle `(0,0) (40,0)
+    /// (0,40)` over a 10-unit lattice: cell centers land on the odd fives,
+    /// the hypotenuse `x + y = 40` passes exactly through `(35,5)`, `(25,15)`,
+    /// `(15,25)` and `(5,35)` — every one of them ε-excluded — and the top
+    /// row is left completely empty. Six cells, wired as a snake from the
+    /// top-left.
+    #[test]
+    fn a_filled_polygon_snakes_its_populated_cells_row_by_row() {
+        let resolved = resolve_shape(Map2dShape::FilledPolygon(right_triangle_40()));
+        assert_eq!(
+            resolved.positions(),
+            vec![
+                [5.0, 5.0],
+                [15.0, 5.0],
+                [25.0, 5.0], // row 0, left to right
+                [15.0, 15.0],
+                [5.0, 15.0], // row 1, snaked back
+                [5.0, 25.0], // row 2, forward again
+            ]
+        );
+        // One strand, and the count is exactly what got placed — no authored
+        // number to disagree with.
+        assert_eq!(resolved.spans.len(), 1);
+        assert_eq!(resolved.spans[0].count, 6);
+    }
+
+    /// The same outline under raster routing and each start corner — the walk
+    /// mirrors `resolve_grid`'s flips, applied to populated cells only.
+    #[test]
+    fn filled_polygon_routing_and_start_corner_mirror_the_grid_walk() {
+        let raster = FilledPolygonShape {
+            routing: GridRouting::Raster,
+            ..right_triangle_40()
+        };
+        assert_eq!(
+            resolve_shape(Map2dShape::FilledPolygon(raster)).positions(),
+            vec![
+                [5.0, 5.0],
+                [15.0, 5.0],
+                [25.0, 5.0],
+                [5.0, 15.0],
+                [15.0, 15.0],
+                [5.0, 25.0],
+            ]
+        );
+
+        // Bottom-right: rows walked bottom-up, first row right-to-left.
+        let bottom_right = FilledPolygonShape {
+            start_corner: GridCorner::Br,
+            ..right_triangle_40()
+        };
+        assert_eq!(
+            resolve_shape(Map2dShape::FilledPolygon(bottom_right)).positions(),
+            vec![
+                [5.0, 25.0],
+                [5.0, 15.0],
+                [15.0, 15.0],
+                [25.0, 5.0],
+                [15.0, 5.0],
+                [5.0, 5.0],
+            ]
+        );
+
+        // Top-right: rows top-down, but the first one entered from the right.
+        let top_right = FilledPolygonShape {
+            start_corner: GridCorner::Tr,
+            ..right_triangle_40()
+        };
+        assert_eq!(
+            resolve_shape(Map2dShape::FilledPolygon(top_right)).positions(),
+            vec![
+                [25.0, 5.0],
+                [15.0, 5.0],
+                [5.0, 5.0],
+                [5.0, 15.0],
+                [15.0, 15.0],
+                [5.0, 25.0],
+            ]
+        );
+    }
+
+    /// The ε-inset is the determinism tie-break: a cell center sitting exactly
+    /// on an edge is excluded, always — the count never turns on which way a
+    /// float rounded. And it damps: nudging that edge by ±ε/2 moves no cell
+    /// across the line, so a vertex drag does not make the lattice blink.
+    #[test]
+    fn the_epsilon_inset_excludes_centers_on_an_edge_and_damps_a_nudge() {
+        // A 40×25 rectangle on a 10-unit lattice: rows at y = 5, 15, 25 — and
+        // the bottom edge runs exactly through y = 25.
+        let interior = vec![
+            [5.0, 5.0],
+            [15.0, 5.0],
+            [25.0, 5.0],
+            [35.0, 5.0],
+            [35.0, 15.0],
+            [25.0, 15.0],
+            [15.0, 15.0],
+            [5.0, 15.0],
+        ];
+        let on_the_edge = rectangle(40.0, 25.0);
+        assert_eq!(
+            resolve_shape(Map2dShape::FilledPolygon(on_the_edge)).positions(),
+            interior,
+            "centers on the bottom edge must be excluded"
+        );
+
+        // ε = pitch × 1e-3 = 0.01. Half of that, either way, changes nothing:
+        // the edge row stays out and the interior cells do not budge.
+        for nudge in [0.005f32, -0.005] {
+            let nudged = resolve_shape(Map2dShape::FilledPolygon(rectangle(40.0, 25.0 + nudge)));
+            let positions = nudged.positions();
+            assert_eq!(positions.len(), interior.len(), "nudge {nudge}");
+            for (actual, want) in positions.iter().zip(&interior) {
+                assert!(
+                    close(*actual, *want),
+                    "nudge {nudge}: {actual:?} != {want:?}"
+                );
+            }
+        }
+
+        // A frank move past the band DOES populate the row — the inset is a
+        // hair, not a hidden margin.
+        let clear = resolve_shape(Map2dShape::FilledPolygon(rectangle(40.0, 26.0)));
+        assert_eq!(clear.lamps.len(), 12);
+    }
+
+    /// `angle_deg` turns the LATTICE, not the outline: the same square packs
+    /// differently at 45°, and the doc-space cells are no longer axis-aligned.
+    #[test]
+    fn the_lattice_angle_repacks_the_same_outline() {
+        let square = FilledPolygonShape {
+            points: vec![[0.0, 0.0], [30.0, 0.0], [30.0, 30.0], [0.0, 30.0]],
+            pitch: 10.0,
+            angle_deg: 0.0,
+            origin: [0.0, 0.0],
+            routing: GridRouting::Snake,
+            start_corner: GridCorner::Tl,
+        };
+        let upright = resolve_shape(Map2dShape::FilledPolygon(square.clone()));
+        assert_eq!(upright.lamps.len(), 9);
+        // Zero degrees is the plain axis-aligned walk, exactly — an author
+        // who has not turned the lattice sees round numbers.
+        assert_eq!(
+            upright.positions(),
+            vec![
+                [5.0, 5.0],
+                [15.0, 5.0],
+                [25.0, 5.0],
+                [25.0, 15.0],
+                [15.0, 15.0],
+                [5.0, 15.0],
+                [5.0, 25.0],
+                [15.0, 25.0],
+                [25.0, 25.0],
+            ]
+        );
+
+        let turned = resolve_shape(Map2dShape::FilledPolygon(FilledPolygonShape {
+            angle_deg: 45.0,
+            ..square
+        }));
+        // A diagonal lattice fits ten cells in the same square, and none of
+        // them sits on the upright lattice's coordinates.
+        assert_eq!(turned.lamps.len(), 10);
+        for lamp in &turned.lamps {
+            assert!(
+                !upright
+                    .lamps
+                    .iter()
+                    .any(|upright| close(upright.pos, lamp.pos)),
+                "turned lattice landed on an upright cell: {:?}",
+                lamp.pos
+            );
+        }
+    }
+
+    /// `origin` slides the lattice phase in the lattice frame — a half-pitch
+    /// nudge moves every cell by exactly that, and can change which cells the
+    /// outline admits at all.
+    #[test]
+    fn the_origin_nudge_shifts_the_lattice_phase() {
+        let flush = resolve_shape(Map2dShape::FilledPolygon(rectangle(40.0, 20.0)));
+        assert_eq!(flush.lamps.len(), 8);
+
+        let nudged = resolve_shape(Map2dShape::FilledPolygon(FilledPolygonShape {
+            origin: [5.0, 0.0],
+            ..rectangle(40.0, 20.0)
+        }));
+        // Half a pitch to the right: the right-hand column would land on the
+        // edge, so the row loses a cell instead of gaining one.
+        assert_eq!(nudged.lamps.len(), 6);
+        assert_eq!(
+            nudged.positions(),
+            vec![
+                [10.0, 5.0],
+                [20.0, 5.0],
+                [30.0, 5.0],
+                [30.0, 15.0],
+                [20.0, 15.0],
+                [10.0, 15.0],
+            ]
+        );
+    }
+
+    /// Snake parity counts VISITED rows: a row the outline skips entirely is
+    /// not a row the chain reaches, so it must not flip the next row's
+    /// direction. An hourglass with a pinched-out middle row is the case.
+    #[test]
+    fn an_unpopulated_row_does_not_flip_the_snake_direction() {
+        // Two 30-wide lobes joined by a waist spanning x ∈ (16, 18) — too
+        // narrow to hold any cell center, which sit on the odd fives. Rows at
+        // y = 5 and y = 45 populate; the row at y = 25 does not.
+        let hourglass = FilledPolygonShape {
+            points: vec![
+                [0.0, 0.0],
+                [30.0, 0.0],
+                [18.0, 24.0],
+                [18.0, 26.0],
+                [30.0, 50.0],
+                [0.0, 50.0],
+                [16.0, 26.0],
+                [16.0, 24.0],
+            ],
+            pitch: 10.0,
+            angle_deg: 0.0,
+            origin: [0.0, 0.0],
+            routing: GridRouting::Snake,
+            start_corner: GridCorner::Tl,
+        };
+        let positions = resolve_shape(Map2dShape::FilledPolygon(hourglass)).positions();
+        let rows: Vec<f32> = positions.iter().map(|pos| pos[1]).collect();
+        assert!(
+            !rows.contains(&25.0),
+            "the waist row must be empty: {positions:?}"
+        );
+        // Row y=5 runs left→right; the NEXT visited row (y=45) runs
+        // right→left. If the empty waist row had consumed a parity step, this
+        // row would run left→right too.
+        let top: Vec<[f32; 2]> = positions.iter().copied().filter(|p| p[1] == 5.0).collect();
+        let bottom: Vec<[f32; 2]> = positions.iter().copied().filter(|p| p[1] == 45.0).collect();
+        assert!(top.len() > 1 && bottom.len() > 1, "{positions:?}");
+        assert!(top[0][0] < top[top.len() - 1][0], "top row runs forward");
+        assert!(
+            bottom[0][0] > bottom[bottom.len() - 1][0],
+            "bottom row must run backward: {bottom:?}"
+        );
+    }
+
+    /// The derived count is deterministic: two resolves of one document are
+    /// the same lamps, and `filled_polygon_cells` is the only walk either the
+    /// resolver or `shape_lamp_count` runs.
+    #[test]
+    fn a_filled_polygon_resolves_deterministically() {
+        let doc = Map2dDoc {
+            objects: vec![object(Map2dShape::FilledPolygon(right_triangle_40()))],
+            ..Map2dDoc::new()
+        };
+        assert_eq!(resolve(&doc).unwrap(), resolve(&doc).unwrap());
+        assert_eq!(
+            filled_polygon_cells(&right_triangle_40()),
+            filled_polygon_cells(&right_triangle_40())
+        );
+    }
+
+    /// The degenerate cases, each naming what is wrong with the object.
+    #[test]
+    fn degenerate_filled_polygons_are_invalid() {
+        for (shape, needle) in [
+            (
+                FilledPolygonShape {
+                    points: vec![[0.0, 0.0], [10.0, 0.0]],
+                    ..right_triangle_40()
+                },
+                "at least 3 points",
+            ),
+            (
+                FilledPolygonShape {
+                    pitch: 0.0,
+                    ..right_triangle_40()
+                },
+                "pitch must be positive",
+            ),
+            (
+                FilledPolygonShape {
+                    pitch: -4.0,
+                    ..right_triangle_40()
+                },
+                "pitch must be positive",
+            ),
+            (
+                FilledPolygonShape {
+                    pitch: f32::NAN,
+                    ..right_triangle_40()
+                },
+                "pitch must be positive",
+            ),
+            (
+                FilledPolygonShape {
+                    points: vec![[2.0, 2.0], [2.0, 2.0], [2.0, 2.0]],
+                    ..right_triangle_40()
+                },
+                "no lattice cells",
+            ),
+            (
+                // A pitch coarser than the outline places nothing.
+                FilledPolygonShape {
+                    pitch: 500.0,
+                    ..right_triangle_40()
+                },
+                "no lattice cells",
+            ),
+            (
+                FilledPolygonShape {
+                    points: vec![[0.0, 0.0], [f32::NAN, 0.0], [0.0, 40.0]],
+                    ..right_triangle_40()
+                },
+                "non-finite",
+            ),
+        ] {
+            let doc = Map2dDoc {
+                objects: vec![object(Map2dShape::FilledPolygon(shape))],
+                ..Map2dDoc::new()
+            };
+            let error = resolve(&doc).unwrap_err();
+            assert!(
+                matches!(&error, Map2dError::InvalidObject { reason, .. } if reason.contains(needle)),
+                "wanted {needle:?} in {error:?}"
+            );
+        }
+    }
+
+    /// The right triangle every filled-polygon walk test reads off: legs on
+    /// the axes, 40 units each, on a 10-unit lattice.
+    fn right_triangle_40() -> FilledPolygonShape {
+        FilledPolygonShape {
+            points: vec![[0.0, 0.0], [40.0, 0.0], [0.0, 40.0]],
+            pitch: 10.0,
+            angle_deg: 0.0,
+            origin: [0.0, 0.0],
+            routing: GridRouting::Snake,
+            start_corner: GridCorner::Tl,
+        }
+    }
+
+    /// An axis-aligned rectangle anchored at the origin, on a 10-unit lattice.
+    fn rectangle(width: f32, height: f32) -> FilledPolygonShape {
+        FilledPolygonShape {
+            points: vec![[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]],
+            pitch: 10.0,
+            angle_deg: 0.0,
+            origin: [0.0, 0.0],
+            routing: GridRouting::Snake,
+            start_corner: GridCorner::Tl,
+        }
+    }
+
     // ---- stride hints ----------------------------------------------------
 
     /// The derived stride per shape kind (D41): the number the UI steps a
@@ -1009,6 +1608,12 @@ mod tests {
                 count: 10,
                 align: PathAlign::On,
             })),
+            1
+        );
+        // Filled polygon: 1 — the outline decides each row's length, so
+        // there is no honest period. Override territory.
+        assert_eq!(
+            shape_stride(&Map2dShape::FilledPolygon(right_triangle_40())),
             1
         );
         // Repeat: the inner shape's whole lamp count — one instance per step.
@@ -1044,6 +1649,19 @@ mod tests {
             Map2dShape::Ring(button_rings()),
             Map2dShape::Path(square_corner_path()),
             Map2dShape::Polygon(triangle_12()),
+            // The derived-count case — the whole reason this pin matters
+            // now: nothing else cross-checks a filled polygon's count.
+            Map2dShape::FilledPolygon(right_triangle_40()),
+            Map2dShape::FilledPolygon(FilledPolygonShape {
+                angle_deg: 45.0,
+                start_corner: GridCorner::Br,
+                ..right_triangle_40()
+            }),
+            Map2dShape::Repeat(RepeatShape {
+                shape: Box::new(Map2dShape::FilledPolygon(right_triangle_40())),
+                center: [0.0, 0.0],
+                count: 3,
+            }),
             repeated_sector(5),
             Map2dShape::Repeat(RepeatShape {
                 shape: Box::new(repeated_sector(2)),

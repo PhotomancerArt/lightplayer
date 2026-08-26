@@ -760,6 +760,12 @@ pub fn editable_path(shape: &Map2dShape) -> Option<&PathShape> {
 /// representable as baked geometry. Everything else carries the turn in its
 /// own parameters — which is what keeps an expanded instance resolving to the
 /// lamps the repeat produced instead of a re-sampled approximation of them.
+///
+/// A filled polygon takes the baked route for now too. It *does* carry an
+/// `angle_deg`, but its lattice anchors to the bbox of the ROTATED outline, so
+/// turning it parametrically needs an argument about how that anchor moves —
+/// which belongs with the editor's filled-polygon work, not with the format
+/// phase. Baking preserves the lamps exactly meanwhile.
 fn rotate_shape(shape: &Map2dShape, rotation: Rotation2d, degrees: f32) -> Option<Map2dShape> {
     Some(match shape {
         Map2dShape::Path(path) => Map2dShape::Path(PathShape {
@@ -793,7 +799,7 @@ fn rotate_shape(shape: &Map2dShape, rotation: Rotation2d, degrees: f32) -> Optio
             center: rotation.apply(repeat.center),
             count: repeat.count,
         }),
-        Map2dShape::Grid(_) => return None,
+        Map2dShape::Grid(_) | Map2dShape::FilledPolygon(_) => return None,
     })
 }
 
@@ -826,6 +832,15 @@ fn translate_shape(shape: &mut Map2dShape, dx: f32, dy: f32) {
         }
         Map2dShape::Polygon(polygon) => {
             for point in &mut polygon.points {
+                point[0] += dx;
+                point[1] += dy;
+            }
+        }
+        // The outline carries the move; `origin` is a lattice-frame phase
+        // nudge, not a position, so it stays put and the cells travel with
+        // the shape.
+        Map2dShape::FilledPolygon(filled) => {
+            for point in &mut filled.points {
                 point[0] += dx;
                 point[1] += dy;
             }
@@ -866,6 +881,16 @@ fn scale_shape(shape: &mut Map2dShape, anchor: [f32; 2], factor: f32) {
             for point in &mut polygon.points {
                 *point = scale_point(*point);
             }
+        }
+        // The lattice scales with the outline, exactly like a grid's pitch:
+        // `pitch` and the `origin` phase nudge are both doc-space lengths.
+        Map2dShape::FilledPolygon(filled) => {
+            for point in &mut filled.points {
+                *point = scale_point(*point);
+            }
+            filled.pitch *= factor;
+            filled.origin[0] *= factor;
+            filled.origin[1] *= factor;
         }
         // Same anchor for the inner shape and the center, so the wheel scales
         // rigidly — scaling the inner shape alone would slide every instance
@@ -915,6 +940,13 @@ fn sanitize_shape(shape: &mut Map2dShape) {
         // resolve-time error naming the object, same as a one-point path.
         Map2dShape::Polygon(polygon) => {
             polygon.count = polygon.count.max(1);
+        }
+        // A shaped matrix has no authored count to clamp — the lattice
+        // derives it. `pitch` gets the grid's floor so a scrubbed field
+        // cannot ask for an unbounded number of cells; an outline that
+        // admits none stays a resolve-time error naming the object.
+        Map2dShape::FilledPolygon(filled) => {
+            filled.pitch = filled.pitch.max(0.5);
         }
         // `count` is bounded at both ends: 0 instances resolve to nothing, and
         // an unbounded count multiplies the whole inner shape — a typo in a

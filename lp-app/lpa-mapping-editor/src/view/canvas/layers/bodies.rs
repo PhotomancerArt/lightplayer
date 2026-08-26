@@ -73,8 +73,11 @@ pub(crate) fn object_bodies(doc: &Map2dDoc, resolved: &ResolvedMap2d) -> Vec<Obj
         let (align, celled, closed, breaks) = match shape {
             Map2dShape::Path(path) => (path.align, true, false, path_gap_breaks(path)),
             Map2dShape::Polygon(polygon) => (polygon.align, true, true, Vec::new()),
-            // Grid and ring lamps are a FIELD, not a ribbon: the neutral
-            // on-path band, and their dots keep speaking for themselves.
+            // Grid, ring and filled-polygon lamps are a FIELD, not a ribbon:
+            // the neutral on-path band, and their dots keep speaking for
+            // themselves. A shaped matrix in particular must NOT get the
+            // closed-outline treatment its outline suggests — the body would
+            // trace the serpentine chain through the lattice, not the shape.
             _ => (PathAlign::On, false, false, Vec::new()),
         };
         // Cut the span at each jumper: one strand per lit run, and the

@@ -374,6 +374,7 @@ pub fn shape_kind_label(shape: &Map2dShape) -> &'static str {
         Map2dShape::Ring(_) => "ring",
         Map2dShape::Path(_) => "path",
         Map2dShape::Polygon(_) => "polygon",
+        Map2dShape::FilledPolygon(_) => "filled polygon",
         Map2dShape::Repeat(_) => "repeat",
     }
 }
@@ -507,6 +508,12 @@ fn shape_fields(
                 }
             }
         }
+        // A shaped matrix has no editable fields on this build: its count is
+        // derived from the outline and the lattice, and the lattice controls
+        // (pitch, angle, phase, routing) arrive with the Polygon tool. The
+        // card still renders its header, so the object is nameable and
+        // deletable like any other.
+        Map2dShape::FilledPolygon(_) => rsx! {},
         // A repeat's own parameters — "N copies, about here". The inner
         // shape is NOT recursed into and needs no descend affordance: the
         // stack shows it as its own card whenever the selection descends,
