@@ -394,7 +394,10 @@ pub(crate) fn editor_polygon_lattice_draft() -> Element {
     rsx! {
         ComposedEditorStory {
             doc: lpc_mapping::corpus::cat_ears(),
-            initial_draft: vec![[430.0, 250.0], [620.0, 250.0], [620.0, 400.0], [525.0, 330.0]],
+            // Inside the cat-ears doc bounds (x 80–420, y 72–330) so the
+            // camera's doc fit keeps the whole draft — ghosts included —
+            // in frame.
+            initial_draft: vec![[170.0, 235.0], [330.0, 235.0], [330.0, 330.0], [250.0, 290.0]],
             draft_polygon: Some(PolygonMode::Filled),
         }
     }
