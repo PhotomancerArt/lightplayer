@@ -20,9 +20,12 @@
 
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{ChevronDown, ChevronUp, Minimize2, RotateCw, Trash2, Ungroup};
-use lpc_mapping::{GridCorner, GridRouting, Map2dShape, PathAlign, RingDir, RingOrder, resolve};
+use lpc_mapping::{
+    GridCorner, GridRouting, Map2dShape, PathAlign, RingDir, RingOrder, resolve, shape_lamp_count,
+};
 
 use crate::editor_core::editor_session::{DEFAULT_REPEAT_COUNT, MapEditorSession};
+use crate::editor_core::map_tool::PolygonMode;
 use crate::editor_core::shape_path::ShapePath;
 use crate::view::canvas::object_color;
 
@@ -493,10 +496,12 @@ fn shape_fields(
                 PathGapsField { session, on_committed, index, depth, gaps: path.gaps.clone() }
             }
         }
-        // A hand-authored polygon (no creation tool yet): the count is the
-        // one live parameter; the outline is authored in the document.
+        // One authored outline, two populations (vision D11). The population
+        // toggle leads both panes because it decides what the fields BELOW
+        // it are; the outline itself is authored on the canvas.
         Map2dShape::Polygon(polygon) => {
             rsx! {
+                PopulationField { session, on_committed, index, depth, current: PolygonMode::Outline }
                 NumberField { session, on_committed, index, depth, label: "count", value: polygon.count as f32, min: 1.0, is_int: true,
                     apply: FieldApply::PolygonCount }
                 SegField {
@@ -508,12 +513,53 @@ fn shape_fields(
                 }
             }
         }
-        // A shaped matrix has no editable fields on this build: its count is
-        // derived from the outline and the lattice, and the lattice controls
-        // (pitch, angle, phase, routing) arrive with the Polygon tool. The
-        // card still renders its header, so the object is nameable and
-        // deletable like any other.
-        Map2dShape::FilledPolygon(_) => rsx! {},
+        // A shaped matrix's lattice: pitch, turn and phase decide where the
+        // cells land, routing and start corner decide the order they are
+        // wired in. There is no count field — the count is DERIVED from the
+        // outline and the lattice (the first such shape in the format), so
+        // it reads back as a display-only row.
+        Map2dShape::FilledPolygon(filled) => {
+            let routing_current = if matches!(filled.routing, GridRouting::Snake) {
+                "snake"
+            } else {
+                "raster"
+            };
+            let corner_current = match filled.start_corner {
+                GridCorner::Tl => "tl",
+                GridCorner::Tr => "tr",
+                GridCorner::Bl => "bl",
+                GridCorner::Br => "br",
+            };
+            let lamps = shape_lamp_count(&Map2dShape::FilledPolygon(filled.clone()));
+            rsx! {
+                PopulationField { session, on_committed, index, depth, current: PolygonMode::Filled }
+                NumberField { session, on_committed, index, depth, label: "pitch", value: filled.pitch, min: 0.5, is_int: false,
+                    apply: FieldApply::FilledPitch }
+                NumberField { session, on_committed, index, depth, label: "lattice angle", value: filled.angle_deg, min: -360.0, is_int: false,
+                    apply: FieldApply::FilledAngle }
+                NumberField { session, on_committed, index, depth, label: "origin x", value: filled.origin[0], min: -100000.0, is_int: false,
+                    apply: FieldApply::FilledOriginX }
+                NumberField { session, on_committed, index, depth, label: "origin y", value: filled.origin[1], min: -100000.0, is_int: false,
+                    apply: FieldApply::FilledOriginY }
+                SegField {
+                    session, on_committed, index, depth, label: "routing",
+                    options: vec![("snake", "snake"), ("raster", "raster")],
+                    current: routing_current,
+                    apply: FieldApply::FilledRouting,
+                }
+                SegField {
+                    session, on_committed, index, depth, label: "start corner",
+                    options: vec![("tl", "↖"), ("tr", "↗"), ("bl", "↙"), ("br", "↘")],
+                    current: corner_current,
+                    apply: FieldApply::FilledCorner,
+                }
+                div {
+                    class: "lpme-pop-meta",
+                    title: "derived: every lattice cell whose center falls inside the outline",
+                    "~{lamps} lamps at this pitch"
+                }
+            }
+        }
         // A repeat's own parameters — "N copies, about here". The inner
         // shape is NOT recursed into and needs no descend affordance: the
         // stack shows it as its own card whenever the selection descends,
@@ -579,6 +625,12 @@ pub enum FieldApply {
     PathAlign,
     PolygonCount,
     PolygonAlign,
+    FilledPitch,
+    FilledAngle,
+    FilledOriginX,
+    FilledOriginY,
+    FilledRouting,
+    FilledCorner,
     RepeatCount,
     RepeatCenterX,
     RepeatCenterY,
@@ -597,6 +649,13 @@ fn apply_number(shape: &mut Map2dShape, apply: FieldApply, value: f32) {
         (FieldApply::PolygonCount, Map2dShape::Polygon(polygon)) => {
             polygon.count = value.max(1.0) as u32;
         }
+        // Sanitize owns the pitch FLOOR (a lattice fine enough to ask for
+        // unbounded cells is refused on commit), so a half-typed digit
+        // previews rather than being swallowed.
+        (FieldApply::FilledPitch, Map2dShape::FilledPolygon(filled)) => filled.pitch = value,
+        (FieldApply::FilledAngle, Map2dShape::FilledPolygon(filled)) => filled.angle_deg = value,
+        (FieldApply::FilledOriginX, Map2dShape::FilledPolygon(filled)) => filled.origin[0] = value,
+        (FieldApply::FilledOriginY, Map2dShape::FilledPolygon(filled)) => filled.origin[1] = value,
         // Sanitize owns the upper bound (`MAX_REPEAT_COUNT`) so a typed digit
         // that overshoots is clamped on commit rather than refused mid-typing.
         (FieldApply::RepeatCount, Map2dShape::Repeat(repeat)) => {
@@ -618,12 +677,7 @@ fn apply_choice(shape: &mut Map2dShape, apply: FieldApply, choice: &str) {
             };
         }
         (FieldApply::GridCorner, Map2dShape::Grid(grid)) => {
-            grid.start_corner = match choice {
-                "tr" => GridCorner::Tr,
-                "bl" => GridCorner::Bl,
-                "br" => GridCorner::Br,
-                _ => GridCorner::Tl,
-            };
+            grid.start_corner = choice_to_corner(choice);
         }
         (FieldApply::RingOrder, Map2dShape::Ring(ring)) => {
             ring.order = if choice == "inner" {
@@ -648,6 +702,16 @@ fn apply_choice(shape: &mut Map2dShape, apply: FieldApply, choice: &str) {
         (FieldApply::PolygonAlign, Map2dShape::Polygon(polygon)) => {
             polygon.align = choice_to_align(choice);
         }
+        (FieldApply::FilledRouting, Map2dShape::FilledPolygon(filled)) => {
+            filled.routing = if choice == "snake" {
+                GridRouting::Snake
+            } else {
+                GridRouting::Raster
+            };
+        }
+        (FieldApply::FilledCorner, Map2dShape::FilledPolygon(filled)) => {
+            filled.start_corner = choice_to_corner(choice);
+        }
         _ => {}
     }
 }
@@ -661,6 +725,63 @@ fn choice_to_align(choice: &str) -> PathAlign {
         "inside" => PathAlign::Inside,
         "outside" => PathAlign::Outside,
         _ => PathAlign::On,
+    }
+}
+
+/// The start-corner `SegField`'s option token, parsed back to a
+/// [`GridCorner`] — shared by every lattice shape, so a grid and a shaped
+/// matrix read the same four buttons the same way.
+fn choice_to_corner(choice: &str) -> GridCorner {
+    match choice {
+        "tr" => GridCorner::Tr,
+        "bl" => GridCorner::Bl,
+        "br" => GridCorner::Br,
+        _ => GridCorner::Tl,
+    }
+}
+
+/// The population switch both polygon panes lead with (vision D11): one
+/// authored outline, lamps on its perimeter or on a lattice filling it.
+///
+/// Not a [`SegField`]: the other segmented controls write a FIELD of the
+/// shape they are given, while this REPLACES the shape node — so it goes
+/// through the session's own conversion, which keeps the object's name, id
+/// and wiring slot and re-derives the new population's density.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PopulationField(
+    session: Signal<MapEditorSession>,
+    on_committed: EventHandler<()>,
+    index: usize,
+    depth: usize,
+    current: PolygonMode,
+) -> Element {
+    rsx! {
+        div { class: "lpme-field",
+            label {
+                title: "outline: lamps ride the perimeter · filled: lamps fill a lattice inside it",
+                "population"
+            }
+            div { class: "lpme-seg",
+                for (mode, text) in [(PolygonMode::Outline, "outline"), (PolygonMode::Filled, "filled")] {
+                    button {
+                        key: "{text}",
+                        class: if mode == current { "lpme-seg-on" } else { "" },
+                        onclick: move |_| {
+                            // A repeat's descent steps are all "the one
+                            // child", which is what `depth` counts.
+                            let path = ShapePath {
+                                object: index,
+                                descent: vec![0; depth],
+                            };
+                            session.write().set_polygon_population_at(&path, mode);
+                            on_committed.call(());
+                        },
+                        "{text}"
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 
 use crate::editor_core::camera::Camera;
 use crate::editor_core::editor_session::MapEditorSession;
-use crate::editor_core::map_tool::MapTool;
+use crate::editor_core::map_tool::{MapTool, PolygonMode};
 
 /// The hint teaches the group grammar exactly when it applies (G1
 /// feedback: double-click descend is undiscoverable without a prompt):
@@ -41,9 +41,24 @@ pub fn tool_hint(session: &MapEditorSession) -> &'static str {
         MapTool::Path { .. } => {
             "click to place lamps · ⏎ or double-click finishes · esc backs out one point"
         }
-        MapTool::Polygon { .. } => {
-            "click to place outline points · ⏎ or click the first point closes · esc backs out one point"
-        }
+        // The polygon hint tracks the DRAFT, because what the next click can
+        // do changes twice while drawing: nothing can close an outline until
+        // three points exist, and only filled mode has a lattice to promise.
+        MapTool::Polygon { ref draft, mode } => match (draft.len(), mode) {
+            (0, PolygonMode::Outline) => {
+                "click the outline's corners — lamps will ride its perimeter"
+            }
+            (0, PolygonMode::Filled) => {
+                "click the outline's corners — lamps will fill a lattice inside it"
+            }
+            (1..=2, _) => "keep clicking corners · three make a shape · esc backs out one point",
+            (_, PolygonMode::Outline) => {
+                "click the first point to close · ⏎ also finishes · esc backs out one point"
+            }
+            (_, PolygonMode::Filled) => {
+                "the lattice previews live · click the first point to close · esc backs out one point"
+            }
+        },
     }
 }
 
@@ -70,7 +85,7 @@ pub fn HelpFloat() -> Element {
             div { class: "lpme-help-panel",
                 div { class: "lpme-help-title", "keyboard" }
                 for (keys, what) in [
-                    ("V / G / R / P", "select · grid · ring · path tool"),
+                    ("V / G / R / P / O", "select · grid · ring · path · polygon tool"),
                     ("N / A / L", "numbers · arrows · live"),
                     ("F", "texture-frame preview"),
                     ("0", "zoom to fit"),
@@ -79,7 +94,7 @@ pub fn HelpFloat() -> Element {
                     ("⌘Z / ⇧⌘Z", "undo · redo"),
                     ("⌘A", "select all"),
                     ("⌫", "delete selection"),
-                    ("⏎", "finish path"),
+                    ("⏎", "finish path · close polygon"),
                     ("dbl-click", "enter a group (edit its sub-object)"),
                     ("esc", "back out · leave group · clear · leave the dive"),
                 ] {

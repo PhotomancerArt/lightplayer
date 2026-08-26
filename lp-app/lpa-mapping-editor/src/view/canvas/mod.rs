@@ -12,9 +12,11 @@
 //! Layers (bottom → top): dot-grid background, fixture sprites (project
 //! space; dived, the focused sprite's body yields to the live doc layers
 //! and neighbours dim), the authored canvas rect, the fit-preview overlay,
-//! wiring arrows, lamps, wiring numbers, the selection outline + corner
-//! resize handles, path vertex handles, the path-draft preview, and the
-//! marquee.
+//! wiring arrows, the shaped matrices' authored silhouettes, lamps, wiring
+//! numbers, the selection outline + corner resize handles, vertex handles,
+//! the drawing-tool draft preview (vertices, the polygon's implicit closing
+//! edge and close target, and the ghost lamps the tool would commit), and
+//! the marquee.
 //!
 //! Every mutation flows through `MapEditorSession` ops: drags run
 //! `begin_gesture` → `*_from_gesture` (totals, no drift) → `commit_gesture`
@@ -32,7 +34,9 @@ use dioxus::prelude::*;
 use lpc_mapping::{Bounds2d, Map2dShape, ResolvedMap2d, Rotation2d, bounds_of_points, resolve};
 
 use crate::editor_core::camera::Camera;
-use crate::editor_core::editor_session::{MapEditorSession, editable_path};
+use crate::editor_core::editor_session::{
+    DEFAULT_PITCH, MapEditorSession, editable_path, editable_vertices, polygon_draft_shape,
+};
 use crate::editor_core::map_tool::MapTool;
 use crate::editor_core::placement::Placement;
 use crate::editor_core::view_geometry::{ArrowInput, wiring_arrows};
@@ -327,15 +331,35 @@ pub fn EditorCanvas(
     let tool_is_select = matches!(session_read.tool, MapTool::Select);
     let tool = session_read.tool.clone();
     let selection = session_read.selection.clone();
-    // Authored polylines, repeats included: a repeated path's editable
-    // geometry is instance 0 — the unrotated inner path — so that is what
-    // takes clicks and shows handles.
-    let path_objects: Vec<(usize, Vec<[f32; 2]>)> = doc
+    // Authored vertex chains, repeats included: a repeated shape's editable
+    // geometry is instance 0 — the unrotated inner shape — so that is what
+    // takes clicks and shows handles. Every vertexed shape answers here
+    // (path, polygon, shaped matrix), and a CLOSED chain is drawn closed, so
+    // the hit line covers the seam edge a polygon actually has.
+    let hit_outlines: Vec<(usize, Vec<[f32; 2]>)> = doc
         .objects
         .iter()
         .enumerate()
         .filter_map(|(index, object)| {
-            editable_path(&object.shape).map(|path| (index, path.points.clone()))
+            let points = editable_vertices(&object.shape)?;
+            Some((
+                index,
+                chain_points(points, vertices_are_closed(&object.shape)),
+            ))
+        })
+        .collect();
+    // A shaped matrix's lamps are a FIELD: nothing else on the canvas draws
+    // the outline they fill (its body is the neutral band its snake sweeps),
+    // so the authored silhouette gets its own thin line. Authored grain, like
+    // the wiring annotations: instance 0 of a repeat, never all of them.
+    let filled_outlines: Vec<(usize, Vec<[f32; 2]>)> = doc
+        .objects
+        .iter()
+        .enumerate()
+        .filter(|(_, object)| is_filled_polygon(&object.shape))
+        .filter_map(|(index, object)| {
+            let points = editable_vertices(&object.shape)?;
+            Some((index, chain_points(points, true)))
         })
         .collect();
     // Inert (jumper) segments carry no lamps, so nothing else on the canvas
@@ -371,13 +395,16 @@ pub fn EditorCanvas(
         .and_then(|path| path.resolve(doc))
         .and_then(|shape| match shape {
             Map2dShape::Repeat(repeat) => {
-                let path = editable_path(&repeat.shape)?;
+                let points = chain_points(
+                    editable_vertices(&repeat.shape)?,
+                    vertices_are_closed(shape),
+                );
                 Some(
                     (1..repeat.count)
                         .map(|instance| {
                             let rotation =
                                 Rotation2d::about(repeat.center, repeat.instance_degrees(instance));
-                            path.points.iter().map(|p| rotation.apply(*p)).collect()
+                            points.iter().map(|p| rotation.apply(*p)).collect()
                         })
                         .collect(),
                 )
@@ -484,51 +511,56 @@ pub fn EditorCanvas(
     let handle_half = 5.0 / eff;
     let selection_margin = radius + 8.0 / eff;
 
-    // Vertex handles for a single selected path — the inner path through a
-    // repeat, whose other instances follow the drag on the next resolve.
+    // Vertex handles for a single selected shape — every shape with authored
+    // vertices (path, polygon, shaped matrix), taken through a repeat at
+    // instance 0, whose other instances follow the drag on the next resolve.
     let vertex_points: Vec<[f32; 2]> = selection
         .single()
         .and_then(|path| path.resolve(doc))
         .filter(|_| tool_is_select)
-        .and_then(editable_path)
-        .map(|path| path.points.clone())
+        .and_then(editable_vertices)
+        .map(<[[f32; 2]]>::to_vec)
         .unwrap_or_default();
     let selected_vertex = selection.vertex;
 
-    // Path draft preview: draft vertices + resolved ghost lamps + the chain
-    // link from the previous object's last lamp.
+    // Draft preview: the placed vertices, the ghost lamps the tool would
+    // commit, and the chain link from the previous object's last lamp.
     let draft_points: Vec<[f32; 2]> = match &tool {
-        MapTool::Path { draft } => draft.clone(),
+        MapTool::Path { draft } | MapTool::Polygon { draft, .. } => draft.clone(),
         _ => Vec::new(),
     };
-    let draft_ghosts: Vec<[f32; 2]> = if draft_points.len() >= 2 {
-        let length: f32 = draft_points
-            .windows(2)
-            .map(|pair| {
-                ((pair[1][0] - pair[0][0]).powi(2) + (pair[1][1] - pair[0][1]).powi(2)).sqrt()
-            })
-            .sum();
-        let count = ((length / 26.0).round() as u32).max(2);
-        let ghost_doc = lpc_mapping::Map2dDoc {
-            objects: vec![lpc_mapping::Map2dObject {
-                name: String::new(),
-                id: None,
-                stride: None,
-                shape: Map2dShape::Path(lpc_mapping::PathShape {
-                    points: draft_points.clone(),
-                    count,
-                    reversed: false,
-                    gaps: Vec::new(),
-                    align: lpc_mapping::PathAlign::On,
-                }),
-            }],
-            ..lpc_mapping::Map2dDoc::new()
-        };
-        resolve(&ghost_doc)
-            .map(|resolved| resolved.positions())
-            .unwrap_or_default()
-    } else {
-        Vec::new()
+    let draft_ghosts: Vec<[f32; 2]> = match &tool {
+        // The path tool's own count heuristic, previewed through the
+        // resolver.
+        MapTool::Path { draft } if draft.len() >= 2 => {
+            let length: f32 = draft
+                .windows(2)
+                .map(|pair| {
+                    ((pair[1][0] - pair[0][0]).powi(2) + (pair[1][1] - pair[0][1]).powi(2)).sqrt()
+                })
+                .sum();
+            let count = ((length / DEFAULT_PITCH).round() as u32).max(2);
+            ghost_positions(Map2dShape::Path(lpc_mapping::PathShape {
+                points: draft.clone(),
+                count,
+                reversed: false,
+                gaps: Vec::new(),
+                align: lpc_mapping::PathAlign::On,
+            }))
+        }
+        // The polygon tool previews the SHAPE ITSELF: `polygon_draft_shape`
+        // is what `polygon_finish` commits, resolved by the real resolver —
+        // so the lattice on screen is the lattice that lands, cell for cell.
+        MapTool::Polygon { draft, mode } => polygon_draft_shape(draft, *mode)
+            .map(ghost_positions)
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    // The close target: a polygon draft's first vertex, once there are
+    // enough points for the next click on it to close the outline.
+    let draft_close_target = match &tool {
+        MapTool::Polygon { draft, .. } => close_target(draft).copied(),
+        _ => None,
     };
     let chain_from = (!draft_points.is_empty())
         .then(|| positions.last().copied())
@@ -683,8 +715,24 @@ pub fn EditorCanvas(
                     MapTool::Path { .. } => {
                         session.write().path_add_point(doc_point);
                     }
-                    MapTool::Polygon { .. } => {
-                        session.write().polygon_add_point(doc_point);
+                    MapTool::Polygon { ref draft, .. } => {
+                        // Close-on-first is the polygon's primary finish:
+                        // a click inside the first vertex's hit ring closes
+                        // the outline instead of adding a point. The ring is
+                        // SCREEN-sized (the vertex-handle convention), so the
+                        // target neither shrinks with zoom nor swallows
+                        // deliberate clicks when zoomed in.
+                        if closes_polygon_draft(draft, doc_point, eff) {
+                            // A refused finish (fewer than three DISTINCT
+                            // vertices survive the draft merge) is an IGNORED
+                            // gesture — the draft and the tool both stay, so
+                            // the author keeps their clicks.
+                            if session.write().polygon_finish().is_some() {
+                                on_committed.call(());
+                            }
+                        } else {
+                            session.write().polygon_add_point(doc_point);
+                        }
                     }
                 }
             },
@@ -976,13 +1024,28 @@ pub fn EditorCanvas(
                 }
             },
             ondoubleclick: move |evt| {
-                // Path-tool finish keeps priority (editor grammar; never
+                // Drawing-tool finish keeps priority (editor grammar; never
                 // in fixture mode — there is no tool without a session).
-                if !fixture_mode && matches!(session.read().tool, MapTool::Path { .. }) {
-                    if session.write().path_finish().is_some() {
-                        on_committed.call(());
+                // The polygon's own gesture is close-on-first, but a
+                // double-click must still be CONSUMED here: mid-draft it can
+                // never be allowed to fall through to the dive-switch below.
+                if !fixture_mode {
+                    let tool = session.read().tool.clone();
+                    match tool {
+                        MapTool::Path { .. } => {
+                            if session.write().path_finish().is_some() {
+                                on_committed.call(());
+                            }
+                            return;
+                        }
+                        MapTool::Polygon { .. } => {
+                            if session.write().polygon_finish().is_some() {
+                                on_committed.call(());
+                            }
+                            return;
+                        }
+                        _ => {}
                     }
-                    return;
                 }
                 // Fixture dive / dive-switch: a sprite double-click dives
                 // when not dived; a NEIGHBOUR while dived switches the
@@ -1090,7 +1153,8 @@ pub fn EditorCanvas(
                         arrows: arrows.as_ref(),
                         ghost_outlines: &ghost_outlines,
                         gap_segments: &gap_segments,
-                        path_objects: &path_objects,
+                        hit_outlines: &hit_outlines,
+                        filled_outlines: &filled_outlines,
                         bodies: &bodies,
                         resolved: &resolved,
                         annotation_spans: &annotation_spans,
@@ -1120,6 +1184,7 @@ pub fn EditorCanvas(
                         chain_from,
                         draft_points: &draft_points,
                         draft_ghosts: &draft_ghosts,
+                        draft_close_target,
                     })}
                     {marquee_layer(eff, marquee_rect)}
                 }
@@ -1128,6 +1193,83 @@ pub fn EditorCanvas(
         }
         {menu_overlay}
     }
+}
+
+/// Vertices a polygon draft needs before its first point becomes a close
+/// target: below three there is no outline, and `polygon_finish` would
+/// refuse anyway.
+const CLOSE_MIN_VERTICES: usize = 3;
+
+/// The vertex a click would close `draft` on, `None` while the draft is too
+/// short to be an outline.
+fn close_target(draft: &[[f32; 2]]) -> Option<&[f32; 2]> {
+    if draft.len() < CLOSE_MIN_VERTICES {
+        return None;
+    }
+    draft.first()
+}
+
+/// Whether a click at `point` (doc space) closes `draft` on its first
+/// vertex.
+///
+/// Judged against [`layers::selection::VERTEX_HIT_PX`] — the same
+/// screen-pixel ring a finished shape's vertex handles take grabs in — so
+/// the close target is a constant size at every zoom, and the gesture that
+/// closes an outline is the gesture that will later grab its corner.
+fn closes_polygon_draft(draft: &[[f32; 2]], point: [f32; 2], eff: f32) -> bool {
+    let Some(first) = close_target(draft) else {
+        return false;
+    };
+    let radius = layers::selection::VERTEX_HIT_PX / eff.max(1e-6);
+    let (dx, dy) = (point[0] - first[0], point[1] - first[1]);
+    dx * dx + dy * dy <= radius * radius
+}
+
+/// True when a shape's authored vertices form a CLOSED loop — a polygon or
+/// a shaped matrix, at any depth under a repeat.
+fn vertices_are_closed(shape: &Map2dShape) -> bool {
+    match shape {
+        Map2dShape::Polygon(_) | Map2dShape::FilledPolygon(_) => true,
+        Map2dShape::Repeat(repeat) => vertices_are_closed(&repeat.shape),
+        _ => false,
+    }
+}
+
+/// True for a shaped matrix, at any depth under a repeat.
+fn is_filled_polygon(shape: &Map2dShape) -> bool {
+    match shape {
+        Map2dShape::FilledPolygon(_) => true,
+        Map2dShape::Repeat(repeat) => is_filled_polygon(&repeat.shape),
+        _ => false,
+    }
+}
+
+/// A vertex chain as it is DRAWN: closed chains repeat their first vertex,
+/// so the loop has no phantom mouth at the seam.
+fn chain_points(points: &[[f32; 2]], closed: bool) -> Vec<[f32; 2]> {
+    let mut drawn = points.to_vec();
+    if closed && points.len() >= CLOSE_MIN_VERTICES {
+        drawn.extend(points.first().copied());
+    }
+    drawn
+}
+
+/// Ghost-lamp positions for a draft shape, through the REAL resolver: a
+/// one-object document resolved exactly as the finished object will be, so
+/// the preview can never drift from what committing creates.
+fn ghost_positions(shape: Map2dShape) -> Vec<[f32; 2]> {
+    let ghost_doc = lpc_mapping::Map2dDoc {
+        objects: vec![lpc_mapping::Map2dObject {
+            name: String::new(),
+            id: None,
+            stride: None,
+            shape,
+        }],
+        ..lpc_mapping::Map2dDoc::new()
+    };
+    resolve(&ghost_doc)
+        .map(|resolved| resolved.positions())
+        .unwrap_or_default()
 }
 
 /// Advance a generation counter and return the new value.
@@ -1226,4 +1368,106 @@ fn event_view_point_wheel(anchor: &Signal<CanvasAnchor>, evt: &Event<WheelData>)
     let point = evt.data().client_coordinates();
     let origin = anchor.peek().origin();
     [point.x as f32 - origin[0], point.y as f32 - origin[1]]
+}
+
+#[cfg(test)]
+mod tests {
+    use lpc_mapping::{FilledPolygonShape, GridCorner, GridRouting, PolygonShape, RepeatShape};
+
+    use super::*;
+    use crate::editor_core::map_tool::PolygonMode;
+
+    fn square() -> Vec<[f32; 2]> {
+        vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]]
+    }
+
+    /// Close-on-first only arms once the draft is an outline, and its ring is
+    /// SCREEN-sized: zoomed out, the same doc-space miss that closes at low
+    /// zoom must not close at high zoom.
+    #[test]
+    fn the_close_target_is_a_screen_sized_ring_on_the_first_vertex() {
+        let draft = vec![[0.0_f32, 0.0], [100.0, 0.0], [100.0, 100.0]];
+        assert!(closes_polygon_draft(&draft, [4.0, 3.0], 1.0), "5 px < 9 px");
+        assert!(!closes_polygon_draft(&draft, [16.0, 0.0], 1.0));
+        // Zoomed 4× in, 5 doc units is 20 screen px — outside the ring.
+        assert!(!closes_polygon_draft(&draft, [4.0, 3.0], 4.0));
+        // Zoomed out, the same ring reaches further in doc units (9 px at
+        // half scale is 18 units).
+        assert!(closes_polygon_draft(&draft, [16.0, 0.0], 0.5));
+        // Two vertices are not an outline yet, however close the click.
+        assert!(!closes_polygon_draft(&draft[..2], [0.0, 0.0], 1.0));
+        assert!(!closes_polygon_draft(&[], [0.0, 0.0], 1.0));
+    }
+
+    /// Closed chains are DRAWN closed (the seam edge is real geometry a hit
+    /// line and a repeat ghost must cover); open ones are left alone.
+    #[test]
+    fn closed_chains_repeat_their_first_vertex_when_drawn() {
+        let polygon = Map2dShape::Polygon(PolygonShape {
+            points: square(),
+            count: 15,
+            align: lpc_mapping::PathAlign::On,
+        });
+        assert!(vertices_are_closed(&polygon));
+        assert_eq!(chain_points(&square(), true).len(), 5);
+        assert_eq!(chain_points(&square(), true)[4], [0.0, 0.0]);
+        assert_eq!(chain_points(&square(), false).len(), 4);
+        // A degenerate chain has no loop to close.
+        assert_eq!(chain_points(&square()[..2], true).len(), 2);
+
+        let path = Map2dShape::Path(lpc_mapping::PathShape {
+            points: square(),
+            count: 4,
+            reversed: false,
+            gaps: Vec::new(),
+            align: lpc_mapping::PathAlign::On,
+        });
+        assert!(!vertices_are_closed(&path));
+        assert!(!is_filled_polygon(&path));
+    }
+
+    /// Both closed-shape predicates reach through repeat wrappers — a
+    /// repeated shaped matrix still draws its silhouette and its seam.
+    #[test]
+    fn the_shape_predicates_reach_through_repeats() {
+        let filled = Map2dShape::FilledPolygon(FilledPolygonShape {
+            points: square(),
+            pitch: 26.0,
+            angle_deg: 0.0,
+            origin: [0.0, 0.0],
+            routing: GridRouting::Snake,
+            start_corner: GridCorner::Tl,
+        });
+        assert!(is_filled_polygon(&filled));
+        assert!(vertices_are_closed(&filled));
+        let wrapped = Map2dShape::Repeat(RepeatShape {
+            shape: Box::new(filled),
+            center: [0.0, 0.0],
+            count: 3,
+        });
+        assert!(is_filled_polygon(&wrapped));
+        assert!(vertices_are_closed(&wrapped));
+    }
+
+    /// The filled-mode ghosts ARE the resolver's cells: the preview and the
+    /// finished object agree lamp for lamp, which is the whole reason the
+    /// draft resolves a real shape instead of sketching one.
+    #[test]
+    fn filled_draft_ghosts_are_the_resolved_lattice() {
+        let draft = square();
+        let shape = polygon_draft_shape(&draft, PolygonMode::Filled).expect("an outline");
+        let Map2dShape::FilledPolygon(filled) = &shape else {
+            panic!("filled mode commits a shaped matrix");
+        };
+        let cells = lpc_mapping::filled_polygon_cells(filled);
+        let ghosts = ghost_positions(shape.clone());
+        assert_eq!(ghosts.len(), cells.len());
+        assert_eq!(ghosts.len(), 16, "100×100 at pitch 26 is a 4×4 lattice");
+        for (ghost, cell) in ghosts.iter().zip(cells.iter()) {
+            assert_eq!(ghost, cell);
+        }
+        // Outline mode previews the perimeter population of the same draft.
+        let outline = polygon_draft_shape(&draft, PolygonMode::Outline).expect("an outline");
+        assert_eq!(ghost_positions(outline).len(), 15);
+    }
 }

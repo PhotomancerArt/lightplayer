@@ -7,8 +7,8 @@
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
     Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FitReconcile, FixtureBody, FixtureSprite,
-    HelpFloat, Map2dDoc, MapEditorSession, MapTool, Placement, ReferenceImage, ShapePath,
-    ZoomFloat, display_inset_padding, doc_fit_bounds, tool_hint,
+    HelpFloat, Map2dDoc, MapEditorSession, MapTool, Placement, PolygonMode, ReferenceImage,
+    ShapePath, ZoomFloat, display_inset_padding, doc_fit_bounds, tool_hint,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -34,6 +34,10 @@ fn ComposedEditorStory(
     #[props(default)] initial_selection: Vec<usize>,
     #[props(default = false)] initial_descend: bool,
     #[props(default)] initial_draft: Vec<[f32; 2]>,
+    /// Seed the draft into the POLYGON tool in this population instead of
+    /// the path tool — the lattice-preview stories' one knob.
+    #[props(default)]
+    draft_polygon: Option<PolygonMode>,
     #[props(default)] initial_view: Option<EditorViewOptions>,
     #[props(default)] reference: Option<ReferenceImage>,
 ) -> Element {
@@ -46,8 +50,14 @@ fn ComposedEditorStory(
             session.descend();
         }
         if !initial_draft.is_empty() {
-            session.tool = MapTool::Path {
-                draft: initial_draft.clone(),
+            session.tool = match draft_polygon {
+                Some(mode) => MapTool::Polygon {
+                    draft: initial_draft.clone(),
+                    mode,
+                },
+                None => MapTool::Path {
+                    draft: initial_draft.clone(),
+                },
             };
         }
         session
@@ -316,6 +326,76 @@ pub(crate) fn editor_path_draft() -> Element {
         ComposedEditorStory {
             doc: lpc_mapping::corpus::cat_ears(),
             initial_draft: vec![[460.0, 320.0], [520.0, 240.0], [580.0, 320.0]],
+        }
+    }
+}
+
+/// The polygon tool's two populations over ONE authored outline: a shaped
+/// matrix (lattice inside a chevron) beside the same outline populated on
+/// its perimeter. Built from the shapes rather than JSON so the story reads
+/// as the document it is.
+fn polygon_populations_doc() -> Map2dDoc {
+    let chevron = |dx: f32| -> Vec<[f32; 2]> {
+        vec![
+            [dx + 10.0, 10.0],
+            [dx + 130.0, 10.0],
+            [dx + 130.0, 150.0],
+            [dx + 70.0, 100.0],
+            [dx + 10.0, 150.0],
+        ]
+    };
+    Map2dDoc {
+        canvas: Some([0.0, 0.0, 320.0, 170.0]),
+        objects: vec![
+            lpc_mapping::Map2dObject {
+                name: "sign face".to_string(),
+                id: None,
+                stride: None,
+                shape: lpc_mapping::Map2dShape::FilledPolygon(lpc_mapping::FilledPolygonShape {
+                    points: chevron(0.0),
+                    pitch: 18.0,
+                    angle_deg: 0.0,
+                    origin: [0.0, 0.0],
+                    routing: lpc_mapping::GridRouting::Snake,
+                    start_corner: lpc_mapping::GridCorner::Tl,
+                }),
+            },
+            lpc_mapping::Map2dObject {
+                name: "sign edge".to_string(),
+                id: None,
+                stride: None,
+                shape: lpc_mapping::Map2dShape::Polygon(lpc_mapping::PolygonShape {
+                    points: chevron(170.0),
+                    count: 26,
+                    align: lpc_mapping::PathAlign::On,
+                }),
+            },
+        ],
+        ..Map2dDoc::new()
+    }
+}
+
+#[story(
+    description = "One authored outline, two populations (the polygon tool's whole point): the shaped matrix on the left is SELECTED — its authored silhouette promotes to a solid accent line and vertex handles sit on its corners, while its lamps stay a FIELD inside the neutral band its wiring sweeps — beside the same chevron populated along its perimeter, where the lamp band IS the shape."
+)]
+pub(crate) fn editor_filled_polygon_selected() -> Element {
+    rsx! {
+        ComposedEditorStory {
+            doc: polygon_populations_doc(),
+            initial_selection: vec![0],
+        }
+    }
+}
+
+#[story(
+    description = "Polygon drawing in filled mode, mid-draft: the placed corners, the dashed IMPLICIT closing edge back to the first vertex, that vertex ringed as the close target, and the live lattice ghosts — resolved by the real resolver, so the preview is cell-for-cell what closing the outline commits."
+)]
+pub(crate) fn editor_polygon_lattice_draft() -> Element {
+    rsx! {
+        ComposedEditorStory {
+            doc: lpc_mapping::corpus::cat_ears(),
+            initial_draft: vec![[430.0, 250.0], [620.0, 250.0], [620.0, 400.0], [525.0, 330.0]],
+            draft_polygon: Some(PolygonMode::Filled),
         }
     }
 }

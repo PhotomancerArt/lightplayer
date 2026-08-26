@@ -53,6 +53,16 @@ pub struct MapEditorSession {
     pub resolve_error: Option<String>,
     pub selection: MapSelection,
     pub tool: MapTool,
+    /// The population the polygon tool starts its NEXT activation in.
+    ///
+    /// A PREFERENCE, never authority: `polygon_finish` reads the active
+    /// tool's own `mode` and nothing else ([`MapTool`] deliberately keeps no
+    /// mode between activations). Every surface that names a population —
+    /// the tool's segmented control, the properties toggle — records it
+    /// here, so drawing three filled polygons in a row costs one mode
+    /// choice rather than three. Session-held because keyboard, toolbar and
+    /// properties all already share the session and must agree.
+    polygon_default: PolygonMode,
 }
 
 impl MapEditorSession {
@@ -69,6 +79,7 @@ impl MapEditorSession {
             resolve_error: None,
             selection: MapSelection::default(),
             tool: MapTool::Select,
+            polygon_default: PolygonMode::default(),
         }
     }
 
@@ -690,6 +701,31 @@ impl MapEditorSession {
 
     // ---- polygon drafting ------------------------------------------------
 
+    /// Activate the polygon tool with an empty draft, in the population last
+    /// named by any surface ([`Self::polygon_default`]).
+    pub fn start_polygon_tool(&mut self) {
+        self.tool = MapTool::polygon(self.polygon_default);
+    }
+
+    /// The population the polygon tool starts its next activation in.
+    #[must_use]
+    pub fn polygon_default(&self) -> PolygonMode {
+        self.polygon_default
+    }
+
+    /// Re-aim the LIVE polygon draft at `mode` (and remember it): the
+    /// segmented control beside the tool. The draft's vertices are untouched
+    /// — the mode decides only what the closed outline becomes.
+    ///
+    /// A no-op when the polygon tool is not active, beyond remembering the
+    /// choice for the next activation.
+    pub fn set_polygon_draft_mode(&mut self, mode: PolygonMode) {
+        self.polygon_default = mode;
+        if let MapTool::Polygon { mode: current, .. } = &mut self.tool {
+            *current = mode;
+        }
+    }
+
     /// Accumulate one outline vertex.
     ///
     /// Whether a click "closed the outline" is a view-space hit test against
@@ -742,22 +778,7 @@ impl MapEditorSession {
         let MapTool::Polygon { draft, mode } = &self.tool else {
             return None;
         };
-        let mode = *mode;
-        let points = closed_outline_points(draft);
-        if points.len() < 3 {
-            return None;
-        }
-        let shape = match mode {
-            PolygonMode::Outline => {
-                let count = outline_count_from_perimeter(&points);
-                Map2dShape::Polygon(PolygonShape {
-                    points,
-                    count,
-                    align: PathAlign::On,
-                })
-            }
-            PolygonMode::Filled => Map2dShape::FilledPolygon(default_filled_polygon(points)),
-        };
+        let shape = polygon_draft_shape(draft, *mode)?;
         Some(self.create_object(Map2dObject {
             name: self.next_name("polygon"),
             id: None,
@@ -781,6 +802,7 @@ impl MapEditorSession {
     /// The same switch at any tree path. Through a repeat it converts the
     /// authored inner polygon — write-through, so every instance follows.
     pub fn set_polygon_population_at(&mut self, path: &ShapePath, mode: PolygonMode) {
+        self.polygon_default = mode;
         self.edit_shape_at(path, |shape| convert_polygon_population(shape, mode));
     }
 
@@ -1209,6 +1231,33 @@ fn closed_outline_points(draft: &[[f32; 2]]) -> Vec<[f32; 2]> {
         points.pop();
     }
     points
+}
+
+/// The shape [`MapEditorSession::polygon_finish`] would create from `draft`
+/// in `mode` — `None` below three distinct vertices, where there is no
+/// outline yet.
+///
+/// The live ghost preview resolves EXACTLY this, so what the canvas shows
+/// while drawing is what closing the outline creates: one derivation, no
+/// second density heuristic to drift out of step (parent decision D11's
+/// "the preview is the resolver, not a sketch of it").
+#[must_use]
+pub fn polygon_draft_shape(draft: &[[f32; 2]], mode: PolygonMode) -> Option<Map2dShape> {
+    let points = closed_outline_points(draft);
+    if points.len() < 3 {
+        return None;
+    }
+    Some(match mode {
+        PolygonMode::Outline => {
+            let count = outline_count_from_perimeter(&points);
+            Map2dShape::Polygon(PolygonShape {
+                points,
+                count,
+                align: PathAlign::On,
+            })
+        }
+        PolygonMode::Filled => Map2dShape::FilledPolygon(default_filled_polygon(points)),
+    })
 }
 
 /// Lamp count for a closed outline at the authored default density.
@@ -2318,6 +2367,58 @@ mod tests {
         session.undo();
         assert_eq!(session.doc().to_json(), before);
         assert!(!session.can_undo(), "exactly one step");
+    }
+
+    /// The live ghost preview and the finished object come off ONE
+    /// derivation: whatever [`polygon_draft_shape`] says the draft is, that
+    /// is byte-for-byte what closing it commits. A second density heuristic
+    /// for the preview is exactly the drift this pins shut.
+    #[test]
+    fn the_draft_preview_shape_is_what_finish_commits() {
+        for mode in [PolygonMode::Outline, PolygonMode::Filled] {
+            let mut session = square_polygon_draft(mode);
+            let previewed = polygon_draft_shape(session.polygon_draft(), mode)
+                .expect("the draft is an outline");
+            let index = session.polygon_finish().expect("polygon created");
+            assert_eq!(
+                session.doc().objects[index].shape,
+                previewed,
+                "{mode:?} preview must be the committed shape"
+            );
+        }
+        // Below three vertices there is no shape to preview, which is the
+        // same answer `polygon_finish` gives.
+        assert!(polygon_draft_shape(&[[0.0, 0.0], [10.0, 0.0]], PolygonMode::Filled).is_none());
+    }
+
+    /// The population a surface names is remembered for the tool's NEXT
+    /// activation, so drawing a run of filled polygons costs one choice —
+    /// while the ACTIVE tool's own mode stays the only thing finish reads.
+    #[test]
+    fn the_polygon_tool_reopens_in_the_last_named_population() {
+        let mut session = MapEditorSession::new(Map2dDoc::new());
+        assert_eq!(session.polygon_default(), PolygonMode::Outline);
+
+        session.start_polygon_tool();
+        session.set_polygon_draft_mode(PolygonMode::Filled);
+        assert_eq!(session.polygon_mode(), Some(PolygonMode::Filled));
+        for point in square_points() {
+            session.polygon_add_point(point);
+        }
+        session.polygon_finish().expect("filled polygon created");
+
+        session.start_polygon_tool();
+        assert_eq!(
+            session.polygon_mode(),
+            Some(PolygonMode::Filled),
+            "the tool reopens where it left off"
+        );
+        assert!(session.polygon_draft().is_empty(), "with a fresh draft");
+
+        // The properties toggle names a population too.
+        session.set_polygon_population(0, PolygonMode::Outline);
+        session.start_polygon_tool();
+        assert_eq!(session.polygon_mode(), Some(PolygonMode::Outline));
     }
 
     /// The population switch keeps the outline and the object's identity —

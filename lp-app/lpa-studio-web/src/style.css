@@ -1868,6 +1868,49 @@ label:has(> input:not(:disabled)) {
     stroke-dasharray: 5 4;
 }
 
+/* The polygon draft's IMPLICIT closing edge: the segment the shape has but
+   the author has not drawn. A finer dash than the drawn chain, so "implied"
+   reads at a glance. */
+.lpme-draft-close {
+    fill: none;
+    stroke: #4c9ffe;
+    stroke-dasharray: 3 5;
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+/* The close TARGET: the first draft vertex, ringed once a click on it would
+   close the outline. Never a pointer target of its own — the canvas root
+   owns the click and decides by hit radius. */
+.lpme-draft-target {
+    fill: none;
+    stroke: #4c9ffe;
+    pointer-events: none;
+}
+
+/* A shaped matrix's authored SILHOUETTE: the outline its lattice fills.
+   Its lamps are a field, so nothing else on the canvas draws the boundary a
+   vertex drag moves. Dashed and mixed down at rest (the object's own colour,
+   the body language of `.lpme-obj-hull`); selection promotes it to a solid
+   accent line. Never a pointer target — the hit line under it owns clicks. */
+.lpme-shape-outline {
+    fill: none;
+    stroke: rgba(154, 151, 143, 0.5);
+    stroke: color-mix(
+        in srgb,
+        var(--lpme-obj-c, rgb(154, 151, 143)) 55%,
+        transparent
+    );
+    stroke-dasharray: 7 5;
+    stroke-linejoin: round;
+    pointer-events: none;
+}
+
+.lpme-shape-outline-on {
+    stroke: #4c9ffe;
+    stroke-dasharray: none;
+}
+
 .lpme-marquee {
     fill: rgba(76, 159, 254, 0.08);
     stroke: #4c9ffe;
