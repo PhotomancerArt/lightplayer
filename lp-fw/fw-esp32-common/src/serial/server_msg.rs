@@ -2,7 +2,8 @@
 //!
 //! This is the chip-agnostic serialization half of every firmware's server
 //! write path: take a [`lpc_wire::WireServerMessage`] and produce one framed
-//! wire line (`\nM!{json}\n`) on the heap. It runs in **thread context** (the
+//! wire line (`\nM!{json}\n`) in the static frame buffer. It runs in
+//! **thread context** (the
 //! transport), never in the io task: serialization recursion plus a
 //! frame-budget buffer must not ride an interrupt executor's borrowed stack —
 //! that exact mistake corrupted the classic ESP32 on the bench (see
@@ -11,25 +12,73 @@
 //! the request/result channels — stays in the bin crate, because that is
 //! where the transport differs.
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, string::String};
 use embedded_hal_async::delay::DelayNs;
 use embedded_io_async::Write;
 use ser_write_json::SerWrite;
 
 use super::chunked_write::ChunkedWriter;
 
-/// A [`SerWrite`] sink over a growable heap buffer. Cannot fail: an
-/// allocation failure aborts through the firmware's `alloc_error_handler`,
-/// the same contract as every other heap use.
-struct VecJsonWriter<'a>(&'a mut Vec<u8>);
+/// The one serialized-frame buffer, in dedicated `.bss` — NOT the heap.
+///
+/// ⚠️ Memory-shape lesson (bench 2026-08-26): serializing server frames into
+/// a heap `Vec` OOM'd the classic on its first real ProjectRead — response
+/// *assembly* already runs the loaded-project heap down to a few KB, and the
+/// frame buffer then landed on top of the peak (first as growth-doubling
+/// transients, then, exact-sized, as the final straw at `free=216`). The old
+/// io-task-side design kept this buffer as task-future `.bss`; this static
+/// restores that memory shape while keeping serialization thread-side.
+///
+/// Exclusivity is structural, not locked: the accountable write protocol has
+/// exactly one frame in flight (`SERVER_WRITE_REQUEST` is depth 1, and the
+/// transport awaits the io task's result before serializing again), so the
+/// single writer (`serialize_server_msg`, thread context) and single reader
+/// (the io task, via [`frame_bytes`]) never overlap.
+static mut FRAME_BUF: [u8; SERVER_MSG_JSON_BUFFER_SIZE] = [0; SERVER_MSG_JSON_BUFFER_SIZE];
 
-impl ser_write_json::SerWrite for VecJsonWriter<'_> {
-    type Error = core::convert::Infallible;
+/// A bounds-checked [`SerWrite`] sink over [`FRAME_BUF`].
+struct FrameBufWriter {
+    len: usize,
+}
+
+/// The only way [`FrameBufWriter`] can fail: out of buffer.
+#[derive(Debug)]
+struct FrameBufFull;
+
+impl core::fmt::Display for FrameBufFull {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("frame buffer full")
+    }
+}
+
+impl ser_write_json::SerWrite for FrameBufWriter {
+    type Error = FrameBufFull;
 
     fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
-        self.0.extend_from_slice(buf);
+        let end = self.len.checked_add(buf.len()).ok_or(FrameBufFull)?;
+        if end > SERVER_MSG_JSON_BUFFER_SIZE {
+            return Err(FrameBufFull);
+        }
+        // SAFETY: single writer by protocol (see FRAME_BUF); bounds checked
+        // above, raw copy to avoid an implicit reference to the static.
+        unsafe {
+            let dst = (core::ptr::addr_of_mut!(FRAME_BUF) as *mut u8).add(self.len);
+            core::ptr::copy_nonoverlapping(buf.as_ptr(), dst, buf.len());
+        }
+        self.len = end;
         Ok(())
     }
+}
+
+/// The serialized frame's bytes, for the io task's write.
+///
+/// SAFETY contract: call only between receiving a `(generation, len)` write
+/// request and posting its result — the window in which the protocol
+/// guarantees the buffer is the reader's (see [`FRAME_BUF`]).
+pub fn frame_bytes(len: usize) -> &'static [u8] {
+    let len = len.min(SERVER_MSG_JSON_BUFFER_SIZE);
+    // SAFETY: exclusive by the accountable-write protocol; length clamped.
+    unsafe { core::slice::from_raw_parts(core::ptr::addr_of!(FRAME_BUF) as *const u8, len) }
 }
 
 /// The serialized-frame budget: the shared `ProjectRead` frame budget plus
@@ -38,27 +87,48 @@ const SERVER_MSG_FRAMING_BYTES: usize = 16;
 const SERVER_MSG_JSON_BUFFER_SIZE: usize =
     lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES + SERVER_MSG_FRAMING_BYTES;
 
-/// Serialize `msg` into one framed wire line: `\nM!{json}\n`.
+/// Serialize `msg` into the static frame buffer as one framed wire line
+/// (`\nM!{json}\n`), returning its length for the write request.
 ///
 /// Thread-context by design (see the module docs): the caller is the
-/// transport's `send`, not the io task. The returned bytes are what the io
-/// task writes verbatim — its whole job shrinks to chunked byte shuttling,
-/// which is what keeps its interrupt-context stack footprint bounded.
-///
-/// The frame budget is enforced after the fact: a frame that serialized
-/// beyond [`SERVER_MSG_JSON_BUFFER_SIZE`] is refused with the same
-/// `Serialization` error (and log line) the old stack-buffer path produced,
-/// so the wire contract is unchanged.
+/// transport's `send`, not the io task — serialization recursion must not
+/// ride an interrupt executor's borrowed stack, and the buffer must not ride
+/// the loaded-project heap (see [`FRAME_BUF`] for both lessons' receipts).
+/// The measure pass runs first so an oversized frame is refused with the
+/// budget numbers instead of a mid-write failure.
 pub fn serialize_server_msg(
     msg: &lpc_wire::WireServerMessage,
-) -> Result<Vec<u8>, lpc_wire::TransportError> {
-    let mut bytes = Vec::with_capacity(1024);
-    let mut writer = VecJsonWriter(&mut bytes);
-    let Ok(()) = writer.write(b"\nM!");
-    // Erased writer: shares one serializer instantiation per wire type with
-    // the frame-budget measurement path (lpc_wire::ser_write_json_len). The
-    // sink itself is infallible, so an error here is the serializer's.
-    if lpc_wire::ser_write_json_to(&mut writer, msg).is_err() {
+) -> Result<usize, lpc_wire::TransportError> {
+    const FRAMING_OVERHEAD: usize = 4; // "\nM!" + trailing "\n"
+    let json_len = lpc_wire::ser_write_json_len(msg);
+    let total = json_len + FRAMING_OVERHEAD;
+    if total > SERVER_MSG_JSON_BUFFER_SIZE {
+        let detail = server_message_detail(msg);
+        log::warn!(
+            "[io_task] server message id={} {} exceeded frame budget: {} B > {} (frame_budget={})",
+            msg.id,
+            detail,
+            total,
+            SERVER_MSG_JSON_BUFFER_SIZE,
+            lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
+        );
+        return Err(lpc_wire::TransportError::Serialization(format!(
+            "server message id={} {} exceeded frame budget ({total} B)",
+            msg.id, detail
+        )));
+    }
+    let mut writer = FrameBufWriter { len: 0 };
+    let mut write_all = || -> Result<(), FrameBufFull> {
+        writer.write(b"\nM!")?;
+        // Erased writer: shares one serializer instantiation per wire type
+        // with the measurement pass above.
+        lpc_wire::ser_write_json_to(&mut writer, msg).map_err(|_| FrameBufFull)?;
+        writer.write(b"\n")?;
+        Ok(())
+    };
+    if write_all().is_err() {
+        // Unreachable if the measure pass is honest; kept as a real error
+        // path rather than a panic because the wire must stay up.
         let detail = server_message_detail(msg);
         log::warn!(
             "[io_task] server message id={} {} failed to serialize",
@@ -70,25 +140,8 @@ pub fn serialize_server_msg(
             msg.id, detail
         )));
     }
-    let Ok(()) = writer.write(b"\n");
-    if bytes.len() > SERVER_MSG_JSON_BUFFER_SIZE {
-        let detail = server_message_detail(msg);
-        log::warn!(
-            "[io_task] server message id={} {} exceeded frame budget: {} B > {} (frame_budget={})",
-            msg.id,
-            detail,
-            bytes.len(),
-            SERVER_MSG_JSON_BUFFER_SIZE,
-            lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
-        );
-        return Err(lpc_wire::TransportError::Serialization(format!(
-            "server message id={} {} exceeded frame budget ({} B)",
-            msg.id,
-            detail,
-            bytes.len()
-        )));
-    }
-    Ok(bytes)
+    debug_assert_eq!(writer.len, total, "measure and write passes disagree");
+    Ok(writer.len)
 }
 
 impl<W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'_, W, F, D> {

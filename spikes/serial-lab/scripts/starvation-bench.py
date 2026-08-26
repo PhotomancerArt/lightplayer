@@ -27,11 +27,15 @@ Checks, in order (summary table at the end):
                   session: write a partial M! line with no newline, wait past
                   the firmware's stale-partial flush, then hello and expect
                   an answer (2026-08-21 wedge, hello-gate defect).
+  C7 projectRead— the Studio sync shape: a full debug ProjectRead under
+                  load must stream response frames and must NOT reboot the
+                  device (the 2026-08-26 serialize-OOM went out because no
+                  bench step ever sent one).
 
 Evidence lines (FifoOverflowed, TX write timed out/failed, retry attempts,
 stale-partial/hello-drain flushes) are counted per phase and printed.
 
-Exit code 0 iff C1, C3, C4, C5, C6 all pass (C2 and C3b are advisory —
+Exit code 0 iff C1, C3, C4, C5, C6, C7 all pass (C2 and C3b are advisory —
 C3b tracks the open longer-than-a-tick defect)."""
 
 import argparse
@@ -301,13 +305,54 @@ def main():
         + f", stale-partial flush lines seen: {flushed}",
     )
 
+    # C7 — the Studio sync shape: debug ProjectRead under load ----------------
+    # Reload the project (C5 left the device idle), then issue the canonical
+    # debug read (generated from lpc-wire's own serializer). Pass = at least
+    # one response frame with our id arrives AND no boot hello (= no reboot)
+    # appears during the exchange.
+    lab.cmd("sequence", name="both_high_low")
+    lab.cmd("capture", ms=12000, timeoutMs=25000, max=5)
+    perf, entries = measure_tick(lab)
+    count_evidence(entries, evidence)
+    c7_tick = perf[0] if perf else 0
+    if c7_tick >= args.load_ms:
+        since = lab.seq()
+        pr = {"projectRead": {"handle": 1, "request": {"since": None, "queries": [
+            {"shapes": {"level": "detail"}},
+            {"nodes": {"level": "detail", "nodes": "all", "include_slots": True}},
+            {"resources": {"level": "summary", "payloads": "none"}},
+            {"runtime": None}]}}}
+        fid = lab.send_frame(pr)
+        t0 = time.time()
+        got, rebooted = 0, False
+        while time.time() - t0 < 30:
+            entries = lab.entries_since(since)
+            for e in entries:
+                fr = e.get("frame")
+                if fr and fr.get("id") == fid:
+                    got += 1
+                if fr and fr.get("id") == 0 and '"hello"' in json.dumps(fr):
+                    rebooted = True
+            if rebooted or got:
+                # keep draining briefly for late reboot evidence
+                if time.time() - t0 > 8:
+                    break
+            time.sleep(0.5)
+        count_evidence(lab.entries_since(since), evidence)
+        results["C7 projectRead/load"] = (
+            got > 0 and not rebooted,
+            f"tick={c7_tick}ms, {got} response frame(s), rebooted={rebooted}",
+        )
+    else:
+        results["C7 projectRead/load"] = (False, f"SKIPPED: no load (tick={c7_tick}ms)")
+
     # Summary -----------------------------------------------------------------
     print("\n=== starvation-bench summary ===")
     width = max(len(k) for k in results)
     critical_ok = True
     for name, (ok, detail) in results.items():
         mark = "PASS" if ok else "FAIL"
-        if name.startswith(("C1", "C3 ", "C4", "C5", "C6")) and not ok:
+        if name.startswith(("C1", "C3 ", "C4", "C5", "C6", "C7")) and not ok:
             critical_ok = False
         print(f"  {name:<{width}}  {mark}  {detail}")
     print("  evidence:", json.dumps(evidence) if evidence else "none")

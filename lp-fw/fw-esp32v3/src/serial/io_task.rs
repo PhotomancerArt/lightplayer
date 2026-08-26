@@ -61,7 +61,7 @@ static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 /// Each request carries a wrapping `u32` generation token that `io_task` echoes
 /// back on the result channel, so `transport.send()` can discard a result
 /// orphaned by a cancelled send instead of trusting arrival order.
-static SERVER_WRITE_REQUEST: Channel<CriticalSectionRawMutex, (u32, Vec<u8>), 1> = Channel::new();
+static SERVER_WRITE_REQUEST: Channel<CriticalSectionRawMutex, (u32, usize), 1> = Channel::new();
 
 static SERVER_WRITE_RESULT: Channel<
     CriticalSectionRawMutex,
@@ -387,11 +387,12 @@ async fn drain_outgoing_messages(router: &MessageRouter, link: &mut UartLink) {
 /// is one chunked byte write (see the module docs).
 async fn drain_server_write_request(link: &mut UartLink, router: &MessageRouter) {
     let receiver = SERVER_WRITE_REQUEST.receiver();
-    let Ok((generation, bytes)) = receiver.try_receive() else {
+    let Ok((generation, len)) = receiver.try_receive() else {
         return;
     };
 
-    let result = link.writer(router).write_framed(&bytes).await;
+    let bytes = fw_esp32_common::serial::server_msg::frame_bytes(len);
+    let result = link.writer(router).write_framed(bytes).await;
     // Echo the request generation so `transport.send()` can discard any stale
     // result left over from a cancelled send.
     SERVER_WRITE_RESULT
@@ -470,7 +471,7 @@ pub fn get_message_channels() -> (
 
 /// Get the accountable server write channels for StreamingMessageRouterTransport.
 pub fn get_server_write_channels() -> (
-    &'static Channel<CriticalSectionRawMutex, (u32, Vec<u8>), 1>,
+    &'static Channel<CriticalSectionRawMutex, (u32, usize), 1>,
     &'static Channel<CriticalSectionRawMutex, (u32, Result<(), lpc_wire::TransportError>), 1>,
 ) {
     (&SERVER_WRITE_REQUEST, &SERVER_WRITE_RESULT)

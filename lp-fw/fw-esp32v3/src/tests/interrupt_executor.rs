@@ -140,11 +140,14 @@ pub fn init() {
     .expect("uart0 config")
     .with_tx(peripherals.GPIO1)
     .with_rx(peripherals.GPIO3);
+    esp_println::println!("[IEXEC] A uart+divisor up");
 
     esp_alloc::heap_allocator!(size: 32 * 1024);
+    esp_println::println!("[IEXEC] B heap up");
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_println::println!("[IEXEC] C peripherals split");
     esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
-    esp_println::println!("[IEXEC] runtime started");
+    esp_println::println!("[IEXEC] D runtime started");
 }

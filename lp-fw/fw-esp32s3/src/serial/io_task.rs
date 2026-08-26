@@ -44,8 +44,7 @@ static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 /// result would be consumed by the next send and misattributed. The generation
 /// lets `transport.send()` discard any stale result instead of trusting order.
 #[cfg(feature = "server")]
-static SERVER_WRITE_REQUEST: Channel<CriticalSectionRawMutex, (u32, alloc::vec::Vec<u8>), 1> =
-    Channel::new();
+static SERVER_WRITE_REQUEST: Channel<CriticalSectionRawMutex, (u32, usize), 1> = Channel::new();
 
 #[cfg(feature = "server")]
 static SERVER_WRITE_RESULT: Channel<
@@ -200,14 +199,17 @@ async fn read_serial<R: Read>(
 #[cfg(feature = "server")]
 async fn drain_server_write_request<W: Write>(tx: &mut W, conn: &mut UsbConnectionMonitor) {
     let receiver = SERVER_WRITE_REQUEST.receiver();
-    let Ok((generation, bytes)) = receiver.try_receive() else {
+    let Ok((generation, len)) = receiver.try_receive() else {
         return;
     };
 
     // Serialization happened thread-side in the transport; this task writes
-    // the framed bytes. The connection verdict is a chip fact and stays here.
+    // the static frame buffer's bytes (exclusive until the result posts —
+    // see fw_esp32_common::serial::server_msg::FRAME_BUF). The connection
+    // verdict is a chip fact and stays here.
     let result = if conn.is_connected() {
-        link_writer(tx).write_framed(&bytes).await
+        let bytes = fw_esp32_common::serial::server_msg::frame_bytes(len);
+        link_writer(tx).write_framed(bytes).await
     } else {
         Err(lpc_wire::TransportError::ConnectionLost)
     };
@@ -266,7 +268,7 @@ pub fn get_message_channels() -> (
 /// Get accountable server write channels for StreamingMessageRouterTransport.
 #[cfg(feature = "server")]
 pub fn get_server_write_channels() -> (
-    &'static Channel<CriticalSectionRawMutex, (u32, alloc::vec::Vec<u8>), 1>,
+    &'static Channel<CriticalSectionRawMutex, (u32, usize), 1>,
     &'static Channel<CriticalSectionRawMutex, (u32, Result<(), lpc_wire::TransportError>), 1>,
 ) {
     (&SERVER_WRITE_REQUEST, &SERVER_WRITE_RESULT)
