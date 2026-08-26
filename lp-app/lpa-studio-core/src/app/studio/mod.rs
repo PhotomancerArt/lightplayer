@@ -11,6 +11,12 @@ pub mod studio_actor;
 mod studio_agent_e2e_tests;
 pub mod studio_command;
 pub mod studio_controller;
+/// End-to-end device tests: the REAL effects layer driving the REAL model
+/// over the scripted fake device's bytes (host-only, like the edit e2e
+/// tests). See the module doc for why nothing here fakes at the model's own
+/// vocabulary.
+#[cfg(test)]
+mod studio_device_e2e_tests;
 /// End-to-end edit-flow tests against an in-process `lpa-server` (host-only
 /// dev-dependency; never part of the wasm lib build).
 #[cfg(test)]

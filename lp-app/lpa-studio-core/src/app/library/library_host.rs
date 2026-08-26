@@ -115,6 +115,20 @@ pub enum CatalogOp {
         history_files: Vec<(String, Vec<u8>)>,
         provenance: super::package_meta::PackageProvenance,
     },
+    /// Write one device MODEL record into the registry (M3 of the
+    /// device-model rebuild — the effects layer's `Command::PersistRecord`).
+    ///
+    /// Registry-only, and a MERGE: only the fields the model owns are
+    /// written, so a row's `association`, `board_id` and `previous_uids`
+    /// survive a sighting. The registry was read-only between the teardown
+    /// and here; this and [`CatalogOp::ForgetRegisteredDevice`] are its two
+    /// writers, and both are driven by the roster, never by a UI flow.
+    UpsertRegisteredDevice(Box<crate::app::places::RegisteredDevice>),
+    /// Remove a device from the registry (`Command::DeleteRecord`).
+    /// Idempotent — forgetting an unknown row is a no-op.
+    ForgetRegisteredDevice {
+        uid: String,
+    },
 }
 
 /// What a catalog transaction produced.
@@ -361,6 +375,18 @@ pub fn apply_catalog_op(
         CatalogOp::EnsureExampleSeeded { id } => Some(ensure_example_seeded(store, &id, now)?),
         CatalogOp::GenerateForBoard { board_id } => {
             Some(generate_for_board(store, &board_id, now)?)
+        }
+        CatalogOp::UpsertRegisteredDevice(device) => {
+            crate::app::places::DeviceRegistry::new(store.fs_handle())
+                .upsert_model_fields(*device)
+                .map_err(LibraryHostError::from)?;
+            None
+        }
+        CatalogOp::ForgetRegisteredDevice { uid } => {
+            crate::app::places::DeviceRegistry::new(store.fs_handle())
+                .forget(&uid)
+                .map_err(LibraryHostError::from)?;
+            None
         }
         CatalogOp::UpgradePackageFormat { project_uid } => {
             let uid = parse_uid(&project_uid)?;

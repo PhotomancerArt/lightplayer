@@ -57,6 +57,28 @@ const LOG_ONLY_PUBLISH_MIN_GAP_SECS: f64 = 0.25;
 /// would loop, so the session stays Failed for manual restart.
 const SIM_CRASH_REBOOT_GUARD_SECS: f64 = 30.0;
 
+/// The device model's knobs for THIS build.
+///
+/// `expected_proto` comes from `lpc-wire` and nowhere else: `lpa-devices`
+/// hardcodes no proto number on purpose, and a build that speaks proto N must
+/// never classify a proto-N device as incompatible because someone re-typed
+/// the number. (`lpa_link::device_link::wire::roster_config` does the same
+/// thing at the transport seam; both read the same constant, and studio-core
+/// must not require a transport feature just to construct a roster.)
+fn device_roster_config() -> crate::DeviceRosterConfig {
+    crate::DeviceRosterConfig {
+        expected_proto: lpc_wire::WIRE_PROTO_VERSION,
+        ..Default::default()
+    }
+}
+
+/// [`device_roster_config`] for the seam test that pins it against
+/// `lpa-link`'s `roster_config()`.
+#[cfg(test)]
+pub(crate) fn device_roster_config_for_test() -> crate::DeviceRosterConfig {
+    device_roster_config()
+}
+
 /// Whether a fresh sim crash at `now` may auto-reboot, given when the
 /// previous auto-reboot ran (`None` = never; epoch seconds).
 fn sim_crash_reboot_allowed(last_reboot_at: Option<f64>, now: f64, guard_secs: f64) -> bool {
@@ -78,6 +100,14 @@ pub struct StudioController {
     /// The door to the simulator runtime: the link provider registry plus
     /// the injected timer factory its connect ladder sleeps on.
     sim_link: crate::SimLink,
+    /// The rebuilt device layer (M3): the `lpa-devices` roster plus the
+    /// effects layer that performs its commands. The ONLY device path —
+    /// there is no device lens in the runtime pool and no device arm on any
+    /// other op, by design (the anti-fifth-machine rule).
+    devices: crate::DeviceRoster,
+    /// A granted-port sweep is due (boot, or a `navigator.serial` connect).
+    /// Drained by the actor's device step so a hotplug storm costs one sweep.
+    device_sweep_pending: bool,
     /// The runtime sessions the studio is attached to, plus the editor
     /// lens. Every network op resolves its wire client through the pool's
     /// lens-bound seam.
@@ -227,6 +257,8 @@ impl StudioController {
         let device_events = Rc::new(std::cell::RefCell::new(DeviceEventLog::new()));
         Self {
             sim_link: crate::SimLink::new(),
+            devices: crate::DeviceRoster::new(device_roster_config()),
+            device_sweep_pending: false,
             pool: RuntimePool::new(),
             project: ProjectController::new(),
             logs: LogRing::new(),
@@ -330,6 +362,192 @@ impl StudioController {
     pub fn apply_agent_feedback(&mut self, feedback: crate::AgentFeedback) {
         self.agent.apply_feedback(feedback);
         self.mark_dirty();
+    }
+
+    // ---------------------------------------------------------------
+    // The device layer (M3 of the device-model rebuild)
+    // ---------------------------------------------------------------
+
+    /// Install the platform transport the effects layer opens ports through
+    /// (wasm: browser Web Serial; host tests: a fake). Install before the
+    /// actor takes ownership.
+    ///
+    /// Installing one also arms the first granted-port sweep: a page that CAN
+    /// see ports should show what it already has permission for, without the
+    /// user asking twice.
+    pub fn set_device_transport(&mut self, transport: Rc<dyn crate::DeviceTransport>) {
+        self.devices.effects_mut().set_transport(transport);
+        self.device_sweep_pending = true;
+    }
+
+    /// Install the platform task spawner for device IO (`spawn_local` on
+    /// wasm). Install before the actor takes ownership.
+    pub fn set_device_spawner(&mut self, spawner: impl Fn(crate::DeviceTaskFuture) + 'static) {
+        self.devices.effects_mut().set_spawner(spawner);
+    }
+
+    /// Install the platform timer factory device waits run on (called by
+    /// `StudioActor::new`, from the same `make_timer` the pull deadlines use).
+    pub fn set_device_timer(
+        &mut self,
+        timer: impl FnMut(Duration) -> crate::DeviceTimerFuture + 'static,
+    ) {
+        self.devices.effects_mut().set_timer(timer);
+    }
+
+    /// Install the sink that returns device inputs to the actor's queue
+    /// (called by `StudioActor::new`).
+    pub fn set_device_input_sink(&mut self, sink: impl Fn(crate::DeviceInput) + 'static) {
+        self.devices.effects_mut().set_input_sink(sink);
+    }
+
+    /// Fold one device input and perform what it asked for.
+    ///
+    /// Synchronous end to end (invariant I7): the record writes it produced
+    /// are queued for [`Self::settle_device_records`], and everything else was
+    /// either a link command (queued on the link) or a spawned future.
+    pub fn fold_device_input(&mut self, input: crate::DeviceInput) {
+        let now = self.device_now();
+        for line in self.devices.handle(now, input) {
+            self.record_device_event(
+                None,
+                Some(&line.scope),
+                DeviceEventKind::Journal {
+                    scope: line.scope.clone(),
+                    entry: line.entry,
+                },
+            );
+        }
+        self.mark_dirty();
+    }
+
+    /// React to a `navigator.serial` edge.
+    pub fn note_device_hotplug(&mut self, edge: crate::app::studio::studio_command::DeviceHotplug) {
+        match edge {
+            crate::app::studio::studio_command::DeviceHotplug::Connected => {
+                self.device_sweep_pending = true;
+            }
+            crate::app::studio::studio_command::DeviceHotplug::Disconnected => {
+                self.devices.sweep_departed_ports();
+            }
+        }
+        self.run_due_device_sweep();
+    }
+
+    /// Run the granted-port sweep when one is due (boot, transport install,
+    /// hotplug connect). Coalesced: a storm of connect events costs one sweep.
+    fn run_due_device_sweep(&mut self) {
+        if !core::mem::take(&mut self.device_sweep_pending) {
+            return;
+        }
+        self.devices.sweep_granted_ports();
+    }
+
+    /// Perform the record writes the device folds asked for.
+    ///
+    /// The ONE asynchronous step in the device path, and it runs outside the
+    /// fold on purpose. A write that fails is a log line, not a stuck card:
+    /// the model's state is already correct, and the registry is a
+    /// convenience that survives a refresh, not the source of truth.
+    pub async fn settle_device_records(&mut self) {
+        self.run_due_device_sweep();
+        let writes = self.devices.take_writes();
+        if writes.is_empty() {
+            return;
+        }
+        if self.library_host.is_none() {
+            // No local store mounted: nothing to remember into. The roster
+            // keeps working for this session, which is the honest degrade.
+            log::debug!("device records not persisted: no library host");
+            return;
+        }
+        for record in writes.persist {
+            let Some(row) = crate::app::devices::registry_row_from_record(&record) else {
+                // An anonymous board has no honest registry key; adopting one
+                // is Setup's gesture, which is round 2.
+                continue;
+            };
+            // Remember which row this device's record went to: by delete time
+            // the device is gone from the fold, and the row key is its
+            // identity, not its handle.
+            self.devices.remember_key(record.device, row.uid.clone());
+            if let Err(error) = self
+                .run_catalog_op(CatalogOp::UpsertRegisteredDevice(Box::new(row)))
+                .await
+            {
+                log::warn!("device record not persisted: {error}");
+            }
+        }
+        for device in writes.delete {
+            let Some(uid) = self
+                .devices
+                .take_key(device)
+                .or_else(|| self.device_registry_key(device))
+            else {
+                continue;
+            };
+            if let Err(error) = self
+                .run_catalog_op(CatalogOp::ForgetRegisteredDevice { uid })
+                .await
+            {
+                log::warn!("device record not forgotten: {error}");
+            }
+        }
+    }
+
+    /// The registry key a device id currently maps to, read off the hydrated
+    /// gallery inputs (the rows themselves carry the model's handle).
+    fn device_registry_key(&self, device: crate::DeviceId) -> Option<String> {
+        self.home_inputs
+            .as_ref()?
+            .registered
+            .iter()
+            .find_map(|row| (row.device_id == Some(device.0)).then(|| row.uid.clone()))
+    }
+
+    /// Rehydrate the registry's remembered boards into the roster.
+    ///
+    /// Runs on every library settle, not once: the library re-hydrates when a
+    /// device row is written, when another tab changes the catalog, and when
+    /// this tab becomes visible again. The load is idempotent (rows the roster
+    /// already holds are skipped), which is what makes calling it repeatedly
+    /// correct rather than a way to grow a second card per board.
+    fn load_device_records_if_due(&mut self) {
+        let Some(inputs) = self.home_inputs.as_ref() else {
+            return;
+        };
+        let rows = inputs.registered.clone();
+        self.devices.load_records(&rows);
+        self.mark_dirty();
+    }
+
+    /// The device model's clock, for tests that assert the two agree.
+    #[cfg(test)]
+    pub(crate) fn device_now_for_test(&self) -> crate::DeviceMillis {
+        self.device_now()
+    }
+
+    /// Provisional device ids of the links still being identified — the
+    /// handle a Cancel gesture on a fresh plug addresses.
+    #[cfg(test)]
+    pub(crate) fn device_pending_ids_for_test(&self) -> Vec<crate::DeviceId> {
+        self.devices
+            .roster()
+            .pending()
+            .iter()
+            .map(|pending| pending.device_id())
+            .collect()
+    }
+
+    /// The device model's clock: the injected wall clock, in the integer
+    /// millis the model keeps its timeline in.
+    fn device_now(&self) -> crate::DeviceMillis {
+        crate::DeviceMillis(((self.now_secs)() * 1_000.0).max(0.0) as u64)
+    }
+
+    /// The devices surface's projection.
+    pub fn device_roster_view(&self) -> crate::DeviceRosterView {
+        self.devices.view(self.device_now())
     }
 
     /// Install the platform's user-settings persistence sink (localStorage
@@ -1161,6 +1379,9 @@ impl StudioController {
         // Overlay the card's persisted UI view-state (the builder leaves
         // `ui` default; the identity key keys the overlay).
         view.sim = view.sim.map(|card| self.overlay_card_ui(card));
+        // The device half is the model's own projection, verbatim: there is
+        // no `Ui*` mirror of it, so the page cannot drift from the fold.
+        view.devices = self.device_roster_view();
         Some(view)
     }
 
@@ -1376,6 +1597,10 @@ impl StudioController {
                 });
             }
         }
+        // The registry rows come off the same snapshot walk; the roster
+        // rehydrates from them the first time they land, so a remembered
+        // board has a card before any port is open.
+        self.load_device_records_if_due();
         self.mark_dirty();
     }
 
@@ -1480,6 +1705,10 @@ impl StudioController {
         if node_id.as_str() == crate::RuntimeOp::NODE_ID {
             let op = action.into_op::<crate::RuntimeOp>()?;
             return self.execute_runtime_op(op).await;
+        }
+        if node_id.as_str() == crate::DevicesOp::NODE_ID {
+            let op = action.into_op::<crate::DevicesOp>()?;
+            return self.execute_devices_op(op).await;
         }
         if node_id == project_node_id {
             // Slot edits and node-level reverts target the project node too
@@ -2156,6 +2385,17 @@ impl StudioController {
 
     /// The runtime-scoped verbs (the sim's danger zone, the console's
     /// log-level selector).
+    /// One device gesture: fold it, then settle whatever it asked to persist.
+    ///
+    /// Nothing here decides anything about a device — the model does. That is
+    /// the point: a UI gesture and a link event enter through the same door,
+    /// with the same rights the fold gives each arm.
+    async fn execute_devices_op(&mut self, op: crate::DevicesOp) -> UiResult {
+        self.fold_device_input(crate::DeviceInput::Action(op.0));
+        self.settle_device_records().await;
+        Ok(UiNotices::new())
+    }
+
     async fn execute_runtime_op(&mut self, op: crate::RuntimeOp) -> UiResult {
         match op {
             crate::RuntimeOp::StopSimulator => self.stop_simulator().await,

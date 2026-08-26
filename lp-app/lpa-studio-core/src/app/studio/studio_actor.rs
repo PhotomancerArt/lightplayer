@@ -229,6 +229,19 @@ where
         let mut agent_timer = make_timer.clone();
         controller
             .set_agent_timer(move |delay| Box::pin(agent_timer(delay)) as crate::AgentTimerFuture);
+        // The device effects layer waits on the SAME platform timer the pull
+        // deadlines use, and pushes every link event, timer fire and port
+        // arrival back onto THIS queue — which is what makes the fold
+        // synchronous and invariant I7 structural rather than a rule someone
+        // has to remember.
+        let mut device_timer = make_timer.clone();
+        controller.set_device_timer(move |delay| {
+            Box::pin(device_timer(delay)) as crate::DeviceTimerFuture
+        });
+        controller.set_device_input_sink({
+            let tx = tx.clone();
+            move |input| tx.send(StudioCommand::Device(input))
+        });
         // Seed the shared delay from the controller's initial per-session
         // policy so the UI timer has a sane first interval before the
         // first batch runs.
@@ -287,6 +300,19 @@ where
         for feedback in plan.agent {
             self.controller.apply_agent_feedback(feedback);
         }
+        // Device folds run BEFORE this batch's actions, and each is
+        // synchronous (invariant I7 — the fold never awaits device IO). A
+        // gesture that lands beside a burst of link events therefore acts on
+        // evidence that already includes them, which is what stops a card
+        // from being clicked in a state it has already left.
+        for step in plan.device {
+            match step {
+                DeviceStep::Input(input) => self.controller.fold_device_input(input),
+                DeviceStep::Hotplug(edge) => self.controller.note_device_hotplug(edge),
+            }
+        }
+        // The one asynchronous half: registry writes the folds asked for.
+        self.controller.settle_device_records().await;
         for action in plan.actions {
             self.run_action(action).await;
         }
@@ -573,6 +599,9 @@ where
 /// coalesced), the ordered actions to run, whether a tick should run
 /// (coalesced to at most one), and whether shutdown was requested.
 struct CommandPlan {
+    /// Device-model inputs and hotplug edges, in queue order. Never
+    /// coalesced: an event stream's order is its meaning.
+    device: Vec<DeviceStep>,
     console: Vec<ConsoleCommand>,
     /// Settings mutations/loads, applied synchronously in queue order
     /// (each is a distinct gesture or layer arrival; never coalesced).
@@ -591,8 +620,15 @@ struct CommandPlan {
     library_changed: bool,
 }
 
+/// One planned device step: fold an input, or make the effects layer look.
+enum DeviceStep {
+    Input(lpa_devices::Input),
+    Hotplug(crate::app::studio::studio_command::DeviceHotplug),
+}
+
 impl CommandPlan {
     fn from_batch(batch: Vec<StudioCommand>) -> Self {
+        let mut device = Vec::new();
         let mut console = Vec::new();
         let mut settings = Vec::new();
         let mut agent = Vec::new();
@@ -604,6 +640,8 @@ impl CommandPlan {
         for command in batch {
             match command {
                 StudioCommand::AttachLibrary(attachment) => attach_library = Some(attachment),
+                StudioCommand::Device(input) => device.push(DeviceStep::Input(input)),
+                StudioCommand::DeviceHotplug(edge) => device.push(DeviceStep::Hotplug(edge)),
                 StudioCommand::LibraryChanged => library_changed = true,
                 StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
                 // Not a local console mutation: a runtime-level change is
@@ -631,6 +669,7 @@ impl CommandPlan {
             }
         }
         Self {
+            device,
             console,
             settings,
             agent,
