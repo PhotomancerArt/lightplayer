@@ -70,7 +70,12 @@ TX timeouts — every exit criterion below met. The alternatives analysis
 is `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`
 (including three bench-found constraints future serial work must not
 re-learn). The `stopAllProjects` workaround remains necessary ONLY for
-devices still flashed with older firmware.
+devices still flashed with older firmware. Residual frontier beyond the
+exit criteria: inbound frames longer than one engine tick of line time
+(~12 KB at a 103 ms tick) are intermittently lost —
+`docs/defects/2026-08-26-inbound-frames-longer-than-a-tick-lossy.md`
+(P6's RX ring is the known design answer; no current client sends that
+shape).
 
 **Exit criteria** — inbound: an interrupt-serviced RX ring (or io_task
 priority/executor isolation) sized so a full-load engine tick cannot

@@ -157,13 +157,15 @@ frame doorbells died under the executor. The fix is swi2; the lesson is
 
 - **Interrupt-fed RX ring (P6 of the plan).** The "actually correct"
   inbound fix in the abstract: a UART ISR drains the FIFO into a ring,
-  removing the 1.4 ms deadline entirely. Held as a conditional
-  follow-up; **not needed** — the bench showed zero inbound loss at 1 ms
-  pacing under a 114 ms tick (the executor preempts the tick, so the
-  cadence holds). Re-open if a future workload shows residual
-  `FifoOverflowed` (the erratum note at `poll_rx_into` — the classic
-  cannot clear the RX-timeout interrupt while the FIFO is non-empty —
-  binds any such design).
+  removing the 1.4 ms deadline entirely. Not needed *for the debt
+  entry's ≥4 KB criterion* (zero loss at 1 ms pacing under a 114 ms
+  tick, 11/11 across sessions). **Re-opened as a follow-up** by the
+  post-facto 12 KiB probe: frames longer than one tick of line time are
+  intermittently, silently lost (~1/3, bursty) —
+  `docs/defects/2026-08-26-inbound-frames-longer-than-a-tick-lossy.md`.
+  The erratum note at `poll_rx_into` (the classic cannot clear the
+  RX-timeout interrupt while the FIFO is non-empty) binds any such
+  design.
 - **Hardware or XON/XOFF flow control.** Genuinely supported by the
   chip but blocked by the board: UART0's pins are fixed GPIO1/GPIO3,
   the CH340's DTR/RTS pair is the auto-reset strap, Web Serial does not
@@ -211,5 +213,8 @@ frame doorbells died under the executor. The fix is swi2; the lesson is
   isolation on swi3 — no doorbell, no io_task, no engine. Run it after
   every esp-rtos bump: it is the canary that says when the pacer
   workaround can be retired (upstream fixed) or when executor semantics
-  shifted. Its current silicon verdict is recorded below in
-  "Harness verdict".
+  shifted. **Harness verdict: pending** — the rig's first silicon runs
+  produced only garbled output (a crash loop before the rig's own UART
+  divisor setup; under diagnosis — the rig, not the fix, is what is
+  broken). Until it runs clean, finding 1's isolation stands untested
+  and the pacer stays on its current evidence.
