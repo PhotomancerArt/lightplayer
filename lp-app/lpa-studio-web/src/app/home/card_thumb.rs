@@ -93,7 +93,7 @@ pub(crate) fn CardThumb(
     rsx! {
         div {
             id: "{preview.frame_id}",
-            class: "tw:relative tw:h-24 tw:w-full tw:overflow-hidden tw:rounded-t-md",
+            class: "tw:relative tw:aspect-[4/3] tw:w-full tw:overflow-hidden tw:rounded-t-md",
             // base layer: identity gradient + the name's initial
             div {
                 class: "tw:absolute tw:inset-0 tw:flex tw:items-center tw:justify-center",
@@ -118,7 +118,7 @@ pub(crate) fn CardThumb(
                     key: "{canvas.id}",
                     id: "{canvas.id}",
                     width: "256",
-                    height: "96",
+                    height: "192",
                     class: thumb_canvas_class(canvas.revealed),
                 }
             }
