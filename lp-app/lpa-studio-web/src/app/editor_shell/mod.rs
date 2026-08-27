@@ -7,14 +7,17 @@
 //! activities. The Fixtures/Outputs panels are the editor's rails — they
 //! are grown in place, never forked.
 //!
-//! The DIVE is layer state, not component identity (the one-project-canvas
-//! plan): double-clicking a fixture makes its lamps editable IN PLACE —
-//! same canvas, same camera, no chrome swap. The asset pipeline
-//! ([`mapping_session::MappingAssetPipeline`]) seeds the workbench-owned
-//! session and applies commits; the toolbar morphs between the fixture
-//! and mapping item lists; esc walks the editor ladder and, at its end,
-//! leaves the dive. Patching becomes its own workbench view later (R5) by
-//! mounting the same canvas with different furniture.
+//! The DIVE is the one selection's DERIVED scope (the
+//! one-selection-one-tree ADR): entering a fixture — double-click, tree
+//! row, toolbar — is a selection dispatch, and its lamps become editable
+//! IN PLACE: same canvas, same camera, no chrome swap. The asset
+//! pipeline ([`mapping_session::MappingAssetPipeline`]) seeds the
+//! workbench-owned session and applies commits; the selection
+//! coordinator ([`selection`]) bridges the core selection and the
+//! session's positional paths; the toolbar morphs between the fixture
+//! and mapping item lists; esc ascends the ladder and, at its end, the
+//! selection itself. The Patching view mounts the same canvas with
+//! different furniture.
 
 pub(crate) mod arrange;
 #[cfg(feature = "stories")]
@@ -541,8 +544,9 @@ pub fn EditorShellCenter(
     }
 }
 
-/// The fixture activity's toolbar: breadcrumb root, arrange verbs for the
-/// selection, history, and the counts readout.
+/// The fixture activity's toolbar: arrange verbs for the selection,
+/// history, and the counts readout (the breadcrumb is gone — scope reads
+/// from the canvas, the Props stack, and the tree).
 fn fixture_toolbar(
     can_edit_mapping: bool,
     has_selection: bool,
