@@ -323,6 +323,17 @@ pub(crate) fn PackageCardMenu(
             label: "Project actions".to_string(),
             placement: PopoverPlacement::BottomEnd,
             initially_open,
+            // Compact trigger for the glass bar: the stock 32px toned
+            // square crowded the slim footer (G1 feedback — "a little
+            // big, wants a tiny bit more space around it"). No
+            // preflight, so the class resets the UA button chrome.
+            trigger: rsx! {
+                span { class: "tw:inline-flex tw:items-center tw:justify-center",
+                    StudioIcon { name: StudioIconName::More, size: 13 }
+                }
+            },
+            trigger_class: CARD_MENU_TRIGGER_CLASS.to_string(),
+            trigger_open_class: format!("{CARD_MENU_TRIGGER_CLASS} tw:bg-white/10 tw:text-strong-foreground"),
             // ---- status: the words behind the face's glyphs ----
             DetailSection {
                 div { class: "tw:grid tw:gap-0.5",
@@ -590,6 +601,11 @@ fn target_display_name(target: &str) -> &str {
 pub(crate) fn home_action(op: HomeOp) -> UiAction {
     UiAction::from_op(ControllerId::new(HOME_NODE_ID), op)
 }
+
+/// The glass bar's compact ⋯ trigger: a 20px quiet icon button (the
+/// stock 32px icon-menu square overwhelms the slim footer). Resets UA
+/// button chrome itself — Tailwind preflight is not loaded.
+const CARD_MENU_TRIGGER_CLASS: &str = "tw:grid tw:h-5 tw:w-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:place-items-center tw:rounded tw:border-0 tw:bg-transparent tw:p-0 tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/10 tw:hover:text-strong-foreground";
 
 /// The card's treatment while an open runs. `busy` is a DIMMING, not a
 /// disabling: the card still acts (it supersedes), so it keeps its

@@ -58,11 +58,17 @@ pub(crate) enum ContextTone {
 
 /// The footer. Absolutely positioned over the card's bottom edge; the
 /// card must be `position: relative` with `overflow: hidden` (both
-/// cards already are). Sits UNDER the stretched open link (no z-index)
-/// so the whole face stays clickable; only the glyph cluster rises
-/// above it (`z-[2]`) so its tooltips can be hovered — a click landing
-/// on a 17px glyph chip deliberately does nothing rather than
-/// mis-opening the card.
+/// cards already are).
+///
+/// Stacking/clicks: the bar's `backdrop-filter` forces a stacking
+/// context, so a z-index INSIDE the bar can never rise past the card's
+/// stretched open link on its own — the bar itself must sit above the
+/// link (`z-[2]`). It stays click-transparent (`pointer-events-none`)
+/// so the face remains a door everywhere except the controls, which
+/// re-enable their own pointer events: the ⋯ menu takes real clicks,
+/// and the glyph cluster takes hover for its tooltips (a click landing
+/// on a 17px glyph deliberately does nothing rather than mis-opening
+/// the card).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn CardGlassFooter(
@@ -81,13 +87,13 @@ pub(crate) fn CardGlassFooter(
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "tw:absolute tw:inset-x-0 tw:bottom-0 tw:border-t tw:border-white/5 tw:bg-[rgba(13,17,21,0.68)] tw:px-2.5 tw:pt-1.5 tw:pb-2 tw:backdrop-blur-[10px] tw:backdrop-saturate-[1.15]",
+        div { class: "tw:pointer-events-none tw:absolute tw:inset-x-0 tw:bottom-0 tw:z-[2] tw:border-t tw:border-white/5 tw:bg-[rgba(13,17,21,0.68)] tw:px-2.5 tw:pt-1.5 tw:pb-2 tw:backdrop-blur-[10px] tw:backdrop-saturate-[1.15]",
             div { class: "tw:flex tw:items-center tw:gap-1.5",
                 p { class: "tw:m-0 tw:min-w-0 tw:flex-1 tw:truncate tw:text-[13px]/[17px] tw:font-semibold tw:text-strong-foreground",
                     "{title}"
                 }
                 if !glyphs.is_empty() {
-                    span { class: "tw:relative tw:z-[2] tw:flex tw:flex-none tw:gap-1",
+                    span { class: "tw:pointer-events-auto tw:flex tw:flex-none tw:gap-1",
                         for glyph in glyphs {
                             span {
                                 class: "tw:inline-flex tw:h-[17px] tw:w-[17px] tw:items-center tw:justify-center tw:rounded tw:bg-black/40 {glyph_tone_class(glyph.tone)}",
@@ -98,7 +104,7 @@ pub(crate) fn CardGlassFooter(
                     }
                 }
                 if let Some(trailing) = trailing {
-                    span { class: "tw:relative tw:z-[2] tw:-my-1.5 tw:-mr-1.5 tw:flex-none",
+                    span { class: "tw:pointer-events-auto tw:-my-1 tw:-mr-1 tw:flex-none",
                         {trailing}
                     }
                 }
