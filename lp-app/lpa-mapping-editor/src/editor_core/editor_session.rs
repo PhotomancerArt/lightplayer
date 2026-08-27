@@ -325,26 +325,87 @@ impl MapEditorSession {
 
     // ---- structural edits ------------------------------------------------
 
-    /// Insert a vertex into the selected path so it becomes `points[at]`,
-    /// splitting the segment it lands in. Inert segments survive the split:
-    /// both halves of a split jumper stay inert, and gaps after the insertion
-    /// point shift up with their segments.
-    pub fn insert_path_vertex(&mut self, index: usize, at: usize, position: [f32; 2]) {
-        self.edit(|doc| {
-            if let Some(path) = doc
-                .objects
-                .get_mut(index)
-                .and_then(|object| editable_path_mut(&mut object.shape))
-                && at <= path.points.len()
-            {
-                path.gaps = gaps_after_vertex_insert(&path.gaps, at);
-                path.points.insert(at, position);
-            }
-        });
+    /// Insert a vertex into object `index`'s outline so it becomes
+    /// `points[at]`, splitting the segment it lands in.
+    pub fn insert_vertex(&mut self, index: usize, at: usize, position: [f32; 2]) -> bool {
+        self.insert_vertex_at(&ShapePath::root(index), at, position)
     }
 
-    /// Delete the selected vertex (path keeps ≥ 2 points) or, without a
-    /// vertex selection, the selected objects.
+    /// Insert a vertex into the outline at `path` so it becomes `points[at]`,
+    /// splitting the segment it lands in. Every vertexed shape answers — path,
+    /// polygon, shaped matrix — through [`editable_vertices_mut`], and through
+    /// a repeat this edits the authored inner shape.
+    ///
+    /// A closed outline's implicit last→first segment splits at `at ==
+    /// points.len()`: the new corner APPENDS, because that seam edge runs from
+    /// the last authored point, not to the first one.
+    ///
+    /// Inert segments survive the split: both halves of a split jumper stay
+    /// inert, and gaps after the insertion point shift up with their segments
+    /// (paths only — no other vertexed shape has jumpers).
+    ///
+    /// One undo step. Returns whether a vertex actually landed.
+    pub fn insert_vertex_at(&mut self, path: &ShapePath, at: usize, position: [f32; 2]) -> bool {
+        let mut inserted = false;
+        self.edit_shape_at(path, |shape| {
+            if editable_vertices(shape).is_none_or(|points| at > points.len()) {
+                return;
+            }
+            if let Some(path) = editable_path_mut(shape) {
+                path.gaps = gaps_after_vertex_insert(&path.gaps, at);
+            }
+            if let Some(points) = editable_vertices_mut(shape) {
+                points.insert(at, position);
+                inserted = true;
+            }
+        });
+        inserted
+    }
+
+    /// Remove one authored vertex from object `index`'s outline.
+    pub fn remove_vertex(&mut self, index: usize, vertex: usize) -> bool {
+        self.remove_vertex_at(&ShapePath::root(index), vertex)
+    }
+
+    /// Remove one authored vertex from the outline at `path`, down to the
+    /// shape's FLOOR: a path keeps two points, a closed outline three. At the
+    /// floor this refuses and returns `false` — the shape has no corner left
+    /// to spare, and the caller must not read that as "delete something else".
+    ///
+    /// A path's inert segments merge with the geometry: the segment left where
+    /// two met stays inert if either half was.
+    ///
+    /// One undo step. Returns whether a vertex actually went.
+    pub fn remove_vertex_at(&mut self, path: &ShapePath, vertex: usize) -> bool {
+        let mut removed = false;
+        self.edit_shape_at(path, |shape| {
+            let floor = vertex_floor(shape);
+            if editable_vertices(shape)
+                .is_none_or(|points| points.len() <= floor || vertex >= points.len())
+            {
+                return;
+            }
+            if let Some(path) = editable_path_mut(shape) {
+                let segments = path.points.len() - 1;
+                path.gaps = gaps_after_vertex_delete(&path.gaps, vertex, segments);
+                // A path's count is its lamp budget along the run: one corner
+                // fewer is one lamp fewer, floored at the two endpoints.
+                path.count = path.count.saturating_sub(1).max(2);
+            }
+            if let Some(points) = editable_vertices_mut(shape) {
+                points.remove(vertex);
+                removed = true;
+            }
+        });
+        removed
+    }
+
+    /// Delete the selected VERTEX when one is selected — down to the shape's
+    /// floor, where the key does nothing at all — else the selected objects.
+    ///
+    /// The vertex branch never falls through to the object branch: a selected
+    /// corner means Delete is about that corner, and a shape that has no corner
+    /// to spare must not lose the whole object instead.
     ///
     /// Deleting a DESCENDED path deletes its whole object: a repeat cannot
     /// exist without its inner shape, so delete-at-depth means "delete the
@@ -353,22 +414,10 @@ impl MapEditorSession {
         if let (Some(selected), Some(vertex)) =
             (self.selection.single().cloned(), self.selection.vertex)
         {
-            let mut deleted = false;
-            self.edit(|doc| {
-                if let Some(path) = selected.resolve_mut(doc).and_then(editable_path_mut)
-                    && path.points.len() > 2
-                    && vertex < path.points.len()
-                {
-                    path.gaps = gaps_after_vertex_delete(&path.gaps, vertex, path.points.len() - 1);
-                    path.points.remove(vertex);
-                    path.count = path.count.saturating_sub(1).max(2);
-                    deleted = true;
-                }
-            });
-            if deleted {
+            if self.remove_vertex_at(&selected, vertex) {
                 self.selection.vertex = None;
-                return;
             }
+            return;
         }
         let selected = self.selection.root_objects();
         if selected.is_empty() {
@@ -897,6 +946,19 @@ pub fn editable_vertices(shape: &Map2dShape) -> Option<&[[f32; 2]]> {
         Map2dShape::FilledPolygon(filled) => Some(&filled.points),
         Map2dShape::Repeat(repeat) => editable_vertices(&repeat.shape),
         Map2dShape::Grid(_) | Map2dShape::Ring(_) => None,
+    }
+}
+
+/// How few authored vertices a shape may be left with: two for an open run,
+/// three for a closed outline (two points enclose nothing). Shapes with no
+/// authored vertices answer [`usize::MAX`], so nothing is ever removable from
+/// them.
+fn vertex_floor(shape: &Map2dShape) -> usize {
+    match shape {
+        Map2dShape::Path(_) => 2,
+        Map2dShape::Polygon(_) | Map2dShape::FilledPolygon(_) => 3,
+        Map2dShape::Repeat(repeat) => vertex_floor(&repeat.shape),
+        Map2dShape::Grid(_) | Map2dShape::Ring(_) => usize::MAX,
     }
 }
 
@@ -1803,13 +1865,15 @@ mod tests {
             }
         });
         // Split segment 1 (the jumper) at its midpoint: it becomes 1 and 2.
-        session.insert_path_vertex(0, 2, [10.0, 5.0]);
+        assert!(session.insert_vertex(0, 2, [10.0, 5.0]));
         assert_eq!(gaps_of(&session), vec![1, 2]);
         assert_eq!(points_of(&session).len(), 5);
 
         // A vertex inserted before every gap pushes them all up one.
-        session.insert_path_vertex(0, 0, [-10.0, 0.0]);
+        assert!(session.insert_vertex(0, 0, [-10.0, 0.0]));
         assert_eq!(gaps_of(&session), vec![2, 3]);
+        // Past the end there is no segment to split.
+        assert!(!session.insert_vertex(0, 99, [0.0, 0.0]));
     }
 
     /// Deleting a vertex merges the two segments it joined; a merged segment
@@ -1836,6 +1900,116 @@ mod tests {
         session.delete_selection();
         assert_eq!(points_of(&session).len(), 2);
         assert_eq!(gaps_of(&session), Vec::<u32>::new()); // clamped: 1 segment left, and it must light
+    }
+
+    /// Insert reaches every vertexed shape through the same seam the handles
+    /// do, repeat wrappers included — and a closed outline's SEAM edge (last →
+    /// first) takes its new corner at the END of the list, never at index 0,
+    /// which would land it on the wrong side of the shape.
+    #[test]
+    fn inserting_a_vertex_spans_every_vertexed_shape_and_the_closing_seam() {
+        // Outline polygon: split the seam edge from [0,100] back to [0,0].
+        let mut session = session_with_square_polygon();
+        assert!(session.insert_vertex(0, 4, [-10.0, 50.0]));
+        let points = points_of_polygon(&session);
+        assert_eq!(points.len(), 5);
+        assert_eq!(points[4], [-10.0, 50.0], "the seam corner appends");
+        assert_eq!(points[0], [0.0, 0.0], "and the first corner stays first");
+
+        // Shaped matrix: same seam, same seat — and the lattice re-derives.
+        let mut session = square_polygon_draft(PolygonMode::Filled);
+        session.polygon_finish().expect("filled polygon created");
+        assert!(session.insert_vertex(0, 2, [120.0, 50.0]));
+        assert_eq!(filled_of(&session).points.len(), 5);
+        assert_eq!(filled_of(&session).points[2], [120.0, 50.0]);
+
+        // Through a repeat the authored INNER shape takes the corner.
+        let mut session = session_with_repeat(3);
+        assert!(session.insert_vertex(0, 1, [100.0, 25.0]));
+        let Map2dShape::Repeat(repeat) = &session.doc().objects[0].shape else {
+            panic!("expected a repeat");
+        };
+        assert_eq!(
+            editable_vertices(&repeat.shape)
+                .expect("inner vertices")
+                .len(),
+            5
+        );
+
+        // Grids have no authored vertex to split.
+        let mut session = MapEditorSession::new(Map2dDoc::new());
+        session.create_default_grid([0.0, 0.0]);
+        assert!(!session.insert_vertex(0, 0, [0.0, 0.0]));
+    }
+
+    /// Remove stops at each shape's floor — two points for a run, three for a
+    /// closed outline — and a refused removal must leave the OBJECT alone: the
+    /// vertex branch of Delete never falls through to deleting the shape.
+    #[test]
+    fn removing_a_vertex_stops_at_the_shapes_floor() {
+        // A closed outline keeps three corners.
+        let mut session = session_with_square_polygon();
+        session.selection.select_only(0);
+        session.selection.vertex = Some(1);
+        session.delete_selection();
+        assert_eq!(points_of_polygon(&session).len(), 3);
+        assert_eq!(session.selection.vertex, None, "the corner is gone");
+        session.selection.vertex = Some(0);
+        session.delete_selection();
+        assert_eq!(points_of_polygon(&session).len(), 3, "at the floor");
+        assert_eq!(session.doc().objects.len(), 1, "the object survives");
+        assert_eq!(session.selection.vertex, Some(0), "and stays selected");
+
+        // A shaped matrix floors at three too.
+        let mut session = square_polygon_draft(PolygonMode::Filled);
+        session.polygon_finish().expect("filled polygon created");
+        assert!(session.remove_vertex(0, 3));
+        assert_eq!(filled_of(&session).points.len(), 3);
+        assert!(!session.remove_vertex(0, 0));
+        assert_eq!(session.doc().objects.len(), 1);
+
+        // A path floors at two, and a repeat's inner path floors the same way.
+        let mut session = session_with_repeat(3);
+        assert!(session.remove_vertex(0, 0));
+        assert!(session.remove_vertex(0, 0));
+        assert!(!session.remove_vertex(0, 0));
+        let Map2dShape::Repeat(repeat) = &session.doc().objects[0].shape else {
+            panic!("expected a repeat");
+        };
+        assert_eq!(
+            editable_vertices(&repeat.shape)
+                .expect("inner vertices")
+                .len(),
+            2
+        );
+
+        // With no vertex selected, Delete is still about the object.
+        let mut session = session_with_square_polygon();
+        session.selection.select_only(0);
+        session.delete_selection();
+        assert!(session.doc().objects.is_empty());
+    }
+
+    /// Each structural vertex edit is exactly ONE undo step, and a refused one
+    /// is no step at all.
+    #[test]
+    fn vertex_insert_and_remove_are_each_one_undo_step() {
+        let mut session = session_with_square_polygon();
+        let base = session.undo.len();
+        assert!(session.insert_vertex(0, 4, [-10.0, 50.0]));
+        assert_eq!(session.undo.len(), base + 1);
+        session.undo();
+        assert_eq!(points_of_polygon(&session).len(), 4);
+
+        assert!(session.remove_vertex(0, 2));
+        assert_eq!(session.undo.len(), base + 1);
+        session.undo();
+        assert_eq!(points_of_polygon(&session).len(), 4);
+
+        // A refused removal writes nothing to undo.
+        let steps = session.undo.len();
+        assert!(!session.remove_vertex(0, 9));
+        assert_eq!(session.undo.len(), steps);
     }
 
     // ---- rotational repeat ----------------------------------------------

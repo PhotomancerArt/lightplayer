@@ -246,12 +246,13 @@ pub(crate) fn doc_layers(input: &DocLayersInput<'_>) -> Element {
                 stroke_width: "{(1.6 / eff).max(radius * 0.22)}",
             }
         }
-        // A shaped matrix's AUTHORED OUTLINE. Its lamps are a field, so its
-        // body is the neutral band the snake sweeps — the silhouette the
-        // author actually drew would otherwise be invisible, and dragging a
-        // vertex would move a boundary nothing on screen shows. Thin, dashed
-        // and never a pointer target (the hit line under it owns clicks);
-        // selection promotes it to a solid accent line.
+        // A shaped matrix's AUTHORED OUTLINE. Its body draws NO band (G1: one
+        // swept along the serpentine snakes through the lattice), so this line
+        // and the lamp cells are the whole picture — and without it the
+        // silhouette the author drew would be invisible, with vertex drags
+        // moving a boundary nothing on screen shows. Thin, dashed and never a
+        // pointer target (the hit line under it owns clicks); selection
+        // promotes it to a solid accent line.
         for (index, (object_index, points)) in input.filled_outlines.iter().enumerate() {
             {
                 let selected = input.selection.object_selected(*object_index);
@@ -277,7 +278,7 @@ pub(crate) fn doc_layers(input: &DocLayersInput<'_>) -> Element {
                             key: "hit{object_index}",
                             class: "lpme-hitline",
                             points: points.iter().map(|p| format!("{},{}", p[0], p[1])).collect::<Vec<_>>().join(" "),
-                            stroke_width: "{14.0 / eff}",
+                            stroke_width: "{crate::view::canvas::HIT_LINE_PX / eff}",
                             onpointerdown: move |evt| {
                                 if secondary_button(&evt) {
                                     return;

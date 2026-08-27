@@ -130,6 +130,10 @@ pub fn handle_editor_key(
             EditorKeyOutcome::Handled
         }
         Key::Backspace | Key::Delete => {
+            // Vertex-FIRST: with a corner selected the key is about that
+            // corner, and a shape already at its floor (a run's two points, an
+            // outline's three) simply refuses — `delete_selection` never lets a
+            // refused corner become a deleted object.
             let had_selection = !session.peek().selection.is_empty();
             if had_selection {
                 evt.prevent_default();

@@ -46,6 +46,7 @@ pub use canvas_anchor::{CanvasAnchor, capture_pointer};
 pub use lamp_metrics::{authored_spans, fit_region, lamp_display_radius};
 pub use palette::object_color;
 
+pub use layers::bodies::CellSeeding;
 pub use layers::cells::{LampCell, lamp_cells, point_cells};
 pub use layers::fixtures::{FixtureBody, FixtureEvent, FixturePick, FixtureSprite, SpriteObject};
 pub use layers::outline::{aligned_outline, dist_to_loops, hit_body, point_in_loops};
@@ -348,10 +349,10 @@ pub fn EditorCanvas(
             ))
         })
         .collect();
-    // A shaped matrix's lamps are a FIELD: nothing else on the canvas draws
-    // the outline they fill (its body is the neutral band its snake sweeps),
-    // so the authored silhouette gets its own thin line. Authored grain, like
-    // the wiring annotations: instance 0 of a repeat, never all of them.
+    // A shaped matrix's lamps are a FIELD, and its body draws no band at all
+    // (bodies.rs), so nothing else on the canvas draws the outline they fill:
+    // the authored silhouette gets its own thin line. Authored grain, like the
+    // wiring annotations: instance 0 of a repeat, never all of them.
     let filled_outlines: Vec<(usize, Vec<[f32; 2]>)> = doc
         .objects
         .iter()
@@ -1024,11 +1025,19 @@ pub fn EditorCanvas(
                 }
             },
             ondoubleclick: move |evt| {
-                // Drawing-tool finish keeps priority (editor grammar; never
-                // in fixture mode — there is no tool without a session).
-                // The polygon's own gesture is close-on-first, but a
-                // double-click must still be CONSUMED here: mid-draft it can
-                // never be allowed to fall through to the dive-switch below.
+                // Double-click dispatch, in order (editor grammar only — never
+                // in fixture mode, where there is no tool and no session):
+                //
+                //   1. a live DRAFT finishes. The polygon's own gesture is
+                //      close-on-first, but the double-click must still be
+                //      CONSUMED: mid-draft it can never fall through.
+                //   2. Select tool, one vertexed object selected, the click on
+                //      one of its EDGES → insert a corner there.
+                //   3. otherwise the fixture dive / dive-switch below.
+                //
+                // Lamp dots handle their own double-click (descend into a
+                // group) and stop propagation first, so rung 2 only ever sees
+                // clicks that missed every lamp.
                 if !fixture_mode {
                     let tool = session.read().tool.clone();
                     match tool {
@@ -1043,6 +1052,12 @@ pub fn EditorCanvas(
                                 on_committed.call(());
                             }
                             return;
+                        }
+                        MapTool::Select => {
+                            if insert_vertex_on_edge(&interact, &evt, eff) {
+                                on_committed.call(());
+                                return;
+                            }
                         }
                         _ => {}
                     }
@@ -1200,6 +1215,76 @@ pub fn EditorCanvas(
 /// refuse anyway.
 const CLOSE_MIN_VERTICES: usize = 3;
 
+/// Screen-pixel stroke width of the invisible hit line laid over an authored
+/// chain — what makes skinny geometry clickable, and what a double-click must
+/// land inside to mean "this edge".
+pub(crate) const HIT_LINE_PX: f32 = 14.0;
+
+/// Where on a vertex chain a click landed: which segment, and the point on it
+/// nearest the click.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct EdgeHit {
+    /// Index of the segment, counting the implicit closing seam last.
+    segment: usize,
+    /// The foot of the click on that segment — the new corner lands ON the
+    /// edge, so inserting one never kinks the outline by the aim error.
+    at: [f32; 2],
+}
+
+impl EdgeHit {
+    /// Where the new vertex sits in the points list. A segment splits by
+    /// taking the seat AFTER its start vertex — which for the closing seam
+    /// (last → first) is the END of the list, never index 0.
+    fn insert_index(self) -> usize {
+        self.segment + 1
+    }
+}
+
+/// The edge of `points` a click at `point` landed on, judged in SCREEN pixels
+/// against the same [`HIT_LINE_PX`] band the hit line already offers the
+/// pointer, so aim never depends on the camera.
+///
+/// `closed` adds the implicit last → first seam as the final segment. A hit
+/// whose foot is within a vertex handle's grab ring of either end is refused:
+/// that click is about the corner that is already there, and splitting a
+/// segment right beside its own endpoint only makes a degenerate one.
+fn hit_edge(points: &[[f32; 2]], closed: bool, point: [f32; 2], eff: f32) -> Option<EdgeHit> {
+    let scale = eff.max(1e-6);
+    let reach = HIT_LINE_PX / 2.0 / scale;
+    let seam = layers::selection::VERTEX_HIT_PX / scale;
+    let last = points.len().checked_sub(1)?;
+    let segments = if closed && points.len() >= CLOSE_MIN_VERTICES {
+        last + 1
+    } else {
+        last
+    };
+    let mut best: Option<(f32, EdgeHit)> = None;
+    for segment in 0..segments {
+        let a = points[segment];
+        let b = points[(segment + 1) % points.len()];
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let len_sq = dx * dx + dy * dy;
+        if len_sq <= f32::EPSILON {
+            continue;
+        }
+        let t = (((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / len_sq).clamp(0.0, 1.0);
+        let foot = [a[0] + t * dx, a[1] + t * dy];
+        let distance = ((point[0] - foot[0]).powi(2) + (point[1] - foot[1]).powi(2)).sqrt();
+        if distance > reach {
+            continue;
+        }
+        // Too near either corner: this is a vertex gesture, not an edge one.
+        let span = len_sq.sqrt();
+        if t * span < seam || (1.0 - t) * span < seam {
+            continue;
+        }
+        if best.is_none_or(|(closest, _)| distance < closest) {
+            best = Some((distance, EdgeHit { segment, at: foot }));
+        }
+    }
+    best.map(|(_, hit)| hit)
+}
+
 /// The vertex a click would close `draft` on, `None` while the draft is too
 /// short to be an outline.
 fn close_target(draft: &[[f32; 2]]) -> Option<&[f32; 2]> {
@@ -1223,6 +1308,44 @@ fn closes_polygon_draft(draft: &[[f32; 2]], point: [f32; 2], eff: f32) -> bool {
     let radius = layers::selection::VERTEX_HIT_PX / eff.max(1e-6);
     let (dx, dy) = (point[0] - first[0], point[1] - first[1]);
     dx * dx + dy * dy <= radius * radius
+}
+
+/// Rung 2 of the double-click dispatch: add a corner where the click landed
+/// on an edge of the single selected outline.
+///
+/// Refuses (and lets the click fall through) unless exactly one object is
+/// selected, it has authored vertices, and the click landed on one of its
+/// edges away from the corners already there. The new corner becomes the
+/// vertex selection, so it shows hot and ⌫ takes it straight back.
+fn insert_vertex_on_edge(interact: &CanvasInteract, evt: &Event<MouseData>, eff: f32) -> bool {
+    let view = event_view_point_mouse(&interact.anchor, evt);
+    let point = interact
+        .placement
+        .inverse_f32(interact.camera.peek().view_to_doc(view));
+    let mut session = interact.session;
+    let planned = {
+        let read = session.peek();
+        read.selection.single().cloned().and_then(|path| {
+            let shape = path.resolve(read.doc())?;
+            let hit = hit_edge(
+                editable_vertices(shape)?,
+                vertices_are_closed(shape),
+                point,
+                eff,
+            )?;
+            Some((path, hit))
+        })
+    };
+    let Some((path, hit)) = planned else {
+        return false;
+    };
+    let at = hit.insert_index();
+    let mut write = session.write();
+    if !write.insert_vertex_at(&path, at, hit.at) {
+        return false;
+    }
+    write.selection.vertex = Some(at);
+    true
 }
 
 /// True when a shape's authored vertices form a CLOSED loop — a polygon or
@@ -1469,5 +1592,58 @@ mod tests {
         // Outline mode previews the perimeter population of the same draft.
         let outline = polygon_draft_shape(&draft, PolygonMode::Outline).expect("an outline");
         assert_eq!(ghost_positions(outline).len(), 15);
+    }
+
+    /// The edge a double-click means, and where its corner sits. The seat is
+    /// the segment's index PLUS ONE, which for the closing seam is the end of
+    /// the list — index 0 would drop the new corner on the far side of the
+    /// shape.
+    #[test]
+    fn an_edge_hit_names_its_segment_and_seats_the_seam_at_the_end() {
+        let points = square();
+        // Top edge (segment 0): the corner lands ON the edge, not at the aim.
+        let hit = hit_edge(&points, true, [50.0, 3.0], 1.0).expect("the top edge");
+        assert_eq!(hit.segment, 0);
+        assert_eq!(hit.at, [50.0, 0.0]);
+        assert_eq!(hit.insert_index(), 1);
+        // The implicit closing seam [0,100] → [0,0] is the LAST segment, and
+        // its corner appends.
+        let seam = hit_edge(&points, true, [-2.0, 50.0], 1.0).expect("the seam");
+        assert_eq!(seam.segment, 3);
+        assert_eq!(seam.at, [0.0, 50.0]);
+        assert_eq!(seam.insert_index(), points.len());
+        // An open chain has no seam: the same click hits nothing.
+        assert!(hit_edge(&points, false, [-2.0, 50.0], 1.0).is_none());
+        assert_eq!(
+            hit_edge(&points, false, [50.0, 3.0], 1.0).map(|hit| hit.segment),
+            Some(0)
+        );
+        // Beyond the hit line's own half-width, nothing.
+        assert!(hit_edge(&points, true, [50.0, 9.0], 1.0).is_none());
+        // The band is SCREEN-sized: zoomed 4× in, 3 doc units is 12 px out.
+        assert!(hit_edge(&points, true, [50.0, 3.0], 4.0).is_none());
+        // Near a corner the gesture is about that corner, not the edge.
+        assert!(hit_edge(&points, true, [4.0, 0.0], 1.0).is_none());
+        // Degenerate chains have no edge at all.
+        assert!(hit_edge(&points[..1], true, [0.0, 0.0], 1.0).is_none());
+        assert!(hit_edge(&[], true, [0.0, 0.0], 1.0).is_none());
+    }
+
+    /// Two edges within reach of one click: the NEAREST wins, so a click in a
+    /// tight corner region never picks the far side.
+    #[test]
+    fn an_edge_hit_picks_the_nearest_edge() {
+        // A 6-unit-wide sliver: both long edges are inside the hit band.
+        let sliver = vec![[0.0_f32, 0.0], [100.0, 0.0], [100.0, 6.0], [0.0, 6.0]];
+        assert_eq!(
+            hit_edge(&sliver, true, [50.0, 2.0], 1.0).map(|hit| hit.segment),
+            Some(0),
+            "nearer the top edge"
+        );
+        assert_eq!(
+            hit_edge(&sliver, true, [50.0, 4.0], 1.0).map(|hit| hit.segment),
+            Some(2),
+            "nearer the bottom edge"
+        );
     }
 }

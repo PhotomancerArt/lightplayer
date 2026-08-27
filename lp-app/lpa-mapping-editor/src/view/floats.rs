@@ -13,14 +13,21 @@ use crate::editor_core::map_tool::{MapTool, PolygonMode};
 /// feedback: double-click descend is undiscoverable without a prompt):
 /// a selected group invites entering; a descended selection explains
 /// write-through and the way out. Tool hints otherwise.
+///
+/// Every hint NAMES ITS KEYS and stays short (the G1 ruling: "tell me what
+/// keys do what" — a line describing what the canvas is already showing
+/// teaches nothing).
 #[must_use]
 pub fn tool_hint(session: &MapEditorSession) -> &'static str {
-    let selected_group = matches!(session.tool, MapTool::Select)
-        && session.selection.single().is_some_and(|path| {
-            path.resolve(session.doc()).is_some_and(|shape| {
-                crate::editor_core::shape_path::structural_child_count(shape) > 0
-            })
-        });
+    let selected_shape = matches!(session.tool, MapTool::Select)
+        .then(|| session.selection.single())
+        .flatten()
+        .and_then(|path| path.resolve(session.doc()));
+    let selected_group = selected_shape
+        .is_some_and(|shape| crate::editor_core::shape_path::structural_child_count(shape) > 0);
+    let vertexed = selected_shape.is_some_and(|shape| {
+        crate::editor_core::editor_session::editable_vertices(shape).is_some()
+    });
     let descended = matches!(session.tool, MapTool::Select)
         && session
             .selection
@@ -33,8 +40,14 @@ pub fn tool_hint(session: &MapEditorSession) -> &'static str {
         MapTool::Select if descended => {
             "editing the sub-object — every instance follows · esc leaves the group"
         }
+        // With an outline in hand, the two gestures worth naming are the ones
+        // nothing on screen suggests: corners are visible, adding and removing
+        // them is not.
+        MapTool::Select if vertexed => {
+            "dbl-click an edge adds a corner · ⌫ removes the selected one · ⌘Z undo"
+        }
         MapTool::Select => {
-            "click selects · ⇧-click adds · drag empty space for marquee · corners resize · ⌘Z undo"
+            "click selects · ⇧-click adds to selection · drag empty space for marquee · ⌘Z undo"
         }
         MapTool::Grid => "click to drop a default grid — size it in the properties popover",
         MapTool::Ring => "click to drop a default ring — tune it in the properties popover",
@@ -42,22 +55,16 @@ pub fn tool_hint(session: &MapEditorSession) -> &'static str {
             "click to place lamps · ⏎ or double-click finishes · esc backs out one point"
         }
         // The polygon hint tracks the DRAFT, because what the next click can
-        // do changes twice while drawing: nothing can close an outline until
-        // three points exist, and only filled mode has a lattice to promise.
+        // do changes while drawing: nothing can close an outline until three
+        // points exist. Which population is coming is the toggle's job (and
+        // the ghosts'), so only the empty draft spends words on it.
         MapTool::Polygon { ref draft, mode } => match (draft.len(), mode) {
-            (0, PolygonMode::Outline) => {
-                "click the outline's corners — lamps will ride its perimeter"
-            }
+            (0, PolygonMode::Outline) => "click to place the first corner · lamps ride the outline",
             (0, PolygonMode::Filled) => {
-                "click the outline's corners — lamps will fill a lattice inside it"
+                "click to place the first corner · lamps fill a lattice inside"
             }
-            (1..=2, _) => "keep clicking corners · three make a shape · esc backs out one point",
-            (_, PolygonMode::Outline) => {
-                "click the first point to close · ⏎ also finishes · esc backs out one point"
-            }
-            (_, PolygonMode::Filled) => {
-                "the lattice previews live · click the first point to close · esc backs out one point"
-            }
+            (1..=2, _) => "click adds a corner · three make a shape · esc backs out one",
+            _ => "click adds a corner · click the first corner or ⏎ closes · esc backs out one",
         },
     }
 }
@@ -93,9 +100,9 @@ pub fn HelpFloat() -> Element {
                     ("right-drag / scroll", "pan"),
                     ("⌘Z / ⇧⌘Z", "undo · redo"),
                     ("⌘A", "select all"),
-                    ("⌫", "delete selection"),
+                    ("⌫", "delete the selected corner, else the selection"),
                     ("⏎", "finish path · close polygon"),
-                    ("dbl-click", "enter a group (edit its sub-object)"),
+                    ("dbl-click", "enter a group · add a corner on an edge"),
                     ("esc", "back out · leave group · clear · leave the dive"),
                 ] {
                     div { class: "lpme-help-row",
