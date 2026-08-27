@@ -72,7 +72,7 @@ pub fn HelpFloat() -> Element {
                     ("F", "texture-frame preview"),
                     ("0", "zoom to fit"),
                     ("⌘ + scroll", "zoom at cursor"),
-                    ("right-drag / scroll", "pan"),
+                    ("right/middle-drag · scroll · space + drag", "pan"),
                     ("⌘Z / ⇧⌘Z", "undo · redo"),
                     ("⌘A", "select all"),
                     ("⌫", "delete selection"),

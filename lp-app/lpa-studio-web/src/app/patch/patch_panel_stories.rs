@@ -50,7 +50,7 @@ fn panel_frame(
         div { class: "tw:flex tw:w-full tw:flex-col tw:overflow-hidden tw:rounded-md tw:border tw:border-border-strong tw:bg-background",
             PatchPanel {
                 surface,
-                selection,
+                selection: lpa_studio_core::UiSelection::from_option(selection),
                 armed,
                 on_action: move |_| {},
             }

@@ -75,7 +75,7 @@ fn arrange_canvas_mini_dome() -> Element {
         ProjectCanvasHost {
             surface,
             bodies,
-            selection: Some(UiPatchTarget::Instance {
+            selection: lpa_studio_core::UiSelection::one(UiPatchTarget::Instance {
                 node: lpa_studio_core::NodeId::new(2),
                 path: "/sector/2".to_string(),
             }),
@@ -122,7 +122,7 @@ fn DiveInPlaceStory() -> Element {
         ProjectCanvasHost {
             surface,
             bodies,
-            selection: None,
+            selection: lpa_studio_core::UiSelection::empty(),
             dive: Some(DiveHost {
                 node: dome_node,
                 session,
@@ -200,7 +200,7 @@ fn arrange_canvas_peach_scale() -> Element {
         ProjectCanvasHost {
             surface,
             bodies,
-            selection: None,
+            selection: lpa_studio_core::UiSelection::empty(),
             on_action: move |_| {},
         }
     })
@@ -234,7 +234,7 @@ fn arrange_canvas_mixed_states() -> Element {
         ProjectCanvasHost {
             surface,
             bodies,
-            selection: None,
+            selection: lpa_studio_core::UiSelection::empty(),
             on_action: move |_| {},
         }
     })
@@ -278,7 +278,6 @@ fn editor_toolbar_dived() -> Element {
     rsx! {
         ToolbarStrip {
             groups: super::dive_toolbar(
-                "dome",
                 &MapTool::Select,
                 Default::default(),
                 &story_asset_editor(),

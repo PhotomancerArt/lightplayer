@@ -20,7 +20,7 @@ use lpa_mapping_editor::{
 };
 use lpa_studio_core::{
     ArtifactLocation, EditorMetaFixture, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
-    ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchSurface, UiPatchTarget,
+    ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchSurface, UiPatchTarget, UiSelection,
 };
 use lpc_mapping::{Bounds2d, Map2dDoc, Map2dShape, PathAlign, ResolvedMap2d};
 
@@ -50,6 +50,12 @@ struct FixtureRender {
     /// Own-space bounds the frame is drawn around.
     bounds: [f64; 4],
     body: FixtureBody,
+    /// Are this render's BOUNDS the real ones — a resolved body, a
+    /// shape-less strip, or a footprint-backed placeholder? A bare
+    /// placeholder's guessed block must never be baked into a held pack
+    /// slot (G1 round 1: slots computed from guessed bounds diverged
+    /// between views and shifted once the body arrived).
+    settled: bool,
     /// `(path, start, lamps)` for instance selection rings.
     instances: Vec<(String, u32, u32)>,
     /// The document's physical strands, from the SAME parse the body came
@@ -95,15 +101,15 @@ impl StrandMeta {
     }
 }
 
-/// A committed drag held on screen until the snapshot confirms it: the
-/// override survives pointer-up so the fixture never snaps back while the
-/// write round-trips (the jump-back bug).
+/// A committed gesture held on screen until the snapshot confirms it: the
+/// override survives pointer-up so the fixtures never snap back while the
+/// write round-trips (the jump-back bug). One gesture = one override,
+/// possibly many fixtures (the multi move/scale).
 #[derive(Clone, PartialEq)]
 pub(crate) struct DragOverride {
-    key: String,
-    transform: UiArrangeTransform,
+    transforms: std::collections::BTreeMap<String, UiArrangeTransform>,
     /// True after pointer-up: the override retires once the surface
-    /// carries (approximately — the kernel quantizes) this transform.
+    /// carries (approximately — the kernel quantizes) every transform.
     committed: bool,
 }
 
@@ -147,7 +153,7 @@ pub(crate) fn ProjectCanvasHost(
     /// map2d bodies by artifact (extracted from the snapshot's node views;
     /// stories inject embedded-example bytes directly).
     bodies: BTreeMap<ArtifactLocation, String>,
-    selection: Option<UiPatchTarget>,
+    selection: UiSelection,
     /// Sticky auto-pack slots (shell-owned; see [`PackSlots`]). Stories
     /// omit it and get the ad-hoc packing.
     #[props(default)]
@@ -184,6 +190,11 @@ pub(crate) fn ProjectCanvasHost(
     /// is unchanged either way — plain clicks never write.
     #[props(default)]
     patch_verbs: bool,
+    /// The Mapping view passes true: the fixture selection box wears
+    /// corner scale handles (transform furniture is that view's
+    /// activity; Patching multi-selects without it).
+    #[props(default)]
+    transform_handles: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // The frame-scoped arm; absent outside the workbench frame (stories).
@@ -236,16 +247,24 @@ pub(crate) fn ProjectCanvasHost(
     let mut live_source = use_signal(|| None::<NodeId>);
     // Live drag override, held until the snapshot confirms the write.
     let mut drag_override = use_signal(|| None::<DragOverride>);
+    // Has the USER edited content on this mount (a fixture drag/scale, a
+    // committed dive edit)? Bounds reconciliation settles ASYNC ARRIVALS
+    // only — once the user moves things, their gesture must never re-fit
+    // the view under them (G1 round 2: "the view is auto scaling as I
+    // drag"). Explicit fits (the zoom float, `0`) still work.
+    let mut content_edited = use_signal(|| false);
 
     let (base_sprites, nodes) = renders.read().clone();
-    // Retire a committed override once the surface caught up (the kernel
-    // quantizes to 4 decimals, so compare loosely).
+    // Retire a committed override once the surface caught up on EVERY
+    // member (the kernel quantizes to 4 decimals, so compare loosely).
     let retire_override = {
         let over = drag_override.peek().clone();
         matches!(over, Some(over) if over.committed
-        && base_sprites.iter().any(|sprite| {
-            sprite.key == over.key
-                && transforms_close(&transform_of(&sprite.placement), &over.transform)
+        && over.transforms.iter().all(|(key, transform)| {
+            base_sprites.iter().any(|sprite| {
+                sprite.key == *key
+                    && transforms_close(&transform_of(&sprite.placement), transform)
+            })
         }))
     };
     if retire_override {
@@ -253,10 +272,12 @@ pub(crate) fn ProjectCanvasHost(
     }
     // Effective sprites: the override wins while it lives.
     let mut sprites = base_sprites;
-    if let Some(over) = drag_override.read().as_ref()
-        && let Some(sprite) = sprites.iter_mut().find(|sprite| sprite.key == over.key)
-    {
-        sprite.placement = placement_of(&over.transform);
+    if let Some(over) = drag_override.read().as_ref() {
+        for sprite in sprites.iter_mut() {
+            if let Some(transform) = over.transforms.get(&sprite.key) {
+                sprite.placement = placement_of(transform);
+            }
+        }
     }
 
     // The dive as the canvas sees it: the focused fixture's key, effective
@@ -356,34 +377,47 @@ pub(crate) fn ProjectCanvasHost(
     // `0` key, waiting for a real viewport measurement and real bounds.
     // Dived, fit frames the FOCUSED fixture's placed bounds (the optional
     // "snap viewport to fixture" affordance); otherwise it fits all.
-    // The fit ALSO re-runs when the measurement moves while the camera is
-    // still exactly the value the last fit produced: the first
-    // measurement races container layout settling (docks, the mobile
-    // fold), and freezing the camera on it baked a nondeterministic zoom
-    // into story baselines (the churner —
-    // docs/debt/story-capture-pipeline.md). Once the user pans or zooms,
-    // the camera is theirs and reconciliation stops.
+    // The fit ALSO re-runs when either MEASUREMENT moves while the camera
+    // is still exactly the value the last fit produced: the first
+    // viewport measurement races container layout settling (docks, the
+    // mobile fold — the story-baseline churner,
+    // docs/debt/story-capture-pipeline.md), and the CONTENT races its own
+    // async loads (bodies, the arrangement document — the peach opened
+    // out of view, G1 round 1). Once the user pans or zooms, the camera
+    // is theirs and reconciliation stops.
     {
+        let bounds = match &dive_focus {
+            Some((_, placement, own_bounds)) => {
+                let corners = placement.corners(*own_bounds);
+                let min_x = corners.iter().map(|c| c[0]).fold(f64::MAX, f64::min);
+                let min_y = corners.iter().map(|c| c[1]).fold(f64::MAX, f64::min);
+                let max_x = corners.iter().map(|c| c[0]).fold(f64::MIN, f64::max);
+                let max_y = corners.iter().map(|c| c[1]).fold(f64::MIN, f64::max);
+                Some(lpc_mapping::Bounds2d {
+                    min_x: min_x as f32,
+                    min_y: min_y as f32,
+                    width: (max_x - min_x).max(1.0) as f32,
+                    height: (max_y - min_y).max(1.0) as f32,
+                })
+            }
+            None => fit_bounds(&sprites),
+        };
+        let bounds_key =
+            bounds.map(|bounds| [bounds.min_x, bounds.min_y, bounds.width, bounds.height]);
+        // After the first user edit, reconcile against the RECORDED bounds
+        // (a frozen comparison): only the viewport half keeps settling.
+        let reconcile_bounds = if *content_edited.read() {
+            fit_done.read().fitted_bounds()
+        } else {
+            bounds_key
+        };
         let viewport_now = *viewport.read();
         if let Some([width, height]) = viewport_now
-            && (*fit_pending.read() || fit_done.read().stale([width, height], &camera.peek()))
+            && (*fit_pending.read()
+                || fit_done
+                    .read()
+                    .stale([width, height], &camera.peek(), reconcile_bounds))
         {
-            let bounds = match &dive_focus {
-                Some((_, placement, own_bounds)) => {
-                    let corners = placement.corners(*own_bounds);
-                    let min_x = corners.iter().map(|c| c[0]).fold(f64::MAX, f64::min);
-                    let min_y = corners.iter().map(|c| c[1]).fold(f64::MAX, f64::min);
-                    let max_x = corners.iter().map(|c| c[0]).fold(f64::MIN, f64::max);
-                    let max_y = corners.iter().map(|c| c[1]).fold(f64::MIN, f64::max);
-                    Some(lpc_mapping::Bounds2d {
-                        min_x: min_x as f32,
-                        min_y: min_y as f32,
-                        width: (max_x - min_x).max(1.0) as f32,
-                        height: (max_y - min_y).max(1.0) as f32,
-                    })
-                }
-                None => fit_bounds(&sprites),
-            };
             if let Some(bounds) = bounds {
                 let padding = match &dive_focus {
                     Some(_) => display_inset_padding(bounds, width, height),
@@ -399,35 +433,57 @@ pub(crate) fn ProjectCanvasHost(
             // empty canvas. Change-guarded: a bare signal write at render
             // would re-render forever.
             let mut next = *fit_done.peek();
-            next.record([width, height], *camera.peek());
+            next.record([width, height], *camera.peek(), bounds_key);
             if *fit_done.peek() != next {
                 fit_done.set(next);
             }
         }
     }
 
-    let dispatch_set = arrange_set_dispatch(&surface);
+    let dispatch_set_many = arrange_set_many_dispatch(&surface);
     let select = move |target: Option<UiPatchTarget>| {
         on_action.call(UiAction::from_op(
             lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
-            ProjectEditorOp::PatchSelect { target },
+            ProjectEditorOp::PatchSelect {
+                selection: UiSelection::from_option(target),
+            },
+        ));
+    };
+    let dispatch_selection = |on_action: &EventHandler<UiAction>, selection: UiSelection| {
+        on_action.call(UiAction::from_op(
+            lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
+            ProjectEditorOp::PatchSelect { selection },
         ));
     };
     let on_fixture = {
         let nodes = nodes.clone();
         let grammar_surface = surface.clone();
-        let grammar_selection = selection.clone();
+        let full_selection = selection.clone();
+        // The arm completes against a SINGLE end (multi is not armable).
+        let grammar_selection = selection.single().cloned();
         move |event: FixtureEvent| match event {
-            FixtureEvent::Select(Some(pick)) => {
+            FixtureEvent::Select {
+                pick: Some(pick),
+                toggle,
+            } => {
                 if let Some(node) = nodes.get(&pick.key) {
                     drag_override.set(None);
-                    // Q10: a sprite click names the OBJECT under the cursor,
-                    // not the whole fixture — the sprite already knows which
-                    // true lamp was hit, and the surface knows which object
-                    // owns it. The fixture stays the honest fallback where a
-                    // body draws no lamps (placeholder, strip) or no object
-                    // covers the one clicked.
-                    let target = sprite_target(&grammar_surface, *node, pick.object, pick.lamp);
+                    if toggle {
+                        // Shift-click: toggle the FIXTURE within the root
+                        // sibling set — the multi-selection gesture. The
+                        // finer object grain stays the plain click's
+                        // answer; a set is built of fixtures.
+                        let mut next = full_selection.clone();
+                        next.toggle_sibling(UiPatchTarget::Fixture { node: *node });
+                        dispatch_selection(&on_action, next);
+                        return;
+                    }
+                    // The PICK GRAIN is view policy (grain follows
+                    // activity): Patching names the OBJECT under the
+                    // cursor (Q10 — the walk-up loop taps physical
+                    // pieces); Mapping selects the FIXTURE (D4 — click
+                    // selects at scope level, double-click descends).
+                    let target = plain_click_target(patch_verbs, &grammar_surface, *node, &pick);
                     // The same fixture-side completion the tree's rows
                     // carry: armed assign + a free segment → the clicked
                     // OBJECT takes it (stronger than the old next-unmapped
@@ -445,43 +501,102 @@ pub(crate) fn ProjectCanvasHost(
                     select(Some(target));
                 }
             }
-            FixtureEvent::Select(None) => {
+            FixtureEvent::Select { pick: None, .. } => {
                 drag_override.set(None);
                 select(None);
             }
-            FixtureEvent::Move {
-                key,
-                placement,
-                commit,
-            } => {
-                let transform = transform_of(&placement);
+            FixtureEvent::Marquee { keys, additive } => {
+                drag_override.set(None);
+                // The marquee selects at FIXTURE grain (root siblings).
+                // Additive keeps the current fixture-grain members and
+                // adds the swept ones; plain replaces.
+                let mut targets: Vec<UiPatchTarget> = if additive {
+                    full_selection
+                        .targets()
+                        .iter()
+                        .filter(|target| matches!(target, UiPatchTarget::Fixture { .. }))
+                        .cloned()
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                for key in &keys {
+                    if let Some(node) = nodes.get(key) {
+                        let target = UiPatchTarget::Fixture { node: *node };
+                        if !targets.contains(&target) {
+                            targets.push(target);
+                        }
+                    }
+                }
+                let mut next = full_selection.clone();
+                next.set_siblings(targets);
+                dispatch_selection(&on_action, next);
+            }
+            FixtureEvent::Move { moves, commit } => {
+                if !*content_edited.peek() {
+                    content_edited.set(true);
+                }
+                let transforms: std::collections::BTreeMap<String, UiArrangeTransform> = moves
+                    .iter()
+                    .map(|(key, placement)| (key.clone(), transform_of(placement)))
+                    .collect();
                 if commit {
-                    // One gesture = one op = one undo step. The override
-                    // stays up (committed) until the snapshot echoes the
-                    // write — no snap-back.
+                    // One gesture = one op = one undo step — however many
+                    // fixtures moved. The override stays up (committed)
+                    // until the snapshot echoes the write — no snap-back.
                     drag_override.set(Some(DragOverride {
-                        key: key.clone(),
-                        transform,
+                        transforms: transforms.clone(),
                         committed: true,
                     }));
-                    if let Some(node) = nodes.get(&key)
-                        && let Some(op) = dispatch_set(&key, *node, transform)
-                    {
+                    let entries: Vec<lpa_studio_core::EditorMetaSet> = transforms
+                        .iter()
+                        .map(|(key, transform)| lpa_studio_core::EditorMetaSet {
+                            node_key: key.clone(),
+                            node: nodes.get(key).copied(),
+                            transform: *transform,
+                        })
+                        .collect();
+                    if let Some(op) = dispatch_set_many(entries) {
                         on_action.call(UiAction::from_op(ProjectController::NODE_ID, op));
                     }
                 } else {
                     drag_override.set(Some(DragOverride {
-                        key,
-                        transform,
+                        transforms,
                         committed: false,
                     }));
                 }
             }
-            FixtureEvent::Dive(key) => {
-                if let Some(node) = nodes.get(&key)
-                    && let Some(on_focus) = &on_focus
+            FixtureEvent::Dive { key, lamp, object } => {
+                // Entering selects the CLICKED object (D4: double-click
+                // descends to what you pointed at), else the fixture's
+                // first object, else the entered-empty drawing state. The
+                // dispatch is the whole entry — the dive derives from the
+                // selection's scope. `on_focus` stays the host's
+                // dive-capable gate (stories omit it).
+                if on_focus.is_some()
+                    && let Some(node) = nodes.get(&key)
                 {
-                    on_focus.call(*node);
+                    drag_override.set(None);
+                    let clicked = match sprite_target(&grammar_surface, *node, object, lamp) {
+                        UiPatchTarget::Fixture { .. } => None,
+                        target => Some(target),
+                    };
+                    let first = clicked.or_else(|| {
+                        grammar_surface
+                            .fixtures
+                            .iter()
+                            .find(|fixture| fixture.node == *node)
+                            .and_then(|fixture| fixture.instances.first())
+                            .map(|instance| {
+                                crate::app::patch::verb_ui::instance_target(*node, instance)
+                            })
+                    });
+                    let mut next = UiSelection::empty();
+                    match first {
+                        Some(target) => next.select_one(target),
+                        None => next.enter(*node),
+                    }
+                    dispatch_selection(&on_action, next);
                 }
             }
         }
@@ -500,7 +615,16 @@ pub(crate) fn ProjectCanvasHost(
     let hint = dive_focus
         .is_some()
         .then(|| tool_hint(&canvas_session.read()));
-    let committed = on_committed.unwrap_or_else(|| EventHandler::new(|()| {}));
+    // Committed dive edits latch content-edited too: a moved object's
+    // bounds land after the apply echoes, and that arrival must not
+    // re-fit either.
+    let committed_inner = on_committed.unwrap_or_else(|| EventHandler::new(|()| {}));
+    let committed = EventHandler::new(move |()| {
+        if !*content_edited.peek() {
+            content_edited.set(true);
+        }
+        committed_inner.call(());
+    });
     rsx! {
         div {
             class: "lpme-canvas-wrap",
@@ -522,6 +646,7 @@ pub(crate) fn ProjectCanvasHost(
                 fixtures: sprites,
                 focused: focused_key,
                 on_fixture,
+                transform_handles,
             }
             if let Some(hint) = hint {
                 div { class: "lpme-hint", "{hint}" }
@@ -573,6 +698,24 @@ fn with_chase_preview(
     colors
 }
 
+/// The plain-click pick grain, per view policy (unified-selection D4 /
+/// walk-up Q10): patch-verb hosts (Patching) resolve the OBJECT under the
+/// cursor — the walk-up loop taps physical pieces and "a click says
+/// WHICH"; everything else (Mapping, stories) selects the FIXTURE — click
+/// selects at scope level, and descent is the double-click's job.
+fn plain_click_target(
+    pick_objects: bool,
+    surface: &UiPatchSurface,
+    node: NodeId,
+    pick: &lpa_mapping_editor::FixturePick,
+) -> UiPatchTarget {
+    if pick_objects {
+        sprite_target(surface, node, pick.object, pick.lamp)
+    } else {
+        UiPatchTarget::Fixture { node }
+    }
+}
+
 /// What a sprite click selects (Q10): the OBJECT owning the clicked lamp,
 /// or the whole fixture when nothing finer can be named.
 ///
@@ -618,12 +761,14 @@ fn sprite_target(
     }
 }
 
-/// Prebuild the `EditorMetaOp::Set` factory: `editor.json` artifact + the
-/// fixture facts every write refreshes footprints through. `None` = the
-/// artifact is unknown (surface not settled), so moves no-op honestly.
-fn arrange_set_dispatch(
+/// Prebuild the `EditorMetaOp::SetMany` factory: `editor.json` artifact +
+/// the fixture facts every write refreshes footprints through. `None` =
+/// the artifact is unknown (surface not settled), so moves no-op
+/// honestly. A single-fixture gesture is simply a set of one — same op,
+/// same one undo step.
+fn arrange_set_many_dispatch(
     surface: &UiPatchSurface,
-) -> impl Fn(&str, NodeId, UiArrangeTransform) -> Option<EditorMetaOp> + Clone + 'static {
+) -> impl Fn(Vec<lpa_studio_core::EditorMetaSet>) -> Option<EditorMetaOp> + Clone + 'static {
     let artifact = surface.editor_meta_artifact.clone();
     let fixtures: Vec<EditorMetaFixture> = surface
         .fixtures
@@ -635,15 +780,14 @@ fn arrange_set_dispatch(
             })
         })
         .collect();
-    move |key, node, transform| {
+    move |entries| {
+        if entries.is_empty() {
+            return None;
+        }
         Some(EditorMetaOp {
             artifact: artifact.clone()?,
             fixtures: fixtures.clone(),
-            verb: EditorMetaVerb::Set {
-                node_key: key.to_string(),
-                node: Some(node),
-                transform,
-            },
+            verb: EditorMetaVerb::SetMany { entries },
         })
     }
 }
@@ -656,7 +800,7 @@ fn transforms_close(a: &UiArrangeTransform, b: &UiArrangeTransform) -> bool {
 }
 
 /// A render's canvas sprite, selection flags applied.
-fn sprite_of(render: &FixtureRender, selection: &Option<UiPatchTarget>) -> FixtureSprite {
+fn sprite_of(render: &FixtureRender, selection: &UiSelection) -> FixtureSprite {
     FixtureSprite {
         key: render.key.clone(),
         label: render.label.clone(),
@@ -685,7 +829,7 @@ fn sprite_of(render: &FixtureRender, selection: &Option<UiPatchTarget>) -> Fixtu
 /// Computed once per sprite build (selection changes rebuild sprites
 /// anyway); the per-object cost is one offset pass plus the cell clipping
 /// over its DRAWN lamps, which display subsampling already bounds.
-fn sprite_objects(render: &FixtureRender, selection: &Option<UiPatchTarget>) -> Vec<SpriteObject> {
+fn sprite_objects(render: &FixtureRender, selection: &UiSelection) -> Vec<SpriteObject> {
     let FixtureBody::Lamps { points, total } = &render.body else {
         return Vec::new();
     };
@@ -876,51 +1020,49 @@ fn strand_metas(doc: &Map2dDoc, resolved: &ResolvedMap2d) -> Vec<StrandMeta> {
 /// id-less rows select at range grain (`instance_target`), so the window
 /// is the identity there.
 fn object_selected(
-    selection: &Option<UiPatchTarget>,
+    selection: &UiSelection,
     node: NodeId,
     path: &str,
     start: u32,
     lamps: u32,
 ) -> bool {
-    match selection {
-        Some(UiPatchTarget::Instance { node: n, path: p }) => {
-            *n == node && !path.is_empty() && p == path
-        }
-        Some(UiPatchTarget::Range {
+    selection.targets().iter().any(|target| match target {
+        UiPatchTarget::Instance { node: n, path: p } => *n == node && !path.is_empty() && p == path,
+        UiPatchTarget::Range {
             node: n,
             start: s,
             count,
-        }) => *n == node && *s == start && *count == Some(lamps),
+        } => *n == node && *s == start && *count == Some(lamps),
         _ => false,
-    }
+    })
 }
 
-/// Does the selection concern this fixture (any grain)?
-fn selection_touches(selection: &Option<UiPatchTarget>, node: NodeId) -> bool {
-    match selection {
-        Some(UiPatchTarget::Fixture { node: n })
-        | Some(UiPatchTarget::Instance { node: n, .. })
-        | Some(UiPatchTarget::Range { node: n, .. }) => *n == node,
+/// Does the selection concern this fixture (any grain, any member)?
+fn selection_touches(selection: &UiSelection, node: NodeId) -> bool {
+    selection.targets().iter().any(|target| match target {
+        UiPatchTarget::Fixture { node: n }
+        | UiPatchTarget::Instance { node: n, .. }
+        | UiPatchTarget::Range { node: n, .. } => *n == node,
         _ => false,
-    }
+    })
 }
 
 /// The selected instance's lamp window on this fixture, when one is.
-fn selected_instance_range(
-    selection: &Option<UiPatchTarget>,
-    render: &FixtureRender,
-) -> Option<(u32, u32)> {
-    match selection {
-        Some(UiPatchTarget::Instance { node, path }) if *node == render.node => render
+fn selected_instance_range(selection: &UiSelection, render: &FixtureRender) -> Option<(u32, u32)> {
+    // One window per sprite (the first member's): the per-object rings
+    // already mark every selected hull, so the range highlight stays a
+    // single-window affordance.
+    selection.targets().iter().find_map(|target| match target {
+        UiPatchTarget::Instance { node, path } if *node == render.node => render
             .instances
             .iter()
             .find(|(p, _, _)| p == path)
             .map(|(_, start, lamps)| (*start, *lamps)),
-        Some(UiPatchTarget::Range { node, start, count }) if *node == render.node => {
+        UiPatchTarget::Range { node, start, count } if *node == render.node => {
             Some((*start, count.unwrap_or(u32::MAX)))
         }
         _ => None,
-    }
+    })
 }
 
 /// Sticky auto-pack slots, keyed by editor key. Owned by the shell; a
@@ -935,12 +1077,17 @@ pub(crate) type PackSlots = BTreeMap<String, UiArrangeTransform>;
 /// every unarranged fixture already has a slot (keep them — stability is
 /// the point), else the held slots plus freshly packed positions for the
 /// fixtures that have NEVER had one. Existing slots are never moved or
-/// dropped.
+/// dropped — which is exactly why a slot may only be ADOPTED from settled
+/// facts: the arrangement document must have answered (before that,
+/// arranged-ness is unknown) and the fixture's bounds must be real.
 pub(crate) fn refresh_pack_slots(
     surface: &UiPatchSurface,
     bodies: &BTreeMap<ArtifactLocation, String>,
     held: &PackSlots,
 ) -> Option<PackSlots> {
+    if !surface.editor_meta_loaded {
+        return None;
+    }
     let renders = build_renders(surface, bodies, held);
     merge_pack_slots(&renders, held)
 }
@@ -950,7 +1097,7 @@ pub(crate) fn refresh_pack_slots(
 fn merge_pack_slots(renders: &[FixtureRender], held: &PackSlots) -> Option<PackSlots> {
     let fresh: Vec<&FixtureRender> = renders
         .iter()
-        .filter(|render| !render.arranged && !held.contains_key(&render.key))
+        .filter(|render| render.settled && !render.arranged && !held.contains_key(&render.key))
         .collect();
     if fresh.is_empty() {
         return None;
@@ -990,7 +1137,7 @@ fn build_renders(
                 let strands = strand_metas(&doc, &resolved);
                 Some((resolved, strands, doc.sample_diameter))
             });
-        let (body, bounds, strands, sample_diameter) = match resolved {
+        let (body, bounds, strands, sample_diameter, settled) = match resolved {
             Some((resolved, strands, sample_diameter)) => {
                 let total = resolved.lamps.len() as u32;
                 let stride = resolved.lamps.len().div_ceil(MAX_DISPLAY_LAMPS).max(1);
@@ -1015,20 +1162,23 @@ fn build_renders(
                     bounds,
                     strands,
                     sample_diameter,
+                    true,
                 )
             }
             None if fixture.mapping_artifact.is_some() => {
                 // A map2d exists but is not loaded: the footprint block.
+                // Settled only when a cached footprint backs the bounds —
+                // a guessed block must never seed a held pack slot.
                 let lamps = fixture.patch.lamps;
-                let bounds = arrange
-                    .footprint
-                    .map(|fp| fp.bbox)
-                    .unwrap_or_else(|| placeholder_bounds(lamps));
+                let footprint = arrange.footprint.map(|fp| fp.bbox);
+                let settled = footprint.is_some();
+                let bounds = footprint.unwrap_or_else(|| placeholder_bounds(lamps));
                 (
                     FixtureBody::Placeholder { lamps },
                     bounds,
                     Vec::new(),
                     lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
+                    settled,
                 )
             }
             None => {
@@ -1040,6 +1190,7 @@ fn build_renders(
                     [0.0, 0.0, width, 10.0],
                     Vec::new(),
                     lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
+                    true,
                 )
             }
         };
@@ -1052,6 +1203,7 @@ fn build_renders(
             arranged: arrange.arranged,
             bounds,
             body,
+            settled,
             instances: fixture
                 .instances
                 .iter()
@@ -1188,6 +1340,7 @@ mod tests {
             arranged,
             bounds,
             body: FixtureBody::Placeholder { lamps: 10 },
+            settled: true,
             instances: Vec::new(),
             strands: Vec::new(),
             sample_diameter: lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
@@ -1215,6 +1368,27 @@ mod tests {
         assert_eq!(
             renders.iter().map(|r| r.transform).collect::<Vec<_>>(),
             again.iter().map(|r| r.transform).collect::<Vec<_>>(),
+        );
+    }
+
+    /// A guessed placeholder must never seed a HELD slot (G1 round 1):
+    /// the slot would bake bounds that move when the body arrives, and
+    /// two views packing at different load times then disagree about the
+    /// same fixture. Unsettled renders keep packing ad hoc — visible, but
+    /// never adopted.
+    #[test]
+    fn unsettled_bounds_never_become_held_slots() {
+        let mut unsettled = render("b", false, [0.0, 0.0, 24.0, 16.0]);
+        unsettled.settled = false;
+        assert_eq!(
+            merge_pack_slots(&[unsettled.clone()], &PackSlots::new()),
+            None,
+            "no slot adopted from guessed bounds"
+        );
+        let settled = render("b", false, [0.0, 0.0, 24.0, 16.0]);
+        assert!(
+            merge_pack_slots(&[settled], &PackSlots::new()).is_some(),
+            "the same fixture with real bounds adopts its slot"
         );
     }
 
@@ -1342,7 +1516,7 @@ mod tests {
             render("b", false, [0.0, 0.0, 20.0, 20.0]),
         ]
         .iter()
-        .map(|r| sprite_of(r, &None))
+        .map(|r| sprite_of(r, &UiSelection::empty()))
         .collect();
         let bounds = fit_bounds(&sprites).expect("bounds");
         assert!(bounds.min_x <= 0.0 && bounds.min_y <= 0.0);
@@ -1380,6 +1554,35 @@ mod tests {
             }],
             ..Default::default()
         }
+    }
+
+    /// The pick grain is VIEW POLICY (the one grammar, two activities):
+    /// Patching (`patch_verbs`) resolves the object under the cursor —
+    /// Q10's "a click says WHICH" — while Mapping selects the fixture,
+    /// because at root scope a click selects at scope level (D4) and
+    /// descent belongs to the double-click.
+    #[test]
+    fn plain_click_grain_follows_the_view() {
+        let surface = dome_surface();
+        let node = NodeId::new(2);
+        let pick = lpa_mapping_editor::FixturePick {
+            key: "k".into(),
+            lamp: Some(35),
+            object: None,
+        };
+        assert_eq!(
+            plain_click_target(true, &surface, node, &pick),
+            UiPatchTarget::Instance {
+                node,
+                path: "/sector/1".to_string(),
+            },
+            "Patching: the object under the cursor"
+        );
+        assert_eq!(
+            plain_click_target(false, &surface, node, &pick),
+            UiPatchTarget::Fixture { node },
+            "Mapping: click selects at scope level"
+        );
     }
 
     /// Q10: a sprite click names the OBJECT the clicked lamp belongs to.
@@ -1545,6 +1748,7 @@ mod tests {
             arranged: true,
             bounds: [0.0, 0.0, 100.0, 10.0],
             body: FixtureBody::Lamps { points, total },
+            settled: true,
             instances: Vec::new(),
             strands: Vec::new(),
             sample_diameter: lpc_mapping::DEFAULT_SAMPLE_DIAMETER,
@@ -1563,7 +1767,7 @@ mod tests {
             ("/gap".into(), 40, 5), // past the drawn points: no body
         ];
         render.strands = vec![path_strand(0, 10), path_strand(10, 10)];
-        let objects = sprite_objects(&render, &None);
+        let objects = sprite_objects(&render, &UiSelection::empty());
         assert_eq!(objects.len(), 3, "one entry per instance, always");
         assert!(!objects[0].hull.is_empty(), "a real span grows a body");
         assert!(!objects[0].outline.is_empty(), "…and something to paint");
@@ -1585,7 +1789,7 @@ mod tests {
         let mut render = lamp_render((0..20).map(|i| [i as f32 * 5.0, 0.0]).collect(), 40);
         render.instances = vec![("/a/0".into(), 0, 20), ("/a/1".into(), 20, 20)];
         render.strands = vec![path_strand(0, 20), path_strand(20, 20)];
-        let objects = sprite_objects(&render, &None);
+        let objects = sprite_objects(&render, &UiSelection::empty());
         assert_eq!(objects[0].cells.len(), 10, "one cell per DRAWN lamp");
         let first: Vec<usize> = objects[0].cells.iter().map(|cell| cell.lamp).collect();
         assert_eq!(first, (0..10).collect::<Vec<_>>());
@@ -1614,7 +1818,7 @@ mod tests {
         let mut render = lamp_render(points, 10);
         render.instances = vec![("/a".into(), 0, 10)];
         render.strands = vec![path_strand(0, 5), path_strand(5, 5)];
-        let objects = sprite_objects(&render, &None);
+        let objects = sprite_objects(&render, &UiSelection::empty());
         assert_eq!(objects[0].outline.len(), 2, "one loop per lit run");
         assert!(
             !lpa_mapping_editor::point_in_loops(&objects[0].hull, [25.0, 0.0]),
@@ -1639,7 +1843,7 @@ mod tests {
             cells: false,
             closed: false,
         }];
-        let objects = sprite_objects(&render, &None);
+        let objects = sprite_objects(&render, &UiSelection::empty());
         assert!(!objects[0].outline.is_empty());
         assert!(objects[0].cells.is_empty(), "dots stay dots");
     }
@@ -1676,7 +1880,7 @@ mod tests {
             .map(|instance| (format!("/sector/{instance}"), instance * 30, 30))
             .collect();
 
-        let objects = sprite_objects(&render, &None);
+        let objects = sprite_objects(&render, &UiSelection::empty());
         assert_eq!(objects.len(), 5, "one body per sector instance");
         for (index, object) in objects.iter().enumerate() {
             assert_eq!(

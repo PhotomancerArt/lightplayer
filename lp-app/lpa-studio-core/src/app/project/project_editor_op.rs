@@ -11,10 +11,13 @@ pub enum ProjectEditorOp {
     /// collapse, mirrored composer draft) — the node arm of the CardUiState
     /// re-home. Applied synchronously in the controller, like `Focus`.
     NodeUi(crate::app::project::node_card_ui_state::NodeUiOp),
-    /// Point the patch surface's one shared selection (D36; core-owned so
-    /// e2e can drive it and P6's verbs can read it). Applied synchronously.
+    /// Set the surface's ONE selection (D36 + unified-selection D2;
+    /// core-owned so e2e can drive it and the verbs can read it). The op
+    /// carries the whole [`crate::UiSelection`] VALUE — surfaces compute
+    /// the next selection through its invariant-enforcing helpers and
+    /// dispatch it; the controller just stores. Applied synchronously.
     PatchSelect {
-        target: Option<crate::UiPatchTarget>,
+        selection: crate::UiSelection,
     },
     /// Record an event into the undo-correlation journal (unified-editor
     /// P2): node/mode switches, and the mapping session's step commits

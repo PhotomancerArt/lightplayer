@@ -912,7 +912,9 @@ pub(crate) fn parse_port_key(value: &str) -> Option<(NodeId, u32)> {
 fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
     on_action.call(UiAction::from_op(
         lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
-        ProjectEditorOp::PatchSelect { target },
+        ProjectEditorOp::PatchSelect {
+            selection: lpa_studio_core::UiSelection::from_option(target),
+        },
     ));
 }
 
@@ -922,13 +924,31 @@ fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PatchPanel(
     surface: UiPatchSurface,
-    selection: Option<UiPatchTarget>,
+    selection: lpa_studio_core::UiSelection,
     /// The frame's armed verb, read in the center and passed down so the
     /// panel stays plain data (and stories can pose an armed state).
     #[props(default)]
     armed: Option<ArmedVerb>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    // A MULTI selection is counts, not a subject (unified-selection P2):
+    // the verbs and the arm are single-subject by ruling, so the panel
+    // states the set and invites narrowing — no transport, not armable.
+    if selection.len() > 1 {
+        let count = selection.len();
+        let word = match selection.primary() {
+            Some(UiPatchTarget::Fixture { .. }) => "fixtures",
+            _ => "objects",
+        };
+        return rsx! {
+            div { class: "tw:flex tw:max-h-[45%] tw:flex-none tw:flex-col tw:overflow-y-auto tw:border-t tw:border-border-subtle tw:bg-card-subtle",
+                div { class: "tw:flex-none tw:px-2.5 tw:py-2 tw:text-[11.5px] tw:text-muted-foreground",
+                    "{count} {word} selected — their mapped lamps breathe on the wire. Select one to patch it."
+                }
+            }
+        };
+    }
+    let selection = selection.single().cloned();
     let object = object_view(&surface, selection.as_ref());
     let card = fixture_card(&surface, selection.as_ref());
     let output = output_view(&surface, selection.as_ref());

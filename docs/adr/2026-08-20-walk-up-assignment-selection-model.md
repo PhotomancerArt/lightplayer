@@ -7,7 +7,12 @@
 - **Supersedes:** None (extends
   `2026-08-20-patching-view-grain-follows-activity.md`, whose Consequences
   named this pass)
-- **Superseded by:** None
+- **Superseded by:** None (extended 2026-08-27 by
+  `2026-08-27-one-selection-one-tree.md`: "one selection" now spans the
+  Mapping dive too — `UiPatchTarget` generalizes to the sibling-set
+  `UiSelection`, plain-clicks-never-write and the arm grammar are
+  untouched, an arm requires exactly one end, and the object-grain
+  canvas pick (Q10) is preserved as Patching's view policy)
 
 ## Context
 
