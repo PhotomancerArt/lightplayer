@@ -247,6 +247,12 @@ pub(crate) fn ProjectCanvasHost(
     let mut live_source = use_signal(|| None::<NodeId>);
     // Live drag override, held until the snapshot confirms the write.
     let mut drag_override = use_signal(|| None::<DragOverride>);
+    // Has the USER edited content on this mount (a fixture drag/scale, a
+    // committed dive edit)? Bounds reconciliation settles ASYNC ARRIVALS
+    // only — once the user moves things, their gesture must never re-fit
+    // the view under them (G1 round 2: "the view is auto scaling as I
+    // drag"). Explicit fits (the zoom float, `0`) still work.
+    let mut content_edited = use_signal(|| false);
 
     let (base_sprites, nodes) = renders.read().clone();
     // Retire a committed override once the surface caught up on EVERY
@@ -398,12 +404,19 @@ pub(crate) fn ProjectCanvasHost(
         };
         let bounds_key =
             bounds.map(|bounds| [bounds.min_x, bounds.min_y, bounds.width, bounds.height]);
+        // After the first user edit, reconcile against the RECORDED bounds
+        // (a frozen comparison): only the viewport half keeps settling.
+        let reconcile_bounds = if *content_edited.read() {
+            fit_done.read().fitted_bounds()
+        } else {
+            bounds_key
+        };
         let viewport_now = *viewport.read();
         if let Some([width, height]) = viewport_now
             && (*fit_pending.read()
                 || fit_done
                     .read()
-                    .stale([width, height], &camera.peek(), bounds_key))
+                    .stale([width, height], &camera.peek(), reconcile_bounds))
         {
             if let Some(bounds) = bounds {
                 let padding = match &dive_focus {
@@ -520,6 +533,9 @@ pub(crate) fn ProjectCanvasHost(
                 dispatch_selection(&on_action, next);
             }
             FixtureEvent::Move { moves, commit } => {
+                if !*content_edited.peek() {
+                    content_edited.set(true);
+                }
                 let transforms: std::collections::BTreeMap<String, UiArrangeTransform> = moves
                     .iter()
                     .map(|(key, placement)| (key.clone(), transform_of(placement)))
@@ -599,7 +615,16 @@ pub(crate) fn ProjectCanvasHost(
     let hint = dive_focus
         .is_some()
         .then(|| tool_hint(&canvas_session.read()));
-    let committed = on_committed.unwrap_or_else(|| EventHandler::new(|()| {}));
+    // Committed dive edits latch content-edited too: a moved object's
+    // bounds land after the apply echoes, and that arrival must not
+    // re-fit either.
+    let committed_inner = on_committed.unwrap_or_else(|| EventHandler::new(|()| {}));
+    let committed = EventHandler::new(move |()| {
+        if !*content_edited.peek() {
+            content_edited.set(true);
+        }
+        committed_inner.call(());
+    });
     rsx! {
         div {
             class: "lpme-canvas-wrap",

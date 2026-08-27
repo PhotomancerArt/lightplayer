@@ -77,6 +77,16 @@ impl FitReconcile {
         });
     }
 
+    /// The content bounds the last fit consumed. Hosts substitute this for
+    /// the live bounds once the USER starts editing content: bounds
+    /// reconciliation exists to settle ASYNC ARRIVALS (bodies, the
+    /// arrangement document), and a user's own drag moving the bounds must
+    /// never re-fit the view under the gesture (G1 round 2).
+    #[must_use]
+    pub fn fitted_bounds(&self) -> Option<[f32; 4]> {
+        self.0.and_then(|fitted| fitted.bounds)
+    }
+
     /// The `data-fit-viewport` value the story-capture ready gate checks:
     /// the reconciled size (whole pixels), or `""` while no measurement
     /// has been reconciled. The gate refuses to photograph a visible
