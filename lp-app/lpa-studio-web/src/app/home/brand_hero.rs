@@ -10,7 +10,7 @@
 //! The stage holds ONE engine canvas behind TWO windows — the triangle and
 //! the wordmark glyphs, cut by a single SVG clipPath. One visual signal,
 //! multiple mapped objects: the product's mapping story, told by the
-//! landing page itself. The plasma that fills the triangle flows on
+//! landing page itself. The light that fills the triangle flows on
 //! through the letters below it.
 //!
 //! Layers, back to front (spike `spikes/logo-triangle-chip/index.html` §4,
@@ -53,8 +53,12 @@ use crate::base::logo_mark::{BrandWord, fillet_tri_path};
 
 /// The landing hero's example and cadence. A constant on purpose: the
 /// future fixture-hero plan swaps this surface's source, not its shape.
-/// `pub(crate)` because the landing's edit-shader affordance opens it.
-pub(crate) const HERO_EXAMPLE: &str = "examples/plasma";
+/// `pub(crate)` because the landing's "Edit this artwork" pill opens it.
+/// It is the brand's own artwork (`examples/logo-sign`): the triangle and
+/// the letters the hero cuts its windows from are the same objects that
+/// example maps to lamps, so the pill hands the visitor exactly the piece
+/// they were just watching.
+pub(crate) const HERO_EXAMPLE: &str = "examples/logo-sign";
 /// Present cadence for the hero — the visitor is watching this one.
 const HERO_FPS: f32 = 30.0;
 
@@ -83,9 +87,9 @@ pub(crate) const WORD_BASELINE_Y: f32 = 292.0;
 const HERO_CANVAS: (u32, u32) = (600, 616);
 
 /// The landing hero: brand triangle as a live shader window, the wordmark
-/// lit by the same surface. The way into the editor lives beside the
-/// slogan in `home_landing` (polish round: an edit link here fought the
-/// tagline for attention).
+/// lit by the same surface. The way into the editor — the "Edit this
+/// artwork" pill — lives under the slogan in `home_landing`, not on this
+/// stage: the hero is a window, and furniture inside it fought the mark.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn BrandHero() -> Element {

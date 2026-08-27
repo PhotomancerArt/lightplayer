@@ -41,13 +41,15 @@ pub fn HomePage(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> 
             }
             BrandHero {}
             // The slogan reads as a slogan — strong ink, a hair larger than
-            // body text — with the edit-shader door as a quiet pencil beside
-            // it (polish round: a text button here fought the tagline).
-            div { class: "tw:flex tw:items-center tw:justify-center tw:gap-1.5",
+            // body text — with the door into the editor STACKED under it, not
+            // beside it: a labelled call to action next to the tagline fought
+            // it for the same line (polish round), and stacking also keeps the
+            // pill off the tagline's width at narrow viewports.
+            div { class: "tw:flex tw:flex-col tw:items-center tw:gap-3",
                 p { class: "tw:m-0 tw:max-w-md tw:text-[15px] tw:font-medium tw:text-strong-foreground",
                     "Friendly shaders, everywhere"
                 }
-                EditShaderPencil { on_action }
+                EditArtworkPill { on_action }
             }
             nav { class: "tw:grid tw:w-[min(680px,100%)] tw:grid-cols-3 tw:gap-3 tw:max-[640px]:grid-cols-1",
                 DiveInCard {
@@ -81,25 +83,33 @@ pub fn HomePage(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> 
     }
 }
 
-/// The door from the hero into the editor: a pencil beside the slogan,
-/// opening the hero's example via the Explore-card path. Inert with a
+/// The door from the hero into the editor: the "Edit this artwork" pill,
+/// opening the hero's example ([`crate::app::home::brand_hero::HERO_EXAMPLE`],
+/// the brand's own Logo Sign) via the Explore-card path. Inert with a
 /// says-why tooltip when there is no dispatcher (stories, host builds).
+///
+/// A labelled pill, not the earlier bare pencil: the hero's whole claim is
+/// that the artwork is *editable*, and a 24px glyph beside the tagline
+/// never said so out loud (G1 ruling, 2026-08-26). The shape is the docs'
+/// own `open-in-studio` call to action — same op, same accent fill, same
+/// icon-plus-label footprint — rounded to a pill so it reads as one thing
+/// to press rather than another card.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn EditShaderPencil(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> Element {
+fn EditArtworkPill(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> Element {
     let live = on_action.is_some();
     let title = if live {
-        "Edit this shader — opens it in the editor and keeps it in your projects"
+        "Edit this artwork — opens it in the editor and keeps it in your projects"
     } else {
         "Only available in the running app"
     };
     rsx! {
         button {
-            class: edit_pencil_class(live),
+            class: edit_artwork_pill_class(live),
             r#type: "button",
             disabled: !live,
             title: "{title}",
-            "aria-label": "Edit this shader",
+            "aria-label": "Edit this artwork",
             onclick: move |_| {
                 if let Some(on_action) = on_action {
                     on_action
@@ -110,18 +120,21 @@ fn EditShaderPencil(#[props(default)] on_action: Option<EventHandler<UiAction>>)
                         );
                 }
             },
-            StudioIcon { name: StudioIconName::Edited, size: 14 }
+            StudioIcon { name: StudioIconName::Edited, size: 15 }
+            span { "Edit this artwork" }
         }
     }
 }
 
-/// Quiet chrome: the slogan is the sentence, the pencil is a footnote
-/// that brightens on hover.
-fn edit_pencil_class(live: bool) -> &'static str {
+/// The accent-filled pill, sized like the docs' `open-in-studio` button so
+/// the product's one "open this example" gesture looks the same wherever it
+/// appears. `max-w-full` + `whitespace-nowrap` keep it inside the narrowest
+/// viewport the site chrome supports without the label breaking mid-word.
+fn edit_artwork_pill_class(live: bool) -> &'static str {
     if live {
-        "tw:flex tw:h-6 tw:w-6 tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:text-muted-foreground tw:transition-colors tw:hover:border-border tw:hover:text-strong-foreground"
+        "tw:inline-flex tw:max-w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-accent-border tw:bg-accent tw:px-4 tw:py-2 tw:text-sm tw:font-bold tw:leading-none tw:text-accent-foreground tw:transition-colors tw:hover:bg-accent-hover"
     } else {
-        "tw:flex tw:h-6 tw:w-6 tw:cursor-not-allowed tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:text-dim-foreground"
+        "tw:inline-flex tw:max-w-full tw:cursor-not-allowed tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border-muted tw:bg-card-muted tw:px-4 tw:py-2 tw:text-sm tw:font-bold tw:leading-none tw:text-dim-foreground"
     }
 }
 
