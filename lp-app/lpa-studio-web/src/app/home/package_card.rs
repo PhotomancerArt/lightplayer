@@ -133,44 +133,40 @@ pub(crate) fn PackageCard(
                 // for finding a project, not for watching twelve of them.
                 mode: ThumbMode::PosterFirst,
             }
-            // The face is the art; the words are one shallow glass bar.
-            // Everything deeper — status in words, the actions — is the
-            // ⋯ popup's job (the redesign's "second click"). The footer
-            // sits under the stretched open link, so the whole face
-            // stays a door.
+            // The face is the art; the words are one slim glass bar —
+            // title, status glyphs, and the ⋯ IN the bar (G1 feedback:
+            // nothing floats on the picture). Everything deeper —
+            // status in words, the actions — is the ⋯ popup's job (the
+            // redesign's "second click"). The footer sits under the
+            // stretched open link, so the whole face stays a door.
             CardGlassFooter {
                 title: card.slug.clone(),
-                context: face_context_line(&card, blocked.as_ref(), opening, edited_line.clone()),
+                context: face_context_line(blocked.as_ref(), opening),
                 glyphs: face_status_glyphs(&card, blocked.is_some()),
-            }
-            // The ⋯ floats on the art, over the open link, with a subtle
-            // backdrop pill so it reads over any picture. The failure
-            // badge holds the OPPOSITE corner (top-left, card_thumb.rs).
-            span {
-                class: "tw:absolute tw:right-1.5 tw:top-1.5 tw:z-[2] tw:rounded-md tw:bg-background/45 tw:backdrop-blur-[4px]",
-                PackageCardMenu {
-                    card: card.clone(),
-                    initially_open: menu_initially_open,
-                    edited_line,
-                    open_href: blocked.is_none().then(|| open_href.clone()),
-                    opening,
-                    empty_devices,
-                    on_action,
-                }
+                trailing: rsx! {
+                    PackageCardMenu {
+                        card: card.clone(),
+                        initially_open: menu_initially_open,
+                        edited_line,
+                        open_href: blocked.is_none().then(|| open_href.clone()),
+                        opening,
+                        empty_devices,
+                        on_action,
+                    }
+                },
             }
         }
     }
 }
 
-/// The face's single context line, priority-ordered: the blocked
-/// headline (amber, matching the border) > "Opening…" > the edited
-/// stamp > provenance. A card with none simply wears a shorter,
-/// title-only footer.
+/// The face's single context line — only when the card demands
+/// attention: the blocked headline (amber, matching the border) or
+/// "Opening…". Quiet facts (edited stamp, provenance) read as noise
+/// repeated across a grid (G1 feedback 2026-08-26) and live in the ⋯
+/// popup instead; a quiet card wears a title-only bar.
 fn face_context_line(
-    card: &UiPackageCard,
     blocked: Option<&(String, String)>,
     opening: bool,
-    edited_line: Option<String>,
 ) -> Option<CardContextLine> {
     if let Some((headline, _remedy)) = blocked {
         // amber = honest bad content (the roster precedent); never
@@ -181,21 +177,9 @@ fn face_context_line(
             tone: ContextTone::Attention,
         });
     }
-    if opening {
-        return Some(CardContextLine {
-            text: "Opening…".to_string(),
-            tone: ContextTone::Working,
-        });
-    }
-    if let Some(edited) = edited_line {
-        return Some(CardContextLine {
-            text: format!("Edited {edited}"),
-            tone: ContextTone::Muted,
-        });
-    }
-    card.provenance.clone().map(|provenance| CardContextLine {
-        text: provenance,
-        tone: ContextTone::Dim,
+    opening.then(|| CardContextLine {
+        text: "Opening…".to_string(),
+        tone: ContextTone::Working,
     })
 }
 

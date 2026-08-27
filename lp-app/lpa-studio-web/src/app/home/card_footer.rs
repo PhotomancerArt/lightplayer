@@ -44,12 +44,11 @@ pub(crate) struct CardContextLine {
     pub tone: ContextTone,
 }
 
+/// Only attention-grade tones exist: quiet facts never earn a context
+/// line on the face (they live in the ⋯ popup), so there is no muted
+/// variant to reach for.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum ContextTone {
-    /// Ordinary fact ("Edited 12 minutes ago").
-    Muted,
-    /// Quiet provenance ("Example", "From shared link").
-    Dim,
     /// In-flight ("Opening…").
     Working,
     /// Honest bad content (a blocked card's headline) — amber, matching
@@ -70,6 +69,13 @@ pub(crate) fn CardGlassFooter(
     title: String,
     #[props(default)] context: Option<CardContextLine>,
     #[props(default)] glyphs: Vec<CardStatusGlyph>,
+    /// The title row's trailing control — the ⋯ menu lives IN the bar
+    /// (G1 feedback 2026-08-26: floating on the art took space from the
+    /// picture). Rises above the stretched open link so it stays
+    /// clickable; negative margins keep the 24px trigger from
+    /// inflating the slim bar.
+    #[props(default)]
+    trailing: Option<Element>,
     /// Live content for the context slot (the example card's opening
     /// progress line) — rendered after the static line, if any.
     children: Element,
@@ -89,6 +95,11 @@ pub(crate) fn CardGlassFooter(
                                 StudioIcon { name: glyph.icon, size: 11 }
                             }
                         }
+                    }
+                }
+                if let Some(trailing) = trailing {
+                    span { class: "tw:relative tw:z-[2] tw:-my-1.5 tw:-mr-1.5 tw:flex-none",
+                        {trailing}
                     }
                 }
             }
@@ -112,8 +123,6 @@ fn glyph_tone_class(tone: GlyphTone) -> &'static str {
 
 fn context_tone_class(tone: ContextTone) -> &'static str {
     match tone {
-        ContextTone::Muted => "tw:text-muted-foreground",
-        ContextTone::Dim => "tw:text-dim-foreground",
         ContextTone::Working => "tw:text-status-working-foreground",
         ContextTone::Attention => "tw:font-semibold tw:text-status-attention-foreground",
     }

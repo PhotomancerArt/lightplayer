@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, PreviewSource, UiAction, UiExampleCard};
 
-use crate::app::home::card_footer::{CardContextLine, CardGlassFooter, ContextTone};
+use crate::app::home::card_footer::CardGlassFooter;
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::gallery_preview::{ThumbMode, card_hover_handlers};
 use crate::app::home::package_card::home_action;
@@ -58,14 +58,12 @@ pub(crate) fn ExampleCard(
                 mode: ThumbMode::PosterFirst,
             }
             // The face is the art; the words are one shallow glass bar
-            // (card-overlay redesign). No menu, no glyphs — an example
-            // has nothing behind a second click.
+            // (card-overlay redesign). Title ONLY — no menu, no glyphs,
+            // and no "Example" label: the shelf's own section header
+            // already says it, and repeating it on every card read as
+            // noise at the G1 gate (2026-08-26).
             CardGlassFooter {
                 title: card.name.clone(),
-                context: (!opening).then(|| CardContextLine {
-                    text: "Example".to_string(),
-                    tone: ContextTone::Dim,
-                }),
                 if opening {
                     // The live pipeline, not a static "Opening…": an example
                     // open never routes to the full opening frame, so on a
