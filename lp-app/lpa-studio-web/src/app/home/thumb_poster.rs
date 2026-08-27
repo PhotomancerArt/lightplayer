@@ -16,9 +16,9 @@
 //! | **CPU tier** | [`lamp_poster`] | [`canvas_poster`] |
 //! | **GPU tier** | [`lamp_poster`] | [`pixel_poster`] |
 //!
-//! The lamp field is rasterized in Rust from the slot's own output frame
-//! ([`rasterize_lamp_field`]), so the capture never scrapes the DOM and its
-//! size is ours to pick. A CPU-tier raster slot presents through the host's
+//! The lamp field is drawn from the slot's own output frame — the same
+//! voronoi cell paths the live layer fills ([`LampCellPaths`]) — so the
+//! capture never scrapes the DOM and its size is ours to pick. A CPU-tier raster slot presents through the host's
 //! `putImageData` blit onto a plain canvas, which reads back fine. A
 //! GPU-tier raster slot's canvas was permanently handed to a worker by
 //! `transferControlToOffscreen`, so `toDataURL` on it is impossible by
@@ -41,7 +41,7 @@ use std::collections::VecDeque;
 use lpa_studio_core::{PreviewSource, UiControlProductPreview};
 use wasm_bindgen::{Clamped, JsCast};
 
-use crate::app::node::lamp_view::{LampRasterBox, rasterize_lamp_field};
+use crate::app::node::lamp_view::LampCellPaths;
 
 /// Posters kept for the session before the oldest is dropped.
 pub(crate) const POSTER_CACHE_LIMIT: usize = 64;
@@ -50,7 +50,6 @@ pub(crate) const POSTER_CACHE_LIMIT: usize = 64;
 /// crisp on a retina panel and still tens of KB as a PNG.
 pub(crate) const POSTER_WIDTH: u32 = 512;
 pub(crate) const POSTER_HEIGHT: u32 = 384;
-const POSTER_DPR: f64 = 2.0;
 
 /// The lamp layer's inset on a card (`card_thumb.rs`: `tw:inset-[6%]`, so
 /// an edge lamp is not clipped by the thumb's rounded corner). The poster
@@ -122,33 +121,17 @@ pub(crate) fn lamp_poster(preview: &UiControlProductPreview) -> Result<String, S
 
     let inset_x = (f64::from(POSTER_WIDTH) * POSTER_LAMP_INSET).round();
     let inset_y = (f64::from(POSTER_HEIGHT) * POSTER_LAMP_INSET).round();
-    let width = ((f64::from(POSTER_WIDTH) - inset_x * 2.0).max(1.0)) as u32;
-    let height = ((f64::from(POSTER_HEIGHT) - inset_y * 2.0).max(1.0)) as u32;
-    let mut buffer = Vec::new();
-    rasterize_lamp_field(
+    let width = (f64::from(POSTER_WIDTH) - inset_x * 2.0).max(1.0);
+    let height = (f64::from(POSTER_HEIGHT) - inset_y * 2.0).max(1.0);
+    // The same voronoi cells the live layer fills — one-shot, so no cache
+    // slot to keep: a poster is captured once per source per session.
+    let mut paths = None;
+    LampCellPaths::ensure(&mut paths, preview)?.fill(
+        &context,
         preview,
         true,
-        LampRasterBox {
-            css_width: f64::from(width) / POSTER_DPR,
-            dpr: POSTER_DPR,
-            width,
-            height,
-        },
-        &mut buffer,
+        [inset_x, inset_y, width, height],
     )?;
-    // `putImageData` REPLACES pixels, alpha included, so the rasterizer's
-    // transparent background would punch a hole straight through the black
-    // frame just filled. Every lamp was already screen-blended over black,
-    // so forcing alpha opaque IS the composite the card shows.
-    for pixel in buffer.chunks_exact_mut(4) {
-        pixel[3] = 255;
-    }
-    let image =
-        web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&buffer), width, height)
-            .map_err(|error| format!("build ImageData: {error:?}"))?;
-    context
-        .put_image_data(&image, inset_x, inset_y)
-        .map_err(|error| format!("putImageData: {error:?}"))?;
     encode_png(&canvas)
 }
 

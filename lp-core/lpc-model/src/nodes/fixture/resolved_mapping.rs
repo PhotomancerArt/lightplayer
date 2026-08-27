@@ -64,7 +64,10 @@ pub struct ResolvedMappingCompact {
     pub spans: Vec<ResolvedSpan>,
     /// Fitted texture-space centers, exact capacity, span-concatenated.
     pub points: Vec<[f32; 2]>,
-    /// Sampling diameter in texture pixels, straight from the document.
+    /// Sampling diameter in texture pixels — the document's doc-space
+    /// diameter carried through the SAME aspect-preserving fit as the
+    /// points (`fit_scale`). It rode through unscaled until 2026-08-24,
+    /// which made this field's unit whatever the doc happened to use.
     pub sample_diameter: f32,
 }
 
