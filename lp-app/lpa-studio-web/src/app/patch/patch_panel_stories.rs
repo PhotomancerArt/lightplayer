@@ -46,11 +46,24 @@ fn panel_frame(
     selection: Option<UiPatchTarget>,
     armed: Option<ArmedVerb>,
 ) -> Element {
+    selection_frame(
+        surface,
+        lpa_studio_core::UiSelection::from_option(selection),
+        armed,
+    )
+}
+
+/// The same frame for a posed multi-target selection.
+fn selection_frame(
+    surface: UiPatchSurface,
+    selection: lpa_studio_core::UiSelection,
+    armed: Option<ArmedVerb>,
+) -> Element {
     rsx! {
         div { class: "tw:flex tw:w-full tw:flex-col tw:overflow-hidden tw:rounded-md tw:border tw:border-border-strong tw:bg-background",
             PatchPanel {
                 surface,
-                selection: lpa_studio_core::UiSelection::from_option(selection),
+                selection,
                 armed,
                 on_action: move |_| {},
             }
@@ -158,6 +171,20 @@ fn patch_panel_objfirst() -> Element {
     // capture must land on.
     surface.chase_preview = lpa_studio_core::chase_preview(&surface, Some(&selection), 0);
     panel_frame(surface, Some(selection), None)
+}
+
+#[story(
+    description = "The N-SELECTED card (unified-selection P2): TWO fixtures shift-set into one sibling selection. A multi selection is counts, not a subject — the verbs and the arm are single-subject by ruling — so the whole panel is one honest line stating the set and inviting narrowing: no facts section, no transport, nothing armable. The canvas gestures own the set; patching one thing means selecting one thing."
+)]
+fn patch_panel_multi_fixtures() -> Element {
+    let mut selection = lpa_studio_core::UiSelection::empty();
+    selection.set_siblings(vec![
+        UiPatchTarget::Fixture { node: dome() },
+        UiPatchTarget::Fixture {
+            node: NodeId::new(3),
+        },
+    ]);
+    selection_frame(mini_dome_surface(false), selection, None)
 }
 
 #[story(
