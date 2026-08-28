@@ -389,6 +389,7 @@ pub fn App() -> Element {
                     StudioRoute::Devices
                         | StudioRoute::Projects
                         | StudioRoute::Project { .. }
+                        | StudioRoute::Example { .. }
                         | StudioRoute::Device { .. }
                 );
                 // …and never while a nav teardown is in flight. Leaving
@@ -409,7 +410,9 @@ pub fn App() -> Element {
                     {
                         if matches!(
                             current,
-                            StudioRoute::Project { .. } | StudioRoute::Device { .. }
+                            StudioRoute::Project { .. }
+                                | StudioRoute::Example { .. }
+                                | StudioRoute::Device { .. }
                         ) {
                             // boot/forward resolution on a lens route
                             // (uid → slug, identity landing): same place,
@@ -428,7 +431,9 @@ pub fn App() -> Element {
                     // as-is
                 } else if matches!(
                     current,
-                    StudioRoute::Project { .. } | StudioRoute::Device { .. }
+                    StudioRoute::Project { .. }
+                        | StudioRoute::Example { .. }
+                        | StudioRoute::Device { .. }
                 ) {
                     // the editor went away: home without an in-flight open
                     // (after one started) means the open ended — the URL
@@ -636,6 +641,28 @@ pub fn App() -> Element {
                         *nav_pending_project.borrow_mut() = Some(*uid);
                     }
                 }
+                StudioRoute::Example { slug, .. } => {
+                    // An example's bare address resolves client-side (the
+                    // parser only produces slugs the embedded table has) —
+                    // no roster needed, so it dispatches straight into the
+                    // same stateless open an Explore card uses (D2).
+                    let already_bound = matches!(
+                        &*nav_bound_route.borrow(),
+                        Some(StudioRoute::Example { slug: bound, .. }) if bound == slug
+                    );
+                    if !already_bound
+                        && let Some(example) =
+                            lpa_studio_core::app::home::embedded_example_by_slug(slug)
+                    {
+                        nav_pending_route_open.set(true);
+                        nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
+                            HOME_NODE_ID,
+                            HomeOp::OpenExample {
+                                id: example.id.to_string(),
+                            },
+                        )));
+                    }
+                }
                 StudioRoute::Device { uid, play: _ } => {
                     let already_bound = matches!(
                         &*nav_bound_route.borrow(),
@@ -754,6 +781,25 @@ pub fn App() -> Element {
                             },
                         )));
                 }
+                // A cold `/p/<slug>` load: the example is compiled in, so
+                // no roster wait — open transiently the moment the library
+                // host is attached (the open funnel needs its clock and
+                // active slot, never its store).
+                StudioRoute::Example { slug, .. } => {
+                    if let Some(example) =
+                        lpa_studio_core::app::home::embedded_example_by_slug(slug)
+                    {
+                        startup_pending_route_open.set(true);
+                        startup_bridge
+                            .tx
+                            .send(StudioCommand::Action(UiAction::from_op(
+                                HOME_NODE_ID,
+                                HomeOp::OpenExample {
+                                    id: example.id.to_string(),
+                                },
+                            )));
+                    }
+                }
                 StudioRoute::Home
                 | StudioRoute::Project { .. }
                 | StudioRoute::Devices
@@ -841,8 +887,10 @@ pub fn App() -> Element {
     // route resolution above lands it on Home with a pending intent.
     let current_view = view.read().clone();
     let current_route = route.read().clone();
-    let opening_frame = matches!(current_route, StudioRoute::Project { .. })
-        && !current_route.project_matches_view(&current_view);
+    let opening_frame = matches!(
+        current_route,
+        StudioRoute::Project { .. } | StudioRoute::Example { .. }
+    ) && !current_route.project_matches_view(&current_view);
     // Play mode (panel.md P12) is a zoom on the SAME session: the flag only
     // picks what the shell renders, and the toggle only rewrites the URL.
     let project_view = current_route.project_view();
@@ -857,7 +905,10 @@ pub fn App() -> Element {
     let workbench_hrefs = current_route.is_lens().then(|| {
         workbench::WorkbenchHrefs::from_entries(workbench::VIEWS.iter().map(|spec| {
             let addressable = spec.view == workbench::WorkbenchView::default()
-                || matches!(&current_route, StudioRoute::Project { .. });
+                || matches!(
+                    &current_route,
+                    StudioRoute::Project { .. } | StudioRoute::Example { .. }
+                );
             (
                 spec.view,
                 addressable.then(|| current_route.with_view(spec.route_view).path()),
