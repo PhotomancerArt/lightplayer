@@ -18,7 +18,7 @@ use crate::app::home::HomePage;
 use crate::app::home::brand_hero::BrandHero;
 
 #[story(
-    description = "The landing page: brand hero (the mark's triangle as a window onto a live shader — here the fallback identity gradient with its Spill bloom, since stories run no engine), wordmark, tagline, the \"Edit this artwork\" pill (inert here — a story has no dispatcher), and the three dive-in cards. The shared-`/p/` line renders nothing without context."
+    description = "The landing page: brand hero (the mark's triangle as a window onto a live shader — here the fallback identity gradient with its Spill bloom, since stories run no engine), wordmark, tagline, the \"Edit the logo\" pill (inert here — a story has no dispatcher), and the three dive-in cards. The shared-`/p/` line renders nothing without context."
 )]
 fn landing() -> Element {
     rsx! {

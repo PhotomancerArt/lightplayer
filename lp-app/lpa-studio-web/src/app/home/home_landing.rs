@@ -83,23 +83,24 @@ pub fn HomePage(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> 
     }
 }
 
-/// The door from the hero into the editor: the "Edit this artwork" pill,
+/// The door from the hero into the editor: the "Edit the logo" pill,
 /// opening the hero's example ([`crate::app::home::brand_hero::HERO_EXAMPLE`],
 /// the brand's own Logo Sign) via the Explore-card path. Inert with a
 /// says-why tooltip when there is no dispatcher (stories, host builds).
 ///
 /// A labelled pill, not the earlier bare pencil: the hero's whole claim is
 /// that the artwork is *editable*, and a 24px glyph beside the tagline
-/// never said so out loud (G1 ruling, 2026-08-26). The shape is the docs'
-/// own `open-in-studio` call to action — same op, same accent fill, same
-/// icon-plus-label footprint — rounded to a pill so it reads as one thing
-/// to press rather than another card.
+/// never said so out loud (G1 ruling, 2026-08-26). Deliberately a QUIET
+/// secondary — neutral border and surface, accent only on hover — after
+/// the solid accent fill proved the loudest thing on the page (G2 ruling,
+/// 2026-08-28; a broader design-language pass is planned, so this stays
+/// inside today's idiom rather than inventing ahead of it).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn EditArtworkPill(#[props(default)] on_action: Option<EventHandler<UiAction>>) -> Element {
     let live = on_action.is_some();
     let title = if live {
-        "Edit this artwork — opens it in the editor and keeps it in your projects"
+        "Edit the logo — opens it in the editor and keeps it in your projects"
     } else {
         "Only available in the running app"
     };
@@ -109,7 +110,7 @@ fn EditArtworkPill(#[props(default)] on_action: Option<EventHandler<UiAction>>) 
             r#type: "button",
             disabled: !live,
             title: "{title}",
-            "aria-label": "Edit this artwork",
+            "aria-label": "Edit the logo",
             onclick: move |_| {
                 if let Some(on_action) = on_action {
                     on_action
@@ -121,20 +122,23 @@ fn EditArtworkPill(#[props(default)] on_action: Option<EventHandler<UiAction>>) 
                 }
             },
             StudioIcon { name: StudioIconName::Edited, size: 15 }
-            span { "Edit this artwork" }
+            span { "Edit the logo" }
         }
     }
 }
 
-/// The accent-filled pill, sized like the docs' `open-in-studio` button so
-/// the product's one "open this example" gesture looks the same wherever it
-/// appears. `max-w-full` + `whitespace-nowrap` keep it inside the narrowest
-/// viewport the site chrome supports without the label breaking mid-word.
+/// The quiet secondary pill: neutral border on the card surface, strong
+/// text, and the accent reserved for hover — the invite is the LABEL, the
+/// hero above it already carries the color. Same footprint as the docs'
+/// `open-in-studio` button so the product's one "open this example"
+/// gesture keeps one size everywhere. `max-w-full` + `whitespace-nowrap`
+/// keep it inside the narrowest viewport the site chrome supports without
+/// the label breaking mid-word.
 fn edit_artwork_pill_class(live: bool) -> &'static str {
     if live {
-        "tw:inline-flex tw:max-w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-accent-border tw:bg-accent tw:px-4 tw:py-2 tw:text-sm tw:font-bold tw:leading-none tw:text-accent-foreground tw:transition-colors tw:hover:bg-accent-hover"
+        "tw:inline-flex tw:max-w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border tw:bg-card tw:px-4 tw:py-2 tw:text-sm tw:font-semibold tw:leading-none tw:text-strong-foreground tw:transition-colors tw:hover:border-accent-border tw:hover:text-accent"
     } else {
-        "tw:inline-flex tw:max-w-full tw:cursor-not-allowed tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border-muted tw:bg-card-muted tw:px-4 tw:py-2 tw:text-sm tw:font-bold tw:leading-none tw:text-dim-foreground"
+        "tw:inline-flex tw:max-w-full tw:cursor-not-allowed tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border-muted tw:bg-card-muted tw:px-4 tw:py-2 tw:text-sm tw:font-semibold tw:leading-none tw:text-dim-foreground"
     }
 }
 

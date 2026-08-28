@@ -53,7 +53,7 @@ use crate::base::logo_mark::{BrandWord, fillet_tri_path};
 
 /// The landing hero's example and cadence. A constant on purpose: the
 /// future fixture-hero plan swaps this surface's source, not its shape.
-/// `pub(crate)` because the landing's "Edit this artwork" pill opens it.
+/// `pub(crate)` because the landing's "Edit the logo" pill opens it.
 /// It is the brand's own artwork (`examples/logo-sign`): the triangle and
 /// the letters the hero cuts its windows from are the same objects that
 /// example maps to lamps, so the pill hands the visitor exactly the piece
