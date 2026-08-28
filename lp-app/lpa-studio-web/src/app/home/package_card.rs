@@ -143,6 +143,27 @@ pub(crate) fn PackageCard(
                 title: card.slug.clone(),
                 context: face_context_line(blocked.as_ref(), opening),
                 glyphs: face_status_glyphs(&card, blocked.is_some()),
+                // Hover slides the bar up over the quiet facts — capped,
+                // delayed, and skipped entirely while the card is already
+                // saying something louder (blocked / opening).
+                reveal: (blocked.is_none() && !opening).then(|| {
+                    let live = live_presence_line(&card);
+                    rsx! {
+                        if let Some(edited) = edited_line.clone() {
+                            p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-muted-foreground",
+                                "Edited {edited}"
+                            }
+                        }
+                        if let Some(provenance) = card.provenance.clone() {
+                            p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-dim-foreground",
+                                "{provenance}"
+                            }
+                        }
+                        if let Some(live) = live {
+                            p { class: live.class, "{live.text}" }
+                        }
+                    }
+                }),
                 trailing: rsx! {
                     PackageCardMenu {
                         card: card.clone(),
@@ -614,13 +635,13 @@ fn package_card_class(opening: bool, busy: bool, blocked: bool) -> &'static str 
     // tw:relative anchors the stretched open link (see the card markup)
     if blocked {
         // amber edge, default cursor: the card is a statement, not a door
-        "tw:relative tw:overflow-hidden tw:rounded-md tw:border tw:border-status-attention-border tw:bg-card"
+        "tw:group tw:relative tw:overflow-hidden tw:rounded-md tw:border tw:border-status-attention-border tw:bg-card"
     } else if opening {
-        "tw:relative tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
+        "tw:group tw:relative tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
     } else if busy {
-        "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
+        "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
     } else {
-        "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+        "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
     }
 }
 

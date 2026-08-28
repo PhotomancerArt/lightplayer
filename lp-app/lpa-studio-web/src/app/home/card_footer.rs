@@ -82,6 +82,16 @@ pub(crate) fn CardGlassFooter(
     /// inflating the slim bar.
     #[props(default)]
     trailing: Option<Element>,
+    /// Quiet facts revealed while the CARD is hovered (the card must
+    /// carry `tw:group`): the bar slides up ~two lines to show them,
+    /// after a short delay so sweeping the pointer across the grid
+    /// doesn't pump every bar. Hover is also when the live preview
+    /// plays — the reveal is capped at a couple of lines precisely so
+    /// it never covers the motion the hover just paid for (the spike's
+    /// concept-D lesson). Enhancement only: touch and keyboard never
+    /// see it, and the ⋯ popup remains the canonical depth.
+    #[props(default)]
+    reveal: Option<Element>,
     /// Live content for the context slot (the example card's opening
     /// progress line) — rendered after the static line, if any.
     children: Element,
@@ -112,6 +122,18 @@ pub(crate) fn CardGlassFooter(
             if let Some(line) = context {
                 p { class: "tw:m-0 tw:mt-px tw:truncate tw:text-xs {context_tone_class(line.tone)}",
                     "{line.text}"
+                }
+            }
+            if let Some(reveal) = reveal {
+                // 0fr → 1fr grid-row animation: height animates without
+                // max-height guesses; the bar is bottom-anchored, so
+                // growing content slides its top edge UP over the art.
+                div { class: "tw:grid tw:grid-rows-[0fr] tw:opacity-0 tw:transition-[grid-template-rows,opacity] tw:delay-150 tw:duration-200 tw:group-hover:grid-rows-[1fr] tw:group-hover:opacity-100",
+                    div { class: "tw:min-h-0 tw:overflow-hidden",
+                        div { class: "tw:grid tw:gap-0.5 tw:pt-1",
+                            {reveal}
+                        }
+                    }
                 }
             }
             {children}
