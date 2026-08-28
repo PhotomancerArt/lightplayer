@@ -816,7 +816,7 @@ clippy-fw-esp32v3:
     # whole app path out, so linting the defaults leaves harness code completely
     # uncovered. That is exactly how 13 fw-esp32 harnesses once rotted
     # uncompiled. Add new `test_*` features to this list.
-    for feat in test_xt_fp_conformance; do
+    for feat in test_xt_fp_conformance test_interrupt_executor; do
       echo "clippy: --features $feat"
       cargo clippy --profile release-esp32v3 --features "$feat" -- --no-deps -D warnings
     done
@@ -1182,6 +1182,42 @@ fwtest-xt-fp-esp32s3 port="" family="" limit="0":
 # recipe most needs to catch is a stale image: if the write silently died, the
 # board keeps running the PREVIOUS harness build, which prints a perfectly
 # well-formed capture with the wrong firmware in it.
+# Interrupt-executor wake rig on the classic (ADR 2026-08-25 + esp-rtos
+# upgrade canary): flashes the `test_interrupt_executor` harness and captures
+# its `[IEXEC]` verdict lines. Run after every esp-rtos bump — `timer_wake:
+# NONE` means the io pacer workaround is still required; `DELIVERED` means
+# upstream changed and the pacer can be retired (deliberately, ADR finding 1).
+# Foreground flash + pty'd monitor for the same chip reasons as the FP recipe.
+fwtest-iexec-esp32v3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    mkdir -p target/fp-capture
+    out="target/fp-capture/iexec-v3-$(date +%Y%m%d-%H%M%S).txt"
+    (cd {{ fw_esp32v3_dir }} && \
+      cargo build --profile release-esp32v3 --features test_interrupt_executor)
+    args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    echo "capturing to $out"
+    : > "$out"
+    (
+      for _ in $(seq 1 240); do
+        if grep -q 'END-IEXEC' "$out" 2>/dev/null; then break; fi
+        sleep 1
+      done
+      pkill -INT -f 'espflash flash.*--chip esp32' || true
+    ) &
+    watcher=$!
+    script -q "$out" espflash flash "${args[@]}" {{ fw_esp32v3_elf }} || true
+    kill "$watcher" 2>/dev/null || true
+    echo "--- [IEXEC] lines ---"
+    grep -a 'IEXEC' "$out" || echo "NO IEXEC OUTPUT (see $out)"
+
 fwtest-xt-fp-esp32v3 port="" family="" limit="0":
     #!/usr/bin/env bash
     set -euo pipefail

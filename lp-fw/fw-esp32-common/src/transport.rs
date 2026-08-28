@@ -1,9 +1,16 @@
-//! Accountable transport: serializes WireServerMessage in io_task, minimal buffering.
+//! Accountable transport: serializes in thread context, io_task writes bytes.
 //!
-//! Sends a server write request to io_task and waits for io_task to serialize
-//! and write the message before returning success.
+//! `send` serializes the WireServerMessage HERE (thread context) into the
+//! shared static frame buffer, submits its length to io_task, and waits for
+//! io_task to report the write's outcome before returning — which is also
+//! what makes the single buffer sound (one frame in flight, ever). io_task never serializes: on the classic its
+//! polls run in interrupt context on a borrowed stack, and serialization
+//! recursion there corrupted the system on the bench (see
+//! `serial::server_msg`'s module docs and the 2026-08-25 ADR).
 
 use alloc::vec::Vec;
+
+use crate::serial::server_msg::serialize_server_msg;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use lpc_shared::transport::ServerTransport;
@@ -16,7 +23,7 @@ use lpc_wire::{ClientMessage, TransportError, json};
 /// until io_task reports that the message was fully written or failed.
 pub struct StreamingMessageRouterTransport {
     incoming: &'static Channel<CriticalSectionRawMutex, alloc::string::String, 32>,
-    server_write_request: &'static Channel<CriticalSectionRawMutex, (u32, WireServerMessage), 1>,
+    server_write_request: &'static Channel<CriticalSectionRawMutex, (u32, usize), 1>,
     server_write_result:
         &'static Channel<CriticalSectionRawMutex, (u32, Result<(), TransportError>), 1>,
     /// Wrapping generation stamped on each write request. `send()` discards any
@@ -30,11 +37,7 @@ impl StreamingMessageRouterTransport {
     /// channel plus the single-slot write request/result pair.
     pub fn new(
         incoming: &'static Channel<CriticalSectionRawMutex, alloc::string::String, 32>,
-        server_write_request: &'static Channel<
-            CriticalSectionRawMutex,
-            (u32, WireServerMessage),
-            1,
-        >,
+        server_write_request: &'static Channel<CriticalSectionRawMutex, (u32, usize), 1>,
         server_write_result: &'static Channel<
             CriticalSectionRawMutex,
             (u32, Result<(), TransportError>),
@@ -50,19 +53,27 @@ impl StreamingMessageRouterTransport {
     }
 }
 
-impl ServerTransport for StreamingMessageRouterTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+impl StreamingMessageRouterTransport {
+    /// One accountable write through io_task: serialize HERE (thread
+    /// context — serialization recursion and the frame buffer must never ride
+    /// the io task's interrupt-context stack; see `serial::server_msg`),
+    /// submit the framed bytes, then await the generation-matched result. A
+    /// mismatched result is a stale response orphaned by a previously
+    /// cancelled send; discard it and keep waiting for the one io_task
+    /// produced for this request.
+    async fn write_once(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
+        // Fills the shared static frame buffer; sending the LENGTH hands the
+        // buffer to the io task, and awaiting the matching result below is
+        // what makes reusing it for the next message sound (see FRAME_BUF).
+        let len = serialize_server_msg(&msg)?;
         let generation = self.generation;
         self.generation = self.generation.wrapping_add(1);
         self.server_write_request
             .sender()
-            .send((generation, msg))
+            .send((generation, len))
             .await;
-        // Await the result matching this generation. A mismatched result is a
-        // stale response orphaned by a previously cancelled send; discard it and
-        // keep waiting for the one io_task produced for this request.
-        let result = loop {
+        loop {
             let (result_generation, result) = self.server_write_result.receiver().receive().await;
             if result_generation == generation {
                 break result;
@@ -71,14 +82,47 @@ impl ServerTransport for StreamingMessageRouterTransport {
                 "StreamingMessageRouterTransport: discarding stale write result \
                  generation={result_generation} (awaiting {generation}) for id={id}"
             );
-        };
+        }
+    }
+}
+
+impl ServerTransport for StreamingMessageRouterTransport {
+    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+        let id = msg.id;
+        // Captured before the message moves: a failed Error notice must not
+        // recurse into another notice.
+        let is_error_frame = matches!(msg.msg, lpc_wire::server::ServerMsgBody::Error { .. });
+        let result = self.write_once(msg).await;
         match &result {
             Ok(()) => log::debug!(
                 "StreamingMessageRouterTransport: wrote message id={id} through io_task"
             ),
-            Err(error) => log::warn!(
-                "StreamingMessageRouterTransport: failed to write message id={id}: {error}"
-            ),
+            Err(error) => {
+                // io_task has already retried per its link's write policy, so
+                // this drop is final — say so at error level, never as a
+                // debuggable-away warn (the debt entry's "no silent drop with
+                // responses=0" criterion).
+                log::error!("StreamingMessageRouterTransport: dropping message id={id}: {error}");
+                // Best-effort: tell the peer its response was dropped, with
+                // the original request id so the client can fail that call
+                // instead of timing out. Skipped when the link is gone
+                // (nobody to tell) and for Error frames themselves (no
+                // recursion); a failed notice is only logged.
+                if !is_error_frame && !matches!(error, TransportError::ConnectionLost) {
+                    let notice = WireServerMessage::new(
+                        id,
+                        lpc_wire::server::ServerMsgBody::Error {
+                            error: alloc::format!("response id={id} dropped: {error}"),
+                        },
+                    );
+                    if self.write_once(notice).await.is_err() {
+                        log::error!(
+                            "StreamingMessageRouterTransport: error notice for id={id} \
+                             also failed; peer left waiting"
+                        );
+                    }
+                }
+            }
         }
         result
     }

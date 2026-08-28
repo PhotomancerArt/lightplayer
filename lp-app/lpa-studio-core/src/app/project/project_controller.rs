@@ -2986,6 +2986,83 @@ impl ProjectController {
         }
     }
 
+    /// [`Self::sync_loaded_project`] under a progress deadline: the initial
+    /// sync's read is by far the largest pull this app makes, and a device
+    /// that resets mid-stream (bench 2026-08-26: assembly OOM on the classic)
+    /// otherwise leaves the UI in "Syncing project" forever. Timeout and
+    /// cancellation are FAILURES here — unlike the passive refresh, an
+    /// initial sync that did not complete has left the project pane empty,
+    /// and the user must see that and why.
+    pub async fn sync_loaded_project_gated<MakeTimer, Timer, Cancel>(
+        &mut self,
+        server: &mut StudioServerClient,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+    ) -> Result<ProjectSyncRun, UiError>
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        let handle_id = self.ready_handle_id()?;
+        self.sync
+            .get_or_insert_with(ProjectSync::new)
+            .begin_initial_sync();
+        match self
+            .run_initial_sync_gated(server, handle_id, deadline, cancel)
+            .await
+        {
+            Ok(logs) => Ok(ProjectSyncRun::synced(logs)),
+            Err(error) => Ok(self.record_sync_failure(server, error)),
+        }
+    }
+
+    async fn run_initial_sync_gated<MakeTimer, Timer, Cancel>(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+    ) -> Result<Vec<UiLogDraft>, UiError>
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        let products = self.subscribed_products();
+        let request = self
+            .sync_for_request()?
+            .initial_project_read_request(products);
+        log::info!(
+            "initial sync: project read (handle={handle_id}, {} queries, {} probes)",
+            request.queries.len(),
+            request.probes.len()
+        );
+        let outcome = server
+            .project_read_gated(handle_id, request, deadline, cancel)
+            .await?;
+        let read = match outcome {
+            StudioProjectReadOutcome::Completed(read) => read,
+            StudioProjectReadOutcome::TimedOut => {
+                return Err(UiError::Transport(
+                    "initial project sync timed out: the device stopped streaming mid-read                      (a device reset looks exactly like this — check the console for                      [RECOVERY] lines and the pull loop's frame count)"
+                        .into(),
+                ));
+            }
+            StudioProjectReadOutcome::Cancelled => {
+                return Err(UiError::Transport(
+                    "initial project sync was cancelled before it completed".into(),
+                ));
+            }
+        };
+        let mut logs = read.logs;
+        self.sync_mut()?.apply_project_read_events(read.events)?;
+        self.apply_synced_project_view()?;
+        logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
+        log::info!("initial sync: complete");
+        Ok(logs)
+    }
+
     pub async fn refresh_project(
         &mut self,
         server: &mut StudioServerClient,
