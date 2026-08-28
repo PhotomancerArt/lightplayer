@@ -33,7 +33,7 @@ pub use node_tree::RuntimeNodeTree;
 pub use render_node::RenderNode;
 pub use runtime_state_shape::RuntimeStateShape;
 pub use scope::ScopeRef;
-pub use sync::tree_deltas_since;
+pub use sync::{tree_deltas_since, tree_deltas_since_iter};
 pub use tree_error::TreeError;
 
 #[cfg(test)]

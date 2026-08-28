@@ -1,8 +1,6 @@
-//! Node-centric project read query/result.
+//! Node-centric project read query.
 
 use super::ReadLevel;
-use crate::slot::WireSlotRootsSnapshot;
-use crate::tree::WireTreeDelta;
 use alloc::vec::Vec;
 use lpc_model::NodeId;
 
@@ -41,14 +39,4 @@ impl NodeReadQuery {
             include_slots: true,
         }
     }
-}
-
-/// Node read result.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct NodeReadResult {
-    pub level: ReadLevel,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tree_deltas: Vec<WireTreeDelta>,
-    pub slots: Option<WireSlotRootsSnapshot>,
 }

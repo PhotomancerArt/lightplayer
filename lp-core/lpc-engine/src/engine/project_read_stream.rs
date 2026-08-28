@@ -74,53 +74,39 @@ impl<'a> EngineProjectReadSource<'a> {
     {
         match query {
             ProjectReadQuery::Shapes(query) => {
-                let result = self.engine.read_project_shapes(query, since);
-                if let Some(registry) = result.registry {
-                    let ids_revision = registry.ids_revision;
+                let since_rev = since.unwrap_or_default();
+                let ids_revision = self.engine.project_shape_ids_revision();
+                send_query_event(
+                    sink,
+                    index,
+                    ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Begin {
+                        level: query.level,
+                        ids_revision,
+                    }),
+                )
+                .await?;
+                // One entry cloned at a time: each is sent (and freed once
+                // flushed) before the next is cloned, so the whole shape
+                // forest never exists in memory at once.
+                for (id, entry) in self.engine.iter_project_shape_entries(since_rev) {
                     send_query_event(
                         sink,
                         index,
-                        ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Begin {
-                            level: result.level,
-                            ids_revision,
-                        }),
+                        ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Entry { id, entry }),
                     )
                     .await?;
-                    for (id, entry) in registry.shapes {
-                        send_query_event(
-                            sink,
-                            index,
-                            ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Entry {
-                                id,
-                                entry,
-                            }),
-                        )
-                        .await?;
-                    }
-                    // Membership sync (G7): when the id set changed after `since`,
-                    // send the full current id list so the client can prune shapes
-                    // that vanished from a gated stream. A `None`/`0` since is
-                    // always older than any real `ids_revision`, so a fresh read
-                    // still carries the confirming list.
-                    if ids_revision > since.unwrap_or_default() {
-                        let ids = self.engine.project_shape_membership_ids();
-                        send_query_event(
-                            sink,
-                            index,
-                            ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Membership {
-                                ids,
-                            }),
-                        )
-                        .await?;
-                    }
-                } else {
+                }
+                // Membership sync (G7): when the id set changed after `since`,
+                // send the full current id list so the client can prune shapes
+                // that vanished from a gated stream. A `None`/`0` since is
+                // always older than any real `ids_revision`, so a fresh read
+                // still carries the confirming list.
+                if ids_revision > since_rev {
+                    let ids = self.engine.project_shape_membership_ids();
                     send_query_event(
                         sink,
                         index,
-                        ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Begin {
-                            level: result.level,
-                            ids_revision: lpc_model::Revision::default(),
-                        }),
+                        ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Membership { ids }),
                     )
                     .await?;
                 }
@@ -134,21 +120,46 @@ impl<'a> EngineProjectReadSource<'a> {
             ProjectReadQuery::Nodes(query) => {
                 let include_slots =
                     query.include_slots && query.level == lpc_wire::ReadLevel::Detail;
-                let result = self.engine.read_project_nodes(since, query);
+                let since_rev = since.unwrap_or_default();
                 send_query_event(
                     sink,
                     index,
                     ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::Begin {
-                        level: result.level,
+                        level: query.level,
                     }),
                 )
                 .await?;
-                if !result.tree_deltas.is_empty() {
+                // Tree deltas stream in bounded batches: each delta is produced
+                // lazily and measured with the wire serializer; a batch is
+                // flushed as its own `TreeDeltas` event near the runtime chunk
+                // budget, so neither the whole-tree delta Vec nor a single
+                // unbounded event exists (the applier `extend`s across events).
+                let mut batch: alloc::vec::Vec<lpc_wire::WireTreeDelta> = alloc::vec::Vec::new();
+                let mut batch_len = 0usize;
+                for delta in crate::node::tree_deltas_since_iter(self.engine.tree(), since_rev) {
+                    let delta_len = lpc_wire::ser_write_json_len(&delta);
+                    if !batch.is_empty()
+                        && batch_len + delta_len > lpc_wire::PROJECT_READ_RUNTIME_CHUNK_BYTES
+                    {
+                        send_query_event(
+                            sink,
+                            index,
+                            ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::TreeDeltas {
+                                deltas: core::mem::take(&mut batch),
+                            }),
+                        )
+                        .await?;
+                        batch_len = 0;
+                    }
+                    batch_len += delta_len;
+                    batch.push(delta);
+                }
+                if !batch.is_empty() {
                     send_query_event(
                         sink,
                         index,
                         ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::TreeDeltas {
-                            deltas: result.tree_deltas,
+                            deltas: batch,
                         }),
                     )
                     .await?;
@@ -157,10 +168,7 @@ impl<'a> EngineProjectReadSource<'a> {
                     // One root materialized at a time: each snapshot is sent
                     // (and freed once flushed) before the next is built, so a
                     // whole-project slot forest never exists in memory at once.
-                    for root in self
-                        .engine
-                        .iter_node_slot_roots(self.registry, since.unwrap_or_default())
-                    {
+                    for root in self.engine.iter_node_slot_roots(self.registry, since_rev) {
                         send_query_event(
                             sink,
                             index,
