@@ -1645,7 +1645,7 @@ mod tests {
     /// safe field repair.
     #[test]
     fn expanding_a_repeat_moves_no_lamp() {
-        // The mini-dome: one gapped sector strand, five instances.
+        // The small-dome: one gapped sector strand, five instances.
         let mut session = MapEditorSession::new(corpus::repeated_sector());
         let before: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
         let spans_before: Vec<(u32, u32)> = session

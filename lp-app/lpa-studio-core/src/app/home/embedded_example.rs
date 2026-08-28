@@ -390,82 +390,84 @@ pub static ZOOK_DOME_FILES: &[ExampleFile] = &[
     ),
 ];
 
-/// `examples/mini-dome` — the mini RADIANCE stand-in: a 5-way repeated
-/// dome (30 lamps a sector — eight suspended triangle panels on one gapped
-/// path, map2d format 3 stable ids) AND three always-lit chevron doors,
-/// scattered across TWO named outputs with
-/// shared ports — many-to-many, the patching archetype
-/// (`docs/use-cases/2026-08-09-mini-dome.md`). The `.patch.json` files
-/// carry the as-built permutation as format-2 path-identity rows
-/// (`/sector/2`), reversal and stride-stepped rotation included.
-pub static MINI_DOME_FILES: &[ExampleFile] = &[
+/// `examples/small-dome` — Yona's real 16' 2V dome at full scale: 50
+/// suspended triangle panels of 119 lamps each (ten 5-way-repeated polygon
+/// objects, map2d format 4) AND one always-lit 360-lamp chevron door,
+/// scattered across TWO named outputs (the build's two control boxes, 13
+/// ports each) with a shared port tail — many-to-many, the patching
+/// archetype (`docs/use-cases/2026-08-09-mini-dome.md`), and a
+/// desktop-scale stress fixture (6,310 lamps). The `.patch.json` files
+/// carry the as-built install as format-2 path-identity rows
+/// (`/band-a/3`), reversal and stride-stepped rotation included; all six
+/// wiring artifacts regenerate via `cargo run -p lpt-geodome`.
+pub static SMALL_DOME_FILES: &[ExampleFile] = &[
     (
         "project.json",
-        include_bytes!("../../../../../examples/mini-dome/project.json"),
+        include_bytes!("../../../../../examples/small-dome/project.json"),
     ),
     (
         "module.json",
-        include_bytes!("../../../../../examples/mini-dome/module.json"),
+        include_bytes!("../../../../../examples/small-dome/module.json"),
     ),
     (
         "clock.json",
-        include_bytes!("../../../../../examples/mini-dome/clock.json"),
+        include_bytes!("../../../../../examples/small-dome/clock.json"),
     ),
     (
         "out_a.json",
-        include_bytes!("../../../../../examples/mini-dome/out_a.json"),
+        include_bytes!("../../../../../examples/small-dome/out_a.json"),
     ),
     (
         "out_b.json",
-        include_bytes!("../../../../../examples/mini-dome/out_b.json"),
+        include_bytes!("../../../../../examples/small-dome/out_b.json"),
     ),
     (
         "dome/module.json",
-        include_bytes!("../../../../../examples/mini-dome/dome/module.json"),
+        include_bytes!("../../../../../examples/small-dome/dome/module.json"),
     ),
     (
         "dome/dome.json",
-        include_bytes!("../../../../../examples/mini-dome/dome/dome.json"),
+        include_bytes!("../../../../../examples/small-dome/dome/dome.json"),
     ),
     (
         "dome/dome.map2d.json",
-        include_bytes!("../../../../../examples/mini-dome/dome/dome.map2d.json"),
+        include_bytes!("../../../../../examples/small-dome/dome/dome.map2d.json"),
     ),
     (
         "dome/dome.patch.json",
-        include_bytes!("../../../../../examples/mini-dome/dome/dome.patch.json"),
+        include_bytes!("../../../../../examples/small-dome/dome/dome.patch.json"),
     ),
     (
         "dome/dome_sky.json",
-        include_bytes!("../../../../../examples/mini-dome/dome/dome_sky.json"),
+        include_bytes!("../../../../../examples/small-dome/dome/dome_sky.json"),
     ),
     (
         "dome/dome_sky.glsl",
-        include_bytes!("../../../../../examples/mini-dome/dome/dome_sky.glsl"),
+        include_bytes!("../../../../../examples/small-dome/dome/dome_sky.glsl"),
     ),
     (
         "doors/module.json",
-        include_bytes!("../../../../../examples/mini-dome/doors/module.json"),
+        include_bytes!("../../../../../examples/small-dome/doors/module.json"),
     ),
     (
         "doors/doors.json",
-        include_bytes!("../../../../../examples/mini-dome/doors/doors.json"),
+        include_bytes!("../../../../../examples/small-dome/doors/doors.json"),
     ),
     (
         "doors/doors.map2d.json",
-        include_bytes!("../../../../../examples/mini-dome/doors/doors.map2d.json"),
+        include_bytes!("../../../../../examples/small-dome/doors/doors.map2d.json"),
     ),
     (
         "doors/doors.patch.json",
-        include_bytes!("../../../../../examples/mini-dome/doors/doors.patch.json"),
+        include_bytes!("../../../../../examples/small-dome/doors/doors.patch.json"),
     ),
     (
         "doors/door_warm.json",
-        include_bytes!("../../../../../examples/mini-dome/doors/door_warm.json"),
+        include_bytes!("../../../../../examples/small-dome/doors/door_warm.json"),
     ),
     (
         "doors/door_warm.glsl",
-        include_bytes!("../../../../../examples/mini-dome/doors/door_warm.glsl"),
+        include_bytes!("../../../../../examples/small-dome/doors/door_warm.glsl"),
     ),
 ];
 
@@ -665,10 +667,10 @@ static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
         files: ZOOK_DOME_FILES,
     },
     EmbeddedExample {
-        id: "examples/mini-dome",
-        name: "Mini Dome",
+        id: "examples/small-dome",
+        name: "Small Dome",
         kind: "Module",
-        files: MINI_DOME_FILES,
+        files: SMALL_DOME_FILES,
     },
     EmbeddedExample {
         id: "examples/peach-1d",

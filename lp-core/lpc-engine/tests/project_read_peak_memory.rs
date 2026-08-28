@@ -2,7 +2,7 @@
 //! `docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
 //!
 //! The full `Detail + include_slots` read is streamed twice over the shipped
-//! mini-dome example under a byte-tracking allocator:
+//! small-dome example under a byte-tracking allocator:
 //!
 //! - a HOLDING sink keeps every emitted event alive at once — the analog of
 //!   the old `snapshot_node_slots` materialize-then-frame path (and of any
@@ -141,10 +141,10 @@ fn streamed_slot_roots_peak_below_materialized_forest() {
         .parent()
         .expect("workspace dir")
         .to_path_buf();
-    let project_dir: PathBuf = workspace_dir.join("examples/mini-dome");
+    let project_dir: PathBuf = workspace_dir.join("examples/small-dome");
     let fs = LpFsStd::new(project_dir);
-    let services = EngineServices::new(TreePath::parse("/mini_dome.show").expect("path"));
-    let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load mini-dome");
+    let services = EngineServices::new(TreePath::parse("/small_dome.show").expect("path"));
+    let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load small-dome");
     rt.engine_mut()
         .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,

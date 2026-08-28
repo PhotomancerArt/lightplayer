@@ -3613,7 +3613,7 @@ fn no_gallery_example_opens_onto_a_warning_badge() {
 }
 
 /// The patch surface (D36, slice 2), end to end at BOTH grains: on
-/// mini-dome (instance grain: two named outputs, sectors + doors,
+/// small-dome (instance grain: two named outputs, panels + door,
 /// instance chips with strides) and on peach-1d (range grain: one unnamed
 /// output, NO instances — the surface must not invent an address grain
 /// the format cannot store). Selection round-trips through
@@ -3623,7 +3623,7 @@ fn no_gallery_example_opens_onto_a_warning_badge() {
 fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
     use crate::UiPatchTarget;
 
-    for (id, expect_instances) in [("examples/mini-dome", true), ("examples/peach-1d", false)] {
+    for (id, expect_instances) in [("examples/small-dome", true), ("examples/peach-1d", false)] {
         let example = crate::app::home::embedded_example(id).expect("example embedded");
         let server = Rc::new(RefCell::new(example_e2e_server(&example)));
         let io = InProcessServerIo {
@@ -3680,9 +3680,9 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
             .unwrap_or_else(|| panic!("{id}: the editor carries no patch surface"));
 
         if expect_instances {
-            // The mini-dome: two named outputs, both fixtures at instance
-            // grain with the archetype's strides (sector fine-step 1,
-            // door 3).
+            // The small-dome: two named outputs, both fixtures at instance
+            // grain with the archetype's authored strides (panel 40 — one
+            // side of a 119-lamp wrap; door 180 — one leg).
             assert_eq!(surface.outputs.len(), 2, "{id}");
             let names: Vec<&str> = surface
                 .outputs
@@ -3698,22 +3698,21 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
                 .iter()
                 .find(|fixture| fixture.label.to_lowercase().contains("dome"))
                 .unwrap_or_else(|| panic!("{id}: no dome fixture on the surface"));
-            assert_eq!(dome.instances.len(), 5, "{id}: five sector instances");
-            assert_eq!(dome.instances[2].path, "/sector/2");
-            // A path sector has no intrinsic period, so its instances step
-            // by 1 (fine rotation); the doors below carry an authored
-            // stride override instead. G1 question 3 owns whether sectors
-            // should inherit an authored override too.
-            assert_eq!(dome.instances[2].stride, 1);
+            assert_eq!(dome.instances.len(), 50, "{id}: fifty panel instances");
+            assert_eq!(dome.instances[2].path, "/rim-a/2");
+            // 119 lamps over three sides has no intrinsic per-side stride
+            // (119 % 3 != 0), so the panels carry an authored override:
+            // one side, 40 lamps.
+            assert_eq!(dome.instances[2].stride, 40);
             let doors = surface
                 .fixtures
                 .iter()
                 .find(|fixture| fixture.label.to_lowercase().contains("door"))
                 .unwrap_or_else(|| panic!("{id}: no doors fixture on the surface"));
-            assert_eq!(doors.instances.len(), 3, "{id}: three door panels");
+            assert_eq!(doors.instances.len(), 1, "{id}: one door");
             assert_eq!(
-                doors.instances[1].stride, 3,
-                "{id}: a door rotates a third at a time (authored stride)"
+                doors.instances[0].stride, 180,
+                "{id}: the door rotates a leg at a time (authored stride)"
             );
         } else {
             // The peach: one unnamed output; fixtures patch at range grain.
@@ -3760,7 +3759,7 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
             "{id}: every output points at a module on the surface"
         );
         if expect_instances {
-            // The mini-dome's real tree: each fixture lives in its OWN
+            // The small-dome's real tree: each fixture lives in its OWN
             // sub-module (Dome, Doors) under the root show — the nearest
             // enclosing module wins, not the root.
             let dome_fixture = surface
@@ -3807,18 +3806,22 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
     }
 }
 
-/// The G1 acceptance run, headless: author the mini-dome's as-built
-/// permutation LIVE through the verb ops — clear both fixtures, assign
-/// every sector and door to its port, reverse `/sector/1`, rotate
-/// `/sector/2` by ten lamps and `/door/1` by one SIDE — and the written
-/// documents equal the shipped hand-authored files **byte for byte**.
-/// Then undo walks the whole thing back to the cleared state.
+/// The G1 acceptance run, headless: author the small-dome's as-built
+/// install LIVE through the verb ops — clear both fixtures, then replay
+/// every row of the shipped patch documents (fifty panel assigns plus the
+/// door, the reversed panel, the rotations stepped by their authored
+/// strides) — and the written documents equal the shipped generated files
+/// **byte for byte**. At 51 rows the replay is data-driven from the
+/// shipped bytes; that stays an honest claim because it proves every
+/// shipped row is REACHABLE through the verb surface and that the verb
+/// writer and the generator agree on canonical bytes. Then undo walks the
+/// whole thing back one gesture at a time.
 #[test]
-fn verbs_author_the_mini_dome_permutation_byte_identically() {
+fn verbs_author_the_small_dome_install_byte_identically() {
     use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
 
     let example =
-        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+        crate::app::home::embedded_example("examples/small-dome").expect("small-dome embedded");
     let shipped: std::collections::BTreeMap<&str, &[u8]> = example
         .files
         .iter()
@@ -3920,38 +3923,63 @@ fn verbs_author_the_mini_dome_permutation_byte_identically() {
         }};
     }
 
-    // Clear both docs, then author the permutation in row order.
+    // Clear both docs, then replay the shipped rows in document order:
+    // assign, then reverse and stride-stepped rotation where the row
+    // carries them (panel stride 40 — one side; door stride 180 — one
+    // leg, both authored in the mapping documents).
     verb!(dome.node, None, PatchVerbKind::Clear);
     verb!(doors.node, None, PatchVerbKind::Clear);
-    let assign = |name: &str, lamp: u32| PatchVerbKind::Assign {
-        output_name: Some(name.to_string()),
-        lamp,
+    let rows_of = |file: &str| -> Vec<(String, String, u32, bool, u32)> {
+        let doc = lpc_mapping::PatchDoc::from_json(
+            std::str::from_utf8(shipped[file]).expect("utf8 patch doc"),
+        )
+        .expect("shipped patch parses");
+        doc.entries
+            .iter()
+            .map(|entry| {
+                let lpc_mapping::PatchSource::Path { path, range } = &entry.source else {
+                    panic!("shipped rows address by path");
+                };
+                assert!(range.is_none(), "shipped rows are whole instances");
+                (
+                    path.to_text(),
+                    entry.output.clone().expect("shipped rows name outputs"),
+                    entry.lamp,
+                    entry.reversed,
+                    entry.offset,
+                )
+            })
+            .collect()
     };
-    verb!(dome.node, Some("/sector/0"), assign("1", 69));
-    verb!(dome.node, Some("/sector/1"), assign("Box 2", 0));
-    verb!(dome.node, Some("/sector/1"), PatchVerbKind::Reverse);
-    verb!(dome.node, Some("/sector/2"), assign("1", 0));
-    verb!(
-        dome.node,
-        Some("/sector/2"),
-        PatchVerbKind::Rotate {
-            steps: 1,
-            stride: 10,
+    for (fixture, file, stride) in [
+        (&dome, "dome/dome.patch.json", 40u32),
+        (&doors, "doors/doors.patch.json", 180),
+    ] {
+        for (path, output, lamp, reversed, offset) in rows_of(file) {
+            verb!(
+                fixture.node,
+                Some(path.as_str()),
+                PatchVerbKind::Assign {
+                    output_name: Some(output),
+                    lamp,
+                }
+            );
+            if reversed {
+                verb!(fixture.node, Some(path.as_str()), PatchVerbKind::Reverse);
+            }
+            if offset > 0 {
+                assert_eq!(offset % stride, 0, "rotation steps by the stride");
+                verb!(
+                    fixture.node,
+                    Some(path.as_str()),
+                    PatchVerbKind::Rotate {
+                        steps: (offset / stride) as i32,
+                        stride,
+                    }
+                );
+            }
         }
-    );
-    verb!(dome.node, Some("/sector/3"), assign("Box 2", 39));
-    verb!(dome.node, Some("/sector/4"), assign("1", 39));
-    verb!(doors.node, Some("/door/0"), assign("1", 30));
-    verb!(doors.node, Some("/door/1"), assign("Box 2", 30));
-    verb!(
-        doors.node,
-        Some("/door/1"),
-        PatchVerbKind::Rotate {
-            steps: 1,
-            stride: 3
-        }
-    );
-    verb!(doors.node, Some("/door/2"), assign("1", 99));
+    }
 
     // Persist the overlay so the authored bytes are on disk (the same
     // save the user presses), then read them back.
@@ -4019,7 +4047,7 @@ fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
     use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
 
     let example =
-        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+        crate::app::home::embedded_example("examples/small-dome").expect("small-dome embedded");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -4143,7 +4171,7 @@ fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
     let manual = body();
     assert!(manual.contains("\"flow\": \"manual\""), "{manual}");
     assert!(manual.contains("\"format\": 3"), "{manual}");
-    assert!(manual.contains("/door/2"), "no entry moved: {manual}");
+    assert!(manual.contains("/door"), "no entry moved: {manual}");
 
     // Unmap all: ONE write that empties the document, flag intact.
     prefetch!();
@@ -4221,7 +4249,7 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
     use crate::{EditorMetaFixture, EditorMetaOp, EditorMetaVerb, UiArrangeTransform};
 
     let example =
-        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+        crate::app::home::embedded_example("examples/small-dome").expect("small-dome embedded");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -4468,7 +4496,7 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
             .fixtures
             .iter()
             .find(|fixture| fixture.node != dome.node)
-            .expect("mini-dome has a second fixture");
+            .expect("small-dome has a second fixture");
         (
             doors.address.clone().expect("doors address"),
             doors.node,
@@ -4586,7 +4614,7 @@ fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
     };
 
     let example =
-        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+        crate::app::home::embedded_example("examples/small-dome").expect("small-dome embedded");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -4658,7 +4686,7 @@ fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
             PatchVerbOp {
                 subject_fixture: Some(dome.node),
                 subject: PatchVerbSubject {
-                    path: Some("/sector/1".to_string()),
+                    path: Some("/rim-a/1".to_string()),
                     range: None,
                 },
                 fixtures: vec![crate::PatchVerbFixture {
@@ -4776,7 +4804,7 @@ fn every_patch_target_arm_round_trips_through_selection() {
     use crate::UiPatchTarget;
 
     let example =
-        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+        crate::app::home::embedded_example("examples/small-dome").expect("small-dome embedded");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -4808,7 +4836,7 @@ fn every_patch_target_arm_round_trips_through_selection() {
         },
         UiPatchTarget::Instance {
             node,
-            path: "/sector/2".to_string(),
+            path: "/rim-a/2".to_string(),
         },
         UiPatchTarget::Fixture { node },
         UiPatchTarget::Range {
@@ -4856,7 +4884,7 @@ fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
     use crate::{PatchVerbKind, PatchVerbOp, PatchVerbSubject};
 
     let example =
-        crate::app::home::embedded_example("examples/mini-dome").expect("mini-dome embedded");
+        crate::app::home::embedded_example("examples/small-dome").expect("small-dome embedded");
     let server = Rc::new(RefCell::new(example_e2e_server(&example)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -4889,7 +4917,7 @@ fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
         .expect("surface")
         .fixtures
         .clone();
-    assert_eq!(all.len(), 2, "the mini-dome patches two fixtures");
+    assert_eq!(all.len(), 2, "the small-dome patches two fixtures");
     let verb_fixtures: Vec<crate::PatchVerbFixture> = all
         .iter()
         .map(|fixture| crate::PatchVerbFixture {
@@ -4966,8 +4994,9 @@ fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
         .expect("a project with outputs ALWAYS has a patch surface — free ports are the point")
         .clone();
 
-    // Both outputs, at the geometry their defs declare (out_a 39/30/39,
-    // out_b 39/30), with nothing on them.
+    // Both outputs, at the geometry their defs declare (each box 13
+    // ports: twelve of 238 — two chained panels — and a tail, box 1's
+    // widened by the 360-lamp door), with nothing on them.
     assert_eq!(surface.outputs.len(), 2, "both boxes stay on the surface");
     let port_spans = |name: &str| -> Vec<(u32, u32, u32)> {
         surface
@@ -4981,12 +5010,17 @@ fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
             .map(|port| (port.key, port.start, port.lamps))
             .collect()
     };
+    let box_ports = |tail: u32| -> Vec<(u32, u32, u32)> {
+        (0..13)
+            .map(|port| (port, port * 238, if port == 12 { tail } else { 238 }))
+            .collect()
+    };
     assert_eq!(
         port_spans("1"),
-        vec![(0, 0, 39), (1, 39, 30), (2, 69, 39)],
+        box_ports(119 + 360),
         "the def's ports are the geometry when no wire was published"
     );
-    assert_eq!(port_spans("Box 2"), vec![(0, 0, 39), (1, 39, 30)]);
+    assert_eq!(port_spans("Box 2"), box_ports(119));
     assert!(
         surface
             .outputs

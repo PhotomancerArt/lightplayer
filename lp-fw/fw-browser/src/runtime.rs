@@ -365,7 +365,7 @@ impl BrowserFirmwareRuntime {
                 Err(error) => {
                     // The ordinary state of a shader-only project — but ALSO
                     // the state of a multi-module project whose sibling
-                    // modules tie on the bus (mini-dome, the peaches). The
+                    // modules tie on the bus (small-dome, the peaches). The
                     // published outputs below settle it either way; say why
                     // once (this is cached).
                     log::debug!("preview runtime: bus control product did not resolve: {error}");
