@@ -49,7 +49,8 @@ use lpc_history::PrefixedUid;
 
 use super::sidecar_producer::read_identity;
 use super::sync_queue::{DueProject, SyncQueue, SyncTrigger, TripResult};
-use super::sync_trip::{classify, run_trip};
+use super::sync_status::{self, SyncOutcomeKind};
+use super::sync_trip::{TripReport, classify, run_trip};
 use crate::cloud::FetchCloudPort;
 use crate::local_store::opfs_library_host;
 
@@ -97,6 +98,7 @@ pub fn clear_denied(uid: &str) {
 /// account's first pump must not inherit this one's work.
 pub fn set_signed_in(signed_in: bool) {
     let engine = engine();
+    sync_status::record(|board| board.record_signed_in(signed_in));
     if engine.signed_in.replace(signed_in) == signed_in {
         return;
     }
@@ -191,12 +193,16 @@ impl SyncEngine {
         // The library host is built by an independent startup task, and a
         // `whoami` that answers first would otherwise sweep an empty roster
         // and consider the account done until the next save.
-        await_library_host().await;
+        if !await_library_host().await {
+            sync_status::record(|board| board.record_sweep(0, true, now_ms()));
+            return;
+        }
         // Read the library BEFORE touching the queue: a `RefMut` may not be
         // held across an await — a save landing mid-read would panic on the
         // second borrow.
         let library = roster().await;
         let now = now_ms();
+        sync_status::record(|board| board.record_sweep(library.len(), false, now));
         {
             let mut queue = self.queue.borrow_mut();
             for uid in library.keys() {
@@ -222,44 +228,77 @@ impl SyncEngine {
     /// with the project lock alive only inside the first and the last (see
     /// the module's `# Locks`).
     async fn run_one(&self, due: &DueProject, roster: &Roster) -> TripResult {
+        let entry = roster.get(&due.uid);
+        let name = entry.map_or(due.uid.as_str(), |entry| entry.name.as_str());
+        let conclude = |kind: SyncOutcomeKind, detail: &str| {
+            sync_status::record(|board| {
+                board.record_project(&due.uid, name, kind, detail, now_ms());
+            });
+        };
         let Some(host) = opfs_library_host() else {
+            conclude(SyncOutcomeKind::Skipped, "no library host in this tab");
             return TripResult::Refused;
         };
         let Ok(uid) = due.uid.parse::<PrefixedUid>() else {
             log::warn!("cloud sync: {} is not a project uid", due.uid);
+            conclude(SyncOutcomeKind::Refused, "not a project uid");
             return TripResult::Refused;
         };
-        let entry = roster.get(&due.uid);
         let mount = match host
             .mount_for_sync(&due.uid, entry.map(|entry| entry.slug.as_str()))
             .await
         {
             Ok(Some(mount)) => mount,
             // Another tab holds the project; its driver owns the trip.
-            Ok(None) => return TripResult::Retry,
+            Ok(None) => {
+                conclude(SyncOutcomeKind::Skipped, "open in another tab; that tab syncs it");
+                return TripResult::Retry;
+            }
             Err(error) => {
                 log::warn!("cloud sync: cannot reach {}: {error}", due.uid);
+                conclude(SyncOutcomeKind::Retrying, &format!("cannot read locally: {error}"));
                 return TripResult::Retry;
             }
         };
 
         // No lock is held from here until `finish`: `mount_for_sync`
         // released it once the snapshot was in memory.
-        let fallback = entry.map_or(due.uid.as_str(), |entry| entry.name.as_str());
-        let result = run_mounted(&mount, uid, fallback, due.restate).await;
+        let result = run_mounted(&mount, uid, name, due.restate).await;
         mount.finish().await;
 
         match result {
             Ok(report) => {
                 log::debug!("cloud sync: {} {report:?}", due.uid);
+                let (kind, detail) = describe(&report);
+                conclude(kind, detail);
                 TripResult::Settled
             }
             Err(error) => {
                 let verdict = classify(&error);
                 log::warn!("cloud sync: {} failed ({verdict:?}): {error}", due.uid);
+                let kind = match verdict {
+                    TripResult::Retry => SyncOutcomeKind::Retrying,
+                    TripResult::Denied => SyncOutcomeKind::Denied,
+                    TripResult::Settled | TripResult::Refused => SyncOutcomeKind::Refused,
+                };
+                conclude(kind, &error.to_string());
                 verdict
             }
         }
+    }
+}
+
+/// A settled report as a status row: the badge word and the sentence.
+fn describe(report: &TripReport) -> (SyncOutcomeKind, &'static str) {
+    match report {
+        TripReport::Published(_) => (SyncOutcomeKind::Published, "record and content are up"),
+        TripReport::Pushed(_) => (SyncOutcomeKind::Pushed, "content is up"),
+        // The branch that used to vanish: no saved version means no trip,
+        // no traffic, and — before the ledger — no trace.
+        TripReport::Nothing => (
+            SyncOutcomeKind::NothingSaved,
+            "no saved version yet — nothing to publish",
+        ),
     }
 }
 
@@ -295,14 +334,16 @@ struct RosterEntry {
 }
 
 /// Wait, briefly, for the startup probe to build the library host.
-async fn await_library_host() {
+/// `false` = it never came; the sweep is lost until the next page load.
+async fn await_library_host() -> bool {
     for _ in 0..HOST_WAIT_RETRIES {
         if opfs_library_host().is_some() {
-            return;
+            return true;
         }
         TimeoutFuture::new(HOST_WAIT_DELAY_MS).await;
     }
     log::warn!("cloud sync: no library host to sweep");
+    false
 }
 
 /// One catalog snapshot per pump, not one per project.
