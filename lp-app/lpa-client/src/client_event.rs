@@ -23,6 +23,8 @@ pub enum ClientEvent {
         memory: Option<MemoryStats>,
         recovery: Option<RecoveryStatus>,
         outputs: Option<Vec<lpc_wire::server::OutputWireStatus>>,
+        /// Serial-link loss counters since boot (device targets only).
+        link: Option<lpc_wire::server::LinkCounters>,
     },
     /// Firmware/server log line carried by the protocol.
     Log { level: LogLevel, message: String },
@@ -49,6 +51,7 @@ impl ClientEvent {
                 memory,
                 recovery,
                 outputs,
+                link,
             } => Some(Self::Heartbeat {
                 fps,
                 frame_count,
@@ -57,6 +60,7 @@ impl ClientEvent {
                 memory,
                 recovery,
                 outputs,
+                link,
             }),
             WireServerMsgBody::Log { level, message } => Some(Self::Log { level, message }),
             _ => None,

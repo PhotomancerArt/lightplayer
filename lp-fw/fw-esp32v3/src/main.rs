@@ -362,6 +362,22 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 /// Largest-free-block probe for the server's ProjectRead headroom gate
 /// (refusal-not-reset): on this 110 KB arena, fragmentation decides what is
 /// actually allocatable, not total free.
+/// Heartbeat memory report: free/used plus the fragmentation evidence
+/// (largest allocatable block, retry-allocator saves) that previously
+/// reached only the printed `[MEM]` line.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
+    let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
+    let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
+    Some(lpc_wire::server::MemoryStats {
+        free_bytes: free,
+        used_bytes: used,
+        total_bytes: used.saturating_add(free),
+        largest_free_block: read_headroom_probe(),
+        oom_retry_saves: Some(OOM_RETRY_SAVES.load(core::sync::atomic::Ordering::Relaxed)),
+    })
+}
+
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 fn read_headroom_probe() -> Option<u32> {
     Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
@@ -791,7 +807,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
         app.server,
         app.transport,
         app.time_provider,
-        esp32_memory_stats,
+        heartbeat_memory_stats,
         |_now_ms| {},
     )
     .await;

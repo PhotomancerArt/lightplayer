@@ -852,6 +852,10 @@ impl LpServer {
                 free_bytes,
                 used_bytes,
                 total_bytes: free_bytes.saturating_add(used_bytes),
+                // Fragmentation evidence, when the embedder installed the
+                // headroom probe (the same number the refusal gate consults).
+                largest_free_block: self.read_headroom_probe.and_then(|probe| probe()),
+                oom_retry_saves: None,
             })
         });
         lpc_wire::ServerRuntimeStatus {

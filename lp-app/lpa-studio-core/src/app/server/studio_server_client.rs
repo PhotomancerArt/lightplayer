@@ -1229,6 +1229,7 @@ mod tests {
             memory: None,
             recovery,
             outputs: None,
+            link: None,
         }
     }
 

@@ -246,6 +246,19 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     ))
 }
 
+/// Heartbeat memory report. This chip has no largest-free-block probe yet
+/// (no recovery/panic_path port), so the fragmentation fields stay absent.
+#[cfg(not(fw_harness))]
+fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
+    esp32_memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::server::MemoryStats {
+        free_bytes,
+        used_bytes,
+        total_bytes: used_bytes.saturating_add(free_bytes),
+        largest_free_block: None,
+        oom_retry_saves: None,
+    })
+}
+
 /// Everything `main` needs to hand to the server loop.
 #[cfg(not(fw_harness))]
 struct FirmwareApp {
@@ -473,7 +486,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         app.server,
         app.transport,
         app.time_provider,
-        esp32_memory_stats,
+        heartbeat_memory_stats,
         move |now_ms| watchdog.feed(now_ms),
     )
     .await;

@@ -1,5 +1,7 @@
 //! Chip-generic serial helpers.
 
+#[cfg(feature = "server")]
+pub mod link_counters;
 pub mod chunked_write;
 pub mod shared_serial;
 

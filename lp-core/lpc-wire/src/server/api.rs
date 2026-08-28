@@ -130,6 +130,12 @@ pub enum ServerMsgBody {
         /// single-core fallback boots).
         #[serde(default)]
         outputs: Option<Vec<crate::server::OutputWireStatus>>,
+        /// Serial-link loss/corruption counters since boot; absent on
+        /// targets without a lossy byte-stream link (host server, ws).
+        /// Every drop the demux takes is counted here so silent loss has a
+        /// wire-visible trace (2026-08-26 inbound-loss defect).
+        #[serde(default)]
+        link: Option<crate::server::LinkCounters>,
     },
     /// Error response for any request type
     Error {
@@ -182,6 +188,42 @@ pub struct MemoryStats {
     pub free_bytes: u32,
     pub used_bytes: u32,
     pub total_bytes: u32,
+    /// Largest single allocatable block — the number that matters on a
+    /// small fragmented arena (total-free can look healthy while every
+    /// allocation over a few hundred bytes fails). Absent on targets that
+    /// cannot probe it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub largest_free_block: Option<u32>,
+    /// Times the retrying allocator saved an allocation that first failed
+    /// (fragmentation pressure evidence). Absent where unsupported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oom_retry_saves: Option<u32>,
+}
+
+/// Serial-link loss/corruption counters, monotonic since boot.
+///
+/// Attached to [`ServerMsgBody::Heartbeat`] so a lost or corrupted inbound
+/// frame is never silent: the drop is counted at the site that takes it and
+/// surfaces on the next heartbeat.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct LinkCounters {
+    /// Newline-terminated `M!` lines whose JSON failed to parse (torn or
+    /// spliced frames).
+    #[serde(default)]
+    pub parse_failures: u32,
+    /// Hardware RX errors (overflow/parity/framing) that dropped a partial
+    /// line.
+    #[serde(default)]
+    pub rx_errors: u32,
+    /// Parsed `M!` lines dropped because the inbound queue was full.
+    #[serde(default)]
+    pub queue_full_drops: u32,
+    /// Stale partial lines discarded at a session boundary (dead session
+    /// remnants).
+    #[serde(default)]
+    pub stale_partial_flushes: u32,
 }
 
 #[cfg(test)]
