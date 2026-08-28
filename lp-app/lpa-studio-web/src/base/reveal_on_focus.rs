@@ -52,10 +52,7 @@ fn reveal_if_mostly_hidden(target: &web_sys::Element) {
     };
     let rect = target.get_bounding_client_rect();
     let view = scroller.get_bounding_client_rect();
-    if mostly_visible(
-        (rect.top(), rect.bottom()),
-        (view.top(), view.bottom()),
-    ) {
+    if mostly_visible((rect.top(), rect.bottom()), (view.top(), view.bottom())) {
         return;
     }
     let options = web_sys::ScrollIntoViewOptions::new();
