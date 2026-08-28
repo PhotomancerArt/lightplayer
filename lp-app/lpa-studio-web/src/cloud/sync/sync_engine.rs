@@ -251,12 +251,18 @@ impl SyncEngine {
             Ok(Some(mount)) => mount,
             // Another tab holds the project; its driver owns the trip.
             Ok(None) => {
-                conclude(SyncOutcomeKind::Skipped, "open in another tab; that tab syncs it");
+                conclude(
+                    SyncOutcomeKind::Skipped,
+                    "open in another tab; that tab syncs it",
+                );
                 return TripResult::Retry;
             }
             Err(error) => {
                 log::warn!("cloud sync: cannot reach {}: {error}", due.uid);
-                conclude(SyncOutcomeKind::Retrying, &format!("cannot read locally: {error}"));
+                conclude(
+                    SyncOutcomeKind::Retrying,
+                    &format!("cannot read locally: {error}"),
+                );
                 return TripResult::Retry;
             }
         };

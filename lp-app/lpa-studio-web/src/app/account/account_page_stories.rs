@@ -271,7 +271,13 @@ fn sync_ledger() -> SyncStatusSnapshot {
         ),
     ];
     for (i, (uid, name, kind, detail)) in rows.into_iter().enumerate() {
-        board.record_project(uid, name, kind, detail, (NOW - 60.0 * (i as f64 + 1.0)) * 1000.0);
+        board.record_project(
+            uid,
+            name,
+            kind,
+            detail,
+            (NOW - 60.0 * (i as f64 + 1.0)) * 1000.0,
+        );
     }
     SyncStatusSnapshot {
         engine: board.engine.clone(),

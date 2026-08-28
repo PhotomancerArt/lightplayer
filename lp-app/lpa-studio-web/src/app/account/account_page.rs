@@ -544,13 +544,19 @@ fn sync_engine_note(sync: &SyncStatusSnapshot, now_secs: f64) -> String {
 fn SyncStatusRow(row: ProjectSyncStatus, now_secs: f64) -> Element {
     let badge = match row.kind {
         SyncOutcomeKind::Refused | SyncOutcomeKind::Denied => {
-            format!("{BADGE_CLASS} tw:border-status-error-border tw:bg-status-error-bg tw:text-status-error-foreground")
+            format!(
+                "{BADGE_CLASS} tw:border-status-error-border tw:bg-status-error-bg tw:text-status-error-foreground"
+            )
         }
         SyncOutcomeKind::Retrying => {
-            format!("{BADGE_CLASS} tw:border-status-warning-border tw:bg-status-warning-bg tw:text-status-warning-foreground")
+            format!(
+                "{BADGE_CLASS} tw:border-status-warning-border tw:bg-status-warning-bg tw:text-status-warning-foreground"
+            )
         }
         SyncOutcomeKind::Published | SyncOutcomeKind::Pushed => {
-            format!("{BADGE_CLASS} tw:border-status-good-border tw:bg-status-good-bg tw:text-status-good-foreground")
+            format!(
+                "{BADGE_CLASS} tw:border-status-good-border tw:bg-status-good-bg tw:text-status-good-foreground"
+            )
         }
         SyncOutcomeKind::NothingSaved | SyncOutcomeKind::Skipped => BADGE_CLASS.to_string(),
     };
