@@ -2,13 +2,11 @@
 
 use alloc::format;
 use alloc::string::String;
-use alloc::vec::Vec;
 
 use lpc_model::{NodeId, Revision, SlotAccess};
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
-    NodeReadQuery, NodeReadResult, ReadLevel, WireSlotRootSnapshot, WireSlotRootsSnapshot,
-    wire_slot_data_from_slot_access,
+    NodeReadQuery, NodeReadResult, ReadLevel, WireSlotRootSnapshot, wire_slot_data_from_slot_access,
 };
 
 use crate::node::{NodeEntryState, tree_deltas_since};
@@ -18,7 +16,6 @@ use super::Engine;
 impl Engine {
     pub(super) fn read_project_nodes(
         &self,
-        registry: &ProjectRegistry,
         since: Option<lpc_model::Revision>,
         query: NodeReadQuery,
     ) -> NodeReadResult {
@@ -28,20 +25,21 @@ impl Engine {
                 tree_deltas_since(self.tree(), since)
             }
         };
-        let slots = if query.include_slots && query.level == ReadLevel::Detail {
-            Some(self.snapshot_node_slots(registry, since))
-        } else {
-            None
-        };
 
+        // Slot roots are never materialized here: the stream layer emits them
+        // one at a time via [`Engine::iter_node_slot_roots`], so peak memory is
+        // one root, not the whole project's slot forest (the classic's
+        // project-read OOM,
+        // `docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
         NodeReadResult {
             level: query.level,
             tree_deltas,
-            slots,
+            slots: None,
         }
     }
 
-    /// Snapshot slot roots, gated per-root by revision (M5 G6a).
+    /// Lazily snapshot slot roots, one root at a time, gated per-root by
+    /// revision (M5 G6a).
     ///
     /// A root is included only when its owning revision is newer than `since`:
     /// `.def` roots gate on the node-def entry revision
@@ -49,20 +47,22 @@ impl Engine {
     /// runtime entry `changed_at`. The whole [`WireSlotRootSnapshot`] is sent
     /// when the gate passes (no sub-root patching — that is M6). The `since == 0`
     /// bulk-sync guard includes every live root so a fresh read is complete.
-    fn snapshot_node_slots(
-        &self,
-        registry: &ProjectRegistry,
+    ///
+    /// Each call to `next()` materializes at most one entry's roots; the
+    /// caller is expected to send and drop each snapshot before pulling the
+    /// next, keeping peak memory at one root's deep copy.
+    pub(super) fn iter_node_slot_roots<'a>(
+        &'a self,
+        registry: &'a ProjectRegistry,
         since: Revision,
-    ) -> WireSlotRootsSnapshot {
-        let mut roots = Vec::new();
-
-        for entry in self.tree().entries() {
-            if let Some(location) = entry.def_location.as_ref()
+    ) -> impl Iterator<Item = WireSlotRootSnapshot> + 'a {
+        self.tree().entries().flat_map(move |entry| {
+            let def_root = if let Some(location) = entry.def_location.as_ref()
                 && let Some(def_entry) = registry.def(location)
                 && root_changed_since(since, def_entry.revision)
                 && let lpc_model::NodeDefState::Loaded(def) = &def_entry.state
             {
-                roots.push(WireSlotRootSnapshot {
+                Some(WireSlotRootSnapshot {
                     name: node_def_root_name(entry.id),
                     shape: def.shape_id(),
                     data: wire_slot_data_from_slot_access(
@@ -70,14 +70,16 @@ impl Engine {
                         def.shape_id(),
                         def.data(),
                     ),
-                });
-            }
+                })
+            } else {
+                None
+            };
 
-            if root_changed_since(since, entry.changed_at())
+            let state_root = if root_changed_since(since, entry.changed_at())
                 && let NodeEntryState::Alive(node) = entry.state.value()
                 && let Some(state) = node.runtime_state_slots()
             {
-                roots.push(WireSlotRootSnapshot {
+                Some(WireSlotRootSnapshot {
                     name: node_state_root_name(entry.id),
                     shape: state.shape_id(),
                     data: wire_slot_data_from_slot_access(
@@ -85,11 +87,13 @@ impl Engine {
                         state.shape_id(),
                         state.data(),
                     ),
-                });
-            }
-        }
+                })
+            } else {
+                None
+            };
 
-        WireSlotRootsSnapshot { roots }
+            def_root.into_iter().chain(state_root)
+        })
     }
 }
 
