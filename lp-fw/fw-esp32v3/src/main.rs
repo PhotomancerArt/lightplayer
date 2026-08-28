@@ -359,6 +359,14 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 ///
 /// The probe is ~17 first-fit walks, once per heartbeat (5 s) — invisible next
 /// to a frame.
+/// Largest-free-block probe for the server's ProjectRead headroom gate
+/// (refusal-not-reset): on this 110 KB arena, fragmentation decides what is
+/// actually allocatable, not total free.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+fn read_headroom_probe() -> Option<u32> {
+    Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
+}
+
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     let free = esp_alloc::HEAP.free();
@@ -694,6 +702,7 @@ fn boot_firmware() -> FirmwareApp {
     // polls. Both are this embedder's to provide: only it holds the manifest
     // and the pusher's mailboxes.
     server.set_total_led_budget(total_led_budget);
+    server.set_read_headroom_probe(Some(read_headroom_probe));
     fw_esp32_common::output::wire_stats_source::install(collect_wire_stats);
 
     // Auto-load a project at boot — unless repeated incomplete boots put us in

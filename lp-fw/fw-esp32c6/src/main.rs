@@ -161,6 +161,13 @@ mod tests {
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
+/// Largest-free-block probe for the server's ProjectRead headroom gate
+/// (refusal-not-reset).
+#[cfg(not(fw_harness))]
+fn read_headroom_probe() -> Option<u32> {
+    Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
+}
+
 #[cfg(not(fw_harness))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     Some((
@@ -370,6 +377,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         Some(radio_service),
         graphics,
     );
+    server.set_read_headroom_probe(Some(read_headroom_probe));
     // Wire hello identity: compile-time provenance from build.rs, injected
     // into the server (sans-IO: the server never reads env/git itself),
     // plus the boot-time read of the root-stamped device identity. The

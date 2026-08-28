@@ -59,6 +59,7 @@ impl<'a> EngineProjectReadSource<'a> {
             self.stream_probe_event(index as u32, probe, sink).await?;
         }
 
+        lpc_shared::backtrace::clear_oom_context();
         send_project_read_event(sink, ProjectReadEvent::End { revision }).await
     }
 
@@ -74,6 +75,7 @@ impl<'a> EngineProjectReadSource<'a> {
     {
         match query {
             ProjectReadQuery::Shapes(query) => {
+                lpc_shared::backtrace::set_oom_context("project read: shapes");
                 let since_rev = since.unwrap_or_default();
                 let ids_revision = self.engine.project_shape_ids_revision();
                 send_query_event(
@@ -118,9 +120,21 @@ impl<'a> EngineProjectReadSource<'a> {
                 .await
             }
             ProjectReadQuery::Nodes(query) => {
+                lpc_shared::backtrace::set_oom_context("project read: nodes tree");
                 let include_slots =
                     query.include_slots && query.level == lpc_wire::ReadLevel::Detail;
                 let since_rev = since.unwrap_or_default();
+                let selection = query.nodes;
+                if let lpc_wire::NodeReadSelection::ByIds(ids) = &selection {
+                    for id in ids {
+                        if self.engine.tree().get(*id).is_none() {
+                            log::debug!(
+                                "project read: selected node {} not in tree (skipped)",
+                                id.0
+                            );
+                        }
+                    }
+                }
                 send_query_event(
                     sink,
                     index,
@@ -136,7 +150,14 @@ impl<'a> EngineProjectReadSource<'a> {
                 // unbounded event exists (the applier `extend`s across events).
                 let mut batch: alloc::vec::Vec<lpc_wire::WireTreeDelta> = alloc::vec::Vec::new();
                 let mut batch_len = 0usize;
-                for delta in crate::node::tree_deltas_since_iter(self.engine.tree(), since_rev) {
+                let selected_deltas = crate::node::tree_deltas_since_iter(
+                    self.engine.tree(),
+                    since_rev,
+                )
+                .filter(|delta| {
+                    super::project_read_nodes::selection_includes(&selection, delta.node_id())
+                });
+                for delta in selected_deltas {
                     let delta_len = lpc_wire::ser_write_json_len(&delta);
                     if !batch.is_empty()
                         && batch_len + delta_len > lpc_wire::PROJECT_READ_RUNTIME_CHUNK_BYTES
@@ -165,10 +186,14 @@ impl<'a> EngineProjectReadSource<'a> {
                     .await?;
                 }
                 if include_slots {
+                    lpc_shared::backtrace::set_oom_context("project read: nodes slot roots");
                     // One root materialized at a time: each snapshot is sent
                     // (and freed once flushed) before the next is built, so a
                     // whole-project slot forest never exists in memory at once.
-                    for root in self.engine.iter_node_slot_roots(self.registry, since_rev) {
+                    for root in
+                        self.engine
+                            .iter_node_slot_roots(self.registry, since_rev, &selection)
+                    {
                         send_query_event(
                             sink,
                             index,
@@ -185,6 +210,7 @@ impl<'a> EngineProjectReadSource<'a> {
                 .await
             }
             ProjectReadQuery::Resources(query) => {
+                lpc_shared::backtrace::set_oom_context("project read: resources");
                 let result = self.engine.read_project_resources(since, query);
                 send_query_event(
                     sink,
@@ -227,6 +253,7 @@ impl<'a> EngineProjectReadSource<'a> {
                 .await
             }
             ProjectReadQuery::Runtime(query) => {
+                lpc_shared::backtrace::set_oom_context("project read: runtime");
                 // The overlay is registry state; surface its `changed_at` on
                 // every runtime status so clients learn the overlay revision
                 // without fetching the overlay itself.
@@ -250,6 +277,7 @@ impl<'a> EngineProjectReadSource<'a> {
     where
         S: ProjectReadEventSink,
     {
+        lpc_shared::backtrace::set_oom_context("project read: probe");
         let result = match probe {
             ProjectProbeRequest::RenderProduct(request) => ProjectProbeResult::RenderProduct(
                 self.engine
@@ -1324,6 +1352,128 @@ mod tests {
         assert!(
             slot_root_names(&mut engine, &registry, Some(Revision::new(3))).is_empty(),
             "no re-delivery after the client catches up to the revert"
+        );
+    }
+
+    #[test]
+    fn by_ids_selection_filters_deltas_and_slot_roots() {
+        // P2 of the wire-evolution plan: `NodeReadSelection::ByIds` was
+        // carried on the wire but ignored by the engine — a client asking for
+        // one node got the whole project. It now filters BOTH tree deltas and
+        // slot roots; unknown ids are skipped (a pager racing deletions).
+        let mut engine = Engine::new(TreePath::parse("/t.show").expect("path"));
+        let mut registry = ProjectRegistry::new();
+        let mut fs = lpfs::LpFsMemory::new();
+        fs.write_file_mut(
+            lpfs::LpPath::new("/project.json"),
+            b"{\n  \"format\": 10\n}\n",
+        )
+        .expect("write container manifest");
+        fs.write_file_mut(
+            lpfs::LpPath::new("/clock.json"),
+            br#"{ "kind": "Clock", "transport": { "rate": 1.0 } }"#,
+        )
+        .expect("write clock def");
+        let shapes = lpc_model::SlotShapeRegistry::default();
+        let ctx = lpc_registry::ParseCtx { shapes: &shapes };
+        registry
+            .load_root(
+                &fs,
+                lpfs::LpPath::new("/clock.json"),
+                Revision::new(1),
+                &ctx,
+            )
+            .expect("load clock project");
+
+        let root = engine.tree().root();
+        let mut add_clock = |engine: &mut Engine, name: &str, slot: u32| {
+            let id = engine
+                .tree_mut()
+                .add_child(
+                    root,
+                    NodeName::parse(name).expect("name"),
+                    NodeName::parse("clock").expect("ty"),
+                    WireChildKind::Input {
+                        source: WireSlotIndex(slot),
+                    },
+                    test_placeholder_spine(),
+                    Revision::new(1),
+                )
+                .expect("add clock node");
+            engine.tree_mut().get_mut(id).expect("entry").def_location =
+                Some(lpc_model::NodeDefLocation::artifact_root(
+                    lpc_model::ArtifactLocation::file("/clock.json"),
+                ));
+            id
+        };
+        let a = add_clock(&mut engine, "a", 0);
+        let b = add_clock(&mut engine, "b", 1);
+        let bogus = lpc_model::NodeId(a.0 + b.0 + 1000);
+
+        let read = |engine: &mut Engine, selection: lpc_wire::NodeReadSelection| {
+            let request = ProjectReadRequest {
+                since: None,
+                queries: Vec::from([ProjectReadQuery::Nodes(NodeReadQuery {
+                    level: lpc_wire::ReadLevel::Detail,
+                    nodes: selection,
+                    include_slots: true,
+                })]),
+                probes: Vec::new(),
+            };
+            collect_read_events(engine, &registry, request)
+        };
+
+        let delta_ids = |events: &[ProjectReadEvent]| -> Vec<lpc_model::NodeId> {
+            events
+                .iter()
+                .filter_map(|event| match event {
+                    ProjectReadEvent::Query {
+                        event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::TreeDeltas {
+                            deltas,
+                        }),
+                        ..
+                    } => Some(deltas.iter().map(|d| d.node_id()).collect::<Vec<_>>()),
+                    _ => None,
+                })
+                .flatten()
+                .collect()
+        };
+        let root_names = |events: &[ProjectReadEvent]| -> Vec<String> {
+            events
+                .iter()
+                .filter_map(|event| match event {
+                    ProjectReadEvent::Query {
+                        event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRoot(r)),
+                        ..
+                    } => Some(r.name.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        // ByIds([a, bogus]): only a's delta and a's def root; bogus skipped.
+        let events = read(
+            &mut engine,
+            lpc_wire::NodeReadSelection::ByIds(Vec::from([a, bogus])),
+        );
+        assert_eq!(delta_ids(&events), Vec::from([a]), "only a's delta");
+        assert_eq!(
+            root_names(&events),
+            Vec::from([node_def_root_name(a)]),
+            "only a's def root"
+        );
+
+        // All: root + a + b deltas, both def roots — full-read behavior kept.
+        let events = read(&mut engine, lpc_wire::NodeReadSelection::All);
+        let ids = delta_ids(&events);
+        assert!(
+            ids.contains(&root) && ids.contains(&a) && ids.contains(&b),
+            "All still walks every entry: {ids:?}"
+        );
+        assert_eq!(
+            root_names(&events),
+            Vec::from([node_def_root_name(a), node_def_root_name(b)]),
+            "All still yields every def root"
         );
     }
 
