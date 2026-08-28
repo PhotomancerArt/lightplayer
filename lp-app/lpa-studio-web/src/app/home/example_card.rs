@@ -58,12 +58,17 @@ pub(crate) fn ExampleCard(
                 mode: ThumbMode::PosterFirst,
             }
             // The face is the art; the words are one shallow glass bar
-            // (card-overlay redesign). Title ONLY — no menu, no glyphs,
-            // and no "Example" label: the shelf's own section header
-            // already says it, and repeating it on every card read as
-            // noise at the G1 gate (2026-08-26).
+            // (card-overlay redesign). Title ONLY at rest — no menu, no
+            // glyphs, and no "Example" label: the shelf's own section
+            // header already says it, and repeating it on every card
+            // read as noise at the G1 gate (2026-08-26). Hover slides
+            // the bar up over the example's fixture blurb, in step with
+            // the live preview the same hover starts.
             CardGlassFooter {
                 title: card.name.clone(),
+                reveal: (!opening && !card.blurb.is_empty()).then(|| rsx! {
+                    p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "{card.blurb}" }
+                }),
                 if opening {
                     // The live pipeline, not a static "Opening…": an example
                     // open never routes to the full opening frame, so on a
@@ -82,13 +87,13 @@ fn example_card_class(opening: bool, busy: bool) -> &'static str {
     // tw:relative anchors the glass footer over the art box
     match (opening, busy) {
         (true, _) => {
-            "tw:relative tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
+            "tw:group tw:relative tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
         }
         (false, true) => {
-            "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
+            "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
         }
         (false, false) => {
-            "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+            "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
         }
     }
 }
