@@ -1386,7 +1386,7 @@ mod tests {
             .expect("load clock project");
 
         let root = engine.tree().root();
-        let mut add_clock = |engine: &mut Engine, name: &str, slot: u32| {
+        let add_clock = |engine: &mut Engine, name: &str, slot: u32| {
             let id = engine
                 .tree_mut()
                 .add_child(

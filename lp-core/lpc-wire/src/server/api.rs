@@ -1,44 +1,11 @@
-use crate::messages::{ProjectReadEvent, ProjectReadRequest};
+use crate::messages::ProjectReadEvent;
 use crate::project::WireProjectHandle;
-use crate::project_command::{WireProjectCommand, WireProjectCommandResponse};
-use crate::server::fs_api::{FsRequest, FsResponse};
+use crate::project_command::WireProjectCommandResponse;
+use crate::server::fs_api::FsResponse;
 use alloc::string::String;
 use alloc::vec::Vec;
 use lpc_model::LpPathBuf;
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ClientMsgBody {
-    /// Filesystem operation request
-    Filesystem(FsRequest),
-    /// Load a project
-    LoadProject { path: LpPathBuf },
-    /// Unload a project
-    UnloadProject { handle: WireProjectHandle },
-    /// Project read request that expects project-read frames.
-    ProjectRead {
-        handle: WireProjectHandle,
-        request: ProjectReadRequest,
-    },
-    /// Project-specific command request.
-    ProjectCommand {
-        handle: WireProjectHandle,
-        command: WireProjectCommand,
-    },
-    /// List available projects
-    ListAvailableProjects,
-    /// List loaded projects
-    ListLoadedProjects,
-    /// Set the server/device global log level at runtime.
-    ///
-    /// Applies process-globally via the `log` crate on whichever platform
-    /// serves the protocol (ESP32, emulator, browser worker, host). Not
-    /// persisted: the device reverts to its logger-init default (Info) on
-    /// reboot. There is deliberately no `Off` — the client can never turn
-    /// the device fully silent.
-    SetLogLevel { level: LogLevel },
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -144,7 +111,7 @@ pub enum ServerMsgBody {
 }
 
 /// Log severity carried by [`ServerMsgBody::Log`] frames and
-/// [`ClientMsgBody::SetLogLevel`] requests, lowest to highest.
+/// [`crate::ClientRequest::SetLogLevel`] requests, lowest to highest.
 ///
 /// There is deliberately no `Off` variant: the runtime log-level command can
 /// lower output to `Error` but never fully silence the device.
@@ -240,14 +207,14 @@ mod tests {
 
     #[test]
     fn set_log_level_request_round_trips() {
-        let request = ClientMsgBody::SetLogLevel {
+        let request = crate::ClientRequest::SetLogLevel {
             level: LogLevel::Debug,
         };
         let json = crate::json::to_string(&request).unwrap();
-        let deserialized: ClientMsgBody = crate::json::from_str(&json).unwrap();
+        let deserialized: crate::ClientRequest = crate::json::from_str(&json).unwrap();
         assert!(matches!(
             deserialized,
-            ClientMsgBody::SetLogLevel {
+            crate::ClientRequest::SetLogLevel {
                 level: LogLevel::Debug
             }
         ));

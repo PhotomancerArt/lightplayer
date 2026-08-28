@@ -45,6 +45,10 @@ smaller fix, e.g. FIFO threshold tuning or the `UART_MEM_CONF.rx_size`
 C3b (12 KB write + readback under load) — advisory until this defect
 closes, then flips to gating.
 
-**Also raise** — the parse-failure drop in `transport.receive` logs at
-DEBUG; a corrupted inbound frame should be at least a WARN with a
-length/prefix, or the next loss of this kind will be invisible again.
+**Also raise** — DONE (2026-08-28, wire-evolution round 1, PR #458):
+the parse-failure drop in `transport.receive` is a WARN with byte
+length + prefix, and every drop site (parse failure, RX error,
+queue-full, stale-partial flush) bumps a counter that rides the
+heartbeat's new `link` field — the next loss of this kind is visible on
+any desk without a serial rig. The byte-loss *mechanism* itself remains
+unpinned and this defect stays open.

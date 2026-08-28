@@ -287,4 +287,24 @@ fn studio_shaped_read_streams_below_materialized() {
         studio_shaped_read(),
     );
     assert!(dropping.slot_roots > 0, "studio-shaped read lost its slots");
+
+    // Absolute ceiling (wire-evolution P5): the full Studio-shaped read's
+    // streamed peak, measured 2026-08-28 at 13,894 B on this fixture, gated
+    // at ~2.3x. Peak is O(largest atom), NOT O(project) — if this trips,
+    // some producer regressed to materialize-first (or a genuinely bigger
+    // atom appeared; raise deliberately, with a measurement, never casually).
+    const STUDIO_SHAPED_STREAMED_PEAK_CEILING_BYTES: usize = 32 * 1024;
+    let baseline = reset_peak();
+    let mut sink = DroppingSink::default();
+    block_on(async {
+        EngineProjectReadSource::new(&mut engine, &registry)
+            .stream_project_read_events(studio_shaped_read(), &mut sink)
+            .await
+            .expect("ceiling stream");
+    });
+    let peak = peak_above(baseline);
+    assert!(
+        peak <= STUDIO_SHAPED_STREAMED_PEAK_CEILING_BYTES,
+        "studio-shaped streamed peak {peak}B exceeds the {STUDIO_SHAPED_STREAMED_PEAK_CEILING_BYTES}B ceiling"
+    );
 }

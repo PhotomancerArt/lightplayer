@@ -66,9 +66,9 @@ pub use project_overlay::{
 #[cfg(feature = "ser-write-json")]
 pub use ser_write::{CountingSerWrite, ErasedWriteError, ser_write_json_len, ser_write_json_to};
 pub use server::{
-    AvailableProject, BuildFacts, ClientMsgBody, FsRequest, FsResponse, HardwareFacts,
-    HardwareIdentity, HelloIdentity, LinkCounters, LoadedProject, MemoryStats, SampleStats,
-    ServerConfig, ServerHello, ServerMsgBody, WIRE_PROTO_VERSION,
+    AvailableProject, BuildFacts, FsRequest, FsResponse, HardwareFacts, HardwareIdentity,
+    HelloIdentity, LinkCounters, LoadedProject, MemoryStats, SampleStats, ServerConfig,
+    ServerHello, ServerMsgBody, WIRE_PROTO_VERSION,
 };
 pub use slot::{
     WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,

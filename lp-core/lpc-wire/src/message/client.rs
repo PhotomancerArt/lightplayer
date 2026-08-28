@@ -41,7 +41,7 @@ pub enum ClientRequest {
     ListLoadedProjects,
     StopAllProjects,
     /// Set the server/device global log level at runtime (see
-    /// [`crate::server::ClientMsgBody::SetLogLevel`] for semantics: global,
+    /// [`ClientRequest::SetLogLevel`] for semantics: global,
     /// non-persistent, no `Off`).
     SetLogLevel {
         level: crate::server::api::LogLevel,
