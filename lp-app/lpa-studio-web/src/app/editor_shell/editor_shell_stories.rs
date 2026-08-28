@@ -12,7 +12,7 @@ use lpa_studio_web_story_macros::story;
 
 use super::arrange::{DiveHost, ProjectCanvasHost};
 use super::toolbar::ToolbarStrip;
-use crate::app::patch::patch_story_fixtures::{small_dome_surface, peach_surface};
+use crate::app::patch::patch_story_fixtures::{peach_surface, small_dome_surface};
 use lpa_studio_core::{
     ArtifactLocation, NodeId, UiArrangeFootprint, UiArrangeMeta, UiArrangeTransform,
     UiPatchSurface, UiPatchTarget, UiSelection,

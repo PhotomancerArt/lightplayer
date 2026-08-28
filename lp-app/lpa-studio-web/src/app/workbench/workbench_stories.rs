@@ -11,7 +11,7 @@ use super::panels::{FixturesPanel, OutputsPanel, PropsPanel, TreeGrain};
 use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchHrefs, WorkbenchView};
 use crate::app::StudioShell;
 use crate::app::patch::patch_story_fixtures::{
-    small_dome_surface, small_dome_walkup_surface, peach_surface,
+    peach_surface, small_dome_surface, small_dome_walkup_surface,
 };
 use crate::app::story_fixtures::{
     project_editor_fixture, project_ready_view, project_synced_pane_view, simulator_lens_card,

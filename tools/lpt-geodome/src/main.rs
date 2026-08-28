@@ -341,7 +341,9 @@ fn plan_boxes(instances: &[PanelInstance]) -> (Vec<usize>, Vec<usize>) {
                 (delta.abs(), -dist(c, CENTER))
             };
             let (ka, kb) = (key(*a), key(*b));
-            ka.0.total_cmp(&kb.0).then(ka.1.total_cmp(&kb.1)).then(a.cmp(b))
+            ka.0.total_cmp(&kb.0)
+                .then(ka.1.total_cmp(&kb.1))
+                .then(a.cmp(b))
         });
         sorted
     };
@@ -377,8 +379,9 @@ fn dome_patch(instances: &[PanelInstance], box_a: &[usize], box_b: &[usize]) -> 
     let mut push = |output: &str, wire: &[usize], quirk_reversed: usize, quirk_rotated: usize| {
         for (position, index) in wire.iter().enumerate() {
             let port = position / PANELS_PER_PORT;
-            let lamp = (port * PANELS_PER_PORT as usize * PANEL_LAMPS as usize
-                + (position % PANELS_PER_PORT) * PANEL_LAMPS as usize) as u32;
+            let lamp = (port * PANELS_PER_PORT * PANEL_LAMPS as usize
+                + (position % PANELS_PER_PORT) * PANEL_LAMPS as usize)
+                as u32;
             doc.entries.push(PatchEntry {
                 source: PatchSource::Path {
                     path: instances[*index].path.clone(),

@@ -29,7 +29,7 @@ use lpa_studio_web_story_macros::story;
 
 use super::patch_panel::PatchPanel;
 use super::patch_story_fixtures::{
-    small_dome_surface, small_dome_walkup_surface, peach_manual_surface,
+    peach_manual_surface, small_dome_surface, small_dome_walkup_surface,
 };
 use crate::app::editor_shell::patching::ArmedVerb;
 use lpa_studio_core::{NodeId, UiPatchSurface, UiPatchTarget};

@@ -14,8 +14,9 @@
 
 use lpc_engine::nodes::OutputFragment;
 use lpc_engine::{EngineServices, ProjectLoader};
-use lpc_mapping::{Map2dDoc, PatchDoc, PatchResolveContext, object_instance_spans, resolve,
-    resolve_patch};
+use lpc_mapping::{
+    Map2dDoc, PatchDoc, PatchResolveContext, object_instance_spans, resolve, resolve_patch,
+};
 use lpc_model::TreePath;
 use lpfs::LpFsStd;
 use std::path::{Path, PathBuf};
@@ -56,8 +57,8 @@ fn workspace_dir() -> PathBuf {
 /// to `(span.start, wire lamp, span.count, reversed, offset)`, ×3 for
 /// samples, in patch-document row order.
 fn expected_placements(map2d: &str, patch: &str) -> Vec<(String, Placement)> {
-    let doc = Map2dDoc::from_json(&std::fs::read_to_string(map2d).expect("map2d"))
-        .expect("map2d parses");
+    let doc =
+        Map2dDoc::from_json(&std::fs::read_to_string(map2d).expect("map2d")).expect("map2d parses");
     let patch_doc =
         PatchDoc::from_json(&std::fs::read_to_string(patch).expect("patch")).expect("patch parses");
     let resolved = resolve(&doc).expect("map2d resolves");
