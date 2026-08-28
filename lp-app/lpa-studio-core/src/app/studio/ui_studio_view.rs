@@ -110,6 +110,13 @@ pub struct UiStudioView {
     /// follows the view, covering example opens and clearing on disconnect
     /// without action plumbing.
     pub open_project_name: Option<String>,
+    /// `Some(example id)` while the open session is a TRANSIENT view
+    /// session over an embedded example (examples vision D2): nothing was
+    /// installed, [`Self::open_project_uid`] carries an ephemeral RAM uid
+    /// that must never reach a URL or the cloud, and the honest address is
+    /// the bare `/p/<slug>`. Cleared the moment an explicit save forks the
+    /// session into the library.
+    pub open_project_transient: Option<String>,
     /// Connect-as-pull result for the attached DEVICE (never the sim —
     /// D22): identity + content classification. Feeds the device pane,
     /// gallery cards, and the device-push verbs (M5/M8′).
@@ -142,6 +149,7 @@ impl UiStudioView {
             lens: None,
             open_project_uid: None,
             open_project_name: None,
+            open_project_transient: None,
             device_sync: None,
             lens_card: None,
             session: None,
@@ -163,6 +171,13 @@ impl UiStudioView {
     pub fn with_open_project(mut self, uid: Option<String>, slug: Option<String>) -> Self {
         self.open_project_uid = uid;
         self.open_project_name = slug;
+        self
+    }
+
+    /// Mark the open session as a transient view of `example_id` (see
+    /// [`Self::open_project_transient`]).
+    pub fn with_transient(mut self, example_id: Option<String>) -> Self {
+        self.open_project_transient = example_id;
         self
     }
 

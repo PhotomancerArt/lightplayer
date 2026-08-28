@@ -232,6 +232,12 @@ impl LibraryStore {
     /// runs before the format gate, "too old" and "corrupt" looked
     /// identical. Now the problem rides the summary
     /// ([`PackageHealth::Blocked`]) and the card says so.
+    /// One draw from the store's injected randomness (the same source uid
+    /// minting uses) — for hosts that need entropy outside a catalog op.
+    pub(crate) fn random_bytes(&self) -> [u8; 16] {
+        (self.random)()
+    }
+
     pub fn list(&self) -> Result<Vec<PackageSummary>, LibraryError> {
         let mut summaries: Vec<PackageSummary> = self
             .package_slugs()?

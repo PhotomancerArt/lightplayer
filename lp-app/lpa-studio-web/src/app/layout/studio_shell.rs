@@ -64,6 +64,9 @@ pub fn StudioShell(
         // consumed by the web shell's URL sync, not the layout
         lens: _,
         open_project_uid: _,
+        // consumed by the web shell's URL sync (transient sessions stay on
+        // their bare example address)
+        open_project_transient: _,
         // the chrome renders the header session·project control (web_app
         // builds it from the editor pane's own view and this field)
         open_project_name: _,

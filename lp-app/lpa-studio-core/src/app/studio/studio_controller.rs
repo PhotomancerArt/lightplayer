@@ -1284,6 +1284,7 @@ impl StudioController {
                 self.project.active_library_uid(),
                 self.project.active_library_display_name(),
             )
+            .with_transient(self.project.active_transient_example())
             .with_device_sync(self.ambient_device_sync().cloned())
             .with_lens_card(self.lens_device_card())
             .with_session(self.session_control())
@@ -5722,7 +5723,10 @@ impl StudioController {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             match &pending {
                 PendingOpen::Package(key) => self.project.open_library_package(server, key).await,
-                PendingOpen::Example(id) => self.project.open_example_package(server, id).await,
+                // Examples open as TRANSIENT view sessions (vision D2):
+                // no seed, no library entry, no persisted uid. The
+                // explicit-save gesture is what installs a copy.
+                PendingOpen::Example(id) => self.project.open_example_transient(server, id).await,
             }
         };
         match result {
@@ -8055,6 +8059,11 @@ impl StudioController {
     }
 
     /// The runtime pool, for e2e assertions about session coexistence.
+    #[cfg(test)]
+    pub(crate) fn project_for_test(&self) -> &ProjectController {
+        &self.project
+    }
+
     pub(crate) fn runtime_pool_for_test(&self) -> &RuntimePool {
         &self.pool
     }

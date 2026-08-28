@@ -32,6 +32,15 @@ impl EmbeddedExample {
             .map(|(path, bytes)| ((*path).to_string(), bytes.to_vec()))
             .collect()
     }
+
+    /// The example's canonical bare slug — the id tail
+    /// (`examples/fyeah-sign` → `fyeah-sign`). This is the `/p/<slug>`
+    /// address (PD3): example directories are `[a-z0-9-]` names, so the
+    /// tail is URL-ready as-is. Uniqueness across the table is pinned by
+    /// a test below.
+    pub fn slug(&self) -> &'static str {
+        self.id.rsplit('/').next().unwrap_or(self.id)
+    }
 }
 
 /// `examples/fyeah-sign` — the Studio demo project (see
@@ -697,6 +706,15 @@ pub fn embedded_example(id: &str) -> Option<EmbeddedExample> {
         .find(|example| example.id == id)
 }
 
+/// Look up an embedded example by its bare slug (the id tail) — the
+/// `/p/<slug>` resolution leg. An unknown slug is `None`, never a guess.
+pub fn embedded_example_by_slug(slug: &str) -> Option<EmbeddedExample> {
+    embedded_examples()
+        .iter()
+        .copied()
+        .find(|example| example.slug() == slug)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -718,6 +736,26 @@ mod tests {
     #[test]
     fn unknown_example_is_none() {
         assert!(embedded_example("examples/unknown").is_none());
+    }
+
+    /// Bare slugs are the `/p/<slug>` grammar (PD3): every id tail must be
+    /// unique or two examples would share an address.
+    #[test]
+    fn example_slugs_are_unique_id_tails() {
+        let mut seen = std::collections::BTreeSet::new();
+        for example in embedded_examples() {
+            assert_eq!(example.id, format!("examples/{}", example.slug()));
+            assert!(
+                seen.insert(example.slug()),
+                "duplicate example slug: {}",
+                example.slug()
+            );
+        }
+        assert_eq!(
+            embedded_example_by_slug("fyeah-sign").map(|e| e.id),
+            Some("examples/fyeah-sign")
+        );
+        assert!(embedded_example_by_slug("unknown").is_none());
     }
 
     /// The docs-example contract: plasma-duo drives the SAME shader (and
