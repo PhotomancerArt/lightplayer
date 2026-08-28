@@ -1,5 +1,5 @@
 ---
-status: carried
+status: paying-down
 since: 2026-08-02      # first registered symptom (line interleaving)
 logged: 2026-08-21     # filed when the third instance met the bar
 area: fw-esp32v3 / fw-esp32-common serial io_task + classic ESP32 UART0
@@ -58,6 +58,24 @@ hard way.
   `spikes/serial-lab`; TX-side response drops added to the picture; both
   dig2go upload attempts' run-evidence waits broken by it. Third
   instance — this entry filed, per the 2026-08-03 entry's own lesson.
+
+**Progress** — 2026-08-25: fix landed on PR #448 (io_task on an
+interrupt executor at swi2/Priority2, hardware-pacer wakes, thread-side
+serialization with byte shuttling, UART write retry + peer-visible
+Error frame, hello-triggered session flush). Bench (dig2go, project at
+103–114 ms ticks, shipping build): 4,592 B inbound write + byte-
+identical readback in 0.3 s under load, 10/10 responses (median
+0.34 s), torn-frame reconnect gates cleanly, zero FifoOverflowed, zero
+TX timeouts — every exit criterion below met. The alternatives analysis
+is `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`
+(including three bench-found constraints future serial work must not
+re-learn). The `stopAllProjects` workaround remains necessary ONLY for
+devices still flashed with older firmware. Residual frontier beyond the
+exit criteria: inbound frames longer than one engine tick of line time
+(~12 KB at a 103 ms tick) are intermittently lost —
+`docs/defects/2026-08-26-inbound-frames-longer-than-a-tick-lossy.md`
+(P6's RX ring is the known design answer; no current client sends that
+shape).
 
 **Exit criteria** — inbound: an interrupt-serviced RX ring (or io_task
 priority/executor isolation) sized so a full-load engine tick cannot

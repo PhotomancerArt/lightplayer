@@ -7,20 +7,25 @@
 //! activities. The Fixtures/Outputs panels are the editor's rails — they
 //! are grown in place, never forked.
 //!
-//! The DIVE is layer state, not component identity (the one-project-canvas
-//! plan): double-clicking a fixture makes its lamps editable IN PLACE —
-//! same canvas, same camera, no chrome swap. The asset pipeline
-//! ([`mapping_session::MappingAssetPipeline`]) seeds the workbench-owned
-//! session and applies commits; the toolbar morphs between the fixture
-//! and mapping item lists; esc walks the editor ladder and, at its end,
-//! leaves the dive. Patching becomes its own workbench view later (R5) by
-//! mounting the same canvas with different furniture.
+//! The DIVE is the one selection's DERIVED scope (the
+//! one-selection-one-tree ADR): entering a fixture — double-click, tree
+//! row, toolbar — is a selection dispatch, and its lamps become editable
+//! IN PLACE: same canvas, same camera, no chrome swap. The asset
+//! pipeline ([`mapping_session::MappingAssetPipeline`]) seeds the
+//! workbench-owned session and applies commits; the selection
+//! coordinator ([`selection`]) bridges the core selection and the
+//! session's positional paths; the toolbar morphs between the fixture
+//! and mapping item lists; esc ascends the ladder and, at its end, the
+//! selection itself. The Patching view mounts the same canvas with
+//! different furniture.
 
 pub(crate) mod arrange;
 #[cfg(feature = "stories")]
 pub(crate) mod editor_shell_stories;
+pub(crate) mod hotkeys;
 pub(crate) mod mapping_session;
 pub(crate) mod patching;
+pub(crate) mod selection;
 pub(crate) mod toolbar;
 
 use std::collections::BTreeMap;
@@ -52,18 +57,24 @@ static NEXT_UPLOAD_INPUT_ID: AtomicU64 = AtomicU64::new(0);
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn EditorShellCenter(
     surface: Option<UiPatchSurface>,
-    selection: Option<UiPatchTarget>,
+    selection: lpa_studio_core::UiSelection,
     /// The full editor view — the canvas resolves fixture map2d bodies out
     /// of the snapshot's node views (the same bytes the face embeds hold).
     project_editor: ProjectEditorView,
-    /// The workbench-owned dive state, shared with the Fixtures tree and
-    /// the Props pane (R4): focused fixture, session, Props commit bumps.
-    dive_focused: Signal<Option<NodeId>>,
+    /// The DERIVED dive (unified-selection P4): the selection's entered
+    /// fixture, computed by the workbench from the one core selection —
+    /// never independent state. The session and Props commit bumps stay
+    /// workbench-owned signals.
+    dive_focused: Option<NodeId>,
     dive_session: Signal<lpa_mapping_editor::MapEditorSession>,
     dive_commits: Signal<u64>,
+    /// The workbench-owned auto-pack slots, SHARED with the Patching
+    /// center (G1 round 1: per-center slots computed at different mount
+    /// times diverged — one conceptual space, one slot truth).
+    pack_slots: Signal<PackSlots>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let mut focused = dive_focused;
+    let focused = dive_focused;
     // Dive-scoped UI state: the asset pipeline's verdict, the view
     // toggles, the fit request, and upload plumbing. Held here (not in the
     // canvas host) so the toolbar and keyboard read the same signals.
@@ -92,7 +103,7 @@ pub fn EditorShellCenter(
     // Sticky auto-pack slots: grown only when a never-slotted fixture
     // appears, and never re-packed — arranging one fixture must not move
     // another, and an undone arrange returns to the retained slot.
-    let mut pack_slots = use_signal(PackSlots::new);
+    let mut pack_slots = pack_slots;
     let refreshed = refresh_pack_slots(&surface, &bodies, &pack_slots.peek());
     if let Some(next) = refreshed {
         pack_slots.set(next);
@@ -107,24 +118,76 @@ pub fn EditorShellCenter(
             ProjectEditorOp::EditorJournal { event, node, mode },
         ));
     };
-    let enter_focus = move |on_action: &EventHandler<UiAction>, node: NodeId| {
-        enter_dive(on_action, focused, node)
-    };
-    let mut exit_focus = move |on_action: &EventHandler<UiAction>| {
-        if focused.peek().is_some() {
-            focus_journal(
-                on_action,
-                UiEditJournalEvent::ModeSwitch,
-                None,
-                UiEditorMode::Arrange,
-            );
+    let enter_focus = {
+        let surface = surface.clone();
+        move |on_action: &EventHandler<UiAction>, node: NodeId| {
+            enter_dive(on_action, &surface, node)
         }
-        focused.set(None);
     };
+    // Leaving the dive = ASCENDING the one selection (the fixture stays
+    // selected at project level); the journal rides the entered-transition
+    // tracker below, not this dispatch.
+    let exit_focus = {
+        let selection = selection.clone();
+        move |on_action: &EventHandler<UiAction>| {
+            let mut next = selection.clone();
+            next.ascend();
+            on_action.call(UiAction::from_op(
+                lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
+                ProjectEditorOp::PatchSelect { selection: next },
+            ));
+        }
+    };
+    // The entered-transition tracker: ONE journal home for every way the
+    // scope can change (double-click, tree row, toolbar, esc, empty-click
+    // ascend, even a selection carried over from the Patching view). It
+    // also seeds the SESSION's own selection from the core selection on
+    // entry — the enter gesture names the object, the session speaks
+    // paths (one-way for now; the P5 coordinator generalizes).
+    {
+        let mut last_entered = use_signal(|| None::<NodeId>);
+        let entered_now = focused;
+        if *last_entered.peek() != entered_now {
+            let previous = *last_entered.peek();
+            last_entered.set(entered_now);
+            match (previous, entered_now) {
+                (None, Some(node)) => focus_journal(
+                    &on_action,
+                    UiEditJournalEvent::ModeSwitch,
+                    Some(node),
+                    UiEditorMode::Mapping,
+                ),
+                (Some(_), Some(node)) => focus_journal(
+                    &on_action,
+                    UiEditJournalEvent::NodeSwitch,
+                    Some(node),
+                    UiEditorMode::Mapping,
+                ),
+                (Some(_), None) => focus_journal(
+                    &on_action,
+                    UiEditJournalEvent::ModeSwitch,
+                    None,
+                    UiEditorMode::Arrange,
+                ),
+                (None, None) => {}
+            }
+        }
+    }
+    // The selection COORDINATOR (P5): the two-way core ↔ session bridge —
+    // seed on entry, mirror session writes up as instance targets. See
+    // `selection.rs` for the direction rules.
+    selection::use_selection_bridge(
+        focused,
+        &selection,
+        &surface,
+        dive_session,
+        dive_state,
+        on_action,
+    );
     // The focused fixture's face-editor DTO (fetch/refusal/apply wiring
     // rides it); a fixture that loses its editor (node removed) drops
     // focus honestly.
-    let focused_editor: Option<(NodeId, String, UiAssetEditor)> = focused.read().and_then(|node| {
+    let focused_editor: Option<(NodeId, String, UiAssetEditor)> = focused.and_then(|node| {
         let fixture = surface
             .fixtures
             .iter()
@@ -145,8 +208,10 @@ pub fn EditorShellCenter(
         })
         .count();
 
-    // The selected fixture's arrange facts, for the transform verbs.
-    let selected: Option<(String, NodeId, UiArrangeTransform)> = match &selection {
+    // The selected fixture's arrange facts, for the transform verbs (a
+    // single-subject affordance: a multi-selection rotates/scales nothing
+    // from the toolbar in P2 — the canvas gestures own the set).
+    let selected: Option<(String, NodeId, UiArrangeTransform)> = match selection.single() {
         Some(
             UiPatchTarget::Fixture { node }
             | UiPatchTarget::Instance { node, .. }
@@ -218,10 +283,9 @@ pub fn EditorShellCenter(
 
     // The toolbar: one strip, per-activity item lists (D1 — the morph is
     // a data swap).
-    let groups = if let Some((_, label, editor)) = &focused_editor {
+    let groups = if let Some((_, _label, editor)) = &focused_editor {
         let session_read = dive_session.read();
         dive_toolbar(
-            label,
             &session_read.tool,
             *view_opts.read(),
             editor,
@@ -238,6 +302,7 @@ pub fn EditorShellCenter(
     };
     let on_toolbar_item = {
         let adjust = adjust.clone();
+        let enter_focus = enter_focus.clone();
         let arrange_verb = arrange_verb.clone();
         let selected = selected.clone();
         let focused_editor = focused_editor.clone();
@@ -249,7 +314,6 @@ pub fn EditorShellCenter(
         let upload_input_id = upload_input_id.clone();
         let mut dive_session = dive_session;
         move |id: &'static str| match id {
-            "dive.exit" => exit_focus(&on_action),
             "arrange.edit-mapping" => {
                 if let Some((_, node, _)) = &selected
                     && surface_fixtures.iter().any(|(n, has)| n == node && *has)
@@ -344,53 +408,64 @@ pub fn EditorShellCenter(
 
     let upload_editor = focused_editor.as_ref().map(|(_, _, editor)| editor.clone());
 
+    // Mode-scoped keys (ratified), on a view-scoped WINDOW listener (see
+    // `hotkeys.rs` — the center-div `onkeydown` died silently whenever
+    // focus landed in a dock): dived, the session owns the whole editor
+    // grammar — and esc's last rung exits the dive (Q4). Not dived, the
+    // arrange byte stack answers ⌘Z alone.
+    {
+        let arrange_verb = arrange_verb.clone();
+        hotkeys::use_window_keydown(move |event: web_sys::KeyboardEvent| {
+            let input = hotkeys::editor_key_input(&event);
+            if focused.is_some() {
+                if dived && dive_ready {
+                    let result = handle_editor_key(
+                        dive_session,
+                        view_opts,
+                        fit_pending,
+                        on_committed,
+                        &input,
+                    );
+                    if result.prevent_default {
+                        event.prevent_default();
+                    }
+                    if result.outcome == EditorKeyOutcome::ExitDive {
+                        exit_focus(&on_action);
+                    }
+                } else if matches!(input.key, Key::Escape) {
+                    // A refused or still-loading dive: esc still leaves.
+                    exit_focus(&on_action);
+                }
+                return;
+            }
+            if matches!(input.key, Key::Escape) {
+                // The root rung of the one ladder (D3): a fixture-grain
+                // selection ascends to nothing — esc deselects at project
+                // level exactly as empty-click does.
+                exit_focus(&on_action);
+                return;
+            }
+            let meta = input.modifiers.meta() || input.modifiers.ctrl();
+            // Shift+z arrives as "Z", so match case-insensitively.
+            let is_z = matches!(
+                &input.key,
+                Key::Character(c) if c.eq_ignore_ascii_case("z")
+            );
+            if meta && is_z {
+                event.prevent_default();
+                let verb = if input.modifiers.shift() {
+                    EditorMetaVerb::Redo
+                } else {
+                    EditorMetaVerb::Undo
+                };
+                arrange_verb(&on_action, verb);
+            }
+        });
+    }
+
     rsx! {
         div {
             class: "tw:flex tw:min-h-0 tw:flex-1 tw:flex-col tw:outline-none",
-            tabindex: 0,
-            onkeydown: {
-                let arrange_verb = arrange_verb.clone();
-                move |evt: KeyboardEvent| {
-                    // Mode-scoped keys (ratified): dived, the session owns
-                    // the whole editor grammar — and esc's last rung exits
-                    // the dive (Q4). Not dived, the arrange byte stack
-                    // answers ⌘Z alone.
-                    if focused.peek().is_some() {
-                        if dived && dive_ready {
-                            let outcome = handle_editor_key(
-                                dive_session,
-                                view_opts,
-                                fit_pending,
-                                on_committed,
-                                &evt,
-                            );
-                            if outcome == EditorKeyOutcome::ExitDive {
-                                exit_focus(&on_action);
-                            }
-                        } else if matches!(evt.data().key(), Key::Escape) {
-                            // A refused or still-loading dive: esc still
-                            // leaves.
-                            exit_focus(&on_action);
-                        }
-                        return;
-                    }
-                    let meta = evt.data().modifiers().meta() || evt.data().modifiers().ctrl();
-                    // Shift+z arrives as "Z", so match case-insensitively.
-                    let is_z = matches!(
-                        evt.data().key(),
-                        Key::Character(c) if c.eq_ignore_ascii_case("z")
-                    );
-                    if meta && is_z {
-                        evt.prevent_default();
-                        let verb = if evt.data().modifiers().shift() {
-                            EditorMetaVerb::Redo
-                        } else {
-                            EditorMetaVerb::Undo
-                        };
-                        arrange_verb(&on_action, verb);
-                    }
-                }
-            },
             ToolbarStrip { groups, on_item: on_toolbar_item }
             if let Some(error) = surface.editor_meta_error.clone() {
                 div { class: "tw:flex-none tw:border-b tw:border-border-subtle tw:bg-status-attention-bg tw:px-2.5 tw:py-1 tw:text-[11px] tw:text-status-attention-foreground",
@@ -459,6 +534,9 @@ pub fn EditorShellCenter(
                         bodies,
                         selection: selection.clone(),
                         pack,
+                        // The Mapping view's transform furniture: the
+                        // fixture selection box wears corner scale handles.
+                        transform_handles: true,
                         dive: focused_editor.as_ref().map(|(node, _, _)| DiveHost {
                             node: *node,
                             session: dive_session,
@@ -476,8 +554,9 @@ pub fn EditorShellCenter(
     }
 }
 
-/// The fixture activity's toolbar: breadcrumb root, arrange verbs for the
-/// selection, history, and the counts readout.
+/// The fixture activity's toolbar: arrange verbs for the selection,
+/// history, and the counts readout (the breadcrumb is gone — scope reads
+/// from the canvas, the Props stack, and the tree).
 fn fixture_toolbar(
     can_edit_mapping: bool,
     has_selection: bool,
@@ -485,14 +564,6 @@ fn fixture_toolbar(
     arranged: usize,
 ) -> Vec<ToolbarGroup> {
     vec![
-        ToolbarGroup {
-            id: "breadcrumb",
-            trailing: false,
-            items: vec![ToolbarItem::Status {
-                text: "Project".to_string(),
-                kind: StatusKind::Label,
-            }],
-        },
         ToolbarGroup {
             id: "arrange",
             trailing: false,
@@ -574,10 +645,11 @@ fn fixture_toolbar(
     ]
 }
 
-/// The dive's toolbar: breadcrumb (root exits), tools, view toggles, and
-/// the save cluster — ONE chrome row total.
+/// The dive's toolbar: tools, view toggles, and the save cluster — ONE
+/// chrome row total. The `‹ Project ▸ fixture` breadcrumb is GONE
+/// (unified-selection P4): scope reads from the dimmed neighbours, the
+/// Props stack, and the tree highlight; esc and empty-click ascend.
 fn dive_toolbar(
-    label: &str,
     tool: &MapTool,
     opts: EditorViewOptions,
     editor: &UiAssetEditor,
@@ -647,21 +719,6 @@ fn dive_toolbar(
         },
     ]);
     vec![
-        ToolbarGroup {
-            id: "breadcrumb",
-            trailing: false,
-            items: vec![
-                ToolbarItem::Link {
-                    id: "dive.exit",
-                    label: "‹ Project".to_string(),
-                    title: "Leave the dive — back to the project canvas (esc)".to_string(),
-                },
-                ToolbarItem::Status {
-                    text: format!("▸ {label}"),
-                    kind: StatusKind::Label,
-                },
-            ],
-        },
         ToolbarGroup {
             id: "tools",
             trailing: false,
@@ -791,32 +848,33 @@ fn polygon_mode_items(tool: &MapTool, editable: bool) -> Vec<ToolbarItem> {
     ]
 }
 
-/// Enter the dive on `node`, stamping the edit journal exactly like the
-/// toolbar path — ONE truth for the transition, shared by the center's
-/// "edit mapping"/double-click and the Props placement card's action.
+/// Enter the dive on `node` — ONE truth for the transition, shared by the
+/// center's "edit mapping" and the Props placement card's action: the
+/// entering SELECTION is dispatched (the fixture's first object, or the
+/// entered-empty drawing state for a document with nothing to name) and
+/// the scope derives from it. The double-click path selects the CLICKED
+/// object instead (D4) — see the canvas host's Dive arm. The journal
+/// rides the center's entered-transition tracker.
 pub(crate) fn enter_dive(
     on_action: &EventHandler<UiAction>,
-    mut dive_focused: Signal<Option<NodeId>>,
+    surface: &UiPatchSurface,
     node: NodeId,
 ) {
-    let event = if dive_focused.peek().is_none() {
-        Some(UiEditJournalEvent::ModeSwitch)
-    } else if *dive_focused.peek() != Some(node) {
-        Some(UiEditJournalEvent::NodeSwitch)
-    } else {
-        None
-    };
-    if let Some(event) = event {
-        on_action.call(UiAction::from_op(
-            lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
-            ProjectEditorOp::EditorJournal {
-                event,
-                node: Some(node),
-                mode: UiEditorMode::Mapping,
-            },
-        ));
+    let first = surface
+        .fixtures
+        .iter()
+        .find(|fixture| fixture.node == node)
+        .and_then(|fixture| fixture.instances.first())
+        .map(|instance| crate::app::patch::verb_ui::instance_target(node, instance));
+    let mut next = lpa_studio_core::UiSelection::empty();
+    match first {
+        Some(target) => next.select_one(target),
+        None => next.enter(node),
     }
-    dive_focused.set(Some(node));
+    on_action.call(UiAction::from_op(
+        lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
+        ProjectEditorOp::PatchSelect { selection: next },
+    ));
 }
 
 /// Prebuild the arrange-op factory: `editor.json` artifact + the fixture
@@ -901,16 +959,26 @@ fn selected_has_mapping(
 fn prefetch_selected_body(
     on_action: &EventHandler<UiAction>,
     surface: &UiPatchSurface,
-    selection: &Option<UiPatchTarget>,
+    selection: &lpa_studio_core::UiSelection,
 ) {
-    let node = match selection {
-        Some(
+    // Lazy per-node loads follow the selection (any member — a multi
+    // selection prefetches each fixture it names).
+    for target in selection.targets() {
+        let node = match target {
             UiPatchTarget::Fixture { node }
             | UiPatchTarget::Instance { node, .. }
-            | UiPatchTarget::Range { node, .. },
-        ) => *node,
-        _ => return,
-    };
+            | UiPatchTarget::Range { node, .. } => *node,
+            _ => continue,
+        };
+        prefetch_fixture_body(on_action, surface, node);
+    }
+}
+
+fn prefetch_fixture_body(
+    on_action: &EventHandler<UiAction>,
+    surface: &UiPatchSurface,
+    node: NodeId,
+) {
     let Some(fixture) = surface.fixtures.iter().find(|fixture| fixture.node == node) else {
         return;
     };

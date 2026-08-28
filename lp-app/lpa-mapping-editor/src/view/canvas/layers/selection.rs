@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use lpc_mapping::Bounds2d;
 
 use crate::view::canvas::canvas_anchor::capture_pointer;
-use crate::view::canvas::{CanvasDrag, CanvasInteract, event_doc_point, secondary_button};
+use crate::view::canvas::{CanvasDrag, CanvasInteract, event_doc_point, pan_takes_press};
 
 /// Screen-pixel radius of a vertex handle's HIT target — what a click must
 /// land in to grab a vertex, and (on a polygon draft's first point) to close
@@ -84,7 +84,7 @@ pub(crate) fn selection_layer(input: &SelectionLayerInput<'_>) -> Element {
                     height: "{2.0 * handle_half}",
                     stroke_width: "{1.4 / eff}",
                     onpointerdown: move |evt| {
-                        if secondary_button(&evt) {
+                        if pan_takes_press(&interact, &evt) {
                             return;
                         }
                         evt.stop_propagation();
@@ -151,7 +151,7 @@ pub(crate) fn selection_layer(input: &SelectionLayerInput<'_>) -> Element {
                         height: "{2.0 * half}",
                         stroke_width: "{1.4 / eff}",
                         onpointerdown: move |evt| {
-                            if secondary_button(&evt) {
+                            if pan_takes_press(&interact, &evt) {
                                 return;
                             }
                             evt.stop_propagation();

@@ -118,6 +118,11 @@ pub struct StudioController {
     #[cfg(test)]
     multi_session_for_test: bool,
     project: ProjectController,
+    /// Platform timer factory for the INITIAL project sync's progress
+    /// deadline, installed by `StudioActor::new` exactly like the agent
+    /// timer below. Absent (tests without an actor) the sync runs ungated —
+    /// the pre-2026-08-26 behavior. See [`Self::sync_project_after_attach`].
+    sync_timer: Option<crate::AgentTimerFactory>,
     /// Bounded, chronological log buffer. Capped in core (P3/Q5) rather than in
     /// the web crate's retired 80-entry mirror.
     logs: LogRing,
@@ -324,6 +329,7 @@ impl StudioController {
             #[cfg(test)]
             multi_session_for_test: false,
             project: ProjectController::new(),
+            sync_timer: None,
             logs: LogRing::new(),
             log_filter: LogFilter::default(),
             device_events,
@@ -405,6 +411,18 @@ impl StudioController {
         timer: impl FnMut(core::time::Duration) -> crate::AgentTimerFuture + 'static,
     ) {
         self.agent.set_timer(timer);
+    }
+
+    /// Install the platform timer factory the initial project sync's
+    /// progress deadline polls on (called by `StudioActor::new`, boxed from
+    /// its `make_timer` — the same seam shape as [`Self::set_agent_timer`]).
+    /// Without it the initial sync awaits unbounded, and a device that dies
+    /// mid-stream turns "Syncing project" into a forever-hang (2026-08-26).
+    pub fn set_sync_timer(
+        &mut self,
+        timer: impl FnMut(core::time::Duration) -> crate::AgentTimerFuture + 'static,
+    ) {
+        self.sync_timer = Some(std::rc::Rc::new(std::cell::RefCell::new(timer)));
     }
 
     /// Write every agent session's latest engine status and def-side param
@@ -7156,7 +7174,23 @@ impl StudioController {
         updates.emit(UxUpdate::View(self.view()));
         let sync = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
-            self.project.sync_loaded_project(server).await?
+            // Gated when the actor installed a platform timer: a device that
+            // dies mid-stream then FAILS the sync (with the pull loop's
+            // progress counts in the console) instead of hanging "Syncing
+            // project" forever. The ungated arm survives for timer-less
+            // constructions (unit tests drive the controller directly).
+            match self.sync_timer.clone() {
+                Some(factory) => {
+                    let deadline =
+                        lpa_client::ProgressDeadline::new(crate::PASSIVE_REFRESH_DEADLINE, {
+                            move |budget| (factory.borrow_mut())(budget)
+                        });
+                    self.project
+                        .sync_loaded_project_gated(server, deadline, &lpa_client::NeverCancel)
+                        .await?
+                }
+                None => self.project.sync_loaded_project(server).await?,
+            }
         };
         self.record_project_sync_run(&sync);
         updates.emit(UxUpdate::View(self.view()));

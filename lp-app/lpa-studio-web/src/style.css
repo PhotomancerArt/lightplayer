@@ -1839,6 +1839,17 @@ label:has(> input:not(:disabled)) {
     cursor: crosshair;
 }
 
+/* Space-bar pan: the hand wins over every element cursor underneath. */
+.lpme-canvas-pan,
+.lpme-canvas-pan * {
+    cursor: grab !important;
+}
+
+.lpme-canvas-pan:active,
+.lpme-canvas-pan:active * {
+    cursor: grabbing !important;
+}
+
 .lpme-sel-outline {
     fill: none;
     stroke: #4c9ffe;

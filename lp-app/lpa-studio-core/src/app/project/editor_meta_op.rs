@@ -50,6 +50,16 @@ pub struct EditorMetaFixture {
     pub mapping_artifact: Option<ArtifactLocation>,
 }
 
+/// One fixture's transform write inside a (possibly multi-fixture)
+/// arrange gesture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EditorMetaSet {
+    pub node_key: String,
+    /// The subject node's runtime id, for the undo stamp.
+    pub node: Option<lpc_model::NodeId>,
+    pub transform: UiArrangeTransform,
+}
+
 /// What the gesture asks for.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EditorMetaVerb {
@@ -60,6 +70,13 @@ pub enum EditorMetaVerb {
         /// The subject node's runtime id, for the undo stamp.
         node: Option<lpc_model::NodeId>,
         transform: UiArrangeTransform,
+    },
+    /// Set SEVERAL fixtures' transforms as ONE write and ONE undo step —
+    /// the multi-selection's move/scale gesture (unified-selection P3).
+    /// One document round-trip, one byte-stack snapshot: ⌘Z restores the
+    /// whole set.
+    SetMany {
+        entries: Vec<EditorMetaSet>,
     },
     /// Undo / redo the arrange byte stack (mode-scoped ⌘Z).
     Undo,

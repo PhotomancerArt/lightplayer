@@ -139,18 +139,52 @@ pub enum PatchPulseLanguage {
     Chase,
 }
 
-/// Pulse the lamps behind one patch subject on the live sim/hardware —
-/// or, with no subject, stop pulsing.
+/// Pulse the lamps behind the selected patch subjects on the live
+/// sim/hardware — or, with none, stop pulsing.
 ///
-/// Dispatched to `ProjectController::NODE_ID`; the controller maps the
+/// Dispatched to `ProjectController::NODE_ID`; the controller maps each
 /// subject through the published placements and writes each affected
 /// output's `highlight` Debug slot (clearing outputs that stop being
 /// involved). A Debug slot, so nothing dirties, nothing saves, and a
 /// forgotten pulse dies with the project unload.
+///
+/// More than one subject is the multi-selection's UNION (unified-selection
+/// P2): several fixtures breathing at once. The sibling invariant makes a
+/// multi-subject list breath-only — chase is a single-object language —
+/// so same-output texts merge as plain span lists.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PatchPulseOp {
-    /// The subject to pulse, or `None` to clear the pulse everywhere.
-    pub subject: Option<PatchPulseSubject>,
+    /// The subjects to pulse; empty clears the pulse everywhere.
+    pub subjects: Vec<PatchPulseSubject>,
+}
+
+impl PatchPulseOp {
+    /// The zero-or-one form every single-selection surface dispatches.
+    #[must_use]
+    pub fn from_option(subject: Option<PatchPulseSubject>) -> Self {
+        Self {
+            subjects: subject.into_iter().collect(),
+        }
+    }
+}
+
+/// Merge two same-output highlight texts (the multi-selection union).
+/// Breath texts are bare span lists and concatenate; a `chase:` text never
+/// legitimately meets another text (chase = single object, enforced by the
+/// selection's sibling invariant), so on that impossible collision the
+/// FIRST text stands rather than corrupting the microformat.
+#[must_use]
+pub(crate) fn merge_highlight_texts(first: &str, second: &str) -> String {
+    if first.starts_with("chase:") || second.starts_with("chase:") {
+        return first.to_string();
+    }
+    if first.is_empty() {
+        return second.to_string();
+    }
+    if second.is_empty() {
+        return first.to_string();
+    }
+    format!("{first},{second}")
 }
 
 impl ControllerOp for PatchPulseOp {
@@ -766,7 +800,9 @@ mod tests {
 
     #[test]
     fn patch_pulse_is_editor_foreground_class() {
-        let op = PatchPulseOp { subject: None };
+        let op = PatchPulseOp {
+            subjects: Vec::new(),
+        };
         assert_eq!(
             op.action_class(),
             ActionClass::Foreground {

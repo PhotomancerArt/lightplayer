@@ -75,12 +75,18 @@ fn ComposedEditorStory(
     // (the story-baseline churner class:
     // docs/debt/story-capture-pipeline.md).
     {
+        let bounds = doc_fit_bounds(session.peek().doc());
+        let bounds_key =
+            bounds.map(|bounds| [bounds.min_x, bounds.min_y, bounds.width, bounds.height]);
         let viewport_now = *viewport.read();
         if let Some([width, height]) = viewport_now
-            && (*fit_pending.read() || fit_done.read().stale([width, height], &camera.peek()))
+            && (*fit_pending.read()
+                || fit_done
+                    .read()
+                    .stale([width, height], &camera.peek(), bounds_key))
         {
             let mut camera = camera;
-            if let Some(bounds) = doc_fit_bounds(session.peek().doc()) {
+            if let Some(bounds) = bounds {
                 let padding = display_inset_padding(bounds, width, height);
                 camera.write().fit(bounds, width, height, padding);
                 if *fit_pending.peek() {
@@ -88,7 +94,7 @@ fn ComposedEditorStory(
                 }
             }
             let mut next = *fit_done.peek();
-            next.record([width, height], *camera.peek());
+            next.record([width, height], *camera.peek(), bounds_key);
             if *fit_done.peek() != next {
                 fit_done.set(next);
             }

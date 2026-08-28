@@ -84,12 +84,6 @@ pub(crate) enum ToolbarItem {
         active: bool,
         enabled: bool,
     },
-    /// Breadcrumb-style link: accent text, no button chrome.
-    Link {
-        id: &'static str,
-        label: String,
-        title: String,
-    },
     /// Inert text: activity labels, counts, save state.
     Status { text: String, kind: StatusKind },
 }
@@ -169,18 +163,6 @@ fn render_item(
                     if let Some(label) = label {
                         "{label}"
                     }
-                }
-            }
-        }
-        ToolbarItem::Link { id, label, title } => {
-            let id = *id;
-            rsx! {
-                button {
-                    key: "{group_id}-{index}",
-                    class: "tw:cursor-pointer tw:border-none tw:bg-transparent tw:p-0 tw:text-xs tw:text-selection-border",
-                    title: "{title}",
-                    onclick: move |_| on_item.call(id),
-                    "{label}"
                 }
             }
         }
