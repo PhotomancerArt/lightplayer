@@ -1880,11 +1880,7 @@ mod tests {
             .map(|span| {
                 let id = span.id.as_ref().expect("panel ids").as_str();
                 let instance = span.instances[0];
-                (
-                    format!("/{id}/{instance}"),
-                    span.start as usize,
-                    span.count as usize,
-                )
+                (format!("/{id}/{instance}"), span.start, span.count)
             })
             .collect();
 
@@ -1893,8 +1889,9 @@ mod tests {
         for (index, object) in objects.iter().enumerate() {
             assert_eq!(
                 object.outline.len(),
-                1,
-                "panel {index}: a closed polygon draws as one lit loop"
+                2,
+                "panel {index}: a closed polygon draws as an edge + hole pair \
+                 (aligned_outline: two loops per closed strand)"
             );
             assert_eq!(object.cells.len(), 119, "panel {index}: a cell per lamp");
             // The cells name this instance's lamps, in the sprite's own
