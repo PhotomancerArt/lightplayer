@@ -24,11 +24,11 @@ use crate::{
     ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem,
     ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
     ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
-    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent,
-    UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
-    UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind,
-    UiPendingEditPhase, UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset,
-    UiStatus, UiViewContent, UxUpdateSink,
+    StudioOverlayMutation, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
+    UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft,
+    UiLogLevel, UiLogOrigin, UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView,
+    UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult, UiShaderError,
+    UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
@@ -3029,38 +3029,105 @@ impl ProjectController {
         Timer: Future<Output = ()>,
         Cancel: CancelSignal + ?Sized,
     {
+        // Staged initial sync (wire-evolution P4): the monolithic
+        // everything-at-once read is the one shape the classic's empirics
+        // matrix proves ALWAYS OOM-resets the board. Each stage below is a
+        // PASS-row shape, bounded on its own, under its own quiet-gap
+        // deadline armed from the caller's single configured deadline.
         let products = self.subscribed_products();
-        let request = self
-            .sync_for_request()?
-            .initial_project_read_request(products);
+        let (deadline_budget, mut make_timer) = deadline.into_parts();
+
+        // Stage 1/3: skeleton — everything except slot detail, no probes.
+        let request = self.sync_for_request()?.initial_skeleton_read_request();
         log::info!(
-            "initial sync: project read (handle={handle_id}, {} queries, {} probes)",
-            request.queries.len(),
-            request.probes.len()
+            "initial sync 1/3: skeleton (handle={handle_id}, {} queries)",
+            request.queries.len()
         );
-        let outcome = server
-            .project_read_gated(handle_id, request, deadline, cancel)
-            .await?;
-        let read = match outcome {
-            StudioProjectReadOutcome::Completed(read) => read,
-            StudioProjectReadOutcome::TimedOut => {
-                return Err(UiError::Transport(
-                    "initial project sync timed out: the device stopped streaming mid-read                      (a device reset looks exactly like this — check the console for                      [RECOVERY] lines and the pull loop's frame count)"
-                        .into(),
-                ));
-            }
-            StudioProjectReadOutcome::Cancelled => {
-                return Err(UiError::Transport(
-                    "initial project sync was cancelled before it completed".into(),
-                ));
-            }
-        };
+        let read = Self::gated_sync_stage(
+            server,
+            handle_id,
+            request,
+            ProgressDeadline::new(deadline_budget, &mut make_timer),
+            cancel,
+            "skeleton",
+        )
+        .await?;
         let mut logs = read.logs;
         self.sync_mut()?.apply_project_read_events(read.events)?;
+
+        // Stage 2/3: slot detail, paged by the skeleton's node ids.
+        // (`since: None` per page — see `initial_slot_page_requests`.)
+        let pages = self.sync_for_request()?.initial_slot_page_requests();
+        log::info!("initial sync 2/3: slot detail in {} page(s)", pages.len());
+        for (page_index, request) in pages.into_iter().enumerate() {
+            let read = Self::gated_sync_stage(
+                server,
+                handle_id,
+                request,
+                ProgressDeadline::new(deadline_budget, &mut make_timer),
+                cancel,
+                "slot detail page",
+            )
+            .await
+            .map_err(|error| stage_page_error(error, page_index))?;
+            logs.extend(read.logs);
+            self.sync_mut()?.apply_project_read_events(read.events)?;
+        }
+
+        // Stage 3/3: probes, one per read.
+        let probe_reads = self
+            .sync_for_request()?
+            .initial_probe_read_requests(products);
+        log::info!("initial sync 3/3: {} probe read(s)", probe_reads.len());
+        for request in probe_reads {
+            let read = Self::gated_sync_stage(
+                server,
+                handle_id,
+                request,
+                ProgressDeadline::new(deadline_budget, &mut make_timer),
+                cancel,
+                "probe",
+            )
+            .await?;
+            logs.extend(read.logs);
+            self.sync_mut()?.apply_project_read_events(read.events)?;
+        }
+
         self.apply_synced_project_view()?;
         logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
         log::info!("initial sync: complete");
         Ok(logs)
+    }
+
+    /// One bounded read of the staged initial sync, with the failure naming
+    /// its stage — timeout and cancellation are FAILURES for an initial sync.
+    async fn gated_sync_stage<MakeTimer, Timer, Cancel>(
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        request: lpc_wire::ProjectReadRequest,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+        stage: &str,
+    ) -> Result<StudioProjectRead, UiError>
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        let outcome = server
+            .project_read_gated(handle_id, request, deadline, cancel)
+            .await?;
+        match outcome {
+            StudioProjectReadOutcome::Completed(read) => Ok(read),
+            StudioProjectReadOutcome::TimedOut => Err(UiError::Transport(format!(
+                "initial project sync timed out during the {stage} read: the device stopped \
+                 streaming mid-read (a device reset looks exactly like this — check the console \
+                 for [RECOVERY] lines and the pull loop's frame count)"
+            ))),
+            StudioProjectReadOutcome::Cancelled => Err(UiError::Transport(format!(
+                "initial project sync was cancelled during the {stage} read"
+            ))),
+        }
     }
 
     pub async fn refresh_project(
@@ -4751,15 +4818,40 @@ impl ProjectController {
         server: &mut StudioServerClient,
         handle_id: u32,
     ) -> Result<Vec<UiLogDraft>, UiError> {
+        let mut logs = self.run_staged_full_read(server, handle_id).await?;
+        self.apply_synced_project_view()?;
+        logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
+        Ok(logs)
+    }
+
+    /// The staged full read (skeleton → slot pages → probes), un-gated —
+    /// the timer-less arm used by tests/hosts and by applier-corruption
+    /// recovery. Same stage shapes as [`Self::run_initial_sync_gated`]; the
+    /// monolithic everything-at-once read is deliberately never sent
+    /// (it is the shape that OOM-reset the classic).
+    async fn run_staged_full_read(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
         let products = self.subscribed_products();
-        let request = self
-            .sync_for_request()?
-            .initial_project_read_request(products);
+        let request = self.sync_for_request()?.initial_skeleton_read_request();
         let read = server.project_read(handle_id, request).await?;
         let mut logs = read.logs;
         self.sync_mut()?.apply_project_read_events(read.events)?;
-        self.apply_synced_project_view()?;
-        logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
+        for request in self.sync_for_request()?.initial_slot_page_requests() {
+            let read = server.project_read(handle_id, request).await?;
+            logs.extend(read.logs);
+            self.sync_mut()?.apply_project_read_events(read.events)?;
+        }
+        for request in self
+            .sync_for_request()?
+            .initial_probe_read_requests(products)
+        {
+            let read = server.project_read(handle_id, request).await?;
+            logs.extend(read.logs);
+            self.sync_mut()?.apply_project_read_events(read.events)?;
+        }
         Ok(logs)
     }
 
@@ -4803,13 +4895,7 @@ impl ProjectController {
                     ),
                 ));
                 self.sync_mut()?.reset_view();
-                let products = self.subscribed_products();
-                let request = self
-                    .sync_for_request()?
-                    .initial_project_read_request(products);
-                let resync = server.project_read(handle_id, request).await?;
-                logs.extend(resync.logs);
-                self.sync_mut()?.apply_project_read_events(resync.events)?;
+                logs.extend(self.run_staged_full_read(server, handle_id).await?);
             }
             Err(error) => return Err(error),
         }
@@ -17013,5 +17099,16 @@ mod tests {
 
     impl Wake for NoopWake {
         fn wake(self: Arc<Self>) {}
+    }
+}
+
+/// Stamp a stage-2 page index into the stage error so a mid-page failure
+/// names how far the staged sync got.
+fn stage_page_error(error: UiError, page_index: usize) -> UiError {
+    match error {
+        UiError::Transport(message) => {
+            UiError::Transport(format!("{message} (slot page {page_index})"))
+        }
+        other => other,
     }
 }
