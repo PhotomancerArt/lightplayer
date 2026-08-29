@@ -6,80 +6,53 @@
     "output": {
       "target": "bus:visual.out"
     },
+    "scale": {
+      "source": "bus:scale"
+    },
     "phase": {
       "source": "bus:speed"
-    },
-    "bands": {
-      "source": "bus:bands"
-    },
-    "tilt": {
-      "source": "bus:tilt"
     },
     "palette": {
       "source": "bus:palette"
     }
   },
   "consumed": {
+    "scale": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "label": "Scale",
+      "description": "Spatial frequency of the folded sine fields"
+    },
     "phase": {
       "kind": "phasor",
       "value": "f32",
       "phasor": {
-        "period_seconds": 12.0,
+        "period_seconds": 100.0,
         "waveform": "ramp",
         "phase_offset": 0.0
       },
       "default_bind": "bus:speed",
       "default": 0,
-      "label": "Speed",
-      "description": "How long the light takes to cross the sign once"
-    },
-    "bands": {
-      "kind": "value",
-      "value": "f32",
-      "default": 2.5,
-      "min": 0.5,
-      "max": 8,
-      "label": "Bands",
-      "description": "How many palette repeats fit across the sign"
-    },
-    "tilt": {
-      "kind": "value",
-      "value": "f32",
-      "default": 0.08,
-      "min": 0,
-      "max": 1,
-      "label": "Tilt",
-      "description": "Direction the light travels, as a turn (0 runs left to right)"
+      "label": "Phase",
+      "description": "Plasma base cycle position (0-1); every field rides a whole multiple of it"
     },
     "palette": {
       "kind": "palette",
       "value": "sampler2D",
       "label": "Palette",
-      "description": "The ramp the travelling bands read their colors from — four of them, each holding a while before fading into the next",
+      "description": "The ramp the plasma field reads its colors from",
       "gradient": {
-        "kind": "cycle",
-        "step_seconds": 12.0,
-        "fade_seconds": 1.0,
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
         "set": [
           {
             "space": "oklab",
             "method": "linear",
-            "stops": "(0.8149,-0.1768,0.0780) (0.8001,-0.1336,-0.0250) (0.6783,-0.0583,-0.1662) (0.5974,0.0616,-0.2217) (0.6710,0.2091,-0.1174) (0.6779,0.2050,0.0579) (0.7751,0.0782,0.1445) (0.8916,-0.0082,0.1567) (0.8149,-0.1768,0.0780)"
-          },
-          {
-            "space": "oklab",
-            "method": "linear",
-            "stops": "(0.8442,-0.1270,-0.0712) (0.6159,-0.0257,-0.2055) (0.5590,0.1208,-0.2494) (0.6265,0.2402,-0.1030) (0.6549,0.2363,0.0410) (0.7236,0.1228,0.1407) (0.8442,-0.1270,-0.0712)"
-          },
-          {
-            "space": "oklab",
-            "method": "linear",
-            "stops": "(0.8797,-0.0002,0.1554) (0.7818,0.0718,0.1472) (0.6831,0.1691,0.1226) (0.6072,0.2191,0.0461) (0.5292,0.1963,-0.0906) (0.6831,0.1691,0.1226) (0.8797,-0.0002,0.1554)"
-          },
-          {
-            "space": "oklab",
-            "method": "linear",
-            "stops": "(0.9307,-0.1192,0.1684) (0.8273,-0.1696,0.1175) (0.7877,-0.1530,0.0331) (0.7469,-0.0993,-0.0877) (0.6558,-0.0285,-0.1811) (0.7877,-0.1530,0.0331) (0.9307,-0.1192,0.1684)"
+            "stops": "(0.7636,0.1313,0.0501) (0.6905,0.225,-0.0628) (0.6383,0.2493,-0.1553) (0.6345,0.1689,-0.192) (0.6799,0.0349,-0.1699) (0.7497,-0.0739,-0.111) (0.8193,-0.1352,-0.0356) (0.8731,-0.1588,0.043) (0.9034,-0.1541,0.1144) (0.9065,-0.1243,0.1662) (0.882,-0.0664,0.1809) (0.8322,0.0225,0.1413) (0.7636,0.1313,0.0501)"
           }
         ]
       }

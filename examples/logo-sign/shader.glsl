@@ -1,28 +1,23 @@
 layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float phase;
-layout(binding = 2) uniform float bands;
-layout(binding = 3) uniform float tilt;
-layout(binding = 4) uniform sampler2D palette;
+layout(binding = 2) uniform float scale;
+layout(binding = 3) uniform sampler2D palette;
 
-// Light travelling across the sign, in three moves you can watch one at a
-// time: pick a direction, count how many color bands fit along it, then
-// slide them.
+// Classic plasma: three folded sine fields plus a radial term, read
+// through a palette.
 //
-// `tilt` is a turn, not degrees — 0 sends the light left to right, 0.25
-// sends it top to bottom, 1 is all the way back around. `bands` is how many
-// palette repeats fit across the sign. `phase` is a 0..1 phasor, so adding
-// it to the palette coordinate scrolls the whole ramp exactly once per
-// cycle; the strip samples wrap=repeat, so it never clamps.
+// Every field used to advance at its own multiple of 0.01 Hz, so one phasor
+// carries the whole animation: `phase` is the 0.01 Hz base cycle and each
+// field rides a whole-number multiple of it. Whole multiples are what keeps
+// the rewrite exact — the wrap they skip is a whole number of sine periods.
 vec4 render_2d(vec2 pos) {
     vec2 uv = pos / outputSize;
-    float angle = tilt * 6.2831853;
-    vec2 heading = vec2(cos(angle), sin(angle));
-    float travel = dot(uv - vec2(0.5, 0.5), heading);
-
-    // A shallow ripple across the travel direction, at a whole multiple of
-    // the base cycle, so the bands breathe instead of marching flat. Whole
-    // multiples are what keep the wrap seamless.
-    float ripple = 0.04 * sin((travel * 2.0 - phase * 3.0) * 6.2831853);
-
-    return vec4(texture(palette, vec2(travel * bands + phase + ripple, 0.0)).rgb, 1.0);
+    float v = sin((uv.x * scale + phase * 13.0) * 6.2831853)
+        + sin((uv.y * scale + phase * 9.0) * 6.2831853)
+        + sin(((uv.x + uv.y) * scale * 0.5 + phase * 11.0) * 6.2831853)
+        + sin((length(uv - vec2(0.5, 0.5)) * scale + phase * 15.0) * 6.2831853);
+    // `hue` runs well past [0,1) on purpose — the strip samples wrap=repeat,
+    // so the ramp scrolls instead of clamping.
+    float hue = v * 0.125 + phase * 5.0;
+    return vec4(texture(palette, vec2(hue, 0.0)).rgb, 1.0);
 }
