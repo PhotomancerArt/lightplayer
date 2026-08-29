@@ -19,21 +19,8 @@ use crate::app::home::package_card::home_action;
 use crate::base::{StudioIcon, StudioIconName};
 use crate::cloud::SharedOpenState;
 
-/// The landing's curated example row (examples vision D5): a handful of
-/// visually strong examples, hero excluded (`brand_hero.rs` already runs
-/// it). Cards link to their canonical `/p/<slug>` addresses and open the
-/// same stateless way an Explore card does; "Explore all →" IS the
-/// explore promotion (Q6 — no nav change). Default picks; the feel gate
-/// adjusts.
-const HOME_EXAMPLE_ROW: &[&str] = &[
-    "examples/fyeah-sign",
-    "examples/zook-dome",
-    "examples/peach-2d",
-    "examples/plasma-duo",
-];
-
-/// The landing stub: the brand, what this is, three ways in, and a
-/// curated example row.
+/// The landing stub: the brand, what this is, three ways in, and the
+/// example grid.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn HomePage(
@@ -53,17 +40,15 @@ pub fn HomePage(
         let state = state();
         state.line().map(|line| (line, state.is_refusal()))
     });
-    // Hover-to-play for the example row, page-scoped like Explore's: one
-    // signal names one hovered card, so the row holds at most one live
+    // Hover-to-play for the example grid, page-scoped like Explore's: one
+    // signal names one hovered card, so the grid holds at most one live
     // preview lease at a time.
     use_context_provider(|| HoveredCard(Signal::new(None)));
-    let curated: Vec<_> = {
-        let cards = embedded_example_cards();
-        HOME_EXAMPLE_ROW
-            .iter()
-            .filter_map(|id| cards.iter().find(|card| card.id == *id).cloned())
-            .collect()
-    };
+    // ALL the examples, right here (G1 ruling 2026-08-29: "scrolling is
+    // better than navigating" — curation and better organization are
+    // future work). Same cards as Explore, hero's example included (its
+    // card is the door to editing what the hero shows).
+    let examples = embedded_example_cards();
     let opening = home.as_ref().and_then(|home| home.opening.clone());
     let busy = opening.is_some();
     rsx! {
@@ -113,12 +98,13 @@ pub fn HomePage(
                     href: "/explore",
                 }
             }
-            // The curated example row (D5): real, running content one
-            // click deep — viewing is stateless (D2), and the card copy's
-            // "becomes yours on first save" is literally the model now.
-            // Rendered dispatcher-less too (stories, host mounts): the
-            // cards are compiled-in content and clicks just no-op there.
-            section { class: "tw:grid tw:w-[min(680px,100%)] tw:gap-3 tw:text-left",
+            // The example grid (D5, widened at G1 to ALL examples): real,
+            // running content one click deep — viewing is stateless (D2),
+            // and the card copy's "becomes yours on first save" is
+            // literally the model now. Rendered dispatcher-less too
+            // (stories, host mounts): the cards are compiled-in content
+            // and clicks just no-op there.
+            section { class: "tw:grid tw:w-[min(1080px,100%)] tw:gap-3 tw:text-left",
                 header { class: "tw:flex tw:items-baseline tw:justify-between",
                     h2 { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
                         "Examples"
@@ -129,8 +115,8 @@ pub fn HomePage(
                         "Explore all →"
                     }
                 }
-                div { class: "tw:grid tw:grid-cols-4 tw:gap-3 tw:max-[640px]:grid-cols-2",
-                    for card in curated {
+                div { class: crate::app::home::card_grid_class(),
+                    for card in examples {
                         ExampleCard {
                             key: "{card.id}",
                             opening: opening.as_deref() == Some(card.id.as_str()),

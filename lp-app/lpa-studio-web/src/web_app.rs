@@ -227,7 +227,8 @@ pub fn App() -> Element {
     // toast (D7) fires on the transient→owned transition: same uid, marker
     // gone. Navigating away clears the open uid too, so a torn-down
     // session never toasts.
-    let loop_last_transient = use_hook(|| Rc::new(RefCell::new(None::<String>)));
+    let last_transient = use_hook(|| Rc::new(RefCell::new(None::<String>)));
+    let loop_last_transient = Rc::clone(&last_transient);
     let mut loop_toasts = toasts;
     let bridge = use_hook(move || {
         install_log_sink();
@@ -330,7 +331,7 @@ pub fn App() -> Element {
                         && next.open_project_transient.is_none()
                         && next.open_project_uid.as_deref() == Some(uid.as_str())
                     {
-                        loop_toasts.say(crate::app::share::visitor_session::SAVED_YOURS_LINE);
+                        loop_toasts.say(crate::app::share::visitor_session::FORKED_COPY_LINE);
                     }
                     *loop_last_transient.borrow_mut() = next
                         .open_project_transient
@@ -568,6 +569,13 @@ pub fn App() -> Element {
     // the move instead.
     let nav_bridge = bridge.clone();
     let nav_open_ids = Rc::clone(&open_ids_now);
+    // Transient-session guard (G1 bug ruling, 2026-08-29): the teardown
+    // path's "the draft is durable" premise is FALSE for a transient view
+    // session — its stores are memory, so leaving really does discard
+    // unsaved work. The latch is the view loop's transient uid; the
+    // confirmed flag stops the click-then-moved double prompt.
+    let nav_transient = Rc::clone(&last_transient);
+    let nav_leave_confirmed = use_hook(|| Rc::new(Cell::new(false)));
     let nav_session = Rc::clone(&session_now);
     let nav_leaving = Rc::clone(&leaving_session);
     let nav_unsaved = Rc::clone(&unsaved);
@@ -587,11 +595,25 @@ pub fn App() -> Element {
                 router::NavEvent::Moved => router::current_route(),
             };
             let plan = nav_session_plan(nav_session.borrow().as_ref(), &target, nav_unsaved.get());
+            // Leaving a TRANSIENT session with unsaved work discards it for
+            // real (memory stores — no durable draft), so this one teardown
+            // asks first. Ordinary sessions keep R8-4's no-prompt rule.
+            let leave_discards_transient = matches!(plan, NavSessionPlan::Leave { .. })
+                && nav_unsaved.get()
+                && nav_transient.borrow().is_some();
             if let router::NavEvent::ClickIntent(_) = event {
                 return match plan {
                     NavSessionPlan::Refuse(line) => {
                         nav_toasts.warn(line);
                         false
+                    }
+                    NavSessionPlan::Leave { .. } if leave_discards_transient => {
+                        let proceed = unsaved_gate::confirm_discarding_unsaved(
+                            TRANSIENT_LEAVE_PROMPT,
+                        );
+                        // remembered so the arrival below doesn't re-ask
+                        nav_leave_confirmed.set(proceed);
+                        proceed
                     }
                     // Everything else is settled on arrival, below: the
                     // click's own history write happens between the two
@@ -603,6 +625,16 @@ pub fn App() -> Element {
             let old = route.peek().clone();
             if new_route == old {
                 return true;
+            }
+            if leave_discards_transient && !nav_leave_confirmed.take() {
+                // Back/forward or a manual URL edit already spent the
+                // history entry; ask now, and put the URL back on decline
+                // (a push, like the Refuse path — restoring what the back
+                // consumed leaves history as it was).
+                if !unsaved_gate::confirm_discarding_unsaved(TRANSIENT_LEAVE_PROMPT) {
+                    router::navigate(&old);
+                    return true;
+                }
             }
             match plan {
                 NavSessionPlan::Refuse(line) => {
@@ -651,6 +683,13 @@ pub fn App() -> Element {
                         .as_ref()
                         .is_some_and(|(open, _)| *open == uid_string);
                     if !already_bound
+                        && nav_unsaved.get()
+                        && !unsaved_gate::confirm_discarding_unsaved(OPEN_DISCARDS_PROMPT)
+                    {
+                        router::navigate(&old);
+                        return true;
+                    }
+                    if !already_bound
                         && !resolve_project_route(
                             *uid,
                             &nav_library_uids,
@@ -669,11 +708,20 @@ pub fn App() -> Element {
                     // An example's bare address resolves client-side (the
                     // parser only produces slugs the embedded table has) —
                     // no roster needed, so it dispatches straight into the
-                    // same stateless open an Explore card uses (D2).
+                    // same stateless open an Explore card uses (D2). This
+                    // dispatch bypasses `on_action`'s unsaved gate, so it
+                    // carries its own (same message, same predicate).
                     let already_bound = matches!(
                         &*nav_bound_route.borrow(),
                         Some(StudioRoute::Example { slug: bound, .. }) if bound == slug
                     );
+                    if !already_bound
+                        && nav_unsaved.get()
+                        && !unsaved_gate::confirm_discarding_unsaved(OPEN_DISCARDS_PROMPT)
+                    {
+                        router::navigate(&old);
+                        return true;
+                    }
                     if !already_bound
                         && let Some(example) =
                             lpa_studio_core::app::home::embedded_example_by_slug(slug)
@@ -996,6 +1044,7 @@ pub fn App() -> Element {
         .then(|| current_view.session.clone())
         .flatten()
         .map(|session| ChromeSessionControl {
+            example: current_view.open_project_transient.is_some(),
             session,
             project: current_view.panes.iter().find_map(|pane| match &pane.body {
                 lpa_studio_core::UiViewContent::ProjectEditor(editor) => {
@@ -1160,6 +1209,15 @@ pub fn App() -> Element {
         }
     }
 }
+
+/// The transient-session leave prompt (G1 bug ruling, 2026-08-29): a
+/// transient view session's stores are memory — leaving really discards.
+const TRANSIENT_LEAVE_PROMPT: &str = "You're viewing an example — unsaved changes here are discarded when you leave.\n\nLeave anyway?";
+
+/// The route-dispatched open's unsaved gate — the same message
+/// `on_action`'s gate uses, for the opens the route listener dispatches
+/// directly (typed URLs, back/forward into another project).
+const OPEN_DISCARDS_PROMPT: &str = "This project has unsaved changes. Opening another project will discard them.\n\nOpen anyway?";
 
 /// What a navigation does to the tab's ONE runtime session.
 ///

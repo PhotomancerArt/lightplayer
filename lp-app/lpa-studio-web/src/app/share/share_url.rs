@@ -53,6 +53,37 @@ impl ShareUrl {
     }
 }
 
+/// A project's canonical absolute link from loose parts — the card and
+/// detail surfaces carry the uid as a string and only know a name/slug.
+/// The uid is the load-bearing half; the slug is cosmetic and the address
+/// bar heals it on open, so a dated library slug here is fine.
+pub fn project_link_absolute(name: &str, uid: &str) -> String {
+    let slug = share_link::slugify(name);
+    match uid.parse::<PrefixedUid>() {
+        Ok(uid) => ShareUrl {
+            origin: current_origin(),
+            slug,
+            uid,
+        }
+        .absolute(),
+        // A malformed uid never happens in practice (these come off view
+        // models), but a lenient fallback beats a panic in a click handler.
+        Err(_) => {
+            let path = if slug.is_empty() {
+                format!("/p/{uid}")
+            } else {
+                format!("/p/{slug}-{uid}")
+            };
+            let origin = current_origin();
+            if origin.is_empty() {
+                path
+            } else {
+                format!("https://{origin}{path}")
+            }
+        }
+    }
+}
+
 /// This page's origin, scheme stripped, for the hero's dim prefix.
 ///
 /// Empty when there is no window (host builds, the story book's own

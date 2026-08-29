@@ -62,7 +62,8 @@ pub const FORKED_LINE: &str = "Forked — this one's yours.";
 /// The fork-at-explicit-save confirmation (examples vision D7): the first
 /// save of a transient view session installed it into the library. Raised
 /// by the web shell's view loop on the transient→owned transition.
-pub const SAVED_YOURS_LINE: &str = "Saved — this project is now yours.";
+/// Copy ruled at G1 (2026-08-29): name the mechanism, not the feeling.
+pub const FORKED_COPY_LINE: &str = "Forked — now editing your copy.";
 /// The discard confirmation.
 pub const DISCARDED_LINE: &str = "Changes discarded — you're back on the shared version.";
 
