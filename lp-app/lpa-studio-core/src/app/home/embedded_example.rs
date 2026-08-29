@@ -1,15 +1,17 @@
-//! The compiled-in example packages (offline/first-run fallback).
+//! The compiled-in example packages: the offline/dev content source for
+//! the canonical example identities.
 //!
-//! Until the examples place lands (M6, D17), the gallery's *Examples*
-//! section lists these. The id doubles as the seed-once provenance source
-//! (`SeededFrom { source }`), so a package seeded by the pre-M4 demo flow
-//! and one opened from the gallery are the same package.
+//! Examples are first-party published projects (examples vision D1) with
+//! bare-slug addresses (`/p/<slug>`, the id tail). Opening one is
+//! STATELESS (D2): a transient memory-backed session, nothing installed —
+//! an explicit save forks a copy with `SeededFrom { source: id }`
+//! provenance (the "Remixed from" line). The home landing and Explore
+//! both list this table.
 //!
 //! Each package's files are `include_bytes!`d from `examples/<name>/`, so
 //! the wasm bundle carries them and the checked-in example IS what the
-//! gallery opens. Adding an example means adding its file table here —
-//! and remembering that an existing library store keeps the package it
-//! already seeded (delete the gallery package to re-seed).
+//! gallery opens. Adding an example means adding its file table here
+//! (slug uniqueness is test-pinned — the id tail is the URL).
 
 /// One file in an embedded package: its package-relative path and bytes.
 pub type ExampleFile = (&'static str, &'static [u8]);
@@ -35,6 +37,15 @@ impl EmbeddedExample {
             .iter()
             .map(|(path, bytes)| ((*path).to_string(), bytes.to_vec()))
             .collect()
+    }
+
+    /// The example's canonical bare slug — the id tail
+    /// (`examples/fyeah-sign` → `fyeah-sign`). This is the `/p/<slug>`
+    /// address (PD3): example directories are `[a-z0-9-]` names, so the
+    /// tail is URL-ready as-is. Uniqueness across the table is pinned by
+    /// a test below.
+    pub fn slug(&self) -> &'static str {
+        self.id.rsplit('/').next().unwrap_or(self.id)
     }
 }
 
@@ -718,6 +729,15 @@ pub fn embedded_example(id: &str) -> Option<EmbeddedExample> {
         .find(|example| example.id == id)
 }
 
+/// Look up an embedded example by its bare slug (the id tail) — the
+/// `/p/<slug>` resolution leg. An unknown slug is `None`, never a guess.
+pub fn embedded_example_by_slug(slug: &str) -> Option<EmbeddedExample> {
+    embedded_examples()
+        .iter()
+        .copied()
+        .find(|example| example.slug() == slug)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -739,6 +759,26 @@ mod tests {
     #[test]
     fn unknown_example_is_none() {
         assert!(embedded_example("examples/unknown").is_none());
+    }
+
+    /// Bare slugs are the `/p/<slug>` grammar (PD3): every id tail must be
+    /// unique or two examples would share an address.
+    #[test]
+    fn example_slugs_are_unique_id_tails() {
+        let mut seen = std::collections::BTreeSet::new();
+        for example in embedded_examples() {
+            assert_eq!(example.id, format!("examples/{}", example.slug()));
+            assert!(
+                seen.insert(example.slug()),
+                "duplicate example slug: {}",
+                example.slug()
+            );
+        }
+        assert_eq!(
+            embedded_example_by_slug("fyeah-sign").map(|e| e.id),
+            Some("examples/fyeah-sign")
+        );
+        assert!(embedded_example_by_slug("unknown").is_none());
     }
 
     /// The docs-example contract: plasma-duo drives the SAME shader (and

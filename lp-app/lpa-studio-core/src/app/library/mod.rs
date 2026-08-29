@@ -21,6 +21,7 @@ pub mod package_meta;
 pub mod package_slug;
 pub mod package_upgrade;
 pub mod package_zip;
+pub mod transient;
 
 pub use library_host::{
     CatalogOp, CatalogOutcome, LibraryHost, LibraryHostError, LocalBoxFuture, MemoryLibraryHost,

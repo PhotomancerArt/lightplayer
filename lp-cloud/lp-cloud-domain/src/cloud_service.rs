@@ -197,6 +197,7 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
                     picture_url: picture_url.map(ToString::to_string),
                     provider: provider.into(),
                     created_at: self.clock.now(),
+                    anonymous: false,
                 };
                 user.recompute_display_name();
                 user
@@ -204,6 +205,36 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
         };
         self.store.put_user(user.clone());
         self.store.resolve_pending_members(&email, user.uid);
+        user
+    }
+
+    /// Mint a GUEST account (examples vision D3/D8): a real [`CloudUser`]
+    /// whose whole publish pipeline works — `require_user`, publish,
+    /// content PUTs — owned by whoever holds the session cookie the edge
+    /// mints next.
+    ///
+    /// Deliberately NOT [`Self::upsert_user`]: a guest has no email, so
+    /// nothing here may touch `resolve_pending_members` (a guest must
+    /// never match a pending member invite), and the synthetic
+    /// `google_sub` (`"anon:<usr-uid>"`) can never collide with a
+    /// provider subject. The account is marked twice — `anonymous: true`
+    /// (the D8 pruning lever) and `provider = "anonymous"` — so the
+    /// prunable set is one obvious query.
+    pub fn begin_guest_user(&mut self) -> CloudUser {
+        let uid = PrefixedUid::mint(UidPrefix::User, &self.mint.uid_bytes());
+        let user = CloudUser {
+            uid,
+            google_sub: alloc::format!("anon:{uid}"),
+            email: String::new(),
+            display_name: "Guest".to_string(),
+            given_name: None,
+            family_name: None,
+            picture_url: None,
+            provider: "anonymous".to_string(),
+            created_at: self.clock.now(),
+            anonymous: true,
+        };
+        self.store.put_user(user.clone());
         user
     }
 
@@ -665,6 +696,7 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
             picture_url: user.picture_url,
             provider_label: provider_label(&user.provider),
             created_at: user.created_at,
+            anonymous: user.anonymous,
         }
     }
 
@@ -919,6 +951,7 @@ fn provider_label(provider: &str) -> String {
     match provider {
         "google" => "Google".to_string(),
         "dev" => "Dev".to_string(),
+        "anonymous" => "Guest".to_string(),
         other => capitalize(other),
     }
 }

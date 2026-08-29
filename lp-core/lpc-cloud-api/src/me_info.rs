@@ -26,9 +26,15 @@ pub struct MeInfo {
     /// Profile photo, hotlinked to the provider — never stored as bytes.
     pub picture_url: Option<String>,
     /// Human label of the connection this account signs in through
-    /// ("Google", "Dev"). A label, not an enum: providers are config, not
-    /// vocabulary (spike §4 ruling).
+    /// ("Google", "Dev", "Guest"). A label, not an enum: providers are
+    /// config, not vocabulary (spike §4 ruling).
     pub provider_label: String,
+    /// A guest account (examples vision D8): browser-held ownership — the
+    /// session cookie IS the identity, there is no login to come back
+    /// through. Clients must not render it as a signed-in account.
+    /// `#[serde(default)]` keeps the field additive on the wire.
+    #[serde(default)]
+    pub anonymous: bool,
     /// When the account was created.
     pub created_at: f64,
 }
@@ -49,6 +55,7 @@ mod tests {
             picture_url: Some("https://example.com/photo.jpg".to_string()),
             provider_label: "Google".to_string(),
             created_at: 42.0,
+            anonymous: false,
         }
     }
 
@@ -85,10 +92,11 @@ mod tests {
             picture_url: None,
             provider_label: "Google".to_string(),
             created_at: 0.0,
+            anonymous: false,
         };
         assert_eq!(
             serde_json::to_string(&info).unwrap(),
-            r#"{"uid":"usr0000000000000000","email":"yona@example.com","displayName":"Yona","givenName":null,"familyName":null,"pictureUrl":null,"providerLabel":"Google","createdAt":0.0}"#
+            r#"{"uid":"usr0000000000000000","email":"yona@example.com","displayName":"Yona","givenName":null,"familyName":null,"pictureUrl":null,"providerLabel":"Google","anonymous":false,"createdAt":0.0}"#
         );
     }
 }
