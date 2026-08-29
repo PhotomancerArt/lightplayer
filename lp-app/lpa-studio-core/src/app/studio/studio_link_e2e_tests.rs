@@ -4859,6 +4859,93 @@ fn the_play_tab_feeds_the_card_frames_the_device_published() {
     );
 }
 
+/// The small-dome regression (2026-08-29), END TO END: one fixture patched
+/// across TWO outputs — a real engine cuts the wire by port counts, answers
+/// one frame entry per output, and the card composes BOTH into one picture.
+/// The feed used to latch whichever output published first, and the second
+/// wire's lamps never appeared anywhere.
+#[test]
+fn a_two_output_project_feeds_the_card_both_wires_composed() {
+    let (store, host) = library();
+    let files: Vec<(String, Vec<u8>)> = crate::app::project::demo_project::demo_project_files()
+        .iter()
+        .map(|(path, bytes)| {
+            // Cap the first output at 100 of the sign's 231 lamps; the rest
+            // flow onto a second output — the small dome's two-box shape.
+            if *path == "output.json" {
+                (
+                    (*path).to_string(),
+                    br#"{
+                        "kind": "Output",
+                        "ports": {"0": {"endpoint": "ws281x:local:D10", "count": 100}},
+                        "bindings": {"input": {"source": "bus:control.out"}}
+                    }"#
+                    .to_vec(),
+                )
+            } else if *path == "module.json" {
+                let module = String::from_utf8(bytes.to_vec()).expect("module.json is utf8");
+                assert!(
+                    module.contains(r#""output": {"#),
+                    "the demo module's output node anchor moved; update this splice"
+                );
+                (
+                    (*path).to_string(),
+                    module
+                        .replace(
+                            r#""output": {"#,
+                            r#""output_b": { "ref": "./output_b.json" }, "output": {"#,
+                        )
+                        .into_bytes(),
+                )
+            } else {
+                ((*path).to_string(), bytes.to_vec())
+            }
+        })
+        .chain(std::iter::once((
+            "output_b.json".to_string(),
+            br#"{
+                "kind": "Output",
+                "ports": {"0": {"endpoint": "ws281x:local:D11", "count": 131}},
+                "bindings": {"input": {"source": "bus:control.out"}}
+            }"#
+            .to_vec(),
+        )))
+        .collect();
+    let (mut studio, card_key, _device) = {
+        let clock = Rc::new(std::cell::Cell::new(1.0));
+        let (mut studio, card_key, device) = studio_with_device_files_at(&store, host, clock, files);
+        select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Play);
+        (studio, card_key, device)
+    };
+
+    run_card_feeds(&mut studio);
+
+    let card = device_card(&studio, &card_key);
+    let frame = card.frame_preview.as_ref().expect("a composed frame");
+    assert_eq!(
+        frame.bytes.len(),
+        231 * 3 * 2,
+        "both wires' samples ride the one buffer (231 RGB lamps as u16)"
+    );
+    let geometry = frame
+        .display_layout
+        .as_ref()
+        .expect("both wires' geometry fits the budget");
+    let lpc_model::ControlDisplayLayout::Layout2d(layout) = geometry.as_ref();
+    assert_eq!(
+        layout.lamps.len(),
+        231,
+        "every lamp of the fixture draws — the second wire's included"
+    );
+    assert!(
+        layout
+            .lamps
+            .iter()
+            .any(|lamp| lamp.sample_start >= 100 * 3),
+        "the second output's lamps read THEIR stretch of the composed buffer"
+    );
+}
+
 /// P3's default rule, end to end: a connected board running a project opens
 /// its card on ▶ with NO tab selection anywhere — and because the tab and
 /// the feed's gate are the same answer (`effective_card_tab`), the feed is
@@ -5105,6 +5192,15 @@ fn studio_with_loaded_device_at(
         .iter()
         .map(|(path, bytes)| ((*path).to_string(), bytes.to_vec()))
         .collect();
+    studio_with_device_files_at(store, host, clock, files)
+}
+
+fn studio_with_device_files_at(
+    store: &LibraryStore,
+    host: Rc<MemoryLibraryHost>,
+    clock: Rc<std::cell::Cell<f64>>,
+    files: Vec<(String, Vec<u8>)>,
+) -> (StudioController, String, FakeEsp32Device) {
     let summary = store
         .install_package("Sign", &files, PackageProvenance::Created, 1.0)
         .expect("the demo project installs");
