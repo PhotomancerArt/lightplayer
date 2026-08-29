@@ -1,6 +1,16 @@
-//! THE patch panel (pass 2, P4) — the Patching view's bottom region:
-//! OBJECT section over OUTPUT section, one selection, the counterpart
-//! following.
+//! THE patch panel (pass 2, P4) — the Patching view's control room, and its
+//! center's BOTTOM region at every width: OBJECT section over OUTPUT section,
+//! one selection, the counterpart following.
+//!
+//! Round 2 moved it into the view's Props dock to stop a panel-height change
+//! from reflowing the canvas; the G1 gate sent it back down here, because
+//! patching and matching belong in one view and the Outputs dock is a working
+//! surface rather than a slot this readout can borrow. The churn defect is
+//! fixed IN PLACE instead: the panel's height is FIXED per breakpoint
+//! ([`PANEL_HEIGHT`]) rather than content-driven, so no selection change can
+//! move the canvas edge above it. Content that outgrows the box scrolls
+//! inside it; content that under-fills it leaves dead space, which is the
+//! accepted cost of a constant canvas box.
 //!
 //! Design record: `spikes/patching-controls/index.html` §1 (states
 //! `#armed` / `#paired` / `#derived` / `#objfirst`). The panel derives
@@ -15,8 +25,15 @@
 //! light language answering to the same authority.
 //!
 //! The section WITHOUT a counterpart shows the invitation: the assign arm
-//! (`a`) plus an inline picker that direct-assigns (pickers write — the
-//! ratified mobile path). Everything else in the panel is either a
+//! (`a`), plus — on the OBJECT side — an inline picker that direct-assigns
+//! (pickers write — the ratified mobile path). The WIRE side has no list of
+//! its own (round 2, P3): the ports live in the Outputs panel, which is a
+//! strict superset of any list this panel could draw (occupancy bars, free
+//! runs as click targets landing at the exact clicked lamp, the counterpart
+//! glow), so the invitation OPENS that panel instead — floating over this
+//! panel above the fold, full-screen below it. It is a mount of an existing
+//! surface, not a new write path: completion still happens inside the Outputs
+//! panel's own `on_port_click`. Everything else in the panel is either a
 //! selection nudge or one of the existing verbs; the panel never opens a
 //! second write path.
 //!
@@ -53,8 +70,8 @@ use crate::app::node::lamp_view::{
 };
 use crate::app::patch::lamp_strip::{LampStrip, StripPresentation};
 use crate::app::patch::verb_ui::{
-    dispatch_assign, dispatch_verb, free_runs, instance_target, next_free_segment, port_next_free,
-    resize_segment, segment_at_free_run, selection_stride, shift_segment, target_is_unmapped,
+    dispatch_assign, dispatch_verb, instance_target, next_free_segment, resize_segment,
+    selection_stride, shift_segment, target_is_unmapped,
 };
 use crate::base::option_cards::{OptionCard, OptionCards};
 use crate::base::{StudioIcon, StudioIconName};
@@ -101,16 +118,36 @@ pub(crate) fn surface_is_live(surface: &UiPatchSurface) -> bool {
         .any(|output| output_frame(surface, output.node).is_some())
 }
 
-/// Is the viewport at the mobile fold (the workbench's ≤820px breakpoint)?
-/// Runtime-checked at gesture time; host test builds never fire gestures.
+/// The workbench's mobile fold, as a number — the same breakpoint the
+/// `tw:max-[820px]:*` utilities name; change one and you change both.
+const MOBILE_FOLD_PX: f64 = 820.0;
+
+/// Is the viewport at the mobile fold, RIGHT NOW? A one-shot read, for
+/// gesture time ("the ports are in a summoned panel on this phone"); host
+/// test builds have no window and answer `false`.
 fn at_mobile_fold() -> bool {
     web_sys::window()
         .and_then(|window| window.inner_width().ok())
         .and_then(|width| width.as_f64())
-        .is_some_and(|width| width <= 820.0)
+        .is_some_and(|width| width <= MOBILE_FOLD_PX)
 }
+
 const SECTION: &str = "tw:grid tw:content-start tw:gap-1.5 tw:border-l-2 tw:border-l-transparent tw:px-2.5 tw:py-2 tw:max-[820px]:px-2 tw:max-[820px]:py-1.5";
 const SECTION_PRIMARY: &str = "tw:grid tw:content-start tw:gap-1.5 tw:border-l-2 tw:border-l-selection-border tw:bg-selection-bg tw:px-2.5 tw:py-2 tw:max-[820px]:px-2 tw:max-[820px]:py-1.5";
+
+/// Which section styling a pane wears — the selection's own side gets the
+/// blue edge.
+fn section_class(primary: bool) -> &'static str {
+    if primary { SECTION_PRIMARY } else { SECTION }
+}
+
+/// A transport row's group separator: a small gap between verb groups on a
+/// row as wide as the center.
+fn group_break() -> Element {
+    rsx! {
+        span { class: "tw:w-2" }
+    }
+}
 const PROMPT: &str = "tw:flex tw:flex-wrap tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:px-2.5 tw:py-1.5 tw:text-[11.5px] tw:text-subtle-foreground";
 const STRIP: &str =
     "tw:relative tw:h-5 tw:overflow-hidden tw:rounded tw:bg-track tw:max-[820px]:h-4";
@@ -837,78 +874,6 @@ pub(crate) fn unmapped_objects(surface: &UiPatchSurface) -> Vec<(UiPatchTarget, 
     rows
 }
 
-/// Every port on the surface as picker rows — the output side's inline
-/// picker. Value keys are `node:port`, parsed back by [`parse_port_key`].
-pub(crate) fn port_options(surface: &UiPatchSurface) -> Vec<(String, String)> {
-    surface
-        .outputs
-        .iter()
-        .flat_map(|output| {
-            output.bay.ports.iter().map(move |port| {
-                let pin = if port.pin_label.is_empty() {
-                    format!("port {}", port.key)
-                } else {
-                    format!("{} · port {}", port.pin_label, port.key)
-                };
-                // Occupancy IN the option (round 3, #6): a destination you
-                // cannot judge is not a choice.
-                (
-                    format!("{}:{}", output.node.0, port.key),
-                    format!(
-                        "{} · {pin} · {}",
-                        output.display_name(),
-                        port_occupancy(port)
-                    ),
-                )
-            })
-        })
-        .collect()
-}
-
-/// One terse occupancy phrase: where the free space is, or that none is.
-fn port_occupancy(port: &lpa_studio_core::UiPatchPort) -> String {
-    let used: u32 = port.cells.iter().map(|cell| cell.lamps).sum();
-    let free = port.lamps.saturating_sub(used);
-    if free == 0 {
-        "full".to_string()
-    } else if let Some((start, _)) = free_runs(port).into_iter().next() {
-        format!("{free} free @ {}", start + 1)
-    } else {
-        format!("{free} free")
-    }
-}
-
-/// The same choices as [`port_options`], as EXPLAINING CARDS (round 3, #6):
-/// title = the port, blurb = its occupancy, so picking a destination is an
-/// informed act rather than a name lottery.
-pub(crate) fn port_cards(surface: &UiPatchSurface) -> Vec<OptionCard> {
-    surface
-        .outputs
-        .iter()
-        .flat_map(|output| {
-            output.bay.ports.iter().map(move |port| {
-                let pin = if port.pin_label.is_empty() {
-                    format!("port {}", port.key)
-                } else {
-                    port.pin_label.clone()
-                };
-                OptionCard {
-                    id: format!("{}:{}", output.node.0, port.key),
-                    icon: StudioIconName::Usb,
-                    title: format!("{} · {pin}", output.display_name()),
-                    blurb: port_occupancy(port),
-                }
-            })
-        })
-        .collect()
-}
-
-/// `node:port` back into its parts.
-pub(crate) fn parse_port_key(value: &str) -> Option<(NodeId, u32)> {
-    let (node, port) = value.split_once(':')?;
-    Some((NodeId::new(node.parse().ok()?), port.parse().ok()?))
-}
-
 fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
     on_action.call(UiAction::from_op(
         lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
@@ -918,22 +883,76 @@ fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
     ));
 }
 
-/// THE patch panel: the Patching center's bottom region (D8 — always
-/// present, empty states included).
+/// The keys row, as data: the grammar the panel PRINTS under itself (it
+/// replaced the help overlay, so it is readable without arming anything). One
+/// wrapping row at the panel's width, in the order a walk-up user meets them.
+const KEYS: &[(&str, &str)] = &[
+    ("a", "assign"),
+    ("m", "next free"),
+    ("[ ]", "shift"),
+    ("- =", "narrow / widen"),
+    ("r", "flip"),
+    ("; '", "rotate"),
+    ("s", "swap"),
+    ("⌘Z", "undo"),
+    ("esc", "disarm, then deselect"),
+];
+
+/// The panel's FIXED box (G1 round 2's ruling). Tall enough for the paired
+/// pose — the tallest everyday state — without a scrollbar at desktop width,
+/// and a little shorter below the fold where the sections are tighter and the
+/// canvas has less room to spare. The `max-h` only ever bites on a SHORT
+/// window, where 45% of the center is less than the fixed height; that is a
+/// per-viewport number, not a per-selection one, so it cannot churn either.
+///
+/// The whole point is content-independence: the canvas edge above must not
+/// move when the selection changes, which is exactly what the old
+/// `max-h-[45%]`-over-content box did every time a pose grew a row.
+const PANEL_HEIGHT: &str = "tw:h-[300px] tw:max-h-[45%] tw:max-[820px]:h-[260px]";
+
+/// THE patch panel (D8 — always present, empty states included): the Patching
+/// center's bottom region, at every width.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PatchPanel(
     surface: UiPatchSurface,
     selection: lpa_studio_core::UiSelection,
-    /// The frame's armed verb, read in the center and passed down so the
+    /// The frame's armed verb, read at the mount site and passed down so the
     /// panel stays plain data (and stories can pose an armed state).
     #[props(default)]
     armed: Option<ArmedVerb>,
+    /// The frame's output-picker popover is open (round 2, P3), read at the
+    /// mount site like `armed` so the panel stays plain data. Above the fold
+    /// only: below it the pick surface is the full-screen summon instead, so
+    /// nothing ever sets this there.
+    #[props(default)]
+    picker_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    let ui = use_hook(try_consume_context::<PatchingUi>);
+    // The popover follows the SHARED pick-dismissal rule (P3): a selection
+    // move or a patch write closes it, exactly as it dismisses the mobile
+    // summon overlay. One mechanism, two sizes — so the two pick surfaces
+    // cannot drift apart about when a pick is over. Hook order: this runs
+    // BEFORE the multi-selection early return below, unconditionally, so
+    // narrowing in and out of a multi selection cannot reorder hooks.
+    crate::app::editor_shell::patching::use_dismiss_on_patch_pick(
+        selection.clone(),
+        Some(&surface),
+        move || {
+            if let Some(ui) = ui {
+                let mut open = ui.picker_open;
+                if *open.peek() {
+                    open.set(false);
+                }
+            }
+        },
+    );
     // A MULTI selection is counts, not a subject (unified-selection P2):
     // the verbs and the arm are single-subject by ruling, so the panel
     // states the set and invites narrowing — no transport, not armable.
+    // The box keeps the same FIXED height as every other pose: a canvas
+    // edge that jumped on shift-click would be the churn defect back.
     if selection.len() > 1 {
         let count = selection.len();
         let word = match selection.primary() {
@@ -941,13 +960,17 @@ pub fn PatchPanel(
             _ => "objects",
         };
         return rsx! {
-            div { class: "tw:flex tw:max-h-[45%] tw:flex-none tw:flex-col tw:overflow-y-auto tw:border-t tw:border-border-subtle tw:bg-card-subtle",
+            div { class: "tw:flex {PANEL_HEIGHT} tw:flex-none tw:flex-col tw:overflow-y-auto tw:border-t tw:border-border-subtle tw:bg-card-subtle",
                 div { class: "tw:flex-none tw:px-2.5 tw:py-2 tw:text-[11.5px] tw:text-muted-foreground",
                     "{count} {word} selected — their mapped lamps breathe on the wire. Select one to patch it."
                 }
             }
         };
     }
+    // The Outputs panel in the picker popover takes the selection SET (it
+    // is the same component the dock mounts); everything panel-local below
+    // narrows to the single subject.
+    let selection_set = selection.clone();
     let selection = selection.single().cloned();
     let object = object_view(&surface, selection.as_ref());
     let card = fixture_card(&surface, selection.as_ref());
@@ -961,11 +984,16 @@ pub fn PatchPanel(
     let attention_object = live && armed_assign && primary == Some(PanelSide::Output);
     let attention_output = live && armed_assign && primary == Some(PanelSide::Object);
     rsx! {
-        // Capped and self-scrolling: the panel is the center's bottom
-        // region, and it must never squeeze the canvas above it to nothing
-        // (the canvas re-fits on every resize — starving it would churn the
-        // fit reconciliation the story capture gates on).
-        div { class: "tw:flex tw:max-h-[45%] tw:flex-none tw:flex-col tw:overflow-y-auto tw:border-t tw:border-border-subtle tw:bg-card-subtle",
+        // The center's bottom region, at a FIXED height so the canvas above
+        // keeps the same box whatever the selection says (the canvas re-fits
+        // on every resize — a moving edge churned the fit reconciliation the
+        // story capture gates on). `relative` is the popover's anchor: the
+        // picker card lays itself out over this panel rather than in a
+        // floating layer, which keeps its position stable while the Outputs
+        // panel inside it re-renders on frame traffic. Note the panel itself
+        // does NOT scroll — its BODY does, below — so the card is free to
+        // rise over the canvas instead of being clipped into a 300px box.
+        div { class: "tw:relative tw:flex {PANEL_HEIGHT} tw:flex-none tw:flex-col tw:border-t tw:border-border-subtle tw:bg-card-subtle",
             // The armed state, absorbing P3's standalone banner: the panel
             // is where the walk-up user is looking, so the arm names itself
             // here (and the invitation buttons below echo it).
@@ -974,68 +1002,143 @@ pub fn PatchPanel(
                     "{verb.banner()}"
                 }
             }
-            ObjectPane {
-                surface: surface.clone(),
-                selection: selection.clone(),
-                object,
-                card,
-                armed: armed.clone(),
-                primary: primary == Some(PanelSide::Object),
-                attention: attention_object,
-                animate: live,
-                on_action,
+            // The two sections scroll INSIDE the fixed box: a pose taller
+            // than the panel (the scarf's flow selector, say) reaches its own
+            // scrollbar rather than pushing the canvas edge up.
+            div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:flex-col tw:overflow-y-auto",
+                ObjectPane {
+                    surface: surface.clone(),
+                    selection: selection.clone(),
+                    object,
+                    card,
+                    armed: armed.clone(),
+                    primary: primary == Some(PanelSide::Object),
+                    attention: attention_object,
+                    animate: live,
+                    on_action,
+                }
+                OutputPane {
+                    surface: surface.clone(),
+                    selection: selection.clone(),
+                    output,
+                    armed,
+                    primary: primary == Some(PanelSide::Output),
+                    attention: attention_output,
+                    animate: live,
+                    on_action,
+                }
             }
-            OutputPane {
-                surface: surface.clone(),
-                selection: selection.clone(),
-                output,
-                armed,
-                primary: primary == Some(PanelSide::Output),
-                attention: attention_output,
-                animate: live,
-                on_action,
-            }
-            // The keys row REPLACES the help overlay: one line, always
-            // visible, in the panel the gesture happens in.
+            // The keys row REPLACES the help overlay: always visible, in the
+            // panel the gesture happens in — so it is pinned under the
+            // scrolling body rather than scrolling away with it.
             div { class: "tw:flex tw:flex-none tw:flex-wrap tw:gap-x-3.5 tw:gap-y-0.5 tw:border-t tw:border-border-subtle tw:bg-card-muted tw:px-2.5 tw:py-1 tw:font-mono tw:text-[10px] tw:text-dim-foreground",
-                span {
-                    span { class: "{KBD}", "a" }
-                    " assign"
+                for (key , label) in KEYS.iter().copied() {
+                    span { key: "{key}",
+                        span { class: "{KBD}", "{key}" }
+                        " {label}"
+                    }
                 }
-                span {
-                    span { class: "{KBD}", "m" }
-                    " next free"
+            }
+            // THE OUTPUT PICKER (round 2, P3): the one-off port pick happens
+            // in the REAL Outputs panel — same component, same `patch_verbs`
+            // grammar, the same occupancy bars and free runs as click targets
+            // — floated over this panel instead of re-listed as flat text in
+            // it. It is a MOUNT, never a second write path: completion still
+            // happens inside the Outputs panel's own `on_port_click` (the
+            // ADR's shared-completion-helpers rule).
+            //
+            // Above the fold only. Below it the summoned full-screen Outputs
+            // panel is the same surface at phone size — one mechanism, two
+            // sizes — so `open_port_picker` never sets this flag there.
+            if picker_open {
+                // Click-outside: a transparent full-viewport sheet under the
+                // card. Only rendered where there is a signal to close —
+                // a story posing the popover has no frame state, and an
+                // invisible click-eater over a story page is a trap.
+                if let Some(ui) = ui {
+                    div {
+                        class: "tw:fixed tw:inset-0 tw:z-[60] tw:bg-transparent",
+                        aria_hidden: "true",
+                        onclick: move |event| {
+                            event.stop_propagation();
+                            let mut open = ui.picker_open;
+                            open.set(false);
+                        },
+                    }
                 }
-                span {
-                    span { class: "{KBD}", "[ ]" }
-                    " shift"
-                }
-                span {
-                    span { class: "{KBD}", "- =" }
-                    " narrow / widen"
-                }
-                span {
-                    span { class: "{KBD}", "r" }
-                    " flip"
-                }
-                span {
-                    span { class: "{KBD}", "; '" }
-                    " rotate"
-                }
-                span {
-                    span { class: "{KBD}", "s" }
-                    " swap"
-                }
-                span {
-                    span { class: "{KBD}", "⌘Z" }
-                    " undo"
-                }
-                span {
-                    span { class: "{KBD}", "esc" }
-                    " disarm, then deselect"
+                // Anchored to the panel's own bottom-left and WIDTH-CAPPED:
+                // the panel is as wide as the center now, and a full-width
+                // card of port rows would be a wall. It grows UPWARD over the
+                // canvas from the section it is about, which is also where
+                // the eye already is.
+                div {
+                    class: "tw:absolute tw:bottom-0 tw:left-0 tw:z-[61] tw:flex tw:max-h-[440px] tw:w-full tw:max-w-[420px] tw:flex-col tw:overflow-hidden tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:shadow-lg",
+                    role: "dialog",
+                    "data-patch-picker": "open",
+                    onclick: move |event| event.stop_propagation(),
+                    // The header carries the ARM: the card covers the panel's
+                    // armed banner while it is up, and a walk-up user must
+                    // never lose track of which gesture the next click
+                    // completes (round 3, #5 — the armed thing names itself).
+                    div {
+                        class: if armed_assign { "tw:flex tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border-subtle tw:bg-selection-bg tw:px-2 tw:py-1" } else { "tw:flex tw:flex-none tw:items-center tw:gap-2 tw:border-b tw:border-border-subtle tw:bg-card-muted tw:px-2 tw:py-1" },
+                        span {
+                            class: if armed_assign { "tw:font-mono tw:text-[9.5px] tw:uppercase tw:tracking-[0.13em] tw:text-selection-border" } else { "tw:font-mono tw:text-[9.5px] tw:uppercase tw:tracking-[0.13em] tw:text-dim-foreground" },
+                            if armed_assign {
+                                "assign armed · pick a port"
+                            } else {
+                                "pick a port"
+                            }
+                        }
+                        span { class: "tw:ml-auto tw:flex tw:items-center tw:gap-1 tw:text-[10px] tw:text-dim-foreground",
+                            span { class: "{KBD}", "esc" }
+                            "closes"
+                        }
+                        button {
+                            class: "tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-1 tw:text-[11px] tw:leading-4 tw:text-dim-foreground tw:hover:text-strong-foreground",
+                            title: "Close the port picker (esc)",
+                            onclick: move |_| {
+                                if let Some(ui) = ui {
+                                    let mut open = ui.picker_open;
+                                    open.set(false);
+                                }
+                            },
+                            "×"
+                        }
+                    }
+                    // The panel's own body, scrolling inside the card: the
+                    // Outputs rail is a column, and a radiance-scale bay is
+                    // taller than any popover has a right to be. Its rows are
+                    // DOM boxes (no canvases), so nothing here can mount a
+                    // canvas that never paints.
+                    div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-1.5",
+                        crate::app::workbench::panels::OutputsPanel {
+                            surface: Some(surface.clone()),
+                            selection: selection_set.clone(),
+                            patch_verbs: true,
+                            on_action,
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+/// Open the port picker at whichever size the user is: the POPOVER over this
+/// panel above the fold, the full-screen summoned Outputs panel below it. Both
+/// are the same Outputs panel with the same grammar — the fold only decides
+/// whether it floats or takes the screen.
+fn open_port_picker(ui: Option<PatchingUi>) {
+    let Some(ui) = ui else {
+        return;
+    };
+    if at_mobile_fold() {
+        let mut summon = ui.summon_outputs;
+        summon.set(true);
+    } else {
+        let mut open = ui.picker_open;
+        open.set(true);
     }
 }
 
@@ -1062,28 +1165,36 @@ fn SectionHead(
             }
             span { class: "tw:truncate tw:text-[12.5px] tw:font-medium tw:text-strong-foreground", "{name}" }
             span { class: "tw:truncate tw:font-mono tw:text-[10px] tw:text-dim-foreground", "{context}" }
-            span { class: "tw:ml-auto tw:flex tw:flex-none tw:items-baseline tw:gap-2",
+            // The head's right-hand cluster — the facts and the ×, ONE
+            // wrapping group. Both used to be `flex-none` siblings, which
+            // was fine while the head was as wide as the center; in a 300px
+            // dock (245px on the md middle) an "auto-mapped" flow value or a
+            // derived window note ran off the edge and was clipped, and the
+            // × was pushed onto a line of its own. Facts the panel bothered
+            // to state must be readable, so they take a second line and the
+            // × trails the last one wherever it lands.
+            span { class: "tw:ml-auto tw:flex tw:min-w-0 tw:flex-wrap tw:items-baseline tw:gap-x-2 tw:gap-y-0.5",
                 for (fact_label , value) in facts {
                     span { class: "tw:flex tw:items-baseline tw:gap-1",
                         span { class: "tw:text-[10px] tw:text-dim-foreground", "{fact_label}" }
                         span { class: "tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground", "{value}" }
                     }
                 }
-            }
-            if deselect {
-                button {
-                    class: "tw:ml-1 tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-1 tw:text-[11px] tw:leading-4 tw:text-dim-foreground tw:hover:text-strong-foreground",
-                    title: "Deselect (esc)",
-                    onclick: move |_| {
-                        // Same rung as esc's clear: the size override
-                        // belongs to the selection it was nudged on.
-                        if let Some(ui) = ui {
-                            let mut size = ui.segment_size;
-                            size.set(None);
-                        }
-                        select(&on_action, None);
-                    },
-                    "×"
+                if deselect {
+                    button {
+                        class: "tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-1 tw:text-[11px] tw:leading-4 tw:text-dim-foreground tw:hover:text-strong-foreground",
+                        title: "Deselect (esc)",
+                        onclick: move |_| {
+                            // Same rung as esc's clear: the size override
+                            // belongs to the selection it was nudged on.
+                            if let Some(ui) = ui {
+                                let mut size = ui.segment_size;
+                                size.set(None);
+                            }
+                            select(&on_action, None);
+                        },
+                        "×"
+                    }
                 }
             }
         }
@@ -1117,7 +1228,7 @@ fn ObjectPane(
     // Nothing here animates itself any more (Q9): every picture the panel
     // paints — published bytes or the controller's unmapped-chase preview —
     // arrives as data on the surface, so the panel keeps no clock at all.
-    let base = if primary { SECTION_PRIMARY } else { SECTION };
+    let base = section_class(primary);
     let class = if attention {
         format!("{base} ux-arm-attention")
     } else {
@@ -1241,7 +1352,7 @@ fn ObjectPane(
                                     },
                                     "unmap"
                                 }
-                                span { class: "tw:w-2" }
+                                {group_break()}
                                 // Mock-level room only (plan): the lamp-count
                                 // edit is a mapping write, not a patch verb.
                                 button {
@@ -1557,7 +1668,7 @@ fn OutputPane(
     // fact line can name it (the spike's mode chip) — and so a walk-up gate
     // can see where the 7px threshold actually falls.
     let presentation = use_signal(StripPresentation::default);
-    let base = if primary { SECTION_PRIMARY } else { SECTION };
+    let base = section_class(primary);
     let class = if attention {
         format!("{base} ux-arm-attention")
     } else {
@@ -1591,7 +1702,6 @@ fn OutputPane(
         (Some(target), None) if is_armable(&surface, target) => Some(target.clone()),
         _ => None,
     };
-    let ports = port_options(&surface);
     rsx! {
         section { class: "{class}",
             match output {
@@ -1608,10 +1718,6 @@ fn OutputPane(
                             format!("left: {left}%; width: {width}%;")
                         });
                     let free = output.free;
-                    let selected_port = output
-                        .port
-                        .map(|key| format!("{}:{key}", output.node.0))
-                        .unwrap_or_default();
                     let object = object_view(&surface, selection.as_ref());
                     let frame = output_frame(&surface, output.node);
                     let (assumed, decode_note) = decode_line(
@@ -1622,7 +1728,6 @@ fn OutputPane(
                     );
                     let colors = output_strip_colors(frame, output.span, assumed);
                     let has_signal = !colors.is_empty();
-                    let object_target = object.map(|object| object.target);
                     let shift_window = output
                         .window
                         .filter(|_| !free)
@@ -1695,76 +1800,20 @@ fn OutputPane(
                             on_action,
                         }
                         div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1.5",
-                            // The port picker writes on pick when there is
-                            // an object to move; otherwise it walks the
-                            // selection to that port's first free segment.
-                            select {
-                                class: "{PICKER}",
-                                value: "{selected_port}",
-                                onchange: {
-                                    let surface = surface.clone();
-                                    let object_target = object_target.clone();
-                                    move |event: FormEvent| {
-                                        let Some((node, key)) = parse_port_key(&event.value()) else {
-                                            return;
-                                        };
-                                        let Some(entry) = surface
-                                            .outputs
-                                            .iter()
-                                            .find(|entry| entry.node == node)
-                                        else {
-                                            return;
-                                        };
-                                        match object_target.as_ref() {
-                                            Some(target) => {
-                                                let subject = assign_subject_target(
-                                                    &surface,
-                                                    target,
-                                                );
-                                                if let Some(lamp) = port_next_free(entry, key) {
-                                                    dispatch_assign(
-                                                        &on_action,
-                                                        &surface,
-                                                        &subject,
-                                                        entry,
-                                                        lamp,
-                                                    );
-                                                }
-                                            }
-                                            None => {
-                                                let run = entry
-                                                    .bay
-                                                    .ports
-                                                    .iter()
-                                                    .find(|port| port.key == key)
-                                                    .and_then(|port| free_runs(port).into_iter().next());
-                                                let target = match run {
-                                                    Some(run) => {
-                                                        segment_at_free_run(&surface, node, key, run, None)
-                                                    }
-                                                    None => UiPatchTarget::Port { node, port: key },
-                                                };
-                                                select(&on_action, Some(target));
-                                            }
-                                        }
-                                    }
-                                },
-                                // `selected` mirrors the bound value onto
-                                // each option: the select's own `value` is
-                                // applied before the options mount, so it
-                                // alone cannot restore the selection (see
-                                // select_mirror_lint).
-                                if selected_port.is_empty() {
-                                    option { value: "", selected: true, "pick a port…" }
-                                }
-                                for (value , label) in ports.iter().cloned() {
-                                    option {
-                                        key: "{value}",
-                                        value: "{value}",
-                                        selected: value == selected_port,
-                                        "{label}"
-                                    }
-                                }
+                            // RE-PICK: the flat port list that used to sit
+                            // here could not say what a destination was
+                            // worth. The Outputs panel can — occupancy bars,
+                            // free runs as click targets that land the run at
+                            // the EXACT clicked lamp — so this opens THAT
+                            // instead (the popover above the dock, or the
+                            // summoned panel below the fold). Clicks in there
+                            // do what they do in the dock: complete a live
+                            // arm, or plainly select.
+                            button {
+                                class: "{STEP}",
+                                title: "Pick a port in the Outputs panel (occupancy and free runs included)",
+                                onclick: move |_| open_port_picker(ui),
+                                "pick…"
                             }
                         }
                         // The port's WHOLE extent as published, with the
@@ -1830,7 +1879,7 @@ fn OutputPane(
                                 {keyed("×10 ››", "]")}
                             }
                             if free {
-                                span { class: "tw:w-2" }
+                                {group_break()}
                                 button {
                                     class: "{STEP}",
                                     title: "Narrow the segment one lamp (-)",
@@ -1851,7 +1900,7 @@ fn OutputPane(
                                 }
                             }
                             if matches!(selection, Some(UiPatchTarget::Port { .. })) || swap_armed {
-                                span { class: "tw:w-2" }
+                                {group_break()}
                                 button {
                                     class: "{swap_class}",
                                     title: "Arm a port swap, then click the other port (s)",
@@ -1868,7 +1917,7 @@ fn OutputPane(
                                     {keyed("swap", "s")}
                                 }
                             }
-                            span { class: "tw:w-2" }
+                            {group_break()}
                             button {
                                 class: "{STEP_ARM}",
                                 title: "Select the next free segment, keeping the arm (m)",
@@ -1893,9 +1942,9 @@ fn OutputPane(
                 }
                 None => {
                     match unmapped_object {
-                        // The invitation (#objfirst): arm, or pick the port
-                        // the object lands on.
-                        Some(target) => rsx! {
+                        // The invitation (#objfirst): arm, and open the pick
+                        // surface the counterpart lives in.
+                        Some(_) => rsx! {
                             SectionHead {
                                 label: "output",
                                 name: "—".to_string(),
@@ -1908,7 +1957,7 @@ fn OutputPane(
                                 span { "Not on any port segment." }
                                 button {
                                     class: "{arm_class}",
-                                    title: "Arm the assign — the next port click links it (a)",
+                                    title: "Arm the assign, and bring up the ports — the next port click links it (a)",
                                     onclick: {
                                         let surface = surface.clone();
                                         let selection = selection.clone();
@@ -1916,14 +1965,18 @@ fn OutputPane(
                                             if let Some(ui) = ui {
                                                 let mut armed = ui.armed;
                                                 arm_assign(&surface, &selection, &mut armed);
-                                                // At the mobile fold the ports
-                                                // live in the Outputs panel —
-                                                // bring it up (round 3, #6);
-                                                // picking there completes and
-                                                // dismisses it.
-                                                if armed.peek().is_some() && at_mobile_fold() {
-                                                    let mut summon = ui.summon_outputs;
-                                                    summon.set(true);
+                                                // The counterpart the user
+                                                // must now click lives in the
+                                                // Outputs panel, so the panel
+                                                // comes to them: the popover
+                                                // over the dock above the
+                                                // fold, the full-screen
+                                                // summon below it (round 3,
+                                                // #6 — one gesture, two
+                                                // sizes). Picking there
+                                                // completes and dismisses.
+                                                if armed.peek().is_some() {
+                                                    open_port_picker(Some(ui));
                                                 }
                                             }
                                         }
@@ -1931,49 +1984,6 @@ fn OutputPane(
                                     // The label never changes (round 3): armed
                                     // = pulse + the counterpart ring.
                                     {keyed("assign", "a")}
-                                }
-                            }
-                            // The destinations as EXPLAINING CARDS (#6):
-                            // occupancy on every option; picking writes (the
-                            // ratified picker rule) at the port's next free
-                            // lamp. At the fold the summoned Outputs panel is
-                            // the picker instead.
-                            div { class: "tw:max-[820px]:hidden",
-                                OptionCards {
-                                    label: "or pick a port".to_string(),
-                                    options: port_cards(&surface),
-                                    on_pick: {
-                                        let surface = surface.clone();
-                                        move |value: String| {
-                                            let Some((node, key)) = parse_port_key(&value) else {
-                                                return;
-                                            };
-                                            let Some(entry) = surface
-                                                .outputs
-                                                .iter()
-                                                .find(|entry| entry.node == node)
-                                            else {
-                                                return;
-                                            };
-                                            // The object lands at the port's next
-                                            // free lamp — the spike's picker
-                                            // transition.
-                                            let subject = assign_subject_target(&surface, &target);
-                                            if let Some(lamp) = port_next_free(entry, key)
-                                                && dispatch_assign(
-                                                    &on_action,
-                                                    &surface,
-                                                    &subject,
-                                                    entry,
-                                                    lamp,
-                                                )
-                                                && let Some(ui) = ui
-                                            {
-                                                let mut armed = ui.armed;
-                                                armed.set(None);
-                                            }
-                                        }
-                                    },
                                 }
                             }
                         },
@@ -2303,16 +2313,13 @@ mod tests {
         assert_eq!(output.window, None);
     }
 
-    /// The pickers' rows: unmapped objects on the object side, every port on
-    /// the output side (round-tripping its value key).
+    /// The surviving picker's rows: the unmapped objects, on the object side.
     ///
-    /// A port row carries its OCCUPANCY (round 3, #6) — where the free space
-    /// is and how much of it — because a destination the user cannot judge is
-    /// not a choice. The 1-based lamp in the phrase is the chips' convention,
-    /// so "30 free @ 31" is the tail of a 60-lamp port whose first half is
-    /// spoken for.
+    /// The output side has no list of its own any more (round 2, P3) — the
+    /// port pick opens the real Outputs panel, which states each
+    /// destination's occupancy in bars a flat text row never could.
     #[test]
-    fn the_pickers_list_the_two_sides_options() {
+    fn the_object_picker_lists_what_is_still_waiting() {
         let surface = half_patched_surface();
         let objects = unmapped_objects(&surface);
         assert_eq!(objects.len(), 1, "only sector 2 still wants a wire");
@@ -2324,13 +2331,6 @@ mod tests {
             }
         );
         assert_eq!(objects[0].1, "sector 2 · 30");
-
-        let ports = port_options(&surface);
-        assert_eq!(ports.len(), 1);
-        assert_eq!(ports[0].0, "10:0");
-        assert_eq!(ports[0].1, "1 · IO18 · port 0 · 30 free @ 31");
-        assert_eq!(parse_port_key(&ports[0].0), Some((output_node(), 0)));
-        assert_eq!(parse_port_key("nonsense"), None);
     }
 
     /// A published wire whose lamp `n` is saturated in channel `n % 3`, with
