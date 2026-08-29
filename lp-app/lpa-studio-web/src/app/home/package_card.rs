@@ -185,10 +185,7 @@ pub(crate) fn PackageCard(
 /// "Opening…". Quiet facts (edited stamp, provenance) read as noise
 /// repeated across a grid (G1 feedback 2026-08-26) and live in the ⋯
 /// popup instead; a quiet card wears a title-only bar.
-fn face_context_line(
-    blocked: Option<&(String, String)>,
-    opening: bool,
-) -> Option<CardContextLine> {
+fn face_context_line(blocked: Option<&(String, String)>, opening: bool) -> Option<CardContextLine> {
     if let Some((headline, _remedy)) = blocked {
         // amber = honest bad content (the roster precedent); never
         // violet, which means "bound" in this Studio. The remedy words
