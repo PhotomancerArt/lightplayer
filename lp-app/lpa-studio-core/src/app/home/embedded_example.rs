@@ -414,6 +414,10 @@ pub static SMALL_DOME_FILES: &[ExampleFile] = &[
         include_bytes!("../../../../../examples/small-dome/clock.json"),
     ),
     (
+        "editor.json",
+        include_bytes!("../../../../../examples/small-dome/editor.json"),
+    ),
+    (
         "out_a.json",
         include_bytes!("../../../../../examples/small-dome/out_a.json"),
     ),

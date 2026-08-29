@@ -35,9 +35,9 @@
 //! it regenerates.
 
 use lpc_mapping::{
-    Map2dDoc, Map2dObject, Map2dObjectId, Map2dShape, MapObjectPath, PatchDoc, PatchEntry,
-    PatchResolveContext, PatchSource, PathAlign, PathShape, PolygonShape, RepeatShape,
-    object_instance_spans, resolve, resolve_patch,
+    EditorFootprint, EditorMetaDoc, Map2dDoc, Map2dObject, Map2dObjectId, Map2dShape,
+    MapObjectPath, PatchDoc, PatchEntry, PatchResolveContext, PatchSource, PathAlign, PathShape,
+    PolygonShape, RepeatShape, object_instance_spans, resolve, resolve_patch,
 };
 use std::path::Path;
 
@@ -428,6 +428,50 @@ fn doors_patch(box_a_panels: usize) -> PatchDoc {
     doc
 }
 
+/// The Arrange placements (`editor.json`): both fixtures at IDENTITY in the
+/// shared 120-unit plan, so the door renders nestled among the panels at its
+/// authored bottom-center spot instead of the unarranged side-by-side tiling.
+///
+/// Keys are the fixtures' full studio node addresses. The root segment
+/// derives from the seeded project directory (`examples-small-dome` →
+/// `/examples_small_dome.show`), so the shipped keys match the gallery
+/// copy; a renamed user copy degrades benignly to "unarranged".
+fn editor_doc(dome: &Map2dDoc, doors: &Map2dDoc) -> EditorMetaDoc {
+    let mut doc = EditorMetaDoc::new();
+    for (key, map2d) in [
+        ("/examples_small_dome.show/dome.module/dome.fixture", dome),
+        (
+            "/examples_small_dome.show/doors.module/doors.fixture",
+            doors,
+        ),
+    ] {
+        let resolved = resolve(map2d).expect("map2d resolves");
+        let (mut min, mut max) = ([f32::MAX, f32::MAX], [f32::MIN, f32::MIN]);
+        for lamp in &resolved.lamps {
+            for axis in 0..2 {
+                min[axis] = min[axis].min(lamp.pos[axis]);
+                max[axis] = max[axis].max(lamp.pos[axis]);
+            }
+        }
+        let surface = doc.mapping_surface_mut(key);
+        // Transform stays identity (the writer omits it); the footprint
+        // cache lets an unloaded fixture render as an honest block. Values
+        // pre-rounded to the writer's four-decimal grid so the document
+        // round-trips byte-for-byte.
+        let grid4 = |v: f32| (f64::from(v) * 10_000.0).round() / 10_000.0;
+        surface.footprint = Some(EditorFootprint {
+            bbox: [
+                grid4(min[0]),
+                grid4(min[1]),
+                grid4(max[0] - min[0]),
+                grid4(max[1] - min[1]),
+            ],
+            lamps: resolved.lamps.len() as u32,
+        });
+    }
+    doc
+}
+
 /// An Output node artifact: the box's port table plus the standard bus
 /// binding, formatted the way the studio serializer writes node files.
 fn output_json(name: &str, ports: &[(String, u32)]) -> String {
@@ -600,6 +644,7 @@ fn main() {
     let doors_patch_doc = doors_patch(box_a.len());
     let ports_a = port_table('A', box_a.len(), true);
     let ports_b = port_table('B', box_b.len(), false);
+    let editor = editor_doc(&dome, &doors);
     validate(
         &dome,
         &doors,
@@ -607,6 +652,11 @@ fn main() {
         &doors_patch_doc,
         &ports_a,
         &ports_b,
+    );
+    assert_eq!(
+        EditorMetaDoc::from_json(&editor.to_json_pretty()).expect("editor doc parses"),
+        editor,
+        "editor.json round-trips"
     );
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -631,6 +681,7 @@ fn main() {
             example.join("doors/doors.patch.json"),
             doors_patch_doc.to_json_pretty() + "\n",
         ),
+        (example.join("editor.json"), editor.to_json_pretty() + "\n"),
         (example.join("out_a.json"), output_json(OUT_A, &ports_a)),
         (example.join("out_b.json"), output_json(OUT_B, &ports_b)),
     ] {
@@ -666,6 +717,15 @@ mod tests {
         for doc in [dome_doc(), doors_doc()] {
             assert_eq!(Map2dDoc::from_json(&doc.to_json()).unwrap(), doc);
         }
+    }
+
+    /// The Arrange placements round-trip and carry both fixtures' entries.
+    #[test]
+    fn generated_editor_doc_parses_back() {
+        let doc = editor_doc(&dome_doc(), &doors_doc());
+        let parsed = EditorMetaDoc::from_json(&doc.to_json_pretty()).unwrap();
+        assert_eq!(parsed, doc);
+        assert_eq!(parsed.nodes.len(), 2, "both fixtures arranged");
     }
 
     /// Both patch documents round-trip through the parser they ship into.

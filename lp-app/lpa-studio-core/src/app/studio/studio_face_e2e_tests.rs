@@ -4334,7 +4334,9 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
             .find(|fixture| fixture.node == dome.node)
             .expect("dome");
         let arrange = dome.arrange.as_ref().expect("arrange facts present");
-        assert!(!arrange.arranged, "nothing has been dragged yet");
+        // The example SHIPS arranged: editor.json places both fixtures at
+        // identity so the door renders nestled into the dome's plan.
+        assert!(arrange.arranged, "the shipped example is arranged");
         assert_eq!(arrange.transform, UiArrangeTransform::default());
     }
 
@@ -4434,8 +4436,8 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
         assert_eq!(arrange.footprint.map(|fp| fp.lamps), Some(dome.patch.lamps));
     }
 
-    // Undo restores the exact pre-arrange bytes (the canonical empty doc —
-    // the file did not exist, and file-existence is not user-facing state).
+    // Undo restores the exact pre-arrange bytes — the SHIPPED document
+    // (the example ships an identity arrangement).
     handle
         .tx
         .send(StudioCommand::Action(crate::UiAction::from_op(
@@ -4449,10 +4451,16 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
     drive(actor.run_one_batch_for_test());
     handle.tx.send(project_action(ProjectOp::SaveOverlay));
     drive(actor.run_one_batch_for_test());
+    let shipped_editor = example
+        .files
+        .iter()
+        .find(|(path, _)| *path == "editor.json")
+        .map(|(_, bytes)| String::from_utf8(bytes.to_vec()).expect("utf8 editor.json"))
+        .expect("the example ships editor.json");
     assert_eq!(
         editor_json().expect("editor.json still exists after undo"),
-        "{\n  \"format\": 1\n}\n",
-        "undo walked back to the canonical empty document"
+        shipped_editor,
+        "undo walked back to the shipped arrangement"
     );
 
     // Redo replays the arrangement byte-for-byte.
