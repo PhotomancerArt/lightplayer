@@ -194,7 +194,7 @@ is overwritten, and the stored document survives open → close byte-identical.
 `corpus::{basic_button, cat_ears, panel_16x16, gapped_path, repeated_sector,
 fyeah}` are the shared test scenes. The two format-2 archetypes are
 `gapped_path` (one channel that jumpers across an inert segment) and
-`repeated_sector` (a mini-dome: one gapped sector repeated five times — one
+`repeated_sector` (a small-dome: one gapped sector repeated five times — one
 object, 5 strands, 60 lamps); the last is the real fyeah sign, derived from
 its mapping SVG via the importer: 219 lamps, 2 universes. Studio stories and
 editor fixtures should reuse these rather than inventing new geometry.

@@ -161,6 +161,27 @@ mod tests {
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
+/// Largest-free-block probe for the server's ProjectRead headroom gate
+/// (refusal-not-reset).
+/// Heartbeat memory report: free/used plus the largest allocatable block
+/// (this chip has the probe; it has no retrying allocator, so that field
+/// stays absent).
+#[cfg(not(fw_harness))]
+fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
+    esp32_memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::server::MemoryStats {
+        free_bytes,
+        used_bytes,
+        total_bytes: used_bytes.saturating_add(free_bytes),
+        largest_free_block: read_headroom_probe(),
+        oom_retry_saves: None,
+    })
+}
+
+#[cfg(not(fw_harness))]
+fn read_headroom_probe() -> Option<u32> {
+    Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
+}
+
 #[cfg(not(fw_harness))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     Some((
@@ -370,6 +391,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         Some(radio_service),
         graphics,
     );
+    server.set_read_headroom_probe(Some(read_headroom_probe));
     // Wire hello identity: compile-time provenance from build.rs, injected
     // into the server (sans-IO: the server never reads env/git itself),
     // plus the boot-time read of the root-stamped device identity. The
@@ -548,7 +570,7 @@ async fn main(spawner: embassy_executor::Spawner) {
             app.server,
             app.transport,
             app.time_provider,
-            esp32_memory_stats,
+            heartbeat_memory_stats,
             move |now_ms| watchdog.feed(now_ms),
         )
         .await;

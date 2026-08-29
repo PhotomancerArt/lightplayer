@@ -111,6 +111,11 @@ pub(crate) struct BrowserFirmwareRuntime {
 /// `OffscreenCanvas` was transferred into the worker, so the surface holds
 /// the only reference and JS GC reclaims both. The worker's shared device
 /// outlives the runtime via `worker_gpu`.
+/// Frame budget for links with no meaningful transport limit: 1 MiB. Big
+/// enough that no real payload ever notices, small enough that the bounded
+/// batching path runs everywhere (see the comment at the call site).
+const HOST_LINK_FRAME_BUDGET_BYTES: usize = 1024 * 1024;
+
 struct GpuRuntimeState {
     worker_gpu: Rc<WorkerGpu>,
     graphics: Arc<GpuGraphics>,
@@ -170,10 +175,13 @@ impl BrowserFirmwareRuntime {
             Some(radio_service),
             graphics,
         );
-        // Browser sim transport is postMessage — no 16 KiB serial frame —
-        // so this link declares no frame budget and answers display
-        // layouts at any scale (dome-class included).
-        server.set_project_read_frame_budget(None);
+        // Browser sim transport is postMessage — no 16 KiB serial frame.
+        // A generous EXPLICIT bound (not `None`): behaviorally identical
+        // for real payloads (display layouts derive a huge budget from it,
+        // dome-class included), but the sim then exercises the same
+        // batching/refusal code path the device runs, so budget regressions
+        // surface in browser CI instead of on silicon.
+        server.set_project_read_frame_budget(Some(HOST_LINK_FRAME_BUDGET_BYTES));
         // Wire hello identity (sans-IO: injected here). Browser runtimes
         // carry no git provenance or stamped identity; the hello's
         // capability half comes from the constructor above.
@@ -365,7 +373,7 @@ impl BrowserFirmwareRuntime {
                 Err(error) => {
                     // The ordinary state of a shader-only project — but ALSO
                     // the state of a multi-module project whose sibling
-                    // modules tie on the bus (mini-dome, the peaches). The
+                    // modules tie on the bus (small-dome, the peaches). The
                     // published outputs below settle it either way; say why
                     // once (this is cached).
                     log::debug!("preview runtime: bus control product did not resolve: {error}");

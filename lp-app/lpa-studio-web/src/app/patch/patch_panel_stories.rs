@@ -21,7 +21,7 @@
 //! auto-mapped fixtures place their own objects, so nothing is ever waiting
 //! and there is no link to arm. The shared fixtures keep the auto pose (it is
 //! the creation-time default, and the lean panel is its own state worth
-//! pinning); [`mini_dome_walkup_surface`] is the manual counterpart with two
+//! pinning); [`small_dome_walkup_surface`] is the manual counterpart with two
 //! objects still off the wire.
 
 use dioxus::prelude::*;
@@ -29,7 +29,7 @@ use lpa_studio_web_story_macros::story;
 
 use super::patch_panel::PatchPanel;
 use super::patch_story_fixtures::{
-    mini_dome_surface, mini_dome_walkup_surface, peach_manual_surface,
+    peach_manual_surface, small_dome_surface, small_dome_walkup_surface,
 };
 use crate::app::editor_shell::patching::ArmedVerb;
 use lpa_studio_core::{NodeId, UiPatchSurface, UiPatchTarget};
@@ -71,7 +71,7 @@ fn selection_frame(
     }
 }
 
-/// The dome fixture of the mini-dome fixtures.
+/// The dome fixture of the small-dome fixtures.
 fn dome() -> NodeId {
     NodeId::new(2)
 }
@@ -85,7 +85,7 @@ fn box_one() -> NodeId {
     description = "The panel with NOTHING selected (D8 — the panel is always present, empty states included). Both sections keep their heads and say what would fill them: the object section names the two ways in (an object, or free space on a port), the output section states plainly that no port segment is selected. The keys row is the same in every state — it REPLACED the help overlay, so the grammar is readable without arming anything."
 )]
 fn patch_panel_empty() -> Element {
-    panel_frame(mini_dome_walkup_surface(), None, None)
+    panel_frame(small_dome_walkup_surface(), None, None)
 }
 
 #[story(
@@ -93,7 +93,7 @@ fn patch_panel_empty() -> Element {
 )]
 fn patch_panel_fixture_card() -> Element {
     panel_frame(
-        mini_dome_surface(false),
+        small_dome_surface(false),
         Some(UiPatchTarget::Fixture { node: dome() }),
         None,
     )
@@ -104,7 +104,7 @@ fn patch_panel_fixture_card() -> Element {
 )]
 fn patch_panel_auto_object() -> Element {
     panel_frame(
-        mini_dome_surface(false),
+        small_dome_surface(false),
         Some(UiPatchTarget::Instance {
             node: dome(),
             path: "/sector/2".to_string(),
@@ -118,7 +118,7 @@ fn patch_panel_auto_object() -> Element {
 )]
 fn patch_panel_paired() -> Element {
     panel_frame(
-        mini_dome_walkup_surface(),
+        small_dome_walkup_surface(),
         Some(UiPatchTarget::Instance {
             node: dome(),
             path: "/sector/2".to_string(),
@@ -132,7 +132,7 @@ fn patch_panel_paired() -> Element {
 )]
 fn patch_panel_derived() -> Element {
     panel_frame(
-        mini_dome_walkup_surface(),
+        small_dome_walkup_surface(),
         Some(UiPatchTarget::Cell {
             id: "doors:0:9:30".to_string(),
         }),
@@ -145,7 +145,7 @@ fn patch_panel_derived() -> Element {
 )]
 fn patch_panel_armed() -> Element {
     panel_frame(
-        mini_dome_walkup_surface(),
+        small_dome_walkup_surface(),
         Some(UiPatchTarget::Segment {
             node: box_one(),
             port: 1,
@@ -160,7 +160,7 @@ fn patch_panel_armed() -> Element {
     description = "OBJECT-FIRST (the spike's #objfirst): an UNMAPPED object on a manual fixture. Its strip carries the CHASE — blue head, red tail, the sweep in object order — computed once core-side and frozen at the still where head, dot and tail read at once, the very colours the canvas sprites paint for the same object (Q9: one selection, one chase, painted once). The transport refuses politely (nothing to rotate off the wire), and the output section invites: arm, or pick a destination from cards that state each port's occupancy, because a destination you cannot judge is not a choice."
 )]
 fn patch_panel_objfirst() -> Element {
-    let mut surface = mini_dome_walkup_surface();
+    let mut surface = small_dome_walkup_surface();
     let selection = UiPatchTarget::Instance {
         node: dome(),
         path: "/sector/4".to_string(),
@@ -184,7 +184,7 @@ fn patch_panel_multi_fixtures() -> Element {
             node: NodeId::new(3),
         },
     ]);
-    selection_frame(mini_dome_surface(false), selection, None)
+    selection_frame(small_dome_surface(false), selection, None)
 }
 
 #[story(

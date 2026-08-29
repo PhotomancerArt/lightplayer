@@ -351,6 +351,7 @@ values; statistical diffs are for the arithmetic in between.
 | silent-drop | 2026-07-31 | [loader-silently-drops-unparseable-nodes](2026-07-31-loader-silently-drops-unparseable-nodes.md) | fixed | lpc-engine loader + flush + virtual ws281x |
 | silent-drop | 2026-08-03 | [dev-file-sync-drops-on-uart-rx-overflow](2026-08-03-dev-file-sync-drops-on-uart-rx-overflow.md) | **open** | lp-cli/src/commands/dev (fs sync) + fw-esp32v3 UART0 RX |
 | silent-drop | 2026-08-07 | [boot-compile-oom-crash-loop](2026-08-07-boot-compile-oom-crash-loop.md) | **open** | fw-esp32v3 boot-compile + lp-cli upload + lpfs partition |
+| silent-drop | 2026-08-28 | [auto-publish-outcomes-invisible](2026-08-28-auto-publish-outcomes-invisible.md) | fixed (visibility + 5xx drop; legacy-library gap open) | lpa-studio-web cloud sync |
 | timeout-scoped-to-sub-phase | 2026-08-07 | [upload-wait-timeout-unbounded-deploy](2026-08-07-upload-wait-timeout-unbounded-deploy.md) | **open** | lp-cli upload (deploy wait) |
 | timeout-scoped-to-sub-phase | 2026-08-24 | [request-idle-budget-blind-to-dropped-responses](2026-08-24-request-idle-budget-blind-to-dropped-responses.md) | fixed | lpa-link device_client_io + client correlation |
 | unbounded-restatement | 2026-07-28 | [tick-error-restated-every-frame](2026-07-28-tick-error-restated-every-frame.md) | fixed | lpa-server (advance_frame) |

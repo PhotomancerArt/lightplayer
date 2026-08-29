@@ -147,7 +147,18 @@ impl ServerTransport for StreamingMessageRouterTransport {
                             return Ok(Some(msg));
                         }
                         Err(e) => {
-                            log::debug!("StreamingMessageRouterTransport: Failed to parse: {e}");
+                            // A torn/spliced frame is protocol loss, not
+                            // chatter — WARN with evidence and count it
+                            // (2026-08-26 inbound-loss defect: this drop sat
+                            // at DEBUG and made losses invisible).
+                            let preview_len = json_str.len().min(48);
+                            crate::serial::link_counters::bump_parse_failure();
+                            log::warn!(
+                                "StreamingMessageRouterTransport: dropping unparseable {} B M! \
+                                 line ({e}); prefix: {:?}",
+                                json_str.len(),
+                                &json_str[..preview_len]
+                            );
                             continue;
                         }
                     }

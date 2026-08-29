@@ -1590,7 +1590,7 @@ mod tests {
     fn project_route() -> StudioRoute {
         StudioRoute::Project {
             uid: "prj0000000000000000".parse().expect("a project uid"),
-            slug: Some("mini-dome".to_string()),
+            slug: Some("small-dome".to_string()),
             view: router::ProjectView::Workspace,
         }
     }

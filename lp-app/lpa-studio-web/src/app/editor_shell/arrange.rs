@@ -14,10 +14,10 @@ use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
-    Camera, CanvasDrag, CellSeeding, EditorCanvas, EditorViewOptions, FitReconcile, FixtureBody,
-    FixtureEvent, FixtureSprite, HelpFloat, LampCell, MapEditorSession, Placement, SpriteObject,
-    ZoomFloat, aligned_outline, display_inset_padding, hit_body, lamp_cells, object_color,
-    point_cells, tool_hint,
+    Camera, CanvasDrag, CellSeeding, EditorCanvas, EditorViewOptions, FitReconcile, FitStale,
+    FixtureBody, FixtureEvent, FixtureSprite, HelpFloat, LampCell, MapEditorSession, Placement,
+    SpriteObject, ZoomFloat, aligned_outline, display_inset_padding, hit_body, lamp_cells,
+    object_color, point_cells, tool_hint,
 };
 use lpa_studio_core::{
     ArtifactLocation, EditorMetaFixture, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
@@ -393,6 +393,11 @@ pub(crate) fn ProjectCanvasHost(
     // async loads (bodies, the arrangement document — the peach opened
     // out of view, G1 round 1). Once the user pans or zooms, the camera
     // is theirs and reconciliation stops.
+    //
+    // The two halves part company on ONE point (the dive-zoom report): a
+    // CONTENT change re-frames only what the camera is not already showing
+    // well, so diving into a fixture that is on screen at a workable size
+    // no longer zooms it to fill. A viewport change never asks.
     {
         let bounds = match &dive_focus {
             Some((_, placement, own_bounds)) => {
@@ -420,19 +425,39 @@ pub(crate) fn ProjectCanvasHost(
             bounds_key
         };
         let viewport_now = *viewport.read();
+        let armed = *fit_pending.read();
+        let staleness = viewport_now.map(|[width, height]| {
+            fit_done
+                .read()
+                .staleness([width, height], &camera.peek(), reconcile_bounds)
+        });
         if let Some([width, height]) = viewport_now
-            && (*fit_pending.read()
-                || fit_done
-                    .read()
-                    .stale([width, height], &camera.peek(), reconcile_bounds))
+            && let Some(staleness) = staleness
+            && (armed || staleness != FitStale::Settled)
         {
-            if let Some(bounds) = bounds {
-                let padding = match &dive_focus {
-                    Some(_) => display_inset_padding(bounds, width, height),
-                    None => 0.0,
-                };
+            let padding = bounds.map_or(0.0, |bounds| match &dive_focus {
+                Some(_) => display_inset_padding(bounds, width, height),
+                None => 0.0,
+            });
+            // Content that moved (a dive changing what we frame, a body
+            // landing) re-frames only when the camera is not already
+            // showing it well. Diving into a fixture you can see at a
+            // workable size leaves the view exactly where you put it; a
+            // fixture off screen, clipped, or too small to edit still gets
+            // framed. An ARMED fit (mount, the zoom float, `0`) and a
+            // VIEWPORT change always fit — the latter is what keeps the
+            // framing a function of the settled layout rather than of
+            // measurement timing.
+            let already_framed = !armed
+                && staleness == FitStale::Bounds
+                && bounds.is_some_and(|bounds| {
+                    camera.peek().frames_well(bounds, width, height, padding)
+                });
+            if let Some(bounds) = bounds
+                && !already_framed
+            {
                 camera.write().fit(bounds, width, height, padding);
-                if *fit_pending.peek() {
+                if armed {
                     fit_pending.set(false);
                 }
             }
@@ -1893,15 +1918,14 @@ mod tests {
         assert!(objects[0].cells.is_empty(), "dots stay dots");
     }
 
-    /// The whole seam on REAL bytes: the mini-dome's own document through
-    /// resolve → strand facts → sprite bodies. Its sector is a repeat of a
-    /// jumpered path, so each instance must come out as one body of eight
-    /// lit runs wearing a cell per drawn lamp — and nothing painted across a
-    /// jumper.
+    /// The whole seam on REAL bytes: the small-dome's own document through
+    /// resolve → strand facts → sprite bodies. Each of its fifty panels is
+    /// a repeat instance of one closed 119-lamp polygon, so each must come
+    /// out as one body of one lit loop wearing a cell per drawn lamp.
     #[test]
-    fn the_mini_dome_sectors_draw_as_jumpered_runs_of_cells() {
-        let example = lpa_studio_core::app::home::embedded_example("examples/mini-dome")
-            .expect("the mini-dome example is embedded");
+    fn the_small_dome_panels_draw_as_closed_runs_of_cells() {
+        let example = lpa_studio_core::app::home::embedded_example("examples/small-dome")
+            .expect("the small-dome example is embedded");
         let text = example
             .files
             .iter()
@@ -1921,28 +1945,35 @@ mod tests {
             f64::from(bounds.height),
         ];
         render.strands = strand_metas(&doc, &resolved);
-        render.instances = (0..5)
-            .map(|instance| (format!("/sector/{instance}"), instance * 30, 30))
+        render.instances = lpc_mapping::object_instance_spans(&doc, &resolved)
+            .iter()
+            .map(|span| {
+                let id = span.id.as_ref().expect("panel ids").as_str();
+                let instance = span.instances[0];
+                (format!("/{id}/{instance}"), span.start, span.count)
+            })
             .collect();
 
         let objects = sprite_objects(&render, &UiSelection::empty());
-        assert_eq!(objects.len(), 5, "one body per sector instance");
+        assert_eq!(objects.len(), 50, "one body per panel instance");
         for (index, object) in objects.iter().enumerate() {
             assert_eq!(
                 object.outline.len(),
-                8,
-                "sector {index}: the path's seven jumpers leave eight lit runs"
+                2,
+                "panel {index}: a closed polygon draws as an edge + hole pair \
+                 (aligned_outline: two loops per closed strand)"
             );
-            assert_eq!(object.cells.len(), 30, "sector {index}: a cell per lamp");
+            assert_eq!(object.cells.len(), 119, "panel {index}: a cell per lamp");
             // The cells name this instance's lamps, in the sprite's own
-            // displayed indexing (stride 1 here — 150 lamps, all drawn).
+            // displayed indexing (stride 1 here — all lamps drawn).
+            let start = index * 119;
             let lamps: Vec<usize> = object.cells.iter().map(|cell| cell.lamp).collect();
-            assert_eq!(lamps, (index * 30..index * 30 + 30).collect::<Vec<_>>());
-            // Every lamp of the sector lands inside its own hit body.
-            for lamp in index * 30..index * 30 + 30 {
+            assert_eq!(lamps, (start..start + 119).collect::<Vec<_>>());
+            // Every lamp of the panel lands inside its own hit body.
+            for lamp in start..start + 119 {
                 assert!(
                     lpa_mapping_editor::point_in_loops(&object.hull, points[lamp]),
-                    "sector {index} lamp {lamp} fell outside its own body"
+                    "panel {index} lamp {lamp} fell outside its own body"
                 );
             }
         }

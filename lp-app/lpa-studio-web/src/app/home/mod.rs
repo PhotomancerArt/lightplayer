@@ -4,6 +4,7 @@
 //! gallery page lived here until the chrome C reorg split it.
 
 pub(crate) mod brand_hero;
+pub(crate) mod card_footer;
 pub(crate) mod card_sheet;
 pub(crate) mod card_thumb;
 pub(crate) mod device_card;

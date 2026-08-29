@@ -148,6 +148,7 @@ fn test_stop_all_projects() {
             None,
             graphics.clone(),
             (*server_ptr).hello(),
+            lpa_server::handlers::EngineLinkState::default(),
             request,
         )
         .unwrap()

@@ -179,6 +179,7 @@ holds the full context.
 | Desktop-app multi-session UX (the web shell's install funnel caps the tab at one session; the N-session pool and per-session projections stay) | `2026-08-19-single-session-web-and-session-control` | A desktop-app shell is built and wants to show more than one session at once |
 | A1: wire values decode under the CURRENT fixture's lamp type (owner's when mapped, else the next-unmapped object's) — the panel states the assumption rather than implying certainty | `2026-08-20-walk-up-assignment-selection-model` | Per-port lamp-type data exists on the surface |
 | The lamps−/+ control is mock-level room only (dashed, disabled): editing an object's lamp count is a mapping write, not a patch verb | `2026-08-20-walk-up-assignment-selection-model` | The count edit gets a home on the mapping write path |
+| The ProjectRead refusal threshold (32 KiB largest-free-block) and the staged sync's 16-node slot page size are provisional constants | `2026-08-28-project-reads-bounded-streamed-refusable` | The wire-evolution round-1 G1 bench walk reads real heartbeat numbers on the classic |
 
 ## Relationship To Shared Planning
 
