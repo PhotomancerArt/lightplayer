@@ -20,6 +20,7 @@ use lpc_history::{PrefixedUid, UidPrefix};
 use crate::app::account::account_page::{
     AccountPageBody, AccountSignInCard, SaveStatus, SessionsPane,
 };
+use crate::cloud::sync::sync_status::{SyncOutcomeKind, SyncStatusBoard, SyncStatusSnapshot};
 
 #[story(
     description = "The converged page (spike §3: B's structure, A's content) — Identity, Account, Sessions as settings rows on a 640px measure. Three browsers signed in; the calling one wears the `current` badge and cannot be signed out from its own row (that is what the footer's danger link is for)."
@@ -179,6 +180,28 @@ pub(crate) fn page_sessions_pending() -> Element {
 }
 
 #[story(
+    label = "Cloud sync ledger",
+    description = "The Cloud sync group with every outcome the driver records: the sweep summary line, then per-project rows — published/pushed (good), no-save-yet and skipped (informational), retrying (warning), refused and denied (error). The detail sentence is the diagnosis and survives truncation as the tooltip; nothing here is a control."
+)]
+pub(crate) fn page_sync_ledger() -> Element {
+    rsx! {
+        AccountPageBody {
+            me: yona(),
+            given: "Yona".to_string(),
+            family: "Appletree".to_string(),
+            sessions: SessionsPane::Ready(vec![current_session()]),
+            sync: sync_ledger(),
+            now_secs: NOW,
+            on_given: EventHandler::new(|_: String| {}),
+            on_family: EventHandler::new(|_: String| {}),
+            on_save: EventHandler::new(|_: UpdateMe| {}),
+            on_revoke: EventHandler::new(|_: String| {}),
+            on_sign_out_everywhere: EventHandler::new(|()| {}),
+        }
+    }
+}
+
+#[story(
     label = "Signed out",
     description = "/account is a real address someone can bookmark, so signed out it is an invitation rather than a 404: the ask, then the chrome's own §4 chooser body (minus its title — the heading already made the ask). Right, the boot state: the card holds its shape while whoami is in flight instead of offering to sign in a beat before showing a profile."
 )]
@@ -196,6 +219,71 @@ pub(crate) fn signed_out_and_pending() -> Element {
 const NOW: f64 = 1_786_060_800.0;
 const DAY: f64 = 86_400.0;
 const SESSION_TTL: f64 = 30.0 * DAY;
+
+/// A staged sync ledger holding one row of every outcome kind, minutes old
+/// against the pinned clock so the trailing "· Nm ago" stays constant.
+fn sync_ledger() -> SyncStatusSnapshot {
+    let mut board = SyncStatusBoard::default();
+    board.record_signed_in(true);
+    board.record_sweep(7, false, (NOW - 300.0) * 1000.0);
+    let rows: [(&str, &str, SyncOutcomeKind, &str); 7] = [
+        (
+            "prjaaaaaaaaaaaaaaaa",
+            "Zook Dome",
+            SyncOutcomeKind::Published,
+            "record and content are up",
+        ),
+        (
+            "prjbbbbbbbbbbbbbbbb",
+            "Logo Sign",
+            SyncOutcomeKind::Pushed,
+            "content is up",
+        ),
+        (
+            "prjcccccccccccccccc",
+            "Fresh Sketch",
+            SyncOutcomeKind::NothingSaved,
+            "no saved version yet — nothing to publish",
+        ),
+        (
+            "prjdddddddddddddddd",
+            "Workbench Wall",
+            SyncOutcomeKind::Skipped,
+            "open in another tab; that tab syncs it",
+        ),
+        (
+            "prjeeeeeeeeeeeeeeee",
+            "Ember Dusk",
+            SyncOutcomeKind::Retrying,
+            "transport: the service was unreachable",
+        ),
+        (
+            "prjffffffffffffffff",
+            "Ancient Import",
+            SyncOutcomeKind::Refused,
+            "local history is unreadable — the project has no event log",
+        ),
+        (
+            "prjgggggggggggggggg",
+            "Borrowed Tracking Copy",
+            SyncOutcomeKind::Denied,
+            "the service refused the push: not yours to write",
+        ),
+    ];
+    for (i, (uid, name, kind, detail)) in rows.into_iter().enumerate() {
+        board.record_project(
+            uid,
+            name,
+            kind,
+            detail,
+            (NOW - 60.0 * (i as f64 + 1.0)) * 1000.0,
+        );
+    }
+    SyncStatusSnapshot {
+        engine: board.engine.clone(),
+        rows: board.rows(),
+    }
+}
 
 /// The row stack for stories that show several pages at once.
 const STACK: &str = "tw:grid tw:gap-8";

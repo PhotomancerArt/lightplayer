@@ -1,9 +1,12 @@
 //! Auto-publish: a signed-in account's projects exist in the cloud without
 //! anybody asking for it (vision D2/D3/D7).
 //!
-//! There is no "share" button in this slice and no sync status anywhere. A
-//! project is created, renamed or saved; some time later the service holds
-//! it, and the address already in the bar is the link. Four pieces:
+//! There is no "share" button in this slice and no sync affordance in the
+//! product surfaces. A project is created, renamed or saved; some time
+//! later the service holds it, and the address already in the bar is the
+//! link. The one place outcomes are visible is diagnostic: the driver
+//! records every trip's conclusion in [`sync_status`] and the `/account`
+//! page renders the ledger. Five pieces:
 //!
 //! - [`sync_queue`] — *when*. The debounce, the retry cadence, and the
 //!   in-flight bookkeeping, as a pure state machine.
@@ -11,7 +14,9 @@
 //!   container manifest; no preview (see that module's docs).
 //! - [`sync_trip`] — *one attempt*. Publish or push, runtime-neutral, tested
 //!   against the in-process service.
-//! - `sync_engine` (wasm only) — the driver that wires the three to the OPFS
+//! - [`sync_status`] — *what just happened*. The per-tab ledger of trip
+//!   conclusions, including the ones that make no network traffic.
+//! - `sync_engine` (wasm only) — the driver that wires the four to the OPFS
 //!   library, `FetchCloudPort`, and the browser's timers.
 //!
 //! # The rules that do not bend
@@ -26,6 +31,7 @@
 
 pub mod sidecar_producer;
 pub mod sync_queue;
+pub mod sync_status;
 pub mod sync_trip;
 
 #[cfg(target_arch = "wasm32")]
