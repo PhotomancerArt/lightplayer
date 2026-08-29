@@ -445,7 +445,7 @@ impl StudioRoute {
             // TRANSIENT view of that example — the ephemeral uid is
             // deliberately not the comparison (it never appears in a URL).
             StudioRoute::Example { slug, .. } => view
-                .open_project_transient
+                .open_transient_example
                 .as_deref()
                 .and_then(lpa_studio_core::app::home::embedded_example)
                 .is_some_and(|example| example.slug() == slug),
@@ -684,7 +684,7 @@ pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
             // uid, which for a transient session is the ephemeral RAM uid
             // and must never reach the URL.
             if let Some(example) = view
-                .open_project_transient
+                .open_transient_example
                 .as_deref()
                 .and_then(lpa_studio_core::app::home::embedded_example)
             {
@@ -1420,7 +1420,7 @@ mod tests {
         let mut view = UiStudioView::new(Vec::new(), UiConsoleView::empty())
             .with_open_project(Some(SHARE_UID.to_string()), Some("Fyeah Sign".to_string()));
         assert!(!route.project_matches_view(&view));
-        view.open_project_transient = Some("examples/fyeah-sign".to_string());
+        view.open_transient_example = Some("examples/fyeah-sign".to_string());
         assert!(route.project_matches_view(&view));
     }
 
@@ -1441,7 +1441,7 @@ mod tests {
             }),
             "an ordinary library session binds its project address"
         );
-        view.open_project_transient = Some("examples/fyeah-sign".to_string());
+        view.open_transient_example = Some("examples/fyeah-sign".to_string());
         assert_eq!(
             lens_route(&view),
             Some(StudioRoute::Example {

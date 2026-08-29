@@ -110,13 +110,22 @@ pub struct UiStudioView {
     /// follows the view, covering example opens and clearing on disconnect
     /// without action plumbing.
     pub open_project_name: Option<String>,
-    /// `Some(example id)` while the open session is a TRANSIENT view
-    /// session over an embedded example (examples vision D2): nothing was
-    /// installed, [`Self::open_project_uid`] carries an ephemeral RAM uid
-    /// that must never reach a URL or the cloud, and the honest address is
-    /// the bare `/p/<slug>`. Cleared the moment an explicit save forks the
-    /// session into the library.
-    pub open_project_transient: Option<String>,
+    /// The open session is a TRANSIENT view session (examples vision D2 /
+    /// P5): memory stores, nothing installed — an explicit save forks it.
+    /// Covers BOTH kinds (embedded example and shared View link); the web
+    /// edge keys the leave-discards-work confirm off this.
+    pub open_project_transient: bool,
+    /// `Some(example id)` when the transient session views an embedded
+    /// example: [`Self::open_project_uid`] then carries a RAM-minted uid
+    /// that must never reach a URL, and the honest address is the bare
+    /// `/p/<slug>`. `None` for shared-view sessions (their uid is the
+    /// cloud document's own and the Project route is honest). Cleared the
+    /// moment an explicit save forks the session into the library.
+    pub open_transient_example: Option<String>,
+    /// Completed fork-at-save count for this tab (monotonic). The web
+    /// shell watches it to raise the fork toast — a state transition
+    /// alone cannot distinguish "forked" from "opened another project".
+    pub transient_fork_generation: u64,
     /// Connect-as-pull result for the attached DEVICE (never the sim —
     /// D22): identity + content classification. Feeds the device pane,
     /// gallery cards, and the device-push verbs (M5/M8′).
@@ -149,7 +158,9 @@ impl UiStudioView {
             lens: None,
             open_project_uid: None,
             open_project_name: None,
-            open_project_transient: None,
+            open_project_transient: false,
+            open_transient_example: None,
+            transient_fork_generation: 0,
             device_sync: None,
             lens_card: None,
             session: None,
@@ -174,10 +185,17 @@ impl UiStudioView {
         self
     }
 
-    /// Mark the open session as a transient view of `example_id` (see
-    /// [`Self::open_project_transient`]).
-    pub fn with_transient(mut self, example_id: Option<String>) -> Self {
-        self.open_project_transient = example_id;
+    /// Mark the open session's transient state (see
+    /// [`Self::open_project_transient`] / [`Self::open_transient_example`]).
+    pub fn with_transient(
+        mut self,
+        transient: bool,
+        example_id: Option<String>,
+        fork_generation: u64,
+    ) -> Self {
+        self.open_project_transient = transient;
+        self.open_transient_example = example_id;
+        self.transient_fork_generation = fork_generation;
         self
     }
 

@@ -223,12 +223,14 @@ pub fn App() -> Element {
     let loop_unsaved = Rc::clone(&unsaved);
     let loop_library_uids = Rc::clone(&library_uids);
     let loop_pending_project = Rc::clone(&pending_project_route);
-    // The transient session's uid from the last view — the fork-at-save
-    // toast (D7) fires on the transient→owned transition: same uid, marker
-    // gone. Navigating away clears the open uid too, so a torn-down
-    // session never toasts.
-    let last_transient = use_hook(|| Rc::new(RefCell::new(None::<String>)));
+    // Whether the last emitted view ran a transient session (the nav
+    // listener's leave-discards-work evidence) and the fork generation the
+    // toast watches (D7): the counter is the core's own "a fork happened"
+    // signal — state transitions alone cannot distinguish a fork from
+    // opening another project.
+    let last_transient = use_hook(|| Rc::new(Cell::new(false)));
     let loop_last_transient = Rc::clone(&last_transient);
+    let loop_fork_generation = use_hook(|| Rc::new(Cell::new(0u64)));
     let mut loop_toasts = toasts;
     let bridge = use_hook(move || {
         install_log_sink();
@@ -320,24 +322,15 @@ pub fn App() -> Element {
                     .open_project_uid
                     .clone()
                     .zip(next.open_project_name.clone());
-                // The fork-at-save moment (examples vision D7): the session
-                // that was a transient view is suddenly an ordinary owned
-                // one under the same uid — the explicit save installed it.
-                // The URL heal rides the lens reconciliation below; this is
-                // the one-line confirmation.
-                {
-                    let was_transient = loop_last_transient.borrow().clone();
-                    if let Some(uid) = was_transient
-                        && next.open_project_transient.is_none()
-                        && next.open_project_uid.as_deref() == Some(uid.as_str())
-                    {
-                        loop_toasts.say(crate::app::share::visitor_session::FORKED_COPY_LINE);
-                    }
-                    *loop_last_transient.borrow_mut() = next
-                        .open_project_transient
-                        .as_ref()
-                        .and(next.open_project_uid.clone());
+                // The fork-at-save moment (examples vision D7): the core
+                // bumps the generation once per completed fork. The URL
+                // heal rides the lens reconciliation below; this is the
+                // one-line confirmation.
+                if next.transient_fork_generation > loop_fork_generation.get() {
+                    loop_toasts.say(crate::app::share::visitor_session::FORKED_COPY_LINE);
                 }
+                loop_fork_generation.set(next.transient_fork_generation);
+                loop_last_transient.set(next.open_project_transient);
                 // Latch the library roster and answer any `/p/<uid>` route
                 // that has been waiting for it (the boot case — navigation
                 // mid-session reads the same latch synchronously).
@@ -600,7 +593,7 @@ pub fn App() -> Element {
             // asks first. Ordinary sessions keep R8-4's no-prompt rule.
             let leave_discards_transient = matches!(plan, NavSessionPlan::Leave { .. })
                 && nav_unsaved.get()
-                && nav_transient.borrow().is_some();
+                && nav_transient.get();
             if let router::NavEvent::ClickIntent(_) = event {
                 return match plan {
                     NavSessionPlan::Refuse(line) => {
@@ -1044,7 +1037,7 @@ pub fn App() -> Element {
         .then(|| current_view.session.clone())
         .flatten()
         .map(|session| ChromeSessionControl {
-            example: current_view.open_project_transient.is_some(),
+            example: current_view.open_transient_example.is_some(),
             session,
             project: current_view.panes.iter().find_map(|pane| match &pane.body {
                 lpa_studio_core::UiViewContent::ProjectEditor(editor) => {
@@ -1368,9 +1361,10 @@ fn resolve_project_route(
     true
 }
 
-/// Consume one pending shared-project intent (P6): fetch the project as a
-/// tracking copy into the library, then open it through the same funnel a
-/// gallery card uses. A refusal lands in `state` for Home's one quiet
+/// Consume one pending shared-project intent (P6/P5): fetch the project
+/// and open it — as a tracking copy through the ordinary funnel (member /
+/// Edit link), or as a TRANSIENT view session (View link — nothing
+/// installed, D1/D2). A refusal lands in `state` for Home's one quiet
 /// line; the URL stays exactly as the sender wrote it, so a reload
 /// retries.
 #[cfg(target_arch = "wasm32")]
@@ -1381,16 +1375,34 @@ fn consume_shared_intent(
     tx: CommandSender,
     pending_route_open: Rc<Cell<bool>>,
 ) {
+    use crate::cloud::shared_open::SharedOpenOutcome;
     state.set(SharedOpenState::Opening);
     spawn(async move {
-        match crate::cloud::shared_open::open_shared_into_library(uid).await {
-            Ok(summary) => {
+        match crate::cloud::shared_open::open_shared_link(uid).await {
+            Ok(SharedOpenOutcome::Installed(summary)) => {
                 state.set(SharedOpenState::Idle);
                 pending_route_open.set(true);
                 tx.send(StudioCommand::Action(UiAction::from_op(
                     HOME_NODE_ID,
                     HomeOp::OpenPackage {
                         key: summary.uid.to_string(),
+                    },
+                )));
+            }
+            Ok(SharedOpenOutcome::Transient {
+                name,
+                package_files,
+                history_files,
+            }) => {
+                state.set(SharedOpenState::Idle);
+                pending_route_open.set(true);
+                tx.send(StudioCommand::Action(UiAction::from_op(
+                    HOME_NODE_ID,
+                    HomeOp::OpenSharedTransient {
+                        uid: uid.to_string(),
+                        name,
+                        package_files,
+                        history_files,
                     },
                 )));
             }

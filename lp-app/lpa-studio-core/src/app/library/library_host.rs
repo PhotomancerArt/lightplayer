@@ -156,6 +156,18 @@ pub enum CatalogOp {
         device: RegisteredDevice,
         version: lpc_history::ContentHash,
     },
+    /// Fork a TRANSIENT view session's working copy into a new library
+    /// project at the explicit save (examples vision P5): a fresh uid is
+    /// minted at install (the incoming manifest's uid — the PARENT cloud
+    /// document's — is dropped), the provenance seeds a fresh history
+    /// (`ForkedFrom` origin + the initial save), and the parent's own log
+    /// stays with the parent. Creation-shaped, like `Duplicate` without a
+    /// library source.
+    ForkTransientCopy {
+        name: String,
+        files: Vec<(String, Vec<u8>)>,
+        provenance: super::package_meta::PackageProvenance,
+    },
     /// Install a project whose content AND history already exist in full —
     /// a cloud tracking copy (`open_shared`, P6) or a locally forked line —
     /// both file sets verbatim, nothing minted, nothing re-saved.
@@ -525,6 +537,11 @@ pub fn apply_catalog_op(
             )?;
             Some(summary_for(store, parse_uid(&project_uid)?)?)
         }
+        CatalogOp::ForkTransientCopy {
+            name,
+            files,
+            provenance,
+        } => Some(store.install_files_with_fresh_uid(&name, &files, provenance, now)?),
         CatalogOp::InstallSyncedProject {
             name,
             package_files,

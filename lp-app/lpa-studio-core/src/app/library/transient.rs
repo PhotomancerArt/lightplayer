@@ -25,6 +25,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use lpc_history::PrefixedUid;
 use lpc_model::AsLpPath;
 use lpfs::{LpFs, LpFsMemory};
 
@@ -55,6 +56,43 @@ pub(crate) fn all_store_files(
     }
     files.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(files)
+}
+
+/// Build a transient `OpenedProject` over PRE-FETCHED content — a shared
+/// View link's working copy and its real history, verbatim (P5). The uid
+/// is the cloud document's own (D17), the history is non-empty by
+/// construction (`open_shared` refuses an empty remote log), so no origin
+/// is minted, no meta sidecar is written, and no save is recorded — the
+/// fetched checkout IS the head.
+pub(crate) fn transient_opened_project_prefetched(
+    uid: PrefixedUid,
+    slug: &str,
+    package_files: &[(String, Vec<u8>)],
+    history_files: &[(String, Vec<u8>)],
+) -> Result<OpenedProject, LibraryError> {
+    let package_fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+    let history_fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+    {
+        let view = package_fs.borrow();
+        for (relative, bytes) in package_files {
+            let path = format!("/{}", relative.trim_start_matches('/'));
+            view.write_file(path.as_str().as_path(), bytes)?;
+        }
+    }
+    {
+        let view = history_fs.borrow();
+        for (relative, bytes) in history_files {
+            let path = format!("/{}", relative.trim_start_matches('/'));
+            view.write_file(path.as_str().as_path(), bytes)?;
+        }
+    }
+    Ok(OpenedProject {
+        uid,
+        slug: slug.to_string(),
+        package_fs,
+        history_fs,
+        receipt: OpenReceipt::nothing_to_undo(),
+    })
 }
 
 /// Build a transient `OpenedProject` from in-memory bytes.

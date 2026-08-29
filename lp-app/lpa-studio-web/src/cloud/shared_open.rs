@@ -2,9 +2,17 @@
 //! intent P3 left behind.
 //!
 //! The route resolver said "this uid is not in the library" and parked the
-//! uid; this module turns that into either a **tracking copy in the OPFS
-//! library** (which then opens through the ordinary P3 open path) or a
-//! calm not-found state on Home.
+//! uid; this module turns that into one of three things, decided by what
+//! the fetch's own answer says the caller is (examples vision P5):
+//!
+//! - **A member or an Edit link-holder** → a **tracking copy in the OPFS
+//!   library** (the D17 model: uid preserved, history verbatim), opened
+//!   through the ordinary open path. An Edit save means push-to-cloud
+//!   collaboration, where a persistent local copy is the right shape.
+//! - **A View link-holder** → a **transient view session** (D1/D2): the
+//!   fetched copy runs from memory, nothing is installed, and an explicit
+//!   save forks a fresh project (`ForkedFrom`).
+//! - Neither → the calm not-found state on Home.
 //!
 //! # Fetch first, install second
 //!
@@ -90,19 +98,33 @@ pub(crate) fn all_files(fs: &dyn LpFs) -> Result<Vec<(String, Vec<u8>)>, FsError
     Ok(files)
 }
 
-/// Fetch `uid` as a tracking copy and install it into the OPFS library.
-///
-/// On success the project is an ordinary library entry (uid preserved,
-/// history verbatim, binding tracking) and the caller opens it through the
-/// same funnel a gallery card uses. On failure nothing was written.
+/// What consuming a `/p/` link produced (examples vision P5): the mode
+/// split, decided by the fetch's own answer.
 #[cfg(target_arch = "wasm32")]
-pub async fn open_shared_into_library(
-    uid: PrefixedUid,
-) -> Result<lpa_studio_core::app::library::PackageSummary, SharedOpenState> {
+pub enum SharedOpenOutcome {
+    /// A tracking copy landed in the library (member / Edit link) — open
+    /// it by key through the ordinary funnel.
+    Installed(lpa_studio_core::app::library::PackageSummary),
+    /// A View link: the fetched bytes for a transient open — nothing was
+    /// installed (D2).
+    Transient {
+        name: String,
+        package_files: Vec<(String, Vec<u8>)>,
+        history_files: Vec<(String, Vec<u8>)>,
+    },
+}
+
+/// Fetch `uid` and either install a tracking copy (member / Edit link) or
+/// hand back the bytes for a transient view session (View link — D1/D2:
+/// viewing installs nothing).
+///
+/// On failure nothing was written.
+#[cfg(target_arch = "wasm32")]
+pub async fn open_shared_link(uid: PrefixedUid) -> Result<SharedOpenOutcome, SharedOpenState> {
     use lpa_cloud_client::cloud_port::TransportError;
     use lpa_cloud_client::{LocalProject, SyncError, sync::open_shared};
     use lpa_studio_core::app::library::{CatalogOp, PackageProvenance};
-    use lpc_cloud_api::CloudError;
+    use lpc_cloud_api::{Access, CloudError};
     use lpfs::LpFsMemory;
 
     let Some(host) = crate::local_store::library_host() else {
@@ -139,6 +161,20 @@ pub async fn open_shared_into_library(
         SharedOpenState::Unreachable
     })?;
 
+    // The mode split (same classification `visitor_mode::share_mode`
+    // draws from a GetProject): a member roster in the answer = member;
+    // otherwise the link's general access decides. Only a View
+    // link-holder views transiently — a member's own project and an Edit
+    // collaboration keep the tracking-copy model (PD5).
+    let view_only = report.members.is_none() && report.meta.access == Access::View;
+    if view_only {
+        return Ok(SharedOpenOutcome::Transient {
+            name,
+            package_files,
+            history_files,
+        });
+    }
+
     let outcome = host
         .catalog(CatalogOp::InstallSyncedProject {
             name,
@@ -151,10 +187,13 @@ pub async fn open_shared_into_library(
             log::warn!("shared open of {uid}: install refused: {error}");
             SharedOpenState::Unreachable
         })?;
-    outcome.summary.ok_or_else(|| {
-        log::warn!("shared open of {uid}: install produced no package");
-        SharedOpenState::Unreachable
-    })
+    outcome
+        .summary
+        .map(SharedOpenOutcome::Installed)
+        .ok_or_else(|| {
+            log::warn!("shared open of {uid}: install produced no package");
+            SharedOpenState::Unreachable
+        })
 }
 
 #[cfg(test)]
