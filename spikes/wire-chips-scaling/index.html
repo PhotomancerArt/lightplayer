@@ -141,7 +141,8 @@
   .hit { position: absolute; top: 0; bottom: 0; }
   .hit.lit { background: rgba(255,255,255,.10); box-shadow: inset 0 0 0 1px var(--border-strong); border-radius: 2px; }
   .hit.sel { box-shadow: inset 0 0 0 1px var(--sel-border); background: var(--sel-bg); border-radius: 2px; }
-  .hit.contested { box-shadow: inset 0 -2px 0 0 var(--err-border); }
+  .hit.contested { box-shadow: inset 0 0 0 1px var(--err-border);
+                   background: rgba(135,75,75,.28); border-radius: 2px; }
   .legend { display: flex; gap: 10px; margin-top: 5px; font-family: var(--mono);
             font-size: 9px; color: var(--dim); flex-wrap: wrap; }
   .legend .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
