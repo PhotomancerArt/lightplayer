@@ -255,22 +255,23 @@ where
         }
 
         let sequence = self.sequence;
-        // The frame owns its events (one clone into the message), but we keep
-        // `pending_events` intact so a send failure leaves the batch pending
-        // without a second up-front clone-to-restore.
+        // The frame takes ownership of the batch (`mem::take`) instead of
+        // cloning it: a clone would double the live event set at every flush —
+        // up to a full frame's worth of structured events — which matters on
+        // the classic's heap. A failed send therefore consumes the batch; that
+        // is fine because no caller retries a failed flush (a transport-write
+        // failure terminates the stream or the tick), and the sequence still
+        // does not advance.
+        let events = core::mem::take(&mut self.pending_events);
+        self.pending_events_len = 0;
         self.transport
             .send(WireServerMessage::stream_frame(
                 self.id,
                 sequence,
                 fin,
-                lpc_wire::server::ServerMsgBody::ProjectRead {
-                    events: self.pending_events.clone(),
-                },
+                lpc_wire::server::ServerMsgBody::ProjectRead { events },
             ))
             .await?;
-        // Confirmed send: clear the batch and advance.
-        self.pending_events.clear();
-        self.pending_events_len = 0;
         self.advance_sequence();
         Ok(())
     }
@@ -491,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn frame_sink_does_not_advance_sequence_after_send_error() {
+    fn frame_sink_consumes_batch_and_holds_sequence_after_send_error() {
         let begin = ProjectReadEvent::Begin {
             revision: Revision::new(7),
         };
@@ -505,14 +506,18 @@ mod tests {
         block_on(async {
             let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
             sink.send_project_read_event(begin).await.unwrap();
+            // `end` does not fit alongside `begin`, forcing a flush of
+            // `[begin]`, which fails. The batch is consumed by the failed send
+            // (no clone-and-retain — see `flush`), `end` is not enqueued, and
+            // the sequence does not advance.
             sink.send_project_read_event(end.clone()).await.unwrap_err();
+            // A later event starts a fresh batch at the same sequence.
             sink.send_project_read_event(end).await.unwrap();
             sink.finish().await.unwrap();
         });
 
-        assert_eq!(transport.inner.sent.len(), 2);
+        assert_eq!(transport.inner.sent.len(), 1);
         assert_frame(&transport.inner.sent[0], 9, 0, 1);
-        assert_frame(&transport.inner.sent[1], 9, 1, 1);
     }
 
     #[test]

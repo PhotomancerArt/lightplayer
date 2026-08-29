@@ -57,9 +57,10 @@ pub async fn run_server_loop<T: ServerTransport>(
     mut server: LpServer,
     mut transport: T,
     time_provider: Esp32TimeProvider,
-    // Chip-injected seams: heap stats for the heartbeat (used/free bytes) and
-    // the watchdog feed. Both are chip facts this crate must not know.
-    memory_stats: fn() -> Option<(u32, u32)>,
+    // Chip-injected seams: heap stats for the heartbeat (including the
+    // fragmentation numbers only the chip can probe) and the watchdog feed.
+    // Both are chip facts this crate must not know.
+    memory_stats: fn() -> Option<lpc_wire::server::MemoryStats>,
     mut feed_watchdog: impl FnMut(u64),
 ) -> ! {
     // Wire hello: the first id-0 frame this loop ever sends, so clients can
@@ -184,9 +185,11 @@ pub async fn run_server_loop<T: ServerTransport>(
         // Send heartbeat message periodically
         // See prior art: fw-esp32/src/tests/test_usb.rs heartbeat_task()
         // This implementation uses proper ServerMessage types with M! prefix
-        if response_count > 0 {
-            heartbeat_last_sent = current_time;
-        } else if current_time.saturating_sub(heartbeat_last_sent) >= HEARTBEAT_INTERVAL_MS {
+        // Heartbeats flow on their interval even while responses are being
+        // served: a long multi-frame read is exactly when the memory and
+        // link-loss numbers matter most, and suppressing the heartbeat there
+        // made a busy device doubly invisible.
+        if current_time.saturating_sub(heartbeat_last_sent) >= HEARTBEAT_INTERVAL_MS {
             // Get loaded projects from server
             let loaded_projects = server.project_manager().list_loaded_projects();
 
@@ -198,12 +201,7 @@ pub async fn run_server_loop<T: ServerTransport>(
             fps_collector.prune_older_than(current_time.saturating_sub(FPS_STATS_WINDOW_MS));
             let fps_stats = fps_collector.compute_stats();
 
-            let memory =
-                memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::server::MemoryStats {
-                    free_bytes,
-                    used_bytes,
-                    total_bytes: used_bytes.saturating_add(free_bytes),
-                });
+            let memory = memory_stats();
 
             // Create heartbeat message (unsolicited: id 0, single/final message).
             let heartbeat_msg = WireServerMessage::new(
@@ -223,6 +221,7 @@ pub async fn run_server_loop<T: ServerTransport>(
                         },
                     ),
                     outputs: crate::output::wire_stats_source::current(),
+                    link: crate::serial::link_counters::current(),
                 },
             );
 

@@ -456,6 +456,7 @@ impl FakeDeviceCore {
                 memory: None,
                 recovery: None,
                 outputs: None,
+                link: None,
             },
         );
         self.emit_wire_frame(&frame);

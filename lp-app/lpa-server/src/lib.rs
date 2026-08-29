@@ -34,7 +34,7 @@ pub use lpc_engine::{
 pub use lpc_engine::features::{ENGINE_FEATURE_FRAGMENT, supported_features};
 pub use project::Project;
 pub use project_manager::{ProjectManager, is_project_dir};
-pub use server::{LpServer, MemoryStatsFn};
+pub use server::{LpServer, MemoryStatsFn, PROJECT_READ_MIN_HEADROOM_BYTES, ReadHeadroomProbe};
 
 /// GLSL frontend that ships on LightPlayer devices — the product constant.
 ///

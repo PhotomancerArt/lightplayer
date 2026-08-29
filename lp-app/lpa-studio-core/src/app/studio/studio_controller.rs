@@ -10139,6 +10139,8 @@ mod tests {
                                     free_bytes: 4096,
                                     used_bytes: 2048,
                                     total_bytes: 6144,
+                                    largest_free_block: None,
+                                    oom_retry_saves: None,
                                 }),
                                 panel_auto_save: Some(true),
                             }),

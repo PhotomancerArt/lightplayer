@@ -84,6 +84,13 @@ where
         self.budget
     }
 
+    /// Decompose into `(budget, make_timer)` so a caller can arm several
+    /// sequential deadlines from one configured deadline (a staged sync runs
+    /// one bounded read per stage; `&mut MakeTimer` is itself a `MakeTimer`).
+    pub fn into_parts(self) -> (Duration, MakeTimer) {
+        (self.budget, self.make_timer)
+    }
+
     /// A fresh timer future for the current budget. Called once per frame wait,
     /// so awaiting the result is the reset-on-progress behaviour.
     fn fresh_timer(&mut self) -> Timer {

@@ -1,65 +1,57 @@
 //! Shape registry project read helpers.
+//!
+//! Shape entries are never materialized as a whole-registry snapshot: the
+//! stream layer pulls them from [`Engine::iter_project_shape_entries`] one
+//! entry at a time (sent and dropped before the next is cloned), so peak
+//! memory is one `SlotShapeEntry`, not the whole shape forest (the classic's
+//! project-read OOM faulted inside `SlotShape::clone` —
+//! `docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
 
 use alloc::vec::Vec;
 
-use lpc_model::{Revision, SlotShapeId};
-use lpc_wire::{ReadLevel, ShapeReadQuery, ShapeReadResult};
+use lpc_model::{Revision, SlotShapeEntry, SlotShapeId};
 
 use super::Engine;
 
 impl Engine {
-    pub(super) fn read_project_shapes(
-        &self,
-        query: ShapeReadQuery,
-        since: Option<Revision>,
-    ) -> ShapeReadResult {
-        let since = since.unwrap_or_default();
-        let (registry, membership) = match query.level {
-            ReadLevel::Ids | ReadLevel::Summary | ReadLevel::Detail => {
-                let mut snapshot = self
-                    .slot_shapes()
-                    .snapshot_page_with_static_catalog(None, usize::MAX)
-                    .0;
-                // Membership sync (G3/G7): when the id set moved past `since`, carry
-                // the full current id list so a client can prune shapes that vanished
-                // from a gated stream. Computed before the entry gate below (which
-                // shrinks `snapshot.shapes`) so it names every live id, not just the
-                // changed ones. Mirrors the stream's `ids_revision > since` guard.
-                let membership = if snapshot.ids_revision > since {
-                    Some(snapshot.shapes.keys().copied().collect())
-                } else {
-                    None
-                };
-                // Gate entries by their per-entry `changed_at`. `since == 0` is a
-                // fresh/bulk read, so every live entry is included (matches the
-                // tree's `since==0` bulk-sync guard); for `since > 0` inclusion is
-                // strictly `changed_at > since`.
-                if since != Revision::default() {
-                    snapshot.shapes.retain(|_, entry| entry.changed_at > since);
-                }
-                (Some(snapshot), membership)
-            }
-        };
-        ShapeReadResult {
-            level: query.level,
-            registry,
-            membership,
-        }
+    /// Registry ids revision, for membership-sync gating.
+    pub(super) fn project_shape_ids_revision(&self) -> Revision {
+        self.slot_shapes().revision()
     }
 
-    /// Full current shape id set for membership sync.
+    /// Lazily snapshot shape entries in merged static+dynamic id order, one
+    /// entry cloned per step.
+    ///
+    /// Gating matches the old whole-snapshot `retain`: `since == 0` is a
+    /// fresh/bulk read including every live entry (static catalog included);
+    /// for `since > 0` inclusion is strictly `changed_at > since` (which
+    /// excludes static-catalog entries — they report `Revision::default()`).
+    pub(super) fn iter_project_shape_entries(
+        &self,
+        since: Revision,
+    ) -> impl Iterator<Item = (SlotShapeId, SlotShapeEntry)> + '_ {
+        let registry = self.slot_shapes();
+        registry.ids_with_static_catalog().filter_map(move |id| {
+            if since != Revision::default() {
+                let changed_at = registry.entry_changed_at_with_static_catalog(id)?;
+                if changed_at <= since {
+                    return None;
+                }
+            }
+            registry
+                .entry_with_static_catalog(id)
+                .map(|entry| (id, entry))
+        })
+    }
+
+    /// Full current shape id set for membership sync — ids only, no entry
+    /// clones.
     ///
     /// The stream emits this list (as `ProjectReadShapeEvent::Membership`) only
     /// when the registry's `ids_revision` is newer than the request `since`, so a
     /// client can prune any local shape whose id is absent. The list is the full
     /// live membership, including the static catalog, so it is authoritative.
     pub(super) fn project_shape_membership_ids(&self) -> Vec<SlotShapeId> {
-        self.slot_shapes()
-            .snapshot_page_with_static_catalog(None, usize::MAX)
-            .0
-            .shapes
-            .keys()
-            .copied()
-            .collect()
+        self.slot_shapes().ids_with_static_catalog().collect()
     }
 }

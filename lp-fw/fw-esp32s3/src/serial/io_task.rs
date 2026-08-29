@@ -246,6 +246,7 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
                 use alloc::string::ToString;
                 if incoming.sender().try_send(line_str.to_string()).is_err() {
                     log::warn!("[io_task] incoming queue full, dropping M! message");
+                    fw_esp32_common::serial::link_counters::bump_queue_full_drop();
                 }
             }
             // Non-M! lines are ignored (debug output, etc.)

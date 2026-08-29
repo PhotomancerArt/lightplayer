@@ -25,6 +25,11 @@ use std::sync::Arc;
 ///
 /// * `Ok((LpServer, Box<dyn LpFs>))` if server creation succeeded
 /// * `Err` if server creation failed
+/// Frame budget for links with no meaningful transport limit: 1 MiB. Big
+/// enough that no real payload ever notices, small enough that the bounded
+/// batching path runs everywhere (see the comment at the call site).
+const HOST_LINK_FRAME_BUDGET_BYTES: usize = 1024 * 1024;
+
 pub fn create_server(
     dir: Option<&Path>,
     memory: bool,
@@ -72,9 +77,12 @@ pub fn create_server(
         graphics,
     );
     // Websocket transport (tungstenite, effectively unbounded frames) — no
-    // 16 KiB serial constraint, so this link declares no frame budget and
-    // answers display layouts at any scale.
-    server.set_project_read_frame_budget(None);
+    // 16 KiB serial constraint. A generous EXPLICIT bound (not `None`):
+    // behaviorally identical for real payloads (display layouts derive a
+    // huge budget from it), but this link then exercises the same
+    // batching/refusal code path the device runs, so budget regressions
+    // surface in host CI instead of on silicon.
+    server.set_project_read_frame_budget(Some(HOST_LINK_FRAME_BUDGET_BYTES));
 
     // Create a new filesystem instance to return (same type as what was created)
     let returned_fs = create_filesystem(dir, memory)?;
