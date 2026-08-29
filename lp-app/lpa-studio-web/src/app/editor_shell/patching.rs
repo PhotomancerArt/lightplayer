@@ -8,7 +8,13 @@
 //! Its bottom region is THE patch panel (pass 2, P4:
 //! `app::patch::patch_panel`) — the verbs' visible home, the invitations,
 //! and the keys row that replaced the help overlay. The toolbar above
-//! keeps only history and status (D4).
+//! keeps only history and status (D4). Round 2 tried moving the panel
+//! into the view's Props dock and the G1 gate sent it back down here:
+//! patching and matching want to be in ONE view, and the Outputs dock is
+//! a working surface, not a slot the readout can borrow. The defect that
+//! move was chasing — a panel-height change reflowing the canvas — is
+//! fixed in place instead, by the panel's fixed, content-independent
+//! height.
 //!
 //! Same canvas, different furniture (the one-project-canvas ADR): no
 //! dive here — the authored tree is Mapping's activity; this center
@@ -19,7 +25,8 @@
 //! Outputs dock, the Tree, or on a sprite) completes it as one real,
 //! undoable write. Plain clicks only ever select. `m` walks the next free
 //! segment and keeps the arm, `[`/`]` and `-`/`=` nudge that window
-//! (selection only), and Esc is a ladder: disarm, then deselect.
+//! (selection only), and Esc is a ladder: close the output picker, then
+//! disarm, then deselect.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -84,6 +91,58 @@ pub(crate) struct PatchingUi {
     /// lives in that panel, so the panel comes to them (G1 round 3, #6).
     /// The workbench consumes and resets it.
     pub summon_outputs: Signal<bool>,
+    /// The DESKTOP half of that same idea (round 2, P3): the output-picker
+    /// POPOVER is open. Above the fold the docks are on screen, so the pick
+    /// surface does not need to replace the view — it floats over the patch
+    /// panel, hosting the very same Outputs panel. Frame-scoped like the
+    /// arm, never in the selection store: it is chrome, not document state.
+    pub picker_open: Signal<bool>,
+}
+
+/// The pick surfaces' ONE dismissal rule, at both sizes (round 2, P3).
+///
+/// A pick surface — the mobile summon overlay, the desktop picker popover —
+/// exists for exactly one gesture, so it goes away the moment the user makes
+/// it: "I expect it to go away once I do the only thing I can, which is
+/// select something" (G1 round 3, #6). Two things count as making it: the
+/// SELECTION moved, or a patch WRITE landed (an armed completion keeps the
+/// selection on the object, so the write is its own signal). Those two are
+/// the fingerprint this watches — one mechanism, so the overlay and the
+/// popover can never disagree about when a pick is over.
+pub(crate) fn use_dismiss_on_patch_pick(
+    selection: lpa_studio_core::UiSelection,
+    surface: Option<&UiPatchSurface>,
+    mut dismiss: impl FnMut() + 'static,
+) {
+    let fingerprint = (selection, placed_lamps(surface));
+    let mut last = use_signal(|| None::<(lpa_studio_core::UiSelection, u64)>);
+    use_effect(use_reactive!(|fingerprint| {
+        let changed = last
+            .peek()
+            .as_ref()
+            .is_some_and(|previous| *previous != fingerprint);
+        last.set(Some(fingerprint));
+        if changed {
+            dismiss();
+        }
+    }));
+}
+
+/// Every lamp any run has placed on any wire — the WRITE half of the pick
+/// fingerprint. A number, not a revision: it moves for exactly the edits a
+/// pick can make and stays put through frame traffic.
+fn placed_lamps(surface: Option<&UiPatchSurface>) -> u64 {
+    surface
+        .map(|surface| {
+            surface
+                .outputs
+                .iter()
+                .flat_map(|output| output.bay.ports.iter())
+                .flat_map(|port| port.cells.iter())
+                .map(|cell| u64::from(cell.lamps))
+                .sum::<u64>()
+        })
+        .unwrap_or(0)
 }
 
 /// Map the shared patch selection onto the pulse's subject vocabulary:
@@ -165,8 +224,9 @@ fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
 /// (the window listener in [`super::hotkeys`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PatchKeyAction {
-    /// The esc ladder: rung 1 disarms, rung 2 clears the selection (and
-    /// with it the nudged segment size).
+    /// The esc ladder ([`escape_rung`]): rung 1 closes the output-picker
+    /// popover, rung 2 disarms, rung 3 clears the selection (and with it
+    /// the nudged segment size).
     Escape,
     Reverse,
     Rotate {
@@ -219,6 +279,35 @@ pub(crate) fn patch_key_action(key: &str, meta: bool, shift: bool) -> Option<Pat
         "=" => PatchKeyAction::ResizeSegment { delta: 1 },
         _ => return None,
     })
+}
+
+/// One rung of the Escape ladder, resolved (the pure half, so the ORDER is
+/// unit-testable apart from the signals).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EscapeRung {
+    /// The output-picker popover is open, so the key shuts it — and nothing
+    /// else. A pick surface is the frontmost thing on screen; spending the
+    /// arm it was opened FOR in the same keystroke would be two cancels for
+    /// one press.
+    ClosePicker,
+    /// An arm is live, so the key spends it.
+    Disarm,
+    /// Nothing armed — clear the selection, and with it the segment size
+    /// the user had nudged.
+    Deselect,
+}
+
+/// The Escape ladder's order: close the picker, then disarm, then deselect.
+/// Inverting any pair would cancel more than the user asked for in one
+/// keystroke.
+pub(crate) fn escape_rung(picker_open: bool, armed: bool) -> EscapeRung {
+    if picker_open {
+        EscapeRung::ClosePicker
+    } else if armed {
+        EscapeRung::Disarm
+    } else {
+        EscapeRung::Deselect
+    }
 }
 
 /// The patching activity's toolbar, SLIMMED (D4): history and the counts
@@ -300,6 +389,7 @@ pub fn PatchingShellCenter(
         mut armed,
         mut segment_size,
         summon_outputs: _,
+        picker_open,
     } = use_context::<PatchingUi>();
     // The pulse's echo guard: dispatch only when the mapped subject
     // actually changes (sweep-with-clear lives in the controller; this
@@ -366,11 +456,15 @@ pub fn PatchingShellCenter(
             };
             match action {
                 PatchKeyAction::Escape => {
-                    if armed.peek().is_some() {
-                        armed.set(None);
-                    } else {
-                        segment_size.set(None);
-                        select(&on_action, None);
+                    let mut picker_open = picker_open;
+                    let rung = escape_rung(*picker_open.peek(), armed.peek().is_some());
+                    match rung {
+                        EscapeRung::ClosePicker => picker_open.set(false),
+                        EscapeRung::Disarm => armed.set(None),
+                        EscapeRung::Deselect => {
+                            segment_size.set(None);
+                            select(&on_action, None);
+                        }
                     }
                 }
                 PatchKeyAction::Reverse => {
@@ -464,13 +558,17 @@ pub fn PatchingShellCenter(
                     }
                 }
             }
-            // THE panel (D8): always the center's bottom region, empty
-            // states included — never a dock, never a popover. It is a
-            // sibling consumer of the ONE selection above it.
+            // THE panel (D8): always the center's bottom region, at every
+            // width, empty states included — never a dock (G1 round 2
+            // re-affirmed it after round 2 tried the Props dock). It is a
+            // sibling consumer of the ONE selection above it, which is what
+            // puts patching and matching in one view. Its height is FIXED,
+            // so nothing it says can move the canvas edge above it.
             PatchPanel {
                 surface: surface.clone(),
                 selection: selection.clone(),
                 armed: armed_verb,
+                picker_open: picker_open(),
                 on_action,
             }
         }
@@ -1029,5 +1127,24 @@ mod tests {
             None,
             "meta+verb is the browser's, not ours"
         );
+    }
+
+    /// Escape is a LADDER, and the rungs are ordered: the open pick surface
+    /// closes first, then an armed verb is spent, and only a press with
+    /// neither drops the selection. Inverting any pair would cancel more
+    /// than the user asked for in one keystroke — the popover is the
+    /// frontmost thing on screen, and it was opened FOR the arm it sits
+    /// over.
+    #[test]
+    fn escape_closes_the_picker_then_disarms_then_deselects() {
+        for armed in [true, false] {
+            assert_eq!(
+                escape_rung(true, armed),
+                EscapeRung::ClosePicker,
+                "an open picker owns the first rung whatever is armed"
+            );
+        }
+        assert_eq!(escape_rung(false, true), EscapeRung::Disarm);
+        assert_eq!(escape_rung(false, false), EscapeRung::Deselect);
     }
 }
