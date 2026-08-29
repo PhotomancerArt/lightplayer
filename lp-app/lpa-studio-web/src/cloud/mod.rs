@@ -23,3 +23,23 @@ pub mod sync;
 pub use fetch_cloud_port::FetchCloudPort;
 pub use session_state::{CloudSession, CloudSessionRefresh, use_cloud_session_provider};
 pub use shared_open::SharedOpenState;
+
+/// Ensure this browser holds a session — minting a GUEST account when it
+/// has none (examples vision D3/D8: an anonymous fork's publish needs an
+/// owner, and sign-in must not gate it). `POST /auth/guest` is idempotent
+/// by cookie: a live session (guest or real) mints nothing. Returns
+/// whether the call landed; the caller refreshes [`CloudSession`] after.
+#[cfg(target_arch = "wasm32")]
+pub async fn ensure_guest_session() -> bool {
+    match gloo_net::http::Request::post("/auth/guest").send().await {
+        Ok(response) if response.ok() => true,
+        Ok(response) => {
+            log::warn!("guest session mint answered {}", response.status());
+            false
+        }
+        Err(error) => {
+            log::warn!("guest session mint failed: {error}");
+            false
+        }
+    }
+}

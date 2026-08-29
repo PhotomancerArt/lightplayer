@@ -85,6 +85,30 @@ One model, two entry points:
   save retries the whole install (the uid is not yet in the library, so
   retry cannot collide).
 
+## Guest ownership (anonymous fork + publish, D3/D8)
+
+Sign-in must not gate saving or sharing. A signed-out fork's publish
+mints a **guest account**: a real `CloudUser` (so `require_user`,
+publish, and the content plane work with zero per-callsite changes)
+with a synthetic subject (`anon:<usr-uid>`), no email (a guest must
+never resolve a pending member invite), `provider = "anonymous"`, and a
+dedicated **`anonymous` column — the D8 pruning lever**: "which rows
+are guest-owned" is `SELECT … FROM users WHERE anonymous = 1`, joined
+through `projects.owner`. `POST /auth/guest` installs a year-long
+session cookie (idempotent by cookie: a live session mints nothing);
+**the cookie IS the ownership** — browser-held, by ruling. The client
+mints it lazily at the first anonymous fork and refreshes its session;
+the sync engine's signed-in edge then sweeps the library and publishes.
+A guest session must never render as a signed-in account: the chrome
+keeps the sign-in affordance, the account page keeps the invitation,
+and the account switcher never remembers a guest.
+
+Accepted consequences: losing the browser profile loses ownership
+(claim-on-sign-in is parked future work); a guest can only ever touch
+its own rows (uid-as-capability unchanged), and the abuse posture is
+the marking + the ordinary rate limits, with pruning as the lever
+against build-up.
+
 ## Alternatives Considered
 
 - **Keep seed-on-open but mark copies unclaimed** (reuse/reset on
@@ -102,8 +126,6 @@ One model, two entry points:
 
 ## Follow-ups
 
-- Anonymous (signed-out) fork + publish: guest cloud ownership,
-  DB-marked for pruning (same plan, P6; may earn its own ADR section).
 - Claim-on-sign-in for guest projects — parked (losing the browser
   profile loses ownership; accepted, D8).
 - Registry-backed example curation (gallery vision M4) — embedded bytes

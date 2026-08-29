@@ -41,6 +41,10 @@ const MIGRATIONS: &[Migration] = &[
         name: "0003_access_and_archive",
         sql: include_str!("../migrations/0003_access_and_archive.sql"),
     },
+    Migration {
+        name: "0004_guest_users",
+        sql: include_str!("../migrations/0004_guest_users.sql"),
+    },
 ];
 
 /// Bring a database up to the current schema and report the version it

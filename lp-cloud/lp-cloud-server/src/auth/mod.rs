@@ -13,5 +13,6 @@
 //! exercises the same two domain calls with no network in the way.
 
 pub mod dev_auth;
+pub mod guest_auth;
 pub mod google_auth;
 pub mod session_cookie;

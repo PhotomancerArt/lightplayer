@@ -368,6 +368,7 @@ fn person(given: &str, family: &str, email: &str, photo: bool, provider: &str, s
         provider_label: provider.to_string(),
         // 2026-06-14T00:00:00Z — an account with some history behind it.
         created_at: 1_781_395_200.0,
+        anonymous: false,
     }
 }
 

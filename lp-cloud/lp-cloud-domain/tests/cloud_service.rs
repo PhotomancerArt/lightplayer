@@ -1442,3 +1442,91 @@ fn heads_of(response: &CloudResponse) -> Vec<ContentHash> {
         other => panic!("expected PushResult, got {other:?}"),
     }
 }
+
+// ---- guest accounts (examples vision D3/D8) ------------------------
+
+/// A guest is a REAL account with the pruning mark: `anonymous` set,
+/// `provider = "anonymous"`, no email — and the whole publish pipeline
+/// works for it, View-readable by anyone holding the uid.
+#[test]
+fn a_guest_account_is_marked_and_publishes_view_readable() {
+    let mut svc = service();
+    let guest = svc.begin_guest_user();
+    assert!(guest.anonymous, "the D8 pruning mark");
+    assert_eq!(guest.provider, "anonymous");
+    assert_eq!(guest.email, "", "a guest has no email");
+    assert!(
+        guest.google_sub.starts_with("anon:usr"),
+        "synthetic subject, namespaced off provider space: {}",
+        guest.google_sub
+    );
+
+    // The wire tells the client it is a guest (the account chip must not
+    // render it as signed-in).
+    let CloudResponse::MeInfo(me) = svc
+        .handle(Actor::User(guest.uid), CloudRequest::GetMe)
+        .expect("a guest can ask who it is")
+    else {
+        panic!("expected MeInfo");
+    };
+    assert!(me.anonymous);
+    assert_eq!(me.provider_label, "Guest");
+
+    // Publish works exactly as it does for a signed-in fork; the result
+    // reads anonymously (D6 — the link is the token).
+    let project = project_uid();
+    svc.handle(
+        Actor::User(guest.uid),
+        CloudRequest::PublishProject(PublishProject {
+            uid: project,
+            access: Access::View,
+            slug: "guest-fork".into(),
+        }),
+    )
+    .expect("a guest publishes");
+    svc.handle(Actor::Anonymous, get_project(project))
+        .expect("anyone holding the uid reads a View project");
+}
+
+/// Two mints are two accounts (idempotency is the EDGE's cookie check —
+/// the domain never guesses), and the prunable set is one obvious query.
+#[test]
+fn guest_mints_are_distinct_and_the_prunable_set_is_one_query() {
+    let mut svc = service();
+    let first = svc.begin_guest_user();
+    let second = svc.begin_guest_user();
+    assert_ne!(first.uid, second.uid);
+
+    // A real sign-in beside them is NOT in the prunable set.
+    let real = svc.upsert_user("g-real", "real@example.com", "Real", "google", None, None, None);
+    for user in [&first, &second] {
+        assert!(svc.store().user(user.uid).expect("stored").anonymous);
+    }
+    assert!(!svc.store().user(real.uid).expect("stored").anonymous);
+}
+
+/// A pending member invite must never resolve onto a guest: invites match
+/// by email, and a guest deliberately has none.
+#[test]
+fn a_guest_never_resolves_pending_member_invites() {
+    let mut svc = service();
+    let world = World::publish(&mut svc, Access::View);
+    svc.handle(
+        world.owner,
+        CloudRequest::AddMember(AddMember {
+            uid: world.project,
+            email: "future@example.com".into(),
+        }),
+    )
+    .expect("invite a not-yet-seen email");
+
+    let guest = svc.begin_guest_user();
+    let members = members_seen_by(&mut svc, world.owner, world.project)
+        .expect("the owner sees the roster");
+    let invite = members
+        .iter()
+        .find(|member| member.email == "future@example.com")
+        .expect("the invite row exists");
+    assert!(invite.pending, "the invite stays pending");
+    assert_ne!(invite.user, Some(guest.uid));
+}

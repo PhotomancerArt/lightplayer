@@ -232,6 +232,22 @@ pub fn App() -> Element {
     let loop_last_transient = Rc::clone(&last_transient);
     let loop_fork_generation = use_hook(|| Rc::new(Cell::new(0u64)));
     let mut loop_toasts = toasts;
+    // The anonymous-fork hook (examples vision D3/D8): a fork by a browser
+    // with no session mints a GUEST account, then refreshes the session —
+    // whose false→true `syncs()` edge sweeps the library (D7) and
+    // publishes the fork. Signed-in (and already-guest) forks skip it.
+    // (consumed under cfg(wasm32) below; hooks stay unconditional so the
+    // hook order is identical on every build)
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        allow(unused_variables, reason = "the guest mint is browser-only")
+    )]
+    let loop_cloud_session = use_context::<Signal<crate::cloud::CloudSession>>();
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        allow(unused_variables, unused_mut, reason = "the guest mint is browser-only")
+    )]
+    let mut loop_cloud_refresh = use_context::<crate::cloud::CloudSessionRefresh>();
     let bridge = use_hook(move || {
         install_log_sink();
         let mut controller = StudioController::new(now_secs);
@@ -328,6 +344,18 @@ pub fn App() -> Element {
                 // one-line confirmation.
                 if next.transient_fork_generation > loop_fork_generation.get() {
                     loop_toasts.say(crate::app::share::visitor_session::FORKED_COPY_LINE);
+                    // Signed out? The fork needs an owner before it can
+                    // publish (D3): mint the guest session, then re-ask
+                    // whoami — the session refresh is what wakes the sync
+                    // engine's library sweep.
+                    #[cfg(target_arch = "wasm32")]
+                    if matches!(&*loop_cloud_session.peek(), crate::cloud::CloudSession::Anonymous { .. }) {
+                        spawn(async move {
+                            if crate::cloud::ensure_guest_session().await {
+                                loop_cloud_refresh.refresh();
+                            }
+                        });
+                    }
                 }
                 loop_fork_generation.set(next.transient_fork_generation);
                 loop_last_transient.set(next.open_project_transient);

@@ -222,8 +222,8 @@ impl MetaStore for SqliteMetaStore {
         self.execute(
             "MetaStore::put_user",
             "INSERT INTO users\n\
-                 (uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at)\n\
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)\n\
+                 (uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at, anonymous)\n\
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)\n\
              ON CONFLICT (uid) DO UPDATE SET\n\
                  google_sub = excluded.google_sub,\n\
                  email = excluded.email,\n\
@@ -232,7 +232,8 @@ impl MetaStore for SqliteMetaStore {
                  family_name = excluded.family_name,\n\
                  picture_url = excluded.picture_url,\n\
                  provider = excluded.provider,\n\
-                 created_at = excluded.created_at",
+                 created_at = excluded.created_at,\n\
+                 anonymous = excluded.anonymous",
             params![
                 user.uid.to_string(),
                 user.google_sub,
@@ -243,6 +244,7 @@ impl MetaStore for SqliteMetaStore {
                 user.picture_url,
                 user.provider,
                 user.created_at,
+                user.anonymous,
             ],
         );
     }
@@ -250,7 +252,7 @@ impl MetaStore for SqliteMetaStore {
     fn user(&self, uid: PrefixedUid) -> Option<CloudUser> {
         self.query_one(
             "MetaStore::user",
-            "SELECT uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at\n\
+            "SELECT uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at, anonymous\n\
              FROM users WHERE uid = ?1",
             params![uid.to_string()],
             decode_user,
@@ -260,7 +262,7 @@ impl MetaStore for SqliteMetaStore {
     fn user_by_google_sub(&self, google_sub: &str) -> Option<CloudUser> {
         self.query_one(
             "MetaStore::user_by_google_sub",
-            "SELECT uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at\n\
+            "SELECT uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at, anonymous\n\
              FROM users WHERE google_sub = ?1 ORDER BY rowid DESC LIMIT 1",
             params![google_sub],
             decode_user,
@@ -270,7 +272,7 @@ impl MetaStore for SqliteMetaStore {
     fn user_by_email(&self, email: &str) -> Option<CloudUser> {
         self.query_one(
             "MetaStore::user_by_email",
-            "SELECT uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at\n\
+            "SELECT uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at, anonymous\n\
              FROM users WHERE email = ?1 ORDER BY rowid DESC LIMIT 1",
             params![email],
             decode_user,
@@ -280,7 +282,7 @@ impl MetaStore for SqliteMetaStore {
     fn users(&self, limit: usize) -> Vec<CloudUser> {
         self.query_all(
             "MetaStore::users",
-            "SELECT uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at\n\
+            "SELECT uid, google_sub, email, display_name, given_name, family_name, picture_url, provider, created_at, anonymous\n\
              FROM users ORDER BY created_at, uid LIMIT ?1",
             params![limit as i64],
             decode_user,
@@ -560,6 +562,7 @@ fn decode_user(row: &Row<'_>) -> rusqlite::Result<CloudUser> {
         picture_url: row.get(6)?,
         provider: row.get(7)?,
         created_at: row.get(8)?,
+        anonymous: row.get(9)?,
     })
 }
 
@@ -680,6 +683,43 @@ mod tests {
     use lpc_history::UidPrefix;
     use tempfile::tempdir;
 
+    /// D8's whole point: "which rows are guest-owned" is ONE obvious
+    /// query — the marking survives the file, and the join to projects is
+    /// the pruning sweep's shape.
+    #[test]
+    fn the_guest_prunable_set_is_one_query() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cloud.sqlite3");
+        let guest = PrefixedUid::mint(UidPrefix::User, &[8; 16]);
+        let real = PrefixedUid::mint(UidPrefix::User, &[9; 16]);
+        let mut store = SqliteMetaStore::open(&path);
+        for (uid, sub, anonymous) in [(guest, "anon:usr8", true), (real, "g-9", false)] {
+            store.put_user(CloudUser {
+                uid,
+                google_sub: sub.into(),
+                email: if anonymous { String::new() } else { "nine@example.com".into() },
+                display_name: if anonymous { "Guest".into() } else { "Nine".into() },
+                given_name: None,
+                family_name: None,
+                picture_url: None,
+                provider: if anonymous { "anonymous".into() } else { "google".into() },
+                created_at: 1.0,
+                anonymous,
+            });
+        }
+        let marked: Vec<String> = store
+            .conn
+            .prepare("SELECT uid FROM users WHERE anonymous = 1")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(marked, vec![guest.to_string()]);
+        assert!(store.user(guest).expect("stored").anonymous);
+        assert!(!store.user(real).expect("stored").anonymous);
+    }
+
     /// The behaviour a `BTreeMap` cannot check for us: a store written,
     /// dropped, and reopened is the same store.
     #[test]
@@ -700,6 +740,7 @@ mod tests {
                 picture_url: None,
                 provider: "google".into(),
                 created_at: 7.5,
+                anonymous: false,
             });
         }
 

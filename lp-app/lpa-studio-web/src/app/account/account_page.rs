@@ -187,6 +187,12 @@ pub fn AccountPage() -> Element {
     });
 
     match session() {
+        // A guest session (examples vision D8) has no account to manage —
+        // no email, no profile to edit, no login to come back through —
+        // so the page keeps the sign-in invitation.
+        CloudSession::SignedIn { me, options } if me.anonymous => rsx! {
+            AccountSignInCard { options, next: "/account".to_string() }
+        },
         CloudSession::SignedIn { me, .. } => rsx! {
             AccountPageBody {
                 me,
@@ -883,6 +889,7 @@ mod tests {
             picture_url: None,
             provider_label: "Google".to_string(),
             created_at: 1_754_400_000.0,
+            anonymous: false,
         }
     }
 
