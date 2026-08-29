@@ -2069,8 +2069,9 @@ mod tests {
             instances: vec![(String::new(), 0, points.len() as u32)],
             strands: strand_metas(&doc, &resolved),
             sample_diameter: doc.sample_diameter,
+            settled: true,
         };
-        let objects = sprite_objects(&render, &None);
+        let objects = sprite_objects(&render, &UiSelection::empty());
         assert_eq!(objects.len(), 1);
         assert!(objects[0].outline.is_empty(), "no band on a shaped matrix");
         assert_eq!(objects[0].cells.len(), points.len());

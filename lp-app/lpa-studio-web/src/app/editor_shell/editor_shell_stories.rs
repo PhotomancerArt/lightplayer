@@ -387,7 +387,6 @@ fn editor_toolbar_polygon_mode() -> Element {
     rsx! {
         ToolbarStrip {
             groups: super::dive_toolbar(
-                "dome",
                 &MapTool::polygon(lpa_mapping_editor::PolygonMode::Filled),
                 Default::default(),
                 &story_asset_editor(),
