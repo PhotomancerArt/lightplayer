@@ -101,22 +101,44 @@ impl Storage for LpFlashStorage {
 
     fn write(&mut self, block: u32, offset: u32, data: &[u8]) -> Result<(), LfsError> {
         let addr = self.block_offset(block, offset);
+        // Start/end trace pair at debug (`setLogLevel debug` to arm on the
+        // bench): discriminates WHERE a flash op wedges under multi-wire
+        // playback — no lines = stuck above littlefs; start without end =
+        // stuck in the stall window / ROM routine; endless pairs = a loop
+        // above this layer. docs/defects/2026-08-29-flash-write-wedges-
+        // under-zook-playback.md.
+        log::debug!("[FLASH] write blk={block} off={offset} len={}", data.len());
+        let t0 = embassy_time::Instant::now();
         // Programming flash opens a cache-disabled window the other core must
         // not run through — see `with_app_core_stalled`. Without the stall,
         // every write here fails `Io` under the dual-core RMT deployment (and
         // crashed the board when tried under render load, 2026-08-05).
-        crate::output::rmt::shared_driver::with_app_core_stalled(|| {
+        let result = crate::output::rmt::shared_driver::with_app_core_stalled(|| {
             self.flash.write(addr, data).map_err(|_| LfsError::Io)
-        })
+        });
+        log::debug!(
+            "[FLASH] write blk={block} done ok={} t={}us",
+            result.is_ok(),
+            t0.elapsed().as_micros()
+        );
+        result
     }
 
     fn erase(&mut self, block: u32) -> Result<(), LfsError> {
         let from = self.partition.offset + block * BLOCK_SIZE;
         let to = from + BLOCK_SIZE;
+        log::debug!("[FLASH] erase blk={block}");
+        let t0 = embassy_time::Instant::now();
         // Same cache-disabled window as `write`; same stall requirement.
-        crate::output::rmt::shared_driver::with_app_core_stalled(|| {
+        let result = crate::output::rmt::shared_driver::with_app_core_stalled(|| {
             self.flash.erase(from, to).map_err(|_| LfsError::Io)
-        })
+        });
+        log::debug!(
+            "[FLASH] erase blk={block} done ok={} t={}us",
+            result.is_ok(),
+            t0.elapsed().as_micros()
+        );
+        result
     }
 }
 
