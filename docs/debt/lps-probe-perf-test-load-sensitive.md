@@ -78,6 +78,16 @@ already recorded in story-capture-pipeline.md).
   `test-rust-core` fails on this test alone, re-run the LATER recipes
   explicitly (`just test-studio-host`) before believing the tree.
 
+- 2026-08-28 — cloud auto-publish diagnosis session: **11.61 s**, then
+  **16.70 s** on the next gate, with a local `just cloud-serve` (plus its
+  own cargo build) and a browser preview running for the repro. Isolated
+  re-run between them: **5.88 s** — a 2.8× swing from load alone. Same
+  shape, no lps-probe code in the branch (the change is confined to
+  `lpa-studio-web` cloud sync, which nothing in lps-probe depends on).
+  Also re-confirmed the two traps this entry already names: the gate must
+  not be piped through `tail` (it masks the exit code), and the recipes
+  behind `test-rust-core` must be re-run explicitly.
+
 **Exit criteria** — The default suite contains no load-sensitive
 wall-clock assert: the perf measurement either moves behind an opt-in
 feature/recipe (perf job), switches to a load-insensitive proxy (eval
