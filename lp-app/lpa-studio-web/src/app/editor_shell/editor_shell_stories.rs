@@ -7,15 +7,15 @@
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
-use lpa_mapping_editor::{Map2dDoc, MapEditorSession, MapTool};
+use lpa_mapping_editor::{Map2dDoc, MapEditorSession, MapTool, ShapePath};
 use lpa_studio_web_story_macros::story;
 
 use super::arrange::{DiveHost, ProjectCanvasHost};
 use super::toolbar::ToolbarStrip;
 use crate::app::patch::patch_story_fixtures::{mini_dome_surface, peach_surface};
 use lpa_studio_core::{
-    ArtifactLocation, UiArrangeFootprint, UiArrangeMeta, UiArrangeTransform, UiPatchSurface,
-    UiPatchTarget,
+    ArtifactLocation, NodeId, UiArrangeFootprint, UiArrangeMeta, UiArrangeTransform,
+    UiPatchSurface, UiPatchTarget, UiSelection,
 };
 
 /// The mini-dome surface with real map2d bodies attached: fixture
@@ -84,6 +84,31 @@ fn arrange_canvas_mini_dome() -> Element {
     })
 }
 
+#[story(
+    description = "Fixture MULTI-SELECT on the Mapping canvas (unified-selection P3): both mini-dome fixtures shift-set into one sibling selection — each sprite wears its own ring, and ONE shared dashed box spans the set with corner scale handles (`transform_handles`, the Mapping view's transform furniture; Patching multi-selects without it). A corner drag scales the whole set about the opposite corner as one `SetMany` undo step; this capture pins the resting furniture."
+)]
+fn arrange_canvas_multi_select() -> Element {
+    let (surface, bodies) = dome_canvas_inputs();
+    let mut selection = UiSelection::empty();
+    selection.set_siblings(vec![
+        UiPatchTarget::Fixture {
+            node: NodeId::new(2),
+        },
+        UiPatchTarget::Fixture {
+            node: NodeId::new(3),
+        },
+    ]);
+    canvas_frame(rsx! {
+        ProjectCanvasHost {
+            surface,
+            bodies,
+            selection,
+            transform_handles: true,
+            on_action: move |_| {},
+        }
+    })
+}
+
 /// The dived story's harness: the workbench-owned session seeded with the
 /// dome's real document, handed to the SAME canvas as layer state.
 #[component]
@@ -139,6 +164,72 @@ fn DiveInPlaceStory() -> Element {
 fn editor_shell_focused_mapping() -> Element {
     rsx! {
         DiveInPlaceStory {}
+    }
+}
+
+/// The SCOPE-DERIVED dive harness (unified-selection P4): one
+/// `UiSelection` is the only input — the story computes the dive from
+/// `selection.entered()` exactly as the workbench does, so these captures
+/// pin the states derivation produces rather than a posed layer. The
+/// session's own selection mirrors what the coordinator's seed would set
+/// for the core targets (`selection.rs`: instance targets → their object
+/// roots).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn DerivedDiveStory(selection: UiSelection, session_roots: Vec<usize>) -> Element {
+    let (surface, bodies) = dome_canvas_inputs();
+    let dome_artifact = surface.fixtures[0]
+        .mapping_artifact
+        .clone()
+        .expect("dome artifact");
+    let dome_doc = Map2dDoc::from_json(&bodies[&dome_artifact]).expect("dome parses");
+    let session = use_signal(move || {
+        let mut session = MapEditorSession::new(dome_doc.clone());
+        for root in &session_roots {
+            session.selection.insert_path(ShapePath::root(*root));
+        }
+        session
+    });
+    let dive = selection.entered().map(|node| DiveHost {
+        node,
+        session,
+        editable: true,
+    });
+    canvas_frame(rsx! {
+        ProjectCanvasHost {
+            surface,
+            bodies,
+            selection,
+            transform_handles: true,
+            dive,
+            on_action: move |_| {},
+        }
+    })
+}
+
+#[story(
+    description = "ENTERED WITH AN OBJECT SELECTED — the derived dive (unified-selection P4): the core selection holds one object-grain target (the dome's `/sector/2`), and the entered fixture is COMPUTED from it — no independent dive state to drift. The canvas renders the scope as the dive (Mapping's activity): the dome's live document editable in place, the sector object selected in the session (the coordinator's seed), the doors dimmed as the neighbour sprite. Esc ascends the one ladder: object → its fixture at project level."
+)]
+fn editor_shell_entered_selected() -> Element {
+    rsx! {
+        DerivedDiveStory {
+            selection: UiSelection::one(UiPatchTarget::Instance {
+                node: NodeId::new(2),
+                path: "/sector/2".to_string(),
+            }),
+            session_roots: vec![0],
+        }
+    }
+}
+
+#[story(
+    description = "ENTERED EMPTY — the one place scope outlives derivation (unified-selection P2/P4): `UiSelection::enter` holds the dome entered with NO targets, the state pure derivation cannot represent and drawing the first object needs (an empty document has nothing to select on the way in). The dive renders with nothing selected inside — no object rings, the tools ready — and esc's clear rung leaves the fixture itself selected at project level."
+)]
+fn editor_shell_entered_empty() -> Element {
+    let mut selection = UiSelection::empty();
+    selection.enter(NodeId::new(2));
+    rsx! {
+        DerivedDiveStory { selection, session_roots: vec![] }
     }
 }
 

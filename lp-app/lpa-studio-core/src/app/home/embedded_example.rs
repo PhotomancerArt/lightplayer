@@ -20,6 +20,10 @@ pub struct EmbeddedExample {
     pub id: &'static str,
     pub name: &'static str,
     pub kind: &'static str,
+    /// One line about the fixture this example runs on — the shelf
+    /// card's hover-reveal content: a browsing shelf answers "what
+    /// would this look like on my thing" before a click.
+    pub blurb: &'static str,
     /// The package's files, in deploy order (`project.json` first).
     pub files: &'static [ExampleFile],
 }
@@ -620,66 +624,77 @@ static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
         id: crate::STUDIO_DEMO_PROJECT_ID,
         name: "Fyeah Sign",
         kind: "Module",
+        blurb: "A letter sign strung with LEDs — the Studio demo",
         files: FYEAH_SIGN_FILES,
     },
     EmbeddedExample {
         id: "examples/plasma",
         name: "Plasma",
         kind: "Module",
+        blurb: "The classic plasma effect on a dome",
         files: PLASMA_FILES,
     },
     EmbeddedExample {
         id: "examples/meteor",
         name: "Meteor",
         kind: "Module",
+        blurb: "Meteors falling across six parallel strips",
         files: METEOR_FILES,
     },
     EmbeddedExample {
         id: "examples/comet",
         name: "Comet",
         kind: "Module",
+        blurb: "A comet trail on a single 120-LED strip",
         files: COMET_FILES,
     },
     EmbeddedExample {
         id: "examples/palette-waves",
         name: "Palette Waves",
         kind: "Module",
+        blurb: "Palette-driven waves washing over a dome",
         files: PALETTE_WAVES_FILES,
     },
     EmbeddedExample {
         id: "examples/fire2012",
         name: "Fire 2012",
         kind: "Module",
+        blurb: "The classic Fire2012 flame on one strip",
         files: FIRE2012_FILES,
     },
     EmbeddedExample {
         id: "examples/plasma-duo",
         name: "Plasma Duo",
         kind: "Module",
+        blurb: "One shader driving two fixtures — a disc and a grid",
         files: PLASMA_DUO_FILES,
     },
     EmbeddedExample {
         id: "examples/zook-dome",
         name: "Zook dome",
         kind: "Module",
+        blurb: "A geodesic dome lit along its struts",
         files: ZOOK_DOME_FILES,
     },
     EmbeddedExample {
         id: "examples/mini-dome",
         name: "Mini Dome",
         kind: "Module",
+        blurb: "A mini dome with lit doorways",
         files: MINI_DOME_FILES,
     },
     EmbeddedExample {
         id: "examples/peach-1d",
         name: "Peach (1D)",
         kind: "Module",
+        blurb: "A peach-shaped fixture sampled in 1D",
         files: PEACH_1D_FILES,
     },
     EmbeddedExample {
         id: "examples/peach-2d",
         name: "Peach (2D)",
         kind: "Module",
+        blurb: "The same peach sampled in 2D",
         files: PEACH_2D_FILES,
     },
 ];

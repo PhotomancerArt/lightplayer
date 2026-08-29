@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Card overlay — full-art gallery cards, design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css, verbatim; via gallery-rework spike) --- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-subtle: #293039;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #94b8aa;
+    --accent: #7be0b2;
+    --accent-border: #65bd96;
+    --accent-hover: #6fc39f;
+    --neutral-bg: #12171c;
+    --neutral-border: #3a444c;
+    --neutral-text: #d9e2df;
+    --good-bg: #13241d;   --good-border: #365545;  --good-text: #7be0b2;
+    --warn-bg: #292614;   --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --live-bg: #142330;   --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --bound-bg: #241a33;  --bound-border: #5f4a85; --bound-text: #c9b1f5;
+    --err-text: #ef7a76;  --err-border: #79403e;   --err-bg: #2b1817;
+    --gold: #e4c065; --gold-bg: rgba(228,192,101,.10);
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 880px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 880px; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+  button { font-family: var(--sans); }
+
+  /* ---- exploration controls ---- */
+  .controls {
+    position: sticky; top: 10px; z-index: 40;
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: 8px; color: var(--muted); font-size: 12px; margin-bottom: 10px;
+    background: color-mix(in srgb, var(--surface-subtle) 92%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .controls .group { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls .group b { color: var(--text); font-weight: 600; }
+  .chip {
+    appearance: none; border: 1px solid var(--border-strong); background: transparent;
+    color: var(--subtle); font-size: 11.5px; font-weight: 600; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer;
+  }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed=true] { color: var(--accent); border-color: var(--accent-border); background: rgba(123,224,178,.08); }
+
+  /* ---- grids ---- */
+  .cardgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; align-items: start; }
+  .stressgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; align-items: start; }
+  .stresslabel { margin: 6px 0 0; font-size: 11px; color: var(--dim); text-align: center; }
+  .halfrow { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; align-items: start; }
+  .halfrow h4 { margin: 0 0 8px; font-size: 11.5px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+  .halfrow p.note { margin: 8px 0 0; font-size: 11.5px; color: var(--dim); }
+  @media (max-width: 1100px) { .halfrow { grid-template-columns: 1fr; } }
+
+  /* ---- rejected strip ---- */
+  .rejrow { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+  .rej { width: 205px; }
+  .rej h4 { margin: 0 0 6px; font-size: 11.5px; color: var(--muted); }
+  .rej h4 .k { display: inline-grid; place-items: center; min-width: 15px; height: 15px; margin-right: 6px; padding: 0 3px;
+    border: 1px solid var(--border-strong); border-radius: 4px; color: var(--subtle);
+    font: 700 9.5px/1 var(--mono); vertical-align: -2px; }
+  .rej p.why { margin: 7px 0 0; font-size: 11px; color: var(--dim); }
+
+  /* =========================================================
+     Shared card bones — production PackageCard/ExampleCard idiom
+     ========================================================= */
+  .card {
+    position: relative; overflow: hidden; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface);
+    cursor: pointer; transition: border-color .15s;
+  }
+  .card:hover { border-color: var(--border-strong); }
+  .card.opening { border-color: var(--live-border); cursor: wait; }
+  .card.blocked { border-color: var(--warn-border); cursor: default; }
+
+  /* thumb box: aspect set by data-aspect on <body>, overridable per card
+     via inline style (native-aspect seed); art aspect-FITS (G1-B) */
+  .thumbbox { position: relative; width: 100%; background: #000; overflow: hidden; }
+  body[data-aspect="wide"]  .thumbbox { aspect-ratio: 8/3; }
+  body[data-aspect="four3"] .thumbbox { aspect-ratio: 4/3; }
+  body[data-aspect="square"] .thumbbox { aspect-ratio: 1/1; }
+  .thumbbox img.art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .thumbbox .gradbase { position: absolute; inset: 0; display: grid; place-items: center; }
+  .thumbbox .gradbase span { font-size: 24px; font-weight: 800; color: rgba(255,255,255,.4); }
+
+  .badge {
+    position: absolute; top: 6px; right: 6px; z-index: 3;
+    border: 1px solid var(--border-strong); border-radius: 3px;
+    background: color-mix(in srgb, var(--bg) 70%, transparent);
+    padding: 0 4px; font-size: 9.6px; font-weight: 700; text-transform: uppercase; line-height: 16px;
+    color: var(--muted);
+  }
+  .badge.err { color: var(--err-text); }
+
+  /* the ⋯ menu button */
+  .menu {
+    appearance: none; border: 0; cursor: pointer;
+    width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center;
+    background: transparent; color: var(--subtle); font: 700 14px/1 var(--sans); padding: 0 0 6px;
+  }
+  .menu:hover { color: var(--text); background: var(--bg-wash); }
+  .menu.onart {
+    position: absolute; top: 5px; right: 5px; z-index: 3;
+    background: color-mix(in srgb, var(--bg) 45%, transparent);
+    color: rgba(255,250,240,.75);
+  }
+  .menu.onart:hover { background: color-mix(in srgb, var(--bg) 70%, transparent); color: var(--strong); }
+  .artwrap:has(.badge) .menu.onart { right: 38px; } /* badge occupies the corner: menu steps left */
+
+  /* overlays anchor to the ART box, never the card */
+  .artwrap { position: relative; }
+
+  /* text bits shared across concepts */
+  .tname { margin: 0; font-size: 14px; font-weight: 600; color: var(--strong);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tline { margin: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tline.muted { color: var(--muted); }
+  .tline.dim { color: var(--dim); }
+  .tline.good { color: var(--good-text); }
+  .tline.working { color: var(--live-text); }
+  .tline.attn { color: var(--warn-text); font-weight: 600; }
+  .tline.remedy { color: var(--muted); white-space: normal; }
+
+  /* production quiet chip (quiet_action_class, verbatim geometry) */
+  .qchip {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 4px; background: transparent;
+    padding: 4px 10px; font-size: 12px; font-weight: 600; color: var(--muted);
+    transition: border-color .15s, color .15s; white-space: nowrap;
+  }
+  .qchip:hover { border-color: var(--border-strong); color: var(--strong); }
+  .qchip .ic { font-size: 10.5px; }
+  .chiprow { display: flex; flex-wrap: wrap; gap: 4px; }
+
+  /* =========================================================
+     C-slim — the converged direction, round 2 (2026-08-25 pm):
+     a FIXED, SHALLOW glass footer. Depth lives behind a second
+     click (the ⋯ popup), not on the card face and not on hover.
+     Hover's only job stays: start the live preview.
+     ========================================================= */
+  .cS .glass {
+    position: absolute; inset: auto 0 0 0; z-index: 2;
+    padding: 6px 9px 7px;
+    background: color-mix(in srgb, #0d1115 68%, transparent);
+    backdrop-filter: blur(10px) saturate(1.15);
+    border-top: 1px solid rgba(255,255,255,.07);
+  }
+  .cS .trow { display: flex; align-items: center; gap: 6px; }
+  .cS .tname { flex: 1; min-width: 0; font-size: 13px; line-height: 17px; }
+  .cS .cline { margin: 1px 0 0; font-size: 11.5px; line-height: 15px; }
+  /* status glyphs: meta compressed to icons; words live in the popup */
+  .stats { display: inline-flex; gap: 4px; flex: none; }
+  .stat {
+    display: inline-grid; place-items: center; width: 17px; height: 17px;
+    border-radius: 4px; background: rgba(0,0,0,.38);
+    font-size: 10px; line-height: 1; font-weight: 700;
+  }
+  .stat.good { color: var(--good-text); }
+  .stat.live { color: var(--live-text); }
+  .stat.warn { color: var(--warn-text); }
+
+  /* =========================================================
+     The second click — detail popup off the ⋯ button
+     ========================================================= */
+  .popwrap { position: relative; }
+  .pop {
+    /* drops from the ⋯ like a real popover; may hang past the card */
+    position: absolute; right: 6px; top: 34px; z-index: 30; width: 246px;
+    background: var(--surface-raised); border: 1px solid var(--border-strong);
+    border-radius: 8px; padding: 10px 12px 11px;
+    box-shadow: 0 10px 28px rgba(0,0,0,.55);
+    display: grid; gap: 3px;
+  }
+  .pop .tname { font-size: 13px; margin-bottom: 2px; }
+  .pop .chiprow { margin-top: 7px; }
+  .pop hr { border: 0; border-top: 1px solid var(--border-subtle); margin: 6px 0 4px; width: 100%; }
+
+  /* =========================================================
+     Rejected concepts (kept small for contrast)
+     ========================================================= */
+  .cA .textblock { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 12px; }
+  .cA .textblock .lines { display: grid; gap: 2px; min-width: 0; }
+  .cA .chiprow { padding: 0 12px 12px; }
+
+  .cB .scrim {
+    position: absolute; inset: auto 0 0 0; z-index: 2;
+    padding: 26px 10px 8px;
+    background: linear-gradient(180deg, rgba(8,10,13,0) 0%, rgba(8,10,13,.58) 45%, rgba(8,10,13,.92) 100%);
+    display: grid; gap: 2px;
+  }
+  .cB .tname, .cB .tline { text-shadow: 0 1px 2px rgba(0,0,0,.65); }
+
+  .cD .reveal {
+    position: absolute; inset: auto 0 0 0; z-index: 2;
+    padding: 7px 10px 9px;
+    background: color-mix(in srgb, #0d1115 76%, transparent);
+    backdrop-filter: blur(9px);
+    border-top: 1px solid rgba(255,255,255,.07);
+    display: grid; gap: 2px;
+    transform: translateY(calc(100% - 30px));
+    transition: transform .18s ease;
+  }
+  .cD .reveal .tname { font-size: 13px; line-height: 16px; }
+  .cD:hover .reveal, body.simhover .cD .reveal { transform: none; }
+
+  .cE .breakout { display: grid; gap: 2px; padding: 9px 12px 10px; border-top: 1px solid var(--border-subtle); }
+  .cE .scrim {
+    position: absolute; inset: auto 0 0 0; z-index: 2;
+    padding: 22px 10px 7px;
+    background: linear-gradient(180deg, rgba(8,10,13,0) 0%, rgba(8,10,13,.55) 45%, rgba(8,10,13,.9) 100%);
+    display: grid; gap: 2px;
+  }
+  .cE .scrim .tname, .cE .scrim .tline { text-shadow: 0 1px 2px rgba(0,0,0,.65); }
+
+  /* C v1: the full variable-height footer, now rejected */
+  .cC .glass {
+    position: absolute; inset: auto 0 0 0; z-index: 2;
+    max-height: 100%; overflow: hidden;
+    padding: 8px 10px 9px;
+    background: color-mix(in srgb, #0d1115 68%, transparent);
+    backdrop-filter: blur(10px) saturate(1.15);
+    border-top: 1px solid rgba(255,255,255,.07);
+    display: grid; gap: 2px;
+  }
+</style>
+</head>
+<body data-aspect="four3">
+
+<h1>Card overlay — full-art gallery cards</h1>
+<p class="hint">
+  <b>Round 2 (2026-08-25):</b> glass footer won round 1, but a footer that grows with meta
+  <b>gets in the way of the preview</b> (Yona). This round the footer is <b>fixed and shallow</b>
+  — the art keeps a constant, dominant share of the card — and meta compresses to small status
+  glyphs. Depth moves behind a <b>second click</b>: the ⋯ popup carries the full status lines
+  and the actions (no hover chips — hover's only job is starting the live preview). Clean but
+  deep. Section 1 compares the two shallow depths; section 2 makes the second click real.
+</p>
+
+<div class="controls">
+  <span class="group"><b>Image box</b>
+    <button class="chip" data-set="aspect" data-val="wide">8:3 old</button>
+    <button class="chip" data-set="aspect" data-val="four3">4:3</button>
+    <button class="chip" data-set="aspect" data-val="square">1:1</button>
+  </span>
+  <span class="group"><b>Footer depth</b>
+    <button class="chip" data-set="depth" data-val="title">title only</button>
+    <button class="chip" data-set="depth" data-val="line">title + line</button>
+  </span>
+  <span class="group">
+    <button class="chip" id="hoverToggle">simulate hover</button>
+  </span>
+</div>
+
+<section class="sec" id="sec1">
+<h2><span class="n">1</span>Footer depth — title-only vs title + one line</h2>
+<p class="sub">
+  Same states, two depths. <b>Left:</b> one title row (~30px) — status glyphs share it; even
+  "blocked" is just an amber border + <b>!</b> glyph, words on the second click. <b>Right:</b>
+  title + a single context line (~46px) — edited-ago / "Example" fits, and blocked's headline
+  gets its one line (remedy still in the popup). Glyphs: <b style="color:#7be0b2">⚡</b> on
+  device · <b style="color:#9cc8ee">▶</b> in simulator · <b style="color:#f0dc7a">!</b> needs
+  attention.
+</p>
+<div class="halfrow">
+  <div>
+    <h4>title only</h4>
+    <div class="stressgrid" id="statesTitle"></div>
+    <p class="note">Maximum art. Is an amber border + glyph enough signal for a blocked card?</p>
+  </div>
+  <div>
+    <h4>title + context line</h4>
+    <div class="stressgrid" id="statesLine"></div>
+    <p class="note">One honest sentence of context; blocked says why on the card face.</p>
+  </div>
+</div>
+</section>
+
+<section class="sec" id="sec2">
+<h2><span class="n">2</span>The second click — ⋯ opens the depth</h2>
+<p class="sub">
+  Click a card's <b>⋯</b> (live here): the popup carries every status line in words plus the
+  actions — open in sim, put on a device, download — so the card face never pays for them.
+  First card's popup is open. Tap targets: first click on the card = open project; ⋯ = detail;
+  nothing depends on hover.
+</p>
+<div class="cardgrid" id="popdemo" style="max-width:760px"></div>
+</section>
+
+<section class="sec" id="sec3">
+<h2><span class="n">3</span>Aspect seed — one box vs native bounds <span class="n">(future session)</span></h2>
+<p class="sub">
+  Same six projects twice. Left: every card clamped to the one chosen box (the shippable
+  default — wide art letterboxes inside it). Right: each card's image box follows its
+  project's <b>native bounds</b>, clamped to [2:1 … 1:1] — the fyeah sign goes wide, the dome
+  stays square, and rows go ragged. What that means for poster capture, bounds, and coordinate
+  mapping is the future session's question, <b>not decided here</b>.
+</p>
+<div class="halfrow">
+  <div>
+    <h4>uniform box (controls' aspect)</h4>
+    <div class="cardgrid" id="uniform"></div>
+    <p class="note">Predictable rows; wide art pays side bars inside the box.</p>
+  </div>
+  <div>
+    <h4>native bounds, clamped [2:1 … 1:1]</h4>
+    <div class="cardgrid" id="native"></div>
+    <p class="note">Art fills its own box; grid rows become ragged (grid stays start-aligned).</p>
+  </div>
+</div>
+</section>
+
+<section class="sec" id="sec4">
+<h2><span class="n">4</span>Grid rhythm — the Projects page at scale</h2>
+<p class="sub">
+  The production grid (<b>minmax(200px, 1fr)</b>, gap 14) at the controls' aspect and footer
+  depth. Poster capture follows the box: 512×192 today → <b>512×384</b> (4:3) or 512×512 (1:1).
+</p>
+<div class="cardgrid" id="rhythm"></div>
+</section>
+
+<section class="sec" id="sec5">
+<h2><span class="n">5</span>Rejected along the way <span class="n">(kept for contrast)</span></h2>
+<div class="rejrow" id="rejected"></div>
+</section>
+
+<script>
+/* ============================================================
+   deterministic artwork — square-ish LED-art posters, generated
+   ============================================================ */
+function mulberry32(a) {
+  return function() {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function plasmaColor(u, v, bright) {
+  const w = Math.sin(u * 5.1 + v * 2.3) + Math.sin(Math.hypot(u - .3, v - .6) * 7.7) + Math.sin(v * 4.9);
+  const hue = 190 + w * 55;
+  const light = bright ? 58 + w * 12 : 34 + w * 10;
+  return `hsl(${hue} 85% ${light}%)`;
+}
+function domeArt() {
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, S, S);
+  const rnd = mulberry32(7), seeds = [];
+  while (seeds.length < 80) {
+    const x = rnd() * 2 - 1, y = rnd() * 2 - 1;
+    if (x * x + y * y <= .88) seeds.push([x, y]);
+  }
+  const img = ctx.getImageData(0, 0, S, S), d = img.data;
+  for (let py = 0; py < S; py++) for (let px = 0; px < S; px++) {
+    const x = (px / S) * 2 - 1, y = (py / S) * 2 - 1;
+    if (x * x + y * y > .96) continue;
+    let d1 = 1e9, d2 = 1e9, k = -1;
+    for (let i = 0; i < seeds.length; i++) {
+      const dx = x - seeds[i][0], dy = y - seeds[i][1], dd = dx * dx + dy * dy;
+      if (dd < d1) { d2 = d1; d1 = dd; k = i; } else if (dd < d2) d2 = dd;
+    }
+    const edge = Math.min(1, (Math.sqrt(d2) - Math.sqrt(d1)) / .045);
+    const [sx, sy] = seeds[k];
+    const w = Math.sin(sx * 4.2 + sy * 2.0) + Math.sin(Math.hypot(sx - .2, sy - .5) * 6.3);
+    const hue = (200 + w * 70 + 360) % 360;
+    const light = (26 + w * 14) * (.35 + .65 * edge);
+    const [r, g, b] = hslToRgb(hue / 360, .8, Math.max(.04, light / 100));
+    const o = (py * S + px) * 4;
+    d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c.toDataURL();
+}
+function plasmaArt() {
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  for (let py = 0; py < S; py += 2) for (let px = 0; px < S; px += 2) {
+    ctx.fillStyle = plasmaColor(px / S * 3, py / S * 3, true);
+    ctx.fillRect(px, py, 2, 2);
+  }
+  return c.toDataURL();
+}
+function matrixArt() {
+  const S = 256, c = document.createElement('canvas'); c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#020304'; ctx.fillRect(0, 0, S, S);
+  const n = 14, cell = S / n, rnd = mulberry32(31);
+  for (let gy = 0; gy < n; gy++) for (let gx = 0; gx < n; gx++) {
+    const lit = rnd() > .38;
+    const cx = gx * cell + cell / 2, cy = gy * cell + cell / 2;
+    if (!lit) { ctx.fillStyle = '#101216'; ctx.beginPath(); ctx.arc(cx, cy, cell * .16, 0, 7); ctx.fill(); continue; }
+    const col = plasmaColor(gx / n * 2.4, gy / n * 2.4, true);
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cell * .52);
+    grad.addColorStop(0, col); grad.addColorStop(.45, col); grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(cx, cy, cell * .52, 0, 7); ctx.fill();
+  }
+  return c.toDataURL();
+}
+/* a natively-wide project: a letter-string sign (fyeah), 2:1 */
+function signArt() {
+  const W = 512, H = 256, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#020304'; ctx.fillRect(0, 0, W, H);
+  const rnd = mulberry32(19);
+  for (let i = 0; i < 46; i++) {
+    const t = i / 45;
+    const cx = 26 + t * (W - 52);
+    const cy = H / 2 + Math.sin(t * Math.PI * 4.2) * H * .22 + (rnd() - .5) * 14;
+    const col = plasmaColor(t * 3.2, Math.sin(t * 9) * .6, true);
+    const r = 9 + rnd() * 4;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2.4);
+    grad.addColorStop(0, '#fff'); grad.addColorStop(.25, col); grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(cx, cy, r * 2.4, 0, 7); ctx.fill();
+  }
+  return c.toDataURL();
+}
+function hslToRgb(h, s, l) {
+  const f = n => {
+    const k = (n + h * 12) % 12;
+    return Math.round(255 * (l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
+  };
+  return [f(0), f(8), f(4)];
+}
+const ART = { dome: domeArt(), plasma: plasmaArt(), matrix: matrixArt(), sign: signArt() };
+
+/* identity gradient (thumb_swatch_style: FNV-1a → two hues) */
+function fnvHues(seed) {
+  let h = 0x811c9dc5;
+  for (const ch of seed) { h ^= ch.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  return [h % 360, (h >>> 16) % 360];
+}
+function gradStyle(seed) {
+  const [a, b] = fnvHues(seed);
+  return `background: linear-gradient(135deg, hsl(${a} 42% 22%), hsl(${b} 54% 32%))`;
+}
+
+/* ============================================================
+   card data
+   ============================================================ */
+const CHIP_OPEN = { ic: '▶', label: 'Open in sim' };
+const CHIP_PUT  = { ic: '⚡', label: 'Put on “Porch sign”' };
+const CHIP_ZIP  = { ic: '⬇', label: 'Download zip' };
+
+/* stats: [glyph, tone, words] — glyph on the card, words in the popup */
+const METAS = {
+  example: { name: 'plasma', context: ['Example', 'dim'], lines: [['Example', 'dim']], chips: [CHIP_OPEN], stats: [] },
+  light:   { name: 'aurora-drift', context: ['Edited 2 hours ago', 'muted'],
+             lines: [['Edited 2 hours ago', 'muted']], chips: [CHIP_OPEN], stats: [] },
+  heavy:   { name: '2026-08-19-2210-porch-glow', context: ['Edited 12 minutes ago', 'muted'],
+             lines: [
+               ['Edited 12 minutes ago', 'muted'],
+               ['for QuinLED Dig-Uno', 'muted'],
+               ['On Porch sign — connected ✓', 'good'],
+               ['Running in simulator', 'good']],
+             chips: [CHIP_OPEN, CHIP_PUT],
+             stats: [['⚡', 'good', 'On Porch sign — connected'], ['▶', 'live', 'Running in simulator']] },
+  blocked: { name: '2026-03-02-0915-legacy', context: ['Format 3 — too old for this Studio', 'attn'],
+             blocked: ['Format 3 — too old for this Studio', 'Export a copy or delete it.'],
+             lines: [], chips: [CHIP_ZIP], stats: [['!', 'warn', 'Format too old']] },
+  opening: { name: 'aurora-drift', context: ['Opening…', 'working'],
+             lines: [['Opening…', 'working']], chips: [CHIP_OPEN], opening: true, stats: [] },
+};
+const LONGNAME = { ...METAS.light, name: 'the-unreasonably-long-project-name-2026-08-25-that-truncates' };
+
+const state = { aspect: 'four3', depth: 'line' };
+
+/* ============================================================
+   renderers
+   ============================================================ */
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+function thumbHtml(spec, opts = {}) {
+  const artKey = opts.art ?? 'dome';
+  const ratio = opts.ratio ? ` style="aspect-ratio:${opts.ratio}"` : '';
+  const badge = opts.badge ? `<span class="badge ${opts.badge === '!' ? 'err' : ''}">${opts.badge}</span>` : '';
+  if (artKey === 'none' || spec.blocked) {
+    return `<div class="thumbbox"${ratio}><div class="gradbase" style="${gradStyle(spec.name)}">
+      <span>${esc(spec.name.replace(/^[\d-]+/, '').charAt(0).toUpperCase() || spec.name[0].toUpperCase())}</span>
+    </div>${badge}</div>`;
+  }
+  return `<div class="thumbbox"${ratio}><img class="art" alt="" src="${ART[artKey]}">${badge}</div>`;
+}
+function statsHtml(spec) {
+  if (!spec.stats.length) return '';
+  return `<span class="stats">${spec.stats.map(([g, tone, words]) =>
+    `<span class="stat ${tone}" title="${esc(words)}">${g}</span>`).join('')}</span>`;
+}
+function chipsHtml(spec) {
+  if (!spec.chips.length) return '';
+  return `<div class="chiprow">${spec.chips.map(c =>
+    `<button class="qchip" type="button"><span class="ic">${c.ic}</span>${esc(c.label)}</button>`).join('')}</div>`;
+}
+function linesHtml(spec) {
+  let out = '';
+  if (spec.blocked) {
+    out += `<p class="tline attn">${esc(spec.blocked[0])}</p><p class="tline remedy">${esc(spec.blocked[1])}</p>`;
+  }
+  for (const [text, cls] of spec.lines) out += `<p class="tline ${cls}">${esc(text)}</p>`;
+  return out;
+}
+function cardClass(spec) {
+  return 'card' + (spec.opening ? ' opening' : '') + (spec.blocked ? ' blocked' : '');
+}
+
+/* C-slim: the round-2 direction. depth = 'title' | 'line' */
+function slimCard(spec, opts = {}, depth = state.depth) {
+  const context = depth === 'line' && spec.context
+    ? `<p class="cline tline ${spec.context[1]}">${esc(spec.context[0])}</p>` : '';
+  return `<article class="${cardClass(spec)} cS"><div class="artwrap">
+    ${thumbHtml(spec, opts)}
+    <button class="menu onart" type="button">…</button>
+    <div class="glass">
+      <div class="trow"><p class="tname">${esc(spec.name)}</p>${statsHtml(spec)}</div>
+      ${context}
+    </div>
+  </div></article>`;
+}
+
+/* the ⋯ popup: full words + actions (the second click) */
+function popHtml(spec) {
+  return `<div class="pop" hidden>
+    <p class="tname">${esc(spec.name)}</p>
+    ${linesHtml(spec)}
+    <hr>
+    ${chipsHtml(spec)}
+  </div>`;
+}
+
+/* rejected renderers (small, for contrast) */
+const REJECTED = {
+  A: {
+    title: 'Current — strip + text block',
+    why: 'Rejected: the art stays a banner; every card pays the full text block whether it has news or not.',
+    render(spec, opts) {
+      return `<article class="${cardClass(spec)} cA">
+        ${thumbHtml(spec, opts)}
+        <div class="textblock">
+          <div class="lines"><p class="tname">${esc(spec.name)}</p>${linesHtml(spec)}</div>
+          <button class="menu" type="button">…</button>
+        </div>
+        ${chipsHtml(spec)}
+      </article>`;
+    },
+  },
+  B: {
+    title: 'Scrim — gradient overlay',
+    why: 'Rejected: heavy meta on hover blankets the whole preview; blocked remedy hid behind hover.',
+    render(spec, opts) {
+      return `<article class="${cardClass(spec)} cB"><div class="artwrap">
+        ${thumbHtml(spec, opts)}
+        <button class="menu onart" type="button">…</button>
+        <div class="scrim"><p class="tname">${esc(spec.name)}</p>${linesHtml(spec)}</div>
+      </div></article>`;
+    },
+  },
+  D: {
+    title: 'Hover-reveal — sliding panel',
+    why: 'Rejected: the panel rises exactly when hover starts the live preview, covering what it just paid for.',
+    render(spec, opts) {
+      return `<article class="${cardClass(spec)} cD"><div class="artwrap">
+        ${thumbHtml(spec, opts)}
+        <button class="menu onart" type="button">…</button>
+        <div class="reveal"><p class="tname">${esc(spec.name)}</p>${linesHtml(spec)}${chipsHtml(spec)}</div>
+      </div></article>`;
+    },
+  },
+  E: {
+    title: 'Breakout — status below the art',
+    why: 'Rejected (rd 1 runner-up): honest, but two visual systems per card; glass read cleaner.',
+    render(spec, opts) {
+      const loud = spec.lines.filter(([, c]) => c === 'good' || c === 'attn');
+      const breakout = loud.length
+        ? `<div class="breakout">${loud.map(([t, c]) => `<p class="tline ${c}">${esc(t)}</p>`).join('')}</div>` : '';
+      return `<article class="${cardClass(spec)} cE"><div class="artwrap">
+        ${thumbHtml(spec, opts)}
+        <button class="menu onart" type="button">…</button>
+        <div class="scrim"><p class="tname">${esc(spec.name)}</p></div>
+      </div>${breakout}</article>`;
+    },
+  },
+  C1: {
+    title: 'Glass v1 — footer grows with meta',
+    why: 'Superseded (rd 2): the variable, sometimes-tall footer gets in the way of the preview.',
+    render(spec, opts) {
+      return `<article class="${cardClass(spec)} cC"><div class="artwrap">
+        ${thumbHtml(spec, opts)}
+        <button class="menu onart" type="button">…</button>
+        <div class="glass"><p class="tname">${esc(spec.name)}</p>${linesHtml(spec)}</div>
+      </div></article>`;
+    },
+  },
+};
+
+/* ============================================================
+   sections
+   ============================================================ */
+const STATES = [
+  ['example',                  METAS.example, { art: 'plasma' }],
+  ['project · light',          METAS.light,   { art: 'matrix' }],
+  ['heavy → glyphs',           METAS.heavy,   { art: 'dome' }],
+  ['no poster yet',            METAS.light,   { art: 'none' }],
+  ['long name',                LONGNAME,      { art: 'plasma' }],
+  ['blocked',                  METAS.blocked, {}],
+  ['opening…',                 METAS.opening, { art: 'dome' }],
+  ['preview failed (badge)',   METAS.light,   { art: 'matrix', badge: '!' }],
+];
+function renderStates() {
+  document.getElementById('statesTitle').innerHTML = STATES.map(([label, spec, opts]) =>
+    `<div>${slimCard(spec, opts, 'title')}<p class="stresslabel">${esc(label)}</p></div>`).join('');
+  document.getElementById('statesLine').innerHTML = STATES.map(([label, spec, opts]) =>
+    `<div>${slimCard(spec, opts, 'line')}<p class="stresslabel">${esc(label)}</p></div>`).join('');
+}
+
+function renderPopdemo() {
+  const cards = [
+    [METAS.heavy, { art: 'dome' }],
+    [METAS.blocked, {}],
+    [METAS.example, { art: 'plasma' }],
+  ];
+  document.getElementById('popdemo').innerHTML = cards.map(([spec, opts]) =>
+    `<div class="popwrap">${slimCard(spec, opts)}${popHtml(spec)}</div>`).join('');
+}
+
+/* six projects with NATIVE bounds (the aspect-seed section) */
+const SEED = [
+  [{ ...METAS.light, name: 'fyeah', context: ['Edited yesterday', 'muted'] }, { art: 'sign' }, '2/1'],
+  [{ ...METAS.light, name: 'zook-dome-show' },        { art: 'dome' },   '1/1'],
+  [METAS.heavy,                                       { art: 'dome' },   '1/1'],
+  [METAS.example,                                     { art: 'plasma' }, '1/1'],
+  [{ ...METAS.light, name: '2026-07-09-1421-basic' }, { art: 'matrix' }, '1/1'],
+  [{ ...METAS.light, name: 'porch-string', context: ['Edited 3 days ago', 'muted'] }, { art: 'sign' }, '2/1'],
+];
+function renderSeed() {
+  document.getElementById('uniform').innerHTML =
+    SEED.map(([spec, opts]) => slimCard(spec, opts)).join('');
+  document.getElementById('native').innerHTML =
+    SEED.map(([spec, opts, ratio]) => slimCard(spec, { ...opts, ratio })).join('');
+}
+
+const RHYTHM = [
+  [METAS.heavy, { art: 'dome' }],
+  [METAS.example, { art: 'plasma' }],
+  [METAS.light, { art: 'matrix' }],
+  [METAS.light, { art: 'none' }],
+  [{ ...METAS.example, name: 'fyeah' }, { art: 'sign' }],
+  [{ ...METAS.light, name: 'zook-dome-show' }, { art: 'plasma' }],
+  [METAS.blocked, {}],
+  [{ ...METAS.light, name: '2026-07-09-1421-basic' }, { art: 'matrix' }],
+];
+function renderRhythm() {
+  document.getElementById('rhythm').innerHTML =
+    RHYTHM.map(([spec, opts]) => slimCard(spec, opts)).join('');
+}
+
+function renderRejected() {
+  document.getElementById('rejected').innerHTML = Object.entries(REJECTED).map(([k, c]) => `
+    <div class="rej">
+      <h4><span class="k">${k}</span>${esc(c.title)}</h4>
+      ${c.render(k === 'C1' || k === 'E' ? METAS.heavy : METAS.light, { art: k === 'B' ? 'matrix' : 'dome' })}
+      <p class="why">${esc(c.why)}</p>
+    </div>`).join('');
+}
+
+function renderAll() {
+  document.body.dataset.aspect = state.aspect;
+  document.querySelectorAll('.chip[data-set]').forEach(b =>
+    b.setAttribute('aria-pressed', String(state[b.dataset.set] === b.dataset.val)));
+  renderStates(); renderPopdemo(); renderSeed(); renderRhythm(); renderRejected();
+  /* first popup open so the section reads without a click */
+  const first = document.querySelector('#popdemo .pop');
+  if (first) first.hidden = false;
+}
+
+document.addEventListener('click', event => {
+  const chip = event.target.closest('.chip[data-set]');
+  if (chip) { state[chip.dataset.set] = chip.dataset.val; renderAll(); return; }
+  const menu = event.target.closest('#popdemo .menu');
+  if (menu) {
+    const pop = menu.closest('.popwrap').querySelector('.pop');
+    pop.hidden = !pop.hidden;
+  }
+});
+document.getElementById('hoverToggle').addEventListener('click', function() {
+  const on = document.body.classList.toggle('simhover');
+  this.setAttribute('aria-pressed', String(on));
+});
+/* pose any state from the URL (headless capture + shareable links):
+   ?aspect=square&depth=title&hover=1&only=2 */
+const params = new URLSearchParams(location.search);
+if (params.get('aspect')) state.aspect = params.get('aspect');
+if (params.get('depth')) state.depth = params.get('depth');
+const only = params.get('only');
+if (only) {
+  document.querySelectorAll('.sec').forEach(sec => { sec.hidden = sec.id !== 'sec' + only; });
+  document.querySelector('h1').hidden = true;
+  document.querySelector('p.hint').hidden = true;
+  document.querySelector('.controls').hidden = true;
+  document.querySelectorAll('.sec h2').forEach(h => h.style.marginTop = '10px');
+}
+if (params.get('hover')) {
+  document.body.classList.add('simhover');
+  document.getElementById('hoverToggle').setAttribute('aria-pressed', 'true');
+}
+renderAll();
+</script>
+</body>
+</html>

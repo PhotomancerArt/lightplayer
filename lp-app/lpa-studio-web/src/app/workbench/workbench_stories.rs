@@ -526,6 +526,29 @@ fn props_stack_fixture_selected() -> Element {
 }
 
 #[story(
+    description = "The props stack with N FIXTURES selected (unified-selection P2/P3 — the canvas multi-select's panel answer): a multi selection has no one placement to edit, so the stack states the count honestly instead of showing one member's card — the gesture (drag, corner scale) acts on the whole set as one undo step, and per-member edits come from selecting one. The fixture-grain sibling class spans fixtures; the dived 'N objects' card is this same posture one level down."
+)]
+fn props_stack_multi_fixtures() -> Element {
+    let mut selection = lpa_studio_core::UiSelection::empty();
+    selection.set_siblings(vec![
+        UiPatchTarget::Fixture {
+            node: NodeId::new(2),
+        },
+        UiPatchTarget::Fixture {
+            node: NodeId::new(3),
+        },
+    ]);
+    rsx! {
+        PropsStackStory {
+            doc: Map2dDoc::new(),
+            surface: labelled(mini_dome_surface(false)),
+            dived: false,
+            selection,
+        }
+    }
+}
+
+#[story(
     description = "The props stack with a PORT selected (the Patching view's wire leaves, B′ deepest-first): the port's readout card on top — 1-based wire span, used/free, cell count, next free lamp — its OUTPUT card unwinding beneath, module strip at the bottom. Readout cards: the verbs act on selections, never card fields."
 )]
 fn props_stack_port_selected() -> Element {
