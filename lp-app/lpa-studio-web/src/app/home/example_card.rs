@@ -24,8 +24,9 @@ pub(crate) fn embedded_example_cards() -> Vec<UiExampleCard> {
         .collect()
 }
 
-/// One example. Click → running simulator, zero choices; the copy becomes
-/// yours in the library (seed-once) and forks on first divergent save.
+/// One example. Click → running simulator, zero choices, NOTHING
+/// installed (a transient view session, examples vision D2); an explicit
+/// save is what forks your copy into the library.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn ExampleCard(

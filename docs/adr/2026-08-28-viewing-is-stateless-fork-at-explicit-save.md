@@ -4,12 +4,17 @@
 - **Date:** 2026-08-28
 - **Deciders:** Photomancer
 - **Plan:** lp2025/2026-08-28-1459-examples-url-handling (PR #461)
-- **Supersedes:** the seed-on-click example model (the 2026-07-06
-  project-management plan's deferred "seed-once wart" — this is its
-  planned replacement) and the tracking-copy-on-open half of D17's
-  share-open flow for **View-access** links; D17's uid-preservation
-  principle itself survives (the uid still names the cloud document, and
-  the local copy an explicit fork installs preserves it).
+- **Supersedes:** the seed-on-click example model — the 2026-07-06
+  studio-project-management plan's `06-examples-place.md` deferred this
+  exact replacement as "remix-on-first-edit / ephemeral playground" —
+  and the tracking-copy-on-open half of D17's share-open flow for
+  **View-access** links; D17's uid-preservation principle itself
+  survives (the uid still names the cloud document; local copies exist
+  only for members/Edit links and explicit forks). Q4 ruling: existing
+  seeded/tracking copies in user libraries are left alone — ordinary
+  self-sufficient packages whose provenance simply stops being
+  consulted; dead `/p/<slug>-<uid>` links to never-published projects
+  keep landing on the calm not-found line.
 - **Superseded by:** None
 
 ## Context
@@ -50,17 +55,20 @@ One model, two entry points:
   must be real entropy because of what happens next.
 - **The explicit save gesture is the fork — the identity moment.** On a
   transient session, save commits as usual (overlay commit, save-as-pull
-  into the memory copy), then installs the memory copy into the real
-  library through `InstallSyncedProject`: uid **promoted** (the manifest
-  already carries it — from this moment it is the share link's
-  unguessable access token), provenance recorded (`SeededFrom` for
-  examples, `ForkedFrom` for shared views), history verbatim. The
-  library handle is swapped in place under the running session — same
-  uid, same content hash, no re-push, no visible reload — and the URL
-  heals from `/p/<slug>` to `/p/<slug>-<uid>` through the ordinary lens
-  reconciliation. A toast confirms: "Saved — this project is now
-  yours." Subsequent saves flow to OPFS, and the install's catalog
-  broadcast triggers the same auto-publish any fork gets.
+  into the memory copy), then installs a copy into the real library. An
+  EXAMPLE session's uid is **promoted** — the files (manifest included)
+  and history install verbatim (`InstallSyncedProject`, `SeededFrom`),
+  and from that moment the uid is the share link's unguessable access
+  token — so the in-place handle swap needs no re-push and no reload. A
+  SHARED VIEW runs the parent cloud document's uid, which the fork must
+  NOT claim: `ForkTransientCopy` mints a fresh identity with a fresh
+  `ForkedFrom` history (the parent's log stays the parent's), and the
+  runtime is re-pushed once so its manifest agrees. Either way the URL
+  heals to the fork's `/p/<slug>-<uid>` through the ordinary lens
+  reconciliation, a toast confirms ("Forked — now editing your copy.",
+  ruled at G1), the top bar's "example" pill vanishes, and subsequent
+  saves flow to OPFS — with the install's catalog broadcast triggering
+  the same auto-publish any fork gets.
 
 ## Consequences
 

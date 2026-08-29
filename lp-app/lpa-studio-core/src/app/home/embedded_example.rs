@@ -1,15 +1,17 @@
-//! The compiled-in example packages (offline/first-run fallback).
+//! The compiled-in example packages: the offline/dev content source for
+//! the canonical example identities.
 //!
-//! Until the examples place lands (M6, D17), the gallery's *Examples*
-//! section lists these. The id doubles as the seed-once provenance source
-//! (`SeededFrom { source }`), so a package seeded by the pre-M4 demo flow
-//! and one opened from the gallery are the same package.
+//! Examples are first-party published projects (examples vision D1) with
+//! bare-slug addresses (`/p/<slug>`, the id tail). Opening one is
+//! STATELESS (D2): a transient memory-backed session, nothing installed —
+//! an explicit save forks a copy with `SeededFrom { source: id }`
+//! provenance (the "Remixed from" line). The home landing and Explore
+//! both list this table.
 //!
 //! Each package's files are `include_bytes!`d from `examples/<name>/`, so
 //! the wasm bundle carries them and the checked-in example IS what the
-//! gallery opens. Adding an example means adding its file table here —
-//! and remembering that an existing library store keeps the package it
-//! already seeded (delete the gallery package to re-seed).
+//! gallery opens. Adding an example means adding its file table here
+//! (slug uniqueness is test-pinned — the id tail is the URL).
 
 /// One file in an embedded package: its package-relative path and bytes.
 pub type ExampleFile = (&'static str, &'static [u8]);

@@ -2634,8 +2634,10 @@ impl ProjectController {
         server: &mut StudioServerClient,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         if self.library.is_some() {
+            // The demo IS example viewing: a transient session, like every
+            // example entry point (D2) — an explicit save forks it.
             return self
-                .open_example_package(server, crate::app::project::demo_project::DEMO_PROJECT_ID)
+                .open_example_transient(server, crate::app::project::demo_project::DEMO_PROJECT_ID)
                 .await;
         }
         self.mark_opening_project();
@@ -2689,33 +2691,6 @@ impl ProjectController {
             std::rc::Rc::clone(&context.host)
         };
         let opened = host.open_project(key).await.map_err(UiError::from)?;
-        self.open_opened_package(server, opened, None).await
-    }
-
-    /// Open an example: seed it into the library once (a catalog
-    /// transaction — found by provenance on every later open, it never
-    /// reseeds), then open the copy like any package.
-    pub(crate) async fn open_example_package(
-        &mut self,
-        server: &mut StudioServerClient,
-        id: &str,
-    ) -> Result<Vec<UiLogDraft>, UiError> {
-        self.mark_opening_project();
-        let host = {
-            let context = self.library.as_ref().ok_or_else(no_library_error)?;
-            std::rc::Rc::clone(&context.host)
-        };
-        let outcome = host
-            .catalog(crate::app::library::CatalogOp::EnsureExampleSeeded { id: id.to_string() })
-            .await
-            .map_err(UiError::from)?;
-        let summary = outcome.summary.ok_or_else(|| {
-            UiError::MissingSession(format!("seeding example {id} produced no package"))
-        })?;
-        let opened = host
-            .open_project(&summary.uid.to_string())
-            .await
-            .map_err(UiError::from)?;
         self.open_opened_package(server, opened, None).await
     }
 
