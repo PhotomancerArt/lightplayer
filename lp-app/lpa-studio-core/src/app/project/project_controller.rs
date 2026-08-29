@@ -158,7 +158,7 @@ pub struct ProjectController {
     editor_meta_absent: bool,
     /// The patch surface's one shared selection (D36; core-owned so e2e
     /// can drive it and the P6 verbs can read it).
-    patch_selection: Option<crate::UiPatchTarget>,
+    patch_selection: crate::UiSelection,
     /// Monotonic correlation-id source for overlay mutation commands.
     next_mutation_cmd_id: u64,
     /// Staged node removals recorded from `RemoveNode` acks, keyed by the
@@ -425,7 +425,7 @@ impl ProjectController {
             slot_shapes: SlotShapeRegistry::default(),
             root_shape_ids: BTreeMap::new(),
             node_card_ui: BTreeMap::new(),
-            patch_selection: None,
+            patch_selection: crate::UiSelection::empty(),
             patch_undo: Vec::new(),
             patch_redo: Vec::new(),
             arrange_undo: Vec::new(),
@@ -2986,6 +2986,83 @@ impl ProjectController {
         }
     }
 
+    /// [`Self::sync_loaded_project`] under a progress deadline: the initial
+    /// sync's read is by far the largest pull this app makes, and a device
+    /// that resets mid-stream (bench 2026-08-26: assembly OOM on the classic)
+    /// otherwise leaves the UI in "Syncing project" forever. Timeout and
+    /// cancellation are FAILURES here — unlike the passive refresh, an
+    /// initial sync that did not complete has left the project pane empty,
+    /// and the user must see that and why.
+    pub async fn sync_loaded_project_gated<MakeTimer, Timer, Cancel>(
+        &mut self,
+        server: &mut StudioServerClient,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+    ) -> Result<ProjectSyncRun, UiError>
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        let handle_id = self.ready_handle_id()?;
+        self.sync
+            .get_or_insert_with(ProjectSync::new)
+            .begin_initial_sync();
+        match self
+            .run_initial_sync_gated(server, handle_id, deadline, cancel)
+            .await
+        {
+            Ok(logs) => Ok(ProjectSyncRun::synced(logs)),
+            Err(error) => Ok(self.record_sync_failure(server, error)),
+        }
+    }
+
+    async fn run_initial_sync_gated<MakeTimer, Timer, Cancel>(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+    ) -> Result<Vec<UiLogDraft>, UiError>
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        let products = self.subscribed_products();
+        let request = self
+            .sync_for_request()?
+            .initial_project_read_request(products);
+        log::info!(
+            "initial sync: project read (handle={handle_id}, {} queries, {} probes)",
+            request.queries.len(),
+            request.probes.len()
+        );
+        let outcome = server
+            .project_read_gated(handle_id, request, deadline, cancel)
+            .await?;
+        let read = match outcome {
+            StudioProjectReadOutcome::Completed(read) => read,
+            StudioProjectReadOutcome::TimedOut => {
+                return Err(UiError::Transport(
+                    "initial project sync timed out: the device stopped streaming mid-read                      (a device reset looks exactly like this — check the console for                      [RECOVERY] lines and the pull loop's frame count)"
+                        .into(),
+                ));
+            }
+            StudioProjectReadOutcome::Cancelled => {
+                return Err(UiError::Transport(
+                    "initial project sync was cancelled before it completed".into(),
+                ));
+            }
+        };
+        let mut logs = read.logs;
+        self.sync_mut()?.apply_project_read_events(read.events)?;
+        self.apply_synced_project_view()?;
+        logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
+        log::info!("initial sync: complete");
+        Ok(logs)
+    }
+
     pub async fn refresh_project(
         &mut self,
         server: &mut StudioServerClient,
@@ -3128,8 +3205,8 @@ impl ProjectController {
             }
             // The patch surface's one shared selection — local and
             // synchronous like the card ops.
-            ProjectEditorOp::PatchSelect { target } => {
-                self.patch_selection = target;
+            ProjectEditorOp::PatchSelect { selection } => {
+                self.patch_selection = selection;
                 Ok(UiNotices::new())
             }
             // Undo-correlation journal events from the shell (P2
@@ -3636,7 +3713,7 @@ impl ProjectController {
         // freeze together. Last, because it reads the finished fixtures.
         surface.chase_preview = super::patch_preview::chase_preview(
             &surface,
-            self.patch_selection.as_ref(),
+            self.patch_selection.single(),
             self.sync.as_ref().map_or(0, |sync| sync.frames_seen()),
         );
         (!surface.outputs.is_empty()).then_some(surface)
@@ -5105,10 +5182,12 @@ impl ProjectController {
         server: &mut StudioServerClient,
         op: crate::PatchPulseOp,
     ) -> Result<ProjectEditRun, UiError> {
-        use super::patch_pulse::{PulseWire, pulse_highlights, wire_extent_lamps};
+        use super::patch_pulse::{
+            PulseWire, merge_highlight_texts, pulse_highlights, wire_extent_lamps,
+        };
 
-        let writes: Vec<(NodeId, String)> = match (&op.subject, self.sync.as_ref()) {
-            (Some(subject), Some(sync)) => {
+        let writes: Vec<(NodeId, String)> = match (op.subjects.as_slice(), self.sync.as_ref()) {
+            (subjects @ [_, ..], Some(sync)) => {
                 let outputs: Vec<NodeId> = sync.published_outputs().collect();
                 let wires: Vec<PulseWire<'_>> = outputs
                     .iter()
@@ -5121,7 +5200,21 @@ impl ProjectController {
                         ),
                     })
                     .collect();
-                pulse_highlights(subject, &wires)
+                // The multi-selection union: each subject maps alone, and
+                // same-output texts merge (breath span lists — the sibling
+                // invariant keeps chase single-subject).
+                let mut merged: Vec<(NodeId, String)> = Vec::new();
+                for subject in subjects {
+                    for (node, text) in pulse_highlights(subject, &wires) {
+                        match merged.iter_mut().find(|(n, _)| *n == node) {
+                            Some((_, existing)) => {
+                                *existing = merge_highlight_texts(existing, &text);
+                            }
+                            None => merged.push((node, text)),
+                        }
+                    }
+                }
+                merged
             }
             _ => Vec::new(),
         };
@@ -7416,55 +7509,88 @@ impl ProjectController {
                 node,
                 transform,
             } => {
-                let (mut doc, before) = match self.editor_meta_read() {
-                    Ok(loaded) => loaded,
-                    Err(reason) => return blocked(reason),
-                };
-                let surface = doc.mapping_surface_mut(node_key);
-                surface.transform = lpc_mapping::EditorTransform {
-                    t: transform.t,
-                    r: transform.r,
-                    s: transform.s,
-                };
-                // Opportunistic footprint refresh: every fixture whose map2d
-                // is locally cached gets its cached footprint trued up as
-                // part of this write (never an unprompted write). Only
-                // ARRANGED fixtures get entries — a footprint alone must not
-                // arrange a node.
-                for fixture in &op.fixtures {
-                    let fresh = self.arrange_footprint(fixture.mapping_artifact.as_ref());
-                    let Some(fresh) = fresh else { continue };
-                    let entry_exists = fixture.node_key == *node_key
-                        || doc.mapping_surface(&fixture.node_key).is_some();
-                    if entry_exists {
-                        let surface = doc.mapping_surface_mut(&fixture.node_key);
-                        if surface.footprint != Some(fresh) {
-                            surface.footprint = Some(fresh);
-                        }
-                    }
-                }
-                doc.normalize_format();
-                let after = format!("{}\n", doc.to_json_pretty()).into_bytes();
-                if after == before {
-                    return Ok(ProjectEditRun {
-                        notices: UiNotices::new(),
-                        logs: Vec::new(),
-                    });
-                }
-                let seq = self.record_edit(*node, crate::UiEditorMode::Arrange);
-                self.arrange_undo.push(EditStep {
-                    seq,
+                let entries = vec![crate::EditorMetaSet {
+                    node_key: node_key.clone(),
                     node: *node,
-                    mode: crate::UiEditorMode::Arrange,
-                    writes: vec![(op.artifact.clone(), before, after.clone())],
-                });
-                self.arrange_redo.clear();
-                // The file exists (in the overlay) from here on.
-                self.editor_meta_absent = false;
-                self.apply_asset_body(server, op.artifact.clone(), after)
-                    .await
+                    transform: *transform,
+                }];
+                self.apply_editor_meta_set(server, &op, &entries).await
+            }
+            crate::EditorMetaVerb::SetMany { entries } => {
+                if entries.is_empty() {
+                    return blocked("nothing to arrange".into());
+                }
+                let entries = entries.clone();
+                self.apply_editor_meta_set(server, &op, &entries).await
             }
         }
+    }
+
+    /// The shared Set/SetMany body: every entry's transform lands in ONE
+    /// document round-trip and ONE byte-stack snapshot, so a multi-fixture
+    /// gesture is exactly one undo step (unified-selection P3).
+    async fn apply_editor_meta_set(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: &crate::EditorMetaOp,
+        entries: &[crate::EditorMetaSet],
+    ) -> Result<ProjectEditRun, UiError> {
+        let (mut doc, before) = match self.editor_meta_read() {
+            Ok(loaded) => loaded,
+            Err(reason) => {
+                return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                    "Arrange edit blocked: {reason}"
+                ))));
+            }
+        };
+        for entry in entries {
+            let surface = doc.mapping_surface_mut(&entry.node_key);
+            surface.transform = lpc_mapping::EditorTransform {
+                t: entry.transform.t,
+                r: entry.transform.r,
+                s: entry.transform.s,
+            };
+        }
+        // Opportunistic footprint refresh: every fixture whose map2d
+        // is locally cached gets its cached footprint trued up as
+        // part of this write (never an unprompted write). Only
+        // ARRANGED fixtures get entries — a footprint alone must not
+        // arrange a node.
+        for fixture in &op.fixtures {
+            let fresh = self.arrange_footprint(fixture.mapping_artifact.as_ref());
+            let Some(fresh) = fresh else { continue };
+            let entry_exists = entries
+                .iter()
+                .any(|entry| entry.node_key == fixture.node_key)
+                || doc.mapping_surface(&fixture.node_key).is_some();
+            if entry_exists {
+                let surface = doc.mapping_surface_mut(&fixture.node_key);
+                if surface.footprint != Some(fresh) {
+                    surface.footprint = Some(fresh);
+                }
+            }
+        }
+        doc.normalize_format();
+        let after = format!("{}\n", doc.to_json_pretty()).into_bytes();
+        if after == before {
+            return Ok(ProjectEditRun {
+                notices: UiNotices::new(),
+                logs: Vec::new(),
+            });
+        }
+        let node = entries.first().and_then(|entry| entry.node);
+        let seq = self.record_edit(node, crate::UiEditorMode::Arrange);
+        self.arrange_undo.push(EditStep {
+            seq,
+            node,
+            mode: crate::UiEditorMode::Arrange,
+            writes: vec![(op.artifact.clone(), before, after.clone())],
+        });
+        self.arrange_redo.clear();
+        // The file exists (in the overlay) from here on.
+        self.editor_meta_absent = false;
+        self.apply_asset_body(server, op.artifact.clone(), after)
+            .await
     }
 
     /// Stage `bytes` as the pending body for `artifact` and send it as a

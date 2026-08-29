@@ -44,11 +44,7 @@ static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 /// result would be consumed by the next send and misattributed. The generation
 /// lets `transport.send()` discard any stale result instead of trusting order.
 #[cfg(feature = "server")]
-static SERVER_WRITE_REQUEST: Channel<
-    CriticalSectionRawMutex,
-    (u32, lpc_wire::WireServerMessage),
-    1,
-> = Channel::new();
+static SERVER_WRITE_REQUEST: Channel<CriticalSectionRawMutex, (u32, usize), 1> = Channel::new();
 
 #[cfg(feature = "server")]
 static SERVER_WRITE_RESULT: Channel<
@@ -78,11 +74,14 @@ const PROBE_INTERVAL: Duration = Duration::from_millis(2000);
 /// — rather than a `fn()` pointer. Naming it `fn()` compiles and reads a little
 /// plainer, and costs 256 B of un-inlinable indirect calls in this image
 /// (measured with `just fw-esp32c6-size-check`).
-fn link_writer<W: Write>(tx: &mut W) -> ChunkedWriter<'_, W, impl FnMut()> {
+fn link_writer<W: Write>(tx: &mut W) -> ChunkedWriter<'_, W, impl FnMut(), embassy_time::Delay> {
     ChunkedWriter::new(
         tx,
         WritePolicy::USB_SERIAL_JTAG,
         crate::recovery::watchdog::note_io_alive,
+        // embassy-time is the right delay source on a thread executor; the
+        // v3's io task can't use it (see ChunkedWriter::new).
+        embassy_time::Delay,
     )
 }
 
@@ -200,13 +199,20 @@ async fn read_serial<R: Read>(
 #[cfg(feature = "server")]
 async fn drain_server_write_request<W: Write>(tx: &mut W, conn: &mut UsbConnectionMonitor) {
     let receiver = SERVER_WRITE_REQUEST.receiver();
-    let Ok((generation, msg)) = receiver.try_receive() else {
+    let Ok((generation, len)) = receiver.try_receive() else {
         return;
     };
 
-    let result = link_writer(tx)
-        .write_server_msg(msg, conn.is_connected())
-        .await;
+    // Serialization happened thread-side in the transport; this task writes
+    // the static frame buffer's bytes (exclusive until the result posts —
+    // see fw_esp32_common::serial::server_msg::FRAME_BUF). The connection
+    // verdict is a chip fact and stays here.
+    let result = if conn.is_connected() {
+        let bytes = fw_esp32_common::serial::server_msg::frame_bytes(len);
+        link_writer(tx).write_framed(bytes).await
+    } else {
+        Err(lpc_wire::TransportError::ConnectionLost)
+    };
     match &result {
         Ok(()) => conn.note_host_active(),
         // Only a USB write timeout/failure is draining evidence; fail-fast
@@ -262,7 +268,7 @@ pub fn get_message_channels() -> (
 /// Get accountable server write channels for StreamingMessageRouterTransport.
 #[cfg(feature = "server")]
 pub fn get_server_write_channels() -> (
-    &'static Channel<CriticalSectionRawMutex, (u32, lpc_wire::WireServerMessage), 1>,
+    &'static Channel<CriticalSectionRawMutex, (u32, usize), 1>,
     &'static Channel<CriticalSectionRawMutex, (u32, Result<(), lpc_wire::TransportError>), 1>,
 ) {
     (&SERVER_WRITE_REQUEST, &SERVER_WRITE_RESULT)

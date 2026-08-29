@@ -358,6 +358,226 @@ impl UiPatchTarget {
             language: self.pulse_language()?,
         })
     }
+
+    /// The sibling class this target selects in — the invariant unit of
+    /// [`UiSelection`]. Fixtures are siblings at the project root; a
+    /// fixture's objects are siblings within that fixture; everything else
+    /// (wire-side places, cells, modules) selects alone.
+    #[must_use]
+    fn sibling_class(&self) -> SiblingClass {
+        match self {
+            Self::Fixture { .. } => SiblingClass::Root,
+            Self::Instance { node, .. } | Self::Range { node, .. } => SiblingClass::Objects(*node),
+            Self::Output { .. }
+            | Self::Port { .. }
+            | Self::Segment { .. }
+            | Self::Cell { .. }
+            | Self::Module { .. } => SiblingClass::Solo,
+        }
+    }
+}
+
+/// Which siblings a target may share a selection with (see
+/// [`UiPatchTarget::sibling_class`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SiblingClass {
+    /// Fixture-grain: siblings at the project root — multi across fixtures.
+    Root,
+    /// Object-grain within ONE fixture: siblings share the fixture.
+    Objects(NodeId),
+    /// Selects alone (wire-side places, cells, modules).
+    Solo,
+}
+
+/// THE one selection (unified-selection D1/D2): a sibling-level SET of
+/// targets plus the derived scope, one value, core-owned.
+///
+/// Invariants (enforced by the write-helpers — no surface restates them):
+///
+/// - `targets` is one sibling class: all fixture-grain (multi across
+///   fixtures), or all object-grain within one fixture, or a single
+///   wire-side/module target. Selecting across classes REPLACES.
+/// - `entered` — the "entered fixture" the Mapping view renders as the
+///   dive — is RECOMPUTED from `targets` on every write (object-grain
+///   targets imply their fixture; everything else implies root), so scope
+///   can never drift from selection. It survives independently only while
+///   `targets` is empty: the entered-EMPTY-fixture state (`enter`), which
+///   pure derivation cannot represent and drawing the first object needs.
+///
+/// What the value MEANS is view policy: Mapping renders `entered` as the
+/// dive; Patching (no dive) reads only the targets. Cross-view the value
+/// simply persists — one selection, one tree.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UiSelection {
+    entered: Option<NodeId>,
+    targets: Vec<UiPatchTarget>,
+}
+
+impl UiSelection {
+    /// Nothing selected, nothing entered.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Exactly one target (the every-surface single-click form).
+    #[must_use]
+    pub fn one(target: UiPatchTarget) -> Self {
+        let mut selection = Self::empty();
+        selection.select_one(target);
+        selection
+    }
+
+    /// The old `Option<UiPatchTarget>` shape, for call sites that select
+    /// zero-or-one.
+    #[must_use]
+    pub fn from_option(target: Option<UiPatchTarget>) -> Self {
+        target.map(Self::one).unwrap_or_default()
+    }
+
+    /// Replace the selection with one target (scope recomputes).
+    pub fn select_one(&mut self, target: UiPatchTarget) {
+        self.targets = vec![target];
+        self.entered = derived_entered(&self.targets);
+    }
+
+    /// Shift-click: toggle `target` within its sibling class. A different
+    /// class (or a solo target) replaces the selection instead. Removing
+    /// the last member leaves an empty selection at root.
+    pub fn toggle_sibling(&mut self, target: UiPatchTarget) {
+        let class = target.sibling_class();
+        let joins = class != SiblingClass::Solo
+            && self
+                .targets
+                .first()
+                .is_some_and(|first| first.sibling_class() == class);
+        if !joins {
+            self.select_one(target);
+            return;
+        }
+        if let Some(index) = self.targets.iter().position(|t| *t == target) {
+            self.targets.remove(index);
+        } else {
+            self.targets.push(target);
+        }
+        self.entered = derived_entered(&self.targets);
+    }
+
+    /// Replace with a sibling SET (marquee): the first target's class
+    /// keeps its siblings, everything else drops, duplicates collapse.
+    pub fn set_siblings(&mut self, targets: Vec<UiPatchTarget>) {
+        let Some(first) = targets.first() else {
+            self.clear();
+            return;
+        };
+        let class = first.sibling_class();
+        let mut kept: Vec<UiPatchTarget> = Vec::new();
+        for target in targets {
+            let matches = if class == SiblingClass::Solo {
+                kept.is_empty()
+            } else {
+                target.sibling_class() == class
+            };
+            if matches && !kept.contains(&target) {
+                kept.push(target);
+            }
+        }
+        self.targets = kept;
+        self.entered = derived_entered(&self.targets);
+    }
+
+    /// Enter a fixture with nothing selected inside it — the empty-document
+    /// drawing state, the one place scope outlives derivation.
+    pub fn enter(&mut self, node: NodeId) {
+        self.targets.clear();
+        self.entered = Some(node);
+    }
+
+    /// Ascend one level (the esc ladder's rung, project grain): objects →
+    /// their fixture selected at root; an entered-empty fixture → that
+    /// fixture selected; anything else → clear. Returns whether anything
+    /// changed.
+    pub fn ascend(&mut self) -> bool {
+        if let Some(node) = self.scope() {
+            self.targets = vec![UiPatchTarget::Fixture { node }];
+            self.entered = None;
+            return true;
+        }
+        if self.targets.is_empty() {
+            return false;
+        }
+        self.clear();
+        true
+    }
+
+    /// Deselect everything (scope included — empty click's full ascend).
+    pub fn clear(&mut self) {
+        self.targets.clear();
+        self.entered = None;
+    }
+
+    /// The entered fixture — object-grain selection's fixture, or the
+    /// explicitly entered empty one. The Mapping view renders this as the
+    /// dive.
+    #[must_use]
+    pub fn entered(&self) -> Option<NodeId> {
+        self.entered
+    }
+
+    /// The scope alias for `entered` (the map2d ADR's word, lifted a
+    /// level).
+    #[must_use]
+    pub fn scope(&self) -> Option<NodeId> {
+        self.entered
+    }
+
+    #[must_use]
+    pub fn targets(&self) -> &[UiPatchTarget] {
+        &self.targets
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.targets.is_empty()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.targets.len()
+    }
+
+    /// The target, when exactly one is selected — the single-subject
+    /// surfaces (verbs, arms, props) speak this.
+    #[must_use]
+    pub fn single(&self) -> Option<&UiPatchTarget> {
+        match self.targets.as_slice() {
+            [one] => Some(one),
+            _ => None,
+        }
+    }
+
+    /// The first target (multi-aware surfaces that need a representative).
+    #[must_use]
+    pub fn primary(&self) -> Option<&UiPatchTarget> {
+        self.targets.first()
+    }
+
+    #[must_use]
+    pub fn contains(&self, target: &UiPatchTarget) -> bool {
+        self.targets.contains(target)
+    }
+}
+
+/// The derived scope: object-grain targets imply their fixture; everything
+/// else implies root. (The entered-empty case bypasses this — see
+/// [`UiSelection::enter`].)
+fn derived_entered(targets: &[UiPatchTarget]) -> Option<NodeId> {
+    match targets.first() {
+        Some(UiPatchTarget::Instance { node, .. } | UiPatchTarget::Range { node, .. }) => {
+            Some(*node)
+        }
+        _ => None,
+    }
 }
 
 /// Parse a fixture's map2d body into its instance table.
@@ -505,5 +725,120 @@ mod tests {
         let instances = instances_from_map2d(doc);
         assert_eq!(instances.len(), 5);
         assert!(instances.iter().all(|instance| instance.stride == 6));
+    }
+
+    fn fixture(node: u32) -> UiPatchTarget {
+        UiPatchTarget::Fixture {
+            node: NodeId::new(node),
+        }
+    }
+
+    fn instance(node: u32, path: &str) -> UiPatchTarget {
+        UiPatchTarget::Instance {
+            node: NodeId::new(node),
+            path: path.to_string(),
+        }
+    }
+
+    /// Fixtures are siblings at the root: shift-click accumulates and
+    /// toggles, and the scope stays root (no fixture is entered by
+    /// selecting fixtures).
+    #[test]
+    fn fixtures_toggle_as_root_siblings() {
+        let mut selection = UiSelection::one(fixture(1));
+        selection.toggle_sibling(fixture(2));
+        assert_eq!(selection.len(), 2);
+        assert_eq!(selection.entered(), None);
+        selection.toggle_sibling(fixture(1));
+        assert_eq!(selection.targets(), &[fixture(2)]);
+        selection.toggle_sibling(fixture(2));
+        assert!(selection.is_empty());
+        assert_eq!(selection.entered(), None);
+    }
+
+    /// Object-grain selection implies its fixture as the derived scope,
+    /// and toggling stays within that one fixture — an object of ANOTHER
+    /// fixture replaces (sibling-level only, the map2d ADR rule lifted).
+    #[test]
+    fn objects_are_siblings_within_one_fixture_and_imply_scope() {
+        let mut selection = UiSelection::one(instance(1, "/a/0"));
+        assert_eq!(selection.entered(), Some(NodeId::new(1)));
+        selection.toggle_sibling(instance(1, "/a/1"));
+        assert_eq!(selection.len(), 2);
+        assert_eq!(selection.entered(), Some(NodeId::new(1)));
+        selection.toggle_sibling(instance(2, "/b/0"));
+        assert_eq!(
+            selection.targets(),
+            &[instance(2, "/b/0")],
+            "a different fixture's object replaces, never co-selects"
+        );
+        assert_eq!(selection.entered(), Some(NodeId::new(2)));
+    }
+
+    /// Wire-side targets select alone: a second one replaces, and a
+    /// fixture click replaces it right back.
+    #[test]
+    fn wire_targets_select_alone() {
+        let port = UiPatchTarget::Port {
+            node: NodeId::new(3),
+            port: 0,
+        };
+        let mut selection = UiSelection::one(port.clone());
+        assert_eq!(selection.entered(), None);
+        selection.toggle_sibling(fixture(1));
+        assert_eq!(selection.targets(), &[fixture(1)]);
+        selection.toggle_sibling(port);
+        assert_eq!(selection.len(), 1);
+        assert!(selection.single().is_some());
+    }
+
+    /// `set_siblings` (the marquee) keeps the first target's class, drops
+    /// the rest, and collapses duplicates.
+    #[test]
+    fn set_siblings_enforces_one_class() {
+        let mut selection = UiSelection::empty();
+        selection.set_siblings(vec![
+            fixture(1),
+            fixture(2),
+            instance(1, "/a/0"),
+            fixture(1),
+        ]);
+        assert_eq!(selection.targets(), &[fixture(1), fixture(2)]);
+        assert_eq!(selection.entered(), None);
+    }
+
+    /// The ascend ladder at project grain: objects → their fixture at
+    /// root → cleared; an entered-empty fixture ascends to the fixture.
+    #[test]
+    fn ascend_walks_objects_to_fixture_to_clear() {
+        let mut selection = UiSelection::empty();
+        selection.set_siblings(vec![instance(1, "/a/0"), instance(1, "/a/1")]);
+        assert!(selection.ascend());
+        assert_eq!(selection.targets(), &[fixture(1)]);
+        assert_eq!(selection.entered(), None);
+        assert!(selection.ascend());
+        assert!(selection.is_empty());
+        assert!(!selection.ascend(), "nothing left to ascend");
+
+        let mut entered = UiSelection::empty();
+        entered.enter(NodeId::new(4));
+        assert_eq!(entered.entered(), Some(NodeId::new(4)));
+        assert!(entered.ascend());
+        assert_eq!(entered.targets(), &[fixture(4)]);
+        assert_eq!(entered.entered(), None);
+    }
+
+    /// Any real selection write kills a retained entered-empty scope —
+    /// scope never drifts from selection (the D2 no-drift property).
+    #[test]
+    fn selection_writes_recompute_the_entered_scope() {
+        let mut selection = UiSelection::empty();
+        selection.enter(NodeId::new(4));
+        selection.select_one(fixture(1));
+        assert_eq!(selection.entered(), None);
+
+        selection.enter(NodeId::new(4));
+        selection.toggle_sibling(instance(2, "/b/0"));
+        assert_eq!(selection.entered(), Some(NodeId::new(2)));
     }
 }

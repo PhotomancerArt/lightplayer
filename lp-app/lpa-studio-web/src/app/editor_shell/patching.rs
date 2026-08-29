@@ -96,11 +96,7 @@ pub(crate) struct PatchingUi {
 /// ([`UiPatchTarget::pulse_language`]), applied by
 /// [`UiPatchTarget::pulse_subject`] — so the UI cannot name a selection in
 /// the wrong tongue.
-fn pulse_subject(
-    surface: &UiPatchSurface,
-    selection: &Option<UiPatchTarget>,
-) -> Option<PatchPulseSubject> {
-    let target = selection.as_ref()?;
+fn pulse_subject(surface: &UiPatchSurface, target: &UiPatchTarget) -> Option<PatchPulseSubject> {
     let (node, range) = match target {
         UiPatchTarget::Fixture { node } => (*node, None),
         UiPatchTarget::Instance { node, path } => {
@@ -148,25 +144,88 @@ fn pulse_subject(
     target.pulse_subject(node, range)
 }
 
-fn send_pulse(on_action: &EventHandler<UiAction>, subject: Option<PatchPulseSubject>) {
+fn send_pulse(on_action: &EventHandler<UiAction>, subjects: Vec<PatchPulseSubject>) {
     on_action.call(UiAction::from_op(
         ProjectController::NODE_ID,
-        PatchPulseOp { subject },
+        PatchPulseOp { subjects },
     ));
 }
 
 fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
     on_action.call(UiAction::from_op(
         lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
-        ProjectEditorOp::PatchSelect { target },
+        ProjectEditorOp::PatchSelect {
+            selection: lpa_studio_core::UiSelection::from_option(target),
+        },
     ));
+}
+
+/// What a Patching keydown asks for — the pure half of the grammar, so
+/// the key → verb decision is unit-testable apart from the DOM plumbing
+/// (the window listener in [`super::hotkeys`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PatchKeyAction {
+    /// The esc ladder: rung 1 disarms, rung 2 clears the selection (and
+    /// with it the nudged segment size).
+    Escape,
+    Reverse,
+    Rotate {
+        steps: i32,
+    },
+    ArmAssign,
+    ArmSwap,
+    /// `m`: advance to the next free segment, KEEPING the arm.
+    NextSegment,
+    /// `[` / `]`: walk the free segment — selection only, never a write.
+    ShiftSegment {
+        delta: i32,
+    },
+    /// `-` / `=`: narrow/widen the free segment; creates the size
+    /// override `m` then keeps.
+    ResizeSegment {
+        delta: i32,
+    },
+    Undo,
+    Redo,
+}
+
+/// The Patching grammar's key table: `r` reverse · `;`/`'` rotate ∓/± ·
+/// `a` arm assign · `s` arm swap · `m` next free segment · `[` `]` shift ·
+/// `-` `=` resize · Escape ladder · ⌘Z/⌘⇧Z undo/redo. `key` is the DOM
+/// `KeyboardEvent.key` string; ⌘⇧Z arrives as "Z", so the meta match is
+/// case-insensitive (the Mapping center documents the same quirk).
+pub(crate) fn patch_key_action(key: &str, meta: bool, shift: bool) -> Option<PatchKeyAction> {
+    if meta {
+        if key.eq_ignore_ascii_case("z") {
+            return Some(if shift {
+                PatchKeyAction::Redo
+            } else {
+                PatchKeyAction::Undo
+            });
+        }
+        return None;
+    }
+    Some(match key {
+        "Escape" => PatchKeyAction::Escape,
+        "r" => PatchKeyAction::Reverse,
+        ";" => PatchKeyAction::Rotate { steps: -1 },
+        "'" => PatchKeyAction::Rotate { steps: 1 },
+        "a" => PatchKeyAction::ArmAssign,
+        "s" => PatchKeyAction::ArmSwap,
+        "m" => PatchKeyAction::NextSegment,
+        "[" => PatchKeyAction::ShiftSegment { delta: -1 },
+        "]" => PatchKeyAction::ShiftSegment { delta: 1 },
+        "-" => PatchKeyAction::ResizeSegment { delta: -1 },
+        "=" => PatchKeyAction::ResizeSegment { delta: 1 },
+        _ => return None,
+    })
 }
 
 /// The patching activity's toolbar, SLIMMED (D4): history and the counts
 /// readout. The verbs themselves moved into the panel's transport rows —
 /// the controls now sit beside the thing they act on, which is what a
-/// walk-up user reads. Every verb is still a hotkey (the center's
-/// `onkeydown` is untouched by the button move).
+/// walk-up user reads. Every verb is still a hotkey (the view-scoped
+/// window listener below — dock clicks no longer kill the keys).
 fn patch_toolbar(surface: &UiPatchSurface) -> Vec<ToolbarGroup> {
     let verb = |id: &'static str, label: &str, title: &str, active: bool, enabled: bool| {
         ToolbarItem::Button {
@@ -228,10 +287,13 @@ fn patch_toolbar(surface: &UiPatchSurface) -> Vec<ToolbarGroup> {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PatchingShellCenter(
     surface: Option<UiPatchSurface>,
-    selection: Option<UiPatchTarget>,
+    selection: lpa_studio_core::UiSelection,
     /// The full editor view — the canvas resolves fixture map2d bodies out
     /// of the snapshot's node views, exactly like the Mapping center.
     project_editor: ProjectEditorView,
+    /// The workbench-owned auto-pack slots, SHARED with the Mapping
+    /// center (G1 round 1: one conceptual space, one slot truth).
+    pack_slots: Signal<PackSlots>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let PatchingUi {
@@ -242,12 +304,12 @@ pub fn PatchingShellCenter(
     // The pulse's echo guard: dispatch only when the mapped subject
     // actually changes (sweep-with-clear lives in the controller; this
     // just keeps renders from re-sending the same subject).
-    let mut pulsed = use_signal(|| Option::<PatchPulseSubject>::None);
+    let mut pulsed = use_signal(Vec::<PatchPulseSubject>::new);
     // View-exit clears the pulse: a highlight pointing at a selection the
     // user can no longer see is actively misleading (#411's own rule).
     use_drop({
         let on_action = on_action;
-        move || send_pulse(&on_action, None)
+        move || send_pulse(&on_action, Vec::new())
     });
     let Some(surface) = surface else {
         return rsx! {
@@ -264,140 +326,117 @@ pub fn PatchingShellCenter(
     // edit blocks with "still loading" (the interim page's lesson).
     prefetch_bodies(&on_action, &surface);
     let (bodies, _) = mapping_assets(&project_editor);
-    // Sticky auto-pack slots, same policy as the Mapping center: the two
-    // views must show the SAME arrangement (one conceptual space).
-    let mut pack_slots = use_signal(PackSlots::new);
+    // Sticky auto-pack slots, the WORKBENCH-owned store both views share
+    // (one conceptual space — and since G1 round 1, one signal, so the
+    // views can never pack the same fixture two ways).
+    let mut pack_slots = pack_slots;
     let refreshed = refresh_pack_slots(&surface, &bodies, &pack_slots.peek());
     if let Some(next) = refreshed {
         pack_slots.set(next);
     }
     let pack = pack_slots.read().clone();
-    let subject = pulse_subject(&surface, &selection);
-    if *pulsed.peek() != subject {
-        pulsed.set(subject.clone());
-        send_pulse(&on_action, subject);
+    // The pulse union (P2): every selected target maps to a subject; a
+    // multi-selection is breath-only by the sibling invariant, and the
+    // controller merges same-output spans.
+    let subjects: Vec<PatchPulseSubject> = selection
+        .targets()
+        .iter()
+        .filter_map(|target| pulse_subject(&surface, target))
+        .collect();
+    if *pulsed.peek() != subjects {
+        pulsed.set(subjects.clone());
+        send_pulse(&on_action, subjects);
+    }
+    // The keyboard grammar rides a view-scoped WINDOW listener (see
+    // `hotkeys.rs`): the walk-up loop's dock clicks — a port free-run, a
+    // tree row — must never kill the keys, which is exactly what the old
+    // center-div `onkeydown` + `tabindex` did the moment focus left the
+    // div. The key → verb decision is `patch_key_action`, pure and
+    // unit-tested; this closure is only the executor.
+    {
+        let surface = surface.clone();
+        // The verbs and the arm are single-subject by ruling — a
+        // multi-selection is not an armable end and has no one stride.
+        let selection = selection.single().cloned();
+        let on_action = on_action;
+        super::hotkeys::use_window_keydown(move |event: web_sys::KeyboardEvent| {
+            let meta = event.meta_key() || event.ctrl_key();
+            let Some(action) = patch_key_action(&event.key(), meta, event.shift_key()) else {
+                return;
+            };
+            match action {
+                PatchKeyAction::Escape => {
+                    if armed.peek().is_some() {
+                        armed.set(None);
+                    } else {
+                        segment_size.set(None);
+                        select(&on_action, None);
+                    }
+                }
+                PatchKeyAction::Reverse => {
+                    dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Reverse);
+                }
+                PatchKeyAction::Rotate { steps } => {
+                    let stride = selection_stride(&surface, &selection);
+                    dispatch_verb(
+                        &on_action,
+                        &surface,
+                        &selection,
+                        PatchVerbKind::Rotate { steps, stride },
+                    );
+                }
+                PatchKeyAction::ArmAssign => arm_assign(&surface, &selection, &mut armed),
+                PatchKeyAction::ArmSwap => arm_swap(&surface, &selection, &mut armed),
+                PatchKeyAction::NextSegment => {
+                    if let Some(next) =
+                        next_free_segment(&surface, selection.as_ref(), *segment_size.peek())
+                    {
+                        select(&on_action, Some(next));
+                    }
+                }
+                PatchKeyAction::ShiftSegment { delta } => {
+                    if let Some(target) = selection.as_ref()
+                        && let Some(next) = shift_segment(&surface, target, delta)
+                    {
+                        select(&on_action, Some(next));
+                    }
+                }
+                PatchKeyAction::ResizeSegment { delta } => {
+                    if let Some(target) = selection.as_ref()
+                        && let Some(next) = resize_segment(&surface, target, delta)
+                    {
+                        // Resizing is what CREATES the override `m` then
+                        // keeps.
+                        if let UiPatchTarget::Segment { lamps, .. } = &next {
+                            segment_size.set(Some(*lamps));
+                        }
+                        select(&on_action, Some(next));
+                    }
+                }
+                PatchKeyAction::Undo => {
+                    dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Undo);
+                }
+                PatchKeyAction::Redo => {
+                    dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Redo);
+                }
+            }
+        });
     }
     let armed_verb = armed.read().clone();
     let groups = patch_toolbar(&surface);
     let on_item = {
         let surface = surface.clone();
-        let selection = selection.clone();
+        let single = selection.single().cloned();
         let on_action = on_action;
         move |id: &'static str| match id {
-            "patch-undo" => dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Undo),
-            "patch-redo" => dispatch_verb(&on_action, &surface, &selection, PatchVerbKind::Redo),
+            "patch-undo" => dispatch_verb(&on_action, &surface, &single, PatchVerbKind::Undo),
+            "patch-redo" => dispatch_verb(&on_action, &surface, &single, PatchVerbKind::Redo),
             _ => {}
         }
     };
     rsx! {
         div {
             class: "tw:flex tw:min-h-0 tw:flex-1 tw:flex-col tw:outline-none",
-            // The keyboard grammar: r reverse · ;/' rotate ∓/± stride ·
-            // a arm assign · s arm swap · m next free segment (keeps the
-            // arm) · [ ] shift the segment · - = narrow/widen it · Escape
-            // ladder (disarm, then deselect) · ⌘Z/⌘⇧Z undo/redo. The keys
-            // are printed in the panel's footer row — the help overlay is
-            // gone (P4).
-            tabindex: 0,
-            onkeydown: {
-                let surface = surface.clone();
-                let selection = selection.clone();
-                let on_action = on_action;
-                move |event: KeyboardEvent| {
-                    let meta = event.modifiers().meta() || event.modifiers().ctrl();
-                    match event.key() {
-                        Key::Escape => {
-                            // The ladder: rung 1 disarms (either verb),
-                            // rung 2 clears the selection — and with it the
-                            // segment size the user had nudged.
-                            if armed.peek().is_some() {
-                                armed.set(None);
-                            } else {
-                                segment_size.set(None);
-                                select(&on_action, None);
-                            }
-                        }
-                        Key::Character(key) => match key.as_str() {
-                            "r" => dispatch_verb(
-                                &on_action,
-                                &surface,
-                                &selection,
-                                PatchVerbKind::Reverse,
-                            ),
-                            ";" => {
-                                let stride = selection_stride(&surface, &selection);
-                                dispatch_verb(
-                                    &on_action,
-                                    &surface,
-                                    &selection,
-                                    PatchVerbKind::Rotate { steps: -1, stride },
-                                );
-                            }
-                            "'" => {
-                                let stride = selection_stride(&surface, &selection);
-                                dispatch_verb(
-                                    &on_action,
-                                    &surface,
-                                    &selection,
-                                    PatchVerbKind::Rotate { steps: 1, stride },
-                                );
-                            }
-                            // The ASSIGN arm: a toggle, like `s`. Armed,
-                            // the next counterpart click links — nothing
-                            // is written until then.
-                            "a" => arm_assign(&surface, &selection, &mut armed),
-                            "s" => arm_swap(&surface, &selection, &mut armed),
-                            // `m` (D3): advance to the next free segment on
-                            // the selected output, KEEPING the arm — the
-                            // walk-up loop is one key and one click per
-                            // object.
-                            "m" => {
-                                if let Some(next) = next_free_segment(
-                                    &surface,
-                                    selection.as_ref(),
-                                    *segment_size.peek(),
-                                ) {
-                                    select(&on_action, Some(next));
-                                }
-                            }
-                            // Segment nudges: selection only, never a doc
-                            // write (a window is not a patch until the arm
-                            // completes).
-                            "[" | "]" => {
-                                let delta = if key.as_str() == "[" { -1 } else { 1 };
-                                if let Some(target) = selection.as_ref()
-                                    && let Some(next) = shift_segment(&surface, target, delta)
-                                {
-                                    select(&on_action, Some(next));
-                                }
-                            }
-                            "-" | "=" => {
-                                let delta = if key.as_str() == "-" { -1 } else { 1 };
-                                if let Some(target) = selection.as_ref()
-                                    && let Some(next) = resize_segment(&surface, target, delta)
-                                {
-                                    // Resizing is what CREATES the override
-                                    // `m` then keeps.
-                                    if let UiPatchTarget::Segment { lamps, .. } = &next {
-                                        segment_size.set(Some(*lamps));
-                                    }
-                                    select(&on_action, Some(next));
-                                }
-                            }
-                            "z" if meta => {
-                                let verb = if event.modifiers().shift() {
-                                    PatchVerbKind::Redo
-                                } else {
-                                    PatchVerbKind::Undo
-                                };
-                                dispatch_verb(&on_action, &surface, &selection, verb);
-                            }
-                            _ => {}
-                        },
-                        _ => {}
-                    }
-                }
-            },
             ToolbarStrip { groups, on_item }
             div { class: "tw:relative tw:flex tw:min-h-0 tw:flex-1 tw:flex-col",
                 if !surface.editor_meta_loaded {
@@ -680,7 +719,7 @@ mod tests {
         let output = surface.outputs[0].node;
 
         assert_eq!(
-            pulse_subject(&surface, &Some(UiPatchTarget::Fixture { node })),
+            pulse_subject(&surface, &UiPatchTarget::Fixture { node }),
             Some(PatchPulseSubject {
                 lamps: PatchPulseLamps::Fixture { node, range: None },
                 language: PatchPulseLanguage::Breath,
@@ -691,7 +730,7 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Instance {
+                &(UiPatchTarget::Instance {
                     node,
                     path: instance.path.clone(),
                 })
@@ -708,7 +747,7 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Port {
+                &(UiPatchTarget::Port {
                     node: output,
                     port: port.key,
                 })
@@ -722,7 +761,7 @@ mod tests {
             })
         );
         assert_eq!(
-            pulse_subject(&surface, &Some(UiPatchTarget::Output { node: output })),
+            pulse_subject(&surface, &UiPatchTarget::Output { node: output }),
             Some(PatchPulseSubject {
                 lamps: PatchPulseLamps::Output {
                     node: output,
@@ -734,14 +773,13 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Module {
+                &(UiPatchTarget::Module {
                     node: NodeId::new(1)
                 })
             ),
             None,
             "a module selection clears the pulse"
         );
-        assert_eq!(pulse_subject(&surface, &None), None);
     }
 
     /// A free SEGMENT is already wire-space: it pulses its own window, and
@@ -770,7 +808,7 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Segment {
+                &(UiPatchTarget::Segment {
                     node: output,
                     port: port.key,
                     start: 12,
@@ -784,7 +822,7 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Segment {
+                &(UiPatchTarget::Segment {
                     node: output,
                     port: port.key,
                     start: 30,
@@ -798,7 +836,7 @@ mod tests {
         assert_eq!(
             pulse_subject(
                 &surface,
-                &Some(UiPatchTarget::Segment {
+                &(UiPatchTarget::Segment {
                     node: output,
                     port: 7,
                     start: 0,
@@ -959,6 +997,37 @@ mod tests {
             })
             .banner()
             .starts_with("Swap armed")
+        );
+    }
+
+    /// The key table, pure: every verb key routes, unknown keys don't, and
+    /// meta gates the undo pair. ⌘⇧Z arrives as "Z" from the DOM, so the
+    /// meta match must be case-insensitive (the old `onkeydown` matched
+    /// "z" exactly and shipped a dead redo hotkey).
+    #[test]
+    fn patch_keys_route_to_their_actions() {
+        use PatchKeyAction as A;
+        let plain = |key| patch_key_action(key, false, false);
+        assert_eq!(plain("Escape"), Some(A::Escape));
+        assert_eq!(plain("r"), Some(A::Reverse));
+        assert_eq!(plain(";"), Some(A::Rotate { steps: -1 }));
+        assert_eq!(plain("'"), Some(A::Rotate { steps: 1 }));
+        assert_eq!(plain("a"), Some(A::ArmAssign));
+        assert_eq!(plain("s"), Some(A::ArmSwap));
+        assert_eq!(plain("m"), Some(A::NextSegment));
+        assert_eq!(plain("["), Some(A::ShiftSegment { delta: -1 }));
+        assert_eq!(plain("]"), Some(A::ShiftSegment { delta: 1 }));
+        assert_eq!(plain("-"), Some(A::ResizeSegment { delta: -1 }));
+        assert_eq!(plain("="), Some(A::ResizeSegment { delta: 1 }));
+        assert_eq!(plain("q"), None);
+        assert_eq!(plain("z"), None, "bare z is not a verb");
+
+        assert_eq!(patch_key_action("z", true, false), Some(A::Undo));
+        assert_eq!(patch_key_action("Z", true, true), Some(A::Redo));
+        assert_eq!(
+            patch_key_action("r", true, false),
+            None,
+            "meta+verb is the browser's, not ours"
         );
     }
 }

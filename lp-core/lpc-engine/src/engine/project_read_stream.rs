@@ -132,7 +132,9 @@ impl<'a> EngineProjectReadSource<'a> {
                 .await
             }
             ProjectReadQuery::Nodes(query) => {
-                let result = self.engine.read_project_nodes(self.registry, since, query);
+                let include_slots =
+                    query.include_slots && query.level == lpc_wire::ReadLevel::Detail;
+                let result = self.engine.read_project_nodes(since, query);
                 send_query_event(
                     sink,
                     index,
@@ -151,8 +153,14 @@ impl<'a> EngineProjectReadSource<'a> {
                     )
                     .await?;
                 }
-                if let Some(slots) = result.slots {
-                    for root in slots.roots {
+                if include_slots {
+                    // One root materialized at a time: each snapshot is sent
+                    // (and freed once flushed) before the next is built, so a
+                    // whole-project slot forest never exists in memory at once.
+                    for root in self
+                        .engine
+                        .iter_node_slot_roots(self.registry, since.unwrap_or_default())
+                    {
                         send_query_event(
                             sink,
                             index,

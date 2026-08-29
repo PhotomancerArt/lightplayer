@@ -58,7 +58,7 @@ server = [
     "dep:embassy-futures",
     "dep:embassy-sync",
     "dep:embassy-time",
-    "dep:embedded-io-async",
+    "dep:embedded-hal-async",
     "dep:embedded-storage",
     "dep:esp-rtos",
     "dep:esp-storage",
@@ -74,7 +74,6 @@ server = [
     "dep:lpfs",
     "dep:lp-ws281x",
     "dep:fw-core",
-    "dep:ser-write-json",
 ]
 
 # Periodic WS281x telemetry over the serial link — OFF by default.
@@ -192,6 +191,10 @@ fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core?/fixture-no-hello"]
 # harness loop in `just clippy-fw-esp32v3` — harness code is cfg'd out of the
 # default build, and 13 harnesses once rotted uncompiled in this repo.
 test_xt_fp_conformance = ["dep:lp-xt-fp-harness"]
+# Interrupt-executor wake rig (ADR 2026-08-25) + esp-rtos upgrade canary.
+# Empty on purpose: it rides the default features' dependency cohort (esp-rtos,
+# embassy) and only swaps the entrypoint — run `just fwtest-iexec-esp32v3`.
+test_interrupt_executor = []
 
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`
@@ -277,6 +280,10 @@ lp-ws281x = { path = "../lp-ws281x", default-features = false, features = ["isr-
 # Async runtime for `serial::io_task`. Mirrors fw-esp32s3's set.
 embassy-executor = { version = "0.10.0", optional = true }
 embassy-time = { version = "0.5.0", optional = true }
+# io_task's TickDelay implements this against the hardware pacer tick, so the
+# shared ChunkedWriter's timeout/backoff seam never touches embassy-time on
+# this chip (see serial/io_task.rs).
+embedded-hal-async = { version = "1.0", optional = true }
 embassy-sync = { version = "0.8.0", optional = true }
 embassy-futures = { version = "0.1", optional = true }
 embedded-io-async = { version = "0.6", optional = true }
@@ -292,10 +299,12 @@ embedded-storage = { version = "0.3", optional = true }
 esp-storage = { version = "0.9", default-features = false, features = ["critical-section", "esp32", "panic-unaligned-buffer"], optional = true }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
 
-# io_task's wire-serialization path plus the boot-time `ServerHello`.
+# io_task's wire-serialization path plus the boot-time `ServerHello`. The
+# `ser-write-json` sink itself lives in `fw_esp32_common::serial::server_msg`
+# (the same lift the S3 and C6 already took), so there is no direct dep here —
+# only lpc-wire's serializer feature.
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
-ser-write-json = { version = "0.3", optional = true, default-features = false, features = ["alloc"] }
 
 # ⚠️ Two of eight node gates, the same pair fw-esp32s3 lists. `node-fixture` is
 # not optional alongside `node-shader`: `OutputNode::consume` requires a

@@ -5,6 +5,12 @@
 - **Deciders:** Photomancer
 - **Plan:** lp2025/2026-08-13-0859-one-project-canvas (PR #416);
   successor to the unified editor shell (PR #415).
+- **Amended 2026-08-27** (`2026-08-27-one-selection-one-tree.md`): the
+  dive is no longer stored layer STATE — it is the one selection's
+  DERIVED scope, rendered by the Mapping view; enter/exit/switch are
+  selection dispatches. Decision 2's camera-never-moves clause and the
+  placement seam stand unchanged. The parked "multi-select across
+  fixtures" row is delivered there.
 
 ## Context
 

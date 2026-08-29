@@ -7,7 +7,10 @@ segments, neutral lamp fill) used by both the canvas and Studio's
 fixture renderers.
 
 ADRs: `docs/adr/2026-07-28-standalone-editor-module.md` (the carve-out),
-`docs/adr/2026-08-13-one-project-canvas.md` (the merged canvas).
+`docs/adr/2026-08-13-one-project-canvas.md` (the merged canvas),
+`docs/adr/2026-08-27-one-selection-one-tree.md` (the one selection: the
+dive as derived scope, the fixture-grain multi-select grammar, and the
+view-parameterized pick grain).
 
 ## Boundary
 
@@ -19,10 +22,15 @@ Studio server:
 
 - Fixtures enter as plain `FixtureSprite` props (label, color,
   placement, own-space bounds, one of three honest bodies, selection
-  flags) and fixture intent leaves as `FixtureEvent`s (tap = select,
-  press-drag = move with one committed placement per gesture,
-  double-click = dive / neighbour dive-switch). The host owns the
-  override lifecycle, packing, persistence, and journal stamping.
+  flags) and fixture intent leaves as `FixtureEvent`s (tap =
+  `Select { pick, toggle }` with shift as the sibling toggle, background
+  band = `Marquee`, press-drag = `Move { moves }` carrying the WHOLE
+  selected set with one committed gesture — the shared selection box's
+  corner handles scale the set uniformly when the host asks for
+  `transform_handles` — and double-click = `Dive` carrying the clicked
+  pick). Right/middle-drag and space+drag pan. The host owns the
+  override lifecycle, packing, persistence, journal stamping, and WHAT a
+  pick selects (fixture grain or object grain is view policy).
 - The DIVE is layer state on the same canvas: the host passes the
   focused sprite's key, the live `MapEditorSession`, and the fixture's
   `Placement`; the doc layers render inside one nested camera ∘

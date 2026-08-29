@@ -28,7 +28,7 @@ use lpa_mapping_editor::{
 use lpa_studio_core::{
     NodeId, PatchVerbKind, ProjectController, ProjectEditorOp, UiAction, UiArrangeTransform,
     UiPatchCell, UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule,
-    UiPatchSurfaceOutput, UiPatchTarget,
+    UiPatchSurfaceOutput, UiPatchTarget, UiSelection,
 };
 use lpc_mapping::{Map2dDoc, Map2dShape};
 
@@ -67,12 +67,14 @@ pub enum TreeGrain {
 fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
     on_action.call(UiAction::from_op(
         lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
-        ProjectEditorOp::PatchSelect { target },
+        ProjectEditorOp::PatchSelect {
+            selection: UiSelection::from_option(target),
+        },
     ));
 }
 
-fn is_selected(selection: &Option<UiPatchTarget>, target: &UiPatchTarget) -> bool {
-    selection.as_ref() == Some(target)
+fn is_selected(selection: &UiSelection, target: &UiPatchTarget) -> bool {
+    selection.contains(target)
 }
 
 /// Fetch-on-demand: resolve unfetched map2d/patch bodies (a no-op once
@@ -137,11 +139,6 @@ fn chip_text(cell: &UiPatchCell) -> String {
 const CHIP: &str = "tw:whitespace-nowrap tw:rounded tw:border tw:border-border-strong tw:bg-card-muted tw:px-1 tw:font-mono tw:text-[9.5px] tw:text-subtle-foreground";
 const ROW_IDLE: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash";
 const ROW_SELECTED: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1";
-// The undived authored rows are structure, not selection targets (the
-// authored tree is edited through the dive) — same look, no affordance.
-const ROW_STATIC: &str = "tw:flex tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1";
-const ROW_STATIC_SELECTED: &str = "tw:flex tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1";
-
 /// Indent per tree level as an inline style — arbitrary depth (nested
 /// modules, nested repeats) must never outrun a generated tailwind class.
 fn indent_style(level: usize) -> String {
@@ -171,7 +168,7 @@ fn module_encloses_items(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ModuleRow(
     module: UiPatchSurfaceModule,
-    selection: Option<UiPatchTarget>,
+    selection: UiSelection,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let target = UiPatchTarget::Module { node: module.node };
@@ -205,7 +202,7 @@ fn ModuleRow(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn FixturesPanel(
     surface: Option<UiPatchSurface>,
-    selection: Option<UiPatchTarget>,
+    selection: UiSelection,
     /// Which tree this view reads (grain follows activity): the Mapping
     /// view passes `Authored`, the Patching view `Resolved`.
     grain: TreeGrain,
@@ -280,7 +277,11 @@ pub fn FixturesPanel(
         let on_action = on_action;
         EventHandler::new(move |target: UiPatchTarget| {
             if patch_verbs {
-                complete_assign_on_object(&on_action, &surface, &selection, patching_ui, &target);
+                // The arm completes against a SINGLE selected end — a
+                // multi-selection is not armable, and `single()` is how
+                // that rule reads here.
+                let single = selection.single().cloned();
+                complete_assign_on_object(&on_action, &surface, &single, patching_ui, &target);
             }
             select(&on_action, Some(target));
         })
@@ -421,7 +422,10 @@ fn dive_rows(doc: &Map2dDoc, selection: &MapSelection) -> Vec<DiveRow> {
 /// matches the first segment — never a second selection store. The
 /// instance number stays implied (the authored tree has one row per
 /// repeat interior, not per instance).
-fn authored_object_for_instance_path(doc: &Map2dDoc, instance_path: &str) -> Option<usize> {
+pub(crate) fn authored_object_for_instance_path(
+    doc: &Map2dDoc,
+    instance_path: &str,
+) -> Option<usize> {
     let first = instance_path
         .split('/')
         .find(|segment| !segment.is_empty())?;
@@ -438,7 +442,7 @@ fn FixtureRows(
     color: &'static str,
     /// Tree level under the module rows (0 = no enclosing module).
     indent: usize,
-    selection: Option<UiPatchTarget>,
+    selection: UiSelection,
     /// Which tree this fixture's children render (grain follows
     /// activity — see [`TreeGrain`]).
     grain: TreeGrain,
@@ -535,34 +539,66 @@ fn FixtureRows(
                 }
             }
         } else if grain == TreeGrain::Authored {
-            // The UNDIVED authored tree (Mapping grain): structure from the
-            // loaded body — display rows, not selection targets (authored
-            // editing goes through the dive). The one highlight is DERIVED
-            // from the shared patch selection (`/sector/2` → the object
-            // whose sticky id matches — the D46 bridge, never a second
-            // selection store).
+            // The UNDIVED authored tree (Mapping grain), CLICKABLE
+            // (unified-selection P5 — tree parity): a row click selects
+            // the object's instance targets through the ONE selection,
+            // which ENTERS the fixture (scope derives) — the tree is an
+            // alternate way in, no double-click needed. An id-less object
+            // is not addressable (A1) and selects its fixture instead.
+            // The highlight is the same D46 bridge, run backward.
             if let Some(doc) = authored_doc {
                 {
-                    let highlighted = selection.as_ref().and_then(|target| match target {
-                        UiPatchTarget::Instance { node, path } if *node == fixture.node => {
-                            authored_object_for_instance_path(&doc, path)
-                        }
-                        _ => None,
-                    });
-                    let mut rows = authored_rows(&doc, &|_| false);
-                    if let Some(object) = highlighted {
-                        for row in &mut rows {
-                            if row.object_index == object && row.path.is_root() {
-                                row.selected = true;
+                    let highlighted: std::collections::BTreeSet<usize> = selection
+                        .targets()
+                        .iter()
+                        .filter_map(|target| match target {
+                            UiPatchTarget::Instance { node, path } if *node == fixture.node => {
+                                authored_object_for_instance_path(&doc, path)
                             }
+                            _ => None,
+                        })
+                        .collect();
+                    let mut rows = authored_rows(&doc, &|_| false);
+                    for row in &mut rows {
+                        if highlighted.contains(&row.object_index) && row.path.is_root() {
+                            row.selected = true;
                         }
                     }
+                    let doc = std::rc::Rc::new(doc);
                     rsx! {
                         for row in rows {
                             div {
                                 key: "auth-{row.object_index}-{row.path.descent:?}",
-                                class: if row.selected { "{ROW_STATIC_SELECTED} tw:py-0.5" } else { "{ROW_STATIC} tw:py-0.5" },
+                                class: if row.selected { "{ROW_SELECTED} tw:py-0.5" } else { "{ROW_IDLE} tw:py-0.5" },
                                 style: indent_style(indent + 1 + row.depth),
+                                onclick: {
+                                    let doc = doc.clone();
+                                    let instances = fixture.instances.clone();
+                                    let node = fixture.node;
+                                    let object_index = row.object_index;
+                                    move |_| {
+                                        use crate::app::editor_shell::selection as coord;
+                                        let targets = coord::instance_targets_for_object(
+                                            node,
+                                            &doc,
+                                            &instances,
+                                            object_index,
+                                        );
+                                        let mut next = UiSelection::empty();
+                                        if !targets.is_empty() {
+                                            next.set_siblings(targets);
+                                        } else if let Some(range) =
+                                            coord::range_target_for_object(node, &doc, object_index)
+                                        {
+                                            // Id-less object (fyeah): the
+                                            // Range grain addresses it.
+                                            next.select_one(range);
+                                        } else {
+                                            next.select_one(UiPatchTarget::Fixture { node });
+                                        }
+                                        coord::dispatch_selection(&on_action, next);
+                                    }
+                                },
                                 if row.path.is_root() {
                                     span {
                                         class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-[2px]",
@@ -628,7 +664,7 @@ fn InstanceRow(
     cells: Vec<UiPatchCell>,
     /// Tree level under the fixture row.
     indent: usize,
-    selection: Option<UiPatchTarget>,
+    selection: UiSelection,
     /// An object row's click — see [`FixtureRows`].
     on_object: EventHandler<UiPatchTarget>,
     on_action: EventHandler<UiAction>,
@@ -700,7 +736,7 @@ pub(crate) struct PortClick {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn OutputsPanel(
     surface: Option<UiPatchSurface>,
-    selection: Option<UiPatchTarget>,
+    selection: UiSelection,
     /// The Patching view passes true: a port click carries the walk-up
     /// grammar (an ARMED verb completes on it). Everywhere else — and
     /// unarmed here — a port click only ever selects: plain clicks never
@@ -725,6 +761,10 @@ pub fn OutputsPanel(
         };
     };
     prefetch_bodies(&on_action, &surface);
+    // The single-target view of the one selection: the arm grammar and
+    // the verb dispatches below are single-subject by ruling (a
+    // multi-selection is not an armable end).
+    let single = selection.single().cloned();
     // The counterpart glow (round 3, #5): while an assign is armed on a
     // fixture-side selection, the FREE RUNS are where the next click
     // belongs — they wear the attention ring. Animation only while frames
@@ -736,10 +776,10 @@ pub fn OutputsPanel(
                 Some(crate::app::editor_shell::patching::ArmedVerb::Assign)
             )
         })
-        && selection
+        && single
             .as_ref()
             .is_some_and(|target| is_armable(&surface, target))
-        && !matches!(selection, Some(UiPatchTarget::Segment { .. }))
+        && !matches!(single, Some(UiPatchTarget::Segment { .. }))
         && crate::app::patch::patch_panel::surface_is_live(&surface);
     // The port-click grammar (P3's arm grammar): an ARMED verb completes
     // here — swap against the clicked port, assign the fixture-side
@@ -748,7 +788,7 @@ pub fn OutputsPanel(
     // directions, and nothing writes without an arm.
     let on_port_click = {
         let surface = surface.clone();
-        let selection = selection.clone();
+        let selection = single.clone();
         let on_action = on_action;
         move |click: PortClick| {
             let PortClick {
@@ -931,7 +971,7 @@ fn OutputBox(
     /// Round 3: armed assign + fixture-side selection = the free runs glow.
     #[props(default)]
     free_attention: bool,
-    selection: Option<UiPatchTarget>,
+    selection: UiSelection,
     on_toggle: EventHandler<lpa_studio_core::NodeId>,
     /// A click on a port row or on free space in its bar — the panel
     /// supplies the grammar (select, or the Patching view's armed verbs).
@@ -1023,7 +1063,7 @@ fn PortRow(
     /// Round 3: the attention ring on this port's free runs.
     #[props(default)]
     free_attention: bool,
-    selection: Option<UiPatchTarget>,
+    selection: UiSelection,
     on_port_click: EventHandler<PortClick>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
@@ -1037,7 +1077,7 @@ fn PortRow(
     // free run, under the cells, so a click names the run it landed in
     // without measuring anything. The selected segment draws over them.
     let runs = free_runs(&port);
-    let selected_segment = match &selection {
+    let selected_segment = match selection.single() {
         Some(UiPatchTarget::Segment {
             node: seg_node,
             port: seg_port,
@@ -1133,7 +1173,7 @@ fn PortCell(
     cell: UiPatchCell,
     port_start: u32,
     port_lamps: u32,
-    selection: Option<UiPatchTarget>,
+    selection: UiSelection,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let lamps = port_lamps.max(1);
@@ -1184,8 +1224,8 @@ fn PortCell(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PropsPanel(
     surface: Option<UiPatchSurface>,
-    selection: Option<UiPatchTarget>,
-    dive_focused: Signal<Option<NodeId>>,
+    selection: UiSelection,
+    dive_focused: Option<NodeId>,
     dive_session: Signal<MapEditorSession>,
     mut dive_commits: Signal<u64>,
     /// The Nodes view's route — the context strip's "Nodes ↗" link.
@@ -1194,7 +1234,7 @@ pub fn PropsPanel(
 ) -> Element {
     // Dived: the full stack. A dive whose fixture vanished from the
     // surface falls through to the arranged-level arms honestly.
-    if let Some(node) = *dive_focused.read()
+    if let Some(node) = dive_focused
         && let Some(surface_now) = surface.as_ref()
         && let Some(fixture) = surface_now
             .fixtures
@@ -1235,7 +1275,7 @@ pub fn PropsPanel(
     // A selected MODULE row reads out its context facts — a context level
     // (the stack's document/placement cards never grow module fields; the
     // real module UX lives on the Nodes view).
-    if let (Some(surface), Some(UiPatchTarget::Module { node })) = (&surface, &selection)
+    if let (Some(surface), Some(UiPatchTarget::Module { node })) = (&surface, selection.single())
         && let Some(module) = surface.modules.iter().find(|module| module.node == *node)
     {
         let fixtures = surface
@@ -1280,7 +1320,7 @@ pub fn PropsPanel(
     // stays the muted strip. Cards are READOUTS in v1: the verbs act on
     // the tree/canvas/port selection, never on card fields.
     if let Some(surface_now) = surface.as_ref() {
-        match &selection {
+        match selection.single() {
             Some(UiPatchTarget::Output { node }) => {
                 if let Some(output) = surface_now
                     .outputs
@@ -1424,7 +1464,22 @@ pub fn PropsPanel(
             _ => {}
         }
     }
-    let fixture = match (&surface, &selection) {
+    // A MULTI selection has no one placement to edit: the stack states the
+    // count honestly instead of showing one member's card (the gesture
+    // acts on the whole set; per-member edits come from selecting one).
+    if selection.len() > 1 {
+        let count = selection.len();
+        let word = match selection.primary() {
+            Some(UiPatchTarget::Fixture { .. }) => "fixtures",
+            _ => "objects",
+        };
+        return rsx! {
+            p { class: "tw:mt-3 tw:px-2 tw:text-center tw:text-xs tw:text-dim-foreground",
+                "{count} {word} selected — drag to move them together, or select one to edit its placement."
+            }
+        };
+    }
+    let fixture = match (&surface, selection.single()) {
         (
             Some(surface),
             Some(
@@ -1638,7 +1693,7 @@ fn PlacementCard(
     dived: bool,
     /// Whether this card is the stack's top/selected card.
     selected: bool,
-    dive_focused: Signal<Option<NodeId>>,
+    dive_focused: Option<NodeId>,
     mut dive_session: Signal<MapEditorSession>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
@@ -1681,11 +1736,15 @@ fn PlacementCard(
                 class: "lpme-lvl-head",
                 title: if dived { "select the fixture level" } else { "" },
                 onclick: move |_| {
-                    // Dived: pop the document selection — the fixture level
-                    // becomes the top card. Not dived, the fixture already
+                    // Dived: ASCEND the one selection — the fixture becomes
+                    // the selection at project level (the dive closes,
+                    // scope being derived). Not dived, the fixture already
                     // IS the selection.
                     if dived {
                         dive_session.write().selection.clear();
+                        let mut next = lpa_studio_core::UiSelection::empty();
+                        next.select_one(UiPatchTarget::Fixture { node });
+                        crate::app::editor_shell::selection::dispatch_selection(&on_action, next);
                     }
                 },
                 span { class: "tw:w-3 tw:flex-none tw:text-center tw:text-[10px] tw:text-dim-foreground",
@@ -1742,8 +1801,11 @@ fn PlacementCard(
                             class: "lpme-btn",
                             title: "Edit this fixture's mapping (double-click on the canvas does too)",
                             disabled: !can_edit_mapping,
-                            onclick: move |_| {
-                                crate::app::editor_shell::enter_dive(&on_action, dive_focused, node);
+                            onclick: {
+                                let surface = surface.clone();
+                                move |_| {
+                                    crate::app::editor_shell::enter_dive(&on_action, &surface, node);
+                                }
                             },
                             "edit mapping"
                         }
