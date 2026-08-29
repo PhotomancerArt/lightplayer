@@ -68,37 +68,54 @@
     sans-serif;
     --studio-font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 
-    --studio-color-bg: #101317;
+    --studio-color-bg: #0d0d13;
     --studio-color-bg-wash: rgba(255, 255, 255, 0.04);
-    --studio-color-surface: #171b20;
-    --studio-color-surface-subtle: #14181d;
-    --studio-color-surface-muted: #11161b;
-    --studio-color-surface-raised: #20272e;
-    --studio-color-surface-raised-strong: #26313a;
-    --studio-color-panel-primary: #18201d;
-    --studio-color-terminal: #0c1114;
-    --studio-color-track: #10151a;
+    --studio-color-surface: #14141c;
+    --studio-color-surface-subtle: #101017;
+    --studio-color-surface-muted: #0f0f15;
+    --studio-color-surface-raised: #1d1d28;
+    --studio-color-surface-raised-strong: #252532;
+    --studio-color-panel-primary: #17171f;
+    --studio-color-terminal: #09090e;
+    --studio-color-track: #0e0e14;
 
-    --studio-color-border: #2a3138;
-    --studio-color-border-muted: #252d34;
-    --studio-color-border-subtle: #293039;
-    --studio-color-border-strong: #3e4852;
-    --studio-color-panel-primary-border: #34463e;
+    --studio-color-border: #343444;
+    --studio-color-border-muted: #2b2b39;
+    --studio-color-border-subtle: #30303d;
+    --studio-color-border-strong: #4a4a5e;
+    --studio-color-panel-primary-border: #3a3a4c;
 
     --studio-color-text: #f2f0e8;
     --studio-color-text-strong: #fffaf0;
     --studio-color-text-soft: #f9f6eb;
-    --studio-color-text-muted: #c7cbd0;
-    --studio-color-text-subtle: #99a2ad;
-    --studio-color-text-dim: #9ba4ad;
-    --studio-color-heading: #94b8aa;
-    --studio-color-accent: #7be0b2;
-    --studio-color-accent-border: #65bd96;
-    --studio-color-accent-hover: #6fc39f;
+    --studio-color-text-muted: #c9c9d2;
+    --studio-color-text-subtle: #9c9cab;
+    --studio-color-text-dim: #9ea0ac;
+    /* Aurora (2026-08-29): heading went neutral; sage (#94b8aa) moved to
+       EXPORT-only — see --studio-status-export-* below. */
+    --studio-color-heading: #e9e9ef;
+    --studio-color-accent: #8be2c0;
+    --studio-color-accent-border: #5fc79d;
+    --studio-color-accent-hover: #79d4ae;
     --studio-color-accent-text-on-fill: #08130d;
     /* Low-alpha accent fill for hover/active washes on accent-bordered
        controls (inline buttons, agent-chat chips, settings buttons). */
-    --studio-color-accent-wash: rgba(123, 224, 178, 0.08);
+    --studio-color-accent-wash: rgba(139, 226, 192, 0.10);
+
+    /* Brand spectrum — moments only (hover light, brand, hero), never
+       resting chrome. Same stops as the logo sweep. */
+    --studio-spectrum: #5fe08b, #53c6f2, #a58af7, #ff5d5d, #ffab4a, #f5e04e;
+    /* Hover bloom color (Aurora: cool violet-blue). */
+    --studio-glow: rgba(140, 170, 255, 0.3);
+    /* Overlay glass material (R3: liquid + spectrum edge; blur is a var so
+       G1 can tune it live). */
+    --studio-glass-bg: rgba(12, 12, 20, 0.65);
+    --studio-glass-blur: 22px;
+    --studio-glass-saturate: 1.5;
+    --studio-glass-edge: rgba(255, 255, 255, 0.14);
+    --studio-glass-border: rgba(255, 255, 255, 0.09);
+    /* Focus ring — new convention token (the app has none today). */
+    --studio-color-focus-ring: #a5b8ff;
 
     /* Selection is its own concept — a neutral white-ish outline, kept
        distinct from the teal brand accent and from semantic status colors so

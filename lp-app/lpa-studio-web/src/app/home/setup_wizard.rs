@@ -718,7 +718,11 @@ fn device_home(wizard: &UiSetupWizard, adopted: bool) -> Element {
     };
     rsx! {
         p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground", "{headline}" }
-        div { class: "tw:h-6 tw:rounded-md tw:border tw:border-border-muted tw:bg-[linear-gradient(90deg,#14323f,#1d5c50,#7be0b2,#1d5c50,#14323f)]" }
+        // Quiet spectrum sweep (Aurora token flip): a hero moment (just
+        // adopted, "it's glowing"), so the brand spectrum is the right
+        // family — dimmed via opacity rather than per-stop alpha, since
+        // `--studio-spectrum` is a plain comma-separated stop list.
+        div { class: "tw:h-6 tw:rounded-md tw:border tw:border-border-muted tw:opacity-45 tw:bg-[linear-gradient(90deg,var(--studio-spectrum))]" }
         p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "Taking you to it…" }
     }
 }
