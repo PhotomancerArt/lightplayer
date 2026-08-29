@@ -4913,7 +4913,8 @@ fn a_two_output_project_feeds_the_card_both_wires_composed() {
         .collect();
     let (mut studio, card_key, _device) = {
         let clock = Rc::new(std::cell::Cell::new(1.0));
-        let (mut studio, card_key, device) = studio_with_device_files_at(&store, host, clock, files);
+        let (mut studio, card_key, device) =
+            studio_with_device_files_at(&store, host, clock, files);
         select_card_tab(&mut studio, &card_key, crate::DeviceCardTab::Play);
         (studio, card_key, device)
     };
@@ -4938,10 +4939,7 @@ fn a_two_output_project_feeds_the_card_both_wires_composed() {
         "every lamp of the fixture draws — the second wire's included"
     );
     assert!(
-        layout
-            .lamps
-            .iter()
-            .any(|lamp| lamp.sample_start >= 100 * 3),
+        layout.lamps.iter().any(|lamp| lamp.sample_start >= 100 * 3),
         "the second output's lamps read THEIR stretch of the composed buffer"
     );
 }

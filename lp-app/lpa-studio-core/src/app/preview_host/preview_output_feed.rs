@@ -33,8 +33,6 @@
 //! read is a host-driven pull with its own pacing and offline story. This one
 //! rides a frame the preview host already schedules, so it owns neither.
 
-use std::rc::Rc;
-
 use lpc_wire::{ControlDisplayLayoutRead, OutputFrameEntry};
 
 use crate::UiControlProductPreview;
@@ -113,6 +111,8 @@ impl PreviewOutputFeed {
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use lpc_model::{
         ColorOrder, ControlDisplayLayout, ControlLamp2d, ControlLayout2d, ControlSampleEncoding,
         ControlSampleLayout, ControlSampleSpan, NodeId, Revision,

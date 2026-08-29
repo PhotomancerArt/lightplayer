@@ -195,7 +195,10 @@ impl OutputFrameCache {
         {
             return Some(cached.frame.clone());
         }
-        let display_layout = match slot.as_ref().filter(|cached| cached.layout_key == layout_key) {
+        let display_layout = match slot
+            .as_ref()
+            .filter(|cached| cached.layout_key == layout_key)
+        {
             Some(cached) => cached.frame.display_layout.clone(),
             None => compose_display_layout(&parts),
         };
