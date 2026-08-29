@@ -19,11 +19,14 @@
 //!   a consumer polling the revision repaints only on real change.
 //! - **The LampView `Rc` contract.** Every genuinely new frame carries a
 //!   FRESH `bytes` `Rc` (the renderer's repaint key) while the display layout
-//!   keeps a STABLE one across frames whose geometry did not move — which is
-//!   why the layout lives on the feed and each frame clones the one `Rc`.
-//! - **One output node.** A project can drive several outputs; a card shows
-//!   one. The first output that has actually published is latched and every
-//!   later answer filters by it.
+//!   keeps a STABLE one across frames whose geometry did not move — both
+//!   kept by the per-output folding in [`OutputFrameCache`].
+//! - **Every output joins the picture.** A project can drive several
+//!   outputs, and the slot composes ALL of them
+//!   ([`OutputFrameCache::composed_frame`]) — one buffer, every wire's
+//!   lamps at their own offsets. The feed used to latch the FIRST output
+//!   that published, which is how the small dome's second box (2,975
+//!   lamps) never appeared on a preview card.
 //!
 //! The device card feed (`crate::app::runtime_pool::card_feed`) keeps the
 //! same guarantees for a session at the far end of a serial link, where the
@@ -32,13 +35,10 @@
 
 use std::rc::Rc;
 
-use lpc_model::{ControlDisplayLayout, ControlExtent, NodeId, Revision};
-use lpc_wire::{
-    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, OutputFrameEntry,
-    WireChannelSampleFormat,
-};
+use lpc_wire::{ControlDisplayLayoutRead, OutputFrameEntry};
 
-use crate::{UiControlProductPreview, UiControlSampleFormat};
+use crate::UiControlProductPreview;
+use crate::app::project::output_frame_cache::OutputFrameCache;
 
 /// Output-frame state for one [`super::PreviewSlotHandle`].
 #[derive(Debug, Default)]
@@ -46,19 +46,12 @@ pub struct PreviewOutputFeed {
     /// The engine's answer to "does the root scope resolve `control.out`?",
     /// `None` until the first frame answers.
     control_first: Option<bool>,
-    /// The output node this slot follows, latched at the first frame.
-    node: Option<NodeId>,
-    /// The geometry every frame shares — one `Rc`, replaced only when the
-    /// engine sends a different layout.
-    layout: Option<Rc<ControlDisplayLayout>>,
-    /// The engine-side revision of `layout`, for `IfChanged` gating.
-    layout_revision: Option<Revision>,
-    /// The engine refused the layout — a PERMANENT answer (genuinely over
-    /// the link's budget). The feed stops asking — building and measuring
-    /// a refused layout is real work at exactly the scale that can least
-    /// afford it — and the slot draws without geometry.
-    layout_refused: bool,
-    /// The newest frame, as the renderer consumes it.
+    /// The per-output half: every output's newest frame and geometry, plus
+    /// the read gate — runtime-scoped claims, reset on invalidate.
+    outputs: OutputFrameCache,
+    /// The newest COMPOSED picture, as the renderer consumes it. Held
+    /// outside [`Self::outputs`] so it survives `invalidate_runtime` (the
+    /// slot's last picture) while the claims behind it reset.
     frame: Option<UiControlProductPreview>,
     /// Bumped once per genuinely new frame; the consumer's cheap poll.
     frame_revision: u64,
@@ -70,7 +63,7 @@ impl PreviewOutputFeed {
         self.control_first
     }
 
-    /// The newest output frame, if one has landed.
+    /// The newest composed output frame, if one has landed.
     pub fn frame(&self) -> Option<&UiControlProductPreview> {
         self.frame.as_ref()
     }
@@ -81,110 +74,50 @@ impl PreviewOutputFeed {
     }
 
     /// What the next preview frame should ask for: `None` once the engine
-    /// has said this project is not control-first (no output traffic at all),
-    /// otherwise the geometry gate — `Always` until a layout is known,
-    /// `IfChanged` while one stands, `None` once the engine refused it.
+    /// has said this project is not control-first (no output traffic at
+    /// all), otherwise the shared multi-output geometry gate
+    /// ([`OutputFrameCache::display_layout_read`]) — `Always` while any
+    /// output still lacks a layout, `IfChanged` while every layout stands,
+    /// `None` once the engine refused them all.
     pub fn next_read(&self) -> Option<ControlDisplayLayoutRead> {
         if self.control_first == Some(false) {
             return None;
         }
-        if self.layout_refused {
-            return Some(ControlDisplayLayoutRead::None);
-        }
-        Some(match self.layout_revision {
-            Some(revision) => ControlDisplayLayoutRead::IfChanged {
-                known_revision: Some(revision),
-            },
-            None => ControlDisplayLayoutRead::Always,
-        })
+        Some(self.outputs.display_layout_read())
     }
 
-    /// Fold one `preview_output_frame` answer into the feed.
+    /// Fold one `preview_output_frame` answer into the feed and recompose
+    /// the picture.
     pub fn apply(&mut self, control_first: bool, outputs: &[OutputFrameEntry]) {
         self.control_first = Some(control_first);
-        let Some(entry) = self.pick_entry(outputs) else {
-            return;
-        };
-        self.node = Some(entry.node);
-        self.apply_display_layout(&entry.display_layout);
-
-        let unchanged = self
-            .frame
-            .as_ref()
-            .is_some_and(|frame| frame.revision == entry.revision.0);
-        // U16 is the only format the lamp renderer reads; anything else would
-        // draw as garbage. Keep the last good frame instead.
-        let readable = entry.sample_format == WireChannelSampleFormat::U16
-            && entry.channels > 0
-            && !entry.bytes.is_empty();
-        if unchanged || !readable {
-            return;
+        let before = self.outputs.frames_seen();
+        self.outputs.apply(outputs);
+        if self.outputs.frames_seen() != before {
+            self.frame_revision += 1;
         }
-
-        self.frame = Some(UiControlProductPreview {
-            revision: entry.revision.0,
-            // The published buffer is one row of RGB samples: three u16
-            // channels per lamp.
-            extent: ControlExtent::new(1, entry.channels.saturating_mul(3)),
-            sample_format: UiControlSampleFormat::U16,
-            sample_layout: entry.sample_layout.clone(),
-            // The ONE geometry Rc, cloned — pointer-stable across frames.
-            display_layout: self.layout.clone(),
-            // A fresh Rc per frame: the renderer's repaint key.
-            bytes: Rc::from(entry.bytes.as_slice()),
-        });
-        self.frame_revision += 1;
+        let nodes: Vec<lpc_model::NodeId> = self.outputs.outputs().collect();
+        if let Some(composed) = self.outputs.composed_frame(&nodes) {
+            self.frame = Some(composed);
+        }
     }
 
     /// Drop everything that was a claim about the slot's RUNTIME — the
-    /// followed output and the geometry — when that runtime goes away
-    /// (eviction, worker recycle). The last frame stays on screen and the
-    /// control-first verdict stands: both are facts about the project, which
-    /// a re-lease redeploys unchanged.
+    /// per-output state, geometry and refusals included — when that runtime
+    /// goes away (eviction, worker recycle). The last composed frame stays
+    /// on screen and the control-first verdict stands: both are facts about
+    /// the project, which a re-lease redeploys unchanged.
     pub fn invalidate_runtime(&mut self) {
-        self.node = None;
-        self.layout = None;
-        self.layout_revision = None;
-        self.layout_refused = false;
-    }
-
-    /// Pick this slot's entry out of one answer: the latched output node when
-    /// there is one, else the first output that has actually published — an
-    /// output with no frame yet is "no frame yet", never worth latching onto.
-    fn pick_entry<'a>(&self, outputs: &'a [OutputFrameEntry]) -> Option<&'a OutputFrameEntry> {
-        match self.node {
-            Some(node) => outputs.iter().find(|entry| entry.node == node),
-            None => outputs
-                .iter()
-                .find(|entry| entry.channels > 0 && !entry.bytes.is_empty()),
-        }
-    }
-
-    /// Absorb the geometry half of an answer.
-    fn apply_display_layout(&mut self, result: &ControlDisplayLayoutProbeResult) {
-        match result {
-            ControlDisplayLayoutProbeResult::Layout(layout) => {
-                self.layout_revision = Some(layout.revision());
-                self.layout_refused = false;
-                self.layout = Some(Rc::new(layout.clone()));
-            }
-            // Both mean "what you have still stands" — keep the Rc, which is
-            // the whole point of asking `IfChanged`.
-            ControlDisplayLayoutProbeResult::Unchanged { .. }
-            | ControlDisplayLayoutProbeResult::Omitted => {}
-            ControlDisplayLayoutProbeResult::Unsupported { .. } => {
-                self.layout_refused = true;
-            }
-        }
+        self.outputs = OutputFrameCache::default();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use lpc_model::{
-        ColorOrder, ControlLamp2d, ControlLayout2d, ControlSampleEncoding, ControlSampleLayout,
-        ControlSampleSpan,
+        ColorOrder, ControlDisplayLayout, ControlLamp2d, ControlLayout2d, ControlSampleEncoding,
+        ControlSampleLayout, ControlSampleSpan, NodeId, Revision,
     };
+    use lpc_wire::{ControlDisplayLayoutProbeResult, WireChannelSampleFormat};
 
     use super::*;
 
@@ -214,8 +147,11 @@ mod tests {
 
         let frame = feed.frame().expect("second frame");
         assert_eq!(frame.revision, 2);
-        assert_eq!(frame.extent, ControlExtent::new(1, 3));
-        assert_eq!(frame.sample_format, UiControlSampleFormat::U16);
+        assert_eq!(
+            frame.extent,
+            lpc_model::ControlExtent::new(1, 3),
+            "one RGB lamp is three samples"
+        );
         assert!(
             !Rc::ptr_eq(&first, &frame.bytes),
             "every new frame must carry a fresh bytes Rc — the renderer's repaint key"
@@ -298,32 +234,34 @@ mod tests {
         assert!(frame.display_layout.is_none());
     }
 
+    /// The small-dome regression (2026-08-29): a project driving TWO
+    /// outputs previews BOTH. The feed used to latch the first entry that
+    /// published, and the second box's 2,975 lamps never appeared anywhere.
     #[test]
-    fn the_first_published_output_is_latched_and_keeps_the_slot_on_one_node() {
+    fn every_published_output_joins_the_composed_picture() {
         let mut feed = PreviewOutputFeed::default();
         let unpublished = OutputFrameEntry {
             channels: 0,
             bytes: Vec::new(),
             ..entry(2, 1, vec![1, 0, 2, 0, 3, 0])
         };
+        let mut box_1 = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
+        box_1.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
+        let mut box_2 = entry(5, 1, vec![9, 0, 8, 0, 7, 0]);
+        box_2.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(12));
 
-        feed.apply(true, &[unpublished, entry(5, 1, vec![1, 0, 2, 0, 3, 0])]);
-        assert_eq!(feed.node, Some(NodeId::new(5)));
+        feed.apply(true, &[unpublished, box_1, box_2]);
 
-        // A second output appearing later cannot swap the picture.
-        feed.apply(
-            true,
-            &[
-                entry(2, 4, vec![7, 0, 7, 0, 7, 0]),
-                entry(5, 4, vec![1, 0, 2, 0, 3, 0]),
-            ],
-        );
-
-        assert_eq!(feed.node, Some(NodeId::new(5)));
+        let frame = feed.frame().expect("composed frame");
         assert_eq!(
-            feed.frame().expect("frame").bytes.as_ref(),
-            [1, 0, 2, 0, 3, 0]
+            frame.bytes.as_ref(),
+            [1, 0, 2, 0, 3, 0, 9, 0, 8, 0, 7, 0],
+            "both outputs' bytes ride the one picture; the unpublished one waits"
         );
+        let ControlDisplayLayout::Layout2d(layout) =
+            frame.display_layout.as_deref().expect("geometry");
+        let starts: Vec<u32> = layout.lamps.iter().map(|lamp| lamp.sample_start).collect();
+        assert_eq!(starts, vec![0, 3], "each output's lamps read its stretch");
     }
 
     /// A format the lamp renderer cannot read leaves the last good frame up
