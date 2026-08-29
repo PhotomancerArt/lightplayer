@@ -1099,7 +1099,10 @@ pub fn App() -> Element {
             VisitorBannerHost {}
             match current_route {
                 StudioRoute::Home => rsx! {
-                    crate::app::HomePage { on_action }
+                    crate::app::HomePage {
+                        on_action,
+                        home: current_view.home.clone().map(|home| *home),
+                    }
                 },
                 StudioRoute::Account => rsx! {
                     crate::app::AccountPage {}

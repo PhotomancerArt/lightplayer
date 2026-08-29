@@ -3,6 +3,20 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, PreviewSource, UiAction, UiExampleCard};
 
+/// The compiled-in examples as cards — the same projection the home view
+/// builder makes. Shared by Explore's no-gallery-slice mounts and the
+/// landing row's curation.
+pub(crate) fn embedded_example_cards() -> Vec<UiExampleCard> {
+    lpa_studio_core::app::home::embedded_examples()
+        .iter()
+        .map(|example| UiExampleCard {
+            id: example.id.to_string(),
+            name: example.name.to_string(),
+            kind: example.kind.to_string(),
+        })
+        .collect()
+}
+
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::gallery_preview::{ThumbMode, card_hover_handlers};
 use crate::app::home::package_card::home_action;
