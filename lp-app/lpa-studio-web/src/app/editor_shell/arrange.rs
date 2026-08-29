@@ -14,9 +14,10 @@ use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
-    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FitReconcile, FixtureBody, FixtureEvent,
-    FixtureSprite, HelpFloat, LampCell, MapEditorSession, Placement, SpriteObject, ZoomFloat,
-    aligned_outline, display_inset_padding, hit_body, lamp_cells, object_color, tool_hint,
+    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FitReconcile, FitStale, FixtureBody,
+    FixtureEvent, FixtureSprite, HelpFloat, LampCell, MapEditorSession, Placement, SpriteObject,
+    ZoomFloat, aligned_outline, display_inset_padding, hit_body, lamp_cells, object_color,
+    tool_hint,
 };
 use lpa_studio_core::{
     ArtifactLocation, EditorMetaFixture, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
@@ -385,6 +386,11 @@ pub(crate) fn ProjectCanvasHost(
     // async loads (bodies, the arrangement document — the peach opened
     // out of view, G1 round 1). Once the user pans or zooms, the camera
     // is theirs and reconciliation stops.
+    //
+    // The two halves part company on ONE point (the dive-zoom report): a
+    // CONTENT change re-frames only what the camera is not already showing
+    // well, so diving into a fixture that is on screen at a workable size
+    // no longer zooms it to fill. A viewport change never asks.
     {
         let bounds = match &dive_focus {
             Some((_, placement, own_bounds)) => {
@@ -412,19 +418,39 @@ pub(crate) fn ProjectCanvasHost(
             bounds_key
         };
         let viewport_now = *viewport.read();
+        let armed = *fit_pending.read();
+        let staleness = viewport_now.map(|[width, height]| {
+            fit_done
+                .read()
+                .staleness([width, height], &camera.peek(), reconcile_bounds)
+        });
         if let Some([width, height]) = viewport_now
-            && (*fit_pending.read()
-                || fit_done
-                    .read()
-                    .stale([width, height], &camera.peek(), reconcile_bounds))
+            && let Some(staleness) = staleness
+            && (armed || staleness != FitStale::Settled)
         {
-            if let Some(bounds) = bounds {
-                let padding = match &dive_focus {
-                    Some(_) => display_inset_padding(bounds, width, height),
-                    None => 0.0,
-                };
+            let padding = bounds.map_or(0.0, |bounds| match &dive_focus {
+                Some(_) => display_inset_padding(bounds, width, height),
+                None => 0.0,
+            });
+            // Content that moved (a dive changing what we frame, a body
+            // landing) re-frames only when the camera is not already
+            // showing it well. Diving into a fixture you can see at a
+            // workable size leaves the view exactly where you put it; a
+            // fixture off screen, clipped, or too small to edit still gets
+            // framed. An ARMED fit (mount, the zoom float, `0`) and a
+            // VIEWPORT change always fit — the latter is what keeps the
+            // framing a function of the settled layout rather than of
+            // measurement timing.
+            let already_framed = !armed
+                && staleness == FitStale::Bounds
+                && bounds.is_some_and(|bounds| {
+                    camera.peek().frames_well(bounds, width, height, padding)
+                });
+            if let Some(bounds) = bounds
+                && !already_framed
+            {
                 camera.write().fit(bounds, width, height, padding);
-                if *fit_pending.peek() {
+                if armed {
                     fit_pending.set(false);
                 }
             }
