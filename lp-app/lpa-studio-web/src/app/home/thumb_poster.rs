@@ -46,10 +46,10 @@ use crate::app::node::lamp_view::LampCellPaths;
 /// Posters kept for the session before the oldest is dropped.
 pub(crate) const POSTER_CACHE_LIMIT: usize = 64;
 
-/// Poster size in device pixels: the card thumb's 256×96 box at 2×, crisp
-/// on a retina panel and still tens of KB as a PNG.
+/// Poster size in device pixels: the card thumb's 256×192 (4:3) box at 2×,
+/// crisp on a retina panel and still tens of KB as a PNG.
 pub(crate) const POSTER_WIDTH: u32 = 512;
-pub(crate) const POSTER_HEIGHT: u32 = 192;
+pub(crate) const POSTER_HEIGHT: u32 = 384;
 
 /// The lamp layer's inset on a card (`card_thumb.rs`: `tw:inset-[6%]`, so
 /// an edge lamp is not clipped by the thumb's rounded corner). The poster

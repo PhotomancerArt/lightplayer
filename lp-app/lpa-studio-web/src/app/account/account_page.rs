@@ -1,6 +1,6 @@
 //! `/account` — the profile page (spike §3: B's structure, A's content).
 //!
-//! Three groups of settings rows, holding only what actually exists:
+//! Four groups of settings rows, holding only what actually exists:
 //!
 //! - **Identity** — the provider's photo (never ours, never stored), and
 //!   the two name boxes. Two neutral boxes rather than one "full name"
@@ -8,6 +8,10 @@
 //!   a different order; save appears when a box differs from what loaded.
 //! - **Account** — the login email with the connection's own label beside
 //!   it, and the account id with its birthday. Facts, not controls.
+//! - **Cloud sync** — the auto-publish driver's ledger: what it last
+//!   concluded about the engine and about each project, failures included.
+//!   Diagnostic rows only; the product-level share surface is a separate
+//!   vision.
 //! - **Sessions** — every browser this account is open in, with a way to
 //!   close one, and a way to close them all.
 //!
@@ -37,6 +41,9 @@ use lpc_cloud_api::request::{ListSessions, RevokeSession, UpdateMe};
 use lpc_cloud_api::{LoginOptionsInfo, MeInfo, SessionInfo};
 
 use crate::app::layout::cloud_account::{AccountAvatar, AvatarFace, SignInPanel, end_session};
+use crate::cloud::sync::sync_status::{
+    self, ProjectSyncStatus, SyncOutcomeKind, SyncStatusSnapshot,
+};
 use crate::cloud::{CloudSession, CloudSessionRefresh, FetchCloudPort, account_memory};
 
 /// The page at `/account`.
@@ -101,6 +108,24 @@ pub fn AccountPage() -> Element {
                 },
             );
         });
+    });
+
+    // ---- the cloud sync ledger -----------------------------------------
+    //
+    // The auto-publish driver keeps a per-tab ledger of trip conclusions
+    // (`sync_status`); this page is its one reader. Polled rather than
+    // subscribed: the driver is not a component and must never depend on
+    // the UI runtime, and a once-a-second copy on a page someone opened to
+    // diagnose sync is the cheapest honest wiring.
+    let mut sync = use_signal(SyncStatusSnapshot::default);
+    use_future(move || async move {
+        loop {
+            sync.set(sync_status::snapshot());
+            #[cfg(target_arch = "wasm32")]
+            gloo_timers::future::TimeoutFuture::new(1_000).await;
+            #[cfg(not(target_arch = "wasm32"))]
+            break;
+        }
     });
 
     let on_save = EventHandler::new(move |update: UpdateMe| {
@@ -169,6 +194,7 @@ pub fn AccountPage() -> Element {
                 family: family(),
                 save_status: save_status(),
                 sessions: sessions(),
+                sync: sync(),
                 now_secs: crate::web_app::now_secs(),
                 on_given: EventHandler::new(move |value: String| {
                     given.set(value);
@@ -257,6 +283,10 @@ pub fn AccountPageBody(
     family: String,
     #[props(default)] save_status: SaveStatus,
     #[props(default)] sessions: SessionsPane,
+    /// The auto-publish driver's per-tab ledger (empty under stories that
+    /// do not stage one).
+    #[props(default)]
+    sync: SyncStatusSnapshot,
     /// Epoch seconds, for the "signed in …" phrasing. A prop so a capture
     /// is not a function of when it ran.
     #[props(default = 0.0)]
@@ -366,6 +396,27 @@ pub fn AccountPageBody(
                 }
             }
 
+            // ---- Cloud sync ------------------------------------------
+            //
+            // Diagnostic, not product: the auto-publish engine works in
+            // silence by design, and this group is where that silence can
+            // be interrogated — the driver's own facts, then the newest
+            // conclusion per project, failures included. The larger
+            // share/publish surface is a separate vision; nothing here
+            // offers a control.
+            section { class: "tw:grid tw:gap-2",
+                h2 { class: GROUP_TITLE_CLASS, "Cloud sync" }
+                div { class: ROWS_CLASS,
+                    div { class: ROW_CLASS,
+                        span { class: KEY_CLASS, "Auto-publish" }
+                        span { class: VALUE_DIM_CLASS, {sync_engine_note(&sync, now_secs)} }
+                    }
+                    for row in sync.rows.iter() {
+                        SyncStatusRow { key: "{row.uid}", row: row.clone(), now_secs }
+                    }
+                }
+            }
+
             // ---- Sessions --------------------------------------------
             section { class: "tw:grid tw:gap-2",
                 h2 { class: GROUP_TITLE_CLASS, "Sessions" }
@@ -458,6 +509,69 @@ fn NameRow(
                         }
                     },
                 }
+            }
+        }
+    }
+}
+
+/// The Auto-publish row's sentence: what the driver knows about itself.
+///
+/// Every branch names the fact a diagnosis needs first: whether there is
+/// an account to sync with, whether the sign-in sweep ever saw the
+/// library, and how much it offered when it did.
+fn sync_engine_note(sync: &SyncStatusSnapshot, now_secs: f64) -> String {
+    if !sync.engine.signed_in {
+        return "waiting for sign-in — nothing syncs until the account is known".to_string();
+    }
+    match &sync.engine.last_sweep {
+        None => "on — projects publish as they are created and saved".to_string(),
+        Some(sweep) if sweep.host_missing => {
+            "the project library was not ready at sign-in, so nothing was offered — reload to retry"
+                .to_string()
+        }
+        Some(sweep) => format!(
+            "sign-in sweep offered {} project{} {}",
+            sweep.offered,
+            if sweep.offered == 1 { "" } else { "s" },
+            time_ago(now_secs, sweep.at_ms / 1000.0),
+        ),
+    }
+}
+
+/// One project's newest sync conclusion.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SyncStatusRow(row: ProjectSyncStatus, now_secs: f64) -> Element {
+    let badge = match row.kind {
+        SyncOutcomeKind::Refused | SyncOutcomeKind::Denied => {
+            format!(
+                "{BADGE_CLASS} tw:border-status-error-border tw:bg-status-error-bg tw:text-status-error-foreground"
+            )
+        }
+        SyncOutcomeKind::Retrying => {
+            format!(
+                "{BADGE_CLASS} tw:border-status-warning-border tw:bg-status-warning-bg tw:text-status-warning-foreground"
+            )
+        }
+        SyncOutcomeKind::Published | SyncOutcomeKind::Pushed => {
+            format!(
+                "{BADGE_CLASS} tw:border-status-good-border tw:bg-status-good-bg tw:text-status-good-foreground"
+            )
+        }
+        SyncOutcomeKind::NothingSaved | SyncOutcomeKind::Skipped => BADGE_CLASS.to_string(),
+    };
+    rsx! {
+        div { class: ROW_CLASS,
+            span { class: "{KEY_CLASS} tw:truncate", title: "{row.name}", "{row.name}" }
+            span {
+                class: "{VALUE_DIM_CLASS} tw:truncate",
+                // The full sentence survives truncation as the tooltip —
+                // the detail is the diagnosis.
+                title: "{row.detail}",
+                "{row.detail} · {time_ago(now_secs, row.at_ms / 1000.0)}"
+            }
+            span { class: ACTION_CLASS,
+                span { class: badge, "{row.kind.label()}" }
             }
         }
     }
