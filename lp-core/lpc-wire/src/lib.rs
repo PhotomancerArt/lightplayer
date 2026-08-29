@@ -26,8 +26,8 @@ pub mod tree;
 pub use messages::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
     ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
-    ControlProductProbeResultHeader, NodeReadQuery, NodeReadResult, NodeReadSelection,
-    OutputFrameEntry, OutputFrameEntryHeader, OutputFrameProbeRequest, OutputFrameProbeResult,
+    ControlProductProbeResultHeader, NodeReadQuery, NodeReadSelection, OutputFrameEntry,
+    OutputFrameEntryHeader, OutputFrameProbeRequest, OutputFrameProbeResult,
     OutputFrameProbeResultHeader, PROJECT_READ_FRAME_MAX_BYTES,
     PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES, PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES,
     PROJECT_READ_PROBE_HEADER_RESERVE_BYTES, PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectProbeRequest,
@@ -36,7 +36,7 @@ pub use messages::{
     ProjectReadResourceEvent, ProjectReadShapeEvent, ProjectRuntimeStatus, ReadLevel,
     RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
     ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RuntimeReadQuery,
-    RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, TimebaseProbeRequest,
+    RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, TimebaseProbeRequest,
     TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
     WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireCellProjection, WireConsumerPolicy,
     WireEffectiveBinding, WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,
@@ -66,8 +66,8 @@ pub use project_overlay::{
 #[cfg(feature = "ser-write-json")]
 pub use ser_write::{CountingSerWrite, ErasedWriteError, ser_write_json_len, ser_write_json_to};
 pub use server::{
-    AvailableProject, BuildFacts, ClientMsgBody, FsRequest, FsResponse, HardwareFacts,
-    HardwareIdentity, HelloIdentity, LoadedProject, MemoryStats, SampleStats, ServerConfig,
+    AvailableProject, BuildFacts, FsRequest, FsResponse, HardwareFacts, HardwareIdentity,
+    HelloIdentity, LinkCounters, LoadedProject, MemoryStats, SampleStats, ServerConfig,
     ServerHello, ServerMsgBody, WIRE_PROTO_VERSION,
 };
 pub use slot::{

@@ -26,7 +26,7 @@ pub use crate::budget::{
     PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES, PROJECT_READ_PROBE_HEADER_RESERVE_BYTES,
     PROJECT_READ_RUNTIME_CHUNK_BYTES,
 };
-pub use node_read::{NodeReadQuery, NodeReadResult, NodeReadSelection};
+pub use node_read::{NodeReadQuery, NodeReadSelection};
 pub use probe::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
     ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
@@ -49,4 +49,4 @@ pub use resource_read::{ResourcePayloadRead, ResourceReadQuery, ResourceReadResu
 pub use runtime_read::{
     ProjectRuntimeStatus, RuntimeReadQuery, RuntimeReadResult, ServerRuntimeStatus,
 };
-pub use shape_read::{ShapeReadQuery, ShapeReadResult};
+pub use shape_read::ShapeReadQuery;

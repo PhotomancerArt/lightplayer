@@ -1,44 +1,11 @@
-use crate::messages::{ProjectReadEvent, ProjectReadRequest};
+use crate::messages::ProjectReadEvent;
 use crate::project::WireProjectHandle;
-use crate::project_command::{WireProjectCommand, WireProjectCommandResponse};
-use crate::server::fs_api::{FsRequest, FsResponse};
+use crate::project_command::WireProjectCommandResponse;
+use crate::server::fs_api::FsResponse;
 use alloc::string::String;
 use alloc::vec::Vec;
 use lpc_model::LpPathBuf;
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ClientMsgBody {
-    /// Filesystem operation request
-    Filesystem(FsRequest),
-    /// Load a project
-    LoadProject { path: LpPathBuf },
-    /// Unload a project
-    UnloadProject { handle: WireProjectHandle },
-    /// Project read request that expects project-read frames.
-    ProjectRead {
-        handle: WireProjectHandle,
-        request: ProjectReadRequest,
-    },
-    /// Project-specific command request.
-    ProjectCommand {
-        handle: WireProjectHandle,
-        command: WireProjectCommand,
-    },
-    /// List available projects
-    ListAvailableProjects,
-    /// List loaded projects
-    ListLoadedProjects,
-    /// Set the server/device global log level at runtime.
-    ///
-    /// Applies process-globally via the `log` crate on whichever platform
-    /// serves the protocol (ESP32, emulator, browser worker, host). Not
-    /// persisted: the device reverts to its logger-init default (Info) on
-    /// reboot. There is deliberately no `Off` — the client can never turn
-    /// the device fully silent.
-    SetLogLevel { level: LogLevel },
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -130,6 +97,12 @@ pub enum ServerMsgBody {
         /// single-core fallback boots).
         #[serde(default)]
         outputs: Option<Vec<crate::server::OutputWireStatus>>,
+        /// Serial-link loss/corruption counters since boot; absent on
+        /// targets without a lossy byte-stream link (host server, ws).
+        /// Every drop the demux takes is counted here so silent loss has a
+        /// wire-visible trace (2026-08-26 inbound-loss defect).
+        #[serde(default)]
+        link: Option<crate::server::LinkCounters>,
     },
     /// Error response for any request type
     Error {
@@ -138,7 +111,7 @@ pub enum ServerMsgBody {
 }
 
 /// Log severity carried by [`ServerMsgBody::Log`] frames and
-/// [`ClientMsgBody::SetLogLevel`] requests, lowest to highest.
+/// [`crate::ClientRequest::SetLogLevel`] requests, lowest to highest.
 ///
 /// There is deliberately no `Off` variant: the runtime log-level command can
 /// lower output to `Error` but never fully silence the device.
@@ -182,6 +155,42 @@ pub struct MemoryStats {
     pub free_bytes: u32,
     pub used_bytes: u32,
     pub total_bytes: u32,
+    /// Largest single allocatable block — the number that matters on a
+    /// small fragmented arena (total-free can look healthy while every
+    /// allocation over a few hundred bytes fails). Absent on targets that
+    /// cannot probe it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub largest_free_block: Option<u32>,
+    /// Times the retrying allocator saved an allocation that first failed
+    /// (fragmentation pressure evidence). Absent where unsupported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oom_retry_saves: Option<u32>,
+}
+
+/// Serial-link loss/corruption counters, monotonic since boot.
+///
+/// Attached to [`ServerMsgBody::Heartbeat`] so a lost or corrupted inbound
+/// frame is never silent: the drop is counted at the site that takes it and
+/// surfaces on the next heartbeat.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct LinkCounters {
+    /// Newline-terminated `M!` lines whose JSON failed to parse (torn or
+    /// spliced frames).
+    #[serde(default)]
+    pub parse_failures: u32,
+    /// Hardware RX errors (overflow/parity/framing) that dropped a partial
+    /// line.
+    #[serde(default)]
+    pub rx_errors: u32,
+    /// Parsed `M!` lines dropped because the inbound queue was full.
+    #[serde(default)]
+    pub queue_full_drops: u32,
+    /// Stale partial lines discarded at a session boundary (dead session
+    /// remnants).
+    #[serde(default)]
+    pub stale_partial_flushes: u32,
 }
 
 #[cfg(test)]
@@ -198,14 +207,14 @@ mod tests {
 
     #[test]
     fn set_log_level_request_round_trips() {
-        let request = ClientMsgBody::SetLogLevel {
+        let request = crate::ClientRequest::SetLogLevel {
             level: LogLevel::Debug,
         };
         let json = crate::json::to_string(&request).unwrap();
-        let deserialized: ClientMsgBody = crate::json::from_str(&json).unwrap();
+        let deserialized: crate::ClientRequest = crate::json::from_str(&json).unwrap();
         assert!(matches!(
             deserialized,
-            ClientMsgBody::SetLogLevel {
+            crate::ClientRequest::SetLogLevel {
                 level: LogLevel::Debug
             }
         ));

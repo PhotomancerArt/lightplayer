@@ -5,41 +5,25 @@ use alloc::string::String;
 
 use lpc_model::{NodeId, Revision, SlotAccess};
 use lpc_registry::ProjectRegistry;
-use lpc_wire::{
-    NodeReadQuery, NodeReadResult, ReadLevel, WireSlotRootSnapshot, wire_slot_data_from_slot_access,
-};
+use lpc_wire::{NodeReadSelection, WireSlotRootSnapshot, wire_slot_data_from_slot_access};
 
-use crate::node::{NodeEntryState, tree_deltas_since};
+use crate::node::NodeEntryState;
 
 use super::Engine;
 
-impl Engine {
-    pub(super) fn read_project_nodes(
-        &self,
-        since: Option<lpc_model::Revision>,
-        query: NodeReadQuery,
-    ) -> NodeReadResult {
-        let since = since.unwrap_or_default();
-        let tree_deltas = match query.level {
-            ReadLevel::Ids | ReadLevel::Summary | ReadLevel::Detail => {
-                tree_deltas_since(self.tree(), since)
-            }
-        };
-
-        // Slot roots are never materialized here: the stream layer emits them
-        // one at a time via [`Engine::iter_node_slot_roots`], so peak memory is
-        // one root, not the whole project's slot forest (the classic's
-        // project-read OOM,
-        // `docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
-        NodeReadResult {
-            level: query.level,
-            tree_deltas,
-            slots: None,
-        }
+/// Does `selection` include this node? `All` keeps full-read behavior;
+/// `ByIds` is a partial view over exactly the named nodes (unknown ids are
+/// simply absent — a pager racing deletions is normal).
+pub(super) fn selection_includes(selection: &NodeReadSelection, id: NodeId) -> bool {
+    match selection {
+        NodeReadSelection::All => true,
+        NodeReadSelection::ByIds(ids) => ids.contains(&id),
     }
+}
 
+impl Engine {
     /// Lazily snapshot slot roots, one root at a time, gated per-root by
-    /// revision (M5 G6a).
+    /// revision (M5 G6a) and filtered by the query's node `selection`.
     ///
     /// A root is included only when its owning revision is newer than `since`:
     /// `.def` roots gate on the node-def entry revision
@@ -55,45 +39,49 @@ impl Engine {
         &'a self,
         registry: &'a ProjectRegistry,
         since: Revision,
+        selection: &'a NodeReadSelection,
     ) -> impl Iterator<Item = WireSlotRootSnapshot> + 'a {
-        self.tree().entries().flat_map(move |entry| {
-            let def_root = if let Some(location) = entry.def_location.as_ref()
-                && let Some(def_entry) = registry.def(location)
-                && root_changed_since(since, def_entry.revision)
-                && let lpc_model::NodeDefState::Loaded(def) = &def_entry.state
-            {
-                Some(WireSlotRootSnapshot {
-                    name: node_def_root_name(entry.id),
-                    shape: def.shape_id(),
-                    data: wire_slot_data_from_slot_access(
-                        self.slot_shapes(),
-                        def.shape_id(),
-                        def.data(),
-                    ),
-                })
-            } else {
-                None
-            };
+        self.tree()
+            .entries()
+            .filter(move |entry| selection_includes(selection, entry.id))
+            .flat_map(move |entry| {
+                let def_root = if let Some(location) = entry.def_location.as_ref()
+                    && let Some(def_entry) = registry.def(location)
+                    && root_changed_since(since, def_entry.revision)
+                    && let lpc_model::NodeDefState::Loaded(def) = &def_entry.state
+                {
+                    Some(WireSlotRootSnapshot {
+                        name: node_def_root_name(entry.id),
+                        shape: def.shape_id(),
+                        data: wire_slot_data_from_slot_access(
+                            self.slot_shapes(),
+                            def.shape_id(),
+                            def.data(),
+                        ),
+                    })
+                } else {
+                    None
+                };
 
-            let state_root = if root_changed_since(since, entry.changed_at())
-                && let NodeEntryState::Alive(node) = entry.state.value()
-                && let Some(state) = node.runtime_state_slots()
-            {
-                Some(WireSlotRootSnapshot {
-                    name: node_state_root_name(entry.id),
-                    shape: state.shape_id(),
-                    data: wire_slot_data_from_slot_access(
-                        self.slot_shapes(),
-                        state.shape_id(),
-                        state.data(),
-                    ),
-                })
-            } else {
-                None
-            };
+                let state_root = if root_changed_since(since, entry.changed_at())
+                    && let NodeEntryState::Alive(node) = entry.state.value()
+                    && let Some(state) = node.runtime_state_slots()
+                {
+                    Some(WireSlotRootSnapshot {
+                        name: node_state_root_name(entry.id),
+                        shape: state.shape_id(),
+                        data: wire_slot_data_from_slot_access(
+                            self.slot_shapes(),
+                            state.shape_id(),
+                            state.data(),
+                        ),
+                    })
+                } else {
+                    None
+                };
 
-            def_root.into_iter().chain(state_root)
-        })
+                def_root.into_iter().chain(state_root)
+            })
     }
 }
 

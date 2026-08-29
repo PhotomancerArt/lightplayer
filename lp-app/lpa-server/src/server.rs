@@ -24,6 +24,34 @@ use lpfs::{FsEvent, LpFs};
 /// Platforms without heap stats (e.g. fw-emu) pass `None`.
 pub type MemoryStatsFn = fn() -> Option<(u32, u32)>;
 
+/// Embedder-supplied probe for the *largest allocatable block* (bytes) — the
+/// number that matters on a small fragmented arena, where total-free can look
+/// healthy while every allocation over a few hundred bytes fails. Embedders
+/// that cannot report it (hosts, browser) leave the probe unset and reads are
+/// never refused.
+pub type ReadHeadroomProbe = fn() -> Option<u32>;
+
+/// Minimum largest-free-block headroom to *begin* serving a ProjectRead.
+///
+/// Below this, assembly of even a well-behaved streamed read (one slot root or
+/// shape entry + one ~16 KiB frame batch + serde transients) risks the
+/// infallible-alloc abort path, which RESETS the board
+/// (`docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
+/// Refusing with a structured error is always better than resetting.
+///
+/// Calibrated on silicon at the 2026-08-29 G1 bench walk (classic,
+/// zook-dome at 42 ms ticks, ~18–21 KB largest free block loaded): with the
+/// gate lowered to 16 KiB the monolithic read passed the gate and still
+/// OOM-reset the board — the crash breadcrumb showed a 480 B alloc failing
+/// in the *shapes* limb, i.e. the sink's in-memory event batch (sized
+/// against the 16 KiB frame budget) plus one atom exhausts such a heap. At
+/// 32 KiB the same board refused 5/5 reads in 0.8 s with zero resets. The
+/// dominant transient IS roughly one frame batch + atom + slop, so one
+/// frame budget × 2 is the honest floor; a board below it (this one could
+/// not even JIT its shader — recovery gated it after repeated 768 B compile
+/// OOMs) cannot serve any read shape and SHOULD be refused.
+pub const PROJECT_READ_MIN_HEADROOM_BYTES: u32 = 32 * 1024;
+
 /// Main server struct for processing client-server messages.
 ///
 /// Message responses are sent through [`ServerTransport`] so large project-read
@@ -54,6 +82,9 @@ pub struct LpServer {
     project_read_frame_budget: Option<usize>,
     /// Optional memory stats callback for logging (ESP32 passes impl, others pass None)
     memory_stats: Option<MemoryStatsFn>,
+    /// Optional largest-free-block probe backing the ProjectRead headroom
+    /// refusal gate. Unset (hosts/browser) = reads are never refused.
+    read_headroom_probe: Option<ReadHeadroomProbe>,
     /// Optional time provider for perf timing (e.g. shader comp). ESP32/emu pass, others None.
     time_provider: Option<Rc<dyn TimeProvider>>,
     /// Optional hardware button service for input nodes.
@@ -217,6 +248,7 @@ impl LpServer {
             safe_output_clamp: None,
             project_read_frame_budget: Some(lpc_wire::PROJECT_READ_FRAME_MAX_BYTES),
             memory_stats,
+            read_headroom_probe: None,
             time_provider,
             button_service,
             radio_service,
@@ -511,6 +543,36 @@ impl LpServer {
                     match client_msg.msg {
                         ClientRequest::ProjectRead { handle, request } => {
                             let sink_frame_budget = self.sink_frame_budget();
+                            // Refusal-not-reset: if the heap cannot afford
+                            // even a well-behaved streamed read, fail the
+                            // request with a structured terminal error instead
+                            // of letting infallible alloc abort-reset the
+                            // board mid-assembly.
+                            if let Some(headroom) =
+                                self.read_headroom_probe.and_then(|probe| probe())
+                                && headroom < PROJECT_READ_MIN_HEADROOM_BYTES
+                            {
+                                let mut sink = ProjectReadStreamSink::with_max_bytes(
+                                    transport,
+                                    msg_id,
+                                    sink_frame_budget,
+                                );
+                                let message = format!(
+                                    "read refused: heap headroom too low (largest free block \
+                                     {headroom} B < {PROJECT_READ_MIN_HEADROOM_BYTES} B); narrow \
+                                     the query (include_slots:false, one probe per read, or page \
+                                     nodes by id) and retry",
+                                );
+                                log::warn!("tick_and_send: {message}");
+                                if let Err(send_error) = sink.send_terminal_error(message).await {
+                                    log::warn!(
+                                        "tick_and_send: failed to send read-refusal error for \
+                                         id={msg_id}: {send_error}"
+                                    );
+                                }
+                                response_count += 1;
+                                continue;
+                            }
                             let mut server_status = self.runtime_status();
                             let Some(project) = self.project_manager.get_project_mut(handle) else {
                                 transport
@@ -658,6 +720,13 @@ impl LpServer {
     }
 
     /// Get the memory stats callback
+    /// Install the largest-free-block probe the ProjectRead headroom gate
+    /// consults (see [`PROJECT_READ_MIN_HEADROOM_BYTES`]). Unset = never
+    /// refuse.
+    pub fn set_read_headroom_probe(&mut self, probe: Option<ReadHeadroomProbe>) {
+        self.read_headroom_probe = probe;
+    }
+
     pub fn memory_stats(&self) -> Option<MemoryStatsFn> {
         self.memory_stats
     }
@@ -792,6 +861,10 @@ impl LpServer {
                 free_bytes,
                 used_bytes,
                 total_bytes: free_bytes.saturating_add(used_bytes),
+                // Fragmentation evidence, when the embedder installed the
+                // headroom probe (the same number the refusal gate consults).
+                largest_free_block: self.read_headroom_probe.and_then(|probe| probe()),
+                oom_retry_saves: None,
             })
         });
         lpc_wire::ServerRuntimeStatus {

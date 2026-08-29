@@ -40,6 +40,17 @@ pub enum WireTreeDelta {
     },
 }
 
+impl WireTreeDelta {
+    /// The node this delta is about, across all variants.
+    pub fn node_id(&self) -> NodeId {
+        match self {
+            WireTreeDelta::Created { id, .. }
+            | WireTreeDelta::EntryChanged { id, .. }
+            | WireTreeDelta::ChildrenChanged { id, .. } => *id,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::WireTreeDelta;

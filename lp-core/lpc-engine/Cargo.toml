@@ -111,7 +111,12 @@ lpc-mapping = { path = "../lpc-mapping", default-features = false, optional = tr
 lpc-model = { path = "../lpc-model", default-features = false }
 lpc-hardware = { path = "../lpc-hardware", default-features = false }
 lpc-registry = { path = "../lpc-registry", default-features = false }
-lpc-wire = { path = "../lpc-wire", default-features = false }
+# `ser-write-json` lets the stream batch tree deltas against real on-wire
+# byte counts (same serializer the ESP32 writes with), matching lpc-shared's
+# frame batcher.
+lpc-wire = { path = "../lpc-wire", default-features = false, features = [
+    "ser-write-json",
+] }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lp-recovery = { workspace = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }

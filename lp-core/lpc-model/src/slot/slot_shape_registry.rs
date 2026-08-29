@@ -580,6 +580,47 @@ impl SlotShapeRegistry {
         )
     }
 
+    /// Walk the merged static-catalog + dynamic id space in ascending order,
+    /// without cloning any entry. Same ordering and membership as
+    /// [`snapshot_page_with_static_catalog`](Self::snapshot_page_with_static_catalog)
+    /// over the full range.
+    pub fn ids_with_static_catalog(&self) -> impl Iterator<Item = SlotShapeId> + '_ {
+        let mut cursor: Option<SlotShapeId> = None;
+        core::iter::from_fn(move || {
+            let static_next = self.next_static_catalog_id_after(cursor);
+            let dynamic_next = self
+                .shapes
+                .range((cursor.map_or(Unbounded, Excluded), Unbounded))
+                .next()
+                .map(|(id, _)| *id);
+            let id = min_shape_id(static_next, dynamic_next)?;
+            cursor = Some(id);
+            Some(id)
+        })
+    }
+
+    /// Clone one entry from the merged static+dynamic space.
+    ///
+    /// The per-entry counterpart of the full-page snapshot: callers stream one
+    /// entry at a time (send, drop, next) so the whole registry is never
+    /// materialized at once.
+    pub fn entry_with_static_catalog(&self, id: SlotShapeId) -> Option<SlotShapeEntry> {
+        self.shapes
+            .get(&id)
+            .cloned()
+            .or_else(|| Self::static_catalog_entry(id))
+    }
+
+    /// `changed_at` for an id in the merged space, without cloning the entry.
+    /// Static-catalog entries report `Revision::default()`, matching the
+    /// entries [`static_catalog_entry`](Self::static_catalog_entry) builds.
+    pub fn entry_changed_at_with_static_catalog(&self, id: SlotShapeId) -> Option<Revision> {
+        if let Some(entry) = self.shapes.get(&id) {
+            return Some(entry.changed_at);
+        }
+        crate::slot_shapes::static_slot_shape(id).map(|_| Revision::default())
+    }
+
     pub fn static_catalog_entry(id: SlotShapeId) -> Option<SlotShapeEntry> {
         let shape = crate::slot_shapes::static_slot_shape(id)?.to_owned_shape();
         Some(match crate::slot_shapes::static_slot_shape_name(id) {
