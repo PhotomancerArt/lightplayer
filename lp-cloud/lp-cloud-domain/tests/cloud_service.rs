@@ -1498,7 +1498,15 @@ fn guest_mints_are_distinct_and_the_prunable_set_is_one_query() {
     assert_ne!(first.uid, second.uid);
 
     // A real sign-in beside them is NOT in the prunable set.
-    let real = svc.upsert_user("g-real", "real@example.com", "Real", "google", None, None, None);
+    let real = svc.upsert_user(
+        "g-real",
+        "real@example.com",
+        "Real",
+        "google",
+        None,
+        None,
+        None,
+    );
     for user in [&first, &second] {
         assert!(svc.store().user(user.uid).expect("stored").anonymous);
     }
@@ -1521,8 +1529,8 @@ fn a_guest_never_resolves_pending_member_invites() {
     .expect("invite a not-yet-seen email");
 
     let guest = svc.begin_guest_user();
-    let members = members_seen_by(&mut svc, world.owner, world.project)
-        .expect("the owner sees the roster");
+    let members =
+        members_seen_by(&mut svc, world.owner, world.project).expect("the owner sees the roster");
     let invite = members
         .iter()
         .find(|member| member.email == "future@example.com")

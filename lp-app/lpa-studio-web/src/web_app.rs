@@ -245,7 +245,11 @@ pub fn App() -> Element {
     let loop_cloud_session = use_context::<Signal<crate::cloud::CloudSession>>();
     #[cfg_attr(
         not(target_arch = "wasm32"),
-        allow(unused_variables, unused_mut, reason = "the guest mint is browser-only")
+        allow(
+            unused_variables,
+            unused_mut,
+            reason = "the guest mint is browser-only"
+        )
     )]
     let mut loop_cloud_refresh = use_context::<crate::cloud::CloudSessionRefresh>();
     let bridge = use_hook(move || {
@@ -349,7 +353,10 @@ pub fn App() -> Element {
                     // whoami — the session refresh is what wakes the sync
                     // engine's library sweep.
                     #[cfg(target_arch = "wasm32")]
-                    if matches!(&*loop_cloud_session.peek(), crate::cloud::CloudSession::Anonymous { .. }) {
+                    if matches!(
+                        &*loop_cloud_session.peek(),
+                        crate::cloud::CloudSession::Anonymous { .. }
+                    ) {
                         spawn(async move {
                             if crate::cloud::ensure_guest_session().await {
                                 loop_cloud_refresh.refresh();
@@ -629,9 +636,8 @@ pub fn App() -> Element {
                         false
                     }
                     NavSessionPlan::Leave { .. } if leave_discards_transient => {
-                        let proceed = unsaved_gate::confirm_discarding_unsaved(
-                            TRANSIENT_LEAVE_PROMPT,
-                        );
+                        let proceed =
+                            unsaved_gate::confirm_discarding_unsaved(TRANSIENT_LEAVE_PROMPT);
                         // remembered so the arrival below doesn't re-ask
                         nav_leave_confirmed.set(proceed);
                         proceed
@@ -1238,7 +1244,8 @@ const TRANSIENT_LEAVE_PROMPT: &str = "You're viewing an example — unsaved chan
 /// The route-dispatched open's unsaved gate — the same message
 /// `on_action`'s gate uses, for the opens the route listener dispatches
 /// directly (typed URLs, back/forward into another project).
-const OPEN_DISCARDS_PROMPT: &str = "This project has unsaved changes. Opening another project will discard them.\n\nOpen anyway?";
+const OPEN_DISCARDS_PROMPT: &str =
+    "This project has unsaved changes. Opening another project will discard them.\n\nOpen anyway?";
 
 /// What a navigation does to the tab's ONE runtime session.
 ///

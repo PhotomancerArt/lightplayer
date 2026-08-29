@@ -5780,13 +5780,7 @@ impl StudioController {
                 } => match uid.parse() {
                     Ok(uid) => {
                         self.project
-                            .open_shared_transient(
-                                server,
-                                uid,
-                                name,
-                                package_files,
-                                history_files,
-                            )
+                            .open_shared_transient(server, uid, name, package_files, history_files)
                             .await
                     }
                     Err(e) => Err(UiError::MissingSession(format!(

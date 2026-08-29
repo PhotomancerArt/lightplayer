@@ -217,9 +217,7 @@ impl HomeOp {
     pub fn is_pure_open(&self) -> bool {
         matches!(
             self,
-            Self::OpenPackage { .. }
-                | Self::OpenExample { .. }
-                | Self::OpenSharedTransient { .. }
+            Self::OpenPackage { .. } | Self::OpenExample { .. } | Self::OpenSharedTransient { .. }
         )
     }
 }

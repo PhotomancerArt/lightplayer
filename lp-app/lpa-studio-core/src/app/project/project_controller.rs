@@ -2724,7 +2724,9 @@ impl ProjectController {
         let opened = crate::app::library::transient::transient_opened_project(
             example.slug(),
             &example.files(),
-            crate::app::library::PackageProvenance::SeededFrom { source: id.to_string() },
+            crate::app::library::PackageProvenance::SeededFrom {
+                source: id.to_string(),
+            },
             &random,
             now,
         )
@@ -2879,9 +2881,7 @@ impl ProjectController {
                         name,
                         files: package_files
                             .into_iter()
-                            .filter(|(path, _)| {
-                                path != ".lp" && !path.starts_with(".lp/")
-                            })
+                            .filter(|(path, _)| path != ".lp" && !path.starts_with(".lp/"))
                             .collect(),
                         provenance: crate::app::library::PackageProvenance::ForkedFrom {
                             parent_project: parent_project.clone(),

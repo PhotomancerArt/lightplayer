@@ -151,7 +151,11 @@ fn explicit_save_forks_the_transient_session_into_the_library() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("edit emits a snapshot");
     assert_eq!(editor_dirty(&snapshot), (1, 0), "the edit is unsaved work");
-    assert_eq!(store.list().expect("list").len(), 0, "play installs nothing");
+    assert_eq!(
+        store.list().expect("list").len(),
+        0,
+        "play installs nothing"
+    );
 
     handle.tx.send(project_action(ProjectOp::SaveOverlay));
     drive(actor.run_one_batch_for_test());
@@ -199,11 +203,9 @@ fn explicit_save_forks_the_transient_session_into_the_library() {
         !handle_installed.history.events().is_empty(),
         "the history installed verbatim"
     );
-    let meta = crate::app::library::package_meta::read_meta(
-        &*handle_installed.package_fs.borrow(),
-    )
-    .expect("meta reads")
-    .expect("meta exists");
+    let meta = crate::app::library::package_meta::read_meta(&*handle_installed.package_fs.borrow())
+        .expect("meta reads")
+        .expect("meta exists");
     assert_eq!(
         meta.provenance,
         PackageProvenance::SeededFrom {
@@ -287,7 +289,6 @@ fn replacing_a_transient_open_queues_no_close() {
         host.closed_projects()
     );
 }
-
 
 #[test]
 fn a_shared_view_link_opens_transiently_and_forks_a_fresh_identity() {
@@ -387,9 +388,9 @@ fn a_shared_view_link_opens_transiently_and_forks_a_fresh_identity() {
         .expect("meta reads")
         .expect("meta exists");
     match meta.provenance {
-        PackageProvenance::ForkedFrom {
-            parent_project, ..
-        } => assert_eq!(parent_project, parent.uid.to_string()),
+        PackageProvenance::ForkedFrom { parent_project, .. } => {
+            assert_eq!(parent_project, parent.uid.to_string())
+        }
         other => panic!("fork provenance must be ForkedFrom, got {other:?}"),
     }
     let fixture: String = String::from_utf8(

@@ -697,12 +697,24 @@ mod tests {
             store.put_user(CloudUser {
                 uid,
                 google_sub: sub.into(),
-                email: if anonymous { String::new() } else { "nine@example.com".into() },
-                display_name: if anonymous { "Guest".into() } else { "Nine".into() },
+                email: if anonymous {
+                    String::new()
+                } else {
+                    "nine@example.com".into()
+                },
+                display_name: if anonymous {
+                    "Guest".into()
+                } else {
+                    "Nine".into()
+                },
                 given_name: None,
                 family_name: None,
                 picture_url: None,
-                provider: if anonymous { "anonymous".into() } else { "google".into() },
+                provider: if anonymous {
+                    "anonymous".into()
+                } else {
+                    "google".into()
+                },
                 created_at: 1.0,
                 anonymous,
             });

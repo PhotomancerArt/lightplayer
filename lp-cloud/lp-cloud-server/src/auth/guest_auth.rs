@@ -21,7 +21,10 @@ use crate::app_state::AppState;
 use crate::auth::session_cookie::{captured_user_agent, session_token, set_session_cookie};
 
 /// Ensure the caller has a session, minting a guest account if needed.
-pub async fn post_guest_auth(state: axum::extract::State<AppState>, headers: HeaderMap) -> Response {
+pub async fn post_guest_auth(
+    state: axum::extract::State<AppState>,
+    headers: HeaderMap,
+) -> Response {
     let axum::extract::State(state) = state;
     let token = session_token(&headers);
     let ttl = state.config().guest_session_ttl_seconds;

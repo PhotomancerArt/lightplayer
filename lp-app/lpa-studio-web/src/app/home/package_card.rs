@@ -20,7 +20,9 @@ use crate::app::home::card_footer::{
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::gallery_preview::{ThumbMode, card_hover_handlers};
 use crate::app::home::package_export::export_package_to_download;
-use crate::base::{DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName, Toasts};
+use crate::base::{
+    DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName, Toasts,
+};
 use crate::core::{ActionButton, ActionButtonVariant, menu_item_action_class, quiet_action_class};
 
 /// One package card: thumbnail, name, meta, and the card menu. Clicking the
