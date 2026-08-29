@@ -32,10 +32,14 @@
 //!
 //! [`ProjectSync`]: super::project_sync::ProjectSync
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use lpc_model::{ControlDisplayLayout, ControlExtent, NodeId, Revision};
+use lpc_model::{
+    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,
+    ControlSampleLayout, ControlSampleSpan, NodeId, Revision,
+};
 use lpc_wire::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, OutputFrameEntry,
     WireChannelSampleFormat, WireOutputPlacement,
@@ -70,11 +74,30 @@ struct OutputFrameEntryState {
     placements: Vec<WireOutputPlacement>,
 }
 
+/// The cached composed picture — see [`OutputFrameCache::composed_frame`].
+///
+/// Identity is `Rc` POINTER pairs, not contents, exactly like the renderer's
+/// own paint key: the composite is rebuilt only when a part's bytes or
+/// geometry `Rc` actually moved, and the two halves are keyed separately so
+/// unchanged geometry keeps its `Rc` (the renderer's whole-field repaint
+/// key) while fresh bytes arrive every frame.
+#[derive(Debug)]
+struct ComposedSlot {
+    /// `(node, Rc::as_ptr(bytes))` per part, in compose order.
+    bytes_key: Vec<(NodeId, usize)>,
+    /// `(node, Rc::as_ptr(layout))` per part (0 for a layout-less part).
+    layout_key: Vec<(NodeId, usize)>,
+    frame: UiControlProductPreview,
+}
+
 /// Published output frames for the lens, keyed by output node.
 #[derive(Debug, Default)]
 pub struct OutputFrameCache {
     outputs: BTreeMap<NodeId, OutputFrameEntryState>,
     frames_seen: u64,
+    /// One cached composite (interior-mutable: composing is a READ of the
+    /// cache, and every caller holds `&self`).
+    composed: RefCell<Option<ComposedSlot>>,
 }
 
 impl OutputFrameCache {
@@ -108,6 +131,81 @@ impl OutputFrameCache {
     /// patch bay walks (a fixture's cells may be on any of them).
     pub fn outputs(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.outputs.keys().copied()
+    }
+
+    /// The picture `nodes` compose TOGETHER: every listed output's newest
+    /// frame concatenated into one buffer, with each part's lamps rebased
+    /// onto its stretch of it.
+    ///
+    /// This is the multi-output twin of the engine's own
+    /// `merge_fragment_display_layouts`, one level up: the engine merges the
+    /// producers WITHIN one wire (their layouts share the mapping document's
+    /// normalized space, which is what makes overlaying them a picture), and
+    /// exactly the same property holds ACROSS wires cut from the same
+    /// project — the small dome's two boxes each carry half of one dome.
+    /// Without this step a multi-output module drew only whichever output a
+    /// consumer picked first, which is how the small dome's Box 2 (2,975
+    /// lamps) never appeared in any lamp view.
+    ///
+    /// Contract kept for consumers:
+    /// - **One part passes through untouched** — same `Rc`s, so the
+    ///   single-output world is byte-for-byte what it was.
+    /// - **Unchanged inputs answer the cached composite** — same `Rc`s
+    ///   again, so a poll that changed nothing repaints nothing.
+    /// - **Unmoved geometry keeps its `Rc`** while fresh bytes arrive: the
+    ///   composed layout is rebuilt only when a part's layout `Rc` moved.
+    ///
+    /// A part with no layout still contributes its BYTES (its stretch of
+    /// the buffer keeps every other part's offsets honest); it simply draws
+    /// no lamps, which is the same honest answer the single-output path
+    /// gives. `None` when no listed output has a frame at all.
+    pub fn composed_frame(&self, nodes: &[NodeId]) -> Option<UiControlProductPreview> {
+        let parts: Vec<(NodeId, &UiControlProductPreview)> = nodes
+            .iter()
+            .filter_map(|node| {
+                let frame = self.outputs.get(node)?.frame.as_ref()?;
+                Some((*node, frame))
+            })
+            .collect();
+        let [first, rest @ ..] = parts.as_slice() else {
+            return None;
+        };
+        if rest.is_empty() {
+            return Some(first.1.clone());
+        }
+
+        let bytes_key: Vec<(NodeId, usize)> = parts
+            .iter()
+            .map(|(node, frame)| (*node, Rc::as_ptr(&frame.bytes) as *const u8 as usize))
+            .collect();
+        let layout_key: Vec<(NodeId, usize)> = parts
+            .iter()
+            .map(|(node, frame)| {
+                let layout = frame
+                    .display_layout
+                    .as_ref()
+                    .map_or(0, |layout| Rc::as_ptr(layout) as usize);
+                (*node, layout)
+            })
+            .collect();
+        let mut slot = self.composed.borrow_mut();
+        if let Some(cached) = slot.as_ref()
+            && cached.bytes_key == bytes_key
+            && cached.layout_key == layout_key
+        {
+            return Some(cached.frame.clone());
+        }
+        let display_layout = match slot.as_ref().filter(|cached| cached.layout_key == layout_key) {
+            Some(cached) => cached.frame.display_layout.clone(),
+            None => compose_display_layout(&parts),
+        };
+        let frame = compose_frame(&parts, display_layout);
+        *slot = Some(ComposedSlot {
+            bytes_key,
+            layout_key,
+            frame: frame.clone(),
+        });
+        Some(frame)
     }
 
     /// What the next read should ask for.
@@ -216,12 +314,98 @@ impl OutputFrameCache {
     }
 }
 
+/// Concatenate the parts' buffers and spans into one frame, in the order
+/// given. Each part's samples land at a running offset, and the composed
+/// spans move with them, so a consumer reading a lamp's colour at its
+/// `sample_start` finds exactly that part's bytes.
+fn compose_frame(
+    parts: &[(NodeId, &UiControlProductPreview)],
+    display_layout: Option<Rc<ControlDisplayLayout>>,
+) -> UiControlProductPreview {
+    let mut bytes: Vec<u8> = Vec::with_capacity(
+        parts
+            .iter()
+            .map(|(_, frame)| frame.bytes.len())
+            .sum::<usize>(),
+    );
+    let mut spans: Vec<ControlSampleSpan> = Vec::new();
+    let mut revision = i64::MIN;
+    let mut offset_samples = 0u32;
+    for (_, part) in parts {
+        revision = revision.max(part.revision);
+        for span in &part.sample_layout.spans {
+            spans.push(ControlSampleSpan {
+                row: span.row,
+                start: span.start.saturating_add(offset_samples),
+                len: span.len,
+                encoding: span.encoding.clone(),
+            });
+        }
+        bytes.extend_from_slice(&part.bytes);
+        offset_samples = offset_samples.saturating_add(part.extent.sample_count());
+    }
+    UiControlProductPreview {
+        revision,
+        extent: ControlExtent::new(1, offset_samples),
+        sample_format: UiControlSampleFormat::U16,
+        sample_layout: ControlSampleLayout { spans },
+        display_layout,
+        bytes: Rc::from(bytes.as_slice()),
+    }
+}
+
+/// Overlay the parts' geometries, each lamp rebased by its part's sample
+/// offset in the composed buffer. Normalized centers overlay as they are —
+/// the same shared-document-space property the engine's per-wire merge
+/// already relies on. `None` when no part carries geometry.
+fn compose_display_layout(
+    parts: &[(NodeId, &UiControlProductPreview)],
+) -> Option<Rc<ControlDisplayLayout>> {
+    let mut lamps: Vec<ControlLamp2d> = Vec::new();
+    let mut paths: Vec<ControlPathSpan2d> = Vec::new();
+    let mut width_hint = 0;
+    let mut height_hint = 0;
+    let mut revision = Revision::default();
+    let mut any = false;
+    let mut offset_samples = 0u32;
+    for (_, part) in parts {
+        if let Some(layout) = &part.display_layout {
+            let ControlDisplayLayout::Layout2d(layout) = layout.as_ref();
+            any = true;
+            width_hint = width_hint.max(layout.width_hint);
+            height_hint = height_hint.max(layout.height_hint);
+            revision = revision.max(layout.revision);
+            for lamp in &layout.lamps {
+                let sample_start = lamp.sample_start.saturating_add(offset_samples);
+                lamps.push(ControlLamp2d {
+                    lamp_index: sample_start / 3,
+                    sample_start,
+                    center: lamp.center,
+                    radius: lamp.radius,
+                });
+            }
+            for path in &layout.paths {
+                paths.push(ControlPathSpan2d {
+                    first_lamp: path.first_lamp.saturating_add(offset_samples / 3),
+                    lamp_count: path.lamp_count,
+                });
+            }
+        }
+        offset_samples = offset_samples.saturating_add(part.extent.sample_count());
+    }
+    any.then(|| {
+        // Composed-buffer order, matching the engine's own merged answer.
+        lamps.sort_by_key(|lamp| lamp.sample_start);
+        paths.sort_by_key(|path| path.first_lamp);
+        Rc::new(ControlDisplayLayout::Layout2d(
+            ControlLayout2d::new(revision, width_hint, height_hint, lamps).with_paths(paths),
+        ))
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use lpc_model::{
-        ColorOrder, ControlLamp2d, ControlLayout2d, ControlSampleEncoding, ControlSampleLayout,
-        ControlSampleSpan,
-    };
+    use lpc_model::{ColorOrder, ControlSampleEncoding};
 
     use super::*;
 
@@ -391,6 +575,155 @@ mod tests {
         garbage.sample_format = WireChannelSampleFormat::U8;
         cache.apply(&[garbage]);
         assert_eq!(cache.frames_seen(), 3);
+    }
+
+    /// The small-dome regression (2026-08-29): TWO outputs cut from one
+    /// module, both answering full frames and geometry — the composed
+    /// picture must carry BOTH outputs' lamps, each reading its own bytes.
+    /// Before the compose step every consumer picked one output and the
+    /// second box's lamps never appeared anywhere.
+    #[test]
+    fn two_outputs_compose_into_one_picture_with_rebased_lamps() {
+        let mut cache = OutputFrameCache::default();
+        let mut box_1 = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
+        box_1.display_layout = ControlDisplayLayoutProbeResult::Layout(layout_at(11, 0.25));
+        let mut box_2 = entry(5, 1, vec![9, 0, 8, 0, 7, 0]);
+        box_2.display_layout = ControlDisplayLayoutProbeResult::Layout(layout_at(12, 0.75));
+        cache.apply(&[box_1, box_2]);
+
+        let composed = cache
+            .composed_frame(&[NodeId::new(4), NodeId::new(5)])
+            .expect("both outputs have frames");
+
+        assert_eq!(
+            composed.bytes.as_ref(),
+            [1, 0, 2, 0, 3, 0, 9, 0, 8, 0, 7, 0],
+            "part buffers concatenate in the order given"
+        );
+        assert_eq!(composed.extent, ControlExtent::new(1, 6));
+        let ControlDisplayLayout::Layout2d(layout) =
+            composed.display_layout.as_deref().expect("geometry");
+        assert_eq!(layout.revision, Revision::new(12), "newest part wins");
+        let starts: Vec<u32> = layout.lamps.iter().map(|lamp| lamp.sample_start).collect();
+        assert_eq!(
+            starts,
+            vec![0, 3],
+            "the second output's lamp reads ITS stretch of the buffer"
+        );
+        assert_eq!(layout.lamps[1].center, [0.75, 0.75]);
+        let spans: Vec<u32> = composed
+            .sample_layout
+            .spans
+            .iter()
+            .map(|span| span.start)
+            .collect();
+        assert_eq!(spans, vec![0, 3], "spans rebase with their part");
+    }
+
+    /// One part passes through untouched — the single-output world keeps
+    /// its exact `Rc`s (the renderer's repaint keys).
+    #[test]
+    fn a_single_part_composes_as_itself() {
+        let mut cache = OutputFrameCache::default();
+        let mut only = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
+        only.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
+        cache.apply(&[only]);
+
+        let composed = cache
+            .composed_frame(&[NodeId::new(4)])
+            .expect("the part composes");
+        let part = cache.frame(NodeId::new(4)).expect("part");
+        assert!(Rc::ptr_eq(&composed.bytes, &part.bytes));
+        assert!(Rc::ptr_eq(
+            composed.display_layout.as_ref().expect("layout"),
+            part.display_layout.as_ref().expect("layout"),
+        ));
+    }
+
+    /// New bytes with unmoved geometry rebuild the composed BYTES only:
+    /// the composed layout keeps its `Rc`, which is what keeps the lamp
+    /// renderer from rebuilding the whole cell field every live frame.
+    #[test]
+    fn unmoved_geometry_keeps_the_composed_layout_rc_across_new_bytes() {
+        let mut cache = OutputFrameCache::default();
+        let mut box_1 = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
+        box_1.display_layout = ControlDisplayLayoutProbeResult::Layout(layout_at(11, 0.25));
+        let mut box_2 = entry(5, 1, vec![9, 0, 8, 0, 7, 0]);
+        box_2.display_layout = ControlDisplayLayoutProbeResult::Layout(layout_at(12, 0.75));
+        cache.apply(&[box_1, box_2]);
+        let nodes = [NodeId::new(4), NodeId::new(5)];
+        let first = cache.composed_frame(&nodes).expect("composed");
+
+        // Same inputs: the whole cached composite answers, Rcs and all.
+        let repeat = cache.composed_frame(&nodes).expect("composed");
+        assert!(Rc::ptr_eq(&first.bytes, &repeat.bytes));
+
+        // A new frame on one output: fresh bytes, same geometry Rc.
+        let mut next = entry(4, 2, vec![4, 0, 5, 0, 6, 0]);
+        next.display_layout = ControlDisplayLayoutProbeResult::Unchanged {
+            revision: Revision::new(11),
+        };
+        cache.apply(&[next]);
+        let second = cache.composed_frame(&nodes).expect("composed");
+        assert!(
+            !Rc::ptr_eq(&first.bytes, &second.bytes),
+            "a new frame must carry fresh composed bytes"
+        );
+        assert!(
+            Rc::ptr_eq(
+                first.display_layout.as_ref().expect("layout"),
+                second.display_layout.as_ref().expect("layout"),
+            ),
+            "unmoved geometry keeps the composed layout Rc"
+        );
+        assert_eq!(&second.bytes[..6], [4, 0, 5, 0, 6, 0]);
+    }
+
+    /// A part the engine refused geometry for still holds its stretch of
+    /// the composed buffer, so the parts that DID answer keep drawing at
+    /// honest offsets.
+    #[test]
+    fn a_layout_less_part_keeps_its_neighbours_offsets_honest() {
+        let mut cache = OutputFrameCache::default();
+        let mut refused = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
+        refused.display_layout = ControlDisplayLayoutProbeResult::Unsupported {
+            reason: "over the wire budget".to_string(),
+        };
+        let mut answered = entry(5, 1, vec![9, 0, 8, 0, 7, 0]);
+        answered.display_layout = ControlDisplayLayoutProbeResult::Layout(layout_at(12, 0.75));
+        cache.apply(&[refused, answered]);
+
+        let composed = cache
+            .composed_frame(&[NodeId::new(4), NodeId::new(5)])
+            .expect("composed");
+        let ControlDisplayLayout::Layout2d(layout) =
+            composed.display_layout.as_deref().expect("geometry");
+        assert_eq!(layout.lamps.len(), 1);
+        assert_eq!(
+            layout.lamps[0].sample_start, 3,
+            "the answering part's lamp still reads its own stretch"
+        );
+        assert_eq!(composed.bytes.len(), 12);
+    }
+
+    fn layout_at(revision: i64, center: f32) -> ControlDisplayLayout {
+        ControlDisplayLayout::Layout2d(
+            ControlLayout2d::new(
+                Revision::new(revision),
+                8,
+                8,
+                vec![ControlLamp2d {
+                    lamp_index: 0,
+                    sample_start: 0,
+                    center: [center, center],
+                    radius: 0.05,
+                }],
+            )
+            .with_paths(vec![ControlPathSpan2d {
+                first_lamp: 0,
+                lamp_count: 1,
+            }]),
+        )
     }
 
     fn entry(node: u32, revision: i64, bytes: Vec<u8>) -> OutputFrameEntry {

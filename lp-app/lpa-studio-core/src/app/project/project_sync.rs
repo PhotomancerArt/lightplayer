@@ -325,6 +325,17 @@ impl ProjectSync {
         self.output_frames.frame(node)
     }
 
+    /// The picture several outputs compose TOGETHER — see
+    /// [`OutputFrameCache::composed_frame`]. The module hero rides this: a
+    /// scope owning two outputs (the small dome's two boxes) heroes every
+    /// wire it owns, not whichever answered first.
+    pub fn composed_output_frame(
+        &self,
+        nodes: &[lpc_model::NodeId],
+    ) -> Option<UiControlProductPreview> {
+        self.output_frames.composed_frame(nodes)
+    }
+
     /// How one output's wire is cut — the runs behind the published frame,
     /// in the output's own planning order. The patch bay's data (D34a).
     pub fn output_placements(&self, node: lpc_model::NodeId) -> &[lpc_wire::WireOutputPlacement] {
