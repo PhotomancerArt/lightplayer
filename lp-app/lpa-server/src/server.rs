@@ -38,9 +38,18 @@ pub type ReadHeadroomProbe = fn() -> Option<u32>;
 /// infallible-alloc abort path, which RESETS the board
 /// (`docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
 /// Refusing with a structured error is always better than resetting.
-/// Conservative first value: one frame budget + one atom-scale margin; the
-/// bench walk (wire-evolution round-1 G1) revisits it against real heartbeat
-/// numbers.
+///
+/// Calibrated on silicon at the 2026-08-29 G1 bench walk (classic,
+/// zook-dome at 42 ms ticks, ~18–21 KB largest free block loaded): with the
+/// gate lowered to 16 KiB the monolithic read passed the gate and still
+/// OOM-reset the board — the crash breadcrumb showed a 480 B alloc failing
+/// in the *shapes* limb, i.e. the sink's in-memory event batch (sized
+/// against the 16 KiB frame budget) plus one atom exhausts such a heap. At
+/// 32 KiB the same board refused 5/5 reads in 0.8 s with zero resets. The
+/// dominant transient IS roughly one frame batch + atom + slop, so one
+/// frame budget × 2 is the honest floor; a board below it (this one could
+/// not even JIT its shader — recovery gated it after repeated 768 B compile
+/// OOMs) cannot serve any read shape and SHOULD be refused.
 pub const PROJECT_READ_MIN_HEADROOM_BYTES: u32 = 32 * 1024;
 
 /// Main server struct for processing client-server messages.

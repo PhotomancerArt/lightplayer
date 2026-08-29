@@ -1,6 +1,7 @@
 ---
-status: open
+status: fixed
 found: 2026-08-26
+fixed: 2026-08-29
 area: lpa-server ProjectRead assembly vs classic ESP32 heap; surfaced by PR #448's transport fix
 related:
   - ../debt/shared-uart-io-task-starvation.md
@@ -77,3 +78,20 @@ bench walk (G1) delivers the on-device verdict.
    longer constructible — the initial sync is staged (skeleton →
    `ByIds` slot pages of 16, `since: None` → one probe per read), each
    stage a PASS-row shape from the matrix above.
+
+**On-device verdict (2026-08-29 G1 bench walk, dig2go classic):**
+FIXED. The full monolithic read (detail + slots + both probes) that
+previously always reset the board now **completes 5/5** against a
+loaded project with headroom (small-dome, 64 KB largest block: 4–6
+frames, 78–120 events, ~1 s, zero resets) and is **refused 5/5** in
+0.8 s with the structured remedy-naming error against a genuinely
+starved board (zook-dome, ~19 KB largest — a heap so tight its own
+shader JIT OOMs). Deliberately lowering the gate to 16 KiB re-admitted
+the monolith and reproduced the OOM reset — with the new breadcrumb
+naming the limb (`alloc 480 bytes failed in "project read: shapes"`) —
+so the shipped 32 KiB floor is silicon-calibrated, not guessed. Studio
+end-to-end staged sync completed against the live classic (first
+successful classic sync ever), surfacing per-node engine statuses.
+Residuals tracked separately: probe results still materialize-then-
+chunk (ladder #9/#10), and flash writes wedge under multi-wire playback
+(`2026-08-29-flash-write-wedges-under-zook-playback.md`).
