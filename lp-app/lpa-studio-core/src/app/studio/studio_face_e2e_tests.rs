@@ -4397,7 +4397,12 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
         written,
         "the written bytes ARE the canonical form (byte-stable rewrite)"
     );
-    let entry = parsed.mapping_surface(&dome_key).expect("dome arranged");
+    // Written keys are PROJECT-RELATIVE (root segment stripped).
+    let entry = parsed
+        .mapping_surface(crate::app::project::editor_meta_op::editor_meta_node_key(
+            &dome_key,
+        ))
+        .expect("dome arranged");
     assert_eq!(entry.transform.t, [40.0, -12.5]);
     assert_eq!(entry.transform.r, 90.0);
     let footprint = entry
@@ -4559,7 +4564,9 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
         lpc_mapping::EditorMetaDoc::from_json(&multi_written).expect("canonical doc parses");
     assert_eq!(
         multi_parsed
-            .mapping_surface(&dome_key)
+            .mapping_surface(crate::app::project::editor_meta_op::editor_meta_node_key(
+                &dome_key,
+            ))
             .expect("dome entry")
             .transform
             .s,
@@ -4567,7 +4574,9 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
     );
     assert_eq!(
         multi_parsed
-            .mapping_surface(&doors_key)
+            .mapping_surface(crate::app::project::editor_meta_op::editor_meta_node_key(
+                &doors_key,
+            ))
             .expect("doors entry")
             .transform
             .t,

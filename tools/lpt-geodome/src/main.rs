@@ -432,18 +432,15 @@ fn doors_patch(box_a_panels: usize) -> PatchDoc {
 /// shared 120-unit plan, so the door renders nestled among the panels at its
 /// authored bottom-center spot instead of the unarranged side-by-side tiling.
 ///
-/// Keys are the fixtures' full studio node addresses. The root segment
-/// derives from the seeded project directory (`examples-small-dome` →
-/// `/examples_small_dome.show`), so the shipped keys match the gallery
-/// copy; a renamed user copy degrades benignly to "unarranged".
+/// Keys are PROJECT-RELATIVE node addresses (the studio strips the
+/// host's root mount segment before reading/writing `editor.json`), so
+/// the shipped arrangement works wherever the project is mounted —
+/// gallery preview, saved library copy, or a test harness.
 fn editor_doc(dome: &Map2dDoc, doors: &Map2dDoc) -> EditorMetaDoc {
     let mut doc = EditorMetaDoc::new();
     for (key, map2d) in [
-        ("/examples_small_dome.show/dome.module/dome.fixture", dome),
-        (
-            "/examples_small_dome.show/doors.module/doors.fixture",
-            doors,
-        ),
+        ("/dome.module/dome.fixture", dome),
+        ("/doors.module/doors.fixture", doors),
     ] {
         let resolved = resolve(map2d).expect("map2d resolves");
         let (mut min, mut max) = ([f32::MAX, f32::MAX], [f32::MIN, f32::MIN]);
