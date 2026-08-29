@@ -3710,10 +3710,9 @@ impl ProjectController {
             EditorMetaReadState::Ready(doc, _) => {
                 surface.editor_meta_loaded = true;
                 for fixture in &mut surface.fixtures {
-                    let entry = fixture
-                        .address
-                        .as_deref()
-                        .and_then(|key| doc.mapping_surface(key));
+                    let entry = fixture.address.as_deref().and_then(|address| {
+                        super::editor_meta_op::editor_meta_surface(&doc, address)
+                    });
                     fixture.arrange = Some(match entry {
                         None => crate::UiArrangeMeta::default(),
                         Some(entry) => crate::UiArrangeMeta {
@@ -7630,7 +7629,12 @@ impl ProjectController {
             }
         };
         for entry in entries {
-            let surface = doc.mapping_surface_mut(&entry.node_key);
+            // Keys are stored PROJECT-RELATIVE (the DTO sends the runtime
+            // address; the root segment is the host's mount) — see
+            // `editor_meta_node_key`. A legacy rooted entry is left in
+            // place; the relative key wins on read.
+            let key = super::editor_meta_op::editor_meta_node_key(&entry.node_key);
+            let surface = doc.mapping_surface_mut(key);
             surface.transform = lpc_mapping::EditorTransform {
                 t: entry.transform.t,
                 r: entry.transform.r,
@@ -7645,12 +7649,13 @@ impl ProjectController {
         for fixture in &op.fixtures {
             let fresh = self.arrange_footprint(fixture.mapping_artifact.as_ref());
             let Some(fresh) = fresh else { continue };
+            let key = super::editor_meta_op::editor_meta_node_key(&fixture.node_key);
             let entry_exists = entries
                 .iter()
-                .any(|entry| entry.node_key == fixture.node_key)
-                || doc.mapping_surface(&fixture.node_key).is_some();
+                .any(|entry| super::editor_meta_op::editor_meta_node_key(&entry.node_key) == key)
+                || doc.mapping_surface(key).is_some();
             if entry_exists {
-                let surface = doc.mapping_surface_mut(&fixture.node_key);
+                let surface = doc.mapping_surface_mut(key);
                 if surface.footprint != Some(fresh) {
                     surface.footprint = Some(fresh);
                 }

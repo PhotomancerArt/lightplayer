@@ -660,7 +660,7 @@ mod tests {
 
     /// A two-instance fixture on a one-port output — enough shape for the
     /// selection→subject arms.
-    fn mini_dome_like_surface() -> UiPatchSurface {
+    fn small_dome_like_surface() -> UiPatchSurface {
         UiPatchSurface {
             fixtures: vec![UiPatchSurfaceFixture {
                 node: NodeId::new(2),
@@ -714,7 +714,7 @@ mod tests {
     fn selections_map_to_their_pulse_subjects() {
         use lpa_studio_core::{PatchPulseLamps, PatchPulseLanguage};
 
-        let surface = mini_dome_like_surface();
+        let surface = small_dome_like_surface();
         let node = surface.fixtures[0].node;
         let output = surface.outputs[0].node;
 
@@ -796,7 +796,7 @@ mod tests {
                 language: PatchPulseLanguage::Breath,
             })
         };
-        let surface = mini_dome_like_surface();
+        let surface = small_dome_like_surface();
         let output = surface.outputs[0].node;
         let port = &surface.outputs[0].bay.ports[0];
         assert_eq!(
@@ -854,7 +854,7 @@ mod tests {
     /// the surface into an armed state the next click would spend.
     #[test]
     fn only_the_two_ends_of_a_link_can_arm_assign() {
-        let mut surface = mini_dome_like_surface();
+        let mut surface = small_dome_like_surface();
         // Sector 2 has no run yet; sector 1 does.
         surface.fixtures[0].instances[1].placed = false;
         let node = surface.fixtures[0].node;
@@ -952,7 +952,7 @@ mod tests {
     /// whole-fixture subject, which the assign verb refuses.
     #[test]
     fn a_fixture_click_assigns_the_next_object_waiting_for_a_wire() {
-        let mut surface = mini_dome_like_surface();
+        let mut surface = small_dome_like_surface();
         surface.fixtures[0].instances[1].placed = false;
         let node = surface.fixtures[0].node;
 

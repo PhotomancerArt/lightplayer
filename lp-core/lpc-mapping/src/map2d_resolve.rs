@@ -1374,7 +1374,7 @@ mod tests {
     }
 
     /// `instances` copies of a four-lamp radial rib around the origin — the
-    /// mini-dome shape the span tests read off.
+    /// small-dome shape the span tests read off.
     fn repeated_sector(instances: u32) -> Map2dShape {
         Map2dShape::Repeat(RepeatShape {
             shape: Box::new(Map2dShape::Path(PathShape {

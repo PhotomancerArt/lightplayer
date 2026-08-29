@@ -44,6 +44,32 @@ fn log_memory(memory_stats: Option<&MemoryStatsFn>, label: &str) {
 }
 
 /// Handle a client message and generate a server response
+/// Device/link state a freshly loaded engine must wear
+/// (`LpServer::load_project` applies the same pair on the host-call path).
+#[derive(Clone, Copy, Debug)]
+pub struct EngineLinkState {
+    /// Engine-ready display-layout byte budget (`None` = unbounded link).
+    pub display_layout_budget: Option<usize>,
+    /// Device-level safe-mode output ceiling.
+    pub safe_output_clamp: Option<u8>,
+}
+
+impl Default for EngineLinkState {
+    /// The fail-safe posture, matching a fresh engine's own default: the
+    /// serial frame budget and no clamp. An un-plumbed caller refuses big
+    /// layouts rather than wedging a serial link; unbounded links opt out
+    /// explicitly (`LpServer::set_project_read_frame_budget(None)`).
+    fn default() -> Self {
+        Self {
+            display_layout_budget: Some(
+                lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
+                    - lpc_wire::PROJECT_READ_PROBE_HEADER_RESERVE_BYTES,
+            ),
+            safe_output_clamp: None,
+        }
+    }
+}
+
 pub fn handle_client_message(
     project_manager: &mut ProjectManager,
     base_fs: &mut dyn LpFs,
@@ -54,6 +80,7 @@ pub fn handle_client_message(
     radio_service: Option<Rc<dyn RadioService>>,
     graphics: Arc<dyn LpGraphics>,
     hello: &lpc_wire::ServerHello,
+    link_state: EngineLinkState,
     client_msg: ClientMessage,
 ) -> Result<WireServerMessage, ServerError> {
     let ClientMessage { id, msg } = client_msg;
@@ -93,6 +120,7 @@ pub fn handle_client_message(
             button_service,
             radio_service,
             graphics,
+            link_state,
             path.as_path(),
         )?,
         lpc_wire::ClientRequest::UnloadProject { handle } => {
@@ -259,6 +287,7 @@ fn handle_load_project(
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
     graphics: Arc<dyn LpGraphics>,
+    link_state: EngineLinkState,
     path: &LpPath,
 ) -> Result<ServerMessagePayload, ServerError> {
     backtrace::set_oom_context("server handler: load project");
@@ -284,6 +313,19 @@ fn handle_load_project(
         radio_service,
         graphics,
     )?;
+    // The clamp and the display-layout budget are device/link state: every
+    // engine wears them, including one born from a wire-load. Skipping this
+    // left wire-loaded projects on the fail-safe SERIAL budget, so an
+    // unbounded link (the browser sim) silently refused dome-scale display
+    // layouts — the lamp preview drew only the fixtures that fit.
+    if let Some(project) = project_manager.get_project_mut(handle) {
+        project
+            .engine_mut()
+            .set_safe_output_clamp(link_state.safe_output_clamp);
+        project
+            .engine_mut()
+            .set_display_layout_budget(link_state.display_layout_budget);
+    }
     backtrace::set_oom_context("server handler: load project memory log");
     log_memory(memory_stats, "load_project after");
     persist_startup_project(base_fs, path);

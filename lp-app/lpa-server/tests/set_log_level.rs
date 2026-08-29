@@ -60,6 +60,7 @@ fn set_log_level_changes_global_max_level_and_acks() {
                 None,
                 graphics.clone(),
                 (*server_ptr).hello(),
+                lpa_server::handlers::EngineLinkState::default(),
                 request,
             )
             .unwrap()

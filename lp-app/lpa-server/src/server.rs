@@ -647,6 +647,10 @@ impl LpServer {
                             // would drop the frame and leave the client
                             // awaiting forever. Only transport-send failures
                             // abort the tick.
+                            let link_state = handlers::EngineLinkState {
+                                display_layout_budget: self.engine_display_layout_budget(),
+                                safe_output_clamp: self.safe_output_clamp,
+                            };
                             let response = match handlers::handle_client_message(
                                 &mut self.project_manager,
                                 &mut *self.base_fs,
@@ -657,6 +661,7 @@ impl LpServer {
                                 self.radio_service.clone(),
                                 self.graphics.clone(),
                                 &self.hello,
+                                link_state,
                                 lpc_wire::ClientMessage { id: msg_id, msg },
                             ) {
                                 Ok(response) => response,

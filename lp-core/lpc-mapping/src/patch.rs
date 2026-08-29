@@ -1265,7 +1265,7 @@ mod tests {
             .map(|resolution| resolution.ranges)
     }
 
-    /// The mini-dome-shaped span table: `sector` = 5 instances of 30, then
+    /// The small-dome-shaped span table: `sector` = 5 instances of 30, then
     /// `door` = 3 instances of 9 (fixture totals 150 + 27 = 177 lamps).
     fn dome_spans() -> Vec<ObjectInstanceSpan> {
         let mut spans = Vec::new();

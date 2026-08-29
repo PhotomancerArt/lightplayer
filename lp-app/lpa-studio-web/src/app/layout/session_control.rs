@@ -1,7 +1,7 @@
 //! The header **session·project control** and its panel — the one piece of
 //! session UI the chrome carries under the single-session web policy.
 //!
-//! `❖ Sim · ESP32-C6 │ ✎ mini dome ②   [Save] [↺]` — one segmented lockup
+//! `❖ Sim · ESP32-C6 │ ✎ small dome ②   [Save] [↺]` — one segmented lockup
 //! (spike `spikes/studio-chrome/` concept **B**, ruled round 7) with the
 //! save moment materializing BESIDE it the instant persisted edits exist
 //! (G1 round-2, 2026-08-19: inspect and act are different surfaces — the

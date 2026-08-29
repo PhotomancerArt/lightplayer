@@ -34,7 +34,7 @@ Rules of the practice (ruled 2026-08-09, mapping & patching vision):
 | Doc | Shape | Example project |
 |---|---|---|
 | [The peach](2026-08-09-peach.md) | Sections of one strip wanting different looks (stained-glass) | `examples/peach-1d`, `examples/peach-2d` — shipped (PR #405; ADR `2026-08-10-output-fragments-and-patch-files`) |
-| [The mini-dome](2026-08-09-mini-dome.md) | N-way symmetric repeat, re-patched every install | future (patching slice 2) |
+| [The small-dome](2026-08-09-mini-dome.md) | N-way symmetric repeat, re-patched every install | `examples/small-dome` — shipped full-scale 2026-08-28 (50×119 panels + door, `lpt-geodome`) |
 | [The two-rig scene](2026-08-09-two-rig-scene.md) | Shared visuals, disjoint control | future |
 
 ## Install demands
