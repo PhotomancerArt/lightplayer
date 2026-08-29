@@ -58,6 +58,11 @@ pub const REFUSED_PUSH_LINE: &str =
 pub const UPDATED_LINE: &str = "Updated to the latest version";
 /// The fork confirmation.
 pub const FORKED_LINE: &str = "Forked — this one's yours.";
+
+/// The fork-at-explicit-save confirmation (examples vision D7): the first
+/// save of a transient view session installed it into the library. Raised
+/// by the web shell's view loop on the transient→owned transition.
+pub const SAVED_YOURS_LINE: &str = "Saved — this project is now yours.";
 /// The discard confirmation.
 pub const DISCARDED_LINE: &str = "Changes discarded — you're back on the shared version.";
 

@@ -181,10 +181,6 @@ impl LibraryHost for SupersedingHost {
     fn notify_saved(&self, uid: &str) {
         self.inner.notify_saved(uid);
     }
-
-    fn mint_random(&self) -> [u8; 16] {
-        self.inner.mint_random()
-    }
 }
 
 #[test]

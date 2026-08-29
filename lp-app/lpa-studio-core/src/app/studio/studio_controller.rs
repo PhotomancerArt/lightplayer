@@ -2006,8 +2006,9 @@ impl StudioController {
     /// dispatch) drains it.
     pub fn attach_library(&mut self, host: Rc<dyn LibraryHost>) {
         let clock = std::rc::Rc::clone(&self.now_secs);
+        let random = std::rc::Rc::clone(&self.random);
         self.library_host = Some(Rc::clone(&host));
-        self.project.set_library(host, clock);
+        self.project.set_library(host, clock, random);
         self.request_library_refresh();
     }
 

@@ -33,6 +33,30 @@ use super::library_store::{LibraryError, PackageHandle};
 use super::package_manifest;
 use super::package_meta::{self, PackageMeta, PackageProvenance};
 
+/// Every file under a store root as (relative path, bytes) — the history
+/// half of the fork-at-save install payload (the package half rides
+/// [`PackageHandle::read_all_files`]).
+pub(crate) fn all_store_files(
+    fs: &Rc<RefCell<dyn LpFs>>,
+) -> Result<Vec<(String, Vec<u8>)>, LibraryError> {
+    let view = fs.borrow();
+    let mut files = Vec::new();
+    let entries = match view.list_dir("/".as_path(), true) {
+        Ok(entries) => entries,
+        Err(lpfs::FsError::NotFound(_)) => Vec::new(),
+        Err(e) => return Err(e.into()),
+    };
+    for entry in entries {
+        if view.is_dir(entry.as_path()).unwrap_or(false) {
+            continue;
+        }
+        let bytes = view.read_file(entry.as_path())?;
+        files.push((entry.as_str().trim_start_matches('/').to_string(), bytes));
+    }
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(files)
+}
+
 /// Build a transient `OpenedProject` from in-memory bytes.
 ///
 /// Writes `files` into a fresh memory package store, mints the manifest

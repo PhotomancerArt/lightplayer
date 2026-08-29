@@ -223,6 +223,12 @@ pub fn App() -> Element {
     let loop_unsaved = Rc::clone(&unsaved);
     let loop_library_uids = Rc::clone(&library_uids);
     let loop_pending_project = Rc::clone(&pending_project_route);
+    // The transient session's uid from the last view — the fork-at-save
+    // toast (D7) fires on the transient→owned transition: same uid, marker
+    // gone. Navigating away clears the open uid too, so a torn-down
+    // session never toasts.
+    let loop_last_transient = use_hook(|| Rc::new(RefCell::new(None::<String>)));
+    let mut loop_toasts = toasts;
     let bridge = use_hook(move || {
         install_log_sink();
         let mut controller = StudioController::new(now_secs);
@@ -313,6 +319,24 @@ pub fn App() -> Element {
                     .open_project_uid
                     .clone()
                     .zip(next.open_project_name.clone());
+                // The fork-at-save moment (examples vision D7): the session
+                // that was a transient view is suddenly an ordinary owned
+                // one under the same uid — the explicit save installed it.
+                // The URL heal rides the lens reconciliation below; this is
+                // the one-line confirmation.
+                {
+                    let was_transient = loop_last_transient.borrow().clone();
+                    if let Some(uid) = was_transient
+                        && next.open_project_transient.is_none()
+                        && next.open_project_uid.as_deref() == Some(uid.as_str())
+                    {
+                        loop_toasts.say(crate::app::share::visitor_session::SAVED_YOURS_LINE);
+                    }
+                    *loop_last_transient.borrow_mut() = next
+                        .open_project_transient
+                        .as_ref()
+                        .and(next.open_project_uid.clone());
+                }
                 // Latch the library roster and answer any `/p/<uid>` route
                 // that has been waiting for it (the boot case — navigation
                 // mid-session reads the same latch synchronously).

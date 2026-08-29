@@ -380,13 +380,6 @@ pub trait LibraryHost {
     /// A save landed in the library copy of `uid` — hosts broadcast this
     /// so other tabs' galleries refresh. Fire-and-forget.
     fn notify_saved(&self, _uid: &str) {}
-
-    /// Platform entropy for identity minting (sans-IO: randomness is the
-    /// edge's business, like the store's own injected `random`). Transient
-    /// view sessions mint their project uid from this at open — the same
-    /// uid a fork-at-save later persists, so it must be as unguessable as
-    /// any other uid (the link IS the access token, D6).
-    fn mint_random(&self) -> [u8; 16];
 }
 
 /// Apply one [`CatalogOp`] through a [`LibraryStore`] — the sync middle
@@ -764,10 +757,5 @@ impl LibraryHost for MemoryLibraryHost {
 
     fn notify_saved(&self, uid: &str) {
         self.saved_notifications.borrow_mut().push(uid.to_string());
-    }
-
-    fn mint_random(&self) -> [u8; 16] {
-        // the store's injected randomness, so tests keep one seeded source
-        self.store.random_bytes()
     }
 }

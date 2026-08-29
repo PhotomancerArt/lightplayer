@@ -508,10 +508,6 @@ impl LibraryHost for OpfsLibraryHost {
         // is never allowed to wait on the network.
         crate::cloud::sync::sync_engine::note(uid, SyncTrigger::Saved);
     }
-
-    fn mint_random(&self) -> [u8; 16] {
-        random_bytes()
-    }
 }
 
 /// Which cloud-sync trigger a catalog transaction is.
