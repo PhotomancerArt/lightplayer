@@ -155,6 +155,28 @@ p.sub b { color:var(--shell-mut); }
   border:1px solid var(--bd-strong); border-radius:999px; padding:0 6px;
   background:transparent; }
 
+/* D: the two-box runtime|document split (gate ruling 2026-08-30).
+   D1 = one shell, two independently-clickable segments; D2 = two boxes. */
+.shell { display:inline-flex; min-width:0; align-items:stretch; overflow:visible;
+  border-radius:7px; border:1px solid var(--bd-strong); background:var(--surface-subtle); }
+.shell .segbtn { display:inline-flex; min-width:0; align-items:center; gap:6px;
+  padding:4px 10px; background:transparent; border:none; font:inherit;
+  color:inherit; cursor:pointer; transition:background .12s; }
+.shell .segbtn:first-child { border-radius:6px 0 0 6px; }
+.shell .segbtn:last-child { border-radius:0 6px 6px 0; }
+.shell .segbtn:hover { background:var(--raised); }
+.box2 { display:inline-flex; min-width:0; align-items:center; gap:6px;
+  padding:4px 10px; border-radius:7px; border:1px solid var(--bd-strong);
+  background:var(--surface-subtle); font:inherit; color:inherit; cursor:pointer;
+  transition:border-color .12s; }
+.box2:hover { border-color:var(--tx-subtle); }
+.runline { display:flex; align-items:center; gap:8px; padding:5px 2px;
+  font-size:11px; color:var(--tx-subtle); }
+.runline .k { width:64px; flex:none; font-size:9.5px; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--tx-dim); font-weight:700; }
+.runline .v { color:var(--tx-muted); font-weight:600; }
+.runline .v .mono { font-family:var(--mono); }
+
 /* faces carry at most a QUIET tint; §3 compares tinted alternatives. */
 .face-neutral { color:var(--tx-muted); }
 .face-neutral svg { color:var(--tx-subtle); }
@@ -365,11 +387,13 @@ for fork/access. <span class="t">The accent pill also dies with #478.</span>
 </p>
 
 <!-- ================= §2 placement ================= -->
-<h2><span class="n">§2</span> Placement — three ways the control can stand</h2>
+<h2><span class="n">§2</span> Placement — four ways the control can stand</h2>
 <p class="sub">
-All three react to the strip. <b>Click each control</b> to open its (stub) popover — full
-per-state popovers are §4. A and B are the vision's Shape A (sibling button); C is the
-rejected-but-comparable Shape B (display only, actions elsewhere).
+All concepts react to the strip. <b>Click each control</b> to open its popover — full
+per-state popovers are §4. A and B are the vision's original Shape A (sibling button);
+C is the rejected-but-comparable Shape B. <b>D is the 2026-08-30 gate direction</b>:
+no third control at all — the bar splits into a runtime box and a document box, the
+relationship face rides inside the document box, and each box opens its own popover.
 </p>
 <div class="rowgrid">
 
@@ -469,6 +493,81 @@ rejected-but-comparable Shape B (display only, actions elsewhere).
     </div>
     <p class="cnotes"><b>Why the vision leans away:</b> a pristine example still has no one-click "Save a copy"; the relationship stays inspectable but not actionable.</p>
   </div>
+
+  <div class="concept">
+    <div class="chead"><span class="name">D · Two boxes — runtime | document</span>
+      <span class="thesis">gate ruling 2026-08-30: left = what's running (device/sim), right = the project — its name, standing, sharing. Each opens its OWN popover.</span></div>
+
+    <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">D1 · one shell, two independently-clickable segments</div>
+    <div class="bar-frame" style="max-width:880px;margin-bottom:14px">
+      <div class="topbar">
+        <div class="logo"></div>
+        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
+        <div class="cluster">
+          <span class="shell">
+            <span class="anchor">
+              <button class="segbtn runtime-btn" data-pop="d1r" title="This tab's session — Garage dome on the classic board">
+                <span class="glyph" style="color:var(--tx-subtle)">▣</span><span class="dot" style="width:7px;height:7px;border-radius:999px;background:var(--st-good-tx);box-shadow:0 0 5px rgba(123,224,178,.55)"></span><span class="name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Garage dome</span><span class="suffix" style="font-size:10.5px;color:var(--tx-dim)">· classic</span>
+              </button>
+              <div class="pop hiddenpop" data-popfor="d1r" data-kind="runtime"></div>
+            </span>
+            <span class="divider"></span>
+            <span class="anchor">
+              <button class="segbtn doc-btn" data-pop="d1d">
+                <span class="glyph rel-proj-glyph" style="color:var(--tx-subtle)">◈</span>
+                <span class="name rel-proj-name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Plasma Duo</span>
+                <span class="rel-face face-neutral"><span class="rel-glyph"></span><span class="word rel-word" style="font-size:9.5px;color:var(--tx-dim)">Example</span></span>
+                <span class="pill-count rel-count" style="display:none">3</span>
+              </button>
+              <div class="pop hiddenpop" data-popfor="d1d" data-kind="doc"></div>
+            </span>
+          </span>
+          <button class="btn-save rel-save" style="display:none">Save</button>
+          <button class="btn-revert rel-revert" style="display:none" title="Revert">↺</button>
+        </div>
+        <div class="spacer"></div>
+        <span class="avatar">Y</span>
+      </div>
+      <div class="stage-body">One bar, two questions. Hover lights each half separately — the #432 "same panel, same wash" rule inverts once the panels differ.</div>
+    </div>
+
+    <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">D2 · two separate boxes</div>
+    <div class="bar-frame" style="max-width:880px">
+      <div class="topbar">
+        <div class="logo"></div>
+        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
+        <div class="cluster">
+          <span class="anchor">
+            <button class="box2 runtime-btn" data-pop="d2r" title="This tab's session — Garage dome on the classic board">
+              <span class="glyph" style="color:var(--tx-subtle)">▣</span><span class="dot" style="width:7px;height:7px;border-radius:999px;background:var(--st-good-tx);box-shadow:0 0 5px rgba(123,224,178,.55)"></span><span class="name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Garage dome</span><span class="suffix" style="font-size:10.5px;color:var(--tx-dim)">· classic</span>
+            </button>
+            <div class="pop hiddenpop" data-popfor="d2r" data-kind="runtime"></div>
+          </span>
+          <span class="anchor">
+            <button class="box2 doc-btn" data-pop="d2d">
+              <span class="glyph rel-proj-glyph" style="color:var(--tx-subtle)">◈</span>
+              <span class="name rel-proj-name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Plasma Duo</span>
+              <span class="rel-face face-neutral"><span class="rel-glyph"></span><span class="word rel-word" style="font-size:9.5px;color:var(--tx-dim)">Example</span></span>
+              <span class="pill-count rel-count" style="display:none">3</span>
+            </button>
+            <div class="pop hiddenpop" data-popfor="d2d" data-kind="doc"></div>
+          </span>
+          <button class="btn-save rel-save" style="display:none">Save</button>
+          <button class="btn-revert rel-revert" style="display:none" title="Revert">↺</button>
+        </div>
+        <div class="spacer"></div>
+        <span class="avatar">Y</span>
+      </div>
+      <div class="stage-body">Most honest: two controls, two outlines, a breath of air. Costs ~10px width over D1 and reads slightly less like one bar.</div>
+    </div>
+
+    <p class="cnotes"><b>The split:</b> LEFT popover = runtime (connection, board, running version, "this tab is the
+    session" — and the landing zone for the desktop device panel's facts when it retires). RIGHT popover = the document
+    (name, standing, share/access, save state, provenance + history), i.e. §4's panels plus a dirty echo and a
+    <b>Details →</b> seam where settings/stats demote. The left box says <b>Running v12</b> while the right says
+    <b>saved v13</b> — push lag becomes visible for free. <span class="t">Fold question:</span> narrow, D loses the
+    relationship word first, then the project glyph — see §5.</p>
+  </div>
 </div>
 
 <!-- ================= §3 faces ================= -->
@@ -559,6 +658,31 @@ Example state with dirty on — the worst-case row.
         <span class="avatar">Y</span>
       </div>
       <div class="stage-body" style="font-size:10.5px">The pill circles up to a round glyph button. Slightly wider than A folded (its own borders both sides).</div>
+    </div>
+  </div>
+  <div class="phone">
+    <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">D1 · two segments, folded</div>
+    <div class="bar-frame">
+      <div class="topbar" style="gap:8px;padding:8px 10px">
+        <div class="logo"></div>
+        <div class="cluster" style="min-width:0">
+          <span class="shell">
+            <button class="segbtn" style="padding:4px 7px">
+              <span class="glyph" style="color:var(--tx-subtle)">▣</span><span class="dot" style="width:7px;height:7px;border-radius:999px;background:var(--st-good-tx);box-shadow:0 0 5px rgba(123,224,178,.55)"></span>
+            </button>
+            <span class="divider"></span>
+            <button class="segbtn" style="padding:4px 7px">
+              <span class="name" style="font-size:11px;font-weight:600;color:var(--tx-muted);max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Plasma Duo</span>
+              <span id="narrow-glyph-d" style="display:inline-flex;color:var(--tx-subtle)"></span>
+              <span class="pill-count">3</span>
+            </button>
+          </span>
+          <button class="btn-save" style="padding:3px 8px">Save</button>
+        </div>
+        <div class="spacer"></div>
+        <span class="avatar">Y</span>
+      </div>
+      <div class="stage-body" style="font-size:10.5px">The word folds first, leaving the relationship glyph riding beside the name — the project glyph yields its slot. No third control to fold at all.</div>
     </div>
   </div>
 </div>
@@ -699,6 +823,30 @@ function popContent(rel) {
   }
 }
 
+/* ---------------- concept D popover builders ----------------------------- */
+function runtimePop() {
+  const transient = state.rel === 'example' || state.rel === 'visitor';
+  return popHead('Garage dome') + `
+    <div class="rel-line"><span style="width:8px;height:8px;border-radius:999px;background:var(--st-good-tx);box-shadow:0 0 6px rgba(123,224,178,.5);flex:none"></span>
+      <span><b>Running.</b> Live edits stream to the board as you work.</span></div>
+    <div class="runline"><span class="k">Board</span><span class="v">classic · ESP32 <span class="mono">(CH340)</span></span></div>
+    <div class="runline"><span class="k">Link</span><span class="v">serial · <span class="mono">137 fps</span> steady</span></div>
+    <div class="runline"><span class="k">Running</span><span class="v">${transient
+      ? 'live session — nothing pushed (transient view)'
+      : '<span class="mono">v12</span> · pushed 20 min ago'}</span></div>
+    <div class="statusline" style="margin-top:12px">⌁ This tab is the session — one device or sim per tab.</div>
+    <div class="utilrow"><button>Stop session</button><button>Device details →</button></div>
+    <p class="note" style="margin-top:8px">Landing zone: the desktop device panel's non-visualization facts fold in here when it retires (follow-on).</p>`;
+}
+function docContent(rel) {
+  let html = popContent(rel);
+  if (state.dirty) {
+    html = html.replace('</div>', `</div>
+      <div class="statusline warn" style="margin:0 0 10px">✎ 3 unsaved edits — Save banks <b>v13</b>.</div>`);
+  }
+  return html + `<div class="utilrow" style="margin-top:10px"><button>Details → <span style="opacity:.7">settings · stats</span></button></div>`;
+}
+
 /* ---------------- §1 current production --------------------------------- */
 const CUR_NAMES = { example:'Plasma Duo', minelocal:'Aurora Field', minepub:'Aurora Field', member:'Halcyon Drift', visitor:'Halcyon Drift' };
 function renderCurrent() {
@@ -738,17 +886,22 @@ function renderPlacements() {
   document.querySelectorAll('.rel-count').forEach(el =>
     el.style.display = state.dirty ? '' : 'none');
   document.querySelectorAll('[data-popfor]').forEach(el => {
-    if (!el.classList.contains('hiddenpop')) el.innerHTML = popContent(state.rel);
+    if (!el.classList.contains('hiddenpop')) el.innerHTML = contentFor(el);
   });
 }
-document.querySelectorAll('.rel-control').forEach(btn => {
+function contentFor(pop) {
+  return pop.dataset.kind === 'runtime' ? runtimePop()
+    : pop.dataset.kind === 'doc' ? docContent(state.rel)
+    : popContent(state.rel);
+}
+document.querySelectorAll('.rel-control, .runtime-btn, .doc-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const pop = document.querySelector(`[data-popfor="${btn.dataset.pop}"]`);
     const wasHidden = pop.classList.contains('hiddenpop');
     document.querySelectorAll('[data-popfor]').forEach(p => p.classList.add('hiddenpop'));
-    document.querySelectorAll('.rel-control').forEach(b => b.classList.remove('rel-open'));
+    document.querySelectorAll('.rel-control, .runtime-btn, .doc-btn').forEach(b => b.classList.remove('rel-open'));
     if (wasHidden) {
-      pop.innerHTML = popContent(state.rel);
+      pop.innerHTML = contentFor(pop);
       pop.classList.remove('hiddenpop');
       btn.classList.add('rel-open');
     }
@@ -773,6 +926,7 @@ function faceCell(rel, kind) {
   document.getElementById('tint-l').innerHTML = G.link;
   document.getElementById('narrow-glyph-a').innerHTML = G.example;
   document.getElementById('narrow-glyph-b').innerHTML = G.example;
+  document.getElementById('narrow-glyph-d').innerHTML = G.example;
 })();
 
 /* ---------------- §4 popover gallery ------------------------------------- */
@@ -788,7 +942,12 @@ function faceCell(rel, kind) {
   document.getElementById('popgallery').innerHTML = Object.keys(REL).map(rel => `
     <div class="popwrap"><p class="pname">${names[rel]}</p>
       <div class="pop" data-static="${rel}">${popContent(rel)}</div>
-      <p class="pnote">${notes[rel]}</p></div>`).join('');
+      <p class="pnote">${notes[rel]}</p></div>`).join('')
+    + `<div class="popwrap"><p class="pname">Runtime — concept D's LEFT box (state-independent)</p>
+      <div class="pop">${runtimePop()}</div>
+      <p class="pnote">The other half of the D split: connection, board, running version, the session hint —
+      and the declared landing zone for the desktop device panel's facts. Note the version symmetry:
+      this says Running v12 while the document popover's strip says saved v13.</p></div>`;
 })();
 
 /* ---------------- §6 fork moment ----------------------------------------- */
