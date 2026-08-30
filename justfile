@@ -1969,6 +1969,38 @@ watch-pr *args:
 hardware-list *args:
     cargo run -q -p lp-cli -- hardware list {{ args }}
 
+# Remove the WebSerial chooser dialog for local dev servers by granting Brave
+# standing serial access via the Chromium enterprise policy
+# SerialAllowAllPortsForUrls, written as a macOS platform policy through
+# `defaults` (no MDM needed). Why: the chooser is a NATIVE dialog no agent
+# tooling can click, and per-device grants are fragile anyway — Brave drops
+# them on reload, and CH340 boards carry no USB serial number so a grant
+# also dies on replug.
+#
+# The URL patterns are PORT-LESS on purpose: the enterprise URL-pattern
+# format treats a missing port as "any port", and dev-port.sh hashes each
+# worktree's server into 20000-40000, so enumerating ports is a losing game.
+# Scope stays loopback-only — no external origin gains serial access.
+#
+# Takes effect after a FULL Brave restart (or brave://policy → "Reload
+# policies"). Verify with `just serial-grant-status` and brave://policy
+# (the policy should list as valid, source "Platform").
+#
+# Note the dialog did TWO jobs — permission grant AND port selection. This
+# recipe replaces only the grant; picking WHICH port now belongs to the app
+# (navigator.serial.getPorts() + VID filtering in the device flow).
+serial-grant:
+    defaults write com.brave.Browser SerialAllowAllPortsForUrls -array "http://localhost" "http://127.0.0.1"
+    @echo 'policy written — restart Brave (or brave://policy → "Reload policies"), then verify at brave://policy'
+
+# Show the standing Brave serial grant (errors if none is set).
+serial-grant-status:
+    defaults read com.brave.Browser SerialAllowAllPortsForUrls
+
+# Remove the standing grant; Brave goes back to chooser prompts per device.
+serial-ungrant:
+    defaults delete com.brave.Browser SerialAllowAllPortsForUrls
+
 # Build and flash a FIXTURE firmware — a CURRENT build that misreports its
 # hello, so a current Studio classifies it Incompatible on purpose.
 #
