@@ -357,6 +357,23 @@ impl LpGraphics for GpuGraphics {
         )
     }
 
+    /// The GPU→CPU copy inherently stages through fresh mapped/quantized
+    /// buffers, so this saves no allocation here — it exists to honor the
+    /// caller-owned-buffer contract on a backend that only runs on hosts.
+    fn read_back_into(&self, texture: &TextureHandle, out: &mut [u8]) -> Result<(), GfxError> {
+        let data = self.read_back(texture)?;
+        let src = data.bytes();
+        if out.len() != src.len() {
+            return Err(len_mismatch(
+                "texture read back bytes",
+                src.len(),
+                out.len(),
+            ));
+        }
+        out.copy_from_slice(src);
+        Ok(())
+    }
+
     /// Native wgpu can block on a buffer map; the browser tier cannot, so
     /// render products stay GPU-resident there (fidelity-tiers ADR — the
     /// probe edge surfaces the residency instead of an error string).
