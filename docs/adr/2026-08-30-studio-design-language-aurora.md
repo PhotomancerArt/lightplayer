@@ -270,10 +270,12 @@ gate rounds) converged on a grammar rather than a single treatment:
 - On rows and cells the ring is the ONLY selection paint (no grey wash;
   a selected row keeps its natural ground, dirty tint included). Option
   cards keep the selection wash + neutral check under the ring. Every
-  mark is static — motion remains exclusively hover/press/drag light
-  (the dense-row hover is the bloom alone; its old blue inset edge read
-  as a competing mark beside the ring), so selected and hovered stay
-  different kinds of light.
+  mark is static — motion remains exclusively hover/press/drag light.
+  The dense-row hover is the hover ring's whisper variant: a lighter
+  wash (never darker — dimming reads wrong), the bloom, and a faint
+  MOVING iridescent hairline. Its old blue inset edge read as a
+  competing mark beside the ring; moving-vs-still is what keeps hovered
+  and selected different kinds of light.
 
 Status hues remain frozen; nothing here touches them. The design
 library's main page (the design-language story) documents the grammar

@@ -5692,13 +5692,46 @@ label:has(> input:not(:disabled)) {
 }
 
 /* Dense rows (tree rows, panel list rows) take the LIGHT variant of the
-   same light: the bloom alone — never a full ring (a ring on every row of
-   a tree is noise, not affordance; spike `.s-row`), and since the
-   selection grammar no edge either (G1 rd 3: the old blue inset edge read
-   as a competing selection-ish mark beside the still ring). No animation
-   here, so nothing for the motion guard to switch off. */
+   same light: a LIGHTER wash (never a darker one — "blackish" hover reads
+   as dimming, G1 rd 4), the bloom, and a faint MOVING iridescent hairline
+   — the hover ring at whisper opacity. Moving keeps it a different kind
+   of light from the still selection ring; the old blue inset edge and the
+   full-strength ring are both retired here (an edge read as a competing
+   selection mark; a loud ring per row is noise). This rule is unlayered,
+   so it outranks any leftover tw:hover:bg-* utility on the same row. */
+.ux-row-edge {
+    position: relative;
+}
+
 .ux-row-edge:hover {
+    background-color: var(--studio-color-bg-wash);
     box-shadow: 0 0 14px var(--studio-glow);
+}
+
+.ux-row-edge:hover::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(from var(--ux-ir-angle), var(--studio-spectrum), #5fe08b);
+    mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    opacity: 0.45;
+    animation: ux-ir-spin 3.2s linear infinite;
+    pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-row-edge:hover::after {
+        animation: none;
+    }
 }
 
 /* Press flare: the bloom answers the finger, not just the pointer. Ordered

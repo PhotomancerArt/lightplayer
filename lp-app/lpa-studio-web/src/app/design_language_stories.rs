@@ -98,7 +98,7 @@ fn page() -> Element {
 
             Idiom {
                 title: "Moving light belongs to the pointer",
-                rule: "The iridescent ring answers hover, the flare answers press, the pinned ring plus a lifted shadow rides a drag. Dense rows take the light variant: the bloom alone, never a ring per row. Motion is EXCLUSIVELY transient pointer state — nothing at rest may animate.",
+                rule: "The iridescent ring answers hover, the flare answers press, the pinned ring plus a lifted shadow rides a drag. Dense rows take the whisper variant: a lighter wash, the bloom, and a faint moving iridescent hairline. Motion is EXCLUSIVELY transient pointer state — nothing at rest may animate.",
                 button { class: "{demo_chip} {ir_ring_class()} ux-press-flare tw:cursor-pointer", "hover / press me" }
                 div { class: "tw:grid tw:w-44 tw:gap-1",
                     div { class: "{row_edge_class()} tw:cursor-default tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:text-soft-foreground tw:hover:bg-card-muted",

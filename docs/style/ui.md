@@ -171,7 +171,9 @@ a mark.
   (`--studio-color-selection-*`) survives there and in span markers.
 
 Every selection mark is static because motion stays the pointer's: the
-iridescent ring (`ux-ir-ring`) on hover, the press flare (`ux-press-flare`)
+iridescent ring (`ux-ir-ring`) on hover, its whisper variant on dense rows
+(`ux-row-edge` — a lighter wash, the bloom, and a faint moving iridescent
+hairline; hover never darkens a row), the press flare (`ux-press-flare`)
 on `:active`, and the pinned ring plus a lifted shadow (`ux-drag-chip`)
 mid-drag. A selected row and a row you're merely passing over stay
 different KINDS of light — one holds still, one moves.

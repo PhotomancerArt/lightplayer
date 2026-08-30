@@ -86,7 +86,7 @@ pub fn ProjectNodeTree(
 /// a node. The explicit `bg-transparent` matters: without it the user-agent
 /// button face paints a gray pill under the dashed border.
 fn tree_add_row_class(open: bool) -> String {
-    const BASE: &str = "tw:grid tw:w-full tw:cursor-pointer tw:appearance-none tw:grid-cols-[18px_minmax(0,1fr)] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-dashed tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-subtle-foreground tw:hover:bg-card-muted tw:hover:text-soft-foreground";
+    const BASE: &str = "tw:grid tw:w-full tw:cursor-pointer tw:appearance-none tw:grid-cols-[18px_minmax(0,1fr)] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-dashed tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-subtle-foreground tw:hover:text-soft-foreground";
     let light = format!("{} {}", row_edge_class(), focus_ring_class());
     if open {
         format!("{BASE} {light} tw:bg-card-muted tw:text-soft-foreground")
@@ -202,10 +202,10 @@ fn tree_item_row_class(focused: bool, dirty: DirtySummary) -> String {
     // light from the still selection mark.
     let edge = format!("{} {focus}", row_edge_class());
     if dirty.is_clean() {
-        format!("{BASE} {edge} tw:border-transparent tw:bg-transparent tw:hover:bg-card-muted")
+        format!("{BASE} {edge} tw:border-transparent tw:bg-transparent")
     } else {
         format!(
-            "{BASE} {edge} {dirty_var} tw:border-transparent tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-tree-dirty-bg),transparent_62%)] tw:hover:bg-card-muted"
+            "{BASE} {edge} {dirty_var} tw:border-transparent tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-tree-dirty-bg),transparent_62%)]"
         )
     }
 }
