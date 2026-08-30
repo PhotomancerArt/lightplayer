@@ -19,6 +19,8 @@
 //! - [`visitor_mode`] / [`visitor_banner`] / [`visitor_popover`] — the P6
 //!   visitor surface: who this viewer is per the service, the strip under
 //!   the chrome, and the read-only share door in the pill slot.
+//! - [`relationship`] — the relationship-control vision's one derived
+//!   `ProjectRelationship`, plus the pristine-transient fork dispatch.
 //!
 //! Visual reference: `spikes/project-share/index.html` §1-A, §2-B, §2-D,
 //! §3-A and §5 (gate rulings G1/G2/G3/G4 + Q12). Production code never
@@ -28,6 +30,7 @@ pub mod archived_projects;
 #[cfg(feature = "stories")]
 pub(crate) mod archived_projects_stories;
 pub mod project_share_control;
+pub mod relationship;
 pub mod share_panel;
 #[cfg(feature = "stories")]
 pub(crate) mod share_panel_stories;
@@ -42,6 +45,7 @@ pub mod visitor_session;
 
 pub use archived_projects::{ArchivedProject, ArchivedProjectsList, ArchivedProjectsSection};
 pub use project_share_control::{ProjectShareControl, archive_project};
+pub use relationship::{ProjectRelationship, derive_relationship, fork_transient_session};
 pub use share_panel::{SharePanel, SharePillPopover};
 pub use share_person::{SharePerson, people_of};
 pub use share_url::ShareUrl;
