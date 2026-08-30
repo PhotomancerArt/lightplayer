@@ -7,8 +7,12 @@
     "cargoTarget": "xtensa-esp32-none-elf"
   },
   "features": [
+    "node.button",
+    "node.clock",
     "node.fixture",
+    "node.playlist",
     "node.shader",
+    "node.texture",
     "gfx.lpvm"
   ],
   "limits": {
