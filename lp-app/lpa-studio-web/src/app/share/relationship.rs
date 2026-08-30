@@ -23,6 +23,8 @@ use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{ControllerId, ProjectController, ProjectOp, StudioCommand, UiAction};
 use lpc_cloud_api::Actor;
 
+use crate::base::StudioIconName;
+
 /// The user's relationship to the OPEN project — one derivation, every
 /// surface renders from it (vision D1). Not persisted; recomputed from
 /// session + service signals.
@@ -89,6 +91,57 @@ pub fn derive_relationship(
         // Equal actors, or either side unknown, or the ambiguous
         // anonymous-vs-anonymous pair: the honest merge is "mine".
         _ => ProjectRelationship::MinePublished,
+    }
+}
+
+/// The relationship's **face**: the glyph-plus-word the project segment
+/// wears (spike §3, vocabulary V2 — glyph AND word wide, glyph alone at the
+/// narrow fold).
+///
+/// The family is NEUTRAL by ruling (D12, post-#478): a face states who this
+/// document is to you, which is identity, not health — so it never borrows
+/// a status color. Green would read "good", blue "live", violet is reserved
+/// for binding; the face takes the dim/subtle foreground and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RelationshipFace {
+    /// The one word: Example / Private / Shared / Member / Viewing. The
+    /// owner-name future ("eshan's") slots into this position unchanged.
+    pub word: &'static str,
+    /// The glyph that survives the 900px fold when the word drops.
+    pub glyph: StudioIconName,
+    /// The segment's tooltip — the sentence the word compresses.
+    pub title: &'static str,
+}
+
+/// The face for one relationship. Total over the enum, so a new state
+/// cannot ship without its vocabulary.
+pub fn relationship_face(relationship: ProjectRelationship) -> RelationshipFace {
+    match relationship {
+        ProjectRelationship::Example => RelationshipFace {
+            word: "Example",
+            glyph: StudioIconName::Test,
+            title: "Built-in example \u{2014} save a copy to make it yours",
+        },
+        ProjectRelationship::MineLocal => RelationshipFace {
+            word: "Private",
+            glyph: StudioIconName::RelationshipPrivate,
+            title: "Yours \u{2014} not shared",
+        },
+        ProjectRelationship::MinePublished => RelationshipFace {
+            word: "Shared",
+            glyph: StudioIconName::RelationshipShared,
+            title: "Yours \u{2014} anyone with the link can view",
+        },
+        ProjectRelationship::MemberOfSomeoneElses => RelationshipFace {
+            word: "Member",
+            glyph: StudioIconName::RelationshipMember,
+            title: "Someone else\u{2019}s project \u{2014} you can edit",
+        },
+        ProjectRelationship::ViewingSomeoneElses => RelationshipFace {
+            word: "Viewing",
+            glyph: StudioIconName::RelationshipViewing,
+            title: "Someone else\u{2019}s project \u{2014} save a copy to keep changes",
+        },
     }
 }
 

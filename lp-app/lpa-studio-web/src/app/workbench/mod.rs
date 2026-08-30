@@ -1021,8 +1021,9 @@ fn PanelBody(
 }
 
 /// The Tree panel's debug chip (R7-2 ruling): the save moment's one home is
-/// now the header session·project control (the Save/↺ segments there ride
-/// the SAME controller-supplied actions this row used to render — see
+/// now the header session·project control (its Save sibling and the
+/// changes popup's revert-all ride the SAME controller-supplied actions
+/// this row used to render — see
 /// `session_control::SessionProjectControl`), so this row carries only the
 /// project-wide "Debug active · N · Clear all" chip, and only while debug
 /// overrides are actually set. Renders nothing otherwise.

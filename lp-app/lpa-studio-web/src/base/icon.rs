@@ -2,10 +2,11 @@ use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Activity, ArrowUpRight, Asterisk, Bot, Boxes, ChartLine, Check, ChevronDown, ChevronRight,
     CircleAlert, CircleDot, CircleMinus, CircleQuestionMark, Clock, Copy, Cpu, Download, Droplet,
-    Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash, Image, Info, Lightbulb, Link2,
-    Link2Off, ListMusic, Locate, LocateFixed, Maximize2, Minimize2, MonitorPlay, MousePointerClick,
-    Pencil, Play, Plus, Radio, Route, Save, Settings, Sparkles, SquareArrowRight, SquareTerminal,
-    Trash2, TriangleAlert, Undo2, Upload, Usb, Waypoints, X, Zap,
+    Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash, Image, Info, Lightbulb, Link,
+    Link2, Link2Off, ListMusic, Locate, LocateFixed, Lock, Maximize2, Minimize2, MonitorPlay,
+    MousePointerClick, Pencil, Play, Plus, Radio, Route, Save, Settings, Sparkles,
+    SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Users, Waypoints,
+    X, Zap,
 };
 
 #[component]
@@ -82,6 +83,10 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Agent => rsx! { Sparkles { size } },
         StudioIconName::Performance => rsx! { ChartLine { size } },
         StudioIconName::Danger => rsx! { TriangleAlert { size } },
+        StudioIconName::RelationshipPrivate => rsx! { Lock { size } },
+        StudioIconName::RelationshipShared => rsx! { Link { size } },
+        StudioIconName::RelationshipMember => rsx! { Users { size } },
+        StudioIconName::RelationshipViewing => rsx! { Eye { size } },
     }
 }
 
@@ -195,6 +200,20 @@ pub enum StudioIconName {
     Performance,
     /// Warning triangle: the device card's Danger tab.
     Danger,
+    /// Padlock: the project-relationship face for **Private** — in your
+    /// library, shared with nobody. The relationship family is neutral by
+    /// ruling (D12, post-#478): these glyphs state identity, never status,
+    /// so they never carry a status tint.
+    RelationshipPrivate,
+    /// Chain link: the **Shared** face — yours, and the link opens it.
+    /// Deliberately lucide `Link` rather than the `Link2` that
+    /// [`Self::BoundValue`] wears: violet `Link2` means bus binding.
+    RelationshipShared,
+    /// People: the **Member** face — someone else's project you can edit.
+    RelationshipMember,
+    /// Eye: the **Viewing** face — someone else's project, read-only until
+    /// you fork a copy.
+    RelationshipViewing,
 }
 
 /// The per-node-type glyph family. Mapped from the node's human-readable

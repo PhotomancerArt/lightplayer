@@ -45,7 +45,10 @@ pub mod visitor_session;
 
 pub use archived_projects::{ArchivedProject, ArchivedProjectsList, ArchivedProjectsSection};
 pub use project_share_control::{ProjectShareControl, archive_project};
-pub use relationship::{ProjectRelationship, derive_relationship, fork_transient_session};
+pub use relationship::{
+    ProjectRelationship, RelationshipFace, derive_relationship, fork_transient_session,
+    relationship_face,
+};
 pub use share_panel::{SharePanel, SharePillPopover};
 pub use share_person::{SharePerson, people_of};
 pub use share_url::ShareUrl;

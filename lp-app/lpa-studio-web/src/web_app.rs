@@ -30,7 +30,8 @@ use crate::app::layout::{
 };
 use crate::app::project::ProjectDetailContent;
 use crate::app::share::{
-    ProjectShareControl, VisitorBannerHost, VisitorShareSlot, archive_project, use_visitor_session,
+    ProjectShareControl, VisitorBannerHost, VisitorShareSlot, archive_project, derive_relationship,
+    use_visitor_session,
 };
 use crate::app::workbench;
 use crate::base::{ToastHost, use_toast_provider};
@@ -1070,17 +1071,36 @@ pub fn App() -> Element {
         .is_lens()
         .then(|| current_view.session.clone())
         .flatten()
-        .map(|session| ChromeSessionControl {
-            example: current_view.open_transient_example.is_some(),
-            session,
-            project: current_view.panes.iter().find_map(|pane| match &pane.body {
+        .map(|session| {
+            let editor = current_view.panes.iter().find_map(|pane| match &pane.body {
                 lpa_studio_core::UiViewContent::ProjectEditor(editor) => {
-                    Some(ProjectDetailContent::new(editor, pane.status.clone()))
+                    Some((editor, pane.status.clone()))
                 }
                 _ => None,
-            }),
-            on_action,
-            initially_open: false,
+            });
+            // The project segment's FACE (vision D1). The roster half of the
+            // derivation is not wired yet: `roster_answered: false` and both
+            // actors `None` mean a library project reads `MineLocal`
+            // ("Private") and the Shared/Member faces stay unreachable —
+            // P3 wires the `GetProject` answer and the session's own actor
+            // through, and the same call then produces all five.
+            let relationship = derive_relationship(
+                current_view.open_project_transient,
+                current_view.open_transient_example.is_some(),
+                editor
+                    .as_ref()
+                    .is_some_and(|(editor, _)| editor.library_identity.is_some()),
+                false,
+                None,
+                None,
+            );
+            ChromeSessionControl {
+                session,
+                project: editor.map(|(editor, status)| ProjectDetailContent::new(editor, status)),
+                relationship,
+                on_action,
+                initially_open: None,
+            }
         });
     // The chrome's narrow ladder keys off the control's presence (a bar
     // carrying it stops fitting sooner); the version chip's fold below

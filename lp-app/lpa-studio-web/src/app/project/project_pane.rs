@@ -17,18 +17,21 @@
 //!
 //! Body: the node tree (plus any sync issue) — no heading and no pane-level
 //! button strip (P6 sidebar tidy: the tree is self-evident; Refresh and
-//! Disconnect remain ops without buttons). The popup is the save panel
-//! (M3 P5) plus the root's "Project settings" rows: the
-//! per-bucket sections list the labeled pending edits with per-entry revert.
+//! Disconnect remain ops without buttons). The popup is the project's
+//! standing — identity, "Project settings" rows, share, stats. The pending
+//! edits are NOT here: the header control's **changes** segment owns them
+//! (relationship-control D8), and its popup renders the labeled entries
+//! with per-entry revert, revert-all, and Save.
 //!
 //! **Embedded mode** (workbench ruling 2): the workbench's Nodes dock renders
 //! this pane FLAT — no card chrome, no project-name/[i] header, just the save
 //! affordances, any sync issue, and the tree on the panel's own background.
 //! The dock is already titled "Nodes", so a card inside it was box-in-box; and
 //! the popup that used to hang off this header lives on the header
-//! session·project control's panel instead ([`ProjectDetailSections`],
-//! re-housed whole — single-session policy). Every other mount keeps the
-//! card, header, and popup exactly as before.
+//! session·project control instead — [`ProjectDetailSections`] under its
+//! PROJECT segment, the pending edits under its CHANGES segment
+//! (single-session policy). Every other mount keeps the card, header, and
+//! popup exactly as before.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -39,9 +42,6 @@ use lpa_studio_core::{
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
 use crate::app::layout::{PaneChrome, StudioPane};
 use crate::app::node::node_status_label_class;
-use crate::app::project::pending_edit_section::{
-    PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
-};
 use crate::app::project::{ProjectNodeTree, ProjectSettingsSection, ProjectShareSection};
 use crate::base::{DetailPopover, DetailSection, PopoverPlacement};
 
@@ -71,6 +71,29 @@ pub struct ProjectDetailContent {
     header_actions: Vec<UiPaneAction>,
 }
 
+/// The pending-work facts and lists the header control's **changes**
+/// popup renders — the projection [`ProjectDetailContent::changes`] hands
+/// out. Plain public fields: this is a view value, not a widget.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectChanges {
+    /// The merged affordance — the popup's "State" row wording.
+    pub affordance: UiAffordance,
+    /// Unsaved / failed counts: the changes segment's face reads them, and
+    /// `persisted > 0` is the same dirty test `header_actions` encodes.
+    pub dirty: DirtySummary,
+    /// The overlay's revision number — the pending fact that used to sit in
+    /// the detail sections' "Pending edits" block.
+    pub overlay_revision: i64,
+    /// Edits dispatched and not yet acked.
+    pub edits_in_flight: usize,
+    /// Every pending edit, in the DTO's stable order (bucketed for display
+    /// by `pending_edit_section::entries_in`).
+    pub pending_edits: Vec<UiPendingEdit>,
+    /// The controller's own Save / Revert-to-saved pair — the popup
+    /// dispatches THESE, never a second save verb minted locally.
+    pub header_actions: Vec<UiPaneAction>,
+}
+
 impl ProjectDetailContent {
     /// The merged affordance — the header control's state glyph reads it.
     pub fn affordance(&self) -> UiAffordance {
@@ -93,6 +116,26 @@ impl ProjectDetailContent {
     /// control's trailing segments read them.
     pub fn header_actions(&self) -> &[UiPaneAction] {
         &self.header_actions
+    }
+
+    /// The **changes** half of this content: everything the header
+    /// control's changes popup renders, in one value.
+    ///
+    /// The bar's changes segment is the concept home for pending work
+    /// (relationship-control D8), so the popup — not
+    /// [`ProjectDetailSections`] — lists the unsaved and failed entries and
+    /// states the pending facts. This accessor exists so the popup can live
+    /// beside the segment it hangs off without the sections' private fields
+    /// leaking wholesale.
+    pub fn changes(&self) -> ProjectChanges {
+        ProjectChanges {
+            affordance: self.affordance,
+            dirty: self.dirty,
+            overlay_revision: self.overlay_revision,
+            edits_in_flight: self.edits_in_flight,
+            pending_edits: self.pending_edits.clone(),
+            header_actions: self.header_actions.clone(),
+        }
     }
 
     /// Gather the popup's content from the editor view and the pane status
@@ -194,11 +237,7 @@ pub fn ProjectPane(
                 DebugActiveChip { count: debug_overrides, on_action }
             },
             detail: rsx! {
-                ProjectDetailPopover {
-                    content: detail_content,
-                    on_action,
-                    initially_open,
-                }
+                ProjectDetailPopover { content: detail_content, initially_open }
             },
             body: rsx! {
                 div { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-3 tw:pt-3",
@@ -262,23 +301,23 @@ pub(crate) fn DebugActiveChip(count: usize, on_action: EventHandler<UiAction>) -
     }
 }
 
-/// The detail popup on the shared [`DetailPopover`] base — the save panel:
-/// project identity with the status word (its only home — headers no longer
-/// carry a status chip), the root's "Project settings" identity rows (the
-/// editable `name` — and the read-only `format`/`uid`/`nodes` rows — live
-/// here rather than on the restored root card, as purpose-built controls
-/// rather than generic slot editors; see
-/// [`ProjectSettingsSection`]), the pending-edit state,
-/// overlay revision, the per-bucket [`DetailSection`]s (unsaved / failed —
-/// there is no debug bucket, D7) as titled change lists with per-entry revert (a populated bucket
-/// wears its affordance tint on the title; the count rides the title row's
-/// meta cell), and the project stats (moved here from the old sidebar
-/// MetricGrid card).
+/// The detail popup on the shared [`DetailPopover`] base — the project's
+/// standing panel: project identity with the status word (its only home —
+/// headers no longer carry a status chip), the root's "Project settings"
+/// identity rows (the editable `name` — and the read-only
+/// `format`/`uid`/`nodes` rows — live here rather than on the restored root
+/// card, as purpose-built controls rather than generic slot editors; see
+/// [`ProjectSettingsSection`]), share, and the project stats (moved here
+/// from the old sidebar MetricGrid card).
+///
+/// The pending-edit lists and facts are NOT here: the header control's
+/// **changes** segment is their concept home
+/// (relationship-control D8), and its popup renders
+/// [`ProjectDetailContent::changes`].
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectDetailPopover(
     content: ProjectDetailContent,
-    on_action: EventHandler<UiAction>,
     #[props(default = false)] initially_open: bool,
 ) -> Element {
     let affordance = content.affordance;
@@ -293,43 +332,44 @@ fn ProjectDetailPopover(
             placement: PopoverPlacement::BottomEnd,
             active: affordance.is_announced(),
             initially_open,
-            ProjectDetailSections { content, on_action }
+            ProjectDetailSections { content }
         }
     }
 }
 
 /// The project popup's SECTIONS, without the popover around them — the
 /// re-housable unit (ruling 2). Rendered inside the project pane's own [i]
-/// on every non-workbench mount, and inside the header session·project
-/// control's panel on every mount (single-session policy) — the workbench's
+/// on every non-workbench mount, and inside the header control's PROJECT
+/// segment popover on every mount (single-session policy) — the workbench's
 /// flat Nodes dock has no header of its own to hang a popup from, so that
 /// mount is the ONLY place its project state shows.
+///
+/// Purely presentational now: the change lists (which carried the per-entry
+/// revert dispatch) moved to the changes popup, so these sections take no
+/// `on_action`.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ProjectDetailSections(
-    content: ProjectDetailContent,
-    on_action: EventHandler<UiAction>,
-) -> Element {
+pub fn ProjectDetailSections(content: ProjectDetailContent) -> Element {
     let ProjectDetailContent {
-        affordance,
         project_name,
         status,
         dirty,
-        overlay_revision,
-        edits_in_flight,
         stats,
-        pending_edits,
         root_slots,
         manifest,
         library_identity,
-        // The Save/Revert pair rides the content value for the header
-        // control's sake; the sections deliberately do not render it (the
-        // popup lists the edits, the control carries the verbs).
+        // The changes half of the content — pending-edit lists, the
+        // pending facts, and the Save/Revert pair — belongs to the header
+        // control's CHANGES popup now (relationship-control D8); it rides
+        // the value so both halves stay one projection, and the sections
+        // deliberately render none of it.
+        affordance: _,
+        overlay_revision: _,
+        edits_in_flight: _,
+        pending_edits: _,
         header_actions: _,
     } = content;
     let status_class = node_status_label_class(status.kind);
-    let unsaved_entries = entries_in(&pending_edits, PendingEditBucket::Persisted);
-    let failed_entries = entries_in(&pending_edits, PendingEditBucket::Failed);
 
     rsx! {
         DetailSection {
@@ -359,27 +399,6 @@ pub fn ProjectDetailSections(
                 ProjectShareSection { uid, slug, unsaved: dirty.persisted }
             }
         }
-        DetailSection { title: "Pending edits",
-            ProjectDetailRow { label: "State", value: state_label(affordance).to_string() }
-            ProjectDetailRow { label: "Overlay revision", value: overlay_revision.to_string() }
-            if edits_in_flight > 0 {
-                ProjectDetailRow { label: "Awaiting ack", value: edits_in_flight.to_string() }
-            }
-        }
-        DetailSection {
-            title: "Unsaved (persisted)",
-            meta: dirty.persisted.to_string(),
-            tint: bucket_section_tint(PendingEditBucket::Persisted, dirty.persisted),
-            PendingEditList { entries: unsaved_entries, on_action }
-        }
-        if dirty.failed > 0 || !failed_entries.is_empty() {
-            DetailSection {
-                title: "Failed edits",
-                meta: dirty.failed.to_string(),
-                tint: bucket_section_tint(PendingEditBucket::Failed, dirty.failed),
-                PendingEditList { entries: failed_entries, on_action }
-            }
-        }
         if !stats.is_empty() {
             DetailSection { title: "Project stats",
                 for metric in stats {
@@ -390,9 +409,11 @@ pub fn ProjectDetailSections(
     }
 }
 
+/// One label/value row of the detail card — shared with the header
+/// control's changes popup, which carries the pending facts now.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProjectDetailRow(label: String, value: String) -> Element {
+pub(crate) fn ProjectDetailRow(label: String, value: String) -> Element {
     rsx! {
         p { class: "tw:m-0 tw:flex tw:items-baseline tw:justify-between tw:gap-3 tw:text-xs tw:leading-snug",
             span { class: "tw:font-bold tw:text-subtle-foreground", "{label}" }
@@ -414,8 +435,9 @@ pub(crate) fn trigger_label(affordance: UiAffordance) -> &'static str {
     }
 }
 
-/// The popup's "State" row wording for the merged affordance.
-fn state_label(affordance: UiAffordance) -> &'static str {
+/// The "State" row wording for the merged affordance — read by the header
+/// control's changes popup, which is where the pending facts live now.
+pub(crate) fn state_label(affordance: UiAffordance) -> &'static str {
     match affordance {
         UiAffordance::Info => "unchanged",
         UiAffordance::Busy => "in progress",

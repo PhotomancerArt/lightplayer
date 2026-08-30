@@ -26,7 +26,7 @@
 //!   session·project control, 2026-08-19 — the squished phone bar):
 //!   <900 the world nav retreats to ⋯, the toggle and the Share pill go
 //!   icon-only, and the version chip hides (the device name already
-//!   folds there); <680 the brand word yields with the ↺; <560 the phone
+//!   folds there); <680 the brand word yields; <560 the phone
 //!   bar — Devices/Projects become ⋯ rows and gaps tighten. What never
 //!   folds: the control, Save, Play, settings, the account slot, and ⋯ —
 //!   the phone bar is the session, the one action on it, and the doors.
@@ -131,7 +131,7 @@ pub fn SiteChrome(
     /// everywhere else (the menu then reads exactly as it always has).
     #[props(default)]
     project_menu: Option<ChromeProjectMenu>,
-    /// THE session·project control (the B lockup); `None` off the lens
+    /// THE session·project control (the E bar's three segments); `None` off the lens
     /// routes. Mounted UNGATED — no `tw:@min-*` — so it is present at every
     /// header width (Q10 ruling: one mount, no top-layer/container-query
     /// workaround); the FOLDS live inside the control.
@@ -162,7 +162,7 @@ pub fn SiteChrome(
     // toggles stops fitting ~220px sooner than a plain one, so the world
     // nav's cut is CONDITIONAL on that load, not a second magic number:
     //   crowded <900 — the world's tabs retreat to ⋯ where the device
-    //     name already folds; the brand word yields at <680 with the ↺.
+    //     name already folds; the brand word yields at <680.
     //   crowded <560 — the phone bar: Devices/Projects join the ⋯ menu's
     //     sections (all five), Patch becomes a menu row, gaps tighten.
     //   plain  <680 — the original ladder, unchanged.
