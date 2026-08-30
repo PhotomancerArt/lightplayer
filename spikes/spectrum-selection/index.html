@@ -315,8 +315,9 @@ horizontal tabs, leading side for vertical lists). <em>The static ring marks a
 chosen object</em> (selection), never a location — selection and nav are
 separate concepts. Intensity scales with size: <em>full rainbow on large
 marks</em> (tab underline, card ring), <em>cool sweep on small side marks</em>.
-Hover/drag stays the only animated light. Open call: is the tree's focused row
-nav (side line) or selection (ring)? Both are shown in §2.
+Hover/drag stays the only animated light. Round 3 closed the last call: a
+surface wears the language of the concept it IS — the tree's highlight is
+you-are-here (side line); the ring stays reserved for true object selection.
 </p>
 
 <div class="controls">
@@ -345,13 +346,13 @@ spectrum. Large mark → full rainbow.
 </p>
 <div class="bars" id="bars"></div>
 
-<h2>2 · Workbench tree — the open call: nav or selection?</h2>
+<h2>2 · Workbench tree — RULED: side line (you-are-here)</h2>
 <p class="hint">
-<em>"Ocean Ripple" is the focused node — its editor is open in the center
-pane; clicking a row moves the workbench there.</em> If that reads as
-navigation, the grammar gives it the side line (cool, small mark). If it reads
-as selection-of-an-object, it gets the ring. Both shown against baseline —
-this is the round-3 gate question.
+The highlight tracks <em>which node you're looking at</em> — its editor is
+open in the center pane, the same job the Nodes-tab underline does. That is
+you-are-here → side line (cool, small mark). The ring never marks a location;
+it stays RESERVED for a true chosen-object state (e.g. a future multi-select
+for group/delete), which today's tree doesn't have.
 </p>
 <div class="panels" id="panels"></div>
 
@@ -384,7 +385,7 @@ full rainbow; card radius shows the whole sweep.
   <ul>
     <li><b>The grammar (round 3):</b> nav you-are-here = static spectrum LINE on the nav axis's edge; object selection = static spectrum RING; selection and nav are separate concepts and never share a mark. Intensity scales with size: full rainbow on large marks (tab underline, card ring), cool sweep on small side marks. Hover stays the only animated light.</li>
     <li>Round-2 rulings (Yona, 2026-08-30): tabs = underline not ring ("selection is different than nav"); intensity = "full rainbow on large things, less on small things (like to-the-side nav indication)"; story-nav = nav, option 2 (side line); option cards = "the spectrum looks good here" (ring stays).</li>
-    <li><b>Open at round-3 gate:</b> the tree's focused row — nav (side line) or selection (ring)? Interpretation note: round-2 answers were read as per-SECTION; if they were per-gate-question, the tree flips to ring.</li>
+    <li><b>Round-3 ruling (Yona):</b> "if there's two ideas, nav and selection, we should show them separately and use the language as specified" — a surface wears the language of the concept it IS. The tree's highlight tracks which node you're looking at → you-are-here → side line. The ring stays reserved for a true chosen-object state (e.g. future tree multi-select), which today's tree doesn't have. GRAMMAR COMPLETE.</li>
     <li>Round-1 rulings: tabs = T1-or-T4, lean T1 because underline already means current-nav-item; tree hinges on what selection IS; story-nav = side line.</li>
     <li>Baseline = PR #478 (full no-hue): neutral underline on tabs, neutral selection border + oklab dirty-mix fill in the tree.</li>
     <li>"Cool sweep" lever: the full spectrum contains amber/red/orange — the unsaved/error/attention hues that sit beside selection in a dirty tree. The Primary tri cannot collide.</li>
@@ -427,8 +428,8 @@ function tabbar(t) {
 
 const TREE_T = [
   { id: "t0", name: "T0 · Baseline", note: "shipped neutral (#478)", mark: "" },
-  { id: "line", name: "IF NAV · side line", note: "cool, small mark", mark: "mk-sideline" },
-  { id: "ring", name: "IF SELECTION · ring", note: "focused row as chosen object", mark: "mk-ring" },
+  { id: "line", name: "PICK · side line", note: "you-are-here, cool", mark: "mk-sideline" },
+  { id: "ring", name: "RESERVED · ring", note: "only for a future true object-selection state", mark: "mk-ring" },
 ];
 function treePanel(t) {
   return `<div class="panel" data-t="${t.id}">
