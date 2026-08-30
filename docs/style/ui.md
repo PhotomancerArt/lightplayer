@@ -170,13 +170,14 @@ a mark.
   neutral check badge under their ring; the neutral selection family
   (`--studio-color-selection-*`) survives there and in span markers.
 
-Every selection mark is static because motion stays the pointer's: the
-iridescent ring (`ux-ir-ring`) on hover, its whisper variant on dense rows
-(`ux-row-edge` — a lighter wash, the bloom, and a faint moving iridescent
-hairline; hover never darkens a row), the press flare (`ux-press-flare`)
-on `:active`, and the pinned ring plus a lifted shadow (`ux-drag-chip`)
-mid-drag. A selected row and a row you're merely passing over stay
-different KINDS of light — one holds still, one moves.
+Every selection mark is static; the pointer answers in its own light: the
+iridescent ring (`ux-ir-ring`) on card/button hover, the press flare
+(`ux-press-flare`) on `:active`, and the pinned ring plus a lifted shadow
+(`ux-drag-chip`) mid-drag. Dense rows go QUIET instead (`ux-row-edge`): a
+plain white outline on hover — no shadow, no wash — that flashes into the
+static spectrum hairline on press, previewing the selection ring the
+click lands. A selected row and a row you're merely passing over never
+share a paint.
 
 Multi-color is a moment, not a wall. The spectrum belongs on hover/press/drag
 feedback, the selection grammar's static marks, the brand mark, and the hero
