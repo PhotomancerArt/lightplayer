@@ -728,7 +728,7 @@ fn WorkbenchBand(
     }
 }
 
-/// One view tab: the nav-tab grammar (accent underline = you are here).
+/// One view tab: the nav-tab grammar (selection underline = you are here).
 /// Deliberately the band's only PROMINENT text — bigger, mixed case, a
 /// 2px underline against the panel tabs' quiet small-caps — so the
 /// hierarchy reads view tabs > panel tabs at a glance (R4-1). Plain

@@ -7,7 +7,7 @@
 //! Three of them mount the **real popover, open, at chrome width** (the
 //! `sign-in-popover-open` story is the exemplar). That is the story shape
 //! that catches what a panel-only fixture cannot: the pill's open treatment
-//! (an accent border tint, not a bright pill), and the panel's placement
+//! (a selection border tint, not a bright pill), and the panel's placement
 //! and width against the bar's right edge. It is also the only way to judge
 //! these at all — the agent browser pane misdraws every outline popover.
 
@@ -38,7 +38,7 @@ pub(crate) fn share_popover_link_view() -> Element {
 
 #[story(
     label = "Share popover, anyone can edit",
-    description = "The level that hands out write access to whoever holds the link. The pressed segment goes warn-gold rather than accent-green (post-gate refinement) and takes its description line with it: the uid IS the capability, and the control should look like the thing it is."
+    description = "The level that hands out write access to whoever holds the link. The pressed segment goes warn-gold rather than the plain selection fill (post-gate refinement) and takes its description line with it: the uid IS the capability, and the control should look like the thing it is."
 )]
 pub(crate) fn share_popover_link_edit() -> Element {
     open_in_bar(Access::Edit, crew())

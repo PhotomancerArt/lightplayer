@@ -94,13 +94,12 @@
     /* Aurora (2026-08-29): heading went neutral; sage (#94b8aa) moved to
        EXPORT-only — see --studio-status-export-* below. */
     --studio-color-heading: #e9e9ef;
-    --studio-color-accent: #8be2c0;
-    --studio-color-accent-border: #5fc79d;
-    --studio-color-accent-hover: #79d4ae;
-    --studio-color-accent-text-on-fill: #08130d;
-    /* Low-alpha accent fill for hover/active washes on accent-bordered
-       controls (inline buttons, agent-chat chips, settings buttons). */
-    --studio-color-accent-wash: rgba(139, 226, 192, 0.10);
+    /* The mint accent set (--studio-color-accent*) was RETIRED outright by
+       the accent reckoning (D1/D5, 2026-08-30): chrome holds no hue at
+       rest — actions/links are neutral + interaction light, selected/current
+       is the selection family, provenance families (EXPORT, EXAMPLE) carry
+       identity, and progress/primary fills are the spectrum. Do not
+       reintroduce an accent token; pick the role family instead. */
 
     /* Brand spectrum — moments only (hover light, brand, hero), never
        resting chrome. Same stops as the logo sweep. */
@@ -118,7 +117,7 @@
     --studio-color-focus-ring: #a5b8ff;
 
     /* Selection is its own concept — a neutral white-ish outline, kept
-       distinct from the teal brand accent and from semantic status colors so
+       distinct from semantic status colors so
        a selected node never reads as "OK" (green) beside an edited (yellow)
        one. `-bg` is the low-alpha fill the tree row mixes the dirty tone into. */
     --studio-color-selection-border: #d6dae0;
@@ -1102,7 +1101,7 @@ label:has(> input:not(:disabled)) {
 }
 
 .ux-node-ui-status-button-running {
-    border-color: var(--studio-color-accent-border);
+    border-color: var(--studio-status-good-border);
     background: var(--studio-status-good-bg);
     color: var(--studio-status-good-text);
 }
@@ -1148,7 +1147,7 @@ label:has(> input:not(:disabled)) {
 }
 
 .ux-node-ui-status-popup-running {
-    border-color: var(--studio-color-accent-border);
+    border-color: var(--studio-status-good-border);
     background: linear-gradient(90deg, rgba(123, 224, 178, 0.13), transparent 72%),
     var(--studio-color-surface-raised);
 }
@@ -1733,7 +1732,7 @@ label:has(> input:not(:disabled)) {
 /* Object BODIES (patching round 3: an object is a THING). Rest state is
    barely-there so the lamps stay the light's voice; hover lifts the body
    under the pointer — pure CSS, no re-render, which is what keeps 150
-   dome objects cheap. Selected wears the accent.
+   dome objects cheap. Selected wears the canvas-selection blue.
 
    The rest stroke is the object's OWN colour, mixed down (design-language
    round, Q3): a canvas of bodies reads as the same colour-coded set the
@@ -1941,7 +1940,8 @@ label:has(> input:not(:disabled)) {
    Its lamps are a field, so nothing else on the canvas draws the boundary a
    vertex drag moves. Dashed and mixed down at rest (the object's own colour,
    the body language of `.lpme-obj-hull`); selection promotes it to a solid
-   accent line. Never a pointer target — the hit line under it owns clicks. */
+   canvas-selection-blue line. Never a pointer target — the hit line under
+   it owns clicks. */
 .lpme-shape-outline {
     fill: none;
     stroke: rgba(154, 151, 143, 0.5);
@@ -2871,7 +2871,7 @@ label:has(> input:not(:disabled)) {
 .ux-node-ui-preview-control .ux-node-ui-preview-grid span {
     min-height: 9px;
     border-radius: 2px;
-    background: var(--studio-color-accent);
+    background: var(--studio-color-text-strong);
 }
 
 .ux-node-ui-preview-control .ux-node-ui-preview-grid span:nth-child(5n) {
@@ -2904,7 +2904,7 @@ label:has(> input:not(:disabled)) {
 }
 
 .ux-node-ui-row-bound .ux-node-ui-row-value {
-    color: var(--studio-color-accent);
+    color: var(--studio-status-bound-text);
 }
 
 .ux-node-ui-source {
@@ -2929,9 +2929,9 @@ label:has(> input:not(:disabled)) {
 }
 
 .ux-node-ui-source-bound {
-    border-color: var(--studio-color-accent-border);
-    color: var(--studio-color-accent);
-    background: var(--studio-status-good-bg);
+    border-color: var(--studio-status-bound-border);
+    color: var(--studio-status-bound-text);
+    background: var(--studio-status-bound-bg);
 }
 
 .ux-node-ui-source-direct {
@@ -2961,8 +2961,8 @@ label:has(> input:not(:disabled)) {
 
 .ux-node-ui-popup-trigger-routed,
 .ux-node-ui-popup-trigger-open {
-    border-color: var(--studio-color-accent-border);
-    color: var(--studio-color-accent);
+    border-color: var(--studio-status-good-border);
+    color: var(--studio-status-good-text);
     background: var(--studio-status-good-bg);
 }
 
@@ -3153,10 +3153,9 @@ label:has(> input:not(:disabled)) {
     --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
-.ux-popover-chrome-accent,
 .ux-popover-chrome-good {
-    --ux-popover-border-color: var(--studio-color-accent-border);
-    --ux-popover-icon-color: var(--studio-color-accent);
+    --ux-popover-border-color: var(--studio-status-good-border);
+    --ux-popover-icon-color: var(--studio-status-good-text);
     --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-good-bg) 58%, transparent);
     --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
     --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
@@ -3416,7 +3415,7 @@ label:has(> input:not(:disabled)) {
 
 .ux-node-ui-binding-arrow {
     flex: 0 0 auto;
-    color: var(--studio-color-accent);
+    color: var(--studio-status-bound-text);
     font-family: var(--studio-font-mono);
 }
 
@@ -3456,9 +3455,9 @@ label:has(> input:not(:disabled)) {
 }
 
 .ux-node-ui-popup-actions button.is-active {
-    border-color: var(--studio-color-accent-border);
-    color: var(--studio-color-accent);
-    background: var(--studio-status-good-bg);
+    border-color: var(--studio-color-selection-border);
+    color: var(--studio-color-text-strong);
+    background: var(--studio-color-selection-bg);
 }
 
 .ux-node-ui-row-label,
@@ -3698,9 +3697,9 @@ label:has(> input:not(:disabled)) {
 
 .ux-node-ui-tree-root,
 .ux-node-ui-tree-active {
-    border-color: var(--studio-color-accent-border);
+    border-color: var(--studio-color-selection-border);
     color: var(--studio-color-text-strong);
-    background: var(--studio-status-good-bg);
+    background: var(--studio-color-selection-bg);
 }
 
 .ux-node-ui-tree-depth-1 {
@@ -5544,7 +5543,7 @@ label:has(> input:not(:disabled)) {
    Motion rules (2026-08-03 spike gates 1-3, amended by gate-4 post-merge:
    the in-app/marketing split collapsed): the WHOLE wordmark sweeps the LED
    rainbow everywhere; icon-only marks cycle the play triangle instead. The
-   triangle cycle STARTS on the brand accent and the gradient rests at its
+   triangle cycle STARTS on the brand green and the gradient rests at its
    left edge, so frozen frames (story captures, reduced motion) look
    canonical. Mark anatomy is the 2026-08-24 simplification — see
    spikes/logo-triangle-chip/index.html and base/logo_mark.rs.
@@ -5562,7 +5561,7 @@ label:has(> input:not(:disabled)) {
 .lp-brand-play-anim {
     /* Base fill IS the frozen frame: when the animation is disabled (story
        capture freeze, prefers-reduced-motion), the triangle rests on the
-       brand accent rather than falling back to currentColor. */
+       brand green rather than falling back to currentColor. */
     fill: #7be0b2;
     animation: lp-brand-play-cycle 8s linear infinite;
 }
@@ -5757,7 +5756,7 @@ select:focus-visible {
 /* --------------------------------------------------------------------------
    Gradient primary — G1-2 RULED KEEP (2026-08-30, "gradient is good"): the
    spectrum-gradient fill IS the Primary tier now, not a gated alternative
-   to a flat accent fill. See `solid_class` in
+   to a flat mint fill. See `solid_class` in
    src/core/action/action_button.rs.
    -------------------------------------------------------------------------- */
 .ux-primary-gradient {

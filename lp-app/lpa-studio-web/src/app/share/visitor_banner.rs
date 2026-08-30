@@ -182,7 +182,7 @@ fn QuietButton(label: &'static str, on_press: Option<EventHandler<()>>) -> Eleme
     }
 }
 
-/// The accent action — the banner is the fork's home (§3-A note).
+/// The gradient-primary action — the banner is the fork's home (§3-A note).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ForkButton(label: &'static str, on_press: Option<EventHandler<()>>) -> Element {

@@ -132,7 +132,7 @@ pub fn PreviewLabPage() -> Element {
                 }
                 div { class: "tw:ml-auto tw:flex tw:gap-2",
                     button {
-                        class: "tw:rounded-sm tw:border tw:border-accent-border tw:bg-card-raised tw:px-4 tw:py-1.5 tw:text-sm tw:font-bold tw:text-strong-foreground",
+                        class: "tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-raised tw:px-4 tw:py-1.5 tw:text-sm tw:font-bold tw:text-strong-foreground",
                         r#type: "button",
                         onclick: start,
                         "Start"
@@ -249,7 +249,7 @@ fn ConfigChoice(
 fn tier_badge_class(tier: &str) -> &'static str {
     match tier {
         "gpu" => {
-            "tw:rounded-sm tw:border tw:border-accent-border tw:px-1 tw:font-bold tw:uppercase tw:text-strong-foreground"
+            "tw:rounded-sm tw:border tw:border-border-strong tw:px-1 tw:font-bold tw:uppercase tw:text-strong-foreground"
         }
         "cpu" => {
             "tw:rounded-sm tw:border tw:border-border-strong tw:px-1 tw:font-bold tw:uppercase tw:text-muted-foreground"
@@ -260,7 +260,7 @@ fn tier_badge_class(tier: &str) -> &'static str {
 
 fn choice_class(active: bool) -> &'static str {
     if active {
-        "tw:rounded-sm tw:border tw:border-accent-border tw:bg-card-raised tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-strong-foreground"
+        "tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-raised tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-strong-foreground"
     } else {
         "tw:rounded-sm tw:border tw:border-border-strong tw:bg-card tw:px-2 tw:py-1 tw:text-xs tw:text-muted-foreground"
     }

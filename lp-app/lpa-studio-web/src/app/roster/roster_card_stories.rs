@@ -246,7 +246,7 @@ fn setup_board_picker_detected_s3() -> Element {
 }
 
 #[story(
-    description = "Setup form with a board picked (accent border, core-owned CardUiState::setup_board — survives tab switches). Install writes this board's runtime manifest to /hardware.json after the flash."
+    description = "Setup form with a board picked (selection border, core-owned CardUiState::setup_board — survives tab switches). Install writes this board's runtime manifest to /hardware.json after the flash."
 )]
 fn setup_board_picker_selected() -> Element {
     sheet(vec![setup_card(

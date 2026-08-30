@@ -29,7 +29,7 @@ pub(crate) fn node_pane() -> Element {
 }
 
 #[story(
-    description = "A selected node pane collapsed down to its header: accent border and active select control."
+    description = "A selected node pane collapsed down to its header: selection border and active select control."
 )]
 pub(crate) fn collapsed_node_pane() -> Element {
     let mut view = playlist_node_view();

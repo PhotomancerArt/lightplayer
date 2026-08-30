@@ -70,7 +70,7 @@ pub(crate) fn OpenInStudioButton(
     }
 }
 
-/// Prominent and friendly: the accent-filled shape, big enough to read as
+/// Prominent and friendly: the gradient Primary shape, big enough to read as
 /// the page's call to action rather than another inline chip. Inert keeps
 /// the identical footprint on the muted surface.
 fn open_button_class(live: bool) -> &'static str {

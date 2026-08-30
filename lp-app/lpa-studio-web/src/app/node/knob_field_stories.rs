@@ -23,7 +23,7 @@ fn KnobStoryCard(children: Element) -> Element {
     }
 }
 
-#[story(description = "Default knob: accent value arc, ticks, gradient body, value readout.")]
+#[story(description = "Default knob: bright-neutral value arc, ticks, gradient body, value readout.")]
 fn default() -> Element {
     rsx! {
         KnobStoryCard {

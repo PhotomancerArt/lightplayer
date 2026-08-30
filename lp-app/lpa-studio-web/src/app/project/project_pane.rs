@@ -141,7 +141,7 @@ pub fn ProjectPane(
     let affordance = detail_content.affordance;
     let chrome = PaneChrome {
         tone: affordance_pane_tone(affordance, status.kind),
-        accent: false,
+        selected: false,
         chips: Vec::new(),
     };
     let sync_issue = view.sync.issue.clone();

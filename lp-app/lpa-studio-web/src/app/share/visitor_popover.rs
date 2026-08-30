@@ -45,7 +45,7 @@ pub fn VisitorSharePopover(
             class: PILL_CLASS.to_string(),
             open_class: PILL_OPEN_CLASS.to_string(),
             trigger: rsx! {
-                span { class: "tw:flex tw:flex-none tw:text-accent",
+                span { class: "tw:flex tw:flex-none tw:text-strong-foreground",
                     UserRound { size: 13 }
                 }
                 // Folds with the crowded bar's <900 rung, like the member
@@ -120,25 +120,30 @@ pub fn VisitorShareCard(
 
 /// Same chrome family as the owner pill — the slot must read as one
 /// control whoever is looking.
-const PILL_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:px-3 tw:py-1.5 tw:text-status-neutral-foreground tw:transition-colors tw:hover:border-accent-border tw:hover:text-strong-foreground";
-const PILL_OPEN_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-accent-border tw:bg-accent-wash tw:px-3 tw:py-1.5 tw:text-strong-foreground";
+const PILL_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:px-3 tw:py-1.5 tw:text-status-neutral-foreground tw:transition-colors tw:hover:border-selection-border tw:hover:text-strong-foreground";
+const PILL_OPEN_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-selection-border tw:bg-selection-bg tw:px-3 tw:py-1.5 tw:text-strong-foreground";
 /// The spike's §2-D card is narrower than the owner panel (300px).
 /// Material-free (P4): the merged-outline popover already paints
 /// background/border/shadow.
 const POPUP_CLASS: &str =
     "tw:grid tw:w-[300px] tw:min-w-0 tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 /// The one filled verb a visitor owns.
-const FORK_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:justify-self-start tw:gap-1.5 tw:rounded-sm tw:border tw:border-accent-border tw:bg-accent tw:px-2.5 tw:py-1.5 tw:text-accent-foreground tw:transition-colors tw:hover:bg-accent-hover";
+const FORK_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:justify-self-start tw:gap-1.5 tw:rounded-sm tw:border tw:px-2.5 tw:py-1.5 tw:transition-colors ux-primary-gradient ux-focus-ring";
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// No preflight (crate README): every button names its own background.
+    /// `.ux-primary-gradient` carries fill, edge, and text together
+    /// (style.css) — it names a background the way `tw:bg-*` does.
     #[test]
     fn every_visitor_button_names_a_background() {
         for class in [PILL_CLASS, PILL_OPEN_CLASS, FORK_CLASS] {
-            assert!(class.contains("tw:bg-"), "no background in `{class}`");
+            assert!(
+                class.contains("tw:bg-") || class.contains("ux-primary-gradient"),
+                "no background in `{class}`"
+            );
         }
     }
 }

@@ -34,7 +34,7 @@ pub fn Tabs(tabs: Vec<TabItem>, initial: usize) -> Element {
 
 fn tab_class(active: bool) -> &'static str {
     if active {
-        "tw:min-h-8 tw:rounded-sm tw:border tw:border-accent-border tw:bg-status-good-bg tw:px-3 tw:text-sm tw:font-bold tw:text-strong-foreground"
+        "tw:min-h-8 tw:rounded-sm tw:border tw:border-selection-border tw:bg-selection-bg tw:px-3 tw:text-sm tw:font-bold tw:text-strong-foreground"
     } else {
         "tw:min-h-8 tw:rounded-sm tw:border tw:border-border-strong tw:bg-transparent tw:px-3 tw:text-sm tw:text-muted-foreground tw:hover:bg-card-muted"
     }

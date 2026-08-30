@@ -575,7 +575,7 @@ fn choice_actions(
 /// glyph+label tile per declared variant, rendered DIRECTLY in the
 /// section body on both cards — always visible, like the 1D/2D tab pair;
 /// no popover, no dropdown, no nested expansion. The selected tile is
-/// unmistakable: accent border, accent wash fill, and a check glyph
+/// unmistakable: selection border, selection wash fill, and a check glyph
 /// (G1b follow-up: the old selected treatment was hard to read).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -647,7 +647,7 @@ fn TileFace(kind: SpaceGlyph, selected: bool, label: String, hint: String) -> El
         span { class: "tw:relative tw:block tw:h-10 tw:w-full tw:overflow-hidden tw:rounded-xs tw:bg-page",
             ProjectionGlyph { kind }
             // The unmistakable half of the selected state: a check badge
-            // over the drawing's corner, paired with the accent
+            // over the drawing's corner, paired with the selection
             // border+wash on the tile.
             if selected {
                 span {
@@ -1270,8 +1270,8 @@ fn segment_class(selected: bool) -> &'static str {
 
 // The tile grid, the tile look and the selected check badge are the SHARED
 // explaining-card language (`base::option_cards`), which this site's G1b
-// ruling defined: inline tiles, no popover, no dropdown, selected = accent
-// border + accent wash + check. The faces here are projection drawings and
+// ruling defined: inline tiles, no popover, no dropdown, selected =
+// selection border + wash + check. The faces here are projection drawings and
 // each tile dispatches a slot-op sequence, so the COMPONENT stays local; only
 // the look is shared, and it is shared rather than copied.
 use crate::base::option_cards::{

@@ -32,11 +32,6 @@
     --color-subtle-foreground: var(--studio-color-text-subtle);
     --color-dim-foreground: var(--studio-color-text-dim);
     --color-heading: var(--studio-color-heading);
-    --color-accent: var(--studio-color-accent);
-    --color-accent-border: var(--studio-color-accent-border);
-    --color-accent-hover: var(--studio-color-accent-hover);
-    --color-accent-foreground: var(--studio-color-accent-text-on-fill);
-    --color-accent-wash: var(--studio-color-accent-wash);
 
     --color-focus-ring: var(--studio-color-focus-ring);
     --color-glass-bg: var(--studio-glass-bg);

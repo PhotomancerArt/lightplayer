@@ -663,7 +663,7 @@ fn NeedsKeyState(
                     for (label , url) in guidance.links {
                         a {
                             key: "{url}",
-                            class: "tw:text-xs tw:text-accent tw:underline",
+                            class: "tw:text-xs tw:text-muted-foreground tw:underline tw:transition-colors tw:hover:text-strong-foreground",
                             href: "{url}",
                             target: "_blank",
                             rel: "noopener noreferrer",
@@ -739,7 +739,7 @@ fn ExportButtons(
 /// Export button chrome: quiet text buttons, enabled/disabled in place.
 fn export_button_class(enabled: bool) -> String {
     let state = if enabled {
-        "tw:cursor-pointer tw:border-border-subtle tw:text-muted-foreground tw:hover:border-accent-border tw:hover:bg-accent-wash tw:hover:text-accent"
+        "tw:cursor-pointer tw:border-border-subtle tw:text-muted-foreground tw:hover:border-border-strong tw:hover:bg-card-raised tw:hover:text-strong-foreground"
     } else {
         "tw:cursor-default tw:border-border-subtle tw:text-subtle-foreground tw:opacity-40"
     };
@@ -777,7 +777,7 @@ fn history_chip_class(busy: bool) -> String {
     let state = if busy {
         "tw:cursor-default tw:opacity-50"
     } else {
-        "tw:cursor-pointer tw:hover:border-accent-border tw:hover:bg-accent-wash"
+        "tw:cursor-pointer tw:hover:border-border-strong tw:hover:bg-card-raised"
     };
     format!(
         "tw:flex tw:flex-none tw:flex-col tw:items-center tw:gap-0.5 tw:rounded-xs tw:border tw:border-transparent tw:bg-transparent tw:p-1 tw:transition tw:duration-300 {state}"
@@ -809,7 +809,7 @@ fn tool_dot_class(row: &UiAgentToolRow) -> &'static str {
 /// Send button chrome: enabled/disabled in place, constant geometry.
 fn send_button_class(enabled: bool) -> String {
     let state = if enabled {
-        "tw:cursor-pointer tw:border-accent-border tw:text-accent tw:hover:bg-accent-wash"
+        "tw:cursor-pointer tw:border-border-strong tw:text-strong-foreground tw:hover:bg-card-raised"
     } else {
         "tw:cursor-default tw:border-border-subtle tw:text-subtle-foreground tw:opacity-40"
     };

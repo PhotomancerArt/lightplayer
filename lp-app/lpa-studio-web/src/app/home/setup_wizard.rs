@@ -193,7 +193,7 @@ fn steps_rail(wizard: &UiSetupWizard, close: Option<EventHandler<UiAction>>) -> 
                                 "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-border-strong tw:text-[0.55rem] tw:text-subtle-foreground"
                             }
                             _ => {
-                                "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-accent tw:text-[0.55rem] tw:text-accent"
+                                "tw:inline-flex tw:h-3.5 tw:w-3.5 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-selection-border tw:text-[0.55rem] tw:text-strong-foreground"
                             }
                         },
                         if step.phase == UiSetupRailPhase::Done {
@@ -686,7 +686,7 @@ fn provision_step(
 /// The generated project's box: one compact line, the rest behind ⓘ.
 fn project_box(project: UiSetupProject) -> Element {
     rsx! {
-        div { class: "tw:grid tw:gap-2 tw:rounded-lg tw:border tw:border-accent tw:bg-surface-muted tw:p-2.5",
+        div { class: "tw:grid tw:gap-2 tw:rounded-lg tw:border tw:border-selection-border tw:bg-surface-muted tw:p-2.5",
             span { class: "tw:text-xs tw:font-bold tw:text-strong-foreground",
                 "Your first project"
                 span { class: "tw:ml-1.5 tw:font-normal tw:text-dim-foreground",
@@ -763,7 +763,7 @@ fn granted_port_list(
         div { class: "tw:grid tw:gap-1.5",
             for port in grants.iter().cloned() {
                 button {
-                    class: "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-border-strong tw:bg-terminal tw:px-3 tw:py-2 tw:text-left tw:text-sm tw:font-semibold tw:text-strong-foreground tw:hover:border-accent",
+                    class: "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-border-strong tw:bg-terminal tw:px-3 tw:py-2 tw:text-left tw:text-sm tw:font-semibold tw:text-strong-foreground tw:hover:border-selection-border",
                     r#type: "button",
                     onclick: move |_| {
                         on_action

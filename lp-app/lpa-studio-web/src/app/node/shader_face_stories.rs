@@ -255,7 +255,7 @@ fn space_one_d_answers() -> Element {
 }
 
 #[story(
-    description = "The projection choices INLINE (the inline-tiles ruling: no popover, no dropdown — a drawer plus a dropdown was two nested expansions): every tile always visible in the section body, each drawing what that answer DOES to a strip. The Default tile is GONE (post-G1b: it was behaviorally identical to authored extrude); an unauthored cell still reads `extrude · default` in its summary, and any pick authors a real shape. The selected tile is unmistakable — accent border, accent wash, check badge. A pick dispatches `EnsurePresent space.OneD.in_2d.<Variant>`."
+    description = "The projection choices INLINE (the inline-tiles ruling: no popover, no dropdown — a drawer plus a dropdown was two nested expansions): every tile always visible in the section body, each drawing what that answer DOES to a strip. The Default tile is GONE (post-G1b: it was behaviorally identical to authored extrude); an unauthored cell still reads `extrude · default` in its summary, and any pick authors a real shape. The selected tile is unmistakable — selection border, wash, check badge. A pick dispatches `EnsurePresent space.OneD.in_2d.<Variant>`."
 )]
 fn space_choices_inline() -> Element {
     rsx! {

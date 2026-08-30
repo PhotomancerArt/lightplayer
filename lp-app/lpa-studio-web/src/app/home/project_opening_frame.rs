@@ -384,7 +384,7 @@ pub fn ProjectOpeningFrame(
                         aria_valuemax: "100",
                         aria_valuenow: "{(fraction * 100.0).round()}",
                         div {
-                            class: "tw:h-full tw:rounded-pill tw:bg-accent tw:transition-[width]",
+                            class: "tw:h-full tw:rounded-pill tw:transition-[width] ux-iri-fill-static",
                             style: "width: {(fraction * 100.0).round()}%;",
                         }
                     }
@@ -450,7 +450,7 @@ pub(crate) fn OpeningProgressLine() -> Element {
                     aria_valuemax: "100",
                     aria_valuenow: "{(fraction * 100.0).round()}",
                     div {
-                        class: "tw:h-full tw:rounded-pill tw:bg-accent tw:transition-[width]",
+                        class: "tw:h-full tw:rounded-pill tw:transition-[width] ux-iri-fill-static",
                         style: "width: {(fraction * 100.0).round()}%;",
                     }
                 }
