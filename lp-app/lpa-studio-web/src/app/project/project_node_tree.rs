@@ -18,8 +18,8 @@ use lpa_studio_core::{
 use crate::app::affordance::{affordance_indicator_class, affordance_trigger_style};
 use crate::app::node::AddNodePicker;
 use crate::base::{
-    PopoverPlacement, StudioIcon, StudioIconName, focus_ring_class, node_kind_icon,
-    row_edge_class, use_reveal_on_focus,
+    PopoverPlacement, StudioIcon, StudioIconName, focus_ring_class, node_kind_icon, row_edge_class,
+    use_reveal_on_focus,
 };
 
 #[component]
