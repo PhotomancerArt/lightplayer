@@ -39,10 +39,14 @@ script was 1924/1940 byte-identical, the remainder being run-to-run
 churn (same-script double-capture differed on 11/160 in the same story
 families); no truncation anywhere; glass blur present in captures.
 Caveat: this macOS Chrome does NOT exhibit the drop (flag true/false
-byte-identical), so the drop is environment-dependent — the pinned CI
-Chrome's re-baseline on PR #479 is the authoritative readout, via the
-normal drift-comment merge-is-acceptance flow. Either way the
-conditional flag pins the more correct capture request.
+byte-identical), so the drop is environment-dependent. CI readout
+(PR #479): `Validate story baselines` passed with ZERO drift — no
+drift comment, no auto-commit — so the pinned CI Chrome does not
+exhibit the drop on the current pin either, and the existing baselines
+already carry the blur. The as-filed mechanism does not reproduce on
+either environment today; the conditional flag stands as the correct
+capture request and removes the standing risk of the drop appearing on
+a future Chrome pin bump.
 
 ## References
 
