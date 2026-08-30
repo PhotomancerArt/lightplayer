@@ -325,6 +325,11 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
                                 slug: slug.clone(),
                             }),
                             unsaved: project.unsaved_count(),
+                            // The History tab's rows (D10): core's capped
+                            // projection of the open handle's own events,
+                            // riding the same gather as everything else
+                            // here — no fetch, no second source of truth.
+                            history: project.history().clone(),
                             details: Some(project.clone()),
                             on_fork: project_popover.on_fork,
                             fork_blocked: project_popover.fork_blocked.clone(),

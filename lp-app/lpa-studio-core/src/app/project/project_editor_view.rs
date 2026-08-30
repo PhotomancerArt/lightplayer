@@ -94,6 +94,12 @@ pub struct ProjectEditorView {
     /// The undo-correlation journal's retained entries (unified-editor P2:
     /// substrate for future tooling and the e2e proofs; v1 UI ignores it).
     pub edit_journal: Vec<crate::UiEditJournalEntry>,
+    /// The open project's document history, capped and newest-first — the
+    /// project popover's History tab (relationship-control D10). Rides the
+    /// view because the events are already replayed in memory on the
+    /// active library handle; empty when no library package backs the
+    /// session at all.
+    pub history: crate::UiProjectHistory,
 }
 
 impl ProjectEditorView {
@@ -127,6 +133,7 @@ impl ProjectEditorView {
             patch_surface: None,
             patch_selection: crate::UiSelection::empty(),
             edit_journal: Vec::new(),
+            history: crate::UiProjectHistory::default(),
         }
     }
 
@@ -211,6 +218,12 @@ impl ProjectEditorView {
     /// Attach the undo-correlation journal's retained entries.
     pub fn with_edit_journal(mut self, edit_journal: Vec<crate::UiEditJournalEntry>) -> Self {
         self.edit_journal = edit_journal;
+        self
+    }
+
+    /// Attach the document-history projection (the History tab's rows).
+    pub fn with_history(mut self, history: crate::UiProjectHistory) -> Self {
+        self.history = history;
         self
     }
 

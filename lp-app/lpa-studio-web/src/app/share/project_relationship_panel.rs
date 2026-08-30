@@ -34,6 +34,12 @@
 //! verbatim. For every other state it is one honest sentence, because
 //! there is no administration to offer.
 //!
+//! **History is a tab, not a door** (D10). It renders core's capped
+//! projection of the OPEN handle's own events — read-only, newest first,
+//! no restore (vision D6 is parked) and no server fetch, so a visitor's
+//! rows are the ones their prefetched copy carries and nothing claims to
+//! be the whole log.
+//!
 //! **The fork-family verb is always present**, in slot 1, hero-tinted only
 //! where it is *the* move (an example you have not kept, a project you are
 //! only visiting). This is the driving pain the vision opened with: a
@@ -48,8 +54,11 @@
 //! [`super::project_roster`].
 
 use dioxus::prelude::*;
+use lpa_studio_core::UiProjectHistory;
+use lpa_studio_core::core::time_ago::time_ago;
 use lpc_cloud_api::Access;
 
+use crate::app::home::package_card::platform_now_secs;
 use crate::app::home::package_export::{ExportForm, ExportTarget, export_package_as};
 use crate::app::project::project_share_section::ShareRow;
 use crate::app::project::{ProjectDetailContent, ProjectDetailSections};
@@ -63,8 +72,8 @@ use crate::base::{
     InlineButtonTone, PopoverCloseHandle, StudioIcon, StudioIconName, inline_icon_button_class,
 };
 
-/// Which tab the panel opens on. History is a real tab from the start
-/// (D10) — it renders its honest empty state here and its rows in P4.
+/// Which tab the panel opens on. History is a real tab (D10): the
+/// document's own events, read-only.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum PanelTab {
     /// Where / Access / actions — the standing panel.
@@ -138,9 +147,17 @@ pub fn ProjectRelationshipPanel(
     #[props(default)]
     export: Option<ExportTarget>,
     /// Unsaved persisted edits: while any exist both export forms would
-    /// hand over the LAST SAVED bytes, so they disable and say so.
+    /// hand over the LAST SAVED bytes, so they disable and say so. The
+    /// History tab reads the same count for its synthetic "editing" row.
     #[props(default = 0)]
     unsaved: usize,
+    /// The document's history, newest first (core's capped projection).
+    /// Empty renders the honest empty state — nothing here is invented.
+    #[props(default)]
+    history: UiProjectHistory,
+    /// Fixed clock for stories; `None` uses the platform clock.
+    #[props(default)]
+    now_secs: Option<f64>,
     /// The surviving settings / identity / stats sections, behind the ⋯
     /// menu's "Details" row. `None` with nothing to show.
     #[props(default)]
@@ -369,7 +386,7 @@ pub fn ProjectRelationshipPanel(
                     }
                 }
             } else {
-                HistoryStub { relationship }
+                HistoryTab { relationship, history, unsaved, now_secs }
             }
         }
     }
@@ -479,24 +496,95 @@ fn OverflowRows(
     }
 }
 
-/// The History tab, this phase: the honest empty state.
+/// The History tab (D10): the document's own events, newest first,
+/// read-only — `vN · KIND · what · when`, spike §4.
 ///
-/// A transient example genuinely has no history — nothing has been saved —
-/// and that is the wording it keeps once P4 fills the tab in. Every other
-/// state gets a placeholder that promises the rows rather than pretending
-/// the document has none.
+/// **Local history only.** The rows are whatever the handle backing this
+/// session holds: for a visit that is the shared history the open
+/// prefetched verbatim, for a library project the full log. Nothing is
+/// fetched here, so a member's tab may show fewer rows than the service
+/// knows — and it says nothing about the rest rather than claiming
+/// completeness.
+///
+/// **No restore.** Checkout is vision D6, parked: every row is text.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn HistoryStub(relationship: ProjectRelationship) -> Element {
-    let line = if relationship == ProjectRelationship::Example {
-        "No history yet \u{2014} history begins at your first save."
-    } else {
-        "History arrives in this branch."
-    };
+fn HistoryTab(
+    relationship: ProjectRelationship,
+    history: UiProjectHistory,
+    unsaved: usize,
+    now_secs: Option<f64>,
+) -> Element {
+    if let Some(line) = history_empty_line(relationship, &history) {
+        return rsx! {
+            p { class: "tw:m-0 tw:px-0.5 tw:pt-1 tw:text-[10.5px] tw:leading-snug tw:text-dim-foreground",
+                "{line}"
+            }
+        };
+    }
+    let now = now_secs.unwrap_or_else(platform_now_secs);
+    // The dirty row is NOT an event — it is work that has not happened to
+    // the document yet — so it wears the warning family and its own box
+    // instead of sitting in the hairline stack as a peer of the saves.
+    let editing = (unsaved > 0)
+        .then_some(history.next_version)
+        .flatten()
+        .map(|next| (next, unsaved_line(unsaved)));
+
     rsx! {
-        p { class: "tw:m-0 tw:px-0.5 tw:pt-1 tw:text-[10.5px] tw:leading-snug tw:text-dim-foreground",
-            "{line}"
+        div { class: "tw:grid tw:min-w-0 tw:pt-1",
+            if let Some((next, line)) = editing {
+                div { class: "{HISTORY_ROW_CLASS} {EDITING_ROW_CLASS}",
+                    span { class: HISTORY_VERSION_CLASS, "v{next}" }
+                    span { class: HISTORY_KIND_CLASS, "editing" }
+                    span { class: HISTORY_WHAT_CLASS, "{line}" }
+                    span { class: "tw:flex-none tw:text-[9.5px]", "now" }
+                }
+            }
+            for (index , entry) in history.entries.iter().enumerate() {
+                div { key: "{index}", class: "{HISTORY_ROW_CLASS} tw:border-0 tw:border-b tw:border-dashed tw:border-border-muted tw:last:border-b-0",
+                    span { class: "{HISTORY_VERSION_CLASS} tw:text-muted-foreground",
+                        if let Some(version) = entry.version {
+                            "v{version}"
+                        }
+                    }
+                    span { class: "{HISTORY_KIND_CLASS} tw:text-dim-foreground", "{entry.kind.word()}" }
+                    span { class: "{HISTORY_WHAT_CLASS} tw:text-subtle-foreground", "{entry.label}" }
+                    span { class: "tw:flex-none tw:text-[9.5px] tw:text-dim-foreground",
+                        "{time_ago(now, entry.at)}"
+                    }
+                }
+            }
         }
+        p { class: "tw:m-0 tw:px-0.5 tw:pt-2 tw:text-[10px] tw:leading-snug tw:text-dim-foreground",
+            "Read-only for now \u{2014} restore lands with the history effort."
+        }
+    }
+}
+
+/// The line the History tab shows INSTEAD of rows, when there are none to
+/// show honestly.
+///
+/// An [`Example`](ProjectRelationship::Example) session always lands here, rows or
+/// not: its history is the seed the transient open wrote (a provenance
+/// origin plus an initial `Saved` of the bytes it opened), which is
+/// bookkeeping, not something the person did. Saying "no history yet" is
+/// the true statement, and it is the same sentence the tab keeps after
+/// they save a copy and the real rows begin.
+fn history_empty_line(
+    relationship: ProjectRelationship,
+    history: &UiProjectHistory,
+) -> Option<&'static str> {
+    (relationship == ProjectRelationship::Example || history.entries.is_empty())
+        .then_some("No history yet \u{2014} history begins at your first save.")
+}
+
+/// The editing row's "what" column.
+fn unsaved_line(unsaved: usize) -> String {
+    if unsaved == 1 {
+        "1 unsaved edit".to_string()
+    } else {
+        format!("{unsaved} unsaved edits")
     }
 }
 
@@ -667,10 +755,77 @@ const BACK_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer t
 /// The small-caps mini-header a section head wears — the Share panel's own
 /// group header, so both surfaces label a group the same way.
 const GROUP_HEADER_CLASS: &str = "tw:flex-none tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground";
+/// One history row's geometry, before its separator: four columns on a
+/// shared baseline (spike §4 — `.histrow`).
+const HISTORY_ROW_CLASS: &str =
+    "tw:flex tw:min-w-0 tw:items-baseline tw:gap-2 tw:px-0.5 tw:py-1.5 tw:text-[10.5px]";
+/// The synthetic editing row: the warning family and a box of its own, so
+/// it never reads as one of the events below it.
+const EDITING_ROW_CLASS: &str = "tw:mb-1 tw:rounded-sm tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:text-status-warning-foreground";
+/// The three column geometries. No colors: the EVENT rows add the neutral
+/// family, and the editing row leaves them off so its warning color
+/// inherits down instead of being overridden column by column.
+const HISTORY_VERSION_CLASS: &str = "tw:w-[30px] tw:flex-none tw:font-mono tw:font-bold";
+const HISTORY_KIND_CLASS: &str =
+    "tw:w-[54px] tw:flex-none tw:text-[8.5px] tw:font-bold tw:uppercase tw:tracking-wide";
+const HISTORY_WHAT_CLASS: &str = "tw:min-w-0 tw:flex-1 tw:truncate";
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lpa_studio_core::{UiHistoryKind, UiProjectHistoryEntry};
+
+    fn one_save() -> UiProjectHistory {
+        UiProjectHistory {
+            entries: vec![UiProjectHistoryEntry {
+                version: Some(1),
+                kind: UiHistoryKind::Saved,
+                label: String::new(),
+                at: 1_000.0,
+            }],
+            next_version: Some(2),
+        }
+    }
+
+    /// An example's rows are the transient open's own seed, not the
+    /// person's history — so the tab says so even when the projection
+    /// handed it entries.
+    #[test]
+    fn an_example_keeps_the_empty_state_even_with_rows() {
+        assert!(history_empty_line(ProjectRelationship::Example, &one_save()).is_some());
+        assert!(
+            history_empty_line(ProjectRelationship::Example, &UiProjectHistory::default())
+                .is_some()
+        );
+    }
+
+    /// Every other state renders whatever the local handle holds, and
+    /// falls back to the same honest sentence when it holds nothing.
+    #[test]
+    fn the_other_states_render_the_rows_they_have() {
+        for relationship in [
+            ProjectRelationship::MineLocal,
+            ProjectRelationship::MinePublished,
+            ProjectRelationship::MemberOfSomeoneElses,
+            ProjectRelationship::ViewingSomeoneElses,
+        ] {
+            assert!(
+                history_empty_line(relationship, &one_save()).is_none(),
+                "{relationship:?} hid rows it has"
+            );
+            assert!(
+                history_empty_line(relationship, &UiProjectHistory::default()).is_some(),
+                "{relationship:?} claimed rows it does not have"
+            );
+        }
+    }
+
+    /// The synthetic row counts in words a person would use.
+    #[test]
+    fn the_editing_row_counts_singular_and_plural() {
+        assert_eq!(unsaved_line(1), "1 unsaved edit");
+        assert_eq!(unsaved_line(3), "3 unsaved edits");
+    }
 
     /// Slot 1 is never empty, and the hero tint belongs to the two states
     /// where forking is THE move — the example you have not kept, and the

@@ -64,6 +64,11 @@ pub struct ProjectDetailContent {
     root_slots: Vec<UiConfigSlot>,
     manifest: Option<lpa_studio_core::UiProjectManifest>,
     library_identity: Option<(String, String)>,
+    /// The open project's document history, newest first and capped — the
+    /// relationship panel's History tab (D10). It rides this value for the
+    /// same reason everything else here does: one gather, so no two homes
+    /// can disagree about a project.
+    history: lpa_studio_core::UiProjectHistory,
     /// The controller's contextual Save / Revert-to-saved pair (present
     /// only while persisted edits are pending). The SECTIONS do not render
     /// them — the pane header and the header session·project control do —
@@ -120,6 +125,12 @@ impl ProjectDetailContent {
         self.library_identity.as_ref()
     }
 
+    /// The open project's document history — the relationship panel's
+    /// History tab reads it, read-only (no restore: vision D6 is parked).
+    pub fn history(&self) -> &lpa_studio_core::UiProjectHistory {
+        &self.history
+    }
+
     /// The controller's contextual header actions (Save / Revert-to-saved),
     /// empty while the project is clean — the header session·project
     /// control's trailing segments read them.
@@ -162,6 +173,7 @@ impl ProjectDetailContent {
             root_slots: view.root_slots.clone(),
             manifest: view.manifest.clone(),
             library_identity: view.library_identity.clone(),
+            history: view.history.clone(),
             header_actions: view.header_actions.clone(),
         }
     }
@@ -377,6 +389,9 @@ pub fn ProjectDetailSections(content: ProjectDetailContent) -> Element {
         edits_in_flight: _,
         pending_edits: _,
         header_actions: _,
+        // Likewise the history half: the relationship panel's History tab
+        // renders it, and these sections are its neighbours, not its home.
+        history: _,
     } = content;
     let status_class = node_status_label_class(status.kind);
 

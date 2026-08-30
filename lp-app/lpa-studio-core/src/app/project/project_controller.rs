@@ -2504,6 +2504,24 @@ impl ProjectController {
         .with_edits_in_flight(self.edits_in_flight())
         .with_patch_surface(surface, self.patch_selection.clone())
         .with_edit_journal(self.edit_journal.entries())
+        .with_history(self.active_project_history())
+    }
+
+    /// The open project's document history, projected for the popover's
+    /// History tab (relationship-control D10).
+    ///
+    /// EAGER, on the ordinary view build: the active handle's history is
+    /// already replayed in memory, so this is a capped walk over a `Vec`
+    /// — cheaper than the `project.json` read this same build does — and
+    /// no lock is taken and nothing is awaited. A session with no library
+    /// package behind it (the storeless demo path) projects to the empty
+    /// history, which the tab renders as its honest empty state.
+    fn active_project_history(&self) -> crate::UiProjectHistory {
+        self.library
+            .as_ref()
+            .and_then(|context| context.active.as_ref())
+            .map(|active| crate::UiProjectHistory::from_history(&active.handle.history))
+            .unwrap_or_default()
     }
 
     /// Human-readable project name for the project pane title and the root

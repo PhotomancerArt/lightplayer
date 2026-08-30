@@ -589,6 +589,22 @@ fn home_create_project_creates_and_opens_a_blank_package_end_to_end() {
         "the initial save snapshot is recorded"
     );
 
+    // …and the EDITOR VIEW already carries it. The History tab's rows
+    // (relationship-control D10) ride the ordinary view build off the open
+    // handle's replayed events — no fetch, no second read of the store —
+    // so a project's history is on screen the moment it is open.
+    assert_eq!(
+        editor
+            .history
+            .entries
+            .iter()
+            .map(|entry| entry.kind)
+            .collect::<Vec<_>>(),
+        vec![crate::UiHistoryKind::Saved, crate::UiHistoryKind::Origin],
+        "newest first, origin last"
+    );
+    assert_eq!(editor.history.next_version, Some(2));
+
     // the open PUSHED the files: the runtime's manifest is the minted
     // one-file blank (uid + the format the loader's root gate demands)
     let pushed_manifest = {
