@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Devices page treatments — add-card CTA + armed confirm</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* =====================================================================
+   Aurora ground, verbatim from src/style.css :root (2026-08-31).
+   Both explorations sit INSIDE the shipped design language: D1 holds
+   (no hue on resting chrome; the spectrum answers interaction) and
+   destructive stays semantic error red everywhere.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --bg:#0d0d13; --surface:#14141c; --panel:#17171f; --raised:#1d1d28;
+  --raised-strong:#252532;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab;
+
+  --sel-bd:#d6dae0; --sel-bg:rgba(214,218,224,.12);
+  --focus:#a5b8ff;
+  --spectrum:#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
+  --glow:rgba(140,170,255,.3);
+
+  --st-good-bg:#13241d;    --st-good-bd:#365545;    --st-good-tx:#7be0b2;
+  --st-neutral-bg:#12171c; --st-neutral-bd:#3a444c; --st-neutral-tx:#d9e2df;
+  --st-working-bg:#24230f; --st-working-bd:#706730; --st-working-tx:#f2e6a2;
+  --st-error-bg:#301b1d;   --st-error-bd:#874b4b;   --st-error-tx:#ffc7c7;
+  --st-error-stripes: repeating-linear-gradient(
+      -45deg, rgba(255,199,199,.14) 0 6px, rgba(255,199,199,0) 6px 12px);
+
+  /* spike shell (deliberately plain, matches other spikes) */
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+
+  --win: 4000ms;   /* armed stand-down window (slider) */
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 28px 32px 140px;
+  background: var(--shell-bg); color: var(--shell-tx);
+  font: 14px/1.45 var(--font);
+}
+h1 { font-size: 13px; letter-spacing: .12em; color: var(--shell-mut);
+     text-transform: uppercase; margin: 0 0 6px; }
+p.hint { color: var(--shell-dim); font-size: 12px; margin: 0 0 18px; max-width: 800px; }
+h2 { font-size: 12px; letter-spacing: .1em; color: var(--shell-mut);
+     text-transform: uppercase; margin: 42px 0 6px; }
+h2 .n { color: var(--shell-dim); margin-right: 6px; }
+p.sub { color: var(--shell-dim); font-size: 12px; margin: 0 0 14px; max-width: 860px; }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls {
+  display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+  padding: 10px 14px; border: 1px dashed var(--shell-bd-strong);
+  border-radius: 8px; color: var(--shell-mut); font-size: 12px;
+  position: sticky; top: 8px; z-index: 50;
+  background: rgba(11,12,14,.92); backdrop-filter: blur(8px);
+}
+.controls b { color: var(--shell-tx); font-weight: 600; }
+.controls button {
+  appearance: none; font: inherit; cursor: pointer;
+  background: #16181c; color: var(--shell-tx);
+  border: 1px solid var(--shell-bd-strong); border-radius: 6px;
+  padding: 3px 10px; font-size: 12px;
+}
+.controls button:hover { background: #1e2126; }
+.controls button.active { border-color: #7be0b2; color: #7be0b2; }
+.controls input[type=range] { width: 110px; accent-color: #7be0b2; }
+.controls .grp { display: flex; gap: 6px; align-items: center; }
+
+/* ---- concept scaffolding ------------------------------------------- */
+.conceptrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+              gap: 22px; align-items: start; }
+.concept { min-width: 0; }
+.chead { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+.chead .name { font-size: 13.5px; font-weight: 700; color: var(--shell-tx); }
+.chead .thesis { font-size: 11.5px; color: var(--shell-dim); }
+.cnotes { font-size: 11.5px; color: var(--shell-mut); margin: 8px 2px 0; line-height: 1.55; }
+.cnotes b { color: var(--shell-tx); font-weight: 600; }
+
+/* The app stage each concept renders into: the devices page's ground. */
+.stage {
+  border-radius: 12px; border: 1px solid var(--shell-bd);
+  background: var(--bg); color: var(--tx); padding: 16px;
+  font-size: 13px; font-family: var(--font);
+}
+
+/* =====================================================================
+   Shared devices-page pieces — faithful to device_roster_card.rs +
+   devices_page.rs classes (card_class, note_class, quiet chips).
+   ===================================================================== */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 12px; }
+.card {
+  display: grid; align-content: start; gap: 10px;
+  border-radius: 8px; border: 1px solid var(--bd);
+  background: var(--panel); padding: 14px;
+  min-height: 158px;
+}
+body[data-mode=empty] .card.sample { display: none; }
+.card h3 { margin: 0; font-size: 13px; font-weight: 700; color: var(--strong);
+           min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.card .id { margin: 0; font: 10.5px var(--mono); color: var(--subtle); }
+.card .detail { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+.card .quiet { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--subtle); }
+.card footer { margin-top: auto; display: flex; flex-wrap: wrap; gap: 7px; }
+.chip {
+  display: inline-flex; align-items: center; padding: 2px 8px;
+  border-radius: 999px; border: 1px solid; font-size: 10.5px; font-weight: 600;
+  white-space: nowrap;
+}
+.chip.good    { background: var(--st-good-bg);    border-color: var(--st-good-bd);    color: var(--st-good-tx); }
+.chip.neutral { background: var(--st-neutral-bg); border-color: var(--st-neutral-bd); color: var(--st-neutral-tx); }
+.chip.working { background: var(--st-working-bg); border-color: var(--st-working-bd); color: var(--st-working-tx); }
+
+/* quiet_class(false) / quiet_class(true) — the card-footer chips. */
+.q {
+  appearance: none; display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer; border-radius: 6px; border: 1px solid var(--bd);
+  background: transparent; padding: 4px 10px;
+  font: 600 11px/1 var(--font); color: var(--muted);
+  transition: color .15s, border-color .15s, background-color .15s;
+}
+.q:hover { border-color: var(--bd-strong); color: var(--strong); }
+.q.danger { color: var(--st-error-tx); }
+.q.danger:hover { border-color: var(--st-error-bd); }
+
+/* The add slot: note_class's dashed card, shared by every concept.
+   Content is IDENTICAL in empty and populated modes (the layout-parity
+   constraint); the mode toggle only adds/removes sibling cards. */
+.slot {
+  display: grid; align-content: center; justify-items: center; gap: 10px;
+  text-align: center;
+  border-radius: 8px; border: 1px dashed var(--bd-strong);
+  padding: 18px 14px; min-height: 158px;
+}
+.slot .copy { margin: 0; font-size: 11px; line-height: 1.55; color: var(--subtle); max-width: 30ch; }
+
+/* ---- spectrum interaction ring (ux-ir-ring, verbatim mechanics) ----- */
+@property --ir-a { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+@keyframes ir-spin { to { --ir-a: 360deg; } }
+.ir { position: relative; }
+.ir::before {
+  content: ""; position: absolute; inset: var(--ir-inset, -1px); z-index: 3;
+  border-radius: inherit; padding: 1px;
+  background: conic-gradient(from var(--ir-a), var(--spectrum), #5fe08b);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  opacity: 0; pointer-events: none;
+}
+.ir:hover::before { opacity: 1; animation: ir-spin 3.2s linear infinite; }
+.ir:hover { box-shadow: 0 2px 20px var(--glow); }
+.no-motion .ir:hover::before { animation: none; }
+
+.fr:focus-visible { border-color: var(--focus);
+  outline: 2px solid color-mix(in srgb, var(--focus) 45%, transparent);
+  outline-offset: 1px; }
+
+/* =====================================================================
+   SECTION 1 — the add-device CTA concepts
+   ===================================================================== */
+
+/* 1A · Shipped Outline baseline, both G1 nits fixed: the + is an inline
+   SVG on the flex baseline (not a text glyph riding high), and padding
+   moves from px-3/py-1.5 to a fuller 9px 18px. */
+.cta-outline {
+  appearance: none; display: inline-flex; align-items: center; gap: 8px;
+  cursor: pointer; border-radius: 4px; border: 1px solid var(--bd-strong);
+  background: transparent; padding: 9px 18px;
+  font: 700 12px/1 var(--font); color: var(--strong);
+  transition: border-color .3s, box-shadow .3s;
+}
+.cta-outline:hover { border-color: var(--sel-bd); }
+.cta-outline svg { display: block; }
+
+/* 1B · The slot IS the button. No inner chip: a thin plus ring + label.
+   Rest = pure neutral; hover = dashed→solid, spectrum ring, lift. */
+.addtile { cursor: pointer; transition: border-color .25s, transform .18s;
+           --ir-inset: -1px; }
+.addtile .plusring {
+  display: grid; place-items: center; width: 38px; height: 38px;
+  border-radius: 999px; border: 1px solid var(--bd-strong);
+  color: var(--strong); transition: border-color .25s;
+}
+.addtile .plusring svg { display: block; }
+.addtile .lbl { font-size: 12.5px; font-weight: 700; color: var(--strong); }
+.addtile:hover { border-style: solid; border-color: transparent; transform: translateY(-1px); }
+.addtile:hover .plusring { border-color: var(--sel-bd); }
+.addtile:hover::before { opacity: 1; animation: ir-spin 3.2s linear infinite; }
+.addtile:hover { box-shadow: 0 2px 20px var(--glow); }
+.no-motion .addtile:hover { transform: none; }
+.no-motion .addtile:hover::before { animation: none; }
+
+/* 1C · Yona's floated idea, rendered honestly: white outline + a standing
+   soft rainbow glow. The glow is a blurred spectrum wash BEHIND the
+   button (z-index -1), not a border — luminance stays on the chip. */
+.cta-glow {
+  position: relative; z-index: 0;
+  appearance: none; display: inline-flex; align-items: center; gap: 8px;
+  cursor: pointer; border-radius: 4px; border: 1px solid var(--sel-bd);
+  background: var(--bg); padding: 9px 18px;
+  font: 700 12px/1 var(--font); color: var(--strong);
+  transition: box-shadow .3s;
+}
+.cta-glow::after {
+  content: ""; position: absolute; inset: -7px; z-index: -1;
+  border-radius: 10px;
+  background: linear-gradient(105deg, var(--spectrum));
+  filter: blur(14px); opacity: .28;
+  transition: opacity .3s;
+}
+.cta-glow:hover::after { opacity: .5; }
+.cta-glow svg { display: block; }
+
+/* 1D · Raised, still no hue: weight comes from ELEVATION — the Secondary
+   tier's raised fill plus a real shadow, sized up a step. Reads heavier
+   than the quiet chips around it without a drop of color. */
+.cta-raised {
+  appearance: none; display: inline-flex; align-items: center; gap: 8px;
+  cursor: pointer; border-radius: 4px; border: 1px solid var(--bd-strong);
+  background: var(--raised); padding: 9px 18px;
+  font: 700 12px/1 var(--font); color: var(--strong);
+  box-shadow: 0 2px 10px rgba(0,0,0,.45);
+  transition: background-color .2s, box-shadow .3s;
+}
+.cta-raised:hover { background: var(--raised-strong); }
+.cta-raised svg { display: block; }
+
+/* 1E · Breathing luminance: the outline baseline whose border slowly
+   breathes between border-strong and selection white. Motion, zero hue —
+   "the page's pulse lives here". Honors reduced-motion. */
+@keyframes breathe {
+  0%, 100% { border-color: var(--bd-strong); box-shadow: 0 0 0 rgba(255,255,255,0); }
+  50%      { border-color: var(--sel-bd);   box-shadow: 0 0 14px rgba(214,218,224,.14); }
+}
+.cta-breathe {
+  appearance: none; display: inline-flex; align-items: center; gap: 8px;
+  cursor: pointer; border-radius: 4px; border: 1px solid var(--bd-strong);
+  background: transparent; padding: 9px 18px;
+  font: 700 12px/1 var(--font); color: var(--strong);
+  animation: breathe 3.6s ease-in-out infinite;
+}
+.cta-breathe:hover { animation-play-state: paused; border-color: var(--sel-bd); }
+.no-motion .cta-breathe { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .cta-breathe { animation: none; }
+  .addtile:hover { transform: none; }
+  .ir:hover::before, .addtile:hover::before { animation: none; }
+}
+
+/* =====================================================================
+   SECTION 2 — the armed destructive chip
+   Shared machine: click 1 arms, click 2 dispatches, blur/window stands
+   down. Variants restyle ONLY the armed reading.
+   ===================================================================== */
+.confirm { position: relative; }
+.confirm .l-armed { display: none; }
+.confirm.armed .l-idle { display: none; }
+.confirm.armed .l-armed { display: inline; }
+
+/* 2A · Shipped: instant red tint + "<verb>?" label. */
+.v-shipped.armed { background: var(--st-error-bg); border-color: var(--st-error-bd); }
+
+/* 2B · Drain: shipped tint + a 2px countdown track along the chip's
+   bottom edge, draining over the window. Stand-down becomes visible. */
+.v-drain.armed { background: var(--st-error-bg); border-color: var(--st-error-bd); }
+.v-drain::after {
+  content: ""; position: absolute; left: 4px; right: 4px; bottom: 1px;
+  height: 2px; border-radius: 2px; background: var(--st-error-tx);
+  transform-origin: left; transform: scaleX(0); opacity: 0;
+}
+.v-drain.armed::after { opacity: .85; animation: drain var(--win) linear forwards; }
+@keyframes drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.no-motion .v-drain.armed::after { animation: none; transform: scaleX(1); }
+
+/* 2C · Knock + ramp: arming physically knocks the chip (quick pop) and
+   the red RAMPS in over 160ms instead of snapping; disarm fades out. */
+@keyframes knock { 0% { transform: scale(1); } 35% { transform: scale(1.07); }
+                   100% { transform: scale(1); } }
+.v-knock { transition: background-color .16s ease-in, border-color .16s ease-in; }
+.v-knock.armed { background: var(--st-error-bg); border-color: var(--st-error-bd);
+                 animation: knock .22s ease-out; }
+.v-knock:not(.armed) { transition: background-color .5s ease-out, border-color .5s ease-out; }
+.no-motion .v-knock.armed { animation: none; }
+
+/* 2D · Stable footprint, calmer ramp: both labels are stacked in one
+   grid cell so "Forget"→"Forget?" cannot move the chip; armed keeps the
+   bg transparent and speaks through border + text + weight only. */
+.v-stable { display: inline-grid; grid-auto-flow: column; align-items: center; }
+.v-stable .stack { display: inline-grid; }
+.v-stable .stack span { grid-area: 1 / 1; transition: opacity .18s; text-align: center; }
+.v-stable .l-armed { display: inline; opacity: 0; }
+.v-stable.armed .l-idle { display: inline; opacity: 0; }
+.v-stable.armed .l-armed { opacity: 1; }
+.v-stable.armed { border-color: var(--st-error-bd); color: #ffdede;
+                  background: transparent; }
+.v-stable.armed:active { background: var(--st-error-bg); }
+
+/* 2E · Solid escalation: armed goes to the FULL refusal treatment —
+   solid error fill + the error stripes token. Unmissable, possibly loud. */
+.v-solid.armed { background: var(--st-error-bg); border-color: var(--st-error-bd); }
+.v-solid.armed { background-image: var(--st-error-stripes); color: #ffd9d9; }
+
+/* 2F · Split: arming reveals an explicit ✕ cancel segment beside the
+   verb — a two-target model instead of blur-to-cancel. */
+.splitwrap { display: inline-flex; }
+.splitwrap .cancel {
+  appearance: none; cursor: pointer; display: none; align-items: center;
+  border: 1px solid var(--bd); border-left: none; background: transparent;
+  border-radius: 0 6px 6px 0; padding: 4px 8px;
+  font: 600 11px/1 var(--font); color: var(--subtle);
+}
+.splitwrap .cancel:hover { color: var(--strong); border-color: var(--bd-strong); }
+.splitwrap.armed .cancel { display: inline-flex; }
+.splitwrap.armed .confirm { border-radius: 6px 0 0 6px;
+  background: var(--st-error-bg); border-color: var(--st-error-bd); }
+
+/* dispatch flash, shared */
+.confirm.done, .v-stable.done { border-color: var(--st-good-bd) !important;
+  color: var(--st-good-tx) !important; background: var(--st-good-bg) !important;
+  background-image: none !important; }
+
+/* section-2 harness: each variant sits in a real card-footer fragment */
+.footrow { display: grid; gap: 8px; border-radius: 8px; border: 1px solid var(--bd);
+           background: var(--panel); padding: 12px 14px; }
+.footrow .who { font-size: 11px; color: var(--subtle); display: flex; gap: 8px;
+                align-items: baseline; }
+.footrow .who b { color: var(--muted); font-weight: 600; font-size: 11.5px; }
+.footrow footer { display: flex; flex-wrap: wrap; gap: 7px; }
+</style>
+</head>
+<body data-mode="populated">
+
+<h1>Devices page — add-card CTA &amp; armed confirm</h1>
+<p class="hint">
+  Two treatments ruled "functionally good, needs design work" at G1 (2026-08-31),
+  explored inside Aurora. <b>Section 1</b>: the add-a-device slot's call to action —
+  the Outline chip was ruled the baseline (vs Primary gradient); concepts refine it
+  or move the affordance, all D1-clean except 1C, which renders the floated
+  "white outline + rainbow glow" honestly so it can be judged on pixels.
+  <b>Section 2</b>: how an armed destructive chip should read between first and
+  second click (today: instant red tint + "Forget?", invisible 4s stand-down).
+</p>
+
+<div class="controls">
+  <span class="grp"><b>grid</b>
+    <button id="m-pop" class="active">populated</button>
+    <button id="m-empty">empty</button>
+  </span>
+  <span class="grp"><b>armed window</b>
+    <input type="range" id="win" min="2000" max="8000" step="500" value="4000">
+    <span id="winlbl">4.0s</span>
+  </span>
+  <span class="grp">
+    <button id="armall">arm every chip</button>
+    <button id="disarmall">stand all down</button>
+  </span>
+  <span class="grp">
+    <button id="slowmo">slow-mo ×4</button>
+    <button id="nomotion">reduced motion</button>
+  </span>
+</div>
+
+<!-- ================================================================ -->
+<h2><span class="n">1</span> Add-a-device card CTA</h2>
+<p class="sub">
+  Same slot in every concept (dashed card, identical content whether the grid is
+  empty or populated — toggle above). What varies is where the "this is the page's
+  action" weight comes from: chip refinement (1A), structure (1B), standing hue
+  (1C), elevation (1D), motion (1E). Hover everything — D1 says the spectrum only
+  answers the pointer.
+</p>
+
+<div class="conceptrow" id="s1">
+  <!-- 1A -->
+  <div class="concept">
+    <div class="chead"><span class="name">1A · Baseline, nits fixed</span>
+      <span class="thesis">the G1 ruling + icon alignment + fuller padding</span></div>
+    <div class="stage"><div class="grid">
+      <div class="slot">
+        <p class="copy">Plug in a LightPlayer board and pick its USB port.</p>
+        <button class="cta-outline ir fr" type="button">
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 1.5v9M1.5 6h9"/></svg>
+          Add a device
+        </button>
+      </div>
+      <div class="card sample" data-card="porch"></div>
+      <div class="card sample" data-card="zook"></div>
+    </div></div>
+    <p class="cnotes"><b>Keep-what-we-have candidate.</b> + sits on the label's optical
+      center; 9×18 padding gives the chip a CTA's chest without the gradient's voice.</p>
+  </div>
+
+  <!-- 1B -->
+  <div class="concept">
+    <div class="chead"><span class="name">1B · The slot is the button</span>
+      <span class="thesis">no inner chip — the whole tile invites</span></div>
+    <div class="stage"><div class="grid">
+      <div class="slot addtile ir fr" tabindex="0" role="button" aria-label="Add a device">
+        <span class="plusring"><svg width="15" height="15" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M6 1.5v9M1.5 6h9"/></svg></span>
+        <span class="lbl">Add a device</span>
+        <p class="copy">Plug in a LightPlayer board and pick its USB port.</p>
+      </div>
+      <div class="card sample" data-card="porch"></div>
+      <div class="card sample" data-card="zook"></div>
+    </div></div>
+    <p class="cnotes"><b>Biggest target, quietest rest.</b> Nothing chip-shaped competes
+      with the card footers; the tile itself lights (ring + lift) on hover. Empty
+      mode: the invitation is the whole first tile, which is the empty state.</p>
+  </div>
+
+  <!-- 1C -->
+  <div class="concept">
+    <div class="chead"><span class="name">1C · White outline + rainbow glow</span>
+      <span class="thesis">Yona's floated idea, rendered to be judged</span></div>
+    <div class="stage"><div class="grid">
+      <div class="slot">
+        <p class="copy">Plug in a LightPlayer board and pick its USB port.</p>
+        <button class="cta-glow fr" type="button">
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 1.5v9M1.5 6h9"/></svg>
+          Add a device
+        </button>
+      </div>
+      <div class="card sample" data-card="porch"></div>
+      <div class="card sample" data-card="zook"></div>
+    </div></div>
+    <p class="cnotes"><b>The D1 exception, on purpose.</b> Standing spectrum wash behind a
+      selection-white outline; hover deepens it. If this reads "heavy", 1A/1D/1E are
+      the calm answers — but now it's a pixels call, not a hunch.</p>
+  </div>
+
+  <!-- 1D -->
+  <div class="concept">
+    <div class="chead"><span class="name">1D · Raised, no hue</span>
+      <span class="thesis">weight from elevation — the Secondary fill, sized up</span></div>
+    <div class="stage"><div class="grid">
+      <div class="slot">
+        <p class="copy">Plug in a LightPlayer board and pick its USB port.</p>
+        <button class="cta-raised ir fr" type="button">
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 1.5v9M1.5 6h9"/></svg>
+          Add a device
+        </button>
+      </div>
+      <div class="card sample" data-card="porch"></div>
+      <div class="card sample" data-card="zook"></div>
+    </div></div>
+    <p class="cnotes"><b>Louder than 1A without a drop of color.</b> Raised fill + real
+      shadow make it the heaviest neutral object on the page; the ring still owns hover.</p>
+  </div>
+
+  <!-- 1E -->
+  <div class="concept">
+    <div class="chead"><span class="name">1E · Breathing luminance</span>
+      <span class="thesis">motion, zero hue — the page's pulse lives here</span></div>
+    <div class="stage"><div class="grid">
+      <div class="slot">
+        <p class="copy">Plug in a LightPlayer board and pick its USB port.</p>
+        <button class="cta-breathe fr" type="button">
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 1.5v9M1.5 6h9"/></svg>
+          Add a device
+        </button>
+      </div>
+      <div class="card sample" data-card="porch"></div>
+      <div class="card sample" data-card="zook"></div>
+    </div></div>
+    <p class="cnotes"><b>The eye finds slow change.</b> Border breathes between
+      border-strong and selection white over 3.6s; hover pins it bright. Drops to a
+      static outline under reduced motion (and the toggle above).</p>
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<h2><span class="n">2</span> Armed destructive chip</h2>
+<p class="sub">
+  All six are LIVE: first click arms, second dispatches (flashes green, resets),
+  blur or the window stands down — drag the window slider, use slow-mo to judge the
+  ramps, "arm every chip" for a side-by-side armed matrix. Each sits in a real card
+  footer next to a non-destructive neighbor, since that contrast is the whole job.
+</p>
+
+<div class="conceptrow" id="s2">
+  <div class="concept">
+    <div class="chead"><span class="name">2A · Shipped</span>
+      <span class="thesis">instant tint + "Forget?" — the G1 "needs work"</span></div>
+    <div class="stage"><div class="footrow">
+      <div class="who"><b>Porch sign</b> ready · esp32-s3</div>
+      <footer>
+        <button class="q fr">Reconnect</button>
+        <button class="q danger fr confirm v-shipped" data-confirm>
+          <span class="l-idle">Forget</span><span class="l-armed">Forget?</span>
+        </button>
+      </footer>
+    </div></div>
+    <p class="cnotes">Label grows a character (footprint nudges), red snaps in with no
+      ramp, and nothing shows the 4s window existing — the three complaints, kept
+      reproducible.</p>
+  </div>
+
+  <div class="concept">
+    <div class="chead"><span class="name">2B · Drain track</span>
+      <span class="thesis">the stand-down window made visible</span></div>
+    <div class="stage"><div class="footrow">
+      <div class="who"><b>Workshop zook</b> offline · last seen 2 days ago</div>
+      <footer>
+        <button class="q fr">Reconnect</button>
+        <button class="q danger fr confirm v-drain" data-confirm>
+          <span class="l-idle">Forget</span><span class="l-armed">Forget?</span>
+        </button>
+      </footer>
+    </div></div>
+    <p class="cnotes">Shipped tint + a 2px track draining along the bottom edge. "Do
+      nothing and it disarms" becomes legible; the drain also gently pressures the
+      second click.</p>
+  </div>
+
+  <div class="concept">
+    <div class="chead"><span class="name">2C · Knock + ramp</span>
+      <span class="thesis">the state CHANGE gets physicality</span></div>
+    <div class="stage"><div class="footrow">
+      <div class="who"><b>usb-3</b> identifying · CH340 1a86:7523</div>
+      <footer>
+        <button class="q fr">Retry</button>
+        <button class="q danger fr confirm v-knock" data-confirm>
+          <span class="l-idle">Dismiss</span><span class="l-armed">Dismiss?</span>
+        </button>
+      </footer>
+    </div></div>
+    <p class="cnotes">Arming knocks (7% pop, 220ms settle) while red ramps in over
+      160ms; standing down fades out over 500ms — arming feels like cocking
+      something, disarming like exhaling.</p>
+  </div>
+
+  <div class="concept">
+    <div class="chead"><span class="name">2D · Stable footprint, calm ramp</span>
+      <span class="thesis">no bg wash — border + text carry it; nothing moves</span></div>
+    <div class="stage"><div class="footrow">
+      <div class="who"><b>Backyard mega-installation west pergola strand B</b> ready</div>
+      <footer>
+        <button class="q fr">Reconnect</button>
+        <button class="q danger fr confirm v-stable" data-confirm>
+          <span class="stack"><span class="l-idle">Forget</span><span class="l-armed">Forget?</span></span>
+        </button>
+      </footer>
+    </div></div>
+    <p class="cnotes">Both labels stacked in one grid cell — the chip cannot resize.
+      Armed keeps the bg transparent (error border + brightened text only); the red
+      FILL is saved for the press itself. The quietest of the six.</p>
+  </div>
+
+  <div class="concept">
+    <div class="chead"><span class="name">2E · Solid escalation</span>
+      <span class="thesis">armed = the full refusal treatment, stripes and all</span></div>
+    <div class="stage"><div class="footrow">
+      <div class="who"><b>Porch sign</b> ready · esp32-s3</div>
+      <footer>
+        <button class="q fr">Reconnect</button>
+        <button class="q danger fr confirm v-solid" data-confirm>
+          <span class="l-idle">Forget</span><span class="l-armed">Forget?</span>
+        </button>
+      </footer>
+    </div></div>
+    <p class="cnotes">Armed wears the error-stripes token — the same cloth as hard
+      refusals. Unmissable; the question is whether a reversible two-click deserves
+      the same alarm as a refusal.</p>
+  </div>
+
+  <div class="concept">
+    <div class="chead"><span class="name">2F · Split confirm / cancel</span>
+      <span class="thesis">an explicit way out instead of blur-to-cancel</span></div>
+    <div class="stage"><div class="footrow">
+      <div class="who"><b>Workshop zook</b> offline · last seen 2 days ago</div>
+      <footer>
+        <button class="q fr">Reconnect</button>
+        <span class="splitwrap" data-split>
+          <button class="q danger fr confirm">
+            <span class="l-idle">Forget</span><span class="l-armed">Forget?</span>
+          </button>
+          <button class="cancel fr" aria-label="cancel">✕</button>
+        </span>
+      </footer>
+    </div></div>
+    <p class="cnotes">Arming reveals a ✕ segment — cancel becomes a target, not a
+      timeout. Costs footprint (the row shifts) and a second decision; earns
+      explicitness.</p>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+
+/* ---------- sample device cards (realistic roster content) ---------- */
+const CARDS = {
+  porch: {
+    title: "Porch sign", chip: ["good", "Ready"],
+    id: "esp32-s3 · dev00000001",
+    lines: [["detail", "Classic · 300 LEDs on 4 outputs"], ["quiet", "seen just now"]],
+    foot: ["Forget"],
+  },
+  zook: {
+    title: "Workshop zook", chip: ["neutral", "Offline"],
+    id: "esp32 · dev0000002b",
+    lines: [["quiet", "last seen 2 days ago"]],
+    foot: ["Reconnect", "Forget"],
+  },
+};
+$$(".card[data-card]").forEach(el => {
+  const c = CARDS[el.dataset.card];
+  el.innerHTML = `
+    <div class="head"><h3>${c.title}</h3><span class="chip ${c.chip[0]}">${c.chip[1]}</span></div>
+    <p class="id">${c.id}</p>
+    ${c.lines.map(([k, t]) => `<p class="${k}">${t}</p>`).join("")}
+    <footer>${c.foot.map(f =>
+      `<button class="q${f === "Forget" ? " danger" : ""} fr" type="button">${f}</button>`).join("")}</footer>`;
+});
+
+/* ---------- controls ---------- */
+let winMs = 4000, slow = false;
+const applyWin = () => {
+  const ms = winMs * (slow ? 4 : 1);
+  document.documentElement.style.setProperty("--win", ms + "ms");
+  $("#winlbl").textContent = (ms / 1000).toFixed(1) + "s";
+};
+$("#win").addEventListener("input", e => { winMs = +e.target.value; applyWin(); });
+$("#slowmo").addEventListener("click", e => {
+  slow = !slow; e.target.classList.toggle("active", slow); applyWin();
+});
+$("#nomotion").addEventListener("click", e => {
+  document.body.classList.toggle("no-motion");
+  e.target.classList.toggle("active");
+});
+$("#m-pop").addEventListener("click", () => setMode("populated"));
+$("#m-empty").addEventListener("click", () => setMode("empty"));
+function setMode(m) {
+  document.body.dataset.mode = m;
+  $("#m-pop").classList.toggle("active", m === "populated");
+  $("#m-empty").classList.toggle("active", m === "empty");
+}
+
+/* ---------- the armed machine ---------- */
+const armed = new Map();   // el -> timeout id
+
+function disarm(el) {
+  el.classList.remove("armed");
+  el.closest("[data-split]")?.classList.remove("armed");
+  clearTimeout(armed.get(el)); armed.delete(el);
+}
+function arm(el) {
+  // restart the drain animation even when re-arming
+  el.classList.remove("armed"); void el.offsetWidth;
+  el.classList.add("armed");
+  el.closest("[data-split]")?.classList.add("armed");
+  clearTimeout(armed.get(el));
+  armed.set(el, setTimeout(() => disarm(el), winMs * (slow ? 4 : 1)));
+}
+function dispatchFx(el) {
+  disarm(el);
+  el.classList.add("done");
+  const idle = $(".l-idle", el), prev = idle.textContent;
+  idle.textContent = "✓";
+  setTimeout(() => { el.classList.remove("done"); idle.textContent = prev; }, 900);
+}
+
+$$(".confirm").forEach(el => {
+  el.addEventListener("click", () =>
+    el.classList.contains("armed") ? dispatchFx(el) : arm(el));
+  el.addEventListener("blur", () => {
+    // split variant: moving focus to its own ✕ must not stand it down
+    setTimeout(() => {
+      const wrap = el.closest("[data-split]");
+      if (wrap && wrap.contains(document.activeElement)) return;
+      if (document.activeElement !== el) disarm(el);
+    }, 0);
+  });
+});
+$$("[data-split] .cancel").forEach(btn =>
+  btn.addEventListener("click", () => disarm($(".confirm", btn.closest("[data-split]")))));
+
+$("#armall").addEventListener("click", () => $$(".confirm").forEach(arm));
+$("#disarmall").addEventListener("click", () => $$(".confirm").forEach(disarm));
+applyWin();
+
+/* ---------- URL params, for capture + deep links ----------
+   ?mode=empty  ?armed=1  ?win=8000  ?only=s1|s2 (hides the other section) */
+const P = new URLSearchParams(location.search);
+if (P.get("mode") === "empty") setMode("empty");
+if (P.get("win")) { winMs = +P.get("win"); $("#win").value = winMs; applyWin(); }
+if (P.get("only")) {
+  const hide = P.get("only") === "s1" ? "#s2" : "#s1";
+  $(hide).style.display = "none";
+  $(hide).previousElementSibling.style.display = "none";                 // p.sub
+  $(hide).previousElementSibling.previousElementSibling.style.display = "none"; // h2
+}
+if (P.get("armed") === "1") $$(".confirm").forEach(arm);
+</script>
+</body>
+</html>
