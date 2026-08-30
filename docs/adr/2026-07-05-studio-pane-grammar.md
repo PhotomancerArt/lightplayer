@@ -269,3 +269,7 @@ Per the deferred-decision convention, these are indexed in
   wins, consider whether `NodeDirtyTint` itself simplifies away) or note
   their deliberate retention. **Revisit when** the tint pick is recorded in
   the M2a plan notes.
+
+> **Amended 2026-08-30** (accent reckoning, PR #478): `PaneChrome`'s
+> `accent: bool` field is now `selected: bool` — same meaning (the neutral
+> selection outline), renamed when the accent token set was retired.

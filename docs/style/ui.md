@@ -112,14 +112,37 @@ Studio's palette is the Aurora direction: violet-tinted graphite surfaces with
 the spectrum reserved for interaction, not decoration
 (`docs/adr/2026-08-30-studio-design-language-aurora.md`).
 
+**There is no accent hue.** The accent reckoning (D1, 2026-08-30) retired the
+mint accent outright: at rest, chrome is neutral — saturated color belongs to
+artwork, status, and interaction light. What used to reach for accent now
+picks its role:
+
+- **Actions** are neutral chips whose interaction answer is the spectrum:
+  the outline CTA (`outline_action_class`) and the `InlineButtonTone::Action`
+  default are bright-neutral at rest and take the iridescent hover ring; the
+  one loud fill is the gradient Primary.
+- **Links** are neutral at rest — muted text, underline, brightening to the
+  strong neutral on hover (`markdown_text`, `help_link`).
+- **Selected / current / you-are-here** is always the selection family
+  (option cards, active tabs, pressed segments, nav underlines, picked
+  tiles) — never a hue.
+- **Authored values** (knob arcs, fader fills, sliders, the tape playhead)
+  are the bright neutral `--studio-color-text-strong`: the artwork and the
+  status families glow, the control doesn't.
+- **Progress** is the iridescent fill vocabulary, never a flat colored bar.
+
+Do not reintroduce an accent token; a hard spot argues a per-surface
+exception at a review gate, never a blanket revival.
+
 Status hues never move, and chrome may never borrow them. Each family means
 one thing and nothing else may wear its color: violet is a bus/binding
 relationship, amber is an unsaved edit, orange is device/roster attention,
 gold is "your hand is on this control right now" (engaged), blue is live,
-sage is export, green is good/valid, and diagonal stripes mark error or debug
-surfaces. A new feature that wants "a color" should reach for a neutral tone
-or the spectrum before it reaches for a status hue — status hues are load
-bearing, and test-enforced (see `inline_button.rs`'s
+sage is export, lavender-grey is example provenance ("you are viewing a
+read-only example"), green is good/valid, and diagonal stripes mark error or
+debug surfaces. A new feature that wants "a color" should reach for a
+neutral tone or the spectrum before it reaches for a status hue — status
+hues are load bearing, and test-enforced (see `inline_button.rs`'s
 `violet_stays_the_binding_convention`).
 
 Selection is the neutral white-ish outline (`--studio-color-selection-*`),

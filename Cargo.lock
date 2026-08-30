@@ -5945,6 +5945,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-devices"
+version = "40.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lpa-fs-opfs"
 version = "40.0.0"
 dependencies = [

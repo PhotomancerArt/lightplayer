@@ -225,8 +225,9 @@ pub(crate) fn fader_input_class(bound: bool, engaged: bool) -> &'static str {
 
 /// The value fill's color class by status family: amber when engaged (a
 /// panel writer holds the channel — the rail wears the capture), violet
-/// when bound, error when invalid, accent otherwise (green stays
-/// valid-only). STATIC classes on purpose: the colors used to ride a
+/// when bound, error when invalid, bright neutral otherwise (accent
+/// reckoning D4 — an authored value is chrome; green stays valid-only).
+/// STATIC classes on purpose: the colors used to ride a
 /// compound dynamic inline style and attribute diffing mangled it (the
 /// GF-gate track glitch); only the numeric width stays dynamic.
 pub(crate) fn fader_fill_class(
@@ -241,7 +242,7 @@ pub(crate) fn fader_fill_class(
     } else if state.invalid.is_some() {
         "tw:bg-[color-mix(in_oklab,var(--studio-status-error-text)_45%,var(--studio-color-surface-muted))]"
     } else {
-        "tw:bg-[color-mix(in_oklab,var(--studio-color-accent)_45%,var(--studio-color-surface-muted))]"
+        "tw:bg-[color-mix(in_oklab,var(--studio-color-text-strong)_45%,var(--studio-color-surface-muted))]"
     }
 }
 

@@ -328,7 +328,7 @@ fn space_policy_forced() -> Element {
 }
 
 #[story(
-    description = "The choice tiles INLINE on the CONSUMER side — one component, both sides of the binding (D16), no popover anywhere in the section (the inline-tiles ruling). Six always-visible tiles: `along the wire` (serpentine: wire order, the map doesn't apply), `follow the source` (dashed: the answer lives on the source), and the four factored shapes. Selected = accent border + wash + check badge."
+    description = "The choice tiles INLINE on the CONSUMER side — one component, both sides of the binding (D16), no popover anywhere in the section (the inline-tiles ruling). Six always-visible tiles: `along the wire` (serpentine: wire order, the map doesn't apply), `follow the source` (dashed: the answer lives on the source), and the four factored shapes. Selected = selection border + wash + check badge."
 )]
 fn space_choices_inline() -> Element {
     rsx! {

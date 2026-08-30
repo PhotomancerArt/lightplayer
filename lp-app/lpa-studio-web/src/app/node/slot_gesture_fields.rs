@@ -1,7 +1,7 @@
 //! Composite gesture field renderers: map entry add/remove and enum variant
 //! switch. Row gestures render through the shared
 //! [`crate::base::InlineButton`] family (P5's one-family rule, now
-//! app-wide): accent tone for available actions, neutral for cancels.
+//! app-wide): the Action tone for available actions, neutral for cancels.
 //!
 //! Gestures ARE the wire ops (M3 decision D1): each control dispatches one
 //! `SlotEditOp::EnsurePresent`/`RemoveValue` at the target address and the
@@ -376,9 +376,9 @@ mod tests {
     }
 
     #[test]
-    fn gesture_buttons_share_the_inline_family_in_the_accent_tone() {
+    fn gesture_buttons_share_the_inline_family_in_the_action_tone() {
         // One button family (P5, now the app-wide InlineButton): gestures
-        // are available actions, so they wear the default ACCENT tone —
+        // are available actions, so they wear the default ACTION tone —
         // never a status family, so a gesture can't read as state.
         for disabled in [false, true] {
             let class =

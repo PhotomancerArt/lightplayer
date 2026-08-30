@@ -1,0 +1,17 @@
+[package]
+name = "lpa-devices"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# Deliberately tiny. This crate is a pure sans-IO model: no executor, no
+# transport, no UI. See README.md ("Forbidden dependencies") before adding
+# anything here.
+[dependencies]
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

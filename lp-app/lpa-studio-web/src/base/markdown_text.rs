@@ -566,7 +566,7 @@ fn render_node(node: &MdNode) -> Element {
         }
         MdNode::Link { href, children } => rsx! {
             a {
-                class: "tw:text-accent tw:underline",
+                class: "tw:text-muted-foreground tw:underline tw:transition-colors tw:hover:text-strong-foreground",
                 href: "{href}",
                 target: "_blank",
                 rel: "noopener noreferrer",

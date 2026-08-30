@@ -107,9 +107,8 @@ pub fn HomePage(
                         "Examples"
                     }
                     a {
-                        // Neutral at rest (Aurora: no resting mint text) —
-                        // the accent-as-link role goes to the accent
-                        // reckoning follow-up.
+                        // Neutral at rest — the canonical link look
+                        // (accent reckoning D1: links hold no hue).
                         class: "tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:hover:text-strong-foreground tw:hover:underline ux-focus-ring",
                         href: "/explore",
                         "Explore all →"
@@ -139,8 +138,8 @@ pub fn HomePage(
 /// A labelled pill, not the earlier bare pencil: the hero's whole claim is
 /// that the artwork is *editable*, and a 24px glyph beside the tagline
 /// never said so out loud (G1 ruling, 2026-08-26). Deliberately a QUIET
-/// secondary — neutral border and surface, accent only on hover — after
-/// the solid accent fill proved the loudest thing on the page (G2 ruling,
+/// secondary — neutral border and surface, brightening on hover — after
+/// the old solid fill proved the loudest thing on the page (G2 ruling,
 /// 2026-08-28; a broader design-language pass is planned, so this stays
 /// inside today's idiom rather than inventing ahead of it).
 #[component]
@@ -176,7 +175,7 @@ fn EditArtworkPill(#[props(default)] on_action: Option<EventHandler<UiAction>>) 
 }
 
 /// The quiet secondary pill: neutral border on the card surface, strong
-/// text, and the accent reserved for hover — the invite is the LABEL, the
+/// text, brightening on hover — the invite is the LABEL, the
 /// hero above it already carries the color. Same footprint as the docs'
 /// `open-in-studio` button so the product's one "open this example"
 /// gesture keeps one size everywhere. `max-w-full` + `whitespace-nowrap`
@@ -184,7 +183,7 @@ fn EditArtworkPill(#[props(default)] on_action: Option<EventHandler<UiAction>>) 
 /// the label breaking mid-word.
 fn edit_artwork_pill_class(live: bool) -> &'static str {
     if live {
-        "tw:inline-flex tw:max-w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border tw:bg-card tw:px-4 tw:py-2 tw:text-sm tw:font-semibold tw:leading-none tw:text-strong-foreground tw:transition-colors tw:hover:border-accent-border tw:hover:text-accent"
+        "tw:inline-flex tw:max-w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border tw:bg-card tw:px-4 tw:py-2 tw:text-sm tw:font-semibold tw:leading-none tw:text-strong-foreground tw:transition-colors tw:hover:border-selection-border tw:hover:text-strong-foreground"
     } else {
         "tw:inline-flex tw:max-w-full tw:cursor-not-allowed tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border-muted tw:bg-card-muted tw:px-4 tw:py-2 tw:text-sm tw:font-semibold tw:leading-none tw:text-dim-foreground"
     }

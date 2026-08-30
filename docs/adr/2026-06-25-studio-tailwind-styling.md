@@ -48,3 +48,7 @@ The exploration node UI still has a substantial historical `ux-node-ui-*` CSS
 surface. It is intentionally treated as transitional follow-up rather than
 expanded into this migration.
 
+> **Amended 2026-08-30** (accent reckoning, PR #478): the `accent` color
+> family was retired outright — see
+> `2026-08-30-studio-design-language-aurora.md`'s amendment and
+> `docs/style/ui.md` Color & Light for the roles that replaced it.
