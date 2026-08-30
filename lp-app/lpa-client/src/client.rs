@@ -1124,6 +1124,7 @@ mod tests {
                 recovery: None,
                 outputs: None,
                 link: None,
+                identity: None,
             },
         )
     }

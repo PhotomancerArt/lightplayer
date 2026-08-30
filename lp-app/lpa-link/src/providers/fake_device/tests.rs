@@ -207,6 +207,102 @@ async fn hello_reflects_a_runtime_root_identity_stamp() {
     assert_eq!(hello.device_uid.as_deref(), Some("devstampstampstamp"));
 }
 
+/// R4a end to end through the real adapter: the device stamps identity on
+/// every heartbeat, so a client that attached mid-stream — long after the
+/// boot hello it never saw — learns who this board is from the unsolicited
+/// channel alone, within one heartbeat period.
+#[test]
+fn a_heartbeat_carries_identity_so_a_mid_stream_attach_resolves_without_a_hello() {
+    use lpa_devices::identity::{DeviceUid, MacAddress};
+
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new("devfakefakefakefake", "Bench fake"))
+            .with_base_mac(FAKE_PROBED_MAC)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )));
+    let mut stream = FakeDeviceByteStream::new(device);
+
+    let lines = read_lines_until(&mut stream, Duration::from_millis(700), |lines| {
+        lines.iter().any(|line| heartbeat_frame(line).is_some())
+    });
+
+    let identity = lines
+        .iter()
+        .find_map(|line| heartbeat_frame(line))
+        .and_then(|frame| frame.identity().cloned())
+        .unwrap_or_else(|| panic!("a heartbeat announces who the device is: {lines:?}"));
+    assert_eq!(
+        identity.uid,
+        Some(DeviceUid("devfakefakefakefake".to_string()))
+    );
+    // The script reports the MAC in the uppercase spelling a device is
+    // allowed to use; the adapter normalizes, or the same board would bind
+    // twice.
+    assert_eq!(
+        identity.mac,
+        Some(MacAddress("60:55:f9:0a:0b:0c".to_string()))
+    );
+}
+
+/// R4b: `ClientRequest::Reboot` is ANSWERED and then honored. The ack must
+/// reach the wire before the board goes down — a reset that eats its own
+/// answer leaves the recovery ladder waiting on a response that no longer
+/// has a sender.
+#[test]
+fn a_reboot_request_is_answered_before_the_device_resets() {
+    const BANNER: &str = "[INIT] LightPlayer fake device booting";
+
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new(),
+    )));
+    let mut stream = FakeDeviceByteStream::new(device.clone());
+
+    // Let the first boot finish so the reboot's banner is unambiguous.
+    read_lines_until(&mut stream, Duration::from_millis(500), |lines| {
+        lines.iter().any(|line| line.contains(BANNER))
+    });
+    stream
+        .write_all(b"M!{\"id\":7,\"msg\":\"reboot\"}\n")
+        .unwrap();
+
+    // Each read window starts a fresh byte buffer, so these lines are the
+    // ones that arrived AFTER the request: the ack, then the second boot.
+    let lines = read_lines_until(&mut stream, Duration::from_millis(1500), |lines| {
+        lines.iter().any(|line| line.contains(BANNER))
+    });
+
+    assert_eq!(
+        device.reboot_requests(),
+        1,
+        "the embedder reset hook observed exactly one request: {lines:?}"
+    );
+    let ack = lines
+        .iter()
+        .position(|line| line.starts_with("M!") && line.contains("\"id\":7"))
+        .unwrap_or_else(|| panic!("the reboot request is answered on the wire: {lines:?}"));
+    let reboot = lines
+        .iter()
+        .position(|line| line.contains(BANNER))
+        .unwrap_or_else(|| panic!("the device reboots: {lines:?}"));
+    assert!(
+        ack < reboot,
+        "the ack reaches the wire before the reset it causes: {lines:?}"
+    );
+}
+
+/// Decode one COMPLETE `M!` heartbeat line through the shipped adapter.
+///
+/// Decoding is also the completeness test: a read window can end mid-frame,
+/// and a truncated line is not evidence of anything.
+fn heartbeat_frame(line: &str) -> Option<lpa_devices::wire::ServerFrame> {
+    use lpa_devices::wire::ServerFrameBody;
+
+    let json = line.strip_prefix("M!")?;
+    let frame = crate::device_link::wire::decode_server_frame(json).ok()?;
+    matches!(frame.body, ServerFrameBody::Heartbeat { .. }).then_some(frame)
+}
+
 #[test]
 fn premature_writes_during_boot_are_discarded_and_counted() {
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(

@@ -1230,6 +1230,7 @@ mod tests {
             recovery,
             outputs: None,
             link: None,
+            identity: None,
         }
     }
 

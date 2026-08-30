@@ -71,6 +71,9 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
                     recovery: None,
                     outputs: None,
                     link: None,
+                    // No LpServer in a harness boot, so no identity to
+                    // announce.
+                    identity: None,
                 },
             );
 

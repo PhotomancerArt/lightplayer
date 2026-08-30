@@ -387,6 +387,27 @@ mod tests {
         assert_eq!(link.stream.signals.len(), 3);
     }
 
+    /// R4b: `Reboot` is a real wire request now, so it reaches the wire as
+    /// one instead of being refused.
+    #[test]
+    fn a_reboot_request_reaches_the_wire_as_a_frame() {
+        let mut link = link(ScriptedStream::default());
+        link.submit(LinkCommand::Open { baud: 921_600 });
+        while link.poll_event().is_some() {}
+
+        link.submit(LinkCommand::SendFrame(ClientFrame {
+            request_id: 1,
+            body: lpa_devices::wire::ClientFrameBody::Reboot,
+        }));
+
+        assert_eq!(link.poll_event(), None, "a carried request is not an error");
+        assert!(
+            link.stream.written_text().contains("\"reboot\""),
+            "{:?}",
+            link.stream.written_text()
+        );
+    }
+
     #[test]
     fn a_request_the_wire_cannot_carry_is_an_error_not_a_silent_drop() {
         let mut link = link(ScriptedStream::default());
@@ -395,7 +416,9 @@ mod tests {
 
         link.submit(LinkCommand::SendFrame(ClientFrame {
             request_id: 1,
-            body: lpa_devices::wire::ClientFrameBody::Reboot,
+            body: lpa_devices::wire::ClientFrameBody::Opaque {
+                label: "Flash".to_string(),
+            },
         }));
 
         assert!(matches!(link.poll_event(), Some(LinkEvent::Error(_))));

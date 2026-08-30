@@ -548,6 +548,10 @@ fn forgetting_an_identified_device_deletes_its_row_and_gives_the_grant_back() {
 /// system hung here. Through the real effects layer the model must instead
 /// reach its deadline and say something honest, with the entry still
 /// escapable.
+///
+/// Since R4a the heartbeats also carry identity, so "honest" is now a NAMED
+/// card whose verdict is still the truthful "never said hello" — rather than
+/// the anonymous pending link this could only produce before.
 #[test]
 fn dropped_responses_degrade_honestly_instead_of_hanging() {
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
@@ -571,28 +575,34 @@ fn dropped_responses_degrade_honestly_instead_of_hanging() {
         |bench| {
             bench
                 .view()
-                .pending
+                .devices
                 .first()
-                .is_some_and(|pending| !pending.state_label.contains("identifying"))
-                || !bench.view().devices.is_empty()
+                .is_some_and(|device| !device.state_label.contains("identifying"))
         },
     );
 
-    let pending = bench.view().pending;
-    assert_eq!(pending.len(), 1, "no identity, so no device: {pending:?}");
+    let view = bench.view();
     assert!(
-        !pending[0].state_label.contains("identifying"),
+        view.pending.is_empty(),
+        "R4a named it off the heartbeats, so it is a card, not a pending link: {:?}",
+        view.pending
+    );
+    assert_eq!(view.devices.len(), 1, "{:?}", view.devices);
+    assert!(
+        !view.devices[0].state_label.contains("identifying"),
         "the deadline ended it: {}",
-        pending[0].state_label
+        view.devices[0].state_label
     );
     assert!(
-        pending[0].escapes.contains(&Escape::Forget),
+        view.devices[0].escapes.contains(&Escape::Forget),
         "an honest degrade still offers a way out"
     );
-    assert!(
-        bench.registry().is_empty(),
-        "an anonymous board earns no row"
-    );
+    // A row is earned by IDENTITY, not by a good verdict — and R4a is where
+    // this board's identity came from. Before it, a starved wire stayed
+    // anonymous and unrememberable no matter how long it talked.
+    let registry = bench.registry();
+    assert_eq!(registry.len(), 1, "{registry:?}");
+    assert_eq!(registry[0].uid, "dev_starved");
 }
 
 /// The seam `lpa-link` calls the ONLY honest source of `expected_proto`: the

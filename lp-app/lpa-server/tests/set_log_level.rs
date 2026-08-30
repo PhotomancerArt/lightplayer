@@ -56,6 +56,7 @@ fn set_log_level_changes_global_max_level_and_acks() {
                 &output_provider,
                 None,
                 None,
+                false, // no reboot hook
                 None,
                 None,
                 None,

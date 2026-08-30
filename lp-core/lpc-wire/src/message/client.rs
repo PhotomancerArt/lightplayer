@@ -46,6 +46,15 @@ pub enum ClientRequest {
     SetLogLevel {
         level: crate::server::api::LogLevel,
     },
+    /// Restart the device, bridge-independently: no DTR/RTS dance, no
+    /// physical access, nothing the USB bridge chip has to support.
+    ///
+    /// Answered with [`crate::server::ServerMsgBody::Reboot`] and THEN
+    /// reset — the embedder's reset hook fires once the answer is on the
+    /// wire. An embedder with no way to reset itself (host, browser)
+    /// answers an error instead: an unhonored ack would make the recovery
+    /// ladder wait for a boot that never comes.
+    Reboot,
 }
 
 #[cfg(test)]
@@ -178,6 +187,17 @@ mod tests {
             ClientRequest::SetLogLevel { level } => assert_eq!(level, LogLevel::Trace),
             _ => panic!("Wrong request type"),
         }
+    }
+
+    /// The unit-variant spelling matters: `Reboot` rides the wire as the
+    /// bare string `"reboot"`, like `Hello`, not as a tagged object.
+    #[test]
+    fn test_reboot_request() {
+        let req = ClientRequest::Reboot;
+        let json = crate::json::to_string(&req).unwrap();
+        assert_eq!(json, "\"reboot\"");
+        let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, ClientRequest::Reboot));
     }
 
     #[test]
