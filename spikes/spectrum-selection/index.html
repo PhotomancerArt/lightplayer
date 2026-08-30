@@ -56,9 +56,8 @@
 }
 
 /* The one live paint variable every treatment reads. */
-body { --sel-stops: var(--stops-full); --wash-a: 0.09; }
+body { --sel-stops: var(--stops-full); }
 body.cool { --sel-stops: var(--stops-cool); }
-body.wash-strong { --wash-a: 0.16; }
 
 * { box-sizing: border-box; }
 body {
@@ -69,7 +68,7 @@ body {
 h1 { font-size: 20px; margin: 0 0 6px; letter-spacing: -0.01em; }
 h2 { font-size: 15px; margin: 40px 0 4px; color: var(--shell-tx); }
 p.hint { margin: 0 0 10px; color: var(--shell-mut); font-size: 13px; max-width: 78ch; }
-.tname { font-weight: 700; color: var(--shell-tx); }
+p.hint em { color: var(--shell-tx); font-style: italic; }
 
 /* ---------- exploration controls strip ---------- */
 .controls {
@@ -110,13 +109,40 @@ p.hint { margin: 0 0 10px; color: var(--shell-mut); font-size: 13px; max-width: 
 @media (prefers-reduced-motion: reduce) { .ref-chip::before { animation: none; } }
 
 /* =====================================================================
-   Section 1 — view tabs (the workbench top bar, faithful to ViewTab in
-   app/workbench/mod.rs post-#478: active = bold heading text + 2.5px
-   rounded underline; inactive = subtle, hover → strong).
+   The static you-are-here / chosen-object paints (shared by sections).
+   ===================================================================== */
+/* the line, horizontal axis (bottom edge) */
+.mk-underline::after {
+  content: ""; position: absolute; left: 8px; right: 8px; bottom: 0;
+  height: 2.5px; border-radius: 999px;
+  background: linear-gradient(90deg, var(--sel-stops));
+}
+/* the line, vertical axis (leading edge) */
+.mk-sideline::after {
+  content: ""; position: absolute; left: 0; top: 3px; bottom: 3px;
+  width: 3px; border-radius: 999px;
+  background: linear-gradient(180deg, var(--sel-stops));
+}
+/* the static ring (chosen object) */
+.mk-ring::before {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(from 210deg, var(--sel-stops), #5fe08b);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  pointer-events: none;
+}
+
+/* =====================================================================
+   Section 1 — view tabs (faithful to ViewTab in app/workbench/mod.rs
+   post-#478: active = bold heading text + 2.5px rounded underline).
    ===================================================================== */
 .bars { display: grid; gap: 14px; margin-top: 12px; }
-.barrow { display: grid; grid-template-columns: 64px 1fr; gap: 12px; align-items: center; }
-.barrow .tag { font: 600 11px/1.3 var(--mono); color: var(--shell-dim); text-align: right; }
+.barrow { display: grid; grid-template-columns: 170px 1fr; gap: 12px; align-items: center; }
+.barrow .tag { font: 600 11px/1.4 var(--mono); color: var(--shell-dim); text-align: right; }
+.barrow .tag b { color: var(--shell-mut); }
 .topbar {
   display: flex; align-items: center; gap: 4px;
   background: var(--bg); border: 1px solid var(--border-muted);
@@ -126,7 +152,7 @@ p.hint { margin: 0 0 10px; color: var(--shell-mut); font-size: 13px; max-width: 
 .logo {
   width: 20px; height: 20px; border-radius: 5px; flex: none; margin-right: 6px;
   background: linear-gradient(135deg, #5fe08b, #53c6f2 55%, #a58af7);
-  clip-path: none; position: relative;
+  position: relative;
 }
 .logo::after {
   content: ""; position: absolute; inset: 4px;
@@ -143,38 +169,13 @@ p.hint { margin: 0 0 10px; color: var(--shell-mut); font-size: 13px; max-width: 
 }
 .tab:hover { color: var(--text-strong); }
 .tab.active { color: var(--heading); }
-.tab.active::after {
+/* baseline neutral underline */
+[data-t="t0"] .tab.active::after {
   content: ""; position: absolute; left: 8px; right: 8px; bottom: 0;
   height: 2.5px; border-radius: 999px; background: var(--sel-bd);
 }
-.topbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-.pillbtn {
-  font: 600 12px/1 var(--font); color: var(--text-muted);
-  background: transparent; border: 1px solid var(--border-strong);
-  border-radius: 999px; padding: 6px 12px; cursor: pointer;
-}
-.avatar { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-raised); border: 1px solid var(--border); }
-
-/* --- tab treatments --- */
-/* T1: the underline itself becomes the (static) spectrum. */
-[data-t="t1"] .tab.active::after { background: linear-gradient(90deg, var(--sel-stops)); }
-/* T2: no underline; a 3px vertical spectrum edge leads the label. */
-[data-t="t2"] .tab.active::after {
-  left: 0; right: auto; top: 10px; bottom: 10px; width: 3px; height: auto;
-  background: linear-gradient(180deg, var(--sel-stops));
-}
-/* T3: neutral underline STAYS; a low-alpha spectrum wash fills the tab. */
-[data-t="t3"] .tab.active::before {
-  content: ""; position: absolute; inset: 4px 2px; border-radius: 7px;
-  background: linear-gradient(100deg, var(--sel-stops));
-  opacity: var(--wash-a); pointer-events: none;
-  /* screen: the wash must read as LIGHT on the surface, not pigment —
-     low-alpha warm stops over grey otherwise land as mud. */
-  mix-blend-mode: screen;
-}
-/* T4: no underline; a pinned (static) full spectrum ring. */
-[data-t="t4"] .tab.active::after { display: none; }
-[data-t="t4"] .tab.active::before {
+[data-t="line"] .tab.active { /* mk-underline applied in markup */ }
+[data-t="ring"] .tab.active::before {
   content: ""; position: absolute; inset: 5px 1px; border-radius: 8px;
   padding: 1px;
   background: conic-gradient(from 210deg, var(--sel-stops), #5fe08b);
@@ -184,6 +185,13 @@ p.hint { margin: 0 0 10px; color: var(--shell-mut); font-size: 13px; max-width: 
   -webkit-mask-composite: xor;
   pointer-events: none;
 }
+.topbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.pillbtn {
+  font: 600 12px/1 var(--font); color: var(--text-muted);
+  background: transparent; border: 1px solid var(--border-strong);
+  border-radius: 999px; padding: 6px 12px; cursor: pointer;
+}
+.avatar { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-raised); border: 1px solid var(--border); }
 
 /* =====================================================================
    Section 2 — workbench tree (faithful to project_node_tree.rs:
@@ -192,8 +200,8 @@ p.hint { margin: 0 0 10px; color: var(--shell-mut); font-size: 13px; max-width: 
    dirty unselected = card-subtle + left dirty gradient to 62%).
    ===================================================================== */
 .panels { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
-.panel { width: 252px; flex: none; }
-.panel .ptitle { font: 600 11px/1.3 var(--mono); color: var(--shell-dim); margin: 0 0 6px 2px; }
+.panel { width: 262px; flex: none; }
+.panel .ptitle { font: 600 11px/1.4 var(--mono); color: var(--shell-dim); margin: 0 0 6px 2px; }
 .panel .ptitle b { color: var(--shell-mut); }
 .tree {
   background: var(--panel-primary); border: 1px solid var(--border-muted);
@@ -208,9 +216,7 @@ p.hint { margin: 0 0 10px; color: var(--shell-mut); font-size: 13px; max-width: 
 }
 .row .ic { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; color: var(--text-subtle); }
 .row .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row .bdg {
-  font: 600 10px/1 var(--mono); border-radius: 4px; padding: 3px 5px;
-}
+.row .bdg { font: 600 10px/1 var(--mono); border-radius: 4px; padding: 3px 5px; }
 .bdg.warn { color: var(--st-warn-tx); background: var(--st-warn-bg); border: 1px solid var(--st-warn-bd); }
 .bdg.err  { color: var(--st-error-tx); background: var(--st-error-bg); border: 1px solid var(--st-error-bd); }
 .bdg.bound{ color: var(--st-bound-tx); background: var(--st-bound-bg); border: 1px solid var(--st-bound-bd); }
@@ -234,57 +240,21 @@ p.hint { margin: 0 0 10px; color: var(--shell-mut); font-size: 13px; max-width: 
 }
 .row.is-dirty:hover, .row.is-dirty-err:hover { background-color: var(--surface-muted); }
 
-/* selected (baseline): neutral border, dirty-derived mix fill */
+/* selected (all tree variants keep the dirty-derived mix fill) */
 .row.is-selected {
-  border-color: var(--sel-bd);
   background: color-mix(in oklab, var(--row-dirty, var(--sel-bg)) 45%, var(--sel-bg));
 }
+[data-t="t0"] .row.is-selected { border-color: var(--sel-bd); }
 body.seldirty .row.is-selected { --row-dirty: var(--st-warn-bg); }
 body.seldirty .row.is-selected .bdg { display: inline-block; }
 .row.is-selected .bdg { display: none; }
 
-/* --- tree treatments --- */
-/* T1: gradient underline under the selected row (border goes quiet). */
-[data-t="t1"] .row.is-selected { border-color: transparent; }
-[data-t="t1"] .row.is-selected::after {
-  content: ""; position: absolute; left: 8px; right: 8px; bottom: 0;
-  height: 2px; border-radius: 999px;
-  background: linear-gradient(90deg, var(--sel-stops));
-}
-/* T2: static spectrum left edge (vs the hover edge's single blue). */
-[data-t="t2"] .row.is-selected { border-color: transparent; }
-[data-t="t2"] .row.is-selected::after {
-  content: ""; position: absolute; left: 0; top: 3px; bottom: 3px;
-  width: 3px; border-radius: 999px;
-  background: linear-gradient(180deg, var(--sel-stops));
-}
-/* T3: neutral border stays; the flat fill becomes a low-alpha wash. */
-[data-t="t3"] .row.is-selected::before {
-  content: ""; position: absolute; inset: 0; border-radius: inherit;
-  background: linear-gradient(100deg, var(--sel-stops));
-  opacity: var(--wash-a); pointer-events: none;
-  mix-blend-mode: screen;
-}
-/* T4: pinned static spectrum ring replaces the neutral border. */
-[data-t="t4"] .row.is-selected { border-color: transparent; }
-[data-t="t4"] .row.is-selected::before {
-  content: ""; position: absolute; inset: -1px; border-radius: inherit;
-  padding: 1px;
-  background: conic-gradient(from 210deg, var(--sel-stops), #5fe08b);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  pointer-events: none;
-}
-
 /* =====================================================================
-   Section 3 — story-book nav (sketch, not a faithful reproduction: a
-   compact grouped nav with one active "you are here" entry).
+   Section 3 — story-book nav (sketch, not a faithful reproduction).
    ===================================================================== */
 .navs { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
 .snav {
-  width: 190px; flex: none;
+  width: 200px; flex: none;
   background: var(--surface); border: 1px solid var(--border-muted);
   border-radius: 10px; padding: 10px 8px;
 }
@@ -298,55 +268,56 @@ body.seldirty .row.is-selected .bdg { display: inline-block; }
   font-size: 12.5px; color: var(--text-muted); cursor: pointer;
 }
 .snav .ent:hover { background: var(--surface-muted); color: var(--text-soft); }
-.snav .ent.active { color: var(--text-strong); border-color: var(--sel-bd); background: var(--sel-bg); }
-[data-t="t1"] .ent.active { border-color: transparent; }
-[data-t="t1"] .ent.active::after {
-  content: ""; position: absolute; left: 8px; right: 8px; bottom: 0;
-  height: 2px; border-radius: 999px;
-  background: linear-gradient(90deg, var(--sel-stops));
+.snav .ent.active { color: var(--text-strong); background: var(--sel-bg); }
+[data-t="t0"] .ent.active { border-color: var(--sel-bd); }
+
+/* =====================================================================
+   Section 4 — object selection: where the ring lives. Option cards
+   (board pickers, setup choices) are a CHOSEN OBJECT, not a location —
+   and today they still wear dying accent (reckoning follow-up).
+   ===================================================================== */
+.cardsets { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 12px; }
+.cardset .ptitle { font: 600 11px/1.4 var(--mono); color: var(--shell-dim); margin: 0 0 8px 2px; }
+.cardset .ptitle b { color: var(--shell-mut); }
+.cards { display: flex; gap: 12px; }
+.ocard {
+  position: relative; width: 176px; border-radius: 10px;
+  background: var(--surface-raised); border: 1px solid var(--border);
+  padding: 12px 14px; cursor: pointer;
 }
-[data-t="t2"] .ent.active { border-color: transparent; }
-[data-t="t2"] .ent.active::after {
-  content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 3px;
-  border-radius: 999px; background: linear-gradient(180deg, var(--sel-stops));
+.ocard .ct { font-size: 13.5px; font-weight: 600; color: var(--text); margin: 0 0 3px; }
+.ocard .cs { font-size: 11.5px; color: var(--text-subtle); margin: 0; line-height: 1.4; }
+.ocard.neutral-sel { border-color: var(--sel-bd); background: color-mix(in oklab, var(--sel-bg) 100%, var(--surface-raised)); }
+.ocard.ring-sel { border-color: transparent; background: var(--surface-raised); }
+/* the ring wears mk-ring from markup */
+
+/* ---------- rejected strip ---------- */
+.rejected {
+  margin-top: 44px; border: 1px dashed var(--shell-bd); border-radius: 10px;
+  padding: 10px 16px; color: var(--shell-dim); font-size: 12.5px; max-width: 100ch;
 }
-[data-t="t3"] .ent.active::before {
-  content: ""; position: absolute; inset: 0; border-radius: inherit;
-  background: linear-gradient(100deg, var(--sel-stops));
-  opacity: var(--wash-a); pointer-events: none;
-  mix-blend-mode: screen;
-}
-[data-t="t4"] .ent.active { border-color: transparent; }
-[data-t="t4"] .ent.active::before {
-  content: ""; position: absolute; inset: -1px; border-radius: inherit;
-  padding: 1px;
-  background: conic-gradient(from 210deg, var(--sel-stops), #5fe08b);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  pointer-events: none;
-}
+.rejected b { color: var(--shell-mut); }
 
 /* ---------- decision log ---------- */
 .declog {
-  margin-top: 48px; border-top: 1px solid var(--shell-bd); padding-top: 14px;
+  margin-top: 28px; border-top: 1px solid var(--shell-bd); padding-top: 14px;
   color: var(--shell-mut); font-size: 12.5px; max-width: 86ch;
 }
 .declog li { margin: 4px 0; }
+.declog b { color: var(--shell-tx); }
 </style>
 </head>
 <body>
 
-<h1>Spectrum-in-selection — how much rainbow can "you are here" wear?</h1>
+<h1>Spectrum-in-selection — round 2: the you-are-here line vs the ring</h1>
 <p class="hint">
-Post accent-reckoning, chrome is fully no-hue and Yona's read is "a bit dry — I
-like the rainbow." This spike tests amending the standing rule
-<em>"selection is the neutral outline, never the spectrum"</em> with STATIC
-(pinned, never animated) spectrum paint, so selected and hovered stay different
-KINDS of light: hover moves, selection doesn't. Baseline T0 is the shipped
-post-#478 neutral. Judge each treatment where it's hardest: a tree where
-hovered, selected, and dirty rows touch.
+Round-1 ruling converged on an idiom, not a single treatment: <em>the
+you-are-here line</em> — a static spectrum line on the nav axis's edge (bottom
+for horizontal tabs, leading side for vertical lists) — versus <em>the static
+ring</em>, which marks a <em>chosen object</em>, not a location. All paint
+stays STATIC; the animated ring remains hover/drag territory. Sections below
+put the two head-to-head on each surface, with the surface's real meaning
+stated so the nav-vs-object call is makeable.
 </p>
 
 <div class="controls">
@@ -361,58 +332,67 @@ hovered, selected, and dirty rows touch.
     <button id="c-clean" class="on">Clean</button>
     <button id="c-dirty">Unsaved (amber)</button>
   </div>
-  <div class="grp"><span class="lbl">T3 wash</span>
-    <button id="c-w1" class="on">Subtle 9%</button>
-    <button id="c-w2">Stronger 16%</button>
-  </div>
   <div class="grp"><span class="lbl">Reference</span>
     <span class="ref-chip">hover light (animated)</span>
   </div>
 </div>
 
-<h2>1 · View tabs — the you-are-here underline</h2>
+<h2>1 · View tabs — horizontal nav → bottom line</h2>
 <p class="hint">
-Safest site: one active tab, persistent, nothing dirty nearby. T0 is the
-shipped neutral underline.
+Round-1: "T1 or T4 — underline already means current-nav-item, but the ring is
+prettier." Head-to-head, plus the neutral baseline. The ring here would spend
+the object mark on a location — see section 4 for where it pays instead.
 </p>
 <div class="bars" id="bars"></div>
 
-<h2>2 · Workbench tree — the real test</h2>
+<h2>2 · Workbench tree — this IS navigation</h2>
 <p class="hint">
-Hovered row (pinned, blue edge + glow) directly above the selected row; amber
-and error dirty rows directly below. If a treatment blurs with either
-neighbour, it fails here first. Toggle "Unsaved" to make the selected row
-itself dirty — the amber mix and the spectrum must coexist.
+What the selected row means: <em>"Ocean Ripple" is the focused node — the one
+whose editor is open in the center pane.</em> Clicking a row navigates the
+workbench there (unified selection: one live surface follows selection). So by
+the round-1 rule this is a vertical nav list → the side line, like the
+story-nav. The ring variant is kept for comparison since round-1 leaned T4
+"but not if it's nav."
 </p>
 <div class="panels" id="panels"></div>
 
-<h2>3 · Story-book nav — active entry (sketch)</h2>
+<h2>3 · Story-book nav — vertical nav → side line</h2>
 <p class="hint">
-Same grammar on a denser, quieter nav. Not a faithful reproduction of the
-stories index — treat as a directional sketch only.
+Round-1 ruled: side line ("a side line indicates selection like a bottom line
+does on the bigger nav"). Shown converged against baseline only.
 </p>
 <div class="navs" id="navs"></div>
+
+<h2>4 · Object selection — where the ring lives</h2>
+<p class="hint">
+Option cards (board pickers, setup choices) are a <em>chosen object</em>, not a
+location — and they still wear the dying accent today, so they need a selection
+family regardless. Card-scale radius also lets the conic ring show its full
+sweep (at tree-row radius it compressed to orange — the attention hue).
+</p>
+<div class="cardsets" id="cardsets"></div>
+
+<div class="rejected">
+  <b>Rejected in round 1:</b> T3 low-alpha spectrum wash (too timid to cure
+  "dry", even screen-blended at 16%) · T1 underline inside the tree (an
+  underline is off-axis in a vertical list; the line sits on the leading edge
+  there) · full ring on tree rows as nav (spends the object mark on a
+  location; small radius compresses the sweep to attention-orange).
+</div>
 
 <div class="declog">
   <strong>Decision log</strong>
   <ul>
-    <li>Baseline = PR #478 (full no-hue): neutral 2.5px underline on tabs, neutral selection border + oklab dirty-mix fill in the tree.</li>
-    <li>All spectrum selection paint is STATIC — the animated conic ring stays hover/drag-only, keeping "moving light = transient pointer state" intact.</li>
-    <li>"Cool sweep" control exists because the full spectrum contains amber/red/orange — the exact hues of the unsaved/error/attention families that sit beside selection in a dirty tree. The tri-gradient (gradient-Primary stops) cannot collide.</li>
-    <li>Status hues untouched; dirty derivation (color-mix into selection fill) preserved in every treatment.</li>
-    <li>T3 keeps the neutral border — the smallest possible amendment to the ui.md rule ("the outline stays neutral; the fill may carry a whisper of spectrum").</li>
+    <li><b>Round 2 idiom under test:</b> the you-are-here line (static spectrum, on the nav axis's edge: bottom for horizontal nav, leading side for vertical) vs the static ring (chosen object, never a location). Hover stays the only animated light.</li>
+    <li>Round-1 rulings (Yona, 2026-08-30): tabs = T1-or-T4, lean T1 because underline already means current-nav-item; tree hinges on what selection IS (answered above: it's nav); story-nav = side line.</li>
+    <li>Baseline = PR #478 (full no-hue): neutral underline on tabs, neutral selection border + oklab dirty-mix fill in the tree.</li>
+    <li>"Cool sweep" lever: the full spectrum contains amber/red/orange — the unsaved/error/attention hues that sit beside selection in a dirty tree. The Primary tri cannot collide.</li>
+    <li>Status hues untouched; dirty derivation (color-mix into selection fill) preserved everywhere.</li>
+    <li>Wanted alongside production work: a design-language page as the design library's main page — the visual twin of docs/style/ui.md Color &amp; Light (idioms: status families, kinds of light, selection grammar, glass). Goes in the yona-plan as a deliverable.</li>
   </ul>
 </div>
 
 <script>
-const TREATMENTS = [
-  { id: "t0", name: "T0 · Baseline", note: "shipped neutral (#478)" },
-  { id: "t1", name: "T1 · Gradient underline", note: "the mark itself is spectrum" },
-  { id: "t2", name: "T2 · Spectrum left edge", note: "3px static edge vs hover's blue" },
-  { id: "t3", name: "T3 · Wash + neutral border", note: "rule survives; fill gets spectrum" },
-  { id: "t4", name: "T4 · Pinned full ring", note: "static twin of the hover ring" },
-];
-
 const ICONS = {
   scene: '<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><polygon points="7,2 12.5,12 1.5,12"/></svg>',
   shader: '<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 9 C3 4, 5 4, 7 9 S 11 14, 13 9" transform="translate(0,-2)"/></svg>',
@@ -421,14 +401,19 @@ const ICONS = {
   output: '<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="2.5" width="9" height="9" rx="2"/><circle cx="7" cy="7" r="1.6"/></svg>',
 };
 
+const TAB_T = [
+  { id: "t0", tag: "T0 · neutral (#478)", mark: "" },
+  { id: "line", tag: "LINE · gradient underline", mark: "mk-underline" },
+  { id: "ring", tag: "RING · pinned static ring", mark: "" },
+];
 function tabbar(t) {
   return `<div class="barrow" data-t="${t.id}">
-    <div class="tag">${t.id.toUpperCase()}</div>
+    <div class="tag"><b>${t.tag}</b></div>
     <div class="topbar">
       <div class="logo"></div>
       <span class="projname"><b>aurora-drift</b> · lp2025</span>
       <nav class="tabs">
-        <button class="tab active">Nodes</button>
+        <button class="tab active ${t.mark}">Nodes</button>
         <button class="tab">Map</button>
         <button class="tab">Patch</button>
       </nav>
@@ -440,13 +425,18 @@ function tabbar(t) {
   </div>`;
 }
 
+const TREE_T = [
+  { id: "t0", name: "T0 · Baseline", note: "shipped neutral (#478)", mark: "" },
+  { id: "line", name: "LINE · side line", note: "nav ruling applied — leading edge", mark: "mk-sideline" },
+  { id: "ring", name: "RING · static ring", note: "if tree selection were an object", mark: "mk-ring" },
+];
 function treePanel(t) {
   return `<div class="panel" data-t="${t.id}">
     <p class="ptitle"><b>${t.name}</b> — ${t.note}</p>
     <div class="tree">
       <div class="row"><span class="ic">${ICONS.scene}</span><span class="nm">Aurora Drift</span></div>
       <div class="row demo-hover"><span class="ic">${ICONS.shader}</span><span class="nm">plasma.glsl</span></div>
-      <div class="row is-selected"><span class="ic">${ICONS.scene}</span><span class="nm">Ocean Ripple</span><span class="bdg warn">EDIT</span></div>
+      <div class="row is-selected ${t.mark}"><span class="ic">${ICONS.scene}</span><span class="nm">Ocean Ripple</span><span class="bdg warn">EDIT</span></div>
       <div class="row is-dirty"><span class="ic">${ICONS.knob}</span><span class="nm">speed</span><span class="bdg warn">EDIT</span></div>
       <div class="row is-dirty-err"><span class="ic">${ICONS.output}</span><span class="nm">small-dome</span><span class="bdg err">ERR</span></div>
       <div class="row"><span class="ic">${ICONS.palette}</span><span class="nm">dusk palette (bound to bus)</span><span class="bdg bound">BUS</span></div>
@@ -455,22 +445,50 @@ function treePanel(t) {
   </div>`;
 }
 
+const NAV_T = [
+  { id: "t0", name: "T0 · Baseline", mark: "" },
+  { id: "line", name: "LINE · side line (round-1 ruling)", mark: "mk-sideline" },
+];
 function storyNav(t) {
-  return `<div class="snav" data-t="${t.id}">
-    <div class="grp">base</div>
-    <span class="ent">inline_button</span>
-    <span class="ent">popover</span>
-    <span class="ent active">gradient_strip</span>
-    <span class="ent">detail_popover</span>
-    <div class="grp">node</div>
-    <span class="ent">knob_field</span>
-    <span class="ent">node_pane</span>
+  return `<div class="panel" data-t="${t.id}">
+    <p class="ptitle"><b>${t.name}</b></p>
+    <div class="snav">
+      <div class="grp">base</div>
+      <span class="ent">inline_button</span>
+      <span class="ent">popover</span>
+      <span class="ent active ${t.mark}">gradient_strip</span>
+      <span class="ent">detail_popover</span>
+      <div class="grp">node</div>
+      <span class="ent">knob_field</span>
+      <span class="ent">node_pane</span>
+    </div>
   </div>`;
 }
 
-document.getElementById("bars").innerHTML = TREATMENTS.map(tabbar).join("");
-document.getElementById("panels").innerHTML = TREATMENTS.map(treePanel).join("");
-document.getElementById("navs").innerHTML = TREATMENTS.map(storyNav).join("");
+const CARDS = [
+  { t: "ESP32-C6", s: "RISC-V · 2 RMT channels · USB-JTAG" },
+  { t: "ESP32-S3", s: "Xtensa · 4 RMT channels · dual core" },
+  { t: "Classic ESP32", s: "Xtensa · legacy support · CH340" },
+];
+const CARD_T = [
+  { id: "t0", name: "NEUTRAL · selection family, no spectrum", cls: "neutral-sel", mark: "" },
+  { id: "ring", name: "RING · static spectrum ring (chosen object)", cls: "ring-sel", mark: "mk-ring" },
+];
+function cardSet(t) {
+  const cards = CARDS.map((c, i) =>
+    `<div class="ocard ${i === 1 ? t.cls + " " + t.mark : ""}">
+      <p class="ct">${c.t}</p><p class="cs">${c.s}</p>
+    </div>`).join("");
+  return `<div class="cardset" data-t="${t.id}">
+    <p class="ptitle"><b>${t.name}</b></p>
+    <div class="cards">${cards}</div>
+  </div>`;
+}
+
+document.getElementById("bars").innerHTML = TAB_T.map(tabbar).join("");
+document.getElementById("panels").innerHTML = TREE_T.map(treePanel).join("");
+document.getElementById("navs").innerHTML = NAV_T.map(storyNav).join("");
+document.getElementById("cardsets").innerHTML = CARD_T.map(cardSet).join("");
 
 /* controls */
 const on = (id, fn) => document.getElementById(id).addEventListener("click", fn);
@@ -491,15 +509,12 @@ on("c-hover", () => {
 });
 on("c-clean", () => { document.body.classList.remove("seldirty"); pick(["c-clean","c-dirty"], "c-clean"); });
 on("c-dirty", () => { document.body.classList.add("seldirty"); pick(["c-clean","c-dirty"], "c-dirty"); });
-on("c-w1", () => { document.body.classList.remove("wash-strong"); pick(["c-w1","c-w2"], "c-w1"); });
-on("c-w2", () => { document.body.classList.add("wash-strong"); pick(["c-w1","c-w2"], "c-w2"); });
 
 /* URL-hash presets so headless captures can hit any control state,
-   e.g. index.html#cool+seldirty+washstrong+nohover */
+   e.g. index.html#cool+seldirty+nohover */
 const preset = location.hash.slice(1).split("+");
 if (preset.includes("cool")) btn("c-cool").click();
 if (preset.includes("seldirty")) btn("c-dirty").click();
-if (preset.includes("washstrong")) btn("c-w2").click();
 if (preset.includes("nohover")) btn("c-hover").click();
 </script>
 </body>
