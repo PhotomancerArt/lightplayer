@@ -279,6 +279,99 @@ impl Roster {
             return Vec::new();
         }
 
+        // A link for an endpoint we already track SUPERSEDES the previous
+        // generation in place: USB re-enumeration (a C6 hard reset, a
+        // physical replug) can kill the old transport without a farewell,
+        // so the next link on the same endpoint is that device's next
+        // generation — never a new discovery. Without this, every
+        // re-enumeration mints another "new device found" card (G1
+        // finding 2026-08-31: a replugged C6 wallpapered the gallery,
+        // one card per boot slice).
+        if let Some(index) = self.devices.iter().position(|device| {
+            device.identity.endpoint.as_ref() == Some(&info.endpoint)
+                && device.link().is_some_and(|held| held != link)
+        }) {
+            let device_id = self.devices[index].id;
+            let old = self.devices[index].link().expect("checked above");
+            self.links.remove(&old);
+            self.routes.remove(&old);
+            self.state
+                .journal
+                .record_input(now, Scope::Device(device_id), input);
+            self.state.journal.note(
+                now,
+                Scope::Roster,
+                JournalNote::LinkRouted {
+                    link,
+                    to: device_id,
+                },
+            );
+            self.routes.insert(link, device_id);
+            let Self { devices, state, .. } = self;
+            let device = &mut devices[index];
+            // `fold_only` deliberately skips eviction, so the dead
+            // generation's activity is evicted here — its ground is gone.
+            let mut commands = device.evict(now, EvictionReason::LinkLost, &mut state.ctx());
+            commands.extend(device.fold_only(
+                now,
+                &Event::LinkDetached { link: old },
+                &mut state.ctx(),
+            ));
+            commands.retain(|command| !addresses_link(command, old));
+            commands.extend(device.fold_only(
+                now,
+                &Event::LinkAttached {
+                    link,
+                    info: info.clone(),
+                },
+                &mut state.ctx(),
+            ));
+            commands.extend(device.spawn_identify(now, &mut state.ctx()));
+            return commands;
+        }
+        if let Some(index) = self
+            .pending
+            .iter()
+            .position(|pending| pending.info.endpoint == info.endpoint)
+        {
+            let old = self.pending[index].link;
+            self.links.remove(&old);
+            self.state.journal.record_input(now, Scope::Roster, input);
+            self.state.journal.note(
+                now,
+                Scope::Roster,
+                JournalNote::PendingLinkDismissed { link: old },
+            );
+            self.state
+                .journal
+                .note(now, Scope::Roster, JournalNote::PendingLinkOpened { link });
+            let Self { pending, state, .. } = self;
+            let entry = &mut pending[index];
+            // Same eviction note as the device branch above.
+            let mut commands =
+                entry
+                    .provisional
+                    .evict(now, EvictionReason::LinkLost, &mut state.ctx());
+            commands.extend(entry.provisional.fold_only(
+                now,
+                &Event::LinkDetached { link: old },
+                &mut state.ctx(),
+            ));
+            commands.retain(|command| !addresses_link(command, old));
+            commands.extend(entry.provisional.fold_only(
+                now,
+                &Event::LinkAttached {
+                    link,
+                    info: info.clone(),
+                },
+                &mut state.ctx(),
+            ));
+            commands.extend(entry.provisional.spawn_identify(now, &mut state.ctx()));
+            entry.link = link;
+            entry.info = info.clone();
+            return commands;
+        }
+
         // A device already bound to this endpoint gets the link back. The
         // binding is a presumption, not proof: identification may re-route.
         let candidate = self.devices.iter().position(|device| {
@@ -958,6 +1051,70 @@ mod tests {
             commands
                 .iter()
                 .any(|command| matches!(command, Command::RevokeGrant(_)))
+        );
+    }
+
+    /// G1 finding 2026-08-31: USB re-enumeration (C6 hard reset, physical
+    /// replug) kills a link without a farewell, and every re-arrival used
+    /// to mint ANOTHER pending card — a replugged board wallpapered the
+    /// gallery. A link on a known endpoint supersedes in place.
+    #[test]
+    fn a_relinked_endpoint_supersedes_its_pending_link_instead_of_minting_another() {
+        let mut roster = Roster::new(RosterConfig::default());
+        roster.handle(Millis(0), attach(LinkId(1), "usb-1"));
+        assert_eq!(roster.pending().len(), 1);
+
+        // Three silent generations later (no LinkDetached ever arrived)...
+        roster.handle(Millis(100), attach(LinkId(2), "usb-1"));
+        let commands = roster.handle(Millis(200), attach(LinkId(3), "usb-1"));
+
+        // ...still exactly one pending card, wearing the newest link, and
+        // still identifying (the new generation re-opens and re-asks).
+        assert_eq!(roster.pending().len(), 1);
+        assert_eq!(roster.pending()[0].link, LinkId(3));
+        assert!(roster.pending()[0].is_identifying());
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            Command::Link {
+                link: LinkId(3),
+                command: LinkCommand::Open { .. },
+            }
+        )));
+        // Nothing still addresses the dead generations.
+        assert!(!commands.iter().any(
+            |command| addresses_link(command, LinkId(1)) || addresses_link(command, LinkId(2))
+        ));
+    }
+
+    #[test]
+    fn a_relinked_endpoint_supersedes_a_devices_dead_link_and_reidentifies() {
+        let mut roster = Roster::new(RosterConfig::default());
+        roster.handle(Millis(0), attach(LinkId(1), "usb-1"));
+        roster.handle(Millis(10), opened(LinkId(1), "usb-1"));
+        roster.handle(
+            Millis(20),
+            hello(LinkId(1), &roster_proto(&roster), "dev_abc"),
+        );
+        assert_eq!(roster.devices().len(), 1);
+
+        // The device still holds LinkId(1) — it died silently. The next
+        // generation on the same endpoint replaces it in place.
+        let commands = roster.handle(Millis(100), attach(LinkId(2), "usb-1"));
+
+        assert_eq!(roster.devices().len(), 1);
+        assert!(roster.pending().is_empty());
+        assert_eq!(roster.devices()[0].link(), Some(LinkId(2)));
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            Command::Link {
+                link: LinkId(2),
+                command: LinkCommand::Open { .. },
+            }
+        )));
+        assert!(
+            !commands
+                .iter()
+                .any(|command| addresses_link(command, LinkId(1)))
         );
     }
 

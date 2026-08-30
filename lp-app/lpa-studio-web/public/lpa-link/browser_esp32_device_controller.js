@@ -188,6 +188,21 @@ export class BrowserEsp32DeviceController {
     await this.releaseProtocol();
   }
 
+  // Adopt a re-enumerated SerialPort into this controller. Chrome mints a
+  // NEW SerialPort object when a granted device re-enumerates (a physical
+  // replug, or a USB-Serial-JTAG chip resetting), so object identity dies
+  // with the old generation while the grant — and this session's id —
+  // lives on. Tear the dead generation's locks down best-effort and carry
+  // the session over to the live object.
+  async adoptPort(port) {
+    if (!port || port === this.port) {
+      return;
+    }
+    await this.releaseProtocol({ collectErrors: false });
+    this.port = port;
+    this.label = labelForPort(port);
+  }
+
   async stopReadPump({ collectErrors = true } = {}) {
     this.readStopRequested = true;
     const activeReader = this.reader;
