@@ -32,7 +32,7 @@ use crate::dataflow::timebase::PhasorKey;
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
     PressureLevel, ProduceResult, RenderContext, RenderNode, RuntimeStateShape, TickContext,
-    err_ctx,
+    ensure_scratch_len, err_ctx,
 };
 use crate::products::visual::{
     CellProjection, ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
@@ -102,6 +102,11 @@ pub struct ShaderNode {
     /// Scratch sample-out for the projected texture fill (2D target filled
     /// by evaluating a 1D program per pixel).
     projected_samples: Option<lp_gfx::SampleOutHandle>,
+    /// Persistent destination for reading `projected_samples` back — the
+    /// tick-alloc rule from defect
+    /// 2026-08-29-flash-write-wedges-under-zook-playback: per-frame reads
+    /// reuse a caller-owned buffer, never a fresh `Vec`.
+    projected_channels: Vec<u16>,
     visual_uniforms: Vec<VisualUniform>,
     /// The last successfully compiled program. Kept through source/config
     /// refreshes and failed recompiles (keep-last-good); replaced only by
@@ -155,6 +160,7 @@ impl ShaderNode {
             space_answer_2: space_answer_2_for(def.space.value()),
             projected_points: None,
             projected_samples: None,
+            projected_channels: Vec::new(),
             visual_uniforms,
             shader: None,
             compilation_error: None,
@@ -719,11 +725,17 @@ impl ShaderNode {
             .projected_samples
             .as_ref()
             .ok_or_else(|| NodeError::msg("projected sample target missing"))?;
-        let channels = graphics
-            .read_sample_out(samples)
+        ensure_scratch_len(
+            &mut self.projected_channels,
+            samples.count() as usize * 4,
+            "projected texture samples",
+        )?;
+        graphics
+            .read_sample_out_into(samples, &mut self.projected_channels)
             .map_err(err_ctx("read projected texture samples"))?;
+        let channels = &self.projected_channels;
         let mut texels = Vec::with_capacity(channels.len() * 2);
-        for channel in &channels {
+        for channel in channels {
             texels.extend_from_slice(&channel.to_le_bytes());
         }
         graphics
@@ -853,6 +865,7 @@ impl NodeRuntime for ShaderNode {
         // reallocates and rewrites it from the request it is answering.
         drop(self.projected_points.take());
         drop(self.projected_samples.take());
+        self.projected_channels = Vec::new();
         Ok(())
     }
 
@@ -3705,8 +3718,12 @@ mod tests {
             self.inner.write_sample_out(out, rgba16)
         }
 
-        fn read_sample_out(&self, out: &SampleOutHandle) -> Result<Vec<u16>, GfxError> {
-            self.inner.read_sample_out(out)
+        fn read_sample_out_into(
+            &self,
+            out: &SampleOutHandle,
+            dst: &mut [u16],
+        ) -> Result<(), GfxError> {
+            self.inner.read_sample_out_into(out, dst)
         }
 
         fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {

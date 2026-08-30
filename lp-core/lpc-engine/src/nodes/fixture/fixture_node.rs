@@ -26,7 +26,7 @@ use lpc_model::nodes::texture::TextureFormat;
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, ControlNode, ControlRenderContext, DestroyCtx,
     MemPressureCtx, NodeError, NodeRuntime, PatchedRun, PressureLevel, ProduceResult,
-    RuntimeStateShape, TickContext, err_ctx,
+    RuntimeStateShape, TickContext, ensure_scratch_len, err_ctx,
 };
 use crate::nodes::fixture::power_limit::{self, PowerPass};
 use crate::products::control::{
@@ -161,6 +161,12 @@ pub struct FixtureNode {
     render_target: Option<TextureHandle>,
     sample_points: Option<FixtureSamplePoints>,
     sample_target: Option<SampleOutHandle>,
+    /// Persistent destination for the per-frame Direct sample read
+    /// ([`lp_gfx::LpGraphics::read_sample_out_into`]). Settles at
+    /// `4 × lamp count` `u16`s for the node's life — a fresh `Vec` here
+    /// every tick is what OOM-reset the classic under zook playback
+    /// (defect 2026-08-29-flash-write-wedges-under-zook-playback).
+    sampled_scratch: Vec<u16>,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
     /// Channel list for Direct sampling — the ONLY per-lamp data that stays
@@ -219,6 +225,7 @@ impl FixtureNode {
             render_target: None,
             sample_points: None,
             sample_target: None,
+            sampled_scratch: Vec::new(),
             precomputed: None,
             direct_channels: None,
             display_layout_revision: None,
@@ -1212,6 +1219,7 @@ impl FixtureNode {
             return render_direct_fixture_control(
                 &mut self.sample_points,
                 &mut self.sample_target,
+                &mut self.sampled_scratch,
                 self.mapping.as_mapping_ref(),
                 channels_version,
                 channels,
@@ -1648,6 +1656,7 @@ fn fixture_carries_2d_coords(mapping: MappingRef<'_>, area_rows: Option<u32>) ->
 fn render_direct_fixture_control(
     sample_points: &mut Option<FixtureSamplePoints>,
     sample_target: &mut Option<SampleOutHandle>,
+    sampled_scratch: &mut Vec<u16>,
     mapping: MappingRef<'_>,
     mapping_version: Revision,
     channels: &[u32],
@@ -1711,16 +1720,16 @@ fn render_direct_fixture_control(
             samples: sample_buf,
         },
     )?;
-    let sampled = ctx
-        .graphics()
+    ensure_scratch_len(sampled_scratch, channels.len() * 4, "fixture sample read")?;
+    ctx.graphics()
         .ok_or_else(|| NodeError::msg("fixture direct sampling requires graphics"))?
-        .read_sample_out(sample_buf)
+        .read_sample_out_into(sample_buf, sampled_scratch)
         .map_err(err_ctx("fixture sample read"))?;
 
     target.samples.fill(0);
     let brightness = settings.brightness.to_q32() / 255.to_q32();
     let mut written_samples = 0usize;
-    for (channel, rgba) in channels.iter().zip(sampled.chunks_exact(4)) {
+    for (channel, rgba) in channels.iter().zip(sampled_scratch.chunks_exact(4)) {
         let base = (*channel as usize).saturating_mul(3);
         if base + 3 > expected_samples {
             continue;
