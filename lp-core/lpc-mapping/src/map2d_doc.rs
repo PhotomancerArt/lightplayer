@@ -32,6 +32,7 @@
 //! | 2 | [`PathShape::gaps`], [`RepeatShape`] |
 //! | 3 | [`Map2dObject::id`], [`Map2dObject::stride`], [`PolygonShape`] |
 //! | 4 | [`PathShape::align`], [`PolygonShape::align`] |
+//! | 5 | [`FilledPolygonShape`] |
 
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
@@ -44,7 +45,7 @@ use crate::map2d_fit::Bounds2d;
 use crate::map2d_object_id::Map2dObjectId;
 
 /// Newest document format this crate can read.
-pub const MAP2D_FORMAT: u32 = 4;
+pub const MAP2D_FORMAT: u32 = 5;
 
 /// The format every document using only the original constructs declares.
 /// [`Map2dDoc::required_format`] returns this unless the content needs more.
@@ -79,6 +80,12 @@ const MAP2D_FORMAT_POLYGON: u32 = 3;
 /// silently reverting authored rendering — so docs that use it must
 /// be refused by older builds (the same rationale as format-3 ids).
 const MAP2D_FORMAT_ALIGN: u32 = 4;
+
+/// The format a document needs once any object is a [`FilledPolygonShape`] —
+/// an unknown variant, same reasoning as [`MAP2D_FORMAT_REPEAT`]: an old build
+/// cannot ignore it without losing every lamp the shaped matrix carries, and
+/// unlike a field it cannot be parsed away and re-derived.
+const MAP2D_FORMAT_FILLED_POLYGON: u32 = 5;
 
 /// Largest [`RepeatShape::count`] an editor may author. The resolver itself
 /// has no ceiling — a hand-authored document is the author's business — but a
@@ -137,6 +144,7 @@ pub enum Map2dShape {
     Ring(RingShape),
     Path(PathShape),
     Polygon(PolygonShape),
+    FilledPolygon(FilledPolygonShape),
     Repeat(RepeatShape),
 }
 
@@ -165,6 +173,15 @@ pub enum GridRouting {
     Raster,
 }
 
+impl GridRouting {
+    /// Serde's `skip_serializing_if` for the newer shapes that keep default
+    /// fields off the wire. [`GridShape`] deliberately does NOT use it — its
+    /// documents already carry the field and must stay byte-identical.
+    pub fn is_default(&self) -> bool {
+        matches!(self, GridRouting::Snake)
+    }
+}
+
 /// Which corner holds lamp 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -174,6 +191,13 @@ pub enum GridCorner {
     Tr,
     Bl,
     Br,
+}
+
+impl GridCorner {
+    /// Serde's `skip_serializing_if`; see [`GridRouting::is_default`].
+    pub fn is_default(&self) -> bool {
+        matches!(self, GridCorner::Tl)
+    }
 }
 
 /// One or more concentric lamp rings. Inner ring counts derive from the
@@ -292,6 +316,48 @@ pub struct PolygonShape {
     /// Stroke alignment (format 4); see [`PathAlign`].
     #[serde(default, skip_serializing_if = "PathAlign::is_on")]
     pub align: PathAlign,
+}
+
+/// A polygon outline filled with a lamp lattice at `pitch` — the
+/// shaped-matrix (custom PCB) primitive (format 5).
+///
+/// Count is **derived**, and this is the first shape where that is true: a
+/// cell is populated iff its center falls inside the outline (ε-inset), and
+/// routing walks the populated cells row by row, so data order stays wiring
+/// order. Editing the outline re-derives the count — there is no authored
+/// number to keep in sync, and therefore none to get wrong.
+/// [`crate::filled_polygon_cells`] is the single walk both the resolver and
+/// [`crate::shape_lamp_count`] read, so the derived count cannot drift from
+/// the resolved lamps.
+///
+/// Every optional field is skipped when default, so a minimal shaped matrix
+/// serializes as just `points` + `pitch`. `routing`/`start_corner` therefore
+/// differ from [`GridShape`], which has always written its defaults — the
+/// bytes of existing grid documents are untouchable, but a brand-new variant
+/// gets to start minimal.
+///
+/// Deliberately absent: holes, per-row overrides, and `align` (an outline's
+/// stroke alignment means nothing for a field of lamps). All three are
+/// future work that composes against explicit `pitch`/`angle_deg`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FilledPolygonShape {
+    /// Outline vertices in doc space, ≥ 3, closed implicitly.
+    pub points: Vec<[f32; 2]>,
+    /// Lattice spacing, both axes. Must be positive.
+    pub pitch: f32,
+    /// Lattice rotation in degrees about the outline bbox center. The
+    /// OUTLINE does not move — only the lattice laid inside it turns.
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub angle_deg: f32,
+    /// Lattice phase nudge in doc units, applied in the lattice frame — the
+    /// knob that slides the lattice a fraction of a pitch so a row of cells
+    /// lands where the board wants it.
+    #[serde(default, skip_serializing_if = "is_zero_offset")]
+    pub origin: [f32; 2],
+    #[serde(default, skip_serializing_if = "GridRouting::is_default")]
+    pub routing: GridRouting,
+    #[serde(default, skip_serializing_if = "GridCorner::is_default")]
+    pub start_corner: GridCorner,
 }
 
 /// `count` rotated instances of an inner shape, equally spaced over a full
@@ -483,6 +549,10 @@ fn shape_required_format(shape: &Map2dShape) -> u32 {
             }
             required
         }
+        // The shaped matrix (format 5): unknown variant, same reasoning as
+        // the repeat and the polygon before it. It carries no `align`, so
+        // there is no format-4 case to check alongside.
+        Map2dShape::FilledPolygon(_) => MAP2D_FORMAT_FILLED_POLYGON,
         _ => MAP2D_FORMAT_BASE,
     }
 }
@@ -505,6 +575,19 @@ fn default_rings() -> u32 {
 
 fn default_start_angle() -> f32 {
     -90.0
+}
+
+/// `skip_serializing_if` for a defaulted-to-zero float. Written as an exact
+/// comparison on purpose: the point is "did the author touch this field", and
+/// a hair off zero IS an authored value. Takes a reference because that is
+/// the signature serde's `skip_serializing_if` calls with.
+fn is_zero_f32(value: &f32) -> bool {
+    *value == 0.0
+}
+
+/// The same, for a defaulted-to-origin 2D offset.
+fn is_zero_offset(value: &[f32; 2]) -> bool {
+    value[0] == 0.0 && value[1] == 0.0
 }
 
 #[cfg(test)]
@@ -556,9 +639,9 @@ mod tests {
     #[test]
     fn rejects_newer_and_zero_formats() {
         assert!(matches!(
-            Map2dDoc::from_json(r#"{"format":5}"#),
+            Map2dDoc::from_json(r#"{"format":6}"#),
             Err(Map2dError::UnsupportedFormat {
-                found: 5,
+                found: 6,
                 supported: MAP2D_FORMAT
             })
         ));
@@ -960,6 +1043,113 @@ mod tests {
             Map2dDoc::from_json(json),
             Err(Map2dError::Parse(reason)) if reason.contains("lowercase letter")
         ));
+    }
+
+    /// The filled polygon is the format-5 shape variant — unknown to older
+    /// builds, which cannot ignore it without losing the whole shaped matrix,
+    /// so it stamps 5 and a format-4 build refuses the document whole.
+    /// Removing it releases the document back down.
+    #[test]
+    fn a_filled_polygon_requires_format_five_and_old_builds_refuse_it() {
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(Map2dObject {
+            name: "badge".to_string(),
+            id: None,
+            stride: None,
+            shape: Map2dShape::FilledPolygon(logo_triangle()),
+        });
+        assert_eq!(doc.required_format(), 5);
+        doc.normalize_format();
+        assert_eq!(doc.format, 5);
+        assert_eq!(Map2dDoc::from_json(&doc.to_json()).unwrap(), doc);
+        assert_eq!(
+            format_gate(doc.format, 4),
+            Err(Map2dError::UnsupportedFormat {
+                found: 5,
+                supported: 4
+            })
+        );
+
+        // Drop the shaped matrix and the document is plain again.
+        doc.objects.clear();
+        doc.normalize_format();
+        assert_eq!(doc.format, 1);
+    }
+
+    /// `required_format` walks into repeats for the new variant too: a shaped
+    /// matrix buried in a repeat still stamps 5.
+    #[test]
+    fn the_format_walk_sees_a_filled_polygon_inside_a_repeat() {
+        let doc = Map2dDoc {
+            objects: vec![Map2dObject {
+                name: "badge".to_string(),
+                id: None,
+                stride: None,
+                shape: Map2dShape::Repeat(RepeatShape {
+                    shape: Box::new(Map2dShape::FilledPolygon(logo_triangle())),
+                    center: [50.0, 50.0],
+                    count: 3,
+                }),
+            }],
+            ..Map2dDoc::new()
+        };
+        assert_eq!(doc.required_format(), 5);
+    }
+
+    /// Byte-stability, forward-facing: every optional field of the new shape
+    /// is skipped at its default, so a minimal shaped matrix is `points` plus
+    /// `pitch` and nothing else — and it still round-trips to itself.
+    #[test]
+    fn a_minimal_filled_polygon_serializes_without_its_defaulted_fields() {
+        let mut doc = Map2dDoc::new();
+        doc.objects.push(Map2dObject {
+            name: "badge".to_string(),
+            id: None,
+            stride: None,
+            shape: Map2dShape::FilledPolygon(logo_triangle()),
+        });
+        doc.normalize_format();
+        let json = doc.to_json();
+        for absent in ["angle_deg", "origin", "routing", "start_corner"] {
+            assert!(!json.contains(absent), "{absent} in {json}");
+        }
+        assert_eq!(Map2dDoc::from_json(&json).unwrap(), doc);
+
+        // Authoring any one of them puts it back on the wire.
+        let Map2dShape::FilledPolygon(filled) = &mut doc.objects[0].shape else {
+            panic!("expected filled polygon");
+        };
+        filled.angle_deg = 30.0;
+        filled.origin = [0.0, 2.5];
+        filled.routing = GridRouting::Raster;
+        filled.start_corner = GridCorner::Br;
+        let json = doc.to_json();
+        for present in ["angle_deg", "origin", "raster", "\"br\""] {
+            assert!(json.contains(present), "{present} missing from {json}");
+        }
+        assert_eq!(Map2dDoc::from_json(&json).unwrap(), doc);
+    }
+
+    /// The existing grid keeps writing its `routing`/`start_corner` defaults —
+    /// the new shape's skip-if-default must not have leaked onto it, or every
+    /// checked-in grid document would change bytes.
+    #[test]
+    fn a_grid_still_serializes_its_defaulted_routing_fields() {
+        let json = corpus::panel_16x16().to_json();
+        assert!(json.contains("\"routing\""), "{json}");
+        assert!(json.contains("\"start_corner\""), "{json}");
+    }
+
+    /// A shaped matrix on a 16-unit lattice — the triangle-PCB archetype.
+    fn logo_triangle() -> FilledPolygonShape {
+        FilledPolygonShape {
+            points: vec![[0.0, 0.0], [96.0, 0.0], [48.0, 83.0]],
+            pitch: 16.0,
+            angle_deg: 0.0,
+            origin: [0.0, 0.0],
+            routing: GridRouting::Snake,
+            start_corner: GridCorner::Tl,
+        }
     }
 
     #[test]

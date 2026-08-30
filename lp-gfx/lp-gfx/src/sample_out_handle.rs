@@ -9,7 +9,7 @@ use crate::handle_allocator::{HandleAllocator, HandleBacking};
 /// [`crate::LpGraphics`] backend.
 ///
 /// RAII: dropping the handle returns the allocation. Sample data moves
-/// through [`crate::LpGraphics::read_sample_out`] /
+/// through [`crate::LpGraphics::read_sample_out_into`] /
 /// [`crate::LpGraphics::write_sample_out`].
 pub struct SampleOutHandle {
     count: u32,

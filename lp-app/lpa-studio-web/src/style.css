@@ -68,37 +68,54 @@
     sans-serif;
     --studio-font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 
-    --studio-color-bg: #101317;
+    --studio-color-bg: #0d0d13;
     --studio-color-bg-wash: rgba(255, 255, 255, 0.04);
-    --studio-color-surface: #171b20;
-    --studio-color-surface-subtle: #14181d;
-    --studio-color-surface-muted: #11161b;
-    --studio-color-surface-raised: #20272e;
-    --studio-color-surface-raised-strong: #26313a;
-    --studio-color-panel-primary: #18201d;
-    --studio-color-terminal: #0c1114;
-    --studio-color-track: #10151a;
+    --studio-color-surface: #14141c;
+    --studio-color-surface-subtle: #101017;
+    --studio-color-surface-muted: #0f0f15;
+    --studio-color-surface-raised: #1d1d28;
+    --studio-color-surface-raised-strong: #252532;
+    --studio-color-panel-primary: #17171f;
+    --studio-color-terminal: #09090e;
+    --studio-color-track: #0e0e14;
 
-    --studio-color-border: #2a3138;
-    --studio-color-border-muted: #252d34;
-    --studio-color-border-subtle: #293039;
-    --studio-color-border-strong: #3e4852;
-    --studio-color-panel-primary-border: #34463e;
+    --studio-color-border: #343444;
+    --studio-color-border-muted: #2b2b39;
+    --studio-color-border-subtle: #30303d;
+    --studio-color-border-strong: #4a4a5e;
+    --studio-color-panel-primary-border: #3a3a4c;
 
     --studio-color-text: #f2f0e8;
     --studio-color-text-strong: #fffaf0;
     --studio-color-text-soft: #f9f6eb;
-    --studio-color-text-muted: #c7cbd0;
-    --studio-color-text-subtle: #99a2ad;
-    --studio-color-text-dim: #9ba4ad;
-    --studio-color-heading: #94b8aa;
-    --studio-color-accent: #7be0b2;
-    --studio-color-accent-border: #65bd96;
-    --studio-color-accent-hover: #6fc39f;
+    --studio-color-text-muted: #c9c9d2;
+    --studio-color-text-subtle: #9c9cab;
+    --studio-color-text-dim: #9ea0ac;
+    /* Aurora (2026-08-29): heading went neutral; sage (#94b8aa) moved to
+       EXPORT-only — see --studio-status-export-* below. */
+    --studio-color-heading: #e9e9ef;
+    --studio-color-accent: #8be2c0;
+    --studio-color-accent-border: #5fc79d;
+    --studio-color-accent-hover: #79d4ae;
     --studio-color-accent-text-on-fill: #08130d;
     /* Low-alpha accent fill for hover/active washes on accent-bordered
        controls (inline buttons, agent-chat chips, settings buttons). */
-    --studio-color-accent-wash: rgba(123, 224, 178, 0.08);
+    --studio-color-accent-wash: rgba(139, 226, 192, 0.10);
+
+    /* Brand spectrum — moments only (hover light, brand, hero), never
+       resting chrome. Same stops as the logo sweep. */
+    --studio-spectrum: #5fe08b, #53c6f2, #a58af7, #ff5d5d, #ffab4a, #f5e04e;
+    /* Hover bloom color (Aurora: cool violet-blue). */
+    --studio-glow: rgba(140, 170, 255, 0.3);
+    /* Overlay glass material (R3: liquid + spectrum edge; blur is a var so
+       G1 can tune it live). */
+    --studio-glass-bg: rgba(12, 12, 20, 0.55);
+    --studio-glass-blur: 22px;
+    --studio-glass-saturate: 1.5;
+    --studio-glass-edge: rgba(255, 255, 255, 0.14);
+    --studio-glass-border: rgba(255, 255, 255, 0.09);
+    /* Focus ring — new convention token (the app has none today). */
+    --studio-color-focus-ring: #a5b8ff;
 
     /* Selection is its own concept — a neutral white-ish outline, kept
        distinct from the teal brand accent and from semantic status colors so
@@ -371,10 +388,11 @@ label:has(> input:not(:disabled)) {
     width: 100%;
     max-width: 300px;
     padding: 14px;
-    background: var(--studio-color-surface);
-    border: 1px solid var(--studio-color-border);
     border-radius: 10px;
-    box-shadow: 0 12px 32px rgb(0 0 0 / 0.5);
+    /* Material (background, blur, border, edge light, shadow, spectrum
+       ring) comes from `ux-glass-panel` on the same element — the sheet
+       is an overlay, and overlays wear the glass (G1 feedback: flat
+       popup backgrounds read as unfinished). */
 }
 
 /* Per-device console (D42), the Console tab's read-only line list —
@@ -1839,6 +1857,17 @@ label:has(> input:not(:disabled)) {
     cursor: crosshair;
 }
 
+/* Space-bar pan: the hand wins over every element cursor underneath. */
+.lpme-canvas-pan,
+.lpme-canvas-pan * {
+    cursor: grab !important;
+}
+
+.lpme-canvas-pan:active,
+.lpme-canvas-pan:active * {
+    cursor: grabbing !important;
+}
+
 .lpme-sel-outline {
     fill: none;
     stroke: #4c9ffe;
@@ -1866,6 +1895,49 @@ label:has(> input:not(:disabled)) {
     fill: none;
     stroke: #4c9ffe;
     stroke-dasharray: 5 4;
+}
+
+/* The polygon draft's IMPLICIT closing edge: the segment the shape has but
+   the author has not drawn. A finer dash than the drawn chain, so "implied"
+   reads at a glance. */
+.lpme-draft-close {
+    fill: none;
+    stroke: #4c9ffe;
+    stroke-dasharray: 3 5;
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+/* The close TARGET: the first draft vertex, ringed once a click on it would
+   close the outline. Never a pointer target of its own — the canvas root
+   owns the click and decides by hit radius. */
+.lpme-draft-target {
+    fill: none;
+    stroke: #4c9ffe;
+    pointer-events: none;
+}
+
+/* A shaped matrix's authored SILHOUETTE: the outline its lattice fills.
+   Its lamps are a field, so nothing else on the canvas draws the boundary a
+   vertex drag moves. Dashed and mixed down at rest (the object's own colour,
+   the body language of `.lpme-obj-hull`); selection promotes it to a solid
+   accent line. Never a pointer target — the hit line under it owns clicks. */
+.lpme-shape-outline {
+    fill: none;
+    stroke: rgba(154, 151, 143, 0.5);
+    stroke: color-mix(
+        in srgb,
+        var(--lpme-obj-c, rgb(154, 151, 143)) 55%,
+        transparent
+    );
+    stroke-dasharray: 7 5;
+    stroke-linejoin: round;
+    pointer-events: none;
+}
+
+.lpme-shape-outline-on {
+    stroke: #4c9ffe;
+    stroke-dasharray: none;
 }
 
 .lpme-marquee {
@@ -2897,14 +2969,15 @@ label:has(> input:not(:disabled)) {
 }
 
 /* ---- the transient confirmation line (base/toast.rs) -------------------
-   One sentence, bottom centre, replaced rather than stacked. It fades
+   One sentence, top centre (G1 ruling 2026-08-29 — it used to sit at the
+   bottom and read as easy to miss), replaced rather than stacked. It fades
    itself out with the keyframe below instead of a timer — see the module
    docs — and ends `visibility: hidden` so a spent line cannot swallow a
    click on whatever is under it. */
 .ux-toast {
     position: fixed;
     left: 50%;
-    bottom: 34px;
+    top: 62px;
     /* Also on the base rule, not only in the keyframes: story capture
        disables animations, and a line centred only by its animation would
        land half a page to the right. */
@@ -2935,7 +3008,7 @@ label:has(> input:not(:disabled)) {
 @keyframes ux-toast-life {
     0% {
         opacity: 0;
-        transform: translateX(-50%) translateY(10px);
+        transform: translateX(-50%) translateY(-10px);
     }
 
     7%,
@@ -2947,7 +3020,7 @@ label:has(> input:not(:disabled)) {
     100% {
         opacity: 0;
         visibility: hidden;
-        transform: translateX(-50%) translateY(6px);
+        transform: translateX(-50%) translateY(-6px);
     }
 }
 
@@ -2983,87 +3056,147 @@ label:has(> input:not(:disabled)) {
     max-width: calc(100vw - 24px);
 }
 
+/* Liquid glass material (Aurora, R3 2026-08-29): the overlay panel
+   surface. Overlays ONLY — popovers, sheets, card bars — never resting
+   surfaces (backdrop-filter promotes a compositing layer, and glass under
+   glass reads as mud). The blur/saturate/edge knobs live in :root
+   (--studio-glass-*) so a gate can tune them in one place. */
+.ux-glass-panel {
+    position: relative;
+    background: var(--studio-glass-bg);
+    backdrop-filter: blur(var(--studio-glass-blur)) saturate(var(--studio-glass-saturate));
+    -webkit-backdrop-filter: blur(var(--studio-glass-blur)) saturate(var(--studio-glass-saturate));
+    border: 1px solid var(--studio-glass-border);
+    box-shadow:
+        inset 0 1px 0 var(--studio-glass-edge),
+        0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+/* Spectrum edge: a masked-overlay ring. NOT border-image — border-image
+   ignores border-radius and paints a square frame (spike round-1 defect).
+   Two solid mask layers XOR'd leave only the 1px padding visible, and the
+   ring clips to the element's own radius. `inset: 0` (not -1px) because
+   glass panels are overflow-hidden; the ring hugs the inside of the
+   border, which is the spike-gated look. */
+.ux-glass-panel::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+        130deg,
+        rgba(95, 224, 139, 0.4),
+        rgba(83, 198, 242, 0.35) 45%,
+        rgba(165, 138, 247, 0.4)
+    );
+    mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    pointer-events: none;
+}
+
+/* The merged-outline popover's glass: a fixed full-viewport layer clipped
+   to the SAME path string the outline SVG draws (both are fixed/inset-0 in
+   CSS-pixel space, so the silhouettes coincide). It sits under the SVG in
+   DOM order; the path keeps stroke + drop-shadow and its (now translucent)
+   tone gradient, this layer supplies base fill + blur. */
+.ux-popover-glass {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    background: var(--studio-glass-bg);
+    backdrop-filter: blur(var(--studio-glass-blur)) saturate(var(--studio-glass-saturate));
+    -webkit-backdrop-filter: blur(var(--studio-glass-blur)) saturate(var(--studio-glass-saturate));
+    pointer-events: none;
+}
+
 .ux-popover-chrome-quiet {
     --ux-popover-border-color: var(--studio-color-border-strong);
     --ux-popover-icon-color: var(--studio-color-text-strong);
-    --ux-popover-trigger-fill-top: var(--studio-color-terminal);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-terminal);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-color-terminal) 42%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-terminal) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-neutral {
     --ux-popover-border-color: var(--studio-color-border-strong);
     --ux-popover-icon-color: var(--studio-color-text-strong);
-    --ux-popover-trigger-fill-top: var(--studio-color-surface-raised-strong);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-color-surface-raised-strong) 42%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-accent,
 .ux-popover-chrome-good {
     --ux-popover-border-color: var(--studio-color-accent-border);
     --ux-popover-icon-color: var(--studio-color-accent);
-    --ux-popover-trigger-fill-top: var(--studio-status-good-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-good-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-working {
     --ux-popover-border-color: var(--studio-status-working-border);
     --ux-popover-icon-color: var(--studio-status-working-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-working-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-working-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-live {
     --ux-popover-border-color: var(--studio-status-live-border);
     --ux-popover-icon-color: var(--studio-status-live-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-live-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-live-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-debug {
     --ux-popover-border-color: var(--studio-status-debug-border);
     --ux-popover-icon-color: var(--studio-status-debug-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-debug-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-debug-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-bound {
     --ux-popover-border-color: var(--studio-status-bound-border);
     --ux-popover-icon-color: var(--studio-status-bound-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-bound-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-bound-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-warning {
     --ux-popover-border-color: var(--studio-status-warning-border);
     --ux-popover-icon-color: var(--studio-status-warning-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-warning-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-warning-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-attention {
     --ux-popover-border-color: var(--studio-status-attention-border);
     --ux-popover-icon-color: var(--studio-status-attention-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-attention-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-attention-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-error {
     --ux-popover-border-color: var(--studio-status-error-border);
     --ux-popover-icon-color: var(--studio-status-error-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-error-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-error-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
-
 /* Contiguous popover chrome: one SVG path (see base/outline.rs) draws the
    merged trigger+panel fill, border, and shadow. The tone variables above
    (.ux-popover-chrome-*) are consumed by the path's gradient and stroke. */
@@ -3081,6 +3214,21 @@ label:has(> input:not(:disabled)) {
     stroke: var(--ux-popover-border-color, var(--studio-color-border-strong));
     stroke-width: 1;
     filter: drop-shadow(0 16px 40px rgba(0, 0, 0, 0.34));
+}
+
+/* Decorative spectrum edge over the merged outline (G1-4 ruling
+   2026-08-30: "a little bland" without it). Rides ON TOP of the tone
+   stroke, but only where the chrome variant opts in — quiet/neutral
+   below; a status-toned popover keeps its pure semantic border. */
+.ux-popover-outline-spectrum {
+    stroke-width: 1;
+    opacity: var(--ux-popover-spectrum-edge, 0);
+    pointer-events: none;
+}
+
+.ux-popover-chrome-quiet,
+.ux-popover-chrome-neutral {
+    --ux-popover-spectrum-edge: 0.85;
 }
 
 /* The in-flow trigger while its visual is re-parented into the top layer:
@@ -3131,6 +3279,22 @@ label:has(> input:not(:disabled)) {
     background: transparent;
     border-color: transparent;
     box-shadow: none;
+}
+
+/* A glass panel hosted AS the merged-outline popover's panel: the outline
+   system already supplies the material (translucent path fill over the
+   `.ux-popover-glass` blur layer), so the body's own glass stands down —
+   a nested backdrop-filter would double the blur cost, and the spectrum
+   ring would fight the tone stroke (semantic border beats decoration).
+   Standalone `ux-glass-panel` uses (anchored detail panels, static story
+   sheets) keep the full material. */
+.ux-popover-panel.ux-svg-popover-panel.ux-glass-panel {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+.ux-popover-panel.ux-svg-popover-panel.ux-glass-panel::after {
+    content: none;
 }
 
 .ux-node-ui-popup strong,
@@ -5405,6 +5569,238 @@ label:has(> input:not(:disabled)) {
 @media (prefers-reduced-motion: reduce) {
     .lp-brand-play-anim,
     .lp-brand-word {
+        animation: none;
+    }
+}
+
+/* ==========================================================================
+   Interaction light — the iridescent ring family (Aurora R2, 2026-08-29)
+
+   The spectrum IS the interaction light: hover, press and drag-in-flight
+   wear it; SELECTION never does (it stays the neutral white outline — the
+   standing ruling this refresh did not touch). Status-toned controls keep
+   their own hue too: a semantic color beats decoration, and "status never
+   relies on color alone" also means a status control must not flash
+   rainbow. Reference: spikes/design-language/index.html, `dir-aurora`
+   plus the hover-lab t4/t5 rows and the extras row.
+
+   Rules encoded here:
+   - the ring is an absolutely-positioned pseudo-element, so nothing's
+     footprint moves when it appears (InlineButton's footprint tests);
+   - NOT border-image — border-image ignores border-radius and paints a
+     square frame (the spike's round-1 defect). Two solid mask layers XOR'd
+     leave only the 1px padding band, clipped to the host's own radius;
+   - the spin runs ONLY while hovered/active (or explicitly pinned on for a
+     drag), so an idle app pays no compositor cost;
+   - prefers-reduced-motion drops every spin and leaves the gradient static
+     at --ux-ir-angle's initial 0deg — the logo sets that precedent.
+   ========================================================================== */
+
+/* The animatable angle. A *registered* property is what lets the conic
+   gradient interpolate at all; an unregistered var() would jump. */
+@property --ux-ir-angle {
+    syntax: "<angle>";
+    initial-value: 0deg;
+    inherits: false;
+}
+
+@keyframes ux-ir-spin {
+    to {
+        --ux-ir-angle: 360deg;
+    }
+}
+
+/* Ring host. `--ux-ir-inset` is the one knob: -1px hugs the OUTSIDE of the
+   border (the spike look, and the default), 0 hugs the inside for hosts
+   that clip — an `overflow: hidden` card would swallow an outset ring
+   whole, which is the same trap .ux-glass-panel::after documents. */
+.ux-ir-ring {
+    position: relative;
+}
+
+.ux-ir-ring::before {
+    content: "";
+    position: absolute;
+    inset: var(--ux-ir-inset, -1px);
+    z-index: 3;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(from var(--ux-ir-angle), var(--studio-spectrum), #5fe08b);
+    mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Clipping hosts (cards, anything overflow-hidden) opt the ring inward. */
+.ux-ir-ring-inset {
+    --ux-ir-inset: 0px;
+}
+
+/* `.ux-ir-ring-on` pins the ring for states with no pointer over them —
+   drag in flight is the one that exists today. */
+.ux-ir-ring:hover:not(:disabled)::before,
+.ux-ir-ring:active:not(:disabled)::before,
+.ux-ir-ring-on::before {
+    opacity: 1;
+    animation: ux-ir-spin 3.2s linear infinite;
+}
+
+/* The soft bloom that rides with the ring. */
+.ux-ir-ring:hover:not(:disabled),
+.ux-ir-ring-on {
+    box-shadow: 0 2px 20px var(--studio-glow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-ir-ring:hover:not(:disabled)::before,
+    .ux-ir-ring:active:not(:disabled)::before,
+    .ux-ir-ring-on::before {
+        animation: none;
+    }
+}
+
+/* Dense rows (tree rows, panel list rows) take the LIGHT variant of the
+   same light: a spectrum edge plus the bloom, never a full ring — a ring
+   on every row of a tree is noise, not affordance (spike `.s-row`). No
+   animation here, so nothing for the motion guard to switch off. */
+.ux-row-edge:hover {
+    box-shadow:
+        inset 2px 0 0 #53c6f2,
+        0 0 14px var(--studio-glow);
+}
+
+/* Press flare: the bloom answers the finger, not just the pointer. Ordered
+   AFTER the ring bloom deliberately — equal specificity, so :active wins
+   over :hover only by being later. */
+.ux-press-flare:active:not(:disabled) {
+    box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--studio-color-focus-ring) 35%, transparent),
+        0 2px 26px var(--studio-glow);
+}
+
+/* Gallery-card lift, composed with the inset ring. Kept a separate class
+   from the ring so `prefers-reduced-motion` can drop the translate below
+   without touching the light. */
+.ux-card-lift {
+    transition:
+        transform 180ms ease,
+        box-shadow 180ms ease;
+}
+
+.ux-card-lift:hover {
+    transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-card-lift {
+        transition: none;
+    }
+
+    .ux-card-lift:hover {
+        transform: none;
+    }
+}
+
+/* Drag in flight: the pointer has left the source, so the ring is pinned
+   (`ux-ir-ring-on`) and the shadow says "lifted off the page". Later than
+   the ring bloom so this box-shadow is the one that lands. */
+.ux-drag-chip {
+    box-shadow:
+        0 10px 26px rgba(0, 0, 0, 0.5),
+        0 2px 20px var(--studio-glow);
+}
+
+/* --------------------------------------------------------------------------
+   Focus ring — a NEW app-wide convention (the app had 9 ad-hoc focus
+   utilities in total before this). Keyboard focus is a token-colored border
+   plus a soft offset outline; `outline` never participates in layout, so no
+   control's footprint moves. Bare element selectors cover text inputs
+   without a 30-file sweep — no Tailwind preflight is loaded, so these are
+   the only rules that touch them.
+   -------------------------------------------------------------------------- */
+.ux-focus-ring:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+    border-color: var(--studio-color-focus-ring);
+    outline: 2px solid color-mix(in srgb, var(--studio-color-focus-ring) 45%, transparent);
+    outline-offset: 1px;
+}
+
+/* --------------------------------------------------------------------------
+   Gradient primary — G1-2 RULED KEEP (2026-08-30, "gradient is good"): the
+   spectrum-gradient fill IS the Primary tier now, not a gated alternative
+   to a flat accent fill. See `solid_class` in
+   src/core/action/action_button.rs.
+   -------------------------------------------------------------------------- */
+.ux-primary-gradient {
+    background: linear-gradient(105deg, #5fe08b, #53c6f2 55%, #a58af7);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: #071010;
+}
+
+.ux-primary-gradient:hover:not(:disabled) {
+    filter: brightness(1.08);
+}
+
+/* --------------------------------------------------------------------------
+   Working / progress spectrum (extras — G1-3 RULED KEEP ALL FOUR: spinner,
+   iridescent progress, drag ring, press flare)
+   -------------------------------------------------------------------------- */
+
+/* Conic working spinner: the spectrum swept into a ring by a radial mask.
+   Unlike the hover ring this one runs whenever it is mounted — it exists
+   only while work is in flight, which is exactly the window it should be
+   moving in. */
+.ux-conic-spinner {
+    display: inline-block;
+    height: 22px;
+    width: 22px;
+    flex: none;
+    border-radius: var(--studio-radius-pill);
+    background: conic-gradient(from 0deg, var(--studio-spectrum), #5fe08b);
+    mask: radial-gradient(circle closest-side, transparent 62%, #000 66%);
+    -webkit-mask: radial-gradient(circle closest-side, transparent 62%, #000 66%);
+    animation: ux-conic-spin 1.1s linear infinite;
+}
+
+@keyframes ux-conic-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Iridescent progress fill. Two classes, because these rules are UNLAYERED
+   and Tailwind's utilities are not: a single `.ux-iri-fill` carrying the
+   sweep would silently outrank the `[animation:…]` utility the timeout and
+   indeterminate bars set for their own motion, and those bars would stop
+   moving. `-static` is the paint alone, for fills that already animate. */
+.ux-iri-fill,
+.ux-iri-fill-static {
+    background: linear-gradient(90deg, var(--studio-spectrum), #5fe08b);
+    background-size: 300% 100%;
+}
+
+.ux-iri-fill {
+    animation: ux-iri-sweep 4s linear infinite;
+}
+
+@keyframes ux-iri-sweep {
+    to {
+        background-position: 300% 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-conic-spinner,
+    .ux-iri-fill {
         animation: none;
     }
 }

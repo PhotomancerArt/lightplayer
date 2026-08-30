@@ -212,6 +212,7 @@ mod tests {
             picture_url: Some("https://example.com/photo.jpg".to_string()),
             provider_label: "Google".to_string(),
             created_at: 1.0,
+            anonymous: false,
         };
         let row = RememberedAccount::of(&me, 42.0);
         assert_eq!(row.email, me.email);

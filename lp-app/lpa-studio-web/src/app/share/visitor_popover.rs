@@ -16,7 +16,9 @@ use lpc_cloud_api::Access;
 
 use crate::app::share::share_panel::ShareUrlHero;
 use crate::app::share::share_url::ShareUrl;
-use crate::base::{PopoverButton, PopoverCloseHandle, PopoverPlacement};
+use crate::base::{
+    InlineButtonTone, PopoverButton, PopoverCloseHandle, PopoverPlacement, inline_icon_button_class,
+};
 
 /// The pill-slot trigger and its anchored visitor card.
 ///
@@ -85,7 +87,7 @@ pub fn VisitorShareCard(
                 }
                 if let Some(mut close) = close {
                     button {
-                        class: CLOSE_CLASS,
+                        class: inline_icon_button_class(InlineButtonTone::Neutral, false),
                         r#type: "button",
                         aria_label: "Close",
                         onclick: move |_| close.close(),
@@ -121,8 +123,10 @@ pub fn VisitorShareCard(
 const PILL_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:px-3 tw:py-1.5 tw:text-status-neutral-foreground tw:transition-colors tw:hover:border-accent-border tw:hover:text-strong-foreground";
 const PILL_OPEN_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-accent-border tw:bg-accent-wash tw:px-3 tw:py-1.5 tw:text-strong-foreground";
 /// The spike's §2-D card is narrower than the owner panel (300px).
-const POPUP_CLASS: &str = "tw:grid tw:w-[300px] tw:min-w-0 tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:text-sm tw:text-muted-foreground tw:shadow-lg";
-const CLOSE_CLASS: &str = "tw:ml-auto tw:inline-flex tw:h-5 tw:w-5 tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:p-0 tw:text-dim-foreground tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
+/// Material-free (P4): the merged-outline popover already paints
+/// background/border/shadow.
+const POPUP_CLASS: &str =
+    "tw:grid tw:w-[300px] tw:min-w-0 tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 /// The one filled verb a visitor owns.
 const FORK_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:justify-self-start tw:gap-1.5 tw:rounded-sm tw:border tw:border-accent-border tw:bg-accent tw:px-2.5 tw:py-1.5 tw:text-accent-foreground tw:transition-colors tw:hover:bg-accent-hover";
 
@@ -133,7 +137,7 @@ mod tests {
     /// No preflight (crate README): every button names its own background.
     #[test]
     fn every_visitor_button_names_a_background() {
-        for class in [PILL_CLASS, PILL_OPEN_CLASS, CLOSE_CLASS, FORK_CLASS] {
+        for class in [PILL_CLASS, PILL_OPEN_CLASS, FORK_CLASS] {
             assert!(class.contains("tw:bg-"), "no background in `{class}`");
         }
     }

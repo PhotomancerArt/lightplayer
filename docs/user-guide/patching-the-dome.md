@@ -9,20 +9,21 @@
 ```embed panel sim=main mode=interactive
 ```
 
-That's a dome — a miniature of a real one: a 2-frequency geodesic shell
-of bare struts, hoisted on a riser ring, with glowing triangular panels
-suspended inside all forty strut triangles. Five identical sectors of
-thirty lamps — eight panels each, one strand jumpered panel-to-panel —
-and three chevron doors around the rim that stay warmly lit no matter
-what the show does. Two control boxes drive it: **"1"** with three
-ports, **"Box 2"** with two.
+That's a real dome — the Small Dome: a 16-foot 2-frequency geodesic
+shell of bare struts, hoisted on a riser ring, with glowing triangular
+panels suspended inside the strut triangles. **Fifty** panels — the
+forty 2V faces plus the ten downward-pointing triangles of the rung
+below — each wrapped with **119 lamps** of strip, and one chevron door
+that stays warmly lit no matter what the show does. Two control boxes
+drive it, thirteen ports each: **"1"** takes the right half of the
+dome (and the door), **"Box 2"** the left.
 
 Here's the thing about domes: the mapping never changes — the geometry was
 decided when the struts were cut — but the **plugging changes every single
-build**. The crew connects each sector to whatever jack is nearest, the
-doors to whatever ports have room left, and the software is expected to
-sort it out afterwards. On the real dome this one imitates, sorting it out
-was most of the clicks the software ever saw.
+build**. The crew connects each panel to whatever jack is nearest, the
+door to whatever port has room left, and the software is expected to
+sort it out afterwards. On the big dome this software grew up against,
+sorting it out was most of the clicks the software ever saw.
 
 Sorting it out is what a **patch** is. If you've read
 [the peach](#/docs/the-peach), you've seen a patch place two fixtures on
@@ -31,81 +32,84 @@ three things a repeated structure needs.
 
 ## Instances, by name
 
-Open `dome/dome.map2d.json` and there is exactly **one** sector in it —
-eight triangle panels (one per 2V face) traced by a single thirty-lamp
-path whose connector segments are `gaps`: jumper wire that carries no
-lamps — repeated five ways around the center. (The geometry is
-generated from the real dome's structure by `cargo run -p lpt-geodome`.)
+Open `dome/dome.map2d.json` and there are exactly **ten** panels in it
+— one per position in a 72-degree sector (`rim-a`, `rim-b`,
+`band-a`–`band-d`, `cap-a`–`cap-c`, `zenith`), each a closed 119-lamp
+polygon repeated five ways around the center. Fifty panels, described
+by ten shapes. (The geometry is generated from the real dome's
+structure by `cargo run -p lpt-geodome`.)
 
 ```json
 {
-  "name": "sector",
-  "id": "sector",
-  "shape": { "repeat": { "shape": { "path": { "...": "...", "gaps": [3, 7, 11, 15, 19, 23, 27] } }, "count": 5 } }
+  "name": "rim a",
+  "id": "rim-a",
+  "stride": 40,
+  "shape": { "repeat": { "shape": { "polygon": { "...": "...", "count": 119 } }, "count": 5 } }
 }
 ```
 
 The `id` is the load-bearing line. It's a stable name for the object —
 assigned once, never changed by renames — and it gives every repeated
-instance an address: `/sector/0` through `/sector/4`. The patch speaks in
-those addresses:
+instance an address: `/rim-a/0` through `/rim-a/4`, and so on across
+all ten objects. The patch speaks in those addresses — the shipped one
+opens:
 
 ```json
 {
   "format": 2,
   "outputs": ["1","Box 2"],
   "entries": [
-    ["/sector/0",0,69],
-    ["/sector/1",1,0,"r"],
-    ["/sector/2",0,0,"",10],
-    ["/sector/3",1,39],
-    ["/sector/4",0,39]
+    ["/rim-a/0",0,0],
+    ["/band-a/0",0,119],
+    ["/cap-c/0",0,238],
+    ["...48 more rows..."]
   ]
 }
 ```
 
-Each row reads: *this instance* → *that output* (an index into the
-`outputs` table above) → *at this wire lamp*. `/sector/2` means "instance
-2, wherever its lamps currently are" — add two lamps to the strut design
-next year and every entry still points at the right physical sector,
-because the lamp ranges are re-derived from the mapping every time. Nobody
-maintains arithmetic.
+Each row reads: *this panel* → *that output* (an index into the
+`outputs` table above) → *at this wire lamp*. `/rim-a/0` means "that
+panel, wherever its lamps currently are" — change the panel design
+next year and every entry still points at the right physical panel,
+because the lamp ranges are re-derived from the mapping every time.
+Nobody maintains arithmetic, and at fifty panels nobody could.
 
 ## Backwards, and turned
 
-Two of the rows carry more:
+Two of the fifty rows carry more:
 
-- `"r"` on `/sector/1` — that sector was plugged in at its **far end**, so
-  its run is laid down the wire back-to-front. One flag, not a rewired
-  strut.
-- the `10` on `/sector/2` — rotation. That sector's strand was fed a
-  few panels along, so its run reads ten lamps further around than the
-  design says. **Offset** turns it in software the way the crew plugged
-  it in hardware.
+- `"r"` on `/band-b/2` — that panel was plugged in at its **far end**,
+  so its run is laid down the wire back-to-front. One flag, not a
+  rewired panel.
+- the `40` on `/band-c/0` — rotation. A triangular panel seated one
+  corner on reads forty lamps further around its wrap than the design
+  says. **Offset** turns it in software the way the crew seated it in
+  hardware.
 
-The doors put a number on that turn. Each door is a **chevron** — a big
-open triangle with no bottom edge, nine lamps up one leg and over to the
-other. A door re-seated one strap-point along is a *rotation by three*,
-and the patch says exactly that:
+Forty is the panel's **stride** — authored on every panel object
+(`"stride": 40`), because 119 lamps over three sides has no intrinsic
+lamps-per-side the way an evenly divisible polygon does. The door puts
+its own number on a turn: it's a **chevron** — a big open triangle
+with no bottom edge, 180 lamps up each ~10-foot leg — and a door
+plugged with its legs swapped is a rotation by one leg:
 
 ```json
-["/door/1",1,30,"",3]
+["/door",0,2975,"",180]
 ```
 
-Three is the door's **stride** — authored on the door object
-(`"stride": 3`), because an open chevron has no intrinsic period the way
-a closed polygon's lamps-per-side is. Rotating by strides is how "it's
-on, just turned" becomes one edit instead of nine.
+Rotating by strides is how "it's on, just turned" becomes one edit
+instead of a hundred and nineteen.
 
 ## Two boxes, shared ports
 
-Look at the two patch files together and you'll see the scatter: sectors
-land on both outputs; doors land on both outputs; and on the ports they
-share, a door's nine lamps ride the **tail** of a sector's thirty — port 0
-of "1" carries `/sector/2` at lamp 0 and `/door/0` at lamp 30. Any
-instance, any port, any output. The output names in the rows ("1",
-"Box 2") are labels you choose on the output node — in the real world
-that's "the box at 10.0.0.105", and renaming one never moves a wire.
+Look at the two patch files together and you'll see the install: each
+box feeds its half of the dome through thirteen ports — two chained
+panels per port, 238 lamps — and on box 1's last port the door's 360
+lamps ride the **tail** of a panel's 119 (`/band-b/1` at lamp 2856,
+`/door` at 2975). Any instance, any port, any output. The output names
+in the rows ("1", "Box 2") are labels you choose on the output node —
+in the real world that's "the box at 10.0.0.105", and renaming one
+never moves a wire.
 
 Everything not named in a patch still takes care of itself: a fixture with
 no patch at all flows onto the first output, in order, exactly like the
@@ -122,5 +126,5 @@ Everything else keeps lighting. A patch is install-day equipment: it
 degrades and reports, it never dies.
 
 Provenance: `docs/use-cases/2026-08-09-mini-dome.md` (the archetype this
-example ships for), and lp2014 field experience on the dome it
-miniaturizes.
+example ships for), `docs/use-cases/2026-08-28-three-domes.md` (the
+real dome it models), and lp2014 field experience on the big dome.

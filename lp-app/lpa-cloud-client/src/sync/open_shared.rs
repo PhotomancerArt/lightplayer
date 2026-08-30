@@ -21,6 +21,11 @@ pub struct OpenSharedReport {
     /// Display metadata from the service's most recent commit — the name
     /// the copy's library entry should wear.
     pub sidecar: SidecarMeta,
+    /// Who has access by email, when the caller is entitled to know —
+    /// `Some` only for a member (the anti-oracle rule). Carried so the
+    /// caller can classify itself (member / edit-visitor / view-visitor)
+    /// without a second `GetProject`.
+    pub members: Option<Vec<lpc_cloud_api::MemberInfo>>,
     /// The service's frontier.
     pub heads: Vec<HeadInfo>,
     /// The version checked out into the working copy.
@@ -88,6 +93,7 @@ pub async fn open_shared<P: CloudPort + ?Sized>(
     Ok(OpenSharedReport {
         meta: remote.meta,
         sidecar: remote.sidecar,
+        members: remote.members,
         heads: remote.heads,
         head,
         adopted_events: log.events.len(),

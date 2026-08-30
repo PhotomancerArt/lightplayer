@@ -1987,7 +1987,7 @@ pub(crate) fn SetupEntryCard(sim: bool, on_action: EventHandler<UiAction>) -> El
     let class = if sim {
         "tw:grid tw:min-h-24 tw:cursor-pointer tw:place-items-center tw:gap-1 tw:rounded-md tw:border tw:border-dashed tw:border-[var(--studio-status-bound-border)] tw:bg-transparent tw:p-3 tw:text-muted-foreground tw:transition-colors tw:hover:border-[var(--studio-status-bound-text)] tw:hover:text-strong-foreground"
     } else {
-        "tw:grid tw:min-h-24 tw:cursor-pointer tw:place-items-center tw:gap-1 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:p-3 tw:text-muted-foreground tw:transition-colors tw:hover:border-accent tw:hover:text-strong-foreground"
+        "tw:grid tw:min-h-24 tw:cursor-pointer tw:place-items-center tw:gap-1 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:p-3 tw:text-muted-foreground tw:transition-colors tw:hover:border-dim-foreground tw:hover:text-strong-foreground ux-focus-ring"
     };
     rsx! {
         button {

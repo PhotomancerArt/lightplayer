@@ -24,11 +24,11 @@ use crate::{
     ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem,
     ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
     ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
-    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent,
-    UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
-    UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind,
-    UiPendingEditPhase, UiProductRef, UiResult, UiShaderError, UiShaderUniform, UiSlotAsset,
-    UiStatus, UiViewContent, UxUpdateSink,
+    StudioOverlayMutation, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
+    UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft,
+    UiLogLevel, UiLogOrigin, UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView,
+    UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult, UiShaderError,
+    UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
@@ -158,7 +158,7 @@ pub struct ProjectController {
     editor_meta_absent: bool,
     /// The patch surface's one shared selection (D36; core-owned so e2e
     /// can drive it and the P6 verbs can read it).
-    patch_selection: Option<crate::UiPatchTarget>,
+    patch_selection: crate::UiSelection,
     /// Monotonic correlation-id source for overlay mutation commands.
     next_mutation_cmd_id: u64,
     /// Staged node removals recorded from `RemoveNode` acks, keyed by the
@@ -220,6 +220,10 @@ pub struct ProjectController {
     /// P3's designation editor bumps this via
     /// [`Self::invalidate_export_lint`].
     export_lint_epoch: std::cell::Cell<u64>,
+    /// Bumped once per completed fork-at-save (D7) — the web shell watches
+    /// it on the view to raise the one-line fork toast (a state transition
+    /// alone can't distinguish "forked" from "opened another project").
+    transient_fork_generation: u64,
 }
 
 /// The local `editor.json` answer, three ways (unified-editor P2): the
@@ -384,6 +388,12 @@ struct PendingNodeFocus {
 struct LibraryContext {
     host: std::rc::Rc<dyn crate::app::library::LibraryHost>,
     now_secs: std::rc::Rc<dyn Fn() -> f64>,
+    /// The platform's identity-minting entropy (the studio controller's
+    /// injected `random`) — transient view sessions mint their project
+    /// uid from it at open, and a fork-at-save persists exactly that uid,
+    /// so it must be as unguessable as any other uid (the link IS the
+    /// access token, D6).
+    random: std::rc::Rc<dyn Fn() -> [u8; 16]>,
     active: Option<ActiveLibraryProject>,
     /// Projects that stopped being active on a synchronous path (state
     /// reset, replacement open) and still hold their host-side lock.
@@ -398,6 +408,28 @@ struct ActiveLibraryProject {
     /// Runtime fs revision the library is synced to (advances on each
     /// successful save-as-pull).
     last_synced: lpc_model::FsVersion,
+    /// `Some` while this is a transient view session (examples vision D2):
+    /// the handle's stores are memory-backed, the uid is ephemeral RAM
+    /// identity, and NOTHING host-side exists for it — no lock to release
+    /// (never queued into `pending_close`), no catalog row, and no
+    /// `notify_saved` broadcast (the cloud sync engine must never be
+    /// offered a transient uid). The web layer reads this through
+    /// [`UiStudioView::open_project_transient`](crate::UiStudioView) to
+    /// keep transient sessions off `/p/<slug>-<uid>` URLs.
+    transient: Option<TransientOrigin>,
+}
+
+/// Where a transient view session's content came from — what the
+/// fork-at-explicit-save step records as provenance, and what the web
+/// layer needs to address the session honestly (a bare `/p/<slug>`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TransientOrigin {
+    /// An embedded example, by id (`examples/fyeah-sign`).
+    Example { id: String },
+    /// Someone else's View-access shared project (P5): the session runs
+    /// the cloud document's own uid over fetched content; a fork mints a
+    /// FRESH identity (the parent uid stays the parent's).
+    SharedView { parent_project: String },
 }
 
 impl ProjectController {
@@ -425,7 +457,7 @@ impl ProjectController {
             slot_shapes: SlotShapeRegistry::default(),
             root_shape_ids: BTreeMap::new(),
             node_card_ui: BTreeMap::new(),
-            patch_selection: None,
+            patch_selection: crate::UiSelection::empty(),
             patch_undo: Vec::new(),
             patch_redo: Vec::new(),
             arrange_undo: Vec::new(),
@@ -441,6 +473,7 @@ impl ProjectController {
             open_notices: Vec::new(),
             export_lint: std::cell::RefCell::new(None),
             export_lint_epoch: std::cell::Cell::new(0),
+            transient_fork_generation: 0,
         }
     }
 
@@ -455,16 +488,28 @@ impl ProjectController {
         &self.runtime_storage_id
     }
 
+    /// A file from the ACTIVE package's store (transient e2e assertions:
+    /// the memory copy is unreachable from outside the controller).
+    #[cfg(test)]
+    pub(crate) fn active_package_file_for_test(&self, path: &str) -> Option<Vec<u8>> {
+        use lpc_model::AsLpPath;
+        let active = self.library.as_ref()?.active.as_ref()?;
+        let view = active.handle.package_fs.borrow();
+        view.read_file(path.as_path()).ok()
+    }
+
     /// Attach the injected library host (browser shell, once the store
     /// backing it is ready).
     pub fn set_library(
         &mut self,
         host: std::rc::Rc<dyn crate::app::library::LibraryHost>,
         now_secs: std::rc::Rc<dyn Fn() -> f64>,
+        random: std::rc::Rc<dyn Fn() -> [u8; 16]>,
     ) {
         self.library = Some(LibraryContext {
             host,
             now_secs,
+            random,
             active: None,
             pending_close: Vec::new(),
         });
@@ -1015,30 +1060,33 @@ impl ProjectController {
         Some(lpc_wire::WireScopeRef::Module { owner })
     }
 
-    /// The frame published by an OUTPUT node this scope owns, when it has one
-    /// worth drawing.
+    /// The frame the OUTPUT nodes this scope owns compose together, when it
+    /// is worth drawing.
     ///
     /// Direct children only: "owns an output" is the question, and an output
-    /// two scopes down belongs to the module that holds it. A frame whose
-    /// geometry the engine refused (dome scale, over the wire budget) is not
-    /// worth drawing — the lens has no synthesis to stand in, and a card
-    /// saying "no display layout" is worse than the mirror it displaced — so
-    /// that scope keeps the ordinary two-channel hero.
+    /// two scopes down belongs to the module that holds it. EVERY owned
+    /// output joins the picture (`ProjectSync::composed_output_frame`) — a
+    /// scope driving two wires heroes both, which is how the small dome's
+    /// second box stopped vanishing from the module face. A composite whose
+    /// geometry the engine refused entirely (dome scale over a budgeted
+    /// wire) is not worth drawing — the lens has no synthesis to stand in,
+    /// and a card saying "no display layout" is worse than the mirror it
+    /// displaced — so that scope keeps the ordinary two-channel hero.
     fn scope_output_frame(
         &self,
         children: &[crate::UiNodeChild],
     ) -> Option<crate::UiControlProductPreview> {
         let sync = self.sync.as_ref()?;
-        children
+        let outputs: Vec<NodeId> = children
             .iter()
             .filter(|child| child.kind == OUTPUT_KIND_LABEL)
-            .find_map(|child| {
+            .filter_map(|child| {
                 let address = ProjectNodeAddress::parse(&child.detail).ok()?;
-                let node = self.node(&address)?;
-                sync.output_frame(node.target().node_id)
-                    .filter(|frame| frame.display_layout.is_some())
-                    .cloned()
+                Some(self.node(&address)?.target().node_id)
             })
+            .collect();
+        sync.composed_output_frame(&outputs)
+            .filter(|frame| frame.display_layout.is_some())
     }
 
     /// The product a scope's named channel resolved to, when it resolved to
@@ -2589,8 +2637,10 @@ impl ProjectController {
         server: &mut StudioServerClient,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         if self.library.is_some() {
+            // The demo IS example viewing: a transient session, like every
+            // example entry point (D2) — an explicit save forks it.
             return self
-                .open_example_package(server, crate::app::project::demo_project::DEMO_PROJECT_ID)
+                .open_example_transient(server, crate::app::project::demo_project::DEMO_PROJECT_ID)
                 .await;
         }
         self.mark_opening_project();
@@ -2644,34 +2694,265 @@ impl ProjectController {
             std::rc::Rc::clone(&context.host)
         };
         let opened = host.open_project(key).await.map_err(UiError::from)?;
-        self.open_opened_package(server, opened).await
+        self.open_opened_package(server, opened, None).await
     }
 
-    /// Open an example: seed it into the library once (a catalog
-    /// transaction — found by provenance on every later open, it never
-    /// reseeds), then open the copy like any package.
-    pub(crate) async fn open_example_package(
+    /// Open an embedded example as a **transient view session** (examples
+    /// vision D2): memory-backed stores, no catalog transaction, no OPFS
+    /// write, no persisted uid — the whole editor runs over the memory
+    /// copy through the ordinary funnel, and an explicit save later is
+    /// what installs it into the real library (fork-at-save).
+    ///
+    /// A library context must still be attached — the transient session
+    /// borrows its clock and lives in its active slot — but the host's
+    /// store is never touched.
+    pub(crate) async fn open_example_transient(
         &mut self,
         server: &mut StudioServerClient,
         id: &str,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         self.mark_opening_project();
-        let host = {
+        let example = crate::app::home::embedded_example(id)
+            .ok_or_else(|| UiError::MissingSession(format!("unknown example {id}")))?;
+        let (now, random) = {
             let context = self.library.as_ref().ok_or_else(no_library_error)?;
-            std::rc::Rc::clone(&context.host)
+            ((context.now_secs)(), (context.random)())
         };
-        let outcome = host
-            .catalog(crate::app::library::CatalogOp::EnsureExampleSeeded { id: id.to_string() })
-            .await
-            .map_err(UiError::from)?;
-        let summary = outcome.summary.ok_or_else(|| {
-            UiError::MissingSession(format!("seeding example {id} produced no package"))
+        // PD2: the session's uid is minted HERE, in RAM, from host entropy —
+        // never persisted and never shown while the session stays transient.
+        // It lives in the memory manifest (so the runtime and library copies
+        // can only ever agree), and the fork-at-save step promotes exactly
+        // this uid into the library — which is why it must be real entropy:
+        // once persisted it is the share link's access token (D6).
+        let opened = crate::app::library::transient::transient_opened_project(
+            example.slug(),
+            &example.files(),
+            crate::app::library::PackageProvenance::SeededFrom {
+                source: id.to_string(),
+            },
+            &random,
+            now,
+        )
+        .map_err(library_ui_error)?;
+        self.open_opened_package(
+            server,
+            opened,
+            Some(TransientOrigin::Example { id: id.to_string() }),
+        )
+        .await
+    }
+
+    /// The transient view session's origin example id, when the active
+    /// session is one (`None` for ordinary library-backed sessions). The
+    /// studio view exposes this so the web layer can address the session
+    /// as `/p/<slug>` and gate URL healing off it.
+    pub(crate) fn active_transient_example(&self) -> Option<String> {
+        match self.library.as_ref()?.active.as_ref()?.transient.as_ref()? {
+            TransientOrigin::Example { id } => Some(id.clone()),
+            TransientOrigin::SharedView { .. } => None,
+        }
+    }
+
+    /// Whether the active session is ANY kind of transient view (example
+    /// or shared) — the view's transient marker for shared views carries
+    /// no example id, so this is the general predicate.
+    pub(crate) fn active_is_transient(&self) -> bool {
+        self.library
+            .as_ref()
+            .and_then(|context| context.active.as_ref())
+            .is_some_and(|active| active.transient.is_some())
+    }
+
+    /// Completed fork-at-save count (see the field).
+    pub(crate) fn transient_fork_generation(&self) -> u64 {
+        self.transient_fork_generation
+    }
+
+    /// Open someone else's View-access shared project as a transient view
+    /// session (P5): pre-fetched working copy + real history, the cloud
+    /// document's own uid (D17), nothing installed. The explicit save
+    /// forks it into a fresh identity.
+    pub(crate) async fn open_shared_transient(
+        &mut self,
+        server: &mut StudioServerClient,
+        uid: lpc_history::PrefixedUid,
+        name: &str,
+        package_files: &[(String, Vec<u8>)],
+        history_files: &[(String, Vec<u8>)],
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        self.mark_opening_project();
+        let opened = crate::app::library::transient::transient_opened_project_prefetched(
+            uid,
+            name,
+            package_files,
+            history_files,
+        )
+        .map_err(library_ui_error)?;
+        self.open_opened_package(
+            server,
+            opened,
+            Some(TransientOrigin::SharedView {
+                parent_project: uid.to_string(),
+            }),
+        )
+        .await
+    }
+
+    /// D7 — the identity moment: on a transient view session, the explicit
+    /// save gesture forks the memory copy into the real library.
+    ///
+    /// The files (which already carry the session's uid in their manifest —
+    /// see `transient_opened_project`) and the full history install
+    /// **verbatim** through `InstallSyncedProject`, so the library copy is
+    /// byte-identical to both the memory copy and the runtime's; then the
+    /// installed project is opened on the real host (taking its lock) and
+    /// swapped in place under the running session — same uid, same content,
+    /// no re-push, no visible reload. Subsequent saves flow to the OPFS
+    /// handle, and the host's catalog broadcast is what wakes the gallery
+    /// and (with `SeededFrom`/`ForkedFrom` provenance) the cloud publish.
+    ///
+    /// `Ok(None)` = not a transient session, nothing to do. On failure the
+    /// session simply STAYS transient — the caller warns, and the next save
+    /// retries the whole install (the uid is not yet in the library, so a
+    /// retry cannot collide).
+    async fn fork_transient_at_save(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<Option<UiNotice>, UiError> {
+        let name = self.active_library_display_name();
+        let (host, origin, uid, memory_hash, head, package_files, history_files, last_synced) = {
+            // No library, no active, or not transient: nothing to fork —
+            // the ordinary save is already complete.
+            let Some(context) = self.library.as_ref() else {
+                return Ok(None);
+            };
+            let Some(active) = context.active.as_ref() else {
+                return Ok(None);
+            };
+            let Some(origin) = active.transient.clone() else {
+                return Ok(None);
+            };
+            let package_files = active.handle.read_all_files().map_err(library_ui_error)?;
+            let history_files =
+                crate::app::library::transient::all_store_files(&active.handle.history_fs)
+                    .map_err(library_ui_error)?;
+            (
+                std::rc::Rc::clone(&context.host),
+                origin,
+                active.handle.uid,
+                active.handle.content_hash().map_err(library_ui_error)?,
+                active.handle.history.head(),
+                package_files,
+                history_files,
+                active.last_synced,
+            )
+        };
+        let name = name.ok_or_else(|| {
+            UiError::MissingSession("the transient session has no display name".to_string())
         })?;
+
+        // The two origins install differently. An EXAMPLE session's uid is
+        // this browser's own mint, so it is PROMOTED: the files (manifest
+        // uid included) and history install verbatim, and nothing about the
+        // running session changes. A SHARED VIEW runs the PARENT cloud
+        // document's uid, which the fork must NOT claim — a fresh identity
+        // is minted at install, the fork starts a fresh history at its
+        // `ForkedFrom` origin, and the runtime is re-pushed afterwards so
+        // its manifest agrees with the library copy (project.json is part
+        // of the canonical hash; skipping the re-push would trip the
+        // save-as-pull corruption tripwire on every later save).
+        let (op, promoted) = match &origin {
+            TransientOrigin::Example { id } => (
+                crate::app::library::CatalogOp::InstallSyncedProject {
+                    name,
+                    package_files,
+                    history_files,
+                    provenance: crate::app::library::PackageProvenance::SeededFrom {
+                        source: id.clone(),
+                    },
+                },
+                true,
+            ),
+            TransientOrigin::SharedView { parent_project } => {
+                let parent_version = head.ok_or_else(|| {
+                    UiError::MissingSession(
+                        "the shared view has no saved version to fork".to_string(),
+                    )
+                })?;
+                (
+                    crate::app::library::CatalogOp::ForkTransientCopy {
+                        name,
+                        files: package_files
+                            .into_iter()
+                            .filter(|(path, _)| path != ".lp" && !path.starts_with(".lp/"))
+                            .collect(),
+                        provenance: crate::app::library::PackageProvenance::ForkedFrom {
+                            parent_project: parent_project.clone(),
+                            parent_version: parent_version.to_string(),
+                        },
+                    },
+                    false,
+                )
+            }
+        };
+        let outcome = host.catalog(op).await.map_err(UiError::from)?;
+        let installed = outcome.summary.ok_or_else(|| {
+            UiError::MissingSession("the fork install produced no package".to_string())
+        })?;
+        if promoted && installed.uid != uid {
+            // install_synced preserves the manifest uid by contract; a
+            // different one back means the library did something else.
+            return Err(UiError::MissingSession(format!(
+                "the fork install changed identity: {} != {uid}",
+                installed.uid
+            )));
+        }
         let opened = host
-            .open_project(&summary.uid.to_string())
+            .open_project(&installed.uid.to_string())
             .await
             .map_err(UiError::from)?;
-        self.open_opened_package(server, opened).await
+        let crate::app::library::OpenedProject {
+            uid: opened_uid,
+            slug,
+            package_fs,
+            history_fs,
+            receipt,
+        } = opened;
+        let handle =
+            crate::app::library::PackageHandle::load(opened_uid, slug, package_fs, history_fs)
+                .map_err(library_ui_error)?;
+        if promoted {
+            // The install wrote the same files — the runtime already runs
+            // this exact content, so the swap needs no re-push. Verify
+            // rather than trust: a divergent copy under a live session
+            // would corrupt the next save-as-pull.
+            let installed_hash = handle.content_hash().map_err(library_ui_error)?;
+            if installed_hash != memory_hash {
+                return Err(UiError::MissingSession(format!(
+                    "the fork install diverged from the session: {installed_hash} != {memory_hash}"
+                )));
+            }
+        }
+        let context = self.library.as_mut().ok_or_else(no_library_error)?;
+        // The memory-backed active is simply dropped: it held no host lock,
+        // and its content lives on in both the runtime and the new handle.
+        context.active = Some(ActiveLibraryProject {
+            handle,
+            last_synced,
+            transient: None,
+        });
+        // Active: the ordinary close path owns the project lock from here.
+        receipt.commit();
+        if !promoted {
+            // Shared-view fork: push the library copy (fresh uid in its
+            // manifest) over the runtime's parent-uid content. One engine
+            // reload at the fork moment; every later save is ordinary.
+            self.reload_active_from_library(server).await?;
+        }
+        self.transient_fork_generation += 1;
+        Ok(Some(UiNotice::info(
+            "Saved — this project is now in your library",
+        )))
     }
 
     /// Push a host-opened project to the runtime and make it the active
@@ -2687,6 +2968,7 @@ impl ProjectController {
         &mut self,
         server: &mut StudioServerClient,
         opened: crate::app::library::OpenedProject,
+        transient: Option<TransientOrigin>,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         let crate::app::library::OpenedProject {
             uid,
@@ -2711,7 +2993,9 @@ impl ProjectController {
         let now = {
             let context = self.library.as_mut().ok_or_else(no_library_error)?;
             if let Some(previous) = context.active.take() {
-                if previous.handle.uid != uid {
+                // A transient session holds nothing host-side — no lock,
+                // no flusher — so there is nothing to queue a close for.
+                if previous.handle.uid != uid && previous.transient.is_none() {
                     context.pending_close.push(previous.handle.uid.to_string());
                 }
             }
@@ -2742,6 +3026,7 @@ impl ProjectController {
         context.active = Some(ActiveLibraryProject {
             handle,
             last_synced: loaded.synced_version,
+            transient,
         });
         // Active: the close path owns the host's lock from here on.
         receipt.commit();
@@ -2770,7 +3055,7 @@ impl ProjectController {
         &mut self,
         server: &mut StudioServerClient,
     ) -> Result<Vec<UiLogDraft>, UiError> {
-        let (uid, slug, package_fs, history_fs) = {
+        let (uid, slug, package_fs, history_fs, transient) = {
             let context = self.library.as_ref().ok_or_else(no_library_error)?;
             let active = context.active.as_ref().ok_or_else(|| {
                 UiError::MissingSession("no active library project to reload".to_string())
@@ -2780,6 +3065,7 @@ impl ProjectController {
                 active.handle.slug.clone(),
                 std::rc::Rc::clone(&active.handle.package_fs),
                 std::rc::Rc::clone(&active.handle.history_fs),
+                active.transient.clone(),
             )
         };
         let handle = crate::app::library::PackageHandle::load(uid, slug, package_fs, history_fs)
@@ -2794,6 +3080,7 @@ impl ProjectController {
         context.active = Some(ActiveLibraryProject {
             handle,
             last_synced: loaded.synced_version,
+            transient,
         });
         self.mark_ready(title, loaded.handle_id, loaded.inventory);
         self.project_fs_root = loaded.fs_root;
@@ -2919,8 +3206,13 @@ impl ProjectController {
         }
         active.handle.record_save(now).map_err(library_ui_error)?;
         active.last_synced = pulled.version;
-        // fire-and-forget: hosts broadcast so other tabs' galleries refresh
-        context.host.notify_saved(&active.handle.uid.to_string());
+        // fire-and-forget: hosts broadcast so other tabs' galleries refresh.
+        // NOT for transient sessions: the uid is ephemeral RAM identity, and
+        // the broadcast is also the cloud sync engine's save trigger — a
+        // transient save must never enqueue a publish.
+        if active.transient.is_none() {
+            context.host.notify_saved(&active.handle.uid.to_string());
+        }
 
         // corruption tripwire: library copy must now match the runtime
         let local = active
@@ -2983,6 +3275,150 @@ impl ProjectController {
         match self.run_initial_sync(server, handle_id).await {
             Ok(logs) => Ok(ProjectSyncRun::synced(logs)),
             Err(error) => Ok(self.record_sync_failure(server, error)),
+        }
+    }
+
+    /// [`Self::sync_loaded_project`] under a progress deadline: the initial
+    /// sync's read is by far the largest pull this app makes, and a device
+    /// that resets mid-stream (bench 2026-08-26: assembly OOM on the classic)
+    /// otherwise leaves the UI in "Syncing project" forever. Timeout and
+    /// cancellation are FAILURES here — unlike the passive refresh, an
+    /// initial sync that did not complete has left the project pane empty,
+    /// and the user must see that and why.
+    pub async fn sync_loaded_project_gated<MakeTimer, Timer, Cancel>(
+        &mut self,
+        server: &mut StudioServerClient,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+    ) -> Result<ProjectSyncRun, UiError>
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        let handle_id = self.ready_handle_id()?;
+        self.sync
+            .get_or_insert_with(ProjectSync::new)
+            .begin_initial_sync();
+        match self
+            .run_initial_sync_gated(server, handle_id, deadline, cancel)
+            .await
+        {
+            Ok(logs) => Ok(ProjectSyncRun::synced(logs)),
+            Err(error) => Ok(self.record_sync_failure(server, error)),
+        }
+    }
+
+    async fn run_initial_sync_gated<MakeTimer, Timer, Cancel>(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+    ) -> Result<Vec<UiLogDraft>, UiError>
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        // Staged initial sync (wire-evolution P4): the monolithic
+        // everything-at-once read is the one shape the classic's empirics
+        // matrix proves ALWAYS OOM-resets the board. Each stage below is a
+        // PASS-row shape, bounded on its own, under its own quiet-gap
+        // deadline armed from the caller's single configured deadline.
+        let products = self.subscribed_products();
+        let (deadline_budget, mut make_timer) = deadline.into_parts();
+
+        // Stage 1/3: skeleton — everything except slot detail, no probes.
+        let request = self.sync_for_request()?.initial_skeleton_read_request();
+        log::info!(
+            "initial sync 1/3: skeleton (handle={handle_id}, {} queries)",
+            request.queries.len()
+        );
+        let read = Self::gated_sync_stage(
+            server,
+            handle_id,
+            request,
+            ProgressDeadline::new(deadline_budget, &mut make_timer),
+            cancel,
+            "skeleton",
+        )
+        .await?;
+        let mut logs = read.logs;
+        self.sync_mut()?.apply_project_read_events(read.events)?;
+
+        // Stage 2/3: slot detail, paged by the skeleton's node ids.
+        // (`since: None` per page — see `initial_slot_page_requests`.)
+        let pages = self.sync_for_request()?.initial_slot_page_requests();
+        log::info!("initial sync 2/3: slot detail in {} page(s)", pages.len());
+        for (page_index, request) in pages.into_iter().enumerate() {
+            let read = Self::gated_sync_stage(
+                server,
+                handle_id,
+                request,
+                ProgressDeadline::new(deadline_budget, &mut make_timer),
+                cancel,
+                "slot detail page",
+            )
+            .await
+            .map_err(|error| stage_page_error(error, page_index))?;
+            logs.extend(read.logs);
+            self.sync_mut()?.apply_project_read_events(read.events)?;
+        }
+
+        // Stage 3/3: probes, one per read.
+        let probe_reads = self
+            .sync_for_request()?
+            .initial_probe_read_requests(products);
+        log::info!("initial sync 3/3: {} probe read(s)", probe_reads.len());
+        for request in probe_reads {
+            let read = Self::gated_sync_stage(
+                server,
+                handle_id,
+                request,
+                ProgressDeadline::new(deadline_budget, &mut make_timer),
+                cancel,
+                "probe",
+            )
+            .await?;
+            logs.extend(read.logs);
+            self.sync_mut()?.apply_project_read_events(read.events)?;
+        }
+
+        self.apply_synced_project_view()?;
+        logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
+        log::info!("initial sync: complete");
+        Ok(logs)
+    }
+
+    /// One bounded read of the staged initial sync, with the failure naming
+    /// its stage — timeout and cancellation are FAILURES for an initial sync.
+    async fn gated_sync_stage<MakeTimer, Timer, Cancel>(
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        request: lpc_wire::ProjectReadRequest,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+        stage: &str,
+    ) -> Result<StudioProjectRead, UiError>
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        let outcome = server
+            .project_read_gated(handle_id, request, deadline, cancel)
+            .await?;
+        match outcome {
+            StudioProjectReadOutcome::Completed(read) => Ok(read),
+            StudioProjectReadOutcome::TimedOut => Err(UiError::Transport(format!(
+                "initial project sync timed out during the {stage} read: the device stopped \
+                 streaming mid-read (a device reset looks exactly like this — check the console \
+                 for [RECOVERY] lines and the pull loop's frame count)"
+            ))),
+            StudioProjectReadOutcome::Cancelled => Err(UiError::Transport(format!(
+                "initial project sync was cancelled during the {stage} read"
+            ))),
         }
     }
 
@@ -3128,8 +3564,8 @@ impl ProjectController {
             }
             // The patch surface's one shared selection — local and
             // synchronous like the card ops.
-            ProjectEditorOp::PatchSelect { target } => {
-                self.patch_selection = target;
+            ProjectEditorOp::PatchSelect { selection } => {
+                self.patch_selection = selection;
                 Ok(UiNotices::new())
             }
             // Undo-correlation journal events from the shell (P2
@@ -3566,10 +4002,9 @@ impl ProjectController {
             EditorMetaReadState::Ready(doc, _) => {
                 surface.editor_meta_loaded = true;
                 for fixture in &mut surface.fixtures {
-                    let entry = fixture
-                        .address
-                        .as_deref()
-                        .and_then(|key| doc.mapping_surface(key));
+                    let entry = fixture.address.as_deref().and_then(|address| {
+                        super::editor_meta_op::editor_meta_surface(&doc, address)
+                    });
                     fixture.arrange = Some(match entry {
                         None => crate::UiArrangeMeta::default(),
                         Some(entry) => crate::UiArrangeMeta {
@@ -3636,7 +4071,7 @@ impl ProjectController {
         // freeze together. Last, because it reads the finished fixtures.
         surface.chase_preview = super::patch_preview::chase_preview(
             &surface,
-            self.patch_selection.as_ref(),
+            self.patch_selection.single(),
             self.sync.as_ref().map_or(0, |sync| sync.frames_seen()),
         );
         (!surface.outputs.is_empty()).then_some(surface)
@@ -4674,15 +5109,40 @@ impl ProjectController {
         server: &mut StudioServerClient,
         handle_id: u32,
     ) -> Result<Vec<UiLogDraft>, UiError> {
+        let mut logs = self.run_staged_full_read(server, handle_id).await?;
+        self.apply_synced_project_view()?;
+        logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
+        Ok(logs)
+    }
+
+    /// The staged full read (skeleton → slot pages → probes), un-gated —
+    /// the timer-less arm used by tests/hosts and by applier-corruption
+    /// recovery. Same stage shapes as [`Self::run_initial_sync_gated`]; the
+    /// monolithic everything-at-once read is deliberately never sent
+    /// (it is the shape that OOM-reset the classic).
+    async fn run_staged_full_read(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
         let products = self.subscribed_products();
-        let request = self
-            .sync_for_request()?
-            .initial_project_read_request(products);
+        let request = self.sync_for_request()?.initial_skeleton_read_request();
         let read = server.project_read(handle_id, request).await?;
         let mut logs = read.logs;
         self.sync_mut()?.apply_project_read_events(read.events)?;
-        self.apply_synced_project_view()?;
-        logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
+        for request in self.sync_for_request()?.initial_slot_page_requests() {
+            let read = server.project_read(handle_id, request).await?;
+            logs.extend(read.logs);
+            self.sync_mut()?.apply_project_read_events(read.events)?;
+        }
+        for request in self
+            .sync_for_request()?
+            .initial_probe_read_requests(products)
+        {
+            let read = server.project_read(handle_id, request).await?;
+            logs.extend(read.logs);
+            self.sync_mut()?.apply_project_read_events(read.events)?;
+        }
         Ok(logs)
     }
 
@@ -4726,13 +5186,7 @@ impl ProjectController {
                     ),
                 ));
                 self.sync_mut()?.reset_view();
-                let products = self.subscribed_products();
-                let request = self
-                    .sync_for_request()?
-                    .initial_project_read_request(products);
-                let resync = server.project_read(handle_id, request).await?;
-                logs.extend(resync.logs);
-                self.sync_mut()?.apply_project_read_events(resync.events)?;
+                logs.extend(self.run_staged_full_read(server, handle_id).await?);
             }
             Err(error) => return Err(error),
         }
@@ -4893,9 +5347,12 @@ impl ProjectController {
         // the library binding follows the loaded project: a disconnected or
         // failed project must not keep pulling saves into (or advertising)
         // the previously open package. Its host lock is queued for release
-        // (this path is sync; the settle points drain the queue).
+        // (this path is sync; the settle points drain the queue). A
+        // transient session holds no host lock, so nothing is queued.
         if let Some(library) = self.library.as_mut() {
-            if let Some(previous) = library.active.take() {
+            if let Some(previous) = library.active.take()
+                && previous.transient.is_none()
+            {
                 library.pending_close.push(previous.handle.uid.to_string());
             }
         }
@@ -5105,10 +5562,12 @@ impl ProjectController {
         server: &mut StudioServerClient,
         op: crate::PatchPulseOp,
     ) -> Result<ProjectEditRun, UiError> {
-        use super::patch_pulse::{PulseWire, pulse_highlights, wire_extent_lamps};
+        use super::patch_pulse::{
+            PulseWire, merge_highlight_texts, pulse_highlights, wire_extent_lamps,
+        };
 
-        let writes: Vec<(NodeId, String)> = match (&op.subject, self.sync.as_ref()) {
-            (Some(subject), Some(sync)) => {
+        let writes: Vec<(NodeId, String)> = match (op.subjects.as_slice(), self.sync.as_ref()) {
+            (subjects @ [_, ..], Some(sync)) => {
                 let outputs: Vec<NodeId> = sync.published_outputs().collect();
                 let wires: Vec<PulseWire<'_>> = outputs
                     .iter()
@@ -5121,7 +5580,21 @@ impl ProjectController {
                         ),
                     })
                     .collect();
-                pulse_highlights(subject, &wires)
+                // The multi-selection union: each subject maps alone, and
+                // same-output texts merge (breath span lists — the sibling
+                // invariant keeps chase single-subject).
+                let mut merged: Vec<(NodeId, String)> = Vec::new();
+                for subject in subjects {
+                    for (node, text) in pulse_highlights(subject, &wires) {
+                        match merged.iter_mut().find(|(n, _)| *n == node) {
+                            Some((_, existing)) => {
+                                *existing = merge_highlight_texts(existing, &text);
+                            }
+                            None => merged.push((node, text)),
+                        }
+                    }
+                }
+                merged
             }
             _ => Vec::new(),
         };
@@ -5471,15 +5944,34 @@ impl ProjectController {
             UiNotice::info(format!("Saved {written} project file(s)"))
         };
         let mut notices = UiNotices::new().with_notice(notice);
+        let mut pulled = true;
         if written > 0 {
             // save-as-pull: the library copy tracks every committed save
             match self.pull_committed_changes_into_library(server).await {
                 Ok(Some(warning)) => notices = notices.with_notice(warning),
                 Ok(None) => {}
                 Err(e) => {
+                    pulled = false;
                     log::warn!("save-as-pull failed (will retry on next save): {e:?}");
                     notices = notices.with_notice(UiNotice::warning(
                         "Saved to the running project, but not yet to your library — will retry on the next save",
+                    ));
+                }
+            }
+        }
+        // D7: on a TRANSIENT session the explicit save is the fork moment —
+        // the memory copy (which now holds the committed save) installs
+        // into the real library and the session becomes an ordinary one.
+        // Skipped when the pull failed: the memory copy would be missing
+        // the very save the user just made; the next save retries both.
+        if pulled {
+            match self.fork_transient_at_save(server).await {
+                Ok(Some(forked)) => notices = notices.with_notice(forked),
+                Ok(None) => {}
+                Err(e) => {
+                    log::warn!("fork-at-save failed (session stays transient): {e:?}");
+                    notices = notices.with_notice(UiNotice::warning(
+                        "Saved in this session, but couldn't add the project to your library — will retry on the next save",
                     ));
                 }
             }
@@ -7416,55 +7908,94 @@ impl ProjectController {
                 node,
                 transform,
             } => {
-                let (mut doc, before) = match self.editor_meta_read() {
-                    Ok(loaded) => loaded,
-                    Err(reason) => return blocked(reason),
-                };
-                let surface = doc.mapping_surface_mut(node_key);
-                surface.transform = lpc_mapping::EditorTransform {
-                    t: transform.t,
-                    r: transform.r,
-                    s: transform.s,
-                };
-                // Opportunistic footprint refresh: every fixture whose map2d
-                // is locally cached gets its cached footprint trued up as
-                // part of this write (never an unprompted write). Only
-                // ARRANGED fixtures get entries — a footprint alone must not
-                // arrange a node.
-                for fixture in &op.fixtures {
-                    let fresh = self.arrange_footprint(fixture.mapping_artifact.as_ref());
-                    let Some(fresh) = fresh else { continue };
-                    let entry_exists = fixture.node_key == *node_key
-                        || doc.mapping_surface(&fixture.node_key).is_some();
-                    if entry_exists {
-                        let surface = doc.mapping_surface_mut(&fixture.node_key);
-                        if surface.footprint != Some(fresh) {
-                            surface.footprint = Some(fresh);
-                        }
-                    }
-                }
-                doc.normalize_format();
-                let after = format!("{}\n", doc.to_json_pretty()).into_bytes();
-                if after == before {
-                    return Ok(ProjectEditRun {
-                        notices: UiNotices::new(),
-                        logs: Vec::new(),
-                    });
-                }
-                let seq = self.record_edit(*node, crate::UiEditorMode::Arrange);
-                self.arrange_undo.push(EditStep {
-                    seq,
+                let entries = vec![crate::EditorMetaSet {
+                    node_key: node_key.clone(),
                     node: *node,
-                    mode: crate::UiEditorMode::Arrange,
-                    writes: vec![(op.artifact.clone(), before, after.clone())],
-                });
-                self.arrange_redo.clear();
-                // The file exists (in the overlay) from here on.
-                self.editor_meta_absent = false;
-                self.apply_asset_body(server, op.artifact.clone(), after)
-                    .await
+                    transform: *transform,
+                }];
+                self.apply_editor_meta_set(server, &op, &entries).await
+            }
+            crate::EditorMetaVerb::SetMany { entries } => {
+                if entries.is_empty() {
+                    return blocked("nothing to arrange".into());
+                }
+                let entries = entries.clone();
+                self.apply_editor_meta_set(server, &op, &entries).await
             }
         }
+    }
+
+    /// The shared Set/SetMany body: every entry's transform lands in ONE
+    /// document round-trip and ONE byte-stack snapshot, so a multi-fixture
+    /// gesture is exactly one undo step (unified-selection P3).
+    async fn apply_editor_meta_set(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: &crate::EditorMetaOp,
+        entries: &[crate::EditorMetaSet],
+    ) -> Result<ProjectEditRun, UiError> {
+        let (mut doc, before) = match self.editor_meta_read() {
+            Ok(loaded) => loaded,
+            Err(reason) => {
+                return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                    "Arrange edit blocked: {reason}"
+                ))));
+            }
+        };
+        for entry in entries {
+            // Keys are stored PROJECT-RELATIVE (the DTO sends the runtime
+            // address; the root segment is the host's mount) — see
+            // `editor_meta_node_key`. A legacy rooted entry is left in
+            // place; the relative key wins on read.
+            let key = super::editor_meta_op::editor_meta_node_key(&entry.node_key);
+            let surface = doc.mapping_surface_mut(key);
+            surface.transform = lpc_mapping::EditorTransform {
+                t: entry.transform.t,
+                r: entry.transform.r,
+                s: entry.transform.s,
+            };
+        }
+        // Opportunistic footprint refresh: every fixture whose map2d
+        // is locally cached gets its cached footprint trued up as
+        // part of this write (never an unprompted write). Only
+        // ARRANGED fixtures get entries — a footprint alone must not
+        // arrange a node.
+        for fixture in &op.fixtures {
+            let fresh = self.arrange_footprint(fixture.mapping_artifact.as_ref());
+            let Some(fresh) = fresh else { continue };
+            let key = super::editor_meta_op::editor_meta_node_key(&fixture.node_key);
+            let entry_exists = entries
+                .iter()
+                .any(|entry| super::editor_meta_op::editor_meta_node_key(&entry.node_key) == key)
+                || doc.mapping_surface(key).is_some();
+            if entry_exists {
+                let surface = doc.mapping_surface_mut(key);
+                if surface.footprint != Some(fresh) {
+                    surface.footprint = Some(fresh);
+                }
+            }
+        }
+        doc.normalize_format();
+        let after = format!("{}\n", doc.to_json_pretty()).into_bytes();
+        if after == before {
+            return Ok(ProjectEditRun {
+                notices: UiNotices::new(),
+                logs: Vec::new(),
+            });
+        }
+        let node = entries.first().and_then(|entry| entry.node);
+        let seq = self.record_edit(node, crate::UiEditorMode::Arrange);
+        self.arrange_undo.push(EditStep {
+            seq,
+            node,
+            mode: crate::UiEditorMode::Arrange,
+            writes: vec![(op.artifact.clone(), before, after.clone())],
+        });
+        self.arrange_redo.clear();
+        // The file exists (in the overlay) from here on.
+        self.editor_meta_absent = false;
+        self.apply_asset_body(server, op.artifact.clone(), after)
+            .await
     }
 
     /// Stage `bytes` as the pending body for `artifact` and send it as a
@@ -16887,5 +17418,16 @@ mod tests {
 
     impl Wake for NoopWake {
         fn wake(self: Arc<Self>) {}
+    }
+}
+
+/// Stamp a stage-2 page index into the stage error so a mid-page failure
+/// names how far the staged sync got.
+fn stage_page_error(error: UiError, page_index: usize) -> UiError {
+    match error {
+        UiError::Transport(message) => {
+            UiError::Transport(format!("{message} (slot page {page_index})"))
+        }
+        other => other,
     }
 }

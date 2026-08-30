@@ -12,9 +12,11 @@
 //! Layers (bottom → top): dot-grid background, fixture sprites (project
 //! space; dived, the focused sprite's body yields to the live doc layers
 //! and neighbours dim), the authored canvas rect, the fit-preview overlay,
-//! wiring arrows, lamps, wiring numbers, the selection outline + corner
-//! resize handles, path vertex handles, the path-draft preview, and the
-//! marquee.
+//! wiring arrows, the shaped matrices' authored silhouettes, lamps, wiring
+//! numbers, the selection outline + corner resize handles, vertex handles,
+//! the drawing-tool draft preview (vertices, the polygon's implicit closing
+//! edge and close target, and the ghost lamps the tool would commit), and
+//! the marquee.
 //!
 //! Every mutation flows through `MapEditorSession` ops: drags run
 //! `begin_gesture` → `*_from_gesture` (totals, no drift) → `commit_gesture`
@@ -32,7 +34,9 @@ use dioxus::prelude::*;
 use lpc_mapping::{Bounds2d, Map2dShape, ResolvedMap2d, Rotation2d, bounds_of_points, resolve};
 
 use crate::editor_core::camera::Camera;
-use crate::editor_core::editor_session::{MapEditorSession, editable_path};
+use crate::editor_core::editor_session::{
+    DEFAULT_PITCH, MapEditorSession, editable_path, editable_vertices, polygon_draft_shape,
+};
 use crate::editor_core::map_tool::MapTool;
 use crate::editor_core::placement::Placement;
 use crate::editor_core::view_geometry::{ArrowInput, wiring_arrows};
@@ -42,7 +46,8 @@ pub use canvas_anchor::{CanvasAnchor, capture_pointer};
 pub use lamp_metrics::{authored_spans, fit_region, lamp_display_radius};
 pub use palette::object_color;
 
-pub use layers::cells::{LampCell, lamp_cells};
+pub use layers::bodies::CellSeeding;
+pub use layers::cells::{LampCell, lamp_cells, point_cells};
 pub use layers::fixtures::{FixtureBody, FixtureEvent, FixturePick, FixtureSprite, SpriteObject};
 pub use layers::outline::{aligned_outline, dist_to_loops, hit_body, point_in_loops};
 
@@ -51,8 +56,9 @@ use layers::bodies::object_bodies;
 use layers::doc::{DocLayersInput, doc_layers};
 use layers::draft::{DraftLayerInput, draft_layer};
 use layers::fixtures::{
-    FixtureLayerInput, SELECT_SLOP_PX, dragged_placement, exceeds_drag_threshold, fixture_layer,
-    hit_fixture, nearest_lamp, resolve_object_pick, within_cycle_radius,
+    FixtureLayerInput, SELECT_SLOP_PX, clamp_scale_factor, dragged_placements,
+    exceeds_drag_threshold, fixture_layer, hit_fixture, nearest_lamp, resolve_object_pick,
+    scaled_placements, sprite_project_aabb, sprites_in_rect, within_cycle_radius,
 };
 use layers::marquee::marquee_layer;
 use layers::selection::{SelectionLayerInput, selection_layer};
@@ -80,13 +86,25 @@ pub enum CanvasDrag {
         /// lamp, so what the pointer went down on is what gets selected.
         object: Option<usize>,
         start_client: [f64; 2],
-        original: Placement,
+        /// The MOVING SET's press-time placements: the whole selected set
+        /// when the press landed on a selected sprite (drag moves them
+        /// together), else just the pressed one.
+        originals: Vec<(String, Placement)>,
         moved: bool,
     },
-    /// Background press under the fixture grammar: pointer-up without
-    /// movement deselects.
-    FixtureTap {
-        start_client: [f64; 2],
+    /// Background press under the fixture grammar: a rubber-band over the
+    /// sprites. Tiny at release = a deselect tap (non-additive only).
+    FixtureMarquee {
+        start: [f32; 2],
+        current: [f32; 2],
+        additive: bool,
+    },
+    /// Corner drag of the fixture selection box: uniform scale of the
+    /// whole selected set about the shared box's opposite corner (D5).
+    FixtureScale {
+        anchor: [f32; 2],
+        start: [f32; 2],
+        originals: Vec<(String, Placement)>,
         moved: bool,
     },
     /// Group move: totals from the gesture-start doc point.
@@ -144,6 +162,17 @@ pub(crate) struct CanvasInteract {
     pub(crate) drag: Signal<Option<CanvasDrag>>,
     pub(crate) anchor: Signal<CanvasAnchor>,
     pub(crate) placement: Placement,
+    /// Space-bar held (window-tracked): the press belongs to the PAN, so
+    /// element handlers step aside and let the svg-level grammar take it.
+    pub(crate) space_held: Signal<bool>,
+}
+
+/// Does this press belong to the canvas PAN rather than the element's own
+/// grammar? True for the secondary (right) and auxiliary (middle) buttons
+/// and while the space bar is held — element handlers return early
+/// WITHOUT stopping propagation, so the svg-level handler arms the pan.
+pub(crate) fn pan_takes_press(interact: &CanvasInteract, evt: &Event<PointerData>) -> bool {
+    pan_button(evt) || *interact.space_held.peek()
 }
 
 #[component]
@@ -189,6 +218,11 @@ pub fn EditorCanvas(
     /// editor grammar needs a dived session.
     #[props(default)]
     on_fixture: Option<EventHandler<FixtureEvent>>,
+    /// Render the fixture selection box + corner scale handles around the
+    /// selected sprites (Mapping furniture — the Patching host omits it;
+    /// transforms are not that view's activity).
+    #[props(default)]
+    transform_handles: bool,
     /// Host-owned reference image, rendered doc-space at the origin between
     /// the dot grid and the authored canvas rect when `view_opts.reference`.
     #[props(default)]
@@ -261,6 +295,8 @@ pub fn EditorCanvas(
         });
     }
 
+    // Space-bar pan state (window-tracked; cleared on keyup and blur).
+    let space_held = crate::view::window_keys::use_space_held();
     // Overlap-selection state (P5). All of it is ephemeral view policy:
     // where the last pick was pressed (the cycle's whole memory), the open
     // candidate menu, the hold timer's ticket, and the right-press travel
@@ -306,6 +342,7 @@ pub fn EditorCanvas(
         drag,
         anchor,
         placement,
+        space_held,
     };
     // The activity discriminator: the fixture grammar owns svg-level
     // presses when the shell listens for fixture events and nothing is
@@ -315,6 +352,8 @@ pub fn EditorCanvas(
     let fixture_mode = on_fixture.is_some() && focused.is_none();
     let fixtures_down = fixtures.clone();
     let fixtures_dbl = fixtures.clone();
+    let fixtures_up = fixtures.clone();
+    let focused_down = focused.clone();
     let fixtures_menu = fixtures.clone();
     let focused_dbl = focused.clone();
     let cam = camera();
@@ -327,15 +366,35 @@ pub fn EditorCanvas(
     let tool_is_select = matches!(session_read.tool, MapTool::Select);
     let tool = session_read.tool.clone();
     let selection = session_read.selection.clone();
-    // Authored polylines, repeats included: a repeated path's editable
-    // geometry is instance 0 — the unrotated inner path — so that is what
-    // takes clicks and shows handles.
-    let path_objects: Vec<(usize, Vec<[f32; 2]>)> = doc
+    // Authored vertex chains, repeats included: a repeated shape's editable
+    // geometry is instance 0 — the unrotated inner shape — so that is what
+    // takes clicks and shows handles. Every vertexed shape answers here
+    // (path, polygon, shaped matrix), and a CLOSED chain is drawn closed, so
+    // the hit line covers the seam edge a polygon actually has.
+    let hit_outlines: Vec<(usize, Vec<[f32; 2]>)> = doc
         .objects
         .iter()
         .enumerate()
         .filter_map(|(index, object)| {
-            editable_path(&object.shape).map(|path| (index, path.points.clone()))
+            let points = editable_vertices(&object.shape)?;
+            Some((
+                index,
+                chain_points(points, vertices_are_closed(&object.shape)),
+            ))
+        })
+        .collect();
+    // A shaped matrix's lamps are a FIELD, and its body draws no band at all
+    // (bodies.rs), so nothing else on the canvas draws the outline they fill:
+    // the authored silhouette gets its own thin line. Authored grain, like the
+    // wiring annotations: instance 0 of a repeat, never all of them.
+    let filled_outlines: Vec<(usize, Vec<[f32; 2]>)> = doc
+        .objects
+        .iter()
+        .enumerate()
+        .filter(|(_, object)| is_filled_polygon(&object.shape))
+        .filter_map(|(index, object)| {
+            let points = editable_vertices(&object.shape)?;
+            Some((index, chain_points(points, true)))
         })
         .collect();
     // Inert (jumper) segments carry no lamps, so nothing else on the canvas
@@ -371,13 +430,16 @@ pub fn EditorCanvas(
         .and_then(|path| path.resolve(doc))
         .and_then(|shape| match shape {
             Map2dShape::Repeat(repeat) => {
-                let path = editable_path(&repeat.shape)?;
+                let points = chain_points(
+                    editable_vertices(&repeat.shape)?,
+                    vertices_are_closed(shape),
+                );
                 Some(
                     (1..repeat.count)
                         .map(|instance| {
                             let rotation =
                                 Rotation2d::about(repeat.center, repeat.instance_degrees(instance));
-                            path.points.iter().map(|p| rotation.apply(*p)).collect()
+                            points.iter().map(|p| rotation.apply(*p)).collect()
                         })
                         .collect(),
                 )
@@ -484,64 +546,97 @@ pub fn EditorCanvas(
     let handle_half = 5.0 / eff;
     let selection_margin = radius + 8.0 / eff;
 
-    // Vertex handles for a single selected path — the inner path through a
-    // repeat, whose other instances follow the drag on the next resolve.
+    // Vertex handles for a single selected shape — every shape with authored
+    // vertices (path, polygon, shaped matrix), taken through a repeat at
+    // instance 0, whose other instances follow the drag on the next resolve.
     let vertex_points: Vec<[f32; 2]> = selection
         .single()
         .and_then(|path| path.resolve(doc))
         .filter(|_| tool_is_select)
-        .and_then(editable_path)
-        .map(|path| path.points.clone())
+        .and_then(editable_vertices)
+        .map(<[[f32; 2]]>::to_vec)
         .unwrap_or_default();
     let selected_vertex = selection.vertex;
 
-    // Path draft preview: draft vertices + resolved ghost lamps + the chain
-    // link from the previous object's last lamp.
+    // Draft preview: the placed vertices, the ghost lamps the tool would
+    // commit, and the chain link from the previous object's last lamp.
     let draft_points: Vec<[f32; 2]> = match &tool {
-        MapTool::Path { draft } => draft.clone(),
+        MapTool::Path { draft } | MapTool::Polygon { draft, .. } => draft.clone(),
         _ => Vec::new(),
     };
-    let draft_ghosts: Vec<[f32; 2]> = if draft_points.len() >= 2 {
-        let length: f32 = draft_points
-            .windows(2)
-            .map(|pair| {
-                ((pair[1][0] - pair[0][0]).powi(2) + (pair[1][1] - pair[0][1]).powi(2)).sqrt()
-            })
-            .sum();
-        let count = ((length / 26.0).round() as u32).max(2);
-        let ghost_doc = lpc_mapping::Map2dDoc {
-            objects: vec![lpc_mapping::Map2dObject {
-                name: String::new(),
-                id: None,
-                stride: None,
-                shape: Map2dShape::Path(lpc_mapping::PathShape {
-                    points: draft_points.clone(),
-                    count,
-                    reversed: false,
-                    gaps: Vec::new(),
-                    align: lpc_mapping::PathAlign::On,
-                }),
-            }],
-            ..lpc_mapping::Map2dDoc::new()
-        };
-        resolve(&ghost_doc)
-            .map(|resolved| resolved.positions())
-            .unwrap_or_default()
-    } else {
-        Vec::new()
+    let draft_ghosts: Vec<[f32; 2]> = match &tool {
+        // The path tool's own count heuristic, previewed through the
+        // resolver.
+        MapTool::Path { draft } if draft.len() >= 2 => {
+            let length: f32 = draft
+                .windows(2)
+                .map(|pair| {
+                    ((pair[1][0] - pair[0][0]).powi(2) + (pair[1][1] - pair[0][1]).powi(2)).sqrt()
+                })
+                .sum();
+            let count = ((length / DEFAULT_PITCH).round() as u32).max(2);
+            ghost_positions(Map2dShape::Path(lpc_mapping::PathShape {
+                points: draft.clone(),
+                count,
+                reversed: false,
+                gaps: Vec::new(),
+                align: lpc_mapping::PathAlign::On,
+            }))
+        }
+        // The polygon tool previews the SHAPE ITSELF: `polygon_draft_shape`
+        // is what `polygon_finish` commits, resolved by the real resolver —
+        // so the lattice on screen is the lattice that lands, cell for cell.
+        MapTool::Polygon { draft, mode } => polygon_draft_shape(draft, *mode)
+            .map(ghost_positions)
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    // The close target: a polygon draft's first vertex, once there are
+    // enough points for the next click on it to close the outline.
+    let draft_close_target = match &tool {
+        MapTool::Polygon { draft, .. } => close_target(draft).copied(),
+        _ => None,
     };
     let chain_from = (!draft_points.is_empty())
         .then(|| positions.last().copied())
         .flatten();
 
     let marquee_rect = match drag() {
-        Some(CanvasDrag::Marquee { start, current, .. }) => {
+        Some(
+            CanvasDrag::Marquee { start, current, .. }
+            | CanvasDrag::FixtureMarquee { start, current, .. },
+        ) => {
             let min = [start[0].min(current[0]), start[1].min(current[1])];
             let max = [start[0].max(current[0]), start[1].max(current[1])];
             Some((min, [max[0] - min[0], max[1] - min[1]]))
         }
         _ => None,
     };
+    // The fixture selection box (unified-selection P3): the shared
+    // project-space AABB of the selected sprites, wearing corner scale
+    // handles when the host asked for transform furniture.
+    let fixture_box: Option<([f64; 4], Vec<(String, Placement)>)> = fixture_mode
+        .then(|| {
+            let selected: Vec<&FixtureSprite> =
+                fixtures.iter().filter(|sprite| sprite.selected).collect();
+            if selected.is_empty() {
+                return None;
+            }
+            let mut bbox = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+            for sprite in &selected {
+                let [x0, y0, x1, y1] = sprite_project_aabb(sprite);
+                bbox[0] = bbox[0].min(x0);
+                bbox[1] = bbox[1].min(y0);
+                bbox[2] = bbox[2].max(x1);
+                bbox[3] = bbox[3].max(y1);
+            }
+            let originals: Vec<(String, Placement)> = selected
+                .iter()
+                .map(|sprite| (sprite.key.clone(), sprite.placement))
+                .collect();
+            Some((bbox, originals))
+        })
+        .flatten();
     drop(session_read);
 
     let commit_drag = move |mut session: Signal<MapEditorSession>| {
@@ -562,7 +657,7 @@ pub fn EditorCanvas(
     rsx! {
         svg {
             id: "{canvas_dom_id}",
-            class: if tool_is_select { "lpme-canvas" } else { "lpme-canvas lpme-canvas-tool" },
+            class: if space_held() { "lpme-canvas lpme-canvas-pan" } else if tool_is_select { "lpme-canvas" } else { "lpme-canvas lpme-canvas-tool" },
             onmounted: move |evt| {
                 #[cfg(target_arch = "wasm32")]
                 if let Some(element) = evt.data().downcast::<web_sys::Element>() {
@@ -574,8 +669,9 @@ pub fn EditorCanvas(
                 let _ = (&evt, &measure_cb);
                 measure();
             },
-            // Right-drag pans regardless of tool (the context menu is
-            // suppressed below); left button keeps the tool grammar.
+            // Right-drag, middle-drag, and space+drag pan regardless of
+            // tool (the context menu is suppressed below); a plain left
+            // button keeps the tool grammar.
             onpointerdown: move |evt| {
                 // Any new press supersedes a pending hold timer and puts
                 // an open menu away. This press's own ticket is what the
@@ -603,16 +699,28 @@ pub fn EditorCanvas(
                 if right_press.peek().is_some() {
                     right_press.set(None);
                 }
+                // Middle-drag and space+drag pan too (the right button was
+                // taken above, with its context-menu bookkeeping).
+                if pan_button(&evt) || *space_held.peek() {
+                    capture_pointer(&evt);
+                    drag.set(Some(CanvasDrag::Pan {
+                        last: event_view_point(&anchor, &evt),
+                    }));
+                    return;
+                }
                 capture_pointer(&evt);
                 if fixture_mode {
                     // Fixture grammar, one canvas-level hit test: press on
-                    // a sprite arms a maybe-move, background press arms a
-                    // deselect tap. No editor grammar runs — no session.
+                    // a sprite arms a maybe-move (of the whole selected set
+                    // when the sprite is in it), shift-click toggles the
+                    // sibling, background press arms the marquee. No
+                    // editor grammar runs — no session.
                     let point = evt.data().client_coordinates();
                     let client = [point.x, point.y];
                     let view = event_view_point(&anchor, &evt);
                     let project = camera.peek().view_to_doc(view);
                     let project_point = [f64::from(project[0]), f64::from(project[1])];
+                    let shift = evt.data().modifiers().shift();
                     match hit_fixture(&fixtures_down, project_point) {
                         Some(sprite) => {
                             // Cycling is a claim about AIM, so it is judged
@@ -628,6 +736,22 @@ pub fn EditorCanvas(
                                 repeat_press,
                             );
                             let lamp = nearest_lamp(sprite, project_point);
+                            if shift {
+                                // Shift-click is pure selection intent —
+                                // no drag arms, no hold menu; the shell
+                                // toggles the sibling.
+                                if let Some(handler) = &on_fixture {
+                                    handler.call(FixtureEvent::Select {
+                                        pick: Some(FixturePick {
+                                            key: sprite.key.clone(),
+                                            lamp,
+                                            object: pick.index,
+                                        }),
+                                        toggle: true,
+                                    });
+                                }
+                                return;
+                            }
                             // Hold-to-menu, but only where the point is
                             // genuinely AMBIGUOUS: with one candidate the
                             // menu would say nothing the press has not
@@ -642,30 +766,73 @@ pub fn EditorCanvas(
                                     candidate_menu::build(sprite, &pick.candidates, view, lamp),
                                 );
                             }
+                            // A press on a SELECTED sprite drags the whole
+                            // selected set; an unselected one drags alone.
+                            let originals: Vec<(String, Placement)> = if sprite.selected {
+                                fixtures_down
+                                    .iter()
+                                    .filter(|sprite| sprite.selected)
+                                    .map(|sprite| (sprite.key.clone(), sprite.placement))
+                                    .collect()
+                            } else {
+                                vec![(sprite.key.clone(), sprite.placement)]
+                            };
                             drag.set(Some(CanvasDrag::FixturePress {
                                 key: sprite.key.clone(),
                                 lamp,
                                 object: pick.index,
                                 start_client: client,
-                                original: sprite.placement,
+                                originals,
                                 moved: false,
                             }));
                         }
-                        None => drag.set(Some(CanvasDrag::FixtureTap {
-                            start_client: client,
-                            moved: false,
+                        None => drag.set(Some(CanvasDrag::FixtureMarquee {
+                            start: project,
+                            current: project,
+                            additive: shift,
                         })),
                     }
                     return;
+                }
+                // D4 (unified selection): while dived, a NEIGHBOUR
+                // fixture's sprite takes single clicks — click selects at
+                // scope level, so the shell ascends to that fixture. The
+                // focused document's own elements stop propagation before
+                // this, and the focused sprite's body is hidden.
+                if on_fixture.is_some() {
+                    let view = event_view_point(&anchor, &evt);
+                    let project = camera.peek().view_to_doc(view);
+                    let project_point = [f64::from(project[0]), f64::from(project[1])];
+                    if let Some(sprite) = hit_fixture(&fixtures_down, project_point)
+                        .filter(|sprite| focused_down.as_deref() != Some(sprite.key.as_str()))
+                    {
+                        if let Some(handler) = &on_fixture {
+                            let pick = resolve_object_pick(
+                                sprite,
+                                project_point,
+                                own_space_slop(camera.peek().scale, sprite.placement.s),
+                                false,
+                            );
+                            handler.call(FixtureEvent::Select {
+                                pick: Some(FixturePick {
+                                    key: sprite.key.clone(),
+                                    lamp: nearest_lamp(sprite, project_point),
+                                    object: pick.index,
+                                }),
+                                toggle: evt.data().modifiers().shift(),
+                            });
+                        }
+                        return;
+                    }
                 }
                 let doc_point = event_doc_point(&interact, &evt);
                 let shift = evt.data().modifiers().shift();
                 let tool_now = session.read().tool.clone();
                 match tool_now {
                     MapTool::Select => {
-                        if !shift {
-                            session.write().selection.clear();
-                        }
+                        // The press no longer clears eagerly: a tap's full
+                        // ascend (D3) and a marquee's replace both resolve
+                        // at RELEASE, so an aborted band loses nothing.
                         drag.set(Some(CanvasDrag::Marquee {
                             start: doc_point,
                             current: doc_point,
@@ -683,6 +850,25 @@ pub fn EditorCanvas(
                     MapTool::Path { .. } => {
                         session.write().path_add_point(doc_point);
                     }
+                    MapTool::Polygon { ref draft, .. } => {
+                        // Close-on-first is the polygon's primary finish:
+                        // a click inside the first vertex's hit ring closes
+                        // the outline instead of adding a point. The ring is
+                        // SCREEN-sized (the vertex-handle convention), so the
+                        // target neither shrinks with zoom nor swallows
+                        // deliberate clicks when zoomed in.
+                        if closes_polygon_draft(draft, doc_point, eff) {
+                            // A refused finish (fewer than three DISTINCT
+                            // vertices survive the draft merge) is an IGNORED
+                            // gesture — the draft and the tool both stay, so
+                            // the author keeps their clicks.
+                            if session.write().polygon_finish().is_some() {
+                                on_committed.call(());
+                            }
+                        } else {
+                            session.write().polygon_add_point(doc_point);
+                        }
+                    }
                 }
             },
             onpointermove: move |evt| {
@@ -696,7 +882,7 @@ pub fn EditorCanvas(
                         lamp,
                         object,
                         start_client,
-                        original,
+                        originals,
                         moved,
                     } => {
                         let point = evt.data().client_coordinates();
@@ -710,9 +896,8 @@ pub fn EditorCanvas(
                         }
                         if now_moved && let Some(handler) = &on_fixture {
                             handler.call(FixtureEvent::Move {
-                                key: key.clone(),
-                                placement: dragged_placement(
-                                    original,
+                                moves: dragged_placements(
+                                    &originals,
                                     start_client,
                                     client,
                                     camera.peek().scale,
@@ -725,21 +910,49 @@ pub fn EditorCanvas(
                             lamp,
                             object,
                             start_client,
-                            original,
+                            originals,
                             moved: now_moved,
                         }));
                     }
-                    CanvasDrag::FixtureTap {
-                        start_client,
-                        moved,
+                    CanvasDrag::FixtureMarquee {
+                        start, additive, ..
                     } => {
-                        let point = evt.data().client_coordinates();
-                        if !moved && exceeds_drag_threshold(start_client, [point.x, point.y]) {
-                            drag.set(Some(CanvasDrag::FixtureTap {
-                                start_client,
-                                moved: true,
-                            }));
+                        drag.set(Some(CanvasDrag::FixtureMarquee {
+                            start,
+                            current: doc_point,
+                            additive,
+                        }));
+                    }
+                    CanvasDrag::FixtureScale {
+                        anchor,
+                        start,
+                        originals,
+                        ..
+                    } => {
+                        let start_dist = ((start[0] - anchor[0]).powi(2)
+                            + (start[1] - anchor[1]).powi(2))
+                        .sqrt();
+                        if start_dist > 1e-3 {
+                            let now_dist = ((doc_point[0] - anchor[0]).powi(2)
+                                + (doc_point[1] - anchor[1]).powi(2))
+                            .sqrt();
+                            let factor = clamp_scale_factor(
+                                &originals,
+                                f64::from(now_dist / start_dist),
+                            );
+                            if let Some(handler) = &on_fixture {
+                                handler.call(FixtureEvent::Move {
+                                    moves: scaled_placements(&originals, anchor, factor),
+                                    commit: false,
+                                });
+                            }
                         }
+                        drag.set(Some(CanvasDrag::FixtureScale {
+                            anchor,
+                            start,
+                            originals,
+                            moved: true,
+                        }));
                     }
                     CanvasDrag::Pan { last } => {
                         // A right-drag past the threshold is a PAN, and a
@@ -811,19 +1024,19 @@ pub fn EditorCanvas(
                         lamp,
                         object,
                         start_client,
-                        original,
+                        originals,
                         moved,
                     } => {
                         if let Some(handler) = &on_fixture {
                             if moved {
-                                // One gesture = one committed move. The
-                                // shell holds the override until the write
-                                // echoes — no snap-back.
+                                // One gesture = one committed move (the
+                                // whole set together). The shell holds the
+                                // override until the write echoes — no
+                                // snap-back.
                                 let point = evt.data().client_coordinates();
                                 handler.call(FixtureEvent::Move {
-                                    key,
-                                    placement: dragged_placement(
-                                        original,
+                                    moves: dragged_placements(
+                                        &originals,
                                         start_client,
                                         [point.x, point.y],
                                         camera.peek().scale,
@@ -837,20 +1050,66 @@ pub fn EditorCanvas(
                                     key: key.clone(),
                                     client: start_client,
                                 }));
-                                handler.call(FixtureEvent::Select(Some(FixturePick {
-                                    key,
-                                    lamp,
-                                    object,
-                                })));
+                                handler.call(FixtureEvent::Select {
+                                    pick: Some(FixturePick { key, lamp, object }),
+                                    toggle: false,
+                                });
                             }
                         }
                     }
-                    // A background tap that never moved deselects — and
-                    // ends the cycle: the stack it was walking is gone.
-                    CanvasDrag::FixtureTap { moved, .. } => {
-                        if !moved && let Some(handler) = &on_fixture {
+                    // The fixture marquee: a real rect selects what it
+                    // crossed; a tap-sized one deselects (non-additive) —
+                    // and ends the cycle: the stack it walked is gone.
+                    CanvasDrag::FixtureMarquee {
+                        start,
+                        current,
+                        additive,
+                    } => {
+                        let min = [start[0].min(current[0]), start[1].min(current[1])];
+                        let max = [start[0].max(current[0]), start[1].max(current[1])];
+                        let scale = camera().scale;
+                        if (max[0] - min[0]) * scale > 4.0 || (max[1] - min[1]) * scale > 4.0 {
+                            if let Some(handler) = &on_fixture {
+                                handler.call(FixtureEvent::Marquee {
+                                    keys: sprites_in_rect(&fixtures_up, min, max),
+                                    additive,
+                                });
+                            }
+                        } else if !additive
+                            && let Some(handler) = &on_fixture
+                        {
                             last_press.set(None);
-                            handler.call(FixtureEvent::Select(None));
+                            handler.call(FixtureEvent::Select {
+                                pick: None,
+                                toggle: false,
+                            });
+                        }
+                    }
+                    CanvasDrag::FixtureScale {
+                        anchor,
+                        start,
+                        originals,
+                        moved,
+                    } => {
+                        if moved && let Some(handler) = &on_fixture {
+                            // Commit at the release point's factor — the
+                            // same arithmetic the live preview ran.
+                            let release = event_doc_point(&interact, &evt);
+                            let start_dist = ((start[0] - anchor[0]).powi(2)
+                                + (start[1] - anchor[1]).powi(2))
+                            .sqrt();
+                            let factor = if start_dist > 1e-3 {
+                                let now_dist = ((release[0] - anchor[0]).powi(2)
+                                    + (release[1] - anchor[1]).powi(2))
+                                .sqrt();
+                                clamp_scale_factor(&originals, f64::from(now_dist / start_dist))
+                            } else {
+                                1.0
+                            };
+                            handler.call(FixtureEvent::Move {
+                                moves: scaled_placements(&originals, anchor, factor),
+                                commit: true,
+                            });
                         }
                     }
                     CanvasDrag::Move { moved, collapse, .. } => {
@@ -879,6 +1138,18 @@ pub fn EditorCanvas(
                         let scale = camera().scale * placement.scale_f32();
                         if (max[0] - min[0]) * scale > 4.0 || (max[1] - min[1]) * scale > 4.0 {
                             session.write().marquee_select(min, max, additive);
+                        } else if !additive {
+                            // A background TAP fully ascends (D3, the Figma
+                            // rule): deselect and leave the scope. Hosts
+                            // without fixture events (the plain editor)
+                            // keep the old clear-in-place.
+                            match &on_fixture {
+                                Some(handler) => handler.call(FixtureEvent::Select {
+                                    pick: None,
+                                    toggle: false,
+                                }),
+                                None => session.write().selection.clear(),
+                            }
                         }
                     }
                 }
@@ -889,7 +1160,9 @@ pub fn EditorCanvas(
                 bump(hold_gen);
                 if matches!(
                     drag(),
-                    Some(CanvasDrag::Pan { .. }) | Some(CanvasDrag::Marquee { .. })
+                    Some(CanvasDrag::Pan { .. })
+                        | Some(CanvasDrag::Marquee { .. })
+                        | Some(CanvasDrag::FixtureMarquee { .. })
                 ) {
                     drag.set(None);
                 }
@@ -897,20 +1170,28 @@ pub fn EditorCanvas(
             onpointercancel: move |_| {
                 bump(hold_gen);
                 // A cancelled fixture drag resets the shell's override to
-                // the press-time placement (nothing was committed).
-                if let Some(CanvasDrag::FixturePress {
-                    key,
-                    original,
-                    moved: true,
-                    ..
-                }) = drag.peek().clone()
-                    && let Some(handler) = &on_fixture
-                {
-                    handler.call(FixtureEvent::Move {
-                        key,
-                        placement: original,
-                        commit: false,
-                    });
+                // the press-time placements (nothing was committed).
+                match drag.peek().clone() {
+                    Some(
+                        CanvasDrag::FixturePress {
+                            originals,
+                            moved: true,
+                            ..
+                        }
+                        | CanvasDrag::FixtureScale {
+                            originals,
+                            moved: true,
+                            ..
+                        },
+                    ) => {
+                        if let Some(handler) = &on_fixture {
+                            handler.call(FixtureEvent::Move {
+                                moves: originals,
+                                commit: false,
+                            });
+                        }
+                    }
+                    _ => {}
                 }
                 drag.set(None);
             },
@@ -957,11 +1238,14 @@ pub fn EditorCanvas(
                                 key: sprite.key.clone(),
                                 client: [point.x, point.y],
                             }));
-                            handler.call(FixtureEvent::Select(Some(FixturePick {
-                                key: sprite.key.clone(),
-                                lamp,
-                                object: pick.index,
-                            })));
+                            handler.call(FixtureEvent::Select {
+                                pick: Some(FixturePick {
+                                    key: sprite.key.clone(),
+                                    lamp,
+                                    object: pick.index,
+                                }),
+                                toggle: false,
+                            });
                         }
                     }
                     _ => menu.set(Some(candidate_menu::build(
@@ -973,13 +1257,42 @@ pub fn EditorCanvas(
                 }
             },
             ondoubleclick: move |evt| {
-                // Path-tool finish keeps priority (editor grammar; never
-                // in fixture mode — there is no tool without a session).
-                if !fixture_mode && matches!(session.read().tool, MapTool::Path { .. }) {
-                    if session.write().path_finish().is_some() {
-                        on_committed.call(());
+                // Double-click dispatch, in order (editor grammar only — never
+                // in fixture mode, where there is no tool and no session):
+                //
+                //   1. a live DRAFT finishes. The polygon's own gesture is
+                //      close-on-first, but the double-click must still be
+                //      CONSUMED: mid-draft it can never fall through.
+                //   2. Select tool, one vertexed object selected, the click on
+                //      one of its EDGES → insert a corner there.
+                //   3. otherwise the fixture dive / dive-switch below.
+                //
+                // Lamp dots handle their own double-click (descend into a
+                // group) and stop propagation first, so rung 2 only ever sees
+                // clicks that missed every lamp.
+                if !fixture_mode {
+                    let tool = session.read().tool.clone();
+                    match tool {
+                        MapTool::Path { .. } => {
+                            if session.write().path_finish().is_some() {
+                                on_committed.call(());
+                            }
+                            return;
+                        }
+                        MapTool::Polygon { .. } => {
+                            if session.write().polygon_finish().is_some() {
+                                on_committed.call(());
+                            }
+                            return;
+                        }
+                        MapTool::Select => {
+                            if insert_vertex_on_edge(&interact, &evt, eff) {
+                                on_committed.call(());
+                                return;
+                            }
+                        }
+                        _ => {}
                     }
-                    return;
                 }
                 // Fixture dive / dive-switch: a sprite double-click dives
                 // when not dived; a NEIGHBOUR while dived switches the
@@ -991,11 +1304,21 @@ pub fn EditorCanvas(
                 let origin = anchor.peek().origin();
                 let view = [point.x as f32 - origin[0], point.y as f32 - origin[1]];
                 let project = camera.peek().view_to_doc(view);
-                if let Some(sprite) =
-                    hit_fixture(&fixtures_dbl, [f64::from(project[0]), f64::from(project[1])])
+                let project_point = [f64::from(project[0]), f64::from(project[1])];
+                if let Some(sprite) = hit_fixture(&fixtures_dbl, project_point)
                     && focused_dbl.as_deref() != Some(sprite.key.as_str())
                 {
-                    handler.call(FixtureEvent::Dive(sprite.key.clone()));
+                    let pick = resolve_object_pick(
+                        sprite,
+                        project_point,
+                        own_space_slop(camera.peek().scale, sprite.placement.s),
+                        false,
+                    );
+                    handler.call(FixtureEvent::Dive {
+                        key: sprite.key.clone(),
+                        lamp: nearest_lamp(sprite, project_point),
+                        object: pick.index,
+                    });
                 }
             },
             onwheel: move |evt| {
@@ -1073,6 +1396,72 @@ pub fn EditorCanvas(
                     focused: focused.as_deref(),
                     cam_scale: cam.scale,
                 })}
+                // Fixture-grain furniture, project space (unified-selection
+                // P3): the selection box + corner scale handles (when the
+                // host asked for transform furniture) and the marquee.
+                if fixture_mode {
+                    if transform_handles && let Some((bbox, _)) = &fixture_box {
+                        {
+                            let margin = 8.0 / f64::from(cam.scale);
+                            let x = bbox[0] - margin;
+                            let y = bbox[1] - margin;
+                            let w = (bbox[2] - bbox[0]) + 2.0 * margin;
+                            let h = (bbox[3] - bbox[1]) + 2.0 * margin;
+                            let half = 5.0 / f64::from(cam.scale);
+                            let stroke = 1.4 / f64::from(cam.scale);
+                            let originals = fixture_box
+                                .as_ref()
+                                .map(|(_, originals)| originals.clone())
+                                .unwrap_or_default();
+                            rsx! {
+                                rect {
+                                    class: "lpme-sel-outline",
+                                    x: "{x}",
+                                    y: "{y}",
+                                    width: "{w}",
+                                    height: "{h}",
+                                    stroke_width: "{stroke}",
+                                    stroke_dasharray: "{5.0 / f64::from(cam.scale)} {4.0 / f64::from(cam.scale)}",
+                                }
+                                for (name, corner_x, corner_y, anchor_x, anchor_y) in [
+                                    ("tl", x, y, x + w, y + h),
+                                    ("tr", x + w, y, x, y + h),
+                                    ("bl", x, y + h, x + w, y),
+                                    ("br", x + w, y + h, x, y),
+                                ] {
+                                    rect {
+                                        key: "fh{name}",
+                                        class: "lpme-handle",
+                                        x: "{corner_x - half}",
+                                        y: "{corner_y - half}",
+                                        width: "{2.0 * half}",
+                                        height: "{2.0 * half}",
+                                        stroke_width: "{stroke}",
+                                        onpointerdown: {
+                                            let originals = originals.clone();
+                                            move |evt: Event<PointerData>| {
+                                                if pan_takes_press(&interact, &evt) {
+                                                    return;
+                                                }
+                                                evt.stop_propagation();
+                                                capture_pointer(&evt);
+                                                let doc_point = event_doc_point(&interact, &evt);
+                                                let mut drag = interact.drag;
+                                                drag.set(Some(CanvasDrag::FixtureScale {
+                                                    anchor: [anchor_x as f32, anchor_y as f32],
+                                                    start: doc_point,
+                                                    originals: originals.clone(),
+                                                    moved: false,
+                                                }));
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    {marquee_layer(cam.scale, marquee_rect)}
+                }
                 // Doc layers render only with a session to show: dived, or
                 // hosted without the fixture grammar (the plain editor).
                 if !fixture_mode {
@@ -1087,7 +1476,8 @@ pub fn EditorCanvas(
                         arrows: arrows.as_ref(),
                         ghost_outlines: &ghost_outlines,
                         gap_segments: &gap_segments,
-                        path_objects: &path_objects,
+                        hit_outlines: &hit_outlines,
+                        filled_outlines: &filled_outlines,
                         bodies: &bodies,
                         resolved: &resolved,
                         annotation_spans: &annotation_spans,
@@ -1117,6 +1507,7 @@ pub fn EditorCanvas(
                         chain_from,
                         draft_points: &draft_points,
                         draft_ghosts: &draft_ghosts,
+                        draft_close_target,
                     })}
                     {marquee_layer(eff, marquee_rect)}
                 }
@@ -1125,6 +1516,191 @@ pub fn EditorCanvas(
         }
         {menu_overlay}
     }
+}
+
+/// Vertices a polygon draft needs before its first point becomes a close
+/// target: below three there is no outline, and `polygon_finish` would
+/// refuse anyway.
+const CLOSE_MIN_VERTICES: usize = 3;
+
+/// Screen-pixel stroke width of the invisible hit line laid over an authored
+/// chain — what makes skinny geometry clickable, and what a double-click must
+/// land inside to mean "this edge".
+pub(crate) const HIT_LINE_PX: f32 = 14.0;
+
+/// Where on a vertex chain a click landed: which segment, and the point on it
+/// nearest the click.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct EdgeHit {
+    /// Index of the segment, counting the implicit closing seam last.
+    segment: usize,
+    /// The foot of the click on that segment — the new corner lands ON the
+    /// edge, so inserting one never kinks the outline by the aim error.
+    at: [f32; 2],
+}
+
+impl EdgeHit {
+    /// Where the new vertex sits in the points list. A segment splits by
+    /// taking the seat AFTER its start vertex — which for the closing seam
+    /// (last → first) is the END of the list, never index 0.
+    fn insert_index(self) -> usize {
+        self.segment + 1
+    }
+}
+
+/// The edge of `points` a click at `point` landed on, judged in SCREEN pixels
+/// against the same [`HIT_LINE_PX`] band the hit line already offers the
+/// pointer, so aim never depends on the camera.
+///
+/// `closed` adds the implicit last → first seam as the final segment. A hit
+/// whose foot is within a vertex handle's grab ring of either end is refused:
+/// that click is about the corner that is already there, and splitting a
+/// segment right beside its own endpoint only makes a degenerate one.
+fn hit_edge(points: &[[f32; 2]], closed: bool, point: [f32; 2], eff: f32) -> Option<EdgeHit> {
+    let scale = eff.max(1e-6);
+    let reach = HIT_LINE_PX / 2.0 / scale;
+    let seam = layers::selection::VERTEX_HIT_PX / scale;
+    let last = points.len().checked_sub(1)?;
+    let segments = if closed && points.len() >= CLOSE_MIN_VERTICES {
+        last + 1
+    } else {
+        last
+    };
+    let mut best: Option<(f32, EdgeHit)> = None;
+    for segment in 0..segments {
+        let a = points[segment];
+        let b = points[(segment + 1) % points.len()];
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let len_sq = dx * dx + dy * dy;
+        if len_sq <= f32::EPSILON {
+            continue;
+        }
+        let t = (((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / len_sq).clamp(0.0, 1.0);
+        let foot = [a[0] + t * dx, a[1] + t * dy];
+        let distance = ((point[0] - foot[0]).powi(2) + (point[1] - foot[1]).powi(2)).sqrt();
+        if distance > reach {
+            continue;
+        }
+        // Too near either corner: this is a vertex gesture, not an edge one.
+        let span = len_sq.sqrt();
+        if t * span < seam || (1.0 - t) * span < seam {
+            continue;
+        }
+        if best.is_none_or(|(closest, _)| distance < closest) {
+            best = Some((distance, EdgeHit { segment, at: foot }));
+        }
+    }
+    best.map(|(_, hit)| hit)
+}
+
+/// The vertex a click would close `draft` on, `None` while the draft is too
+/// short to be an outline.
+fn close_target(draft: &[[f32; 2]]) -> Option<&[f32; 2]> {
+    if draft.len() < CLOSE_MIN_VERTICES {
+        return None;
+    }
+    draft.first()
+}
+
+/// Whether a click at `point` (doc space) closes `draft` on its first
+/// vertex.
+///
+/// Judged against [`layers::selection::VERTEX_HIT_PX`] — the same
+/// screen-pixel ring a finished shape's vertex handles take grabs in — so
+/// the close target is a constant size at every zoom, and the gesture that
+/// closes an outline is the gesture that will later grab its corner.
+fn closes_polygon_draft(draft: &[[f32; 2]], point: [f32; 2], eff: f32) -> bool {
+    let Some(first) = close_target(draft) else {
+        return false;
+    };
+    let radius = layers::selection::VERTEX_HIT_PX / eff.max(1e-6);
+    let (dx, dy) = (point[0] - first[0], point[1] - first[1]);
+    dx * dx + dy * dy <= radius * radius
+}
+
+/// Rung 2 of the double-click dispatch: add a corner where the click landed
+/// on an edge of the single selected outline.
+///
+/// Refuses (and lets the click fall through) unless exactly one object is
+/// selected, it has authored vertices, and the click landed on one of its
+/// edges away from the corners already there. The new corner becomes the
+/// vertex selection, so it shows hot and ⌫ takes it straight back.
+fn insert_vertex_on_edge(interact: &CanvasInteract, evt: &Event<MouseData>, eff: f32) -> bool {
+    let view = event_view_point_mouse(&interact.anchor, evt);
+    let point = interact
+        .placement
+        .inverse_f32(interact.camera.peek().view_to_doc(view));
+    let mut session = interact.session;
+    let planned = {
+        let read = session.peek();
+        read.selection.single().cloned().and_then(|path| {
+            let shape = path.resolve(read.doc())?;
+            let hit = hit_edge(
+                editable_vertices(shape)?,
+                vertices_are_closed(shape),
+                point,
+                eff,
+            )?;
+            Some((path, hit))
+        })
+    };
+    let Some((path, hit)) = planned else {
+        return false;
+    };
+    let at = hit.insert_index();
+    let mut write = session.write();
+    if !write.insert_vertex_at(&path, at, hit.at) {
+        return false;
+    }
+    write.selection.vertex = Some(at);
+    true
+}
+
+/// True when a shape's authored vertices form a CLOSED loop — a polygon or
+/// a shaped matrix, at any depth under a repeat.
+fn vertices_are_closed(shape: &Map2dShape) -> bool {
+    match shape {
+        Map2dShape::Polygon(_) | Map2dShape::FilledPolygon(_) => true,
+        Map2dShape::Repeat(repeat) => vertices_are_closed(&repeat.shape),
+        _ => false,
+    }
+}
+
+/// True for a shaped matrix, at any depth under a repeat.
+fn is_filled_polygon(shape: &Map2dShape) -> bool {
+    match shape {
+        Map2dShape::FilledPolygon(_) => true,
+        Map2dShape::Repeat(repeat) => is_filled_polygon(&repeat.shape),
+        _ => false,
+    }
+}
+
+/// A vertex chain as it is DRAWN: closed chains repeat their first vertex,
+/// so the loop has no phantom mouth at the seam.
+fn chain_points(points: &[[f32; 2]], closed: bool) -> Vec<[f32; 2]> {
+    let mut drawn = points.to_vec();
+    if closed && points.len() >= CLOSE_MIN_VERTICES {
+        drawn.extend(points.first().copied());
+    }
+    drawn
+}
+
+/// Ghost-lamp positions for a draft shape, through the REAL resolver: a
+/// one-object document resolved exactly as the finished object will be, so
+/// the preview can never drift from what committing creates.
+fn ghost_positions(shape: Map2dShape) -> Vec<[f32; 2]> {
+    let ghost_doc = lpc_mapping::Map2dDoc {
+        objects: vec![lpc_mapping::Map2dObject {
+            name: String::new(),
+            id: None,
+            stride: None,
+            shape,
+        }],
+        ..lpc_mapping::Map2dDoc::new()
+    };
+    resolve(&ghost_doc)
+        .map(|resolved| resolved.positions())
+        .unwrap_or_default()
 }
 
 /// Advance a generation counter and return the new value.
@@ -1148,13 +1724,27 @@ fn own_space_slop(cam_scale: f32, placement_scale: f64) -> f64 {
     SELECT_SLOP_PX / (f64::from(cam_scale) * placement_scale).max(1e-6)
 }
 
-/// True for the secondary (right) button — those pointerdowns fall through
-/// to the canvas pan instead of tool/selection actions.
+/// True for the secondary (right) button — its pointerdown is the pan
+/// with context-menu bookkeeping.
 pub(crate) fn secondary_button(evt: &Event<PointerData>) -> bool {
     evt.data().trigger_button() == Some(dioxus::html::input_data::MouseButton::Secondary)
 }
 
+/// True for the secondary (right) or auxiliary (middle) button — those
+/// pointerdowns fall through to the canvas pan instead of tool/selection
+/// actions.
+pub(crate) fn pan_button(evt: &Event<PointerData>) -> bool {
+    matches!(
+        evt.data().trigger_button(),
+        Some(
+            dioxus::html::input_data::MouseButton::Secondary
+                | dioxus::html::input_data::MouseButton::Auxiliary
+        )
+    )
+}
+
 /// Select `object_index` (respecting shift-toggle) and arm a move drag.
+/// Callers have already checked [`pan_takes_press`].
 pub(crate) fn select_and_start_move(
     interact: CanvasInteract,
     object_index: usize,
@@ -1223,4 +1813,159 @@ fn event_view_point_wheel(anchor: &Signal<CanvasAnchor>, evt: &Event<WheelData>)
     let point = evt.data().client_coordinates();
     let origin = anchor.peek().origin();
     [point.x as f32 - origin[0], point.y as f32 - origin[1]]
+}
+
+#[cfg(test)]
+mod tests {
+    use lpc_mapping::{FilledPolygonShape, GridCorner, GridRouting, PolygonShape, RepeatShape};
+
+    use super::*;
+    use crate::editor_core::map_tool::PolygonMode;
+
+    fn square() -> Vec<[f32; 2]> {
+        vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]]
+    }
+
+    /// Close-on-first only arms once the draft is an outline, and its ring is
+    /// SCREEN-sized: zoomed out, the same doc-space miss that closes at low
+    /// zoom must not close at high zoom.
+    #[test]
+    fn the_close_target_is_a_screen_sized_ring_on_the_first_vertex() {
+        let draft = vec![[0.0_f32, 0.0], [100.0, 0.0], [100.0, 100.0]];
+        assert!(closes_polygon_draft(&draft, [4.0, 3.0], 1.0), "5 px < 9 px");
+        assert!(!closes_polygon_draft(&draft, [16.0, 0.0], 1.0));
+        // Zoomed 4× in, 5 doc units is 20 screen px — outside the ring.
+        assert!(!closes_polygon_draft(&draft, [4.0, 3.0], 4.0));
+        // Zoomed out, the same ring reaches further in doc units (9 px at
+        // half scale is 18 units).
+        assert!(closes_polygon_draft(&draft, [16.0, 0.0], 0.5));
+        // Two vertices are not an outline yet, however close the click.
+        assert!(!closes_polygon_draft(&draft[..2], [0.0, 0.0], 1.0));
+        assert!(!closes_polygon_draft(&[], [0.0, 0.0], 1.0));
+    }
+
+    /// Closed chains are DRAWN closed (the seam edge is real geometry a hit
+    /// line and a repeat ghost must cover); open ones are left alone.
+    #[test]
+    fn closed_chains_repeat_their_first_vertex_when_drawn() {
+        let polygon = Map2dShape::Polygon(PolygonShape {
+            points: square(),
+            count: 15,
+            align: lpc_mapping::PathAlign::On,
+        });
+        assert!(vertices_are_closed(&polygon));
+        assert_eq!(chain_points(&square(), true).len(), 5);
+        assert_eq!(chain_points(&square(), true)[4], [0.0, 0.0]);
+        assert_eq!(chain_points(&square(), false).len(), 4);
+        // A degenerate chain has no loop to close.
+        assert_eq!(chain_points(&square()[..2], true).len(), 2);
+
+        let path = Map2dShape::Path(lpc_mapping::PathShape {
+            points: square(),
+            count: 4,
+            reversed: false,
+            gaps: Vec::new(),
+            align: lpc_mapping::PathAlign::On,
+        });
+        assert!(!vertices_are_closed(&path));
+        assert!(!is_filled_polygon(&path));
+    }
+
+    /// Both closed-shape predicates reach through repeat wrappers — a
+    /// repeated shaped matrix still draws its silhouette and its seam.
+    #[test]
+    fn the_shape_predicates_reach_through_repeats() {
+        let filled = Map2dShape::FilledPolygon(FilledPolygonShape {
+            points: square(),
+            pitch: 26.0,
+            angle_deg: 0.0,
+            origin: [0.0, 0.0],
+            routing: GridRouting::Snake,
+            start_corner: GridCorner::Tl,
+        });
+        assert!(is_filled_polygon(&filled));
+        assert!(vertices_are_closed(&filled));
+        let wrapped = Map2dShape::Repeat(RepeatShape {
+            shape: Box::new(filled),
+            center: [0.0, 0.0],
+            count: 3,
+        });
+        assert!(is_filled_polygon(&wrapped));
+        assert!(vertices_are_closed(&wrapped));
+    }
+
+    /// The filled-mode ghosts ARE the resolver's cells: the preview and the
+    /// finished object agree lamp for lamp, which is the whole reason the
+    /// draft resolves a real shape instead of sketching one.
+    #[test]
+    fn filled_draft_ghosts_are_the_resolved_lattice() {
+        let draft = square();
+        let shape = polygon_draft_shape(&draft, PolygonMode::Filled).expect("an outline");
+        let Map2dShape::FilledPolygon(filled) = &shape else {
+            panic!("filled mode commits a shaped matrix");
+        };
+        let cells = lpc_mapping::filled_polygon_cells(filled);
+        let ghosts = ghost_positions(shape.clone());
+        assert_eq!(ghosts.len(), cells.len());
+        assert_eq!(ghosts.len(), 16, "100×100 at pitch 26 is a 4×4 lattice");
+        for (ghost, cell) in ghosts.iter().zip(cells.iter()) {
+            assert_eq!(ghost, cell);
+        }
+        // Outline mode previews the perimeter population of the same draft.
+        let outline = polygon_draft_shape(&draft, PolygonMode::Outline).expect("an outline");
+        assert_eq!(ghost_positions(outline).len(), 15);
+    }
+
+    /// The edge a double-click means, and where its corner sits. The seat is
+    /// the segment's index PLUS ONE, which for the closing seam is the end of
+    /// the list — index 0 would drop the new corner on the far side of the
+    /// shape.
+    #[test]
+    fn an_edge_hit_names_its_segment_and_seats_the_seam_at_the_end() {
+        let points = square();
+        // Top edge (segment 0): the corner lands ON the edge, not at the aim.
+        let hit = hit_edge(&points, true, [50.0, 3.0], 1.0).expect("the top edge");
+        assert_eq!(hit.segment, 0);
+        assert_eq!(hit.at, [50.0, 0.0]);
+        assert_eq!(hit.insert_index(), 1);
+        // The implicit closing seam [0,100] → [0,0] is the LAST segment, and
+        // its corner appends.
+        let seam = hit_edge(&points, true, [-2.0, 50.0], 1.0).expect("the seam");
+        assert_eq!(seam.segment, 3);
+        assert_eq!(seam.at, [0.0, 50.0]);
+        assert_eq!(seam.insert_index(), points.len());
+        // An open chain has no seam: the same click hits nothing.
+        assert!(hit_edge(&points, false, [-2.0, 50.0], 1.0).is_none());
+        assert_eq!(
+            hit_edge(&points, false, [50.0, 3.0], 1.0).map(|hit| hit.segment),
+            Some(0)
+        );
+        // Beyond the hit line's own half-width, nothing.
+        assert!(hit_edge(&points, true, [50.0, 9.0], 1.0).is_none());
+        // The band is SCREEN-sized: zoomed 4× in, 3 doc units is 12 px out.
+        assert!(hit_edge(&points, true, [50.0, 3.0], 4.0).is_none());
+        // Near a corner the gesture is about that corner, not the edge.
+        assert!(hit_edge(&points, true, [4.0, 0.0], 1.0).is_none());
+        // Degenerate chains have no edge at all.
+        assert!(hit_edge(&points[..1], true, [0.0, 0.0], 1.0).is_none());
+        assert!(hit_edge(&[], true, [0.0, 0.0], 1.0).is_none());
+    }
+
+    /// Two edges within reach of one click: the NEAREST wins, so a click in a
+    /// tight corner region never picks the far side.
+    #[test]
+    fn an_edge_hit_picks_the_nearest_edge() {
+        // A 6-unit-wide sliver: both long edges are inside the hit band.
+        let sliver = vec![[0.0_f32, 0.0], [100.0, 0.0], [100.0, 6.0], [0.0, 6.0]];
+        assert_eq!(
+            hit_edge(&sliver, true, [50.0, 2.0], 1.0).map(|hit| hit.segment),
+            Some(0),
+            "nearer the top edge"
+        );
+        assert_eq!(
+            hit_edge(&sliver, true, [50.0, 4.0], 1.0).map(|hit| hit.segment),
+            Some(2),
+            "nearer the bottom edge"
+        );
+    }
 }

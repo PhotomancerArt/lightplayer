@@ -202,11 +202,14 @@ pub(crate) fn menu_overlay(
                         let key = key.clone();
                         let object = row.object;
                         move |_| {
-                            on_fixture.call(FixtureEvent::Select(Some(FixturePick {
-                                key: key.clone(),
-                                lamp,
-                                object: Some(object),
-                            })));
+                            on_fixture.call(FixtureEvent::Select {
+                                pick: Some(FixturePick {
+                                    key: key.clone(),
+                                    lamp,
+                                    object: Some(object),
+                                }),
+                                toggle: false,
+                            });
                             menu.set(None);
                         }
                     },

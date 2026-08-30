@@ -105,6 +105,10 @@ impl LpGraphics for TimingGraphics {
         self.inner.read_back(texture)
     }
 
+    fn read_back_into(&self, texture: &TextureHandle, out: &mut [u8]) -> Result<(), GfxError> {
+        self.inner.read_back_into(texture, out)
+    }
+
     fn supports_read_back(&self) -> bool {
         self.inner.supports_read_back()
     }
@@ -131,6 +135,10 @@ impl LpGraphics for TimingGraphics {
 
     fn write_sample_out(&self, out: &mut SampleOutHandle, rgba16: &[u16]) -> Result<(), GfxError> {
         self.inner.write_sample_out(out, rgba16)
+    }
+
+    fn read_sample_out_into(&self, out: &SampleOutHandle, dst: &mut [u16]) -> Result<(), GfxError> {
+        self.inner.read_sample_out_into(out, dst)
     }
 
     fn read_sample_out(&self, out: &SampleOutHandle) -> Result<Vec<u16>, GfxError> {

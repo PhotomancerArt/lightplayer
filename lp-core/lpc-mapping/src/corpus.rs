@@ -116,7 +116,7 @@ mod tests {
         assert_eq!(on_first, 12);
     }
 
-    /// The mini-dome: one authored sector, five physical strands. The span
+    /// The small-dome: one authored sector, five physical strands. The span
     /// list is what the fixture and the output face read, so this pins the
     /// structure (5 × 12, consecutive, all one object) and not just the total.
     #[test]
@@ -162,7 +162,7 @@ mod tests {
         }
     }
 
-    /// Distance from the mini-dome's hub at `[200, 200]`.
+    /// Distance from the small-dome's hub at `[200, 200]`.
     fn hub_radius(pos: [f32; 2]) -> f32 {
         ((pos[0] - 200.0).powi(2) + (pos[1] - 200.0).powi(2)).sqrt()
     }

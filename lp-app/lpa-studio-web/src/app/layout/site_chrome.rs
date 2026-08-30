@@ -63,6 +63,7 @@ use crate::app::layout::session_control::{ChromeSessionControl, SessionProjectCo
 use crate::base::{
     IconMenuButton, IconMenuTone, LogoLockup, PopoverCloseHandle, StudioIcon, StudioIconName,
 };
+use crate::core::menu_item_action_class;
 
 /// The lens routes' mode toggle (Play): the target of the plain hash link
 /// and whether the mode is currently on. A prop rather than a child so
@@ -424,7 +425,7 @@ fn ProjectMenuRows(menu: ChromeProjectMenu) -> Element {
     } = menu;
     rsx! {
         button {
-            class: PROJECT_MENU_ROW,
+            class: menu_item_action_class(),
             r#type: "button",
             onclick: move |_| {
                 // Close FIRST: the panel this opens is another popover
@@ -436,13 +437,10 @@ fn ProjectMenuRows(menu: ChromeProjectMenu) -> Element {
                 on_share.call(());
             },
             UserRound { size: 14 }
-            // The row's type lives on the span: `style.css` resets
-            // `button { font: inherit }` UNLAYERED, which beats every
-            // (layered) Tailwind font utility on the button itself.
-            span { class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-semibold", "Sharing & access…" }
+            span { "Sharing & access…" }
         }
         button {
-            class: PROJECT_MENU_ROW_QUIET,
+            class: menu_item_action_class(),
             r#type: "button",
             title: "Archive this project — reversible, and nothing is deleted",
             onclick: move |_| {
@@ -452,7 +450,7 @@ fn ProjectMenuRows(menu: ChromeProjectMenu) -> Element {
                 on_archive.call(());
             },
             Archive { size: 14 }
-            span { class: "tw:min-w-0 tw:truncate tw:text-xs tw:font-medium", "Archive project" }
+            span { "Archive project" }
         }
     }
 }
@@ -562,7 +560,7 @@ fn ToolCard(
             href: "{href}",
             target: "_blank",
             rel: "noopener noreferrer",
-            span { class: "tw:mt-0.5 tw:flex tw:h-7 tw:w-7 tw:flex-none tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-border tw:bg-card-muted tw:text-accent",
+            span { class: "tw:mt-0.5 tw:flex tw:h-7 tw:w-7 tw:flex-none tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-border tw:bg-card-muted tw:text-heading",
                 StudioIcon { name: icon, size: 15 }
             }
             span { class: "tw:grid tw:min-w-0 tw:gap-0.5",
@@ -577,13 +575,13 @@ fn ToolCard(
 }
 
 /// Current-destination treatment: heading color plus the accent underline.
-const NAV_TAB_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']";
+const NAV_TAB_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-heading tw:after:content-['']";
 /// Idle treatment: subtle text that brightens on hover.
 const NAV_TAB_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
 /// Secondary-family active: the same current-destination grammar, one
 /// weight lighter — the family reads quieter even when it is where you
 /// are.
-const NAV_TAB_SECONDARY_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']";
+const NAV_TAB_SECONDARY_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-heading tw:after:content-['']";
 /// Secondary-family idle: reduced weight and dimmed, full strength on
 /// hover.
 pub(crate) const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-subtle-foreground/70 tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
@@ -592,23 +590,17 @@ pub(crate) const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1
 /// brand — the logo IS Home's tab, so at Home it marks the place like
 /// one. The offset differs from the tabs' because the lockup's box is
 /// shorter; both land the bar on the header's border line.
-const LOGO_HOME_ACTIVE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[14px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']";
+const LOGO_HOME_ACTIVE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[14px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-heading tw:after:content-['']";
 
 /// ⋯ menu section row, idle.
 pub(crate) const NAV_MENU_ITEM_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
 /// ⋯ menu section row, current place.
 const NAV_MENU_ITEM_ACTIVE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:transition-colors tw:hover:bg-card-raised";
-/// ⋯ menu PROJECT row. A `<button>`, so it must name its own background
-/// and border explicitly — this build ships Tailwind without preflight, and
-/// an unstyled button paints the UA's `buttonface` (crate README).
-const PROJECT_MENU_ROW: &str = "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2.5 tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-left tw:text-muted-foreground tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
-/// The same row, quieter: the reversible act (Archive) reads lighter than
-/// the one above it, and never destructive.
-const PROJECT_MENU_ROW_QUIET: &str = "tw:flex tw:w-full tw:cursor-pointer tw:items-center tw:gap-2.5 tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-left tw:text-subtle-foreground tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
-
 /// The one ⋯ menu popup: wide enough for tool cards; section rows ride
-/// the same width.
-const OVERFLOW_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:gap-1 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+/// the same width. Material-free (P4): `.ux-popover-panel.ux-svg-popover-panel`
+/// already paints background/border/shadow via the merged-outline path, so
+/// this only sets layout and type.
+const OVERFLOW_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:gap-1 tw:rounded-md tw:border tw:p-1.5 tw:text-sm tw:text-muted-foreground";
 /// Mini-header labelling each group of the ⋯ menu.
 pub(crate) const GROUP_HEADER_CLASS: &str = "tw:px-1.5 tw:pt-1.5 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground tw:first:pt-0.5";
 /// Rows are cards, not text links: fixed three-column grid so the title and

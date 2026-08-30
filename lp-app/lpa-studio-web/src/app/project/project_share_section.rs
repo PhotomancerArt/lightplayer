@@ -26,7 +26,9 @@
 use dioxus::prelude::*;
 
 use crate::app::home::package_export::{ExportForm, ExportTarget, export_package_as};
-use crate::base::{StudioIcon, StudioIconName};
+use crate::app::share::share_url::project_link_absolute;
+use crate::base::{StudioIcon, StudioIconName, Toasts};
+use crate::core::inline_link_row_class;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -44,10 +46,27 @@ pub fn ProjectShareSection(
         uid: uid.clone(),
         slug: slug.clone(),
     };
+    let toasts = try_consume_context::<Toasts>();
+    let (link_slug, link_uid) = (slug.clone(), uid.clone());
     let json_target = ExportTarget { uid, slug };
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-1.5",
+            // The link first — the address bar IS the link (D1), and this
+            // row is where people look for it (G1 finding, 2026-08-29).
+            // Never dirty-disabled: the link is identity, not bytes.
+            ShareRow {
+                label: "Copy link",
+                hint: "Copy this project's link — the same address the address bar shows.",
+                icon: StudioIconName::ExternalLink,
+                disabled: false,
+                on_press: move |_| {
+                    crate::clipboard::write_text(&project_link_absolute(&link_slug, &link_uid));
+                    if let Some(mut toasts) = toasts {
+                        toasts.say("Link copied");
+                    }
+                },
+            }
             ShareRow {
                 label: "Download zip",
                 hint: "Download this project as a zip archive.",
@@ -89,11 +108,7 @@ fn ShareRow(
     } else {
         hint
     };
-    let class = if disabled {
-        "tw:flex tw:w-full tw:min-w-0 tw:cursor-not-allowed tw:items-center tw:gap-2 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-0 tw:py-0.5 tw:text-left tw:text-xs tw:text-subtle-foreground tw:opacity-60"
-    } else {
-        "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-0 tw:py-0.5 tw:text-left tw:text-xs tw:text-muted-foreground tw:transition-colors tw:hover:text-strong-foreground"
-    };
+    let class = inline_link_row_class(disabled);
 
     rsx! {
         button {

@@ -1,8 +1,8 @@
 {
   "kind": "Fixture",
   "render_size": {
-    "width": 32,
-    "height": 32
+    "width": 128,
+    "height": 128
   },
   "bindings": {
     "input": {

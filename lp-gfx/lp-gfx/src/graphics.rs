@@ -21,7 +21,8 @@ use crate::texture_handle::TextureHandle;
 ///
 /// Handles returned by the `create_*` methods are RAII (drop frees) and are
 /// only valid with the backend that created them. All texel/sample access
-/// crosses this trait as owned bytes — no backend pointers escape.
+/// crosses this trait as byte copies into or out of caller-owned storage —
+/// no backend pointers escape.
 pub trait LpGraphics: Send + Sync {
     /// Compile GLSL into a runnable visual shader.
     ///
@@ -171,7 +172,19 @@ pub trait LpGraphics: Send + Sync {
     /// [`Self::blend_textures`] instead — see the crate README doctrine.
     fn read_back(&self, texture: &TextureHandle) -> Result<TextureData, GfxError>;
 
-    /// Whether [`Self::read_back`] can service requests on this backend.
+    /// Read a texture back into `out`, a caller-owned buffer of exactly
+    /// `width × height × bytes_per_pixel(format)` bytes — the same tightly
+    /// packed little-endian texels [`Self::read_back`] returns.
+    ///
+    /// The per-tick form of [`Self::read_back`]: a sink that reads back
+    /// every tick (fixture texture accumulation) holds one persistent
+    /// buffer and refills it here instead of materializing a fresh
+    /// allocation per tick. [`Self::read_back`] stays for one-shot
+    /// consumers — tests, probes, captures.
+    fn read_back_into(&self, texture: &TextureHandle, out: &mut [u8]) -> Result<(), GfxError>;
+
+    /// Whether [`Self::read_back`] / [`Self::read_back_into`] can service
+    /// requests on this backend.
     ///
     /// CPU backends keep textures host-resident and always answer `true`
     /// (the default). The browser GPU tier answers `false`: readback would
@@ -236,8 +249,29 @@ pub trait LpGraphics: Send + Sync {
     /// Write all `count × 4` RGBA16 channels (`[r0, g0, b0, a0, r1, …]`).
     fn write_sample_out(&self, out: &mut SampleOutHandle, rgba16: &[u16]) -> Result<(), GfxError>;
 
-    /// Read all `count × 4` RGBA16 channels back.
-    fn read_sample_out(&self, out: &SampleOutHandle) -> Result<Vec<u16>, GfxError>;
+    /// Read all `count × 4` RGBA16 channels into `dst` (length must match
+    /// exactly, mirroring [`Self::write_sample_out`]).
+    ///
+    /// This is the per-frame read: the caller owns `dst` and reuses it
+    /// across ticks, so a frame costs a memcpy, never a heap allocation.
+    /// The `Vec`-returning [`Self::read_sample_out`] cloned the full sample
+    /// surface every tick, and on the classic ESP32 that per-tick
+    /// alloc+free (12 KB at zook scale, under an infallible allocator) is
+    /// what reset the board whenever an inbound request's transients ate
+    /// the headroom — see
+    /// `docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.md`.
+    fn read_sample_out_into(&self, out: &SampleOutHandle, dst: &mut [u16]) -> Result<(), GfxError>;
+
+    /// Read all `count × 4` RGBA16 channels back as a fresh `Vec`.
+    ///
+    /// Allocates per call — a convenience for tests and tooling only.
+    /// Frame paths must hold a persistent buffer and use
+    /// [`Self::read_sample_out_into`] instead.
+    fn read_sample_out(&self, out: &SampleOutHandle) -> Result<Vec<u16>, GfxError> {
+        let mut data = alloc::vec![0u16; out.count() as usize * 4];
+        self.read_sample_out_into(out, &mut data)?;
+        Ok(data)
+    }
 
     /// Zero every channel of `out`.
     fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError>;

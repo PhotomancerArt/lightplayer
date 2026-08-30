@@ -30,8 +30,9 @@ pub mod view;
 
 pub(crate) use action::confirmation_confirmed;
 pub use action::{
-    ActionButton, ActionButtonVariant, ActionStrip, menu_item_action_class,
-    menu_item_destructive_action_class, quiet_action_class,
+    ActionButton, ActionButtonVariant, ActionStrip, inline_link_row_class, menu_item_action_class,
+    menu_item_destructive_action_class, outline_action_class, quiet_action_class,
+    quiet_destructive_action_class, solid_action_class,
 };
 pub use issue_view::IssueView;
 pub use log_list::LogList;

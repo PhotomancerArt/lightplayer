@@ -124,8 +124,10 @@ fn dispatch_hello(
             None,
             None,
             None,
+            None,
             graphics.clone(),
             (*server_ptr).hello(),
+            lpa_server::handlers::EngineLinkState::default(),
             request,
         )
         .unwrap()

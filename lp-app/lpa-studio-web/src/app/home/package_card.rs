@@ -14,10 +14,15 @@ use lpc_cloud_api::share_link::slugify;
 
 use crate::router::canonical_share_path;
 
+use crate::app::home::card_footer::{
+    CardContextLine, CardGlassFooter, CardStatusGlyph, ContextTone, GlyphTone,
+};
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::gallery_preview::{ThumbMode, card_hover_handlers};
 use crate::app::home::package_export::export_package_to_download;
-use crate::base::{DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName};
+use crate::base::{
+    DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName, Toasts,
+};
 use crate::core::{ActionButton, ActionButtonVariant, menu_item_action_class, quiet_action_class};
 
 /// One package card: thumbnail, name, meta, and the card menu. Clicking the
@@ -61,10 +66,6 @@ pub(crate) fn PackageCard(
         .health
         .blocked()
         .map(|(headline, remedy)| (headline.to_string(), remedy.to_string()));
-    let upgrades_from = match card.health {
-        PackageHealth::UpgradesOnOpen { found } => Some(found),
-        _ => None,
-    };
     // the slug IS the title; the thumbnail initial skips its date stamp
 
     // The card's open link IS the project's share link (identity vision
@@ -85,10 +86,13 @@ pub(crate) fn PackageCard(
     // still entering the card. Touch devices never send these, so a tap
     // still just follows the link.
     let (hover_enter, hover_leave) = card_hover_handlers(source.as_ref());
+    // Drag-in-flight state is local chrome, not app state: it exists only
+    // to light the source card while the ghost is out (Aurora R2 extra).
+    let mut dragging = use_signal(|| false);
 
     rsx! {
         article {
-            class: package_card_class(opening, busy, blocked.is_some()),
+            class: package_card_class(opening, busy, blocked.is_some(), dragging()),
             onmouseenter: hover_enter,
             onmouseleave: hover_leave,
             // drag a project onto a device card = the push-confirm sheet
@@ -99,9 +103,11 @@ pub(crate) fn PackageCard(
                 move |_| {
                     if draggable {
                         set_dragged_project(uid.clone());
+                        dragging.set(true);
                     }
                 }
             },
+            ondragend: move |_| dragging.set(false),
             // Opening a card is NAVIGATION, so it is a real <a> to the
             // project route (D37: the URL points at a runtime — a project
             // always opens on the sim, never a device takeover): plain
@@ -134,164 +140,115 @@ pub(crate) fn PackageCard(
                 // for finding a project, not for watching twelve of them.
                 mode: ThumbMode::PosterFirst,
             }
-            div { class: "tw:flex tw:items-start tw:justify-between tw:gap-2 tw:p-3",
-                div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
-                    p { class: "tw:m-0 tw:truncate tw:text-sm tw:font-semibold tw:text-strong-foreground",
-                        "{card.slug}"
-                    }
-                    if let Some((headline, remedy)) = blocked.clone() {
-                        // amber = honest bad content (the roster precedent);
-                        // never violet, which means "bound" in this Studio
-                        p { class: "tw:m-0 tw:text-xs tw:font-semibold tw:text-status-attention-foreground",
-                            "{headline}"
-                        }
-                        p { class: "tw:m-0 tw:text-xs tw:leading-normal tw:text-muted-foreground",
-                            "{remedy}"
-                        }
-                    } else if opening {
-                        p { class: "tw:m-0 tw:text-xs tw:text-status-working-foreground", "Opening…" }
-                    } else {
-                        if let Some(found) = upgrades_from {
-                            // a fact, not a warning: it opens, and opening
-                            // it is what upgrades it
-                            p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground",
-                                title: "Opening this project upgrades it to the current format and saves a version you can go back to.",
-                                "Format {found} — upgrades when you open it"
-                            }
-                        }
-                        if let Some(edited) = edited_line {
-                            p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "Edited {edited}" }
-                        }
-                        // Advisory board target (vision D3): a quiet fact,
-                        // not a warning — mismatch tint is P06's job, in
-                        // mismatch context only.
-                        if let Some(target) = card.target.as_deref() {
+            // The face is the art; the words are one slim glass bar —
+            // title, status glyphs, and the ⋯ IN the bar (G1 feedback:
+            // nothing floats on the picture). Everything deeper —
+            // status in words, the actions — is the ⋯ popup's job (the
+            // redesign's "second click"). The footer sits under the
+            // stretched open link, so the whole face stays a door.
+            CardGlassFooter {
+                title: card.slug.clone(),
+                context: face_context_line(blocked.as_ref(), opening),
+                glyphs: face_status_glyphs(&card, blocked.is_some()),
+                // Hover slides the bar up over the quiet facts — capped,
+                // delayed, and skipped entirely while the card is already
+                // saying something louder (blocked / opening).
+                reveal: (blocked.is_none() && !opening).then(|| {
+                    let live = live_presence_line(&card);
+                    rsx! {
+                        if let Some(edited) = edited_line.clone() {
                             p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-muted-foreground",
-                                "for {target_display_name(target)}"
+                                "Edited {edited}"
                             }
                         }
                         if let Some(provenance) = card.provenance.clone() {
-                            p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-dim-foreground", "{provenance}" }
-                        }
-                        // the association parity line yields to the LIVE
-                        // indication when the device is actually here
-                        if card.connected_device.is_none() {
-                            if let Some(device) = card.on_device.clone() {
-                                p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground",
-                                    "On {device} ✓"
-                                }
+                            p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-dim-foreground",
+                                "{provenance}"
                             }
                         }
-                        // D28: the runtime-presence chip — device line,
-                        // sim line, or the "Live in 2 places" aggregate
-                        // when the project runs on BOTH. Chips are
-                        // pointers, deliberately inert: no runtime grab
-                        // from a project card (D29's never-a-surprise-
-                        // takeover); the runtime cards themselves sit one
-                        // glance up in the roster.
-                        if let Some(live) = live_presence_line(&card) {
-                            p { class: live.class, title: live.title, "{live.text}" }
-                        }
-                        // a fact, not a warning: neutral chip; the card stays
-                        // clickable — the open's refusal notice explains
-                        if card.open_elsewhere {
-                            p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground",
-                                span { class: "tw:inline-block tw:rounded tw:border tw:border-border tw:px-1.5 tw:py-px",
-                                    "Open in another tab"
-                                }
-                            }
+                        if let Some(live) = live {
+                            p { class: live.class, "{live.text}" }
                         }
                     }
-                }
-                span {
-                    class: "tw:relative tw:z-[2]",
+                }),
+                trailing: rsx! {
                     PackageCardMenu {
                         card: card.clone(),
                         initially_open: menu_initially_open,
+                        edited_line,
+                        open_href: blocked.is_none().then(|| open_href.clone()),
+                        opening,
+                        empty_devices,
                         on_action,
                     }
-                }
-            }
-            // the crystallized open action (D36 prep): same navigation as
-            // the bare card click, spelled out — projects always open on
-            // the sim, never a device takeover (D29). Beside it, one
-            // "Put on <name>" per connected-empty device (model §1-A):
-            // the explicit button IS the D11 consent, and pushing to a
-            // blank board destroys nothing — one click, no confirm.
-            div { class: "tw:flex tw:flex-wrap tw:gap-1 tw:px-3 tw:pb-3",
-                // Both chooser buttons wear the SAME quiet-chip treatment
-                // (2026-07-26 walk: the anchor's UA underline read as a
-                // link, the push button's accent tint didn't match — a
-                // matched pair now; the <a> stays an <a> for D37 nav).
-                if blocked.is_none() {
-                    a {
-                        class: "{quiet_action_class()} tw:relative tw:z-[2] tw:no-underline",
-                        href: "{open_href}",
-                        title: "Open this project in the simulator.",
-                        onclick: move |event| {
-                            if opening {
-                                event.prevent_default();
-                            }
-                        },
-                        span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
-                            StudioIcon { name: StudioIconName::Play, size: 14 }
-                        }
-                        span { "Open in sim" }
-                    }
-                } else {
-                    // The remedies, spelled out on the card itself: export
-                    // reads raw files, so it works on exactly the packages
-                    // that need rescuing.
-                    button {
-                        class: "{quiet_action_class()} tw:relative tw:z-[2]",
-                        r#type: "button",
-                        title: "Download this project as a zip archive — the files are exported as they are.",
-                        onclick: {
-                            let export_card = card.clone();
-                            move |_| export_package_to_download(&export_card)
-                        },
-                        span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
-                            StudioIcon { name: StudioIconName::Download, size: 14 }
-                        }
-                        span { "Download zip" }
-                    }
-                }
-                for (device_key, device_name) in empty_devices.iter().filter(|_| blocked.is_none()) {
-                    button {
-                        class: "{quiet_action_class()} tw:relative tw:z-[2]",
-                        r#type: "button",
-                        title: "Put this project on \"{device_name}\" — it's empty and ready.",
-                        onclick: {
-                            let key = card.uid.clone();
-                            let device_key = device_key.clone();
-                            move |event: MouseEvent| {
-                                event.stop_propagation();
-                                if busy || opening {
-                                    return;
-                                }
-                                on_action.call(UiAction::from_op(
-                                    ControllerId::new(DEPLOY_NODE_ID),
-                                    DeployOp::PushProject {
-                                        key: key.clone(),
-                                        target: DeviceTarget::card(&device_key),
-                                    },
-                                ));
-                            }
-                        },
-                        span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
-                            StudioIcon { name: StudioIconName::Apply, size: 14 }
-                        }
-                        span { "Put on \"{device_name}\"" }
-                    }
-                }
+                },
             }
         }
     }
 }
 
-/// The card menu: rename form plus duplicate / export / delete rows. The
-/// rows are `UiAction`s rendered in the shared menu-item context (export is
-/// a web-side handler wearing the same classes) — one action vocabulary,
+/// The face's single context line — only when the card demands
+/// attention: the blocked headline (amber, matching the border) or
+/// "Opening…". Quiet facts (edited stamp, provenance) read as noise
+/// repeated across a grid (G1 feedback 2026-08-26) and live in the ⋯
+/// popup instead; a quiet card wears a title-only bar.
+fn face_context_line(blocked: Option<&(String, String)>, opening: bool) -> Option<CardContextLine> {
+    if let Some((headline, _remedy)) = blocked {
+        // amber = honest bad content (the roster precedent); never
+        // violet, which means "bound" in this Studio. The remedy words
+        // live in the ⋯ popup.
+        return Some(CardContextLine {
+            text: headline.clone(),
+            tone: ContextTone::Attention,
+        });
+    }
+    opening.then(|| CardContextLine {
+        text: "Opening…".to_string(),
+        tone: ContextTone::Working,
+    })
+}
+
+/// The title row's status glyphs — the D28 runtime-presence facts
+/// compressed to icons (words ride the tooltip and the ⋯ popup):
+/// lightning = on the connected device (green only when current, the
+/// D24 rule), the sim glyph = running in simulator, amber "!" = the
+/// card is blocked. Both runtimes live = both glyphs ("Live in 2
+/// places" stays a popup/tooltip phrasing).
+fn face_status_glyphs(card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGlyph> {
+    if blocked {
+        return vec![CardStatusGlyph {
+            icon: StudioIconName::StepAttention,
+            tone: GlyphTone::Attention,
+            words: "This project can't be opened by this Studio.".to_string(),
+        }];
+    }
+    let mut glyphs = Vec::new();
+    if let Some(connection) = card.connected_device.as_ref() {
+        glyphs.push(CardStatusGlyph {
+            icon: StudioIconName::Apply,
+            tone: match connection.relation {
+                SyncRelation::AtHead => GlyphTone::Good,
+                SyncRelation::Behind | SyncRelation::Diverged => GlyphTone::Attention,
+            },
+            words: connected_line(&connection.device_name, connection.relation),
+        });
+    }
+    if card.running_in_sim {
+        glyphs.push(CardStatusGlyph {
+            icon: StudioIconName::Simulator,
+            tone: GlyphTone::Live,
+            words: "Running in simulator".to_string(),
+        });
+    }
+    glyphs
+}
+
+/// The card menu — the redesigned card's DEPTH surface ("the second
+/// click"): a status section carrying in words everything the slim face
+/// compressed to glyphs, then the actions — open in sim, put on an
+/// empty device, push, rename, duplicate, export, delete. The rows are
+/// `UiAction`s rendered in the shared menu-item context (export is a
+/// web-side handler wearing the same classes) — one action vocabulary,
 /// one look.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -300,11 +257,34 @@ pub(crate) fn PackageCardMenu(
     /// Open the menu immediately (stories only).
     #[props(default = false)]
     initially_open: bool,
+    /// The formatted "…ago" stamp, computed by the card (fixed clock in
+    /// stories).
+    #[props(default)]
+    edited_line: Option<String>,
+    /// The card's open link (D37: opening is navigation) for the
+    /// "Open in sim" row. `None` renders no row (blocked cards).
+    #[props(default)]
+    open_href: Option<String>,
+    /// This card's open is in flight — the open row holds navigation.
+    #[props(default = false)]
+    opening: bool,
+    /// Connected-empty boards offered a one-click push, as (card key,
+    /// display name) — the former face chips, now rows (model §1-A: the
+    /// explicit row IS the D11 consent; pushing to a blank board
+    /// destroys nothing).
+    #[props(default)]
+    empty_devices: Vec<(String, String)>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let mut rename_value = use_signal(|| card.slug.clone());
     let rename_uid = card.uid.clone();
     let export_card = card.clone();
+    // Copy link (G1 finding, 2026-08-29): the canonical `/p/<slug>-<uid>`
+    // address, from the card's own identity. Cards carry the library slug
+    // (dated); the cosmetic half heals on open, the uid is what matters.
+    let link_name = card.slug.clone();
+    let link_uid = card.uid.clone();
+    let link_toasts = try_consume_context::<Toasts>();
     // Rename and duplicate both round-trip the manifest through the strict
     // reader, so on a package this Studio cannot read they would fail with
     // a parser complaint. A blocked card offers only what works on raw
@@ -350,12 +330,97 @@ pub(crate) fn PackageCardMenu(
         .with_icon("upload")
     });
 
+    // The status facts, in words — everything the slim face compresses
+    // away (card-overlay redesign). Derived here so the section renders
+    // from the same helpers the face's tooltips use.
+    let blocked_lines = card
+        .health
+        .blocked()
+        .map(|(headline, remedy)| (headline.to_string(), remedy.to_string()));
+    let upgrades_from = match card.health {
+        PackageHealth::UpgradesOnOpen { found } => Some(found),
+        _ => None,
+    };
+    let association = card
+        .connected_device
+        .is_none()
+        .then(|| card.on_device.clone())
+        .flatten();
+    let live = live_presence_line(&card);
+
     rsx! {
         DetailPopover {
             icon: StudioIconName::More,
             label: "Project actions".to_string(),
             placement: PopoverPlacement::BottomEnd,
             initially_open,
+            // Compact trigger for the glass bar: the stock 32px toned
+            // square crowded the slim footer (G1 feedback — "a little
+            // big, wants a tiny bit more space around it"). No
+            // preflight, so the class resets the UA button chrome.
+            trigger: rsx! {
+                span { class: "tw:inline-flex tw:items-center tw:justify-center",
+                    StudioIcon { name: StudioIconName::More, size: 13 }
+                }
+            },
+            trigger_class: CARD_MENU_TRIGGER_CLASS.to_string(),
+            trigger_open_class: format!("{CARD_MENU_TRIGGER_CLASS} tw:bg-white/10 tw:text-strong-foreground"),
+            // ---- status: the words behind the face's glyphs ----
+            DetailSection {
+                div { class: "tw:grid tw:gap-0.5",
+                    if let Some((headline, remedy)) = blocked_lines {
+                        // amber = honest bad content; never violet (bound)
+                        p { class: "tw:m-0 tw:text-xs tw:font-semibold tw:text-status-attention-foreground",
+                            "{headline}"
+                        }
+                        p { class: "tw:m-0 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                            "{remedy}"
+                        }
+                    }
+                    if let Some(found) = upgrades_from {
+                        // a fact, not a warning: it opens, and opening it
+                        // is what upgrades it
+                        p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground",
+                            title: "Opening this project upgrades it to the current format and saves a version you can go back to.",
+                            "Format {found} — upgrades when you open it"
+                        }
+                    }
+                    if let Some(edited) = edited_line {
+                        p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "Edited {edited}" }
+                    }
+                    // Advisory board target (vision D3): a quiet fact, not
+                    // a warning.
+                    if let Some(target) = card.target.as_deref() {
+                        p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground",
+                            "for {target_display_name(target)}"
+                        }
+                    }
+                    if let Some(provenance) = card.provenance.clone() {
+                        p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "{provenance}" }
+                    }
+                    // the association parity line yields to the LIVE
+                    // indication when the device is actually here
+                    if let Some(device) = association {
+                        p { class: "tw:m-0 tw:text-xs tw:text-status-good-foreground",
+                            "On {device} ✓"
+                        }
+                    }
+                    // D28 runtime presence, in full: the aggregate line
+                    // spells out both places on its own second line —
+                    // the popup has the room the face does not.
+                    if let Some(live) = live {
+                        p { class: live.class, "{live.text}" }
+                        if let Some(places) = live.title {
+                            p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "{places}" }
+                        }
+                    }
+                    // a fact, not a warning: the card stays clickable —
+                    // the open's refusal notice explains
+                    if card.open_elsewhere {
+                        p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "Open in another tab" }
+                    }
+                }
+            }
             if let Some(exports) = new_from.clone() {
                 DetailSection { title: Some("New project from this\u{2026}".to_string()),
                     NewFromPatternForm { uid: card.uid.clone(), exports, on_action }
@@ -386,6 +451,52 @@ pub(crate) fn PackageCardMenu(
             }
             DetailSection {
                 div { class: "tw:grid tw:gap-0.5",
+                    // The crystallized open action (D36 prep): the same
+                    // navigation as the card face, spelled out — projects
+                    // always open on the sim, never a device takeover
+                    // (D29). A real <a> for D37 nav.
+                    if let Some(href) = open_href.clone() {
+                        a {
+                            class: "{menu_item_action_class()} tw:no-underline",
+                            href: "{href}",
+                            title: "Open this project in the simulator.",
+                            onclick: move |event: MouseEvent| {
+                                if opening {
+                                    event.prevent_default();
+                                }
+                            },
+                            span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                                StudioIcon { name: StudioIconName::Play, size: 14 }
+                            }
+                            span { "Open in sim" }
+                        }
+                    }
+                    // One "Put on <name>" per connected-empty device
+                    // (model §1-A): the row IS the D11 consent, and
+                    // pushing to a blank board destroys nothing.
+                    for (device_key, device_name) in empty_devices.iter().filter(|_| !blocked).cloned() {
+                        button {
+                            class: menu_item_action_class(),
+                            r#type: "button",
+                            title: "Put this project on \"{device_name}\" — it's empty and ready.",
+                            onclick: {
+                                let key = card.uid.clone();
+                                move |_| {
+                                    on_action.call(UiAction::from_op(
+                                        ControllerId::new(DEPLOY_NODE_ID),
+                                        DeployOp::PushProject {
+                                            key: key.clone(),
+                                            target: DeviceTarget::card(&device_key),
+                                        },
+                                    ));
+                                }
+                            },
+                            span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                                StudioIcon { name: StudioIconName::Apply, size: 14 }
+                            }
+                            span { "Put on \"{device_name}\"" }
+                        }
+                    }
                     if !blocked {
                         if let Some(push) = push_to_device {
                             ActionButton {
@@ -401,6 +512,26 @@ pub(crate) fn PackageCardMenu(
                             variant: ActionButtonVariant::MenuItem,
                             on_action,
                         }
+                    }
+                    button {
+                        class: menu_item_action_class(),
+                        r#type: "button",
+                        title: "Copy this project's link — the same address the editor shows.",
+                        onclick: move |_| {
+                            crate::clipboard::write_text(
+                                &crate::app::share::share_url::project_link_absolute(
+                                    &link_name,
+                                    &link_uid,
+                                ),
+                            );
+                            if let Some(mut toasts) = link_toasts {
+                                toasts.say("Link copied");
+                            }
+                        },
+                        span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                            StudioIcon { name: StudioIconName::ExternalLink, size: 14 }
+                        }
+                        span { "Copy link" }
                     }
                     button {
                         class: menu_item_action_class(),
@@ -522,20 +653,39 @@ pub(crate) fn home_action(op: HomeOp) -> UiAction {
     UiAction::from_op(ControllerId::new(HOME_NODE_ID), op)
 }
 
+/// The glass bar's compact ⋯ trigger: a 20px quiet icon button (the
+/// stock 32px icon-menu square overwhelms the slim footer). Resets UA
+/// button chrome itself — Tailwind preflight is not loaded.
+const CARD_MENU_TRIGGER_CLASS: &str = "tw:grid tw:h-5 tw:w-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:place-items-center tw:rounded tw:border-0 tw:bg-transparent tw:p-0 tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/10 tw:hover:text-strong-foreground";
+
 /// The card's treatment while an open runs. `busy` is a DIMMING, not a
 /// disabling: the card still acts (it supersedes), so it keeps its
 /// pointer cursor.
-fn package_card_class(opening: bool, busy: bool, blocked: bool) -> &'static str {
+fn package_card_class(opening: bool, busy: bool, blocked: bool, dragging: bool) -> &'static str {
     // tw:relative anchors the stretched open link (see the card markup)
+    if dragging {
+        // Drag in flight: the pointer has left the card, so the ring is
+        // pinned on rather than hover-gated, and the shadow says "lifted
+        // off the page". The HTML5 drag image is a snapshot taken at
+        // dragstart, so this styles the SOURCE — which is the card the eye
+        // is tracking anyway while the ghost follows the cursor.
+        return "tw:group tw:relative tw:cursor-grabbing tw:overflow-hidden tw:rounded-md tw:border tw:border-transparent tw:bg-card ux-ir-ring ux-ir-ring-inset ux-ir-ring-on ux-drag-chip";
+    }
     if blocked {
         // amber edge, default cursor: the card is a statement, not a door
-        "tw:relative tw:overflow-hidden tw:rounded-md tw:border tw:border-status-attention-border tw:bg-card"
+        "tw:group tw:relative tw:overflow-hidden tw:rounded-md tw:border tw:border-status-attention-border tw:bg-card"
     } else if opening {
-        "tw:relative tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
+        "tw:group tw:relative tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
     } else if busy {
-        "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
+        "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
     } else {
-        "tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+        // Inset ring: the card clips its own overflow, so an outset ring
+        // would be clipped away entirely (same trap .ux-glass-panel::after
+        // documents). It paints at z-3, above the glass footer (z-2) and
+        // the stretched open link (z-1), and takes no pointer events. The
+        // resting border goes transparent on hover so the ring IS the edge
+        // rather than a second line inside a grey one.
+        "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-transparent ux-ir-ring ux-ir-ring-inset ux-card-lift"
     }
 }
 
@@ -692,7 +842,7 @@ mod tests {
             blocked.health.blocked().map(|(headline, _)| headline),
             Some("Format 3 — too old for this Studio")
         );
-        assert!(package_card_class(false, false, true).contains("status-attention-border"));
+        assert!(package_card_class(false, false, true, false).contains("status-attention-border"));
     }
 
     #[test]
@@ -701,7 +851,27 @@ mod tests {
         upgradable.health = PackageHealth::UpgradesOnOpen { found: 4 };
         assert!(upgradable.health.is_openable());
         assert_eq!(upgradable.health.blocked(), None);
-        assert!(!package_card_class(false, false, false).contains("status-attention-border"));
+        assert!(
+            !package_card_class(false, false, false, false).contains("status-attention-border")
+        );
+    }
+
+    #[test]
+    fn a_card_in_flight_pins_the_ring_and_a_resting_one_does_not() {
+        // The drag ghost is a snapshot taken at dragstart, so the SOURCE
+        // card carries the in-flight light — and the pointer has left it,
+        // so the ring cannot be hover-gated there.
+        let dragging = package_card_class(false, false, false, true);
+        assert!(dragging.contains("ux-ir-ring-on"), "{dragging}");
+        assert!(dragging.contains("ux-drag-chip"), "{dragging}");
+        for resting in [
+            package_card_class(false, false, false, false),
+            package_card_class(true, false, false, false),
+            package_card_class(false, true, false, false),
+            package_card_class(false, false, true, false),
+        ] {
+            assert!(!resting.contains("ux-ir-ring-on"), "{resting}");
+        }
     }
 
     #[test]

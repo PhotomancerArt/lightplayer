@@ -12,7 +12,9 @@ use crate::app::node::{
     NodeChildren, NodeDetailPopover, NodeFaceBody, ProducedProducts, ProducedValues,
     SlotRecordEditor,
 };
-use crate::base::{HelpLink, Platform, StudioIcon, StudioIconName, node_kind_icon};
+use crate::base::{
+    HelpLink, Platform, StudioIcon, StudioIconName, node_kind_icon, use_reveal_on_focus,
+};
 
 /// Which surface treatment a dirty node pane wears — the D7 tint experiment,
 /// story-selectable pending the user's P5 pick.
@@ -72,6 +74,9 @@ pub fn NodePane(
     let title = view.header.title.clone();
     let tabs = view.tabs.clone();
     let focused = view.focused;
+    // Sidebar→card: a tree-row click focuses a card that may be scrolled
+    // out of view; reveal it (edge-triggered, only when mostly hidden).
+    let reveal = use_reveal_on_focus(focused);
     let select_action = view.action.clone();
     let select_kind = view.header.kind.clone();
     // The node KIND, right-aligned before the ⓘ like the device card's
@@ -122,7 +127,7 @@ pub fn NodePane(
     let child_exports = view.exports.clone();
 
     rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:gap-3",
+        div { class: "tw:grid tw:min-w-0 tw:gap-3", onmounted: reveal,
             div { class: surface_class,
                 RichObjectPane {
                     collapse: PaneCollapse {

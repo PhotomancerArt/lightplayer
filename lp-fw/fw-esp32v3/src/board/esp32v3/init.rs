@@ -19,7 +19,7 @@
 //! twice panics. It is the app path's **only** call to `esp_hal::init`.
 
 use esp_hal::clock::CpuClock;
-use esp_hal::interrupt::software::SoftwareInterruptControl;
+use esp_hal::interrupt::software::{SoftwareInterrupt, SoftwareInterruptControl};
 use esp_hal::timer::timg::{TimerGroup, TimerGroupInstance};
 use esp_hal::uart::{Config as UartConfig, Uart};
 use esp_hal::{Blocking, uart::ConfigError};
@@ -123,9 +123,28 @@ pub fn init_board() -> (
 }
 
 /// Start the Embassy runtime with the given timer and software interrupt.
+///
+/// Consumes software interrupt 0 (the esp-rtos scheduler's doorbell) and
+/// TIMG0's timer0 (the scheduler's alarm), and hands back the runtime pieces
+/// `main.rs` builds the io side from: a software interrupt for the io
+/// interrupt executor that keeps `serial::io_task` scheduled through long
+/// engine ticks, and TIMG0's *second* timer for that task's 1 ms pacer
+/// (io_task cannot use embassy-time — see `serial::io_task::IO_TICK`).
+///
+/// ⚠️ Software interrupt **2**, not 1: swi1 is the APP core's wire-pusher
+/// frame doorbell (`output::rmt::wire_pusher` raises and resets it via
+/// `steal()`, invisible to this ownership chain). Binding the io executor
+/// there had the two sides eating each other's raises — io wakes died the
+/// moment the APP core started, and frame doorbells died under the executor
+/// (bench 2026-08-25). Software interrupt 3 stays unclaimed.
 pub fn start_runtime(
     timg0: TimerGroup<'static, impl TimerGroupInstance>,
     sw_int: SoftwareInterruptControl<'static>,
+) -> (
+    SoftwareInterrupt<'static, 2>,
+    esp_hal::timer::AnyTimer<'static>,
 ) {
+    let io_pacer_timer = timg0.timer1.into();
     esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
+    (sw_int.software_interrupt2, io_pacer_timer)
 }

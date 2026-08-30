@@ -20,13 +20,13 @@ use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
     initialize_channel_accumulators, mapping_from_map2d_doc,
 };
-use lp_gfx::{SampleOutHandle, SamplePointsHandle, TextureData, TextureHandle};
+use lp_gfx::{SampleOutHandle, SamplePointsHandle, TextureHandle};
 use lpc_model::nodes::texture::TextureFormat;
 
 use crate::node::{
     AssetRefreshContext, AssetRefreshResult, ControlNode, ControlRenderContext, DestroyCtx,
     MemPressureCtx, NodeError, NodeRuntime, PatchedRun, PressureLevel, ProduceResult,
-    RuntimeStateShape, TickContext, err_ctx,
+    RuntimeStateShape, TickContext, ensure_scratch_len, err_ctx,
 };
 use crate::nodes::fixture::power_limit::{self, PowerPass};
 use crate::products::control::{
@@ -159,8 +159,18 @@ pub struct FixtureNode {
     last_visual_product: Option<VisualProduct>,
     last_settings: Option<FixtureRenderSettings>,
     render_target: Option<TextureHandle>,
+    /// Persistent buffer the TextureArea/1D paths read `render_target` back
+    /// into each tick. A fresh full-texture `Vec` per tick is a device OOM
+    /// on large fixtures (flash-write-wedge defect, remaining exposure).
+    read_back_scratch: alloc::vec::Vec<u8>,
     sample_points: Option<FixtureSamplePoints>,
     sample_target: Option<SampleOutHandle>,
+    /// Persistent destination for the per-frame Direct sample read
+    /// ([`lp_gfx::LpGraphics::read_sample_out_into`]). Settles at
+    /// `4 × lamp count` `u16`s for the node's life — a fresh `Vec` here
+    /// every tick is what OOM-reset the classic under zook playback
+    /// (defect 2026-08-29-flash-write-wedges-under-zook-playback).
+    sampled_scratch: Vec<u16>,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
     /// Channel list for Direct sampling — the ONLY per-lamp data that stays
@@ -217,8 +227,10 @@ impl FixtureNode {
             last_visual_product: None,
             last_settings: None,
             render_target: None,
+            read_back_scratch: alloc::vec::Vec::new(),
             sample_points: None,
             sample_target: None,
+            sampled_scratch: Vec::new(),
             precomputed: None,
             direct_channels: None,
             display_layout_revision: None,
@@ -1212,6 +1224,7 @@ impl FixtureNode {
             return render_direct_fixture_control(
                 &mut self.sample_points,
                 &mut self.sample_target,
+                &mut self.sampled_scratch,
                 self.mapping.as_mapping_ref(),
                 channels_version,
                 channels,
@@ -1245,10 +1258,17 @@ impl FixtureNode {
             let texture =
                 ensure_fixture_render_target(&mut self.render_target, &texture_request, ctx)?;
             ctx.render_texture_into(visual_product, &texture_request, texture)?;
-            let texture_data = ctx
-                .graphics()
+            let byte_len = texture.width() as usize
+                * texture.height() as usize
+                * texture.format().bytes_per_pixel();
+            ensure_scratch_len(
+                &mut self.read_back_scratch,
+                byte_len,
+                "fixture strip read back",
+            )?;
+            ctx.graphics()
                 .ok_or_else(|| NodeError::msg("fixture strip accumulation requires graphics"))?
-                .read_back(texture)
+                .read_back_into(texture, &mut self.read_back_scratch)
                 .map_err(err_ctx("fixture strip render target read back"))?;
             let channels = self
                 .direct_channels
@@ -1256,7 +1276,8 @@ impl FixtureNode {
                 .map(|(_, channels)| channels.as_slice())
                 .ok_or_else(|| NodeError::msg("fixture strip render missing cached channels"))?;
             let accumulators = accumulate_fixture_channels_from_strip(
-                &texture_data,
+                texture,
+                &self.read_back_scratch,
                 channels,
                 settings.wire_reversed,
             )?;
@@ -1287,13 +1308,21 @@ impl FixtureNode {
         };
         let texture = ensure_fixture_render_target(&mut self.render_target, &texture_request, ctx)?;
         ctx.render_texture_into(visual_product, &texture_request, texture)?;
-        let texture_data = ctx
-            .graphics()
+        let byte_len = texture.width() as usize
+            * texture.height() as usize
+            * texture.format().bytes_per_pixel();
+        ensure_scratch_len(
+            &mut self.read_back_scratch,
+            byte_len,
+            "fixture texture read back",
+        )?;
+        ctx.graphics()
             .ok_or_else(|| NodeError::msg("fixture texture accumulation requires graphics"))?
-            .read_back(texture)
+            .read_back_into(texture, &mut self.read_back_scratch)
             .map_err(err_ctx("fixture render target read back"))?;
-        let accumulators = accumulate_fixture_channels_from_texture_data(
-            &texture_data,
+        let accumulators = accumulate_fixture_channels_from_texture_bytes(
+            texture,
+            &self.read_back_scratch,
             mapping_entries,
             settings.width,
             settings.height,
@@ -1545,11 +1574,13 @@ fn fixture_strip_point_coords(count: u32, wire_reversed: bool) -> Vec<i32> {
 }
 
 /// One texel per lamp, straight off an `(N, 1)` strip render — the 1D
-/// answer to `accumulate_fixture_channels_from_texture_data`. There is no
+/// answer to `accumulate_fixture_channels_from_texture_bytes`. There is no
 /// area to integrate here, so there is no sampler and no u8 round trip:
-/// the RGBA16 texel IS the lamp value.
+/// the RGBA16 texel IS the lamp value. `bytes` is the target read back
+/// into the caller's scratch, described by the handle's shape.
 fn accumulate_fixture_channels_from_strip(
-    texture: &TextureData,
+    texture: &TextureHandle,
+    bytes: &[u8],
     channels: &[u32],
     wire_reversed: bool,
 ) -> Result<ChannelAccumulators, NodeError> {
@@ -1575,7 +1606,6 @@ fn accumulate_fixture_channels_from_strip(
         b: alloc::vec![Q32::ZERO; len],
         max_channel,
     };
-    let bytes = texture.bytes();
     for (index, channel) in channels.iter().enumerate() {
         // The reversed wire reads the strip back to front: lamp `k` takes
         // texel `N-1-k` (the along-the-wire direction option).
@@ -1648,6 +1678,7 @@ fn fixture_carries_2d_coords(mapping: MappingRef<'_>, area_rows: Option<u32>) ->
 fn render_direct_fixture_control(
     sample_points: &mut Option<FixtureSamplePoints>,
     sample_target: &mut Option<SampleOutHandle>,
+    sampled_scratch: &mut Vec<u16>,
     mapping: MappingRef<'_>,
     mapping_version: Revision,
     channels: &[u32],
@@ -1711,16 +1742,16 @@ fn render_direct_fixture_control(
             samples: sample_buf,
         },
     )?;
-    let sampled = ctx
-        .graphics()
+    ensure_scratch_len(sampled_scratch, channels.len() * 4, "fixture sample read")?;
+    ctx.graphics()
         .ok_or_else(|| NodeError::msg("fixture direct sampling requires graphics"))?
-        .read_sample_out(sample_buf)
+        .read_sample_out_into(sample_buf, sampled_scratch)
         .map_err(err_ctx("fixture sample read"))?;
 
     target.samples.fill(0);
     let brightness = settings.brightness.to_q32() / 255.to_q32();
     let mut written_samples = 0usize;
-    for (channel, rgba) in channels.iter().zip(sampled.chunks_exact(4)) {
+    for (channel, rgba) in channels.iter().zip(sampled_scratch.chunks_exact(4)) {
         let base = (*channel as usize).saturating_mul(3);
         if base + 3 > expected_samples {
             continue;
@@ -1940,8 +1971,9 @@ fn apply_brightness_unorm16(value: u16, brightness_u8: u8, brightness: Q32) -> u
     Q32((((i64::from(value)) * i64::from(brightness.0)) >> 16) as i32).to_u16_saturating()
 }
 
-fn accumulate_fixture_channels_from_texture_data(
-    texture: &TextureData,
+fn accumulate_fixture_channels_from_texture_bytes(
+    texture: &TextureHandle,
+    bytes: &[u8],
     mapping_entries: &[PixelMappingEntry],
     width: u32,
     height: u32,
@@ -1952,7 +1984,7 @@ fn accumulate_fixture_channels_from_texture_data(
     {
         return Ok(accumulate_from_mapping(
             mapping_entries,
-            texture.bytes(),
+            bytes,
             TextureFormat::Rgba16,
             width,
             height,
@@ -1963,7 +1995,7 @@ fn accumulate_fixture_channels_from_texture_data(
         texture.width(),
         texture.height(),
         texture.format(),
-        texture.bytes().to_vec(),
+        bytes.to_vec(),
     )
     .map_err(err_ctx("fixture render target product"))?;
     accumulate_fixture_channels_from_texture_product(
@@ -5586,14 +5618,19 @@ mod mapping_representation_differential {
     use lp_collection::VecMap;
     use lpc_mapping::{
         GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathAlign,
-        PathShape, RingDir, RingOrder, RingShape, fit_points, resolve,
+        PathShape, RingDir, RingOrder, RingShape, fit_points, fit_scale, resolve,
     };
     use lpc_model::{EnumSlot, MapSlot};
 
-    /// The pre-P3 `mapping_from_map2d_doc`, verbatim: resolve, aspect-fit,
-    /// then expand into one `PathSpec::PointList` slot path per document
-    /// object. This is the behaviour the compact carrier replaced; it exists
-    /// here only to be differenced against.
+    /// The pre-P3 `mapping_from_map2d_doc`: resolve, aspect-fit, then
+    /// expand into one `PathSpec::PointList` slot path per document
+    /// object. This is the behaviour the compact carrier replaced; it
+    /// exists here only to be differenced against. One deliberate
+    /// departure from the verbatim original: the slot form's
+    /// `sample_diameter` is texture pixels by contract, so the oracle
+    /// carries the doc's diameter through the same fit as the positions
+    /// (the verbatim copy predated that fix and passed doc units through
+    /// — the unit-mismatch defect, 2026-08-24).
     fn expand_doc_into_slots(
         doc: &Map2dDoc,
         texture_width: u32,
@@ -5601,14 +5638,23 @@ mod mapping_representation_differential {
     ) -> MappingConfig {
         let resolved = resolve(doc).expect("resolve document");
         let mut paths = VecMap::new();
+        let mut sample_diameter = doc.sample_diameter;
         if !resolved.lamps.is_empty() {
+            let positions = resolved.positions();
             let fitted = fit_points(
-                &resolved.positions(),
+                &positions,
                 doc.canvas_bounds(),
                 texture_width,
                 texture_height,
             )
             .expect("fit points");
+            sample_diameter *= fit_scale(
+                &positions,
+                doc.canvas_bounds(),
+                texture_width,
+                texture_height,
+            )
+            .expect("fit scale");
             for span in &resolved.spans {
                 let start = span.start as usize;
                 let end = start + span.count as usize;
@@ -5621,7 +5667,7 @@ mod mapping_representation_differential {
                 );
             }
         }
-        MappingConfig::path_points(MapSlot::new(paths), doc.sample_diameter)
+        MappingConfig::path_points(MapSlot::new(paths), sample_diameter)
     }
 
     fn object(shape: Map2dShape) -> Map2dObject {
