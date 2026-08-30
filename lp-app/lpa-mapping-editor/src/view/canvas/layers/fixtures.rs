@@ -92,12 +92,14 @@ pub struct SpriteObject {
     /// nothing hits.
     pub hull: Vec<Vec<[f32; 2]>>,
     /// The VISUAL outline loops, aligned as the document authored it. Empty
-    /// means nothing is drawn.
+    /// means no band is drawn — the shaped matrix's case, where a band swept
+    /// along the serpentine would trace the wire through the lattice instead
+    /// of the shape, and its cells carry the picture alone.
     pub outline: Vec<Vec<[f32; 2]>>,
-    /// Voronoi cells for objects whose lamps read as a ribbon (path,
-    /// polygon); empty for the kinds that keep dots. `lamp` indexes the
-    /// sprite's DISPLAYED points, so the live-fill hooks stride exactly like
-    /// the circles'.
+    /// Voronoi cells for objects whose lamps earn them — strand-seeded for a
+    /// ribbon (path, polygon), field-seeded for a shaped matrix, empty for the
+    /// kinds that keep dots. `lamp` indexes the sprite's DISPLAYED points, so
+    /// the live-fill hooks stride exactly like the circles'.
     pub cells: Vec<LampCell>,
     /// `(first lamp, count)` in the fixture's TRUE numbering — the same
     /// space [`nearest_lamp`] answers in, so overlapping bodies can be broken

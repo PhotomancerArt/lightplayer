@@ -123,6 +123,10 @@ pub fn handle_editor_key(
                 "g" => session.write().tool = MapTool::Grid,
                 "r" => session.write().tool = MapTool::Ring,
                 "p" => session.write().tool = MapTool::path(),
+                // `o` for outline: `p` is the path tool's and the polygon
+                // tool's whole subject is a closed OUTLINE, whichever
+                // population fills it.
+                "o" => session.write().start_polygon_tool(),
                 "n" => {
                     let current = view_opts.peek().numbers;
                     view_opts.write().numbers = !current;
@@ -151,14 +155,15 @@ pub fn handle_editor_key(
         Key::Escape => {
             let mut s = session.write();
             // The ladder (D6 + the selection/tree ADR, reshaped by the
-            // unified-selection model): back out one path vertex, then
-            // drop a vertex sub-selection, then ASCEND out of a descended
-            // group, then reset the tool — and then esc ASCENDS OUT of
-            // the document itself (`ExitDive`: the host selects the
-            // fixture at project level). The old clear-selection rung is
-            // gone: "dived with nothing selected" is no longer a state —
-            // scope derives from selection, so leaving IS the next rung.
-            if s.path_backout() {
+            // unified-selection model): back out one drafted vertex —
+            // path or polygon, whichever tool is drawing — then drop a
+            // vertex sub-selection, then ASCEND out of a descended group,
+            // then reset the tool — and then esc ASCENDS OUT of the
+            // document itself (`ExitDive`: the host selects the fixture
+            // at project level). The old clear-selection rung is gone:
+            // "dived with nothing selected" is no longer a state — scope
+            // derives from selection, so leaving IS the next rung.
+            if s.path_backout() || s.polygon_backout() {
                 return EditorKeyResult::handled(false);
             }
             if s.selection.vertex.is_some() {
@@ -178,14 +183,27 @@ pub fn handle_editor_key(
             }
         }
         Key::Enter => {
-            if matches!(session.peek().tool, MapTool::Path { .. })
-                && session.write().path_finish().is_some()
-            {
+            // Enter is the ACCESSIBILITY fallback for both drawing tools:
+            // the path's double-click and the polygon's close-on-first are
+            // the primary gestures. A polygon draft with fewer than three
+            // vertices refuses and KEEPS the draft (parent decision D11), so
+            // the miss costs nothing.
+            let tool = session.peek().tool.clone();
+            let finished = match tool {
+                MapTool::Path { .. } => session.write().path_finish(),
+                MapTool::Polygon { .. } => session.write().polygon_finish(),
+                _ => None,
+            };
+            if finished.is_some() {
                 on_committed.call(());
             }
             EditorKeyResult::handled(false)
         }
         Key::Backspace | Key::Delete => {
+            // Vertex-FIRST: with a corner selected the key is about that
+            // corner, and a shape already at its floor (a run's two points, an
+            // outline's three) simply refuses — `delete_selection` never lets a
+            // refused corner become a deleted object.
             let had_selection = !session.peek().selection.is_empty();
             if had_selection {
                 session.write().delete_selection();

@@ -14,10 +14,10 @@ use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
-    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FitReconcile, FitStale, FixtureBody,
-    FixtureEvent, FixtureSprite, HelpFloat, LampCell, MapEditorSession, Placement, SpriteObject,
-    ZoomFloat, aligned_outline, display_inset_padding, hit_body, lamp_cells, object_color,
-    tool_hint,
+    Camera, CanvasDrag, CellSeeding, EditorCanvas, EditorViewOptions, FitReconcile, FitStale,
+    FixtureBody, FixtureEvent, FixtureSprite, HelpFloat, LampCell, MapEditorSession, Placement,
+    SpriteObject, ZoomFloat, aligned_outline, display_inset_padding, hit_body, lamp_cells,
+    object_color, point_cells, tool_hint,
 };
 use lpa_studio_core::{
     ArtifactLocation, EditorMetaFixture, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
@@ -82,13 +82,20 @@ struct StrandMeta {
     count: u32,
     /// Authored stroke alignment (map2d format 4).
     align: PathAlign,
-    /// These lamps read as a RIBBON and wear voronoi cells (path, polygon);
-    /// grid and ring lamps are a field and keep their dots.
-    cells: bool,
+    /// How these lamps take voronoi cells — as a ribbon along the strand
+    /// (path, polygon), as a bare field (shaped matrix), or not at all (grid,
+    /// ring, and bodies with no document behind them).
+    cells: CellSeeding,
     /// The lamps close their own loop (a polygon's perimeter wraps), so the
     /// outline repeats the first lamp and the band comes out an annulus
     /// rather than a ribbon with a mouth at the seam.
     closed: bool,
+    /// These lamps wear the band their strand sweeps. A shaped matrix does
+    /// NOT (G1): swept along its serpentine the band snakes through its own
+    /// lattice and self-overlaps, describing the wire instead of the shape —
+    /// its cells carry it. The HIT body is unaffected; picking still works off
+    /// the symmetric band.
+    banded: bool,
 }
 
 impl StrandMeta {
@@ -901,12 +908,11 @@ fn sprite_objects(render: &FixtureRender, selection: &UiSelection) -> Vec<Sprite
                     .collect(),
                 _ => strands.clone(),
             };
-            let cells = match meta {
-                Some(meta) if meta.cells => {
-                    object_cells(&strands, align, &displayed, render.sample_diameter)
-                }
-                _ => Vec::new(),
-            };
+            let seeding = meta.map_or(CellSeeding::None, |meta| meta.cells);
+            let cells = object_cells(seeding, &strands, align, &displayed, render.sample_diameter);
+            // A body with no document behind it draws the neutral band; only a
+            // shaped matrix opts out (its cells say the shape instead).
+            let banded = meta.is_none_or(|meta| meta.banded);
             let label = if path.is_empty() {
                 format!("lamps {start}\u{2013}{}", end.saturating_sub(1))
             } else {
@@ -914,8 +920,14 @@ fn sprite_objects(render: &FixtureRender, selection: &UiSelection) -> Vec<Sprite
             };
             SpriteObject {
                 label,
+                // The HIT body stays whatever the visual band does: picking an
+                // object must not depend on how it chose to draw itself.
                 hull: hit_body(&outline_strands, reach),
-                outline: aligned_outline(&outline_strands, align, reach),
+                outline: if banded {
+                    aligned_outline(&outline_strands, align, reach)
+                } else {
+                    Vec::new()
+                },
                 cells,
                 lamps: (*start, *lamps),
                 selected: object_selected(selection, render.node, path, *start, *lamps),
@@ -964,13 +976,26 @@ fn instance_strands(
 /// display stride to name a true lamp, exactly as the circles do. Cells
 /// clipped away to nothing carry no polygon and are dropped here rather than
 /// emitting an empty path element.
+///
+/// A ribbon seeds per strand; a shaped matrix's field seeds through
+/// [`point_cells`] — the one call the node view's output preview makes, so the
+/// same lamps get the same mosaic wherever they are drawn.
 fn object_cells(
+    seeding: CellSeeding,
     strands: &[Vec<[f32; 2]>],
     align: PathAlign,
     displayed: &[usize],
     sample_diameter: f32,
 ) -> Vec<LampCell> {
-    lamp_cells(strands, align, sample_diameter)
+    let seeded = match seeding {
+        CellSeeding::None => return Vec::new(),
+        CellSeeding::Strand => lamp_cells(strands, align, sample_diameter),
+        CellSeeding::Field => {
+            let field: Vec<[f32; 2]> = strands.iter().flatten().copied().collect();
+            point_cells(&field, sample_diameter / 2.0)
+        }
+    };
+    seeded
         .into_iter()
         .filter(|cell| cell.polygon.len() >= 3)
         .filter_map(|cell| {
@@ -1016,12 +1041,28 @@ fn strand_metas(doc: &Map2dDoc, resolved: &ResolvedMap2d) -> Vec<StrandMeta> {
         while let Map2dShape::Repeat(repeat) = shape {
             shape = &repeat.shape;
         }
-        let (align, cells, closed, breaks) = match shape {
-            Map2dShape::Path(path) => (path.align, true, false, lpc_mapping::path_gap_breaks(path)),
-            Map2dShape::Polygon(polygon) => (polygon.align, true, true, Vec::new()),
-            // Grid and ring lamps are a FIELD, not a ribbon: they wear the
-            // neutral on-path band and keep their dots.
-            _ => (PathAlign::On, false, false, Vec::new()),
+        let (align, cells, closed, banded, breaks) = match shape {
+            Map2dShape::Path(path) => (
+                path.align,
+                CellSeeding::Strand,
+                false,
+                true,
+                lpc_mapping::path_gap_breaks(path),
+            ),
+            Map2dShape::Polygon(polygon) => {
+                (polygon.align, CellSeeding::Strand, true, true, Vec::new())
+            }
+            // A shaped matrix's lamps are a FIELD, and its band is a lie: swept
+            // along the serpentine it traces the chain through the lattice, not
+            // the outline, and self-overlaps doing it (G1). No band; the cells
+            // carry the shape, seeded exactly as the product preview seeds the
+            // same lamps.
+            Map2dShape::FilledPolygon(_) => {
+                (PathAlign::On, CellSeeding::Field, false, false, Vec::new())
+            }
+            // Grid and ring lamps are a field inside the neutral on-path band,
+            // and keep their dots.
+            _ => (PathAlign::On, CellSeeding::None, false, true, Vec::new()),
         };
         // Cut the span at each jumper: one meta per lit run.
         let mut cursor = 0;
@@ -1035,6 +1076,7 @@ fn strand_metas(doc: &Map2dDoc, resolved: &ResolvedMap2d) -> Vec<StrandMeta> {
                 align,
                 cells,
                 closed,
+                banded,
             });
             cursor = offset;
         }
@@ -1759,8 +1801,9 @@ mod tests {
             start,
             count,
             align: PathAlign::On,
-            cells: true,
+            cells: CellSeeding::Strand,
             closed: false,
+            banded: true,
         }
     }
 
@@ -1866,8 +1909,9 @@ mod tests {
             start: 0,
             count: 10,
             align: PathAlign::On,
-            cells: false,
+            cells: CellSeeding::None,
             closed: false,
+            banded: true,
         }];
         let objects = sprite_objects(&render, &UiSelection::empty());
         assert!(!objects[0].outline.is_empty());
@@ -1936,12 +1980,15 @@ mod tests {
     }
 
     /// The drawing facts reach the sprite build from the ONE parse the
-    /// resolver already did: alignment per object, cells only for the ribbon
-    /// kinds, a repeat's instances as separate strands, and a jumper cutting
-    /// its path's span in two.
+    /// resolver already did: alignment per object, the right cell seeding per
+    /// kind, the shaped matrix's missing band, a repeat's instances as separate
+    /// strands, and a jumper cutting its path's span in two.
     #[test]
     fn strand_metas_carry_alignment_kind_and_the_physical_breaks() {
-        use lpc_mapping::{Map2dObject, PathShape, PolygonShape, RepeatShape, RingShape};
+        use lpc_mapping::{
+            FilledPolygonShape, GridCorner, GridRouting, Map2dObject, PathShape, PolygonShape,
+            RepeatShape, RingShape,
+        };
 
         let object = |shape| Map2dObject {
             name: String::new(),
@@ -1977,21 +2024,92 @@ mod tests {
                     start_angle_deg: -90.0,
                     dir: Default::default(),
                 })),
+                object(Map2dShape::FilledPolygon(FilledPolygonShape {
+                    points: vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]],
+                    pitch: 26.0,
+                    angle_deg: 0.0,
+                    origin: [0.0, 0.0],
+                    routing: GridRouting::Snake,
+                    start_corner: GridCorner::default(),
+                })),
             ],
             ..Map2dDoc::new()
         };
         let resolved = lpc_mapping::resolve(&doc).expect("the document resolves");
         let metas = strand_metas(&doc, &resolved);
         // The gapped path is TWO runs of its one span; the repeat is one
-        // strand per instance; the ring is one field.
+        // strand per instance; the ring and the shaped matrix are one field
+        // each.
         let shape: Vec<(u32, u32)> = metas.iter().map(|meta| (meta.start, meta.count)).collect();
-        assert_eq!(shape, vec![(0, 3), (3, 2), (5, 3), (8, 3), (11, 4)]);
-        assert!(metas[0].align == PathAlign::Inside && metas[0].cells);
+        assert_eq!(
+            shape,
+            vec![(0, 3), (3, 2), (5, 3), (8, 3), (11, 4), (15, 16)]
+        );
+        assert!(metas[0].align == PathAlign::Inside && metas[0].cells == CellSeeding::Strand);
+        assert!(metas[0].banded, "a path sweeps its band");
         assert_eq!(metas[1].align, PathAlign::Inside, "both sides of a jumper");
         assert!(metas[2].closed, "a polygon's perimeter wraps");
         assert_eq!(metas[3].align, PathAlign::Outside, "through the repeat");
-        assert!(!metas[4].cells, "a ring keeps its dots");
+        assert_eq!(metas[4].cells, CellSeeding::None, "a ring keeps its dots");
+        assert!(metas[4].banded, "inside its band");
         assert_eq!(metas[4].align, PathAlign::On);
+        // The shaped matrix: field-seeded cells, and NO band to snake through
+        // its lattice.
+        assert_eq!(metas[5].cells, CellSeeding::Field);
+        assert!(!metas[5].banded);
+        assert!(!metas[5].closed);
+    }
+
+    /// The shaped matrix's sprite body: the band is gone, every drawn lamp
+    /// still wears a cell, and the HIT body survives — dropping the band must
+    /// not make the object unpickable.
+    #[test]
+    fn a_filled_polygon_sprite_keeps_its_cells_and_hit_body_without_a_band() {
+        use lpc_mapping::{FilledPolygonShape, GridCorner, GridRouting, Map2dObject};
+
+        let doc = Map2dDoc {
+            objects: vec![Map2dObject {
+                name: "panel".into(),
+                id: None,
+                stride: None,
+                shape: Map2dShape::FilledPolygon(FilledPolygonShape {
+                    points: vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]],
+                    pitch: 26.0,
+                    angle_deg: 0.0,
+                    origin: [0.0, 0.0],
+                    routing: GridRouting::Snake,
+                    start_corner: GridCorner::default(),
+                }),
+            }],
+            ..Map2dDoc::new()
+        };
+        let resolved = lpc_mapping::resolve(&doc).expect("the document resolves");
+        let points = resolved.positions();
+        let render = FixtureRender {
+            node: NodeId::new(1),
+            key: "panel".into(),
+            label: "panel".into(),
+            color: "#fff",
+            transform: UiArrangeTransform::default(),
+            arranged: true,
+            bounds: [0.0, 0.0, 100.0, 100.0],
+            body: FixtureBody::Lamps {
+                points: points.clone(),
+                total: points.len() as u32,
+            },
+            instances: vec![(String::new(), 0, points.len() as u32)],
+            strands: strand_metas(&doc, &resolved),
+            sample_diameter: doc.sample_diameter,
+            settled: true,
+        };
+        let objects = sprite_objects(&render, &UiSelection::empty());
+        assert_eq!(objects.len(), 1);
+        assert!(objects[0].outline.is_empty(), "no band on a shaped matrix");
+        assert_eq!(objects[0].cells.len(), points.len());
+        assert!(
+            lpa_mapping_editor::point_in_loops(&objects[0].hull, points[0]),
+            "the hit body still claims its own lamps"
+        );
     }
 
     /// A pick's hull index resolves to THAT instance; the nearest lamp

@@ -483,6 +483,47 @@ fn props_stack_dived_descended() -> Element {
 }
 
 #[story(
+    description = "The props stack on a SHAPED MATRIX (filled polygon): the population toggle leads the card because it decides the fields under it, then the lattice — pitch, turn, phase origin, wiring routing and start corner — and a read-only derived count, the first shape whose lamp count is computed rather than authored."
+)]
+fn props_stack_filled_polygon() -> Element {
+    rsx! {
+        PropsStackStory {
+            doc: filled_polygon_doc(),
+            surface: props_stack_surface(),
+            select: ShapePath::root(0),
+        }
+    }
+}
+
+/// A one-object document whose object is a shaped matrix — the props stack's
+/// filled-polygon fixture.
+fn filled_polygon_doc() -> Map2dDoc {
+    Map2dDoc {
+        canvas: Some([0.0, 0.0, 160.0, 160.0]),
+        objects: vec![lpc_mapping::Map2dObject {
+            name: "sign face".to_string(),
+            id: None,
+            stride: None,
+            shape: lpc_mapping::Map2dShape::FilledPolygon(lpc_mapping::FilledPolygonShape {
+                points: vec![
+                    [10.0, 10.0],
+                    [130.0, 10.0],
+                    [130.0, 150.0],
+                    [70.0, 100.0],
+                    [10.0, 150.0],
+                ],
+                pitch: 18.0,
+                angle_deg: 0.0,
+                origin: [0.0, 0.0],
+                routing: lpc_mapping::GridRouting::Snake,
+                start_corner: lpc_mapping::GridCorner::Tl,
+            }),
+        }],
+        ..Map2dDoc::new()
+    }
+}
+
+#[story(
     description = "The props stack at multi-select: sibling roots share one 'N objects' leaf card (lamp total, delete all) over the placement card — shared-ancestor cards would stack between them if the siblings were descended, but sibling-level multi-select at today's arity means the fixture is the only shared level."
 )]
 fn props_stack_multi_select() -> Element {
