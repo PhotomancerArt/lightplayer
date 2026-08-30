@@ -819,7 +819,21 @@ async function launchCaptureBrowser(pageCount) {
         child.kill("SIGTERM");
       }
       await Promise.race([childExited, delay(1_000)]);
-      await rm(userDataDir, { recursive: true, force: true });
+      // Chrome may still be flushing profile writes when it goes down (the
+      // 1s exit race above can elapse first), so an eager recursive removal
+      // races those writes — CI died with ENOTEMPTY here AFTER every PNG was
+      // captured. Retry briefly, and never let cleanup fail the run: a
+      // leftover temp profile dir is harmless.
+      try {
+        await rm(userDataDir, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 200,
+        });
+      } catch (error) {
+        console.warn(`leaving Chrome profile dir ${userDataDir}: ${error.message}`);
+      }
     },
   };
 }
