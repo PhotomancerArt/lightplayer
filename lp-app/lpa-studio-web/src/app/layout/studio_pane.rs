@@ -272,8 +272,13 @@ fn PaneActionButton(
 }
 
 fn pane_surface_class(selected: bool) -> String {
+    // The selected (focused) pane wears the full-spectrum ring — the
+    // selection grammar's chosen-object mark at card scale (G1: "give it
+    // the rainbow to make it clear it's active"). Inset variant: this
+    // surface clips (`overflow-hidden`), which would swallow an outset
+    // ring whole.
     let border_class = if selected {
-        "tw:border-selection-border"
+        "ux-sel-ring ux-sel-ring-inset tw:border-transparent"
     } else {
         "tw:border-border"
     };
