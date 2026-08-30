@@ -12,6 +12,11 @@ use super::node_naming::{node_kind_label, node_kind_slug};
 /// last. Stable — the picker never reorders. `Module` sits with the other
 /// container (settled D-C: an empty module is creatable, and everything
 /// composable should be authorable).
+///
+/// Must stay a permutation of [`NodeKind::ALL`] —
+/// [`tests::picker_kinds_is_a_permutation_of_all_kinds`] fails on a kind
+/// added without a picker placement, so a new kind cannot silently skip
+/// every picker.
 const PICKER_KINDS: &[NodeKind] = &[
     NodeKind::Shader,
     NodeKind::Texture,
@@ -244,11 +249,32 @@ fn kind_is_missing(kind: NodeKind, features: &[LpFeature]) -> bool {
 mod tests {
     use super::*;
 
+    /// The one non-compile-checked seam in the "new kind must be placed"
+    /// chain: `NodeKind::ALL` and `produces_visual` are wildcard-free (a
+    /// new variant fails to compile until placed), but `PICKER_KINDS` is a
+    /// hand-ordered list. Enforce that it names every kind exactly once so
+    /// a new kind cannot ship without a deliberate picker placement.
+    #[test]
+    fn picker_kinds_is_a_permutation_of_all_kinds() {
+        assert_eq!(PICKER_KINDS.len(), NodeKind::ALL.len());
+        for kind in NodeKind::ALL {
+            assert_eq!(
+                PICKER_KINDS.iter().filter(|k| **k == kind).count(),
+                1,
+                "{kind:?} must appear exactly once in PICKER_KINDS"
+            );
+        }
+    }
+
     #[test]
     fn menu_offers_every_kind_in_stable_order() {
         let menu = add_node_menu(&UiAttachTarget::ProjectRoot);
 
-        assert_eq!(menu.entries.len(), 11, "every instantiable kind");
+        assert_eq!(
+            menu.entries.len(),
+            NodeKind::ALL.len(),
+            "every instantiable kind"
+        );
         assert!(menu.entries.iter().any(|e| e.kind == NodeKind::Module));
         assert_eq!(menu.entries[0].kind, NodeKind::Shader);
         assert_eq!(menu.entries[0].label, "Shader");
