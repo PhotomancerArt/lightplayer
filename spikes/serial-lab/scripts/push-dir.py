@@ -62,8 +62,16 @@ class Lab:
 
     def await_response(self, frame_id, since, timeout_s=20.0):
         t0 = time.time()
+        warned_lossy = False
         while time.time() - t0 < timeout_s:
-            entries = self.cmd("buffer", since=since, max=2000).get("entries", [])
+            resp = self.cmd("buffer", since=since, max=2000)
+            missed = resp.get("evicted", 0) + resp.get("truncated", 0)
+            if missed and not warned_lossy:
+                warned_lossy = True
+                print(f"  ⚠ buffer window lossy ({missed} entries missed) — "
+                      f"response id={frame_id} may be undetectable",
+                      file=sys.stderr)
+            entries = resp.get("entries", [])
             for e in entries:
                 frame = e.get("frame")
                 if frame and frame.get("id") == frame_id:
