@@ -48,11 +48,12 @@ to the door's 360 and out_b refuses at 32,357 bytes.
 again look like "some fixtures don't draw," not like an error. The
 2,048-lamp ceiling remains the declared posture for real serial links.
 
-**Remaining symptom (open, separate mechanism)** — with this fix the
-browser sim draws out_a completely (25 panels + door, 3,335 lamps), but
-out_b's lamp geometry still never reaches the composed lamp view — the
-engine answers its full 2,975-lamp layout at unbounded budget (verified
-by direct probe), so the drop is downstream of the engine: the streamed
-read, the client's frame assembly, or the preview compositor. Tracked
-as its own investigation; the wire is provably fine (the Outputs panel
-shows Box 2 at 2975/2975 with live cells).
+**Remaining symptom (resolved 2026-08-29, separate mechanism)** — with
+this fix the browser sim drew out_a completely (25 panels + door, 3,335
+lamps), but out_b's lamp geometry still never reached the composed lamp
+view, even though the engine answers its full 2,975-lamp layout at
+unbounded budget (verified by direct probe). The drop was client-side:
+every lamp compositor (device/sim card feed, preview-host feed,
+module-face hero) reduced the probe's per-output answer to ONE output.
+Filed and fixed as
+[lamp-views-latch-one-output](2026-08-29-lamp-views-latch-one-output.md).

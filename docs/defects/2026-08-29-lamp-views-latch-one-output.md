@@ -5,9 +5,6 @@ fixed: this change
 area: lpa-studio-core (card_feed + preview_output_feed + output_frame_cache + project_controller scope hero)
 class: config-masked-defect
 related:
-  # Lands with PR #460 (the full-scale small-dome example), where this
-  # defect's symptom was first seen and where its "Remaining symptom"
-  # section names this entry.
   - 2026-08-28-wire-load-skips-link-engine-state.md
 ---
 # Every lamp view latched ONE output and dropped the rest
