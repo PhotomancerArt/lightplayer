@@ -37,3 +37,33 @@ for FLASH ops even though the transport no longer needs it).
 `with_app_core_stalled` under zook vs small-dome; check whether the
 wedge is a livelock (never returns) or extreme slowness; bisect wire
 count (2 vs 5 outputs) on the same project.
+
+## Diagnosed 2026-08-29 (bench walk follow-up): not a flash stall — an OOM reset loop
+
+The "wedge" was the classic silently resetting, twice, and auto-reloading:
+`LpGraphics::read_sample_out` returned `.data().to_vec()` — a fresh heap
+clone of the full sample surface — and `FixtureNode`'s Direct render path
+called it **every tick** (zook: 1,500 lamps × RGBA16 = 12,000 B allocated
+and freed per frame). Any inbound request whose transients pushed
+largest-free below that hit the infallible-alloc handler →
+`stage_oom_and_reset`; the second reset (shader-compile OOM on auto-load)
+plus auto-reload made the sequence read as an unresponsive handler. The
+OOM breadcrumb also misattributed: the context was whatever scope the last
+request handler set, never the tick.
+
+**Fixed** (same date, `read_sample_out` contract change):
+- `LpGraphics::read_sample_out_into(out, &mut [u16])` is now the frame-path
+  read — callers copy into a persistent caller-owned buffer (`FixtureNode`,
+  the playlist crossfade, and the shader projected-texture path each hold
+  one). The `Vec`-returning `read_sample_out` remains as a default-method
+  convenience for tests/tooling only. At big-dome scale this also removes
+  ~240 KB/frame of alloc+memcpy churn on every backend.
+- The scratch buffers grow through `try_reserve`
+  (`lpc-engine::node::ensure_scratch_len`): a tick-path allocation failure
+  now degrades to a skipped frame (`NodeError`) instead of staging a reset.
+- `Engine::tick` / `render_texture_product` set an OOM context on entry, so
+  a tick-path OOM attributes to the tick rather than the last-set scope.
+
+Remaining exposure: the fixture 1D/TextureArea path still materializes an
+owned `TextureData` per frame via `read_back` (not on zook's Direct path);
+same treatment would need a `read_back_into` contract.
