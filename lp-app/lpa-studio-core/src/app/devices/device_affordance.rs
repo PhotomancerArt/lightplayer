@@ -34,6 +34,7 @@ pub fn device_status_kind(status: DeviceStatus) -> UiStatusKind {
 pub fn device_escape_action(escape: Escape, device: DeviceId) -> UiAction {
     DevicesOp::action_for(match escape {
         Escape::Cancel => Action::CancelActivity { device },
+        Escape::Retry => Action::Identify { device },
         Escape::Disconnect => Action::Disconnect { device },
         Escape::Forget => Action::Forget { device },
     })
@@ -46,7 +47,9 @@ pub fn device_escape_action(escape: Escape, device: DeviceId) -> UiAction {
 /// the grant back. `Cancel` stops the identification that is running on it.
 pub fn pending_escape_action(escape: Escape, link: LinkId) -> UiAction {
     DevicesOp::action_for(match escape {
-        Escape::Cancel | Escape::Disconnect | Escape::Forget => Action::DismissLink { link },
+        Escape::Cancel | Escape::Retry | Escape::Disconnect | Escape::Forget => {
+            Action::DismissLink { link }
+        }
     })
 }
 

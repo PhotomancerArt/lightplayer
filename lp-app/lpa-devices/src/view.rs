@@ -75,6 +75,9 @@ pub struct OutcomeView {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum Escape {
     Cancel,
+    /// Re-run identification — offered when the link is up but the last
+    /// identify settled in silence, so "try again" needs no replug.
+    Retry,
     Disconnect,
     Forget,
 }
@@ -129,6 +132,18 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         if view.cancellable {
             escapes.push(Escape::Cancel);
         }
+    }
+    // The one verdict identify can END in is silence, and the escape from
+    // silence must not be a replug: offer the re-ask whenever the link is
+    // up, nothing is running, and the evidence still says nothing.
+    if activity.is_none()
+        && device.link().is_some()
+        && matches!(
+            device.evidence.classification,
+            Classification::Quiet { .. } | Classification::Unknown
+        )
+    {
+        escapes.push(Escape::Retry);
     }
     if device.link().is_some() {
         escapes.push(Escape::Disconnect);

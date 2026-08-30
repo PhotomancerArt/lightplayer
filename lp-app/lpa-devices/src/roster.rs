@@ -56,6 +56,10 @@ pub struct RosterConfig {
     /// Slack between an activity's own settle time and the supervision
     /// backstop, so a reducer that settles on time is never evicted first.
     pub supervision_slack_ms: u64,
+    /// How many times a silent identify re-asks on its own before the card
+    /// settles at "no response" (a fresh window each time). A replugged
+    /// board answering on the second window shouldn't need a human retry.
+    pub identify_auto_retries: u32,
     /// Silence before freshness flips to quiet. Wider than two heartbeat
     /// periods on purpose: a lossy wire must not flap the timeline.
     pub quiet_after_ms: u64,
@@ -71,6 +75,7 @@ impl Default for RosterConfig {
             hello_request_interval_ms: 1_000,
             cancel_grace_ms: 2_000,
             supervision_slack_ms: 1_000,
+            identify_auto_retries: 2,
             quiet_after_ms: 12_000,
             journal_capacity: 512,
         }
