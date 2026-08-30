@@ -177,6 +177,49 @@ p.sub b { color:var(--shell-mut); }
 .runline .v { color:var(--tx-muted); font-weight:600; }
 .runline .v .mono { font-family:var(--mono); }
 
+/* document-popover skeleton (round 3): tabs + fixed sections + action row */
+.ptabs { display:flex; gap:2px; margin:0 0 10px; border-bottom:1px solid var(--bd-muted); }
+.ptab { padding:5px 10px; font-size:10.5px; font-weight:700; color:var(--tx-dim);
+  border:none; background:none; font-family:var(--font); cursor:pointer;
+  border-bottom:2px solid transparent; margin-bottom:-1px; letter-spacing:.03em; }
+.ptab:hover { color:var(--tx-muted); }
+.ptab.on { color:var(--tx-strong); border-bottom-color:var(--tx-subtle); }
+.whereline { display:flex; align-items:flex-start; gap:8px; font-size:11px;
+  line-height:1.5; color:var(--tx-subtle); }
+.whereline svg { flex:none; margin-top:2px; opacity:.85; }
+.whereline b { color:var(--tx-muted); font-weight:700; }
+.wheresub { margin:4px 0 0 20px; font-size:10px; color:var(--tx-dim); line-height:1.5; }
+.actrow { display:flex; gap:6px; margin-top:12px; padding-top:11px;
+  border-top:1px solid var(--bd-muted); }
+.act { display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  border-radius:7px; padding:7px 10px; font:inherit; font-size:11px; font-weight:700;
+  cursor:pointer; white-space:nowrap; transition:border-color .12s; }
+.act-hero { flex:1; border:1px solid var(--st-good-bd); background:var(--st-good-bg);
+  color:var(--st-good-tx); }
+.act-hero:hover { border-color:var(--st-good-tx); }
+.act-quiet { flex:1; border:1px solid var(--bd-strong); background:var(--surface-subtle);
+  color:var(--tx-muted); }
+.act-quiet:hover { border-color:var(--tx-subtle); }
+.act-side { flex:none; border:1px solid var(--bd-strong); background:transparent;
+  color:var(--tx-subtle); }
+.act-side:hover { border-color:var(--tx-subtle); color:var(--tx); }
+.histrow { display:flex; align-items:baseline; gap:8px; padding:6px 2px;
+  font-size:10.5px; color:var(--tx-subtle); border-bottom:1px dashed var(--bd-muted); }
+.histrow:last-of-type { border-bottom:none; }
+.histrow .hv { font-family:var(--mono); font-weight:700; color:var(--tx-muted);
+  width:30px; flex:none; }
+.histrow .hk { flex:none; width:54px; color:var(--tx-dim); text-transform:uppercase;
+  font-size:8.5px; letter-spacing:.07em; font-weight:700; }
+.histrow .hwhat { flex:1; min-width:0; }
+.histrow .hwhat b { color:var(--tx-muted); font-weight:600; }
+.histrow .hwhen { flex:none; color:var(--tx-dim); font-size:9.5px; }
+.rejected { border:1px dashed var(--shell-bd-strong); border-radius:10px;
+  padding:10px 14px; font-size:11.5px; color:var(--shell-mut); line-height:1.6;
+  max-width:880px; margin-bottom:18px; }
+.rejected b { color:var(--shell-tx); }
+.sentence-word { flex:none; font-size:10.5px; font-style:italic; color:var(--tx-dim);
+  padding:0 2px; }
+
 /* faces carry at most a QUIET tint; §3 compares tinted alternatives. */
 .face-neutral { color:var(--tx-muted); }
 .face-neutral svg { color:var(--tx-subtle); }
@@ -387,113 +430,22 @@ for fork/access. <span class="t">The accent pill also dies with #478.</span>
 </p>
 
 <!-- ================= §2 placement ================= -->
-<h2><span class="n">§2</span> Placement — four ways the control can stand</h2>
+<h2><span class="n">§2</span> Placement — D converged (two boxes: runtime | document)</h2>
 <p class="sub">
-All concepts react to the strip. <b>Click each control</b> to open its popover — full
-per-state popovers are §4. A and B are the vision's original Shape A (sibling button);
-C is the rejected-but-comparable Shape B. <b>D is the 2026-08-30 gate direction</b>:
-no third control at all — the bar splits into a runtime box and a document box, the
-relationship face rides inside the document box, and each box opens its own popover.
+Gate ruling 2026-08-30: the bar splits into a <b>runtime box</b> (device/sim — what's
+running) and a <b>document box</b> (the project — name, standing, sharing), each opening
+its own popover. The relationship face rides inside the document box. <b>Click the boxes</b>;
+the strip drives every state. Full per-state popovers are §4.
 </p>
+<div class="rejected">
+<b>Rejected at the 2026-08-30 gate:</b> A · fused third relationship segment (two popovers
+off one visual box read as a trap) · B · detached relationship pill (a third control and a
+third shape in the row) · C · display-only word in the lockup (relationship inspectable but
+not actionable — though its instinct, the face riding inside the project box, survives in D).
+</div>
 <div class="rowgrid">
 
-  <div class="concept">
-    <div class="chead"><span class="name">A · Fused third segment</span>
-      <span class="thesis">continues the lockup box — one project bar, three facts; still its own button.</span></div>
-    <div class="bar-frame" style="max-width:880px">
-      <div class="topbar">
-        <div class="logo"></div>
-        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
-        <div class="cluster">
-          <span class="lockup fused-left">
-            <span class="seg"><span class="glyph">▣</span><span class="dot"></span><span class="name">Garage dome</span><span class="suffix">· classic</span></span>
-            <span class="divider"></span>
-            <span class="seg">
-              <span class="glyph rel-proj-glyph">◈</span>
-              <span class="name rel-proj-name">Plasma Duo</span>
-              <span class="pill-count rel-count" style="display:none">3</span>
-            </span>
-          </span>
-          <span class="anchor">
-            <button class="rel-fused rel-control" data-pop="a" style="margin-left:0">
-              <span class="rel-face face-neutral"><span class="rel-glyph"></span><span class="word rel-word">Example</span></span>
-            </button>
-            <div class="pop hiddenpop" data-popfor="a"></div>
-          </span>
-          <button class="btn-save rel-save" style="display:none">Save</button>
-          <button class="btn-revert rel-revert" style="display:none" title="Revert">↺</button>
-        </div>
-        <div class="spacer"></div>
-        <span class="avatar">Y</span>
-      </div>
-      <div class="stage-body">A reads as "the project bar grew a third segment" — device · project · standing. The hairline and shared geometry promise one family; the separate hover/click keeps the #432 inspect-vs-act split honest.</div>
-    </div>
-    <p class="cnotes"><b>Risk:</b> two adjacent click targets on one visual box open two different popovers — the lockup's session panel vs the relationship popover. <span class="t">Does that read as coherent?</span> (gate Q)</p>
-  </div>
-
-  <div class="concept">
-    <div class="chead"><span class="name">B · Detached pill</span>
-      <span class="thesis">the Save-button pattern — clearly its own control, a breath away from the lockup.</span></div>
-    <div class="bar-frame" style="max-width:880px">
-      <div class="topbar">
-        <div class="logo"></div>
-        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
-        <div class="cluster">
-          <span class="lockup">
-            <span class="seg"><span class="glyph">▣</span><span class="dot"></span><span class="name">Garage dome</span><span class="suffix">· classic</span></span>
-            <span class="divider"></span>
-            <span class="seg">
-              <span class="glyph rel-proj-glyph">◈</span>
-              <span class="name rel-proj-name">Plasma Duo</span>
-              <span class="pill-count rel-count" style="display:none">3</span>
-            </span>
-          </span>
-          <span class="anchor">
-            <button class="rel-detached rel-control" data-pop="b">
-              <span class="rel-face face-neutral"><span class="rel-glyph"></span><span class="word rel-word">Example</span></span>
-            </button>
-            <div class="pop hiddenpop" data-popfor="b"></div>
-          </span>
-          <button class="btn-save rel-save" style="display:none">Save</button>
-          <button class="btn-revert rel-revert" style="display:none" title="Revert">↺</button>
-        </div>
-        <div class="spacer"></div>
-        <span class="avatar">Y</span>
-      </div>
-      <div class="stage-body">B inherits the legacy Share pill's slot-in-the-row feel but moves it home, beside the project it describes. No shared-box ambiguity; costs a little more width and reads slightly less "of the project bar".</div>
-    </div>
-    <p class="cnotes"><b>Risk:</b> a rounded pill between the lockup and Save makes the action row busier; three shapes (box, pill, button) where A has two.</p>
-  </div>
-
-  <div class="concept">
-    <div class="chead"><span class="name">C · Display-in-lockup (vision's rejected Shape B, kept comparable)</span>
-      <span class="thesis">the word lives inside the project segment; clicking still opens the shared session panel.</span></div>
-    <div class="bar-frame" style="max-width:880px">
-      <div class="topbar">
-        <div class="logo"></div>
-        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
-        <div class="cluster">
-          <span class="lockup">
-            <span class="seg"><span class="glyph">▣</span><span class="dot"></span><span class="name">Garage dome</span><span class="suffix">· classic</span></span>
-            <span class="divider"></span>
-            <span class="seg">
-              <span class="glyph rel-proj-glyph">◈</span>
-              <span class="name rel-proj-name">Plasma Duo</span>
-              <span class="rel-inline-word rel-word">Example</span>
-              <span class="pill-count rel-count" style="display:none">3</span>
-            </span>
-          </span>
-          <button class="btn-save rel-save" style="display:none">Save</button>
-          <button class="btn-revert rel-revert" style="display:none" title="Revert">↺</button>
-        </div>
-        <div class="spacer"></div>
-        <span class="avatar">Y</span>
-      </div>
-      <div class="stage-body">C is today's example-pill pattern generalized: cheapest, but the actions (fork/share/access) must live in the session panel — the popover with the pending-edit lists and stats — burying the driving-pain fix two levels deep.</div>
-    </div>
-    <p class="cnotes"><b>Why the vision leans away:</b> a pristine example still has no one-click "Save a copy"; the relationship stays inspectable but not actionable.</p>
-  </div>
-
+  
   <div class="concept">
     <div class="chead"><span class="name">D · Two boxes — runtime | document</span>
       <span class="thesis">gate ruling 2026-08-30: left = what's running (device/sim), right = the project — its name, standing, sharing. Each opens its OWN popover.</span></div>
@@ -561,6 +513,37 @@ relationship face rides inside the document box, and each box opens its own popo
       <div class="stage-body">Most honest: two controls, two outlines, a breath of air. Costs ~10px width over D1 and reads slightly less like one bar.</div>
     </div>
 
+    <div style="font-size:11px;color:var(--shell-mut);margin:14px 0 6px">D3 · the sentence bar — <span style="font-style:italic">device running project</span> (design-language probe, deliberately shallow)</div>
+    <div class="bar-frame" style="max-width:880px">
+      <div class="topbar">
+        <div class="logo"></div>
+        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
+        <div class="cluster">
+          <span class="anchor">
+            <button class="box2 runtime-btn" data-pop="d3r" title="This tab's session — Garage dome on the classic board">
+              <span class="glyph" style="color:var(--tx-subtle)">▣</span><span class="dot" style="width:7px;height:7px;border-radius:999px;background:var(--st-good-tx);box-shadow:0 0 5px rgba(123,224,178,.55)"></span><span class="name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Garage dome</span>
+            </button>
+            <div class="pop hiddenpop" data-popfor="d3r" data-kind="runtime"></div>
+          </span>
+          <span class="sentence-word">running</span>
+          <span class="anchor">
+            <button class="box2 doc-btn" data-pop="d3d">
+              <span class="glyph rel-proj-glyph" style="color:var(--tx-subtle)">◈</span>
+              <span class="name rel-proj-name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Plasma Duo</span>
+              <span class="rel-face face-neutral"><span class="rel-glyph"></span><span class="word rel-word" style="font-size:9.5px;color:var(--tx-dim)">Example</span></span>
+              <span class="pill-count rel-count" style="display:none">3</span>
+            </button>
+            <div class="pop hiddenpop" data-popfor="d3d" data-kind="doc"></div>
+          </span>
+          <button class="btn-save rel-save" style="display:none">Save</button>
+          <button class="btn-revert rel-revert" style="display:none" title="Revert">↺</button>
+        </div>
+        <div class="spacer"></div>
+        <span class="avatar">Y</span>
+      </div>
+      <div class="stage-body">The connective makes the bar read as a fact — "Garage dome <i>running</i> Plasma Duo". Costs the word's width; the board suffix moved into the runtime popover. Folds by dropping the word first. Probe only — if it doesn't land immediately, D1/D2 stand.</div>
+    </div>
+
     <p class="cnotes"><b>The split:</b> LEFT popover = runtime (connection, board, running version, "this tab is the
     session" — and the landing zone for the desktop device panel's facts when it retires). RIGHT popover = the document
     (name, standing, share/access, save state, provenance + history), i.e. §4's panels plus a dirty echo and a
@@ -591,12 +574,14 @@ the word position unchanged. <span class="t">Trap noted:</span> violet stays res
 binding/bus; green reads "good", blue reads "live" — any tint borrows a meaning.</p>
 
 <!-- ================= §4 popovers ================= -->
-<h2><span class="n">§4</span> The popover, per state — where everything lives</h2>
+<h2><span class="n">§4</span> The document popover — one skeleton, five states</h2>
 <p class="sub">
-One panel grammar for all five states: header → relationship line → the one hero action
-this state deserves → link/access → status → provenance + version strip with the
-<b>History →</b> seam (read-only in this effort). The pristine-example hero is the driving-pain fix:
-<b>Save a copy</b> without editing first.
+Round-3 rebuild on the gate rulings: <b>clearly-defined deep concepts in fixed slots</b>.
+Every state renders header → tabs <b>[Project | History]</b> → <b>Where</b> (standing +
+provenance) → <b>Access</b> (link first, always in the same spot, then control/roster) →
+<b>action row</b> with fixed slots: the fork-family verb (always present — hero-tinted only
+where it's <i>the</i> move), Copy link, ⋯ overflow (zip/json/details). History is a tab —
+click the tabs on any panel below.
 </p>
 <div class="popgrid" id="popgallery"></div>
 
@@ -604,62 +589,10 @@ this state deserves → link/access → status → provenance + version strip wi
 <h2><span class="n">§5</span> Narrow — 375&nbsp;px phone bar</h2>
 <p class="sub">
 Below the 560px cut segment padding tightens and the device name already folds to glyph+dot
-(the 900px cut). The relationship face folds to glyph-only. A and B compared at true width,
-Example state with dirty on — the worst-case row.
+(the 900px cut). D at true 375px width, dirty on — the worst-case row. The relationship word
+folds first; there is no third control to fold at all.
 </p>
 <div class="phones">
-  <div class="phone">
-    <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">A · fused, folded</div>
-    <div class="bar-frame">
-      <div class="topbar" style="gap:8px;padding:8px 10px">
-        <div class="logo"></div>
-        <div class="cluster" style="min-width:0">
-          <span class="lockup fused-left">
-            <span class="seg" style="padding:4px 7px"><span class="glyph">▣</span><span class="dot"></span></span>
-            <span class="divider"></span>
-            <span class="seg" style="padding:4px 7px">
-              <span class="glyph">◈</span>
-              <span class="name" style="max-width:96px" id="narrow-name-a">Plasma Duo</span>
-              <span class="pill-count">3</span>
-            </span>
-          </span>
-          <button class="rel-fused" style="padding:4px 8px">
-            <span class="rel-face face-neutral"><span id="narrow-glyph-a"></span></span>
-          </button>
-          <button class="btn-save" style="padding:3px 8px">Save</button>
-        </div>
-        <div class="spacer"></div>
-        <span class="avatar">Y</span>
-      </div>
-      <div class="stage-body" style="font-size:10.5px">Glyph-only face; the title attribute still names the state. Save keeps its word — it is the rarer, more urgent control.</div>
-    </div>
-  </div>
-  <div class="phone">
-    <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">B · detached, folded</div>
-    <div class="bar-frame">
-      <div class="topbar" style="gap:8px;padding:8px 10px">
-        <div class="logo"></div>
-        <div class="cluster" style="min-width:0">
-          <span class="lockup">
-            <span class="seg" style="padding:4px 7px"><span class="glyph">▣</span><span class="dot"></span></span>
-            <span class="divider"></span>
-            <span class="seg" style="padding:4px 7px">
-              <span class="glyph">◈</span>
-              <span class="name" style="max-width:96px">Plasma Duo</span>
-              <span class="pill-count">3</span>
-            </span>
-          </span>
-          <button class="rel-detached" style="padding:4px 8px">
-            <span class="rel-face face-neutral"><span id="narrow-glyph-b"></span></span>
-          </button>
-          <button class="btn-save" style="padding:3px 8px">Save</button>
-        </div>
-        <div class="spacer"></div>
-        <span class="avatar">Y</span>
-      </div>
-      <div class="stage-body" style="font-size:10.5px">The pill circles up to a round glyph button. Slightly wider than A folded (its own borders both sides).</div>
-    </div>
-  </div>
   <div class="phone">
     <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">D1 · two segments, folded</div>
     <div class="bar-frame">
@@ -700,16 +633,17 @@ required. Watch the face flip Example→Private, the URL heal, and the toast con
       <div class="logo"></div>
       <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
       <div class="cluster">
-        <span class="lockup fused-left">
-          <span class="seg"><span class="glyph">▣</span><span class="dot"></span><span class="name">Garage dome</span><span class="suffix">· classic</span></span>
+        <span class="shell">
+          <span class="segbtn" style="cursor:default"><span class="glyph" style="color:var(--tx-subtle)">▣</span><span class="dot" style="width:7px;height:7px;border-radius:999px;background:var(--st-good-tx);box-shadow:0 0 5px rgba(123,224,178,.55)"></span><span class="name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Garage dome</span><span class="suffix" style="font-size:10.5px;color:var(--tx-dim)">· classic</span></span>
           <span class="divider"></span>
-          <span class="seg"><span class="glyph">◈</span><span class="name" id="fork-name">Plasma Duo</span></span>
-        </span>
-        <span class="anchor">
-          <button class="rel-fused" id="fork-face-btn">
-            <span class="rel-face face-neutral"><span id="fork-glyph"></span><span class="word" id="fork-word">Example</span></span>
-          </button>
-          <div class="pop hiddenpop" id="fork-pop" style="position:absolute;top:calc(100% + 8px);left:0;z-index:30"></div>
+          <span class="anchor">
+            <button class="segbtn" id="fork-face-btn">
+              <span class="glyph" style="color:var(--tx-subtle)">◈</span>
+              <span class="name" style="font-size:11px;font-weight:600;color:var(--tx-muted)" id="fork-name">Plasma Duo</span>
+              <span class="rel-face face-neutral"><span id="fork-glyph"></span><span class="word" id="fork-word" style="font-size:9.5px;color:var(--tx-dim)">Example</span></span>
+            </button>
+            <div class="pop hiddenpop" id="fork-pop" style="position:absolute;top:calc(100% + 8px);left:0;z-index:30"></div>
+          </span>
         </span>
       </div>
       <div class="spacer"></div>
@@ -760,70 +694,109 @@ function verStrip(v, when, hist) {
 function popHead(name) {
   return `<div class="head"><span class="t">${name}</span><button class="x">✕</button></div>`;
 }
-function popContent(rel) {
-  const r = REL[rel];
-  const nm = state.long ? r.longname : r.name;
+/* ------- document panel: ONE skeleton for every state (round 3) ---------
+   Header -> tabs [Project | History] -> WHERE -> ACCESS -> ACTION ROW.
+   Same sections, same order, same footer slots in all five states:
+   slot 1 = the fork-family verb (always present, emphasis varies),
+   slot 2 = Copy link, slot 3 = overflow (zip/json/details). */
+function whereBlock(rel) {
+  const W = {
+    example: [G.example, '<b>Built-in example</b> — curated by Photomancer.',
+      'Play freely — nothing saves until you keep a copy.'],
+    minelocal: [G.lock, '<b>Yours</b> — in this browser&rsquo;s library.',
+      'Forked from Plasma Duo · 3 days ago.'],
+    minepub: [G.link, '<b>Yours</b> — published; the link is live.',
+      'Forked from Plasma Duo · 3 days ago.'],
+    member: [G.users, '<b>Eshan&rsquo;s</b> — shared with you.',
+      'Owned by eshan@radiancecrew.org · you were added 5 days ago.'],
+    visitor: [G.eye, '<b>Someone else&rsquo;s</b> — you&rsquo;re viewing as a guest.',
+      'The owner is unnamed — the service only tells members.'],
+  }[rel];
+  return `<div class="whereline">${W[0]}<span>${W[1]}</span></div>
+    <p class="wheresub">${W[2]}</p>`;
+}
+function accessBlock(rel) {
   switch (rel) {
-    case 'example': return popHead(nm) + `
-      <div class="rel-line">${G.example}<span><b>Built-in example.</b> Play freely — nothing is saved until you keep a copy.</span></div>
-      <button class="hero-btn">${G.example} Save a copy</button>
-      <p class="hero-sub">Makes it yours: it joins your library, gets its own link, and edits start saving.</p>
-      ${urlHero('plasma-duo','','Copy link')}
-      <p class="note">The example's canonical link — safe to share, opens for anyone.</p>
-      <div class="provenance">${G.example}<span>Curated example · <b>Photomancer</b></span></div>`;
+    case 'example': return urlHero('plasma-duo','','Copy link')
+      + `<p class="note">The canonical example link — opens for anyone, always.</p>`;
     case 'minelocal': {
       const pub = PUBSTATES[state.pub];
       const line = {
-        'not published': `<div class="statusline attn">◌ Not published yet — it publishes on your next save.</div>`,
-        'publishing…':   `<div class="statusline">↻ Publishing…</div>`,
-        'retrying':      `<div class="statusline warn">⚠ Publish retrying — last attempt couldn't reach the cloud.</div>`,
-        'restricted':    `<div class="statusline">🔒 Published, restricted — only you can open the link.</div>`,
+        'not published': `<div class="statusline attn" style="margin-top:8px">◌ Not published yet — it publishes on your next save.</div>`,
+        'publishing…': `<div class="statusline" style="margin-top:8px">↻ Publishing…</div>`,
+        'retrying': `<div class="statusline warn" style="margin-top:8px">⚠ Publish retrying — last attempt couldn&rsquo;t reach the cloud.</div>`,
+        'restricted': `<div class="statusline" style="margin-top:8px">Published, restricted — only you can open the link.</div>`,
       }[pub];
-      return popHead(nm) + `
-      <div class="rel-line">${G.lock}<span><b>Yours, private.</b> Only this browser has it${pub==='restricted'?' — the cloud copy is restricted':''}.</span></div>
-      <span class="grouphead">General access</span>
-      <div class="segrow"><button class="on">Restricted</button><button>Anyone can view</button><button>Anyone can edit</button></div>
-      <p class="segdesc"><b>Only people added below</b> can open the link. Everyone else sees nothing — not even that it exists.</p>
-      ${line}
-      ${urlHero('aurora-field','prj7g2k9m3qxw4tn0b')}
-      <div class="provenance">${G.example}<span>Forked from <b>Plasma Duo</b> · 3 days ago</span></div>
-      ${verStrip(3,'2 h ago',true)}
-      <div class="utilrow"><button>Download .zip</button><button>Copy as JSON</button></div>`;
+      return urlHero('aurora-field','prj7g2k9m3qxw4tn0b') + line
+        + `<div class="segrow" style="margin-top:8px"><button class="on">Restricted</button><button>Anyone can view</button><button>Anyone can edit</button></div>
+           <p class="segdesc"><b>Only people added</b> can open the link. Everyone else sees nothing — not even that it exists.</p>`;
     }
-    case 'minepub': return popHead(nm) + `
-      <div class="rel-line">${G.link}<span><b>Yours, shared.</b> Anyone with the link can open it running.</span></div>
-      <span class="grouphead">General access</span>
-      <div class="segrow"><button>Restricted</button><button class="on">Anyone can view</button><button>Anyone can edit</button></div>
-      <p class="segdesc">Opens <b>running</b> for anyone with the link — no account needed. Only the people below can save changes.</p>
-      ${urlHero('aurora-field','prj7g2k9m3qxw4tn0b')}
-      <p class="note">Same link as the address bar — copying either works.</p>
-      <span class="grouphead">People</span>
-      <div class="person"><span class="av">YA</span><span class="who"><span class="em">hypher@gmail.com</span></span><span class="role">owner</span></div>
-      <div class="person"><span class="av" style="border-color:var(--st-good-bd);background:var(--st-good-bg);color:var(--st-good-tx)">EK</span><span class="who"><span class="em">eshan@radiancecrew.org</span></span><span class="role">can edit</span></div>
-      <div class="provenance">${G.example}<span>Forked from <b>Plasma Duo</b> · 3 days ago</span></div>
-      ${verStrip(12,'20 min ago',true)}
-      <div class="utilrow"><button>Download .zip</button><button>Copy as JSON</button></div>`;
-    case 'member': return popHead(nm) + `
-      <div class="rel-line">${G.users}<span><b>Shared with you — you can edit.</b> Saves go to the shared project.</span></div>
-      ${urlHero('halcyon-drift','prjc4w8n2ke5mrxa1z')}
-      <span class="grouphead">People</span>
-      <div class="person"><span class="av" style="border-color:var(--st-good-bd);background:var(--st-good-bg);color:var(--st-good-tx)">EK</span><span class="who"><span class="em">eshan@radiancecrew.org</span></span><span class="role">owner</span></div>
-      <div class="person"><span class="av">YA</span><span class="who"><span class="em">hypher@gmail.com</span></span><span class="role">can edit</span></div>
-      <button class="hero-btn" style="margin-top:12px">${G.example} Fork my own copy</button>
-      <p class="hero-sub">Splits off an independent copy in your library; the shared one is untouched.</p>
-      <div class="provenance">${G.users}<span>Owned by <b>eshan@radiancecrew.org</b></span></div>
-      ${verStrip(41,'5 min ago · by Eshan',true)}`;
-    case 'visitor': return popHead(nm) + `
-      <div class="rel-line">${G.eye}<span><b>Viewing someone else's project.</b> Play freely — nothing you touch changes their copy.</span></div>
-      <button class="hero-btn">${G.example} Fork — make it yours</button>
-      <p class="hero-sub">Keeps your tweaks: a fresh copy in your library with its own link.</p>
-      ${urlHero('halcyon-drift','prjc4w8n2ke5mrxa1z','Copy link')}
-      <p class="note">You hold <b>view</b> access — the link is the key, no account needed.</p>
-      <div class="provenance">${G.users}<span>Owned by <b>someone else</b> · you're a guest</span></div>`;
+    case 'minepub': return urlHero('aurora-field','prj7g2k9m3qxw4tn0b')
+      + `<div class="segrow" style="margin-top:8px"><button>Restricted</button><button class="on">Anyone can view</button><button>Anyone can edit</button></div>
+         <p class="segdesc">Opens <b>running</b> for anyone with the link — no account needed. Only the people below can save changes.</p>
+         <div class="person"><span class="av">YA</span><span class="who"><span class="em">hypher@gmail.com</span></span><span class="role">owner</span></div>
+         <div class="person"><span class="av" style="border-color:var(--st-good-bd);background:var(--st-good-bg);color:var(--st-good-tx)">EK</span><span class="who"><span class="em">eshan@radiancecrew.org</span></span><span class="role">can edit</span></div>`;
+    case 'member': return urlHero('halcyon-drift','prjc4w8n2ke5mrxa1z')
+      + `<div class="statusline good" style="margin-top:8px">✓ You can edit — saves go to the shared project.</div>
+         <div class="person" style="margin-top:6px"><span class="av" style="border-color:var(--st-good-bd);background:var(--st-good-bg);color:var(--st-good-tx)">EK</span><span class="who"><span class="em">eshan@radiancecrew.org</span></span><span class="role">owner</span></div>
+         <div class="person"><span class="av">YA</span><span class="who"><span class="em">hypher@gmail.com</span></span><span class="role">can edit</span></div>`;
+    case 'visitor': return urlHero('halcyon-drift','prjc4w8n2ke5mrxa1z','Copy link')
+      + `<p class="note">You hold <b>view</b> access — the link is the key, no account needed. Nothing you touch changes their copy.</p>`;
   }
 }
+function actionRow(rel) {
+  const fork = {
+    example: ['act-hero', 'Save a copy'],
+    minelocal: ['act-quiet', 'Duplicate'],
+    minepub: ['act-quiet', 'Duplicate'],
+    member: ['act-quiet', 'Fork my copy'],
+    visitor: ['act-hero', 'Fork — make it yours'],
+  }[rel];
+  return `<div class="actrow">
+    <button class="act ${fork[0]} act-fork">${G.example} ${fork[1]}</button>
+    <button class="act act-side">⧉ Copy link</button>
+    <button class="act act-side" title="Download .zip · Copy as JSON · Details (settings, stats)">⋯</button>
+  </div>`;
+}
+function historyTab(rel) {
+  if (rel === 'example') {
+    return `<p class="note" style="margin:6px 0 0">No history yet — this is a transient view.
+      History begins at your first save.</p>
+      <div class="actrow"><button class="act act-hero act-fork">${G.example} Save a copy</button></div>`;
+  }
+  const row = (v,k,what,when) => `<div class="histrow"><span class="hv">${v}</span><span class="hk">${k}</span><span class="hwhat">${what}</span><span class="hwhen">${when}</span></div>`;
+  const dirtyRow = state.dirty ? row('v13','editing','3 unsaved edits','now') : '';
+  const rows = {
+    minelocal: dirtyRow + row('v3','saved','','2 h ago') + row('v2','saved','','yesterday')
+      + row('v1','origin','forked from <b>Plasma Duo</b>','3 days ago'),
+    minepub: dirtyRow + row('v12','saved','','20 min ago') + row('v12','pushed','→ <b>Garage dome</b>','18 min ago')
+      + row('v11','saved','','2 h ago') + row('v1','origin','forked from <b>Plasma Duo</b>','3 days ago'),
+    member: row('v41','saved','by <b>Eshan</b>','5 min ago') + row('v40','pushed','→ <b>Halcyon rig</b>','yesterday')
+      + row('v39','saved','by <b>you</b>','2 days ago') + row('v1','origin','created','3 weeks ago'),
+    visitor: row('v41','saved','','5 min ago') + row('v39','saved','','2 days ago')
+      + row('v1','origin','created','3 weeks ago'),
+  }[rel];
+  return rows + `<p class="note" style="margin-top:8px">Read-only for now — restore lands with the history effort.</p>`;
+}
+function docPanel(rel, tab) {
+  const r = REL[rel];
+  const nm = state.long ? r.longname : r.name;
+  const on = t => tab === t ? ' on' : '';
+  const dirtyLine = state.dirty
+    ? `<div class="statusline warn" style="margin:0 0 10px">✎ 3 unsaved edits — Save banks <b>v13</b>.</div>` : '';
+  const body = tab === 'history' ? historyTab(rel)
+    : dirtyLine
+      + `<span class="grouphead" style="margin-top:0">Where</span>` + whereBlock(rel)
+      + `<span class="grouphead">Access</span>` + accessBlock(rel)
+      + actionRow(rel);
+  return popHead(nm)
+    + `<div class="ptabs"><button class="ptab${on('project')}" data-tab="project">Project</button><button class="ptab${on('history')}" data-tab="history">History</button></div>`
+    + body;
+}
+/* legacy alias — everything renders through the skeleton now */
+function popContent(rel) { return docPanel(rel, 'project'); }
 
-/* ---------------- concept D popover builders ----------------------------- */
+/* ---------------- concept D runtime popover ------------------------------ */
 function runtimePop() {
   const transient = state.rel === 'example' || state.rel === 'visitor';
   return popHead('Garage dome') + `
@@ -837,14 +810,6 @@ function runtimePop() {
     <div class="statusline" style="margin-top:12px">⌁ This tab is the session — one device or sim per tab.</div>
     <div class="utilrow"><button>Stop session</button><button>Device details →</button></div>
     <p class="note" style="margin-top:8px">Landing zone: the desktop device panel's non-visualization facts fold in here when it retires (follow-on).</p>`;
-}
-function docContent(rel) {
-  let html = popContent(rel);
-  if (state.dirty) {
-    html = html.replace('</div>', `</div>
-      <div class="statusline warn" style="margin:0 0 10px">✎ 3 unsaved edits — Save banks <b>v13</b>.</div>`);
-  }
-  return html + `<div class="utilrow" style="margin-top:10px"><button>Details → <span style="opacity:.7">settings · stats</span></button></div>`;
 }
 
 /* ---------------- §1 current production --------------------------------- */
@@ -891,9 +856,19 @@ function renderPlacements() {
 }
 function contentFor(pop) {
   return pop.dataset.kind === 'runtime' ? runtimePop()
-    : pop.dataset.kind === 'doc' ? docContent(state.rel)
-    : popContent(state.rel);
+    : docPanel(pop.dataset.static || state.rel, pop.dataset.tab || 'project');
 }
+/* tab clicks re-render their own panel, keeping its state (delegated so it
+   works in live popovers, the §4 gallery, and §6 alike) */
+document.addEventListener('click', e => {
+  const tabBtn = e.target.closest('.ptab');
+  if (!tabBtn) return;
+  const pop = tabBtn.closest('.pop');
+  if (!pop) return;
+  pop.dataset.tab = tabBtn.dataset.tab;
+  if (pop.id === 'fork-pop') { pop.innerHTML = docPanel(forked ? 'minelocal' : 'example', pop.dataset.tab); return; }
+  pop.innerHTML = contentFor(pop);
+});
 document.querySelectorAll('.rel-control, .runtime-btn, .doc-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const pop = document.querySelector(`[data-popfor="${btn.dataset.pop}"]`);
@@ -924,30 +899,31 @@ function faceCell(rel, kind) {
     `<tr><th>State</th><th>V1 · word</th><th>V2 · glyph + word</th><th>V3 · glyph (fold)</th></tr>` + rows;
   document.getElementById('tint-n').innerHTML = G.link;
   document.getElementById('tint-l').innerHTML = G.link;
-  document.getElementById('narrow-glyph-a').innerHTML = G.example;
-  document.getElementById('narrow-glyph-b').innerHTML = G.example;
   document.getElementById('narrow-glyph-d').innerHTML = G.example;
 })();
 
 /* ---------------- §4 popover gallery ------------------------------------- */
 (function(){
   const notes = {
-    example: 'Hero = the driving-pain fix. No history strip: a transient session has saved nothing yet; provenance names the curation instead.',
-    minelocal: 'Publish status finally has a product face (cycle it with the strip). Access segment present but Restricted; zip/JSON retire here from the old detail-popup rows.',
-    minepub: 'The existing SharePanel content, re-homed: URL hero, access segment + gate-approved descriptions, people. Plus provenance + version strip it never had.',
-    member: 'You appear in the roster; fork is secondary (you can already edit). Version strip shows the collaborator’s save.',
-    visitor: 'The visitor banner’s fork, re-homed. Access stated plainly; no roster (the service answers members to members only).',
+    example: 'Where names the curation; Access = the canonical link; the fork slot wears the hero tint — the driving-pain fix, same footer slot as everywhere else. History tab: honest empty state.',
+    minelocal: 'Publish status lives inside Access (cycle it with the strip). The fork slot goes quiet ("Duplicate") but never moves.',
+    minepub: 'The old SharePanel content becomes the Access section: link, segment + gate-approved descriptions, people. Same skeleton, nothing special-cased.',
+    member: 'Access states your standing and shows the roster; fork stays in its slot, quiet ("Fork my copy").',
+    visitor: 'Access is one honest sentence + the link; the fork slot wears the hero tint again. No roster (members are told to members only).',
   };
   const names = { example:'Example', minelocal:'Mine · private', minepub:'Mine · shared', member:'Member', visitor:'Viewing' };
   document.getElementById('popgallery').innerHTML = Object.keys(REL).map(rel => `
     <div class="popwrap"><p class="pname">${names[rel]}</p>
-      <div class="pop" data-static="${rel}">${popContent(rel)}</div>
+      <div class="pop" data-static="${rel}" data-tab="project">${docPanel(rel, 'project')}</div>
       <p class="pnote">${notes[rel]}</p></div>`).join('')
-    + `<div class="popwrap"><p class="pname">Runtime — concept D's LEFT box (state-independent)</p>
-      <div class="pop">${runtimePop()}</div>
+    + `<div class="popwrap"><p class="pname">History tab — Mine · shared (tabs are clickable on every panel)</p>
+      <div class="pop" data-static="minepub" data-tab="history">${docPanel('minepub', 'history')}</div>
+      <p class="pnote">Real event vocabulary (saved / pushed / origin), version-numbered, read-only.
+      The push row echoes the runtime box's "Running v12" — the two popovers agree on what lag exists.</p></div>`
+    + `<div class="popwrap"><p class="pname">Runtime — D's LEFT box (state-independent)</p>
+      <div class="pop" data-kind="runtime">${runtimePop()}</div>
       <p class="pnote">The other half of the D split: connection, board, running version, the session hint —
-      and the declared landing zone for the desktop device panel's facts. Note the version symmetry:
-      this says Running v12 while the document popover's strip says saved v13.</p></div>`;
+      and the declared landing zone for the desktop device panel's facts when it retires.</p></div>`;
 })();
 
 /* ---------------- §6 fork moment ----------------------------------------- */
@@ -964,19 +940,21 @@ function renderFork() {
 }
 forkBtn.addEventListener('click', () => {
   if (forkPop.classList.contains('hiddenpop')) {
-    forkPop.innerHTML = forked ? popContent('minelocal') : popContent('example');
+    forkPop.innerHTML = docPanel(forked ? 'minelocal' : 'example', 'project');
+    forkPop.dataset.tab = 'project';
     forkPop.classList.remove('hiddenpop');
-    if (!forked) {
-      const hero = forkPop.querySelector('.hero-btn');
-      hero && hero.addEventListener('click', () => {
-        forked = true; renderFork();
-        forkPop.classList.add('hiddenpop');
-        const t = document.getElementById('fork-toast');
-        t.classList.add('show');
-        setTimeout(() => t.classList.remove('show'), 2600);
-      });
-    }
   } else forkPop.classList.add('hiddenpop');
+});
+/* delegated: survives tab-switch re-renders inside the popover */
+document.addEventListener('click', e => {
+  if (forked) return;
+  if (e.target.closest('.act-fork') && e.target.closest('#fork-pop')) {
+    forked = true; renderFork();
+    forkPop.classList.add('hiddenpop');
+    const t = document.getElementById('fork-toast');
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2600);
+  }
 });
 document.getElementById('fork-reset').addEventListener('click', () => {
   forked = false; renderFork(); forkPop.classList.add('hiddenpop');
@@ -1000,7 +978,7 @@ document.getElementById('ctl-dirty').addEventListener('click', e => {
 document.getElementById('ctl-pub').addEventListener('click', e => {
   state.pub = (state.pub + 1) % PUBSTATES.length;
   e.target.textContent = PUBSTATES[state.pub];
-  document.querySelectorAll('[data-static="minelocal"]').forEach(p => p.innerHTML = popContent('minelocal'));
+  document.querySelectorAll('[data-static="minelocal"]').forEach(p => p.innerHTML = contentFor(p));
   renderAll();
 });
 document.getElementById('ctl-long').addEventListener('click', e => {
