@@ -1,7 +1,8 @@
 ---
-status: diagnosed
+status: fixed
 found: 2026-08-29
 diagnosed: 2026-08-29
+fixed: 2026-08-29
 area: per-tick sample-out clone vs inbound-request transients on the classic heap
 related:
   - 2026-08-29-shader-jit-compile-transient-starves-classic-heap.md
@@ -58,16 +59,27 @@ This explains every observation at once:
 - wire count was a confound: 5-wire zook vs 2-wire flat small-dome
   differed in *fixture heap pressure*, not RMT behavior.
 
-**Fixes, in leverage order**
-1. `read_sample_out` should not clone per tick: hand out a borrow or
-   copy into a persistent caller buffer in FixtureNode. Also a perf
-   win at every scale (big dome: ~240 KB/frame of memcpy+alloc churn).
-2. Tick-path allocations this size should be fallible → skip/degrade
-   the frame, never `stage_oom_and_reset` (same contract direction as
-   D7 refusal-not-reset).
-3. `set_oom_context` on tick/render entry — this OOM attributed to
-   `node:/zook_dome.sho` with `context=<unset>`, which pointed at the
-   shader for a fixture-path alloc.
+**Fixes, in leverage order** — all three landed 2026-08-29 (the
+`read_sample_out_into` contract change):
+1. ~~`read_sample_out` should not clone per tick~~ **DONE**:
+   `LpGraphics::read_sample_out_into(out, &mut [u16])` is the frame-path
+   read — exact-length copy into a persistent caller-owned buffer.
+   `FixtureNode`'s Direct render, the playlist crossfade, and the shader
+   projected-texture fill each hold one; the `Vec`-returning
+   `read_sample_out` survives as a default-method convenience for
+   tests/tooling only. Also the perf win at every scale (big dome:
+   ~240 KB/frame of memcpy+alloc churn gone on every backend).
+2. ~~Tick-path allocations this size should be fallible~~ **DONE** for
+   the new scratches: they grow through `try_reserve`
+   (`lpc-engine::node::ensure_scratch_len`), so an allocation failure
+   skips the frame with a `NodeError` instead of staging a reset.
+   Remaining exposure: the fixture 1D/TextureArea path still
+   materializes an owned `TextureData` per frame via `read_back` (not
+   on zook's Direct path); same treatment needs a `read_back_into`
+   contract.
+3. ~~`set_oom_context` on tick/render entry~~ **DONE**: `Engine::tick`
+   and `render_texture_product` set a context on entry, so a tick OOM
+   attributes to the tick rather than the last-set request scope.
 
 **Workaround** — unchanged and now explained: `stopAllProjects` before
 any write/load against a playing classic (no ticks → no 12 KB ask).
