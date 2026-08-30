@@ -59,7 +59,8 @@ fn status_style(family: &str) -> String {
 )]
 fn page() -> Element {
     let demo_chip = "tw:rounded-md tw:border tw:border-border tw:bg-card-raised tw:px-3 tw:py-1.5 tw:text-xs tw:text-muted-foreground";
-    let mini_tab = "tw:relative tw:cursor-default tw:px-3 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight";
+    let mini_tab =
+        "tw:relative tw:cursor-default tw:px-3 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight";
     let mini_nav_row = "tw:relative tw:cursor-default tw:rounded-sm tw:border tw:border-transparent tw:px-2.5 tw:py-1 tw:text-xs";
     rsx! {
         article { class: "tw:grid tw:max-w-[860px] tw:min-w-0 tw:gap-7 tw:p-1",
