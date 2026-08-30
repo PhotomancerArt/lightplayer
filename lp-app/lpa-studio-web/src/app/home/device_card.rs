@@ -398,7 +398,7 @@ fn SetupForm(
                     "Name your device"
                 }
                 input {
-                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-sm tw:text-strong-foreground tw:outline-none",
                     value: "{name_value}",
                     oninput: move |event| typed_name.set(Some(event.value())),
                 }
@@ -532,7 +532,7 @@ pub(crate) fn BoardPicker(
 ///
 /// Selection is core-owned card state, so it survives re-renders and tab
 /// switches. Three visual states, deliberately distinct (gate rounds 2–3):
-/// picked (accent outline + check), the IMPLICIT generic default (quiet
+/// picked (selection outline + check), the IMPLICIT generic default (quiet
 /// dashed outline — "this is what plain Install does", not a choice), and
 /// unpicked (no chrome until hover).
 #[component]
@@ -549,7 +549,7 @@ fn BoardTile(
     let board_id = board.as_ref().map(|board| board.board_id.clone());
     let class = match (selected, implicit) {
         (true, false) => {
-            "tw:relative tw:grid tw:justify-items-center tw:gap-1.5 tw:rounded-lg tw:border tw:border-accent tw:bg-transparent tw:px-1 tw:py-2"
+            "tw:relative tw:grid tw:justify-items-center tw:gap-1.5 tw:rounded-lg tw:border tw:border-selection-border tw:bg-transparent tw:px-1 tw:py-2"
         }
         (true, true) => {
             "tw:relative tw:grid tw:justify-items-center tw:gap-1.5 tw:rounded-lg tw:border tw:border-dashed tw:border-border tw:bg-transparent tw:px-1 tw:py-2"
@@ -564,7 +564,7 @@ fn BoardTile(
             r#type: "button",
             onclick: move |_| on_pick.call(board_id.clone()),
             if selected && !implicit {
-                span { class: "tw:absolute tw:right-1 tw:top-0.5 tw:text-[0.6rem] tw:font-bold tw:text-accent",
+                span { class: "tw:absolute tw:right-1 tw:top-0.5 tw:text-[0.6rem] tw:font-bold tw:text-strong-foreground",
                     "✓"
                 }
             }
@@ -1832,7 +1832,7 @@ fn NameForm(
                     "Name your device"
                 }
                 input {
-                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-sm tw:text-strong-foreground tw:outline-none",
                     value: "{name_value}",
                     oninput: move |event| typed_name.set(Some(event.value())),
                 }
@@ -1878,7 +1878,7 @@ fn NameDeviceSheet(card_key: String, on_action: EventHandler<UiAction>) -> Eleme
                     }
                 },
                 input {
-                    class: "tw:mb-3 tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    class: "tw:mb-3 tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:text-sm tw:text-strong-foreground tw:outline-none",
                     autofocus: true,
                     placeholder: "e.g. Porch sign",
                     value: "{name}",
@@ -1978,7 +1978,7 @@ pub(crate) fn ConnectDeviceCard(on_action: EventHandler<UiAction>) -> Element {
 }
 
 /// One entry card. The sim wears the violet (bound) family the studio
-/// reserves for "this is the simulator", never the accent green.
+/// reserves for "this is the simulator", never good-green.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn SetupEntryCard(sim: bool, on_action: EventHandler<UiAction>) -> Element {

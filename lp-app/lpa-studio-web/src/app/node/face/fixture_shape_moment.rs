@@ -290,7 +290,7 @@ pub fn FixtureShapeMoment(
 /// state visibly inert.
 fn shape_tile_class(enabled: bool) -> &'static str {
     if enabled {
-        "tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:p-1.5 tw:text-left tw:text-muted-foreground tw:hover:border-accent-border tw:hover:text-strong-foreground"
+        "tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:p-1.5 tw:text-left tw:text-muted-foreground tw:hover:border-border-strong tw:hover:text-strong-foreground"
     } else {
         "tw:grid tw:min-w-0 tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:p-1.5 tw:text-left tw:text-dim-foreground tw:opacity-60"
     }

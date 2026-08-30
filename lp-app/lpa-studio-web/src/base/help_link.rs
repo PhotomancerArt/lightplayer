@@ -13,7 +13,8 @@
 //! existing is a compile error, never a dead "?" in the field.
 //!
 //! Visually it is deliberately quieter than an action: no border chip, a
-//! subtle glyph that answers hover in the accent color. It must be
+//! subtle glyph that brightens to the strong neutral on hover (links are
+//! neutral at rest — accent reckoning D1, 2026-08-30). It must be
 //! discoverable without competing with the surface's real controls.
 
 use dioxus::prelude::*;
@@ -37,7 +38,7 @@ pub fn HelpLink(
 ) -> Element {
     let mut link_class = "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:items-center \
          tw:justify-center tw:rounded-xs tw:text-subtle-foreground \
-         tw:transition-colors tw:hover:text-accent"
+         tw:transition-colors tw:hover:text-strong-foreground"
         .to_string();
     if let Some(extra) = class {
         link_class = format!("{link_class} {extra}");

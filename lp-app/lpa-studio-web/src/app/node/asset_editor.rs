@@ -786,7 +786,7 @@ fn persistence_word_class(dirty: bool) -> String {
 /// constant geometry, enable/disable in place via color + opacity eases.
 fn persist_button_class(enabled: bool) -> String {
     let state = if enabled {
-        "tw:cursor-pointer tw:border-accent-border tw:text-accent tw:opacity-100 tw:hover:bg-accent-wash"
+        "tw:cursor-pointer tw:border-border-strong tw:text-strong-foreground tw:opacity-100 tw:hover:bg-card-raised"
     } else {
         "tw:cursor-default tw:border-border-subtle tw:text-subtle-foreground tw:opacity-40"
     };

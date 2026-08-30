@@ -149,7 +149,7 @@ pub fn NodePane(
                     title,
                     title_action: focus_action.clone(),
                     tone,
-                    accent: focused,
+                    selected: focused,
                     actions: header_actions,
                     on_action,
                     trailing: rsx! {
@@ -383,7 +383,7 @@ fn NodeSelectButton(
         )
     } else {
         (
-            "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:border-accent-border tw:hover:text-accent",
+            "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:border-border-strong tw:hover:text-strong-foreground",
             "Select this node so probes follow it",
         )
     };

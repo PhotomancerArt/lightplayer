@@ -36,7 +36,7 @@ fn PanelCanvas(children: Element) -> Element {
 }
 
 #[story(
-    description = "The three panel states across all three widget families, with NO sublabels — a control is a widget, a label, and a value. Read-at-default = quiet accent, subtle label. Read-following = violet at the LIVE value. Engaged = gold arc/fill/ring plus the per-control reset glyph. Everything the old captions said now lives behind the label (see control-detail)."
+    description = "The three panel states across all three widget families, with NO sublabels — a control is a widget, a label, and a value. Read-at-default = bright-neutral arc, subtle label. Read-following = violet at the LIVE value. Engaged = gold arc/fill/ring plus the per-control reset glyph. Everything the old captions said now lives behind the label (see control-detail)."
 )]
 fn three_states() -> Element {
     rsx! {

@@ -205,7 +205,7 @@ fn pane_header() -> Element {
                     kind: "USB".to_string(),
                     chrome: PaneChrome {
                         tone: PaneTone::Warning,
-                        accent: false,
+                        selected: false,
                         chips: vec![PaneChip {
                             tone: PaneTone::Warning,
                             text: "Running v3 — behind".to_string(),
@@ -220,7 +220,7 @@ fn pane_header() -> Element {
                         // The node select control, copied from NodeSelectButton
                         // (unfocused) so node_pane stays untouched.
                         button {
-                            class: "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:border-accent-border tw:hover:text-accent",
+                            class: "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:border-border-strong tw:hover:text-strong-foreground",
                             r#type: "button",
                             aria_label: "Select this node so probes follow it",
                             title: "Select this node so probes follow it",
@@ -231,7 +231,7 @@ fn pane_header() -> Element {
                     kind: "Shader".to_string(),
                     chrome: PaneChrome {
                         tone: PaneTone::Warning,
-                        accent: false,
+                        selected: false,
                         chips: vec![PaneChip {
                             tone: PaneTone::Warning,
                             text: "2 unsaved".to_string(),

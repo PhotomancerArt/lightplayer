@@ -365,21 +365,22 @@ impl DriverInner {
         let (w, h) = (f64::from(width), f64::from(height));
 
         // Ticks and labels draw in the canvas's own `color` at ruler
-        // alphas; the playhead and birth edge take the accent token from
-        // the same computed style (custom properties inherit).
+        // alphas; the playhead and birth edge take the bright neutral from
+        // the same computed style (custom properties inherit) — the
+        // authored-value stroke the knobs use (accent reckoning D4).
         let style = self.window.get_computed_style(&canvas).ok().flatten();
         let base = style
             .as_ref()
             .and_then(|style| style.get_property_value("color").ok())
             .filter(|color| !color.is_empty())
             .unwrap_or_else(|| String::from("#e6e4de"));
-        let accent = style
+        let bright = style
             .as_ref()
-            .map(|style| style.get_property_value("--studio-color-accent"))
+            .map(|style| style.get_property_value("--studio-color-text-strong"))
             .and_then(Result::ok)
             .map(|color| color.trim().to_string())
             .filter(|color| !color.is_empty())
-            .unwrap_or_else(|| String::from("#7be0b2"));
+            .unwrap_or_else(|| String::from("#e9e9ef"));
 
         let anchor = self.anchor.borrow();
         let Some(anchor) = anchor.as_ref() else {
@@ -407,14 +408,14 @@ impl DriverInner {
 
         context.clear_rect(0.0, 0.0, w, h);
 
-        // Clock birth: faint wash before t = 0, accent edge line at it.
+        // Clock birth: faint wash before t = 0, bright edge line at it.
         let zero_x = cx - t * pps;
         if zero_x > 0.0 {
             context.set_fill_style_str(&base);
             context.set_global_alpha(0.025);
             context.fill_rect(0.0, 0.0, zero_x.min(w), h);
             context.set_global_alpha(0.5);
-            context.set_stroke_style_str(&accent);
+            context.set_stroke_style_str(&bright);
             context.set_line_width(dpr);
             context.begin_path();
             context.move_to(zero_x, 0.0);
@@ -454,14 +455,14 @@ impl DriverInner {
         }
         context.set_global_alpha(1.0);
 
-        // Fixed centered playhead: accent needle + triangle.
-        context.set_stroke_style_str(&accent);
+        // Fixed centered playhead: bright needle + triangle.
+        context.set_stroke_style_str(&bright);
         context.set_line_width(1.5 * dpr);
         context.begin_path();
         context.move_to(cx, 8.0 * dpr);
         context.line_to(cx, h);
         context.stroke();
-        context.set_fill_style_str(&accent);
+        context.set_fill_style_str(&bright);
         context.begin_path();
         context.move_to(cx - 4.0 * dpr, 2.0 * dpr);
         context.line_to(cx + 4.0 * dpr, 2.0 * dpr);

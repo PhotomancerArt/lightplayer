@@ -188,18 +188,20 @@ pub fn solid_action_class(priority: ActionPriority) -> &'static str {
     solid_class(priority)
 }
 
-/// A quiet accent-outline CTA: transparent fill, accent border and text, a
-/// wash on hover — the "Connect"/"Save"/"Add" family that recurred as
-/// near-identical hand-rolled strings across the settings popover, account
-/// page, agent chat, and share panel (P4 consolidation). Smaller than the
-/// Solid tier's `min-h-9`, for compact rows and popovers that cannot carry
-/// a full action-strip button. `destructive` swaps to the refusal tone
-/// (e.g. "Stop").
+/// A quiet outline CTA: transparent fill, neutral strong border and text,
+/// the iridescent ring answering hover — the "Connect"/"Save"/"Add" family
+/// that recurred as near-identical hand-rolled strings across the settings
+/// popover, account page, agent chat, and share panel (P4 consolidation).
+/// Neutral at rest per the accent reckoning (D1, 2026-08-30): chrome holds
+/// no hue; the spectrum ring is what says "this answers your pointer".
+/// Smaller than the Solid tier's `min-h-9`, for compact rows and popovers
+/// that cannot carry a full action-strip button. `destructive` swaps to the
+/// refusal tone (e.g. "Stop").
 pub fn outline_action_class(destructive: bool) -> &'static str {
     if destructive {
         "tw:cursor-pointer tw:rounded-xs tw:border tw:border-status-error-border tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-status-error-foreground tw:transition-colors tw:hover:bg-status-error-bg tw:disabled:cursor-not-allowed tw:disabled:opacity-60 ux-focus-ring"
     } else {
-        "tw:cursor-pointer tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-accent tw:transition tw:duration-300 tw:hover:bg-accent-wash tw:disabled:cursor-not-allowed tw:disabled:opacity-60 ux-focus-ring"
+        "tw:cursor-pointer tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-strong-foreground tw:transition tw:duration-300 tw:hover:border-selection-border tw:disabled:cursor-not-allowed tw:disabled:opacity-60 ux-focus-ring ux-ir-ring"
     }
 }
 
@@ -292,6 +294,21 @@ mod tests {
         // the Primary fill, not a gated alternative to a flat accent fill.
         let class = solid_class(ActionPriority::Primary);
         assert!(class.contains("ux-primary-gradient"), "{class}");
-        assert!(!class.contains("tw:bg-accent"), "{class}");
+        assert!(!class.contains("accent"), "{class}");
+    }
+
+    #[test]
+    fn the_outline_cta_is_neutral_with_the_ring() {
+        // Accent reckoning D1 (2026-08-30): no hue on resting chrome. The
+        // outline CTA is a neutral chip whose interaction answer is the
+        // spectrum ring, not a colored wash; destructive keeps its full
+        // semantic red and, like every status tone, refuses the ring.
+        let plain = outline_action_class(false);
+        assert!(!plain.contains("accent"), "{plain}");
+        assert!(plain.contains("ux-ir-ring"), "{plain}");
+        assert!(plain.contains("ux-focus-ring"), "{plain}");
+        let destructive = outline_action_class(true);
+        assert!(destructive.contains("status-error"), "{destructive}");
+        assert!(!destructive.contains("ux-ir-ring"), "{destructive}");
     }
 }

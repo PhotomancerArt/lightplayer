@@ -292,10 +292,12 @@ fn kind_glyph_class(sim: bool) -> &'static str {
 }
 
 /// The D16 status dot, the same three-value vocabulary the strip collapses
-/// to: accent run / amber attention / hollow connected-empty.
+/// to: good-green run / amber attention / hollow connected-empty.
 fn dot_class(status: UiChromeSessionStatus) -> &'static str {
     match status {
-        UiChromeSessionStatus::Run => "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-accent",
+        UiChromeSessionStatus::Run => {
+            "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-good-foreground"
+        }
         UiChromeSessionStatus::Attention => {
             "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-attention-foreground"
         }
@@ -467,9 +469,10 @@ const SAVE_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer t
 // revert/discard-edit action InlineButton's Warning tone is scoped to.
 /// The unsaved count, the header chip's pill verbatim (D8): mono, amber,
 /// pill-shaped — the same badge the pane's own affordances wear.
-/// The transient-example marker: accent-tinted, quiet, always present
-/// while viewing (unlike the amber count, which only appears dirty).
-const EXAMPLE_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border-accent-border tw:bg-accent-wash tw:px-1.5 tw:text-[9.5px] tw:font-semibold tw:text-accent";
+/// The transient-example marker: the lavender-grey EXAMPLE provenance
+/// family (accent reckoning D3) — quiet, always present while viewing
+/// (unlike the amber count, which only appears dirty).
+const EXAMPLE_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border-status-example-border tw:bg-status-example-bg tw:px-1.5 tw:text-[9.5px] tw:font-semibold tw:text-status-example-foreground";
 
 const COUNT_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:font-mono tw:text-[9.5px] tw:font-semibold tw:text-status-warning-foreground";
 

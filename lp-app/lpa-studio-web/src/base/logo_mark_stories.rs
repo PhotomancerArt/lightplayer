@@ -5,7 +5,7 @@
 //! sheet. Change `logo_mark.rs` and CI re-mints every PNG under
 //! `story-images/base__logo-mark__*`. The capture harness freezes CSS
 //! animations before mount, so animated treatments capture their canonical
-//! first frame (rainbow gradient at rest, play triangle on the accent).
+//! first frame (rainbow gradient at rest, play triangle on the brand green).
 //!
 //! Design record: `spikes/lightplayer-logo/index.html` (PR #304).
 
@@ -16,7 +16,7 @@ use crate::base::{LogoLockup, LogoMark, LogoStacked};
 
 #[story(
     screenshot,
-    description = "The brand lockup: white datasheet-fine chip, full-rainbow wordmark, triangle cycling with it (accent when frozen). One treatment everywhere — app chrome and readme hero alike."
+    description = "The brand lockup: white datasheet-fine chip, full-rainbow wordmark, triangle cycling with it (brand green when frozen). One treatment everywhere — app chrome and readme hero alike."
 )]
 fn lockup() -> Element {
     dark_stage(rsx! { LogoLockup { size: 110 } })
@@ -24,7 +24,7 @@ fn lockup() -> Element {
 
 #[story(
     screenshot,
-    description = "Mono forms: ink-on-light for print, white-on-black, one-color accent."
+    description = "Mono forms: ink-on-light for print, white-on-black, one-color brand green."
 )]
 fn lockup_mono() -> Element {
     rsx! {
@@ -40,7 +40,7 @@ fn lockup_mono() -> Element {
                 LogoLockup { size: 44, mono: true }
             }
             div {
-                class: "tw:flex tw:justify-center tw:rounded-lg tw:bg-card tw:p-8 tw:text-accent",
+                class: "tw:flex tw:justify-center tw:rounded-lg tw:bg-card tw:p-8 tw:text-[#5fe08b]",
                 LogoLockup { size: 44, mono: true }
             }
         }
@@ -57,7 +57,7 @@ fn stacked() -> Element {
 
 #[story(
     screenshot,
-    description = "App-icon tiles at 128px: dark, accent, and black treatments. Icon-only rule: the play triangle is the animated element (frozen here on the accent)."
+    description = "App-icon tiles at 128px: dark, brand-green, and black treatments. Icon-only rule: the play triangle is the animated element (frozen here on the brand green)."
 )]
 fn app_icons() -> Element {
     rsx! {

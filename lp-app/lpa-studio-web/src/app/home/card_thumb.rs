@@ -173,11 +173,11 @@ fn thumb_canvas_class(revealed: bool) -> &'static str {
 }
 
 /// Badge chip styling per state — preview-lab's tier vocabulary (GPU wears
-/// the accent border, CPU the muted one) in gallery-sized clothes; errors
+/// the strong border, CPU the muted one) in gallery-sized clothes; errors
 /// read as errors.
 fn thumb_badge_class(badge: &ThumbPreviewBadge) -> &'static str {
     match badge {
-        ThumbPreviewBadge::Gpu => "tw:border-accent-border tw:text-strong-foreground",
+        ThumbPreviewBadge::Gpu => "tw:border-border-strong tw:text-strong-foreground",
         ThumbPreviewBadge::Cpu { .. } => "tw:border-border-strong tw:text-muted-foreground",
         ThumbPreviewBadge::Error { .. } => "tw:border-border-strong tw:text-error-foreground",
     }
