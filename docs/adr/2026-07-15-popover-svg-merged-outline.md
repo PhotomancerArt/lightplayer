@@ -58,6 +58,11 @@ flag), and ONE SVG path draws the fill, border, and shadow for the whole shape.
   loop.
 - The panel and trigger paint no background/border of their own while open;
   consumer `popup_class` chrome is neutralized via `ux-svg-popover-panel`.
+  *Amended 2026-08-30 — mechanism, not architecture:* the path's fill can
+  now be translucent, with a clipped `.ux-popover-glass` layer painted
+  beneath it (same path string, `clip-path: path(evenodd, …)`), and the
+  path can carry an optional second, purely decorative stroke. See
+  `docs/adr/2026-08-30-studio-design-language-aurora.md`.
 - Geometry is unit-testable on the host; visual regressions are covered by the
   story-PNG baseline gate.
 - Rotated ancestors are unsupported (axis-aligned rects only) — acceptable for

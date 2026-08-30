@@ -96,30 +96,18 @@ fn action_class(
     }
 }
 
-/// **G1 knob (Q3).** `true` = the ruled spike's spectrum-gradient primary;
-/// `false` = the quiet-primary fallback, i.e. today's flat accent fill with
-/// only the hover ring carrying the spectrum. The gate decides which one
-/// ships, and the decision is this one line — nothing else in the tree
-/// branches on it.
-const GRADIENT_PRIMARY: bool = true;
-
 fn solid_class(priority: ActionPriority) -> &'static str {
     match priority {
-        // The gradient fill lives in `.ux-primary-gradient` (style.css)
-        // rather than an arbitrary Tailwind value: it carries fill, edge
-        // and text together, and a class is the only place a hover
-        // `filter` can live without becoming an animated inline style.
-        ActionPriority::Primary if GRADIENT_PRIMARY => {
-            concat!(
-                "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:break-words tw:disabled:cursor-not-allowed tw:disabled:opacity-60",
-                " ux-primary-gradient ux-ir-ring ux-focus-ring ux-press-flare"
-            )
-        }
+        // G1-2: KEEP ("gradient is good") — the gradient is simply the
+        // Primary fill now, not a gated alternative. The fill lives in
+        // `.ux-primary-gradient` (style.css) rather than an arbitrary
+        // Tailwind value: it carries fill, edge and text together, and a
+        // class is the only place a hover `filter` can live without
+        // becoming an animated inline style.
         ActionPriority::Primary => {
             concat!(
                 "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:break-words tw:disabled:cursor-not-allowed tw:disabled:opacity-60",
-                " tw:border-accent-border tw:bg-accent tw:text-accent-foreground tw:hover:bg-accent-hover",
-                " ux-ir-ring ux-focus-ring ux-press-flare"
+                " ux-primary-gradient ux-ir-ring ux-focus-ring ux-press-flare"
             )
         }
         ActionPriority::Secondary => {
@@ -249,8 +237,8 @@ mod tests {
     #[test]
     fn every_solid_tier_keeps_the_same_geometry() {
         // The interaction light is pseudo-elements and outlines only: a
-        // tier swap (or the G1 gradient/quiet flip) must never resize a
-        // button, so the geometry tokens are identical across tiers.
+        // tier swap must never resize a button, so the geometry tokens are
+        // identical across tiers.
         for priority in PRIORITIES {
             let class = solid_class(priority);
             for token in [
@@ -299,16 +287,11 @@ mod tests {
     }
 
     #[test]
-    fn the_primary_fill_follows_the_gate_knob() {
-        // The G1 cull is one const: gradient primaries, or the flat accent
-        // fill with only the hover ring carrying the spectrum. Whichever
-        // way it lands, exactly one of the two fills is in the class.
+    fn the_primary_fill_is_the_spectrum_gradient() {
+        // G1-2 ruling (2026-08-30, "gradient is good"): the gradient is
+        // the Primary fill, not a gated alternative to a flat accent fill.
         let class = solid_class(ActionPriority::Primary);
-        assert_eq!(
-            class.contains("ux-primary-gradient"),
-            GRADIENT_PRIMARY,
-            "{class}"
-        );
-        assert_eq!(class.contains("tw:bg-accent"), !GRADIENT_PRIMARY, "{class}");
+        assert!(class.contains("ux-primary-gradient"), "{class}");
+        assert!(!class.contains("tw:bg-accent"), "{class}");
     }
 }

@@ -5642,7 +5642,8 @@ label:has(> input:not(:disabled)) {
 }
 
 /* Gallery-card lift, composed with the inset ring. Kept a separate class
-   from the ring so G1 can cull the movement without losing the light. */
+   from the ring so `prefers-reduced-motion` can drop the translate below
+   without touching the light. */
 .ux-card-lift {
     transition:
         transform 180ms ease,
@@ -5690,10 +5691,10 @@ select:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
-   Gradient primary (Q3) — built for the G1 cull. The quiet-primary fallback
-   is ONE edit: flip `GRADIENT_PRIMARY` in
-   src/core/action/action_button.rs to `false` and every primary goes back
-   to the flat accent fill; this class is then simply unused.
+   Gradient primary — G1-2 RULED KEEP (2026-08-30, "gradient is good"): the
+   spectrum-gradient fill IS the Primary tier now, not a gated alternative
+   to a flat accent fill. See `solid_class` in
+   src/core/action/action_button.rs.
    -------------------------------------------------------------------------- */
 .ux-primary-gradient {
     background: linear-gradient(105deg, #5fe08b, #53c6f2 55%, #a58af7);
@@ -5706,7 +5707,8 @@ select:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
-   Working / progress spectrum (extras, culled at G1)
+   Working / progress spectrum (extras — G1-3 RULED KEEP ALL FOUR: spinner,
+   iridescent progress, drag ring, press flare)
    -------------------------------------------------------------------------- */
 
 /* Conic working spinner: the spectrum swept into a ring by a radial mask.
