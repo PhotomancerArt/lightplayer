@@ -42,7 +42,43 @@ export async function getGrantedPorts() {
     return [];
   }
   const { BrowserEsp32DeviceController } = await loadControllerModule();
+  await adoptReenumeratedPorts(ports);
   return ports.map((port) => sessionForPort(BrowserEsp32DeviceController, port, undefined));
+}
+
+// Chrome mints a NEW SerialPort object when a granted device re-enumerates
+// (a physical replug, or a USB-Serial-JTAG chip resetting), so matching by
+// object identity alone would mint a second session — and downstream a
+// second endpoint and another "new device found" card — for the same grant
+// (G1 finding, 2026-08-31: a replugged C6 wallpapered the gallery). A
+// session whose port is no longer enumerated is a dead generation: adopt
+// the new port into it when the USB identity (vid:pid) matches, pairing in
+// order — the round-1 single-board case; multi-board disambiguation stays
+// with the hello-identity merge.
+async function adoptReenumeratedPorts(ports) {
+  const live = new Set(ports);
+  const dead = [...sessions.values()].filter((session) => !live.has(session.port));
+  if (dead.length === 0) {
+    return;
+  }
+  const known = new Set([...sessions.values()].map((session) => session.port));
+  for (const port of ports) {
+    if (known.has(port)) {
+      continue;
+    }
+    const info = port.getInfo?.() ?? {};
+    const index = dead.findIndex((session) => {
+      const old = session.port?.getInfo?.() ?? {};
+      return (
+        old.usbVendorId === info.usbVendorId && old.usbProductId === info.usbProductId
+      );
+    });
+    if (index === -1) {
+      continue;
+    }
+    const [session] = dead.splice(index, 1);
+    await session.adoptPort(port);
+  }
 }
 
 // The ONE session-per-SerialPort rule, shared by the chooser and the
@@ -81,8 +117,8 @@ export async function requestPort() {
   return sessionForPort(BrowserEsp32DeviceController, port, label);
 }
 
-export async function openPort(id, baudRate) {
-  return requireSession(id).openProtocol({ baudRate });
+export async function openPort(id, baudRate, reset = true) {
+  return requireSession(id).openProtocol({ baudRate, reset });
 }
 
 export async function writeLine(id, line) {

@@ -1,5 +1,7 @@
 //! App-side links to LightPlayer runtimes and devices.
 
+#[cfg(feature = "device-link")]
+pub mod device_link;
 #[cfg(feature = "device-session")]
 pub mod device_session;
 pub mod provider;

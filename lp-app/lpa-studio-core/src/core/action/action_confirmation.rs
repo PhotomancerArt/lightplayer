@@ -10,6 +10,12 @@ pub struct ActionConfirmation {
     pub message: String,
     /// Label for the confirmation button.
     pub confirm_label: String,
+    /// Present the confirmation as a two-click ARMED button (first click
+    /// arms — the button itself asks; second click within the window
+    /// dispatches) instead of the native dialog. For destructive-but-light
+    /// verbs where a modal reads heavier than the act (G1 feedback,
+    /// 2026-08-31: Forget device).
+    pub inline: bool,
 }
 
 impl ActionConfirmation {
@@ -23,6 +29,13 @@ impl ActionConfirmation {
             title: title.into(),
             message: message.into(),
             confirm_label: confirm_label.into(),
+            inline: false,
         }
+    }
+
+    /// Two-click armed-button presentation (see [`Self::inline`]).
+    pub fn inline(mut self) -> Self {
+        self.inline = true;
+        self
     }
 }

@@ -158,6 +158,7 @@ pub fn build_home_view(
             sim,
             projects: Vec::new(),
             examples,
+            devices: crate::DeviceRosterView::default(),
             remembered: Vec::new(),
             library_available: false,
             opening,
@@ -178,6 +179,9 @@ pub fn build_home_view(
         sim,
         projects: dedupe_by_key(projects, |card| card.uid.clone(), "project"),
         examples,
+        // Filled by `StudioController::home_view` from the roster: the
+        // builder reads the LIBRARY, and the device model is not in it.
+        devices: crate::DeviceRosterView::default(),
         // The registry survived the device teardown; the stub names what it
         // holds so the records are visibly intact.
         remembered: inputs

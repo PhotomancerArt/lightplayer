@@ -179,13 +179,19 @@ impl BrowserSerialEsp32Provider {
         self.endpoint(&endpoint_id)
     }
 
+    /// `reset: false` opens the port WITHOUT the D0/R1/R0 hard reset.
+    /// Identify relies on it: a USB-Serial-JTAG chip (C6) re-enumerates on
+    /// hard reset, which kills the port that was just opened — the model's
+    /// mid-stream hello request needs no reset at all (G1 finding,
+    /// 2026-08-31: identify wedged at "Not responding" on every C6 open).
     pub async fn open_protocol(
         &self,
         session_id: &LinkSessionId,
         baud_rate: u32,
+        reset: bool,
     ) -> Result<(), LinkError> {
         let (endpoint_id, port_id) = self.session_endpoint_and_port(session_id)?;
-        let result = browser_serial::open(port_id, baud_rate).await?;
+        let result = browser_serial::open(port_id, baud_rate, reset).await?;
         let logs = protocol_open_result_logs(endpoint_id, session_id.clone(), result);
         let mut sessions = self.sessions.borrow_mut();
         let state = session_state_mut(&mut sessions, session_id)?;

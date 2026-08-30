@@ -332,6 +332,22 @@ pub fn App() -> Element {
                 }
             });
         }
+        // The rebuilt device layer (M3): the roster's effects run device IO
+        // in spawned futures on the browser's executor, and reach real ports
+        // through the Web Serial provider. A browser without Web Serial
+        // installs no transport, and the devices page says so rather than
+        // showing an empty roster that reads like "you have none".
+        #[cfg(target_arch = "wasm32")]
+        {
+            controller.set_device_spawner(wasm_bindgen_futures::spawn_local);
+            let provider = Rc::new(lpa_studio_core::BrowserSerialEsp32Provider::with_options(
+                Default::default(),
+            ));
+            match lpa_studio_core::BrowserSerialTransport::new(provider) {
+                Some(transport) => controller.set_device_transport(Rc::new(transport)),
+                None => log::info!("this browser has no Web Serial; devices are unavailable"),
+            }
+        }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;
         let loop_tx = handle.tx.clone();
@@ -819,6 +835,13 @@ pub fn App() -> Element {
                     ));
                 }
                 install_library_listeners(&startup_bridge.tx);
+                // Hotplug (M3): a granted port (re)appearing makes the
+                // effects layer sweep for grants it has not attached; one
+                // leaving makes it detach the links that stopped being open.
+                // Both edges are "go look", not "here is a port" — the
+                // browser's listeners carry no argument. Listener lifetime =
+                // page lifetime (forget).
+                install_serial_hotplug(&startup_bridge.tx);
             }
             #[cfg(not(target_arch = "wasm32"))]
             let _ = &startup_bridge;
@@ -828,10 +851,10 @@ pub fn App() -> Element {
             // from the view loop, which first has to learn whether this
             // library HAS that project.
             //
-            // The device arm of the startup route dispatch (a
-            // `/device/<uid>` reload's granted-port connect + attach), the
-            // D32 auto-connect sweep and the serial hotplug listener all
-            // went with M2 of the device-model rebuild.
+            // The devices half re-derives too, and needs nothing from here:
+            // the roster rehydrates the registry's rows at the first library
+            // settle, and the granted-port sweep is armed when the transport
+            // is installed.
             match &startup_route {
                 // A cold `/p/<slug>` load: the example is compiled in, so
                 // no roster wait — open transiently the moment the library
@@ -1487,6 +1510,37 @@ fn preload_engine_assets() {
             Err(error) => log::debug!("engine preload: fetching {module_url}: {error}"),
         }
     });
+}
+
+/// The `navigator.serial` hotplug listeners (M3 of the device-model
+/// rebuild).
+///
+/// Both edges are re-derivation triggers, not events carrying a port: the
+/// browser's `connect`/`disconnect` listeners take no argument, so `connect`
+/// becomes "sweep the grants you hold" and `disconnect` becomes "detach the
+/// links that stopped being open". The effects layer answers both.
+#[cfg(target_arch = "wasm32")]
+fn install_serial_hotplug(tx: &CommandSender) {
+    use lpa_studio_core::app::studio::studio_command::DeviceHotplug;
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::prelude::Closure;
+
+    let connect_tx = tx.clone();
+    let on_connect = Closure::wrap(Box::new(move || {
+        connect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Connected));
+    }) as Box<dyn FnMut()>);
+    let disconnect_tx = tx.clone();
+    let on_disconnect = Closure::wrap(Box::new(move || {
+        disconnect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Disconnected));
+    }) as Box<dyn FnMut()>);
+    let installed = lpa_link::providers::browser_serial_esp32::install_serial_events(
+        on_connect.as_ref().unchecked_ref(),
+        on_disconnect.as_ref().unchecked_ref(),
+    );
+    if installed {
+        on_connect.forget();
+        on_disconnect.forget();
+    }
 }
 
 /// Wire the cross-tab library refresh triggers (M4b): a BroadcastChannel
