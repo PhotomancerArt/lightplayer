@@ -95,7 +95,7 @@ pub(crate) fn narrow_menu_open() -> Element {
 
 #[story(
     label = "⋯ menu on a project route",
-    description = "The overflow menu while a project is open: a Project group leads it (spike project-share §5, ruling G4). \"Sharing & access…\" opens the same panel the Share pill does, and \"Archive project\" is a QUIET row, not a red one — archiving is reversible and nothing is deleted, so dressing it as destructive would teach people to fear the wrong control. There is no Delete forever anywhere in this menu."
+    description = "The overflow menu while a project is open: a Project group leads it (spike project-share §5, ruling G4). It holds exactly one row now — \"Sharing & access…\" retired with the Share pill at relationship-control P5, because the bar's PROJECT segment is the share door and a door in the bar does not also belong behind a menu. \"Archive project\" is a QUIET row, not a red one — archiving is reversible and nothing is deleted, so dressing it as destructive would teach people to fear the wrong control. There is no Delete forever anywhere in this menu."
 )]
 pub(crate) fn overflow_menu_project_group() -> Element {
     rsx! {
@@ -110,7 +110,6 @@ pub(crate) fn overflow_menu_project_group() -> Element {
                 section: SiteSection::Session,
                 overflow_menu_open: true,
                 project_menu: Some(ChromeProjectMenu {
-                    on_share: EventHandler::new(|()| {}),
                     on_archive: EventHandler::new(|()| {}),
                 }),
                 VersionChipPreview { chip: branch_chip() }
@@ -146,8 +145,8 @@ pub(crate) fn control_states() -> Element {
 }
 
 #[story(
-    label = "Faces — the relationship, clean and dirty",
-    description = "The project segment's face across the standings the bar can reach today, clean over dirty. Example is the pristine transient view (the accent \"example\" pill it replaces is gone — the face is neutral by D12, and it is the one thing in the bar that says whose document this is); Private is a library project with no roster answer, which is what every saved project reads as until P3 wires the fetch. Dirty adds the amber count on the CHANGES segment and the Save sibling; the project segment does not change, because ownership and dirtiness are different questions."
+    label = "Faces — all five relationships, clean and dirty",
+    description = "The project segment's face for every state the derivation can produce, clean over dirty. Example is the pristine transient view (the accent \"example\" pill it replaces is gone — the face is neutral by D12, and it is the one thing in the bar that says whose document this is); Private is a library project the service has not answered a roster for; Shared is the same project once it has (D12 keeps it neutral — no status-blue for published); Member and Viewing are somebody else's document, with and without write. Dirty adds the amber count on the CHANGES segment and the Save sibling; the project segment does not change in either direction, because ownership and dirtiness are different questions."
 )]
 pub(crate) fn control_relationship_faces() -> Element {
     rsx! {
@@ -155,6 +154,9 @@ pub(crate) fn control_relationship_faces() -> Element {
             for (face_label, relationship) in [
                 ("Example", ProjectRelationship::Example),
                 ("Private", ProjectRelationship::MineLocal),
+                ("Shared", ProjectRelationship::MinePublished),
+                ("Member", ProjectRelationship::MemberOfSomeoneElses),
+                ("Viewing", ProjectRelationship::ViewingSomeoneElses),
             ]
             {
                 div { class: "tw:grid tw:gap-1",
@@ -300,7 +302,7 @@ pub(crate) fn lens_bar_ladder() -> Element {
 
 #[story(
     label = "Lens bar phone ⋯ menu",
-    description = "The phone rung's ⋯ menu (crowded bar <560): the Project group leads, the folded Patch toggle rides in as a mode row, and the Sections group carries ALL FIVE sections — Devices and Projects join the world's three, because the phone bar keeps no inline tabs at all."
+    description = "The phone rung's ⋯ menu (crowded bar <560): the Project group leads with its one Archive row, and the Sections group carries ALL FIVE sections — Devices and Projects join the world's three, because the phone bar keeps no inline tabs at all."
 )]
 pub(crate) fn lens_bar_phone_menu_open() -> Element {
     rsx! {
@@ -334,7 +336,6 @@ fn lens_frame(width: u32, menu_open: bool) -> Element {
                 }),
                 play_toggle: Some(ChromeModeToggle { href: "#play".to_string(), active: false }),
                 project_menu: Some(ChromeProjectMenu {
-                    on_share: EventHandler::new(|()| {}),
                     on_archive: EventHandler::new(|()| {}),
                 }),
                 // The version chip behind the crowded bar's <900 fold —

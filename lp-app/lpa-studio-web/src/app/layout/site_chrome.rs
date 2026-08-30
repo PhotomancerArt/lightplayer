@@ -24,8 +24,9 @@
 //!   session control and its Play toggle stops fitting ~220px sooner
 //!   than a plain one, so the crowded bar folds earlier (G1 of the
 //!   session·project control, 2026-08-19 — the squished phone bar):
-//!   <900 the world nav retreats to ⋯, the toggle and the Share pill go
-//!   icon-only, and the version chip hides (the device name already
+//!   <900 the world nav retreats to ⋯, the toggle goes icon-only, the
+//!   project segment's relationship word folds to its glyph, and the
+//!   version chip hides (the device name already
 //!   folds there); <680 the brand word yields; <560 the phone
 //!   bar — Devices/Projects become ⋯ rows and gaps tighten. What never
 //!   folds: the control, Save, Play, settings, the account slot, and ⋯ —
@@ -57,7 +58,7 @@
 //! any open sim/device session. Nothing here reloads the page.
 
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{Archive, Play, UserRound};
+use dioxus_icons::lucide::{Archive, Play};
 
 use crate::app::layout::session_control::{ChromeSessionControl, SessionProjectControl};
 use crate::base::{
@@ -79,19 +80,20 @@ pub struct ChromeModeToggle {
     pub active: bool,
 }
 
-/// The project-scoped rows the ⋯ menu grows while a project route is open
+/// The project-scoped row the ⋯ menu grows while a project route is open
 /// (spike `project-share` §5, ruling G4).
 ///
-/// Sharing lives here as well as on the pill because a menu is where people
-/// look for a project's *settings*; archive lives here and nowhere else
-/// because the Share panel stays pure access control, the way Docs keeps
-/// them apart. Both are handlers rather than markup so the chrome stays
-/// presentational — what "archive" means to the service belongs to
-/// `app::share`, and where the app goes afterwards belongs to `web_app`.
+/// Archive lives here and nowhere else, because the sharing surface stays
+/// pure access control, the way Docs keeps them apart. It is a handler
+/// rather than markup so the chrome stays presentational — what "archive"
+/// means to the service belongs to `app::share`, and where the app goes
+/// afterwards belongs to `web_app`.
+///
+/// The companion "Sharing & access…" row retired at relationship-control
+/// P5 along with the pill it opened: the bar's PROJECT segment is the one
+/// door now, and it is in the bar itself, not behind a menu.
 #[derive(Clone, PartialEq)]
 pub struct ChromeProjectMenu {
-    /// Open the Share panel (the same panel the pill opens).
-    pub on_share: EventHandler<()>,
     /// Archive this project. Quiet, not destructive: it is reversible.
     pub on_archive: EventHandler<()>,
 }
@@ -127,7 +129,7 @@ pub fn SiteChrome(
     /// Stories only: mount the narrow ⋯ menu open (capture can't hover).
     #[props(default = false)]
     overflow_menu_open: bool,
-    /// The project rows the ⋯ menu grows on a project route; `None`
+    /// The project row the ⋯ menu grows on a project route; `None`
     /// everywhere else (the menu then reads exactly as it always has).
     #[props(default)]
     project_menu: Option<ChromeProjectMenu>,
@@ -407,7 +409,7 @@ fn NavMenuItem(
     }
 }
 
-/// The ⋯ menu's project rows: the sharing door, then the removal verb.
+/// The ⋯ menu's project row: the removal verb.
 ///
 /// **Archive is a quiet row, not a red one** (spike §5): it is reversible —
 /// the project stops resolving for everyone but its members and nothing is
@@ -419,26 +421,8 @@ fn NavMenuItem(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectMenuRows(menu: ChromeProjectMenu) -> Element {
     let close = try_consume_context::<PopoverCloseHandle>();
-    let ChromeProjectMenu {
-        on_share,
-        on_archive,
-    } = menu;
+    let ChromeProjectMenu { on_archive } = menu;
     rsx! {
-        button {
-            class: menu_item_action_class(),
-            r#type: "button",
-            onclick: move |_| {
-                // Close FIRST: the panel this opens is another popover
-                // anchored in the same bar, and two open at once reads as
-                // a stuck menu.
-                if let Some(mut close) = close {
-                    close.close();
-                }
-                on_share.call(());
-            },
-            UserRound { size: 14 }
-            span { "Sharing & access…" }
-        }
         button {
             class: menu_item_action_class(),
             r#type: "button",

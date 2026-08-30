@@ -60,17 +60,17 @@ use lpc_cloud_api::Access;
 
 use crate::app::home::package_card::platform_now_secs;
 use crate::app::home::package_export::{ExportForm, ExportTarget, export_package_as};
-use crate::app::project::project_share_section::ShareRow;
 use crate::app::project::{ProjectDetailContent, ProjectDetailSections};
-use crate::app::share::relationship::ProjectRelationship;
-use crate::app::share::share_panel::{
+use crate::app::share::access_controls::{
     AccessDescription, AccessSegment, AddPersonRow, PeopleList, ShareUrlHero,
 };
+use crate::app::share::relationship::ProjectRelationship;
 use crate::app::share::share_person::SharePerson;
 use crate::app::share::share_url::ShareUrl;
 use crate::base::{
     InlineButtonTone, PopoverCloseHandle, StudioIcon, StudioIconName, inline_icon_button_class,
 };
+use crate::core::inline_link_row_class;
 
 /// Which tab the panel opens on. History is a real tab (D10): the
 /// document's own events, read-only.
@@ -438,13 +438,56 @@ fn PublishLine(publish: Option<PublishStatus>) -> Element {
     }
 }
 
+/// One overflow row: icon, label, and a disabled state that explains
+/// itself through the row's title.
+///
+/// Inherited verbatim from the retired `ProjectShareSection` (the detail
+/// popup's old "Share" block, P5) — same rows, same words, same
+/// dirty-disable rule, one home.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ShareRow(
+    label: &'static str,
+    hint: &'static str,
+    icon: StudioIconName,
+    disabled: bool,
+    on_press: EventHandler<()>,
+) -> Element {
+    let title = if disabled {
+        "Save this project to share it."
+    } else {
+        hint
+    };
+    let class = inline_link_row_class(disabled);
+
+    rsx! {
+        button {
+            class,
+            r#type: "button",
+            disabled,
+            title,
+            onclick: move |event| {
+                event.stop_propagation();
+                if !disabled {
+                    on_press.call(());
+                }
+            },
+            span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:flex-none tw:items-center tw:justify-center", aria_hidden: "true",
+                StudioIcon { name: icon, size: 14 }
+            }
+            span { class: "tw:min-w-0 tw:truncate", "{label}" }
+        }
+    }
+}
+
 /// The ⋯ overflow's rows: the two export forms and the door back to the
 /// settings/identity/stats sections.
 ///
 /// The forms read the **library snapshot** — the bytes on disk — while
 /// unsaved edits live in the overlay, so a dirty project would silently
 /// export its last saved version. They disable and say so instead (the
-/// rule and its line come from `ProjectShareSection`, which this replaces).
+/// rule and its line come from `ProjectShareSection`, which this replaced
+/// at P5).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn OverflowRows(

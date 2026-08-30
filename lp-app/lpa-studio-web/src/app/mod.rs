@@ -24,7 +24,8 @@ pub mod project;
 #[cfg(feature = "stories")]
 pub(crate) mod readme_stories;
 pub mod roster;
-/// The owner's sharing surface: the Share pill, its panel, and the archive.
+/// The sharing surface: the project popover's access controls, the live
+/// roster behind them, and the archive.
 pub mod share;
 #[cfg(feature = "stories")]
 pub(crate) mod story_fixtures;
@@ -37,5 +38,5 @@ pub use home::{DevicesPage, ExplorePage, HomePage, ProjectOpeningFrame, Projects
 pub use layout::{PaneFrame, StudioShell};
 pub use node::NodePane;
 pub use project::{ProjectNodeWorkspace, ProjectPane};
-pub use share::{ArchivedProjectsSection, ProjectShareControl};
+pub use share::ArchivedProjectsSection;
 pub use wiring::WiringDrawerBody;

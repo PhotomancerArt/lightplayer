@@ -1,7 +1,10 @@
-//! The Share pill and the panel it opens (spike `project-share` §1-A + §2-B,
-//! gate rulings G1/G2 — visual reference only, never imported).
+//! The sharing controls themselves — the URL hero, the general-access
+//! segment and its description line, the people list and its add row
+//! (spike `project-share` §1-A + §2-B, gate rulings G1/G2 — visual
+//! reference only, never imported).
 //!
-//! Link-first, top to bottom:
+//! Link-first, in the order the relationship panel's Where and Access
+//! sections mount them:
 //!
 //! 1. **The URL**, because the address bar is the product (D1/D13). It is
 //!    the hero, not a footer button: copying the link is the share, and
@@ -17,7 +20,16 @@
 //!    add-person affordance sits at the list's BOTTOM (house rule:
 //!    add-buttons at the insertion point).
 //!
-//! No footer: the hero owns Copy, and closing is the × or a click outside.
+//! # One home, since the pill retired
+//!
+//! These were the body of the chrome's standalone Share pill
+//! (`SharePillPopover` / `SharePanel`). The pill and its panel retired with
+//! relationship-control P5 — the project segment's popover is the one door
+//! now — and the controls moved wholesale into that popover's Where and
+//! Access sections ([`super::project_relationship_panel`], vision D9),
+//! same controls, same gate-approved strings. Nothing here paints a
+//! popover or knows a trigger; they are `pub(crate)` pieces the panel
+//! composes.
 //!
 //! # Shape
 //!
@@ -25,16 +37,6 @@
 //! mount the three access states and the awkward people set with no cloud
 //! service, no session and no context. [`super::project_roster`] is the
 //! live half that fills these props and answers the events.
-//!
-//! # Two homes for the pieces
-//!
-//! [`ShareUrlHero`], [`AccessSegment`], [`AccessDescription`],
-//! [`PeopleList`] and [`AddPersonRow`] are also the **relationship
-//! panel's** Where and Access sections
-//! ([`super::project_relationship_panel`], vision D9) — the same controls,
-//! the same gate-approved strings, mounted under the project segment
-//! instead of the pill. They are `pub(crate)` for that reason. When the
-//! pill retires (P5) [`SharePanel`] goes with it and the pieces stay.
 //!
 //! # Tailwind traps (crate README)
 //!
@@ -46,143 +48,17 @@
 //! label's type therefore lives on an inner `<span>`.
 
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{Link2, Plus, UserRound, X};
+use dioxus_icons::lucide::{Link2, Plus};
 use lpc_cloud_api::{Access, MemberRole};
 
 use crate::app::share::share_person::SharePerson;
 use crate::app::share::share_url::ShareUrl;
-use crate::base::{
-    InlineButtonTone, PopoverButton, PopoverCloseHandle, PopoverPlacement,
-    inline_icon_button_class, inline_text_button_class,
-};
+use crate::base::{InlineButtonTone, inline_text_button_class};
 use crate::core::outline_action_class;
 
-/// The chrome's Share pill and its anchored panel.
-///
-/// Quiet by design (G1 ruling): the neutral chip family, with the accent
-/// living only in the person glyph — the bar already carries the URL, so
-/// this is a door, not an advertisement. Opening tints the border with the
-/// accent.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn SharePillPopover(
-    /// What the panel's title calls this project.
-    name: String,
-    /// The canonical link, in the pieces the hero paints.
-    url: ShareUrl,
-    /// What holding the link grants right now.
-    access: Access,
-    /// The member rows (empty is legal — a project nobody has been added
-    /// to still shows its owner once the service answers).
-    #[props(default)]
-    people: Vec<SharePerson>,
-    /// A `SetAccess` is in flight; the segment stays interactive (the
-    /// update is optimistic) but says so.
-    #[props(default = false)]
-    busy: bool,
-    #[props(default)] on_access: Option<EventHandler<Access>>,
-    #[props(default)] on_copy: Option<EventHandler<()>>,
-    #[props(default)] on_add: Option<EventHandler<String>>,
-    #[props(default)] on_remove: Option<EventHandler<String>>,
-    /// Stories only: mount the panel open (capture cannot click). Also how
-    /// the ⋯ menu's "Sharing & access…" row opens it — see
-    /// `project_share_control`.
-    #[props(default = false)]
-    initially_open: bool,
-) -> Element {
-    rsx! {
-        PopoverButton {
-            class: SHARE_PILL_CLASS.to_string(),
-            open_class: SHARE_PILL_OPEN_CLASS.to_string(),
-            trigger: rsx! {
-                span { class: "tw:flex tw:flex-none tw:text-accent",
-                    UserRound { size: 13 }
-                }
-                // The word carries its own type: `style.css` resets
-                // `button { font: inherit }` unlayered, which beats any
-                // font utility on the button itself. It folds with the
-                // crowded bar's <900 rung (site_chrome's narrow ladder) —
-                // the glyph and the hover title carry the pill below it.
-                span { class: "tw:hidden tw:text-[11.5px] tw:font-bold tw:@min-[900px]:inline", "Share" }
-            },
-            label: "Share".to_string(),
-            title: format!("Sharing and access for \"{name}\""),
-            popup_class: SHARE_POPUP_CLASS.to_string(),
-            // The bordered-chip family, like the avatar trigger it sits
-            // beside — this pill has a border at rest, so the neutral
-            // chrome's raised fill reads as the same control, opened.
-            chrome_class: "ux-popover-chrome-neutral".to_string(),
-            placement: PopoverPlacement::BottomEnd,
-            // Glyph PLUS label: the top-layer copy must keep the trigger's
-            // own box or the bar would shift on open.
-            layer_keeps_layout: true,
-            initially_open,
-            SharePanel {
-                name,
-                url,
-                access,
-                people,
-                busy,
-                on_access,
-                on_copy,
-                on_add,
-                on_remove,
-            }
-        }
-    }
-}
-
-/// The panel's body. Pure — stories mount it without a popover.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn SharePanel(
-    name: String,
-    url: ShareUrl,
-    access: Access,
-    #[props(default)] people: Vec<SharePerson>,
-    #[props(default = false)] busy: bool,
-    #[props(default)] on_access: Option<EventHandler<Access>>,
-    #[props(default)] on_copy: Option<EventHandler<()>>,
-    #[props(default)] on_add: Option<EventHandler<String>>,
-    #[props(default)] on_remove: Option<EventHandler<String>>,
-    /// Stories only: render the add row already unfolded into its input.
-    #[props(default = false)]
-    adding: bool,
-) -> Element {
-    let close = try_consume_context::<PopoverCloseHandle>();
-    rsx! {
-        // One explicit grid wrapper: the popover primitive nests children
-        // in its own content div, so the panel class never reaches them.
-        div { class: "tw:grid tw:min-w-0 tw:gap-2.5 tw:p-3.5",
-            div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
-                strong { class: "tw:min-w-0 tw:truncate tw:text-[12.5px] tw:font-bold tw:text-strong-foreground",
-                    "Share \"{name}\""
-                }
-                if let Some(mut close) = close {
-                    button {
-                        class: inline_icon_button_class(InlineButtonTone::Neutral, false),
-                        r#type: "button",
-                        aria_label: "Close",
-                        onclick: move |_| close.close(),
-                        X { size: 13 }
-                    }
-                }
-            }
-            ShareUrlHero { url: url.clone(), on_copy }
-            p { class: "tw:m-0 tw:px-0.5 tw:text-[10px] tw:leading-snug tw:text-dim-foreground",
-                "Same link as the address bar — copying either works."
-            }
-            AccessSegment { access, busy, on_access }
-            AccessDescription { access }
-            span { class: GROUP_HEADER_CLASS, "People" }
-            PeopleList { people, on_remove }
-            AddPersonRow { on_add, adding }
-        }
-    }
-}
-
 /// The hero: the whole link on one line, and the one button that matters.
-/// Shared with the visitor popover (P6) — same link, same powers, same box.
+/// The relationship panel's Where section mounts it — the link is *where
+/// this document lives*, not a footer button.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn ShareUrlHero(url: ShareUrl, on_copy: Option<EventHandler<()>>) -> Element {
@@ -480,18 +356,6 @@ fn initials_style(hue: u16) -> String {
     )
 }
 
-/// The pill at rest: the neutral chip family, accent only in the glyph.
-const SHARE_PILL_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:px-3 tw:py-1.5 tw:text-status-neutral-foreground tw:transition-colors tw:hover:border-accent-border tw:hover:text-strong-foreground";
-/// The pill while open: the accent border tint the spike's `.sharebtn.open`
-/// wears. Same box, so opening cannot nudge the bar.
-const SHARE_PILL_OPEN_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-accent-border tw:bg-accent-wash tw:px-3 tw:py-1.5 tw:text-strong-foreground";
-/// The panel, at the spike's 348px. Plain `w-[…]`, the shipped ⋯ menu's
-/// idiom: `.ux-popover-panel` already caps every panel at
-/// `calc(100vw - 24px)`. Material-free (P4): the merged-outline popover's
-/// `ux-svg-popover-panel` already paints background/border/shadow, so this
-/// carries only layout and type.
-const SHARE_POPUP_CLASS: &str =
-    "tw:grid tw:w-[348px] tw:min-w-0 tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 /// The URL hero's box: the terminal surface, because it holds an address.
 const URL_HERO_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-border tw:bg-terminal tw:px-2.5 tw:py-2";
 /// The one filled button in the panel — the link IS the share.
@@ -501,9 +365,6 @@ const SEGMENT_CLASS: &str =
     "tw:flex tw:min-w-0 tw:overflow-hidden tw:rounded-sm tw:border tw:border-border-strong";
 /// One segment button, before its state tone.
 const SEGMENT_BUTTON_BASE: &str = "tw:min-w-0 tw:flex-1 tw:cursor-pointer tw:border-0 tw:border-r tw:border-border-muted tw:px-1.5 tw:py-2 tw:transition-colors tw:last:border-r-0";
-/// The uppercase mini-header over a group.
-const GROUP_HEADER_CLASS: &str =
-    "tw:px-0.5 tw:pt-0.5 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground";
 /// The pending-invitation badge: warn-toned, because it is a promise the
 /// service has not been able to keep yet.
 const INVITED_BADGE_CLASS: &str = "tw:inline-flex tw:flex-none tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:py-px tw:font-mono tw:text-[8.5px] tw:font-bold tw:uppercase tw:tracking-wide tw:text-status-warning-foreground";
@@ -542,12 +403,7 @@ mod tests {
     /// background, or the browser paints `buttonface` (crate README).
     #[test]
     fn every_button_class_names_a_background() {
-        for class in [
-            SHARE_PILL_CLASS,
-            SHARE_PILL_OPEN_CLASS,
-            COPY_BUTTON_CLASS,
-            ADD_ROW_CLASS,
-        ] {
+        for class in [COPY_BUTTON_CLASS, ADD_ROW_CLASS] {
             assert!(class.contains("tw:bg-"), "no background in `{class}`");
         }
         for access in [Access::None, Access::View, Access::Edit] {

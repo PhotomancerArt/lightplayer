@@ -17,11 +17,12 @@
 //!
 //! Body: the node tree (plus any sync issue) — no heading and no pane-level
 //! button strip (P6 sidebar tidy: the tree is self-evident; Refresh and
-//! Disconnect remain ops without buttons). The popup is the project's
-//! standing — identity, "Project settings" rows, share, stats. The pending
-//! edits are NOT here: the header control's **changes** segment owns them
-//! (relationship-control D8), and its popup renders the labeled entries
-//! with per-entry revert, revert-all, and Save.
+//! Disconnect remain ops without buttons). The popup is what the project
+//! IS — identity, "Project settings" rows, stats. Two things are
+//! deliberately NOT here: the pending edits, owned by the header control's
+//! **changes** segment (relationship-control D8, with per-entry revert,
+//! revert-all, and Save), and the share rows, owned by its **project**
+//! segment's popover (D9 — Copy link in the action row, zip/JSON in its ⋯).
 //!
 //! **Embedded mode** (workbench ruling 2): the workbench's Nodes dock renders
 //! this pane FLAT — no card chrome, no project-name/[i] header, just the save
@@ -43,7 +44,7 @@ use lpa_studio_core::{
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
 use crate::app::layout::{PaneChrome, StudioPane};
 use crate::app::node::node_status_label_class;
-use crate::app::project::{ProjectNodeTree, ProjectSettingsSection, ProjectShareSection};
+use crate::app::project::{ProjectNodeTree, ProjectSettingsSection};
 use crate::base::{DetailPopover, DetailSection, PopoverPlacement};
 
 /// Everything the project's detail popup shows, gathered from the editor view
@@ -328,13 +329,14 @@ pub(crate) fn DebugActiveChip(count: usize, on_action: EventHandler<UiAction>) -
 /// identity rows (the editable `name` — and the read-only
 /// `format`/`uid`/`nodes` rows — live here rather than on the restored root
 /// card, as purpose-built controls rather than generic slot editors; see
-/// [`ProjectSettingsSection`]), share, and the project stats (moved here
+/// [`ProjectSettingsSection`]), and the project stats (moved here
 /// from the old sidebar MetricGrid card).
 ///
-/// The pending-edit lists and facts are NOT here: the header control's
-/// **changes** segment is their concept home
-/// (relationship-control D8), and its popup renders
-/// [`ProjectDetailContent::changes`].
+/// Two things are NOT here. The pending-edit lists and facts belong to the
+/// header control's **changes** segment (relationship-control D8), whose
+/// popup renders [`ProjectDetailContent::changes`]; the share rows belong
+/// to its **project** segment's popover (D9), which is also what reaches
+/// these sections, through its ⋯ menu's Details row.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectDetailPopover(
@@ -374,11 +376,17 @@ pub fn ProjectDetailSections(content: ProjectDetailContent) -> Element {
     let ProjectDetailContent {
         project_name,
         status,
-        dirty,
         stats,
         root_slots,
         manifest,
-        library_identity,
+        // The sharing half — the link, the two export forms, and the
+        // dirty-disable rule that guards them — belongs to the project
+        // popover now (relationship-control D9): Copy link is a fixed
+        // action-row slot, zip/JSON are its ⋯ overflow. These sections are
+        // reached THROUGH that popover, so carrying the rows here too would
+        // be the same door twice.
+        dirty: _,
+        library_identity: _,
         // The changes half of the content — pending-edit lists, the
         // pending facts, and the Save/Revert pair — belongs to the header
         // control's CHANGES popup now (relationship-control D8); it rides
@@ -411,16 +419,6 @@ pub fn ProjectDetailSections(content: ProjectDetailContent) -> Element {
             // generic slot editor — see `project_settings_section`.
             DetailSection { title: "Project settings",
                 ProjectSettingsSection { manifest, root_slots }
-            }
-        }
-        // Share is its own section: settings are what the project IS,
-        // share is what you do with it. A project with no library
-        // package behind it (the storeless demo path, or a
-        // device-hosted project this library does not know) renders
-        // none — the affordances read the library snapshot.
-        if let Some((uid, slug)) = library_identity.clone() {
-            DetailSection { title: "Share",
-                ProjectShareSection { uid, slug, unsaved: dirty.persisted }
             }
         }
         if !stats.is_empty() {

@@ -2,13 +2,13 @@
 //! address bar, the roster it answers with, and the writes the access
 //! controls make back against it.
 //!
-//! This used to be private to [`super::project_share_control`]. The
-//! relationship control needs the same answer in a second place — the
-//! project segment's popover owns Access now (vision D9) — and the
-//! relationship derivation itself needs the roster half
+//! This used to be private to the chrome's standalone Share pill. The
+//! relationship control needs the same answer for two jobs — the project
+//! segment's popover owns Access now (vision D9), and the relationship
+//! derivation itself reads the roster half
 //! ([`super::relationship::derive_relationship`]'s `roster_answered` /
-//! `owner`), so the machinery moved here and both surfaces call
-//! [`use_project_roster`]. One implementation, not two.
+//! `owner`) — so the machinery moved here. The pill retired at P5, and
+//! one mount is left: the web shell's, per project route.
 //!
 //! # Why one `GetProject` decides everything
 //!
@@ -36,15 +36,12 @@
 //! level back and says so — no surface ever shows a level the service does
 //! not hold.
 //!
-//! # Two mounts, two trips (this phase)
+//! # One mount, one trip
 //!
-//! The standalone Share pill and the project popover both call the hook
-//! while the pill is still mounted (it retires in P5), so a project route
-//! asks the service twice. Deliberate and temporary: sharing one fetch
-//! across two independently-mounted chrome slots would mean a context
-//! provider and a lifetime for it, for one phase of overlap. The answer is
-//! idempotent and cached by the browser's own connection reuse; the cost is
-//! one extra GET.
+//! The overlap phase is over: the pill that used to call this hook
+//! alongside the popover retired at P5, so a project route asks the
+//! service exactly once, from `web_app`, and the answer feeds both the
+//! derivation and the panel.
 
 use dioxus::prelude::*;
 use lpc_cloud_api::request::{AddMember, GetProject, RemoveMember, SetAccess};
@@ -83,7 +80,8 @@ pub enum RosterState {
 impl RosterState {
     /// A reply as state. `members: None` is the service saying "you are a
     /// link-holder, not a member" — no administration door for you (the
-    /// visitor surface is `visitor_popover`'s). An archived project keeps
+    /// project popover's Access section says so in one sentence instead of
+    /// showing dead controls). An archived project keeps
     /// resolving for its members but has no sharing to do until it is
     /// restored.
     pub fn of_info(info: &ProjectInfo) -> Self {

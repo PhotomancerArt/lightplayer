@@ -8,8 +8,8 @@
 //!
 //! **These read the SAVED bytes.** The library snapshot is what is on
 //! disk; unsaved overlay edits are not in it. Callers reachable while a
-//! project is dirty (the editor's project popup) must save first — see
-//! `ProjectShareSection`. The gallery's own cards can only be dirty for
+//! project is dirty (the project popover's overflow menu) must save first
+//! — see `app::share::project_relationship_panel`. The gallery's own cards can only be dirty for
 //! the project currently open in the editor, and that card is not the
 //! export surface.
 

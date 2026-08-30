@@ -4473,7 +4473,8 @@ impl ProjectController {
     /// `None` when no library package backs the running project — the demo
     /// path and a device-hosted project this library does not know have no
     /// manifest to designate against, so neither the rail nor the popup row
-    /// appears at all (the `ProjectShareSection` precedent).
+    /// appears at all (the same precedent the project popover's export
+    /// rows follow: no package, no rows).
     fn export_designation_context(&self) -> Option<ExportDesignationContext> {
         let active = self.library.as_ref()?.active.as_ref()?;
         let fields = {

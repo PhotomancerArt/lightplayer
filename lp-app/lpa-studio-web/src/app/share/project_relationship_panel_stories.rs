@@ -4,7 +4,7 @@
 //! The live panel renders from the `CloudSession`, a `GetProject`, the
 //! route, and the tab's publish ledger, none of which a story provides —
 //! so these mount the pure component with fixtures, the way
-//! `share_panel_stories` mounts the Share panel.
+//! `access_controls_stories` mounts the controls it composes.
 //!
 //! **Read them as a column.** The point of the phase is that the five
 //! states do NOT each invent a shape: header → tabs → Where → Access →

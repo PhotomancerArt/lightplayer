@@ -34,10 +34,9 @@ use crate::app::project::ProjectDetailContent;
 use crate::app::share::share_person::people_of;
 use crate::app::share::share_url::current_origin;
 use crate::app::share::{
-    ProjectRelationship, ProjectRoster, ProjectShareControl, PublishStatus, RosterFacts,
-    RosterState, ShareUrl, VisitorBannerHost, VisitorShareSlot, archive_project,
-    derive_relationship, fork_transient_session, use_project_roster, use_visitor_session,
-    viewer_actor,
+    ProjectRelationship, ProjectRoster, PublishStatus, RosterFacts, RosterState, ShareUrl,
+    VisitorBannerHost, archive_project, derive_relationship, fork_transient_session,
+    use_project_roster, use_visitor_session, viewer_actor,
 };
 use crate::app::workbench;
 use crate::base::{ToastHost, use_toast_provider};
@@ -1034,20 +1033,15 @@ pub fn App() -> Element {
     let workbench_route = current_route.is_lens() && !play && editor_open;
 
     // Sharing administers THE project in the address bar (D1 — the address
-    // bar IS the link), so both its doors exist only on a project route.
-    // Whether the pill actually draws is a further question only the
-    // service can answer; see `app::share::ProjectShareControl`.
+    // bar IS the link), so the roster fetch below runs only on a project
+    // route. The door itself is the bar's PROJECT segment now — the
+    // standalone Share pill and the ⋯ menu's "Sharing & access…" row both
+    // retired at relationship-control P5.
     let project_uid = match &current_route {
         StudioRoute::Project { uid, .. } => Some(*uid),
         _ => None,
     };
-    // The ⋯ menu's "Sharing & access…" opens the SAME panel the pill does.
-    // A popover owns its own open state, so the row bumps a request count
-    // that re-keys the control and mounts it open — one bump per ask, so
-    // asking again after closing reopens it.
-    let mut share_request = use_signal(|| 0u32);
     let project_menu = project_uid.map(|uid| ChromeProjectMenu {
-        on_share: EventHandler::new(move |()| share_request += 1),
         on_archive: EventHandler::new(move |()| {
             archive_project(uid, Some(toasts), move || {
                 // We just archived the project this route addresses; the
@@ -1071,11 +1065,8 @@ pub fn App() -> Element {
     // project in the address bar answers all three signals P1's derivation
     // was left waiting on: whether the service put this viewer on the
     // roster, what the link grants, and who owns it. The session's own
-    // actor is the other side of that owner comparison.
-    //
-    // The standalone Share pill mounts the same hook until it retires (P5),
-    // so a project route asks twice this phase — see the two-mounts note in
-    // `app::share::project_roster`.
+    // actor is the other side of that owner comparison. ONE mount since P5
+    // retired the pill — one `GetProject` per project route.
     let roster = use_project_roster(project_uid);
     let roster_state = (roster.state)();
     let cloud_session = use_context::<Signal<crate::cloud::CloudSession>>();
@@ -1181,23 +1172,10 @@ pub fn App() -> Element {
                 play_toggle: play_toggle
                     .map(|href| ChromeModeToggle { href, active: play }),
                 tight: workbench_route,
-                if let Some(uid) = project_uid {
-                    // First in the right cluster, ahead of the gear and
-                    // the avatar (spike §1-A). Re-keyed on the request
-                    // count so the ⋯ row can mount it open, and on the
-                    // uid so moving to another project re-asks the
-                    // service instead of showing the last one's roster.
-                    ProjectShareControl {
-                        key: "{uid}-{share_request}",
-                        uid,
-                        initially_open: share_request() > 0,
-                    }
-                    // The same slot, visitor variant (P6, spike §2-D).
-                    // Each door self-gates on the service's answer —
-                    // members get the pill above, link-holders get this
-                    // one, and never both.
-                    VisitorShareSlot {}
-                }
+                // No share slot in the right cluster: the owner pill and
+                // its visitor variant both retired at relationship-control
+                // P5, and the bar's PROJECT segment is the one door for
+                // every standing.
                 // The build chip is an inspector, not a control: it is the
                 // first utility to fold — with the crowded bar's <900 rung
                 // on lens routes, with the phone rung elsewhere.

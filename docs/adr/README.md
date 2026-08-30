@@ -180,6 +180,10 @@ holds the full context.
 | A1: wire values decode under the CURRENT fixture's lamp type (owner's when mapped, else the next-unmapped object's) — the panel states the assumption rather than implying certainty | `2026-08-20-walk-up-assignment-selection-model` | Per-port lamp-type data exists on the surface |
 | The lamps−/+ control is mock-level room only (dashed, disabled): editing an object's lamp count is a mapping write, not a patch verb | `2026-08-20-walk-up-assignment-selection-model` | The count edit gets a home on the mapping write path |
 | The ProjectRead refusal threshold (32 KiB largest-free-block) and the staged sync's 16-node slot page size are provisional constants | `2026-08-28-project-reads-bounded-streamed-refusable` | The wire-evolution round-1 G1 bench walk reads real heartbeat numbers on the classic |
+| Owner attribution by NAME (`Actor` carries no profile, so no surface names an owner; the relationship faces are shaped for the word to drop in) | `2026-08-30-relationship-control-three-segment-bar` | Cloud accounts carry display profiles |
+| Tracking copies derive as `MineLocal` (an Edit-link visitor or a legacy View copy reads as "Private" on the bar and is offered Duplicate, not the tracking-copy fork) | `2026-08-30-relationship-control-three-segment-bar` | The visitor banner's own retirement, or the derivation learns about tracking copies |
+| History restore/checkout behind the popover's read-only History tab (`SnapshotStore::materialize` and `LocalProject::checkout` exist; the rows are text) | `2026-08-30-relationship-control-three-segment-bar` | The history effort takes the seam |
+| The desktop device panel's retirement into the runtime popover (declared landing zone, not yet a move) | `2026-08-30-relationship-control-three-segment-bar` | The device panel is retired |
 
 ## Relationship To Shared Planning
 

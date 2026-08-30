@@ -4,7 +4,7 @@
 //!
 //! Since the examples-vision P5 split there are TWO local shapes under
 //! this coordinator. A **View** link opens as a TRANSIENT session (memory
-//! stores, nothing installed — D1/D2): the mode fetch and the door/banner
+//! stores, nothing installed — D1/D2): the mode fetch and the banner
 //! work unchanged, the pull loop and store-mounting flows quietly no-op
 //! (`mount` finds no OPFS project), and **fork = the explicit save**
 //! ([`VisitorSession::fork`] dispatches `SaveOverlay`; the core's
@@ -44,6 +44,14 @@
 //! Anonymous edit-visitors get their saves pushed from here (the P4 engine
 //! deliberately no-ops signed out; an `Edit` link is the one anonymous
 //! write the service accepts).
+//!
+//! **The visitor's share door retired** (relationship-control P5). The
+//! chrome's pill slot — owner pill and its `VisitorSharePopover` variant
+//! alike — is gone; the project segment's popover is the one door, and it
+//! renders a visit from the derived relationship rather than from this
+//! coordinator. What stays here is the strip, the pull loop, and the two
+//! verbs ([`VisitorSession::fork`], [`VisitorSession::discard`]) the
+//! diverged tracking copy still needs.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -57,7 +65,6 @@ use lpc_history::{PrefixedUid, SyncRelation};
 use crate::app::share::share_url::{ShareUrl, current_origin};
 use crate::app::share::visitor_banner::{BannerState, VisitorBanner, VisitorBannerView};
 use crate::app::share::visitor_mode::ShareMode;
-use crate::app::share::visitor_popover::VisitorSharePopover;
 use crate::base::Toasts;
 use crate::cloud::CloudSession;
 use crate::router::StudioRoute;
@@ -428,38 +435,6 @@ fn install_focus_listener(flag: Rc<Cell<bool>>) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn install_focus_listener(_flag: Rc<Cell<bool>>) {}
-
-/// The chrome's pill slot, visitor variant: renders the §2-D door when the
-/// service said this viewer is a link-holder, and nothing otherwise (the
-/// member pill is `ProjectShareControl`'s — each self-gates, so exactly
-/// one door ever draws).
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn VisitorShareSlot() -> Element {
-    let Some(session) = try_consume_context::<VisitorSession>() else {
-        return rsx! {};
-    };
-    let Some(ux) = session.ux() else {
-        return rsx! {};
-    };
-    if !ux.mode.is_visitor() {
-        return rsx! {};
-    }
-    let Some(url) = session.share_url() else {
-        return rsx! {};
-    };
-    let copy_session = session.clone();
-    let fork_session = session.clone();
-    rsx! {
-        VisitorSharePopover {
-            name: ux.name.clone(),
-            url,
-            access: ux.access,
-            on_copy: move |()| copy_session.copy_link(),
-            on_fork: move |()| fork_session.fork(),
-        }
-    }
-}
 
 /// The strip under the chrome: mounted on project routes, draws only for
 /// a visitor whose project is actually open in the editor.
