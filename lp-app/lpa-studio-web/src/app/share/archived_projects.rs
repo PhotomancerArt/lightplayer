@@ -188,7 +188,7 @@ fn ArchivedRow(project: ArchivedProject, on_restore: Option<EventHandler<Prefixe
                 }
             }
             button {
-                class: inline_text_button_class(InlineButtonTone::Accent, false),
+                class: inline_text_button_class(InlineButtonTone::Action, false),
                 r#type: "button",
                 title: "Bring this project back to the library",
                 onclick: move |_| {

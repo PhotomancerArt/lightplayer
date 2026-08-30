@@ -36,6 +36,29 @@ impl NodeKind {
         NodeKind::Output,
         NodeKind::Fixture,
     ];
+
+    /// Whether this kind's runtime publishes a renderable
+    /// [`crate::VisualProduct`] — the contract a playlist entry child must
+    /// meet, since a playlist selects and blends its entries' visual
+    /// outputs into its own (`PlaylistState.output`).
+    ///
+    /// Shader, fluid, and playlist state each carry a produced visual
+    /// output slot; a module mirrors its scope's `visual.out`. Texture is a
+    /// resource shaders sample, not a renderable product, and the compute
+    /// shader publishes artifact-shaped data slots — neither can be watched
+    /// on its own. Wildcard-free so a new kind must be placed.
+    pub const fn produces_visual(self) -> bool {
+        match self {
+            NodeKind::Module | NodeKind::Shader | NodeKind::Fluid | NodeKind::Playlist => true,
+            NodeKind::Button
+            | NodeKind::Clock
+            | NodeKind::Texture
+            | NodeKind::ComputeShader
+            | NodeKind::ControlRadio
+            | NodeKind::Output
+            | NodeKind::Fixture => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -65,5 +88,25 @@ mod tests {
         for (i, kind) in NodeKind::ALL.iter().enumerate() {
             assert_eq!(index_in_all(*kind), i, "{kind:?} out of place in ALL");
         }
+    }
+
+    /// The visual set is exactly the kinds whose runtime publishes a
+    /// `VisualProduct` (shader/fluid/playlist state, the module mirror).
+    #[test]
+    fn visual_kinds_are_the_watchable_four() {
+        let visual: alloc::vec::Vec<NodeKind> = NodeKind::ALL
+            .iter()
+            .copied()
+            .filter(|kind| kind.produces_visual())
+            .collect();
+        assert_eq!(
+            visual,
+            [
+                NodeKind::Module,
+                NodeKind::Shader,
+                NodeKind::Fluid,
+                NodeKind::Playlist,
+            ]
+        );
     }
 }

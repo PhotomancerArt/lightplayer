@@ -218,3 +218,27 @@ the merged outline, static story sheets) keep the full material.
   scheduled.
 - Light mode remains fully out of scope; Aurora is dark-only, matching the
   rest of Studio.
+
+## Amendment — the accent reckoning (2026-08-30)
+
+Aurora as originally shipped removed mint-as-chrome-state but kept
+`--studio-color-accent` (mint) as the action/link/identity color. That
+stance is superseded: the accent reckoning (planning dir
+`2026-08-29-2140-accent-reckoning`, PR #478) ruled **full no-hue** (D1,
+Yona: "no hue if we can make it work. the aurora gradient really is the
+look I'm going for") and retired the accent token set outright.
+
+North star, ratified: **at rest, chrome is neutral; saturated color
+belongs to artwork, status, and interaction light.** "Accent" dissolved
+into roles — actions are neutral chips answered by the iridescent ring
+(the gradient Primary stays the one loud fill), links are neutral with a
+hover brighten, selected/current is the neutral selection family,
+authored values (knob arcs, fader fills, the tape playhead) are the
+bright neutral, progress is the iridescent fill. One new frozen family
+was added beside EXPORT: **EXAMPLE** (`--studio-status-example-*`,
+lavender-grey) for example provenance. All five recolored surface groups
+passed the in-app feel gate with no per-surface exceptions.
+
+The escape hatch is per-surface exceptions argued at a review gate —
+never a blanket accent revival. Current guidance lives in
+`docs/style/ui.md` Color & Light.

@@ -88,7 +88,7 @@ fn GrowingPopoverStory() -> Element {
             label: "Growing details".to_string(),
             title: "Growing details".to_string(),
             popup_class: "ux-node-ui-popup ux-popover-story-panel".to_string(),
-            chrome_class: "ux-popover-chrome-accent".to_string(),
+            chrome_class: "ux-popover-chrome-neutral".to_string(),
             placement: PopoverPlacement::BottomEnd,
             initially_open: true,
             div { class: "ux-node-ui-popup-kicker", "popover" }
@@ -120,7 +120,7 @@ fn PopoverStoryButton(
             label: format!("{label} details"),
             title: format!("{label} details"),
             popup_class: "ux-node-ui-popup ux-popover-story-panel".to_string(),
-            chrome_class: "ux-popover-chrome-accent".to_string(),
+            chrome_class: "ux-popover-chrome-neutral".to_string(),
             placement,
             initially_open,
             div { class: "ux-node-ui-popup-kicker", "popover" }

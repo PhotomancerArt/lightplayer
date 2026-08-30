@@ -27,7 +27,7 @@ fn FaderStoryCard(#[props(default = false)] tall: bool, children: Element) -> El
     }
 }
 
-#[story(description = "Default fader: accent fill sized to the value, chunky grip.")]
+#[story(description = "Default fader: bright-neutral fill sized to the value, chunky grip.")]
 fn default() -> Element {
     rsx! {
         FaderStoryCard {

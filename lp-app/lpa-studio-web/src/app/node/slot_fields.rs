@@ -421,7 +421,7 @@ pub fn XySlotField(
                 onpointercancel: move |_| dragging.set(false),
                 span { class: "tw:pointer-events-none tw:absolute tw:left-1/2 tw:top-0 tw:h-full tw:w-px tw:bg-border-muted" }
                 span { class: "tw:pointer-events-none tw:absolute tw:left-0 tw:top-1/2 tw:h-px tw:w-full tw:bg-border-muted" }
-                span { class: "tw:pointer-events-none tw:absolute tw:h-2 tw:w-2 tw:-translate-x-1/2 tw:-translate-y-1/2 tw:rounded-full tw:border tw:border-accent-border tw:bg-accent", style: "{point_style}" }
+                span { class: "tw:pointer-events-none tw:absolute tw:h-2 tw:w-2 tw:-translate-x-1/2 tw:-translate-y-1/2 tw:rounded-full tw:border tw:border-background tw:bg-selection-border", style: "{point_style}" }
             }
             span { class: "{numeric_field_class(&state)} tw:flex-col tw:items-stretch tw:justify-center tw:gap-0.5 tw:self-center",
                 XyPadReadout { label: "x", value: value[0] }
@@ -586,7 +586,7 @@ fn bool_option_class(state: &UiSlotFieldState, active: bool) -> &'static str {
     match (state.invalid.is_some(), active) {
         (true, true) => "tw:bg-status-error-bg tw:px-2 tw:py-1 tw:text-status-error-foreground",
         (true, false) => "tw:bg-page tw:px-2 tw:py-1 tw:text-subtle-foreground",
-        (false, true) => "tw:bg-accent-bg tw:px-2 tw:py-1 tw:text-accent",
+        (false, true) => "tw:bg-selection-bg tw:px-2 tw:py-1 tw:text-strong-foreground",
         (false, false) => "tw:bg-page tw:px-2 tw:py-1 tw:text-subtle-foreground",
     }
 }

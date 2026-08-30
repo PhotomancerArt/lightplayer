@@ -13,7 +13,7 @@
 //! - `title` / `kind` — pane identity text; the title truncates, everything
 //!   else keeps its width.
 //! - `chrome` — the pane's one neutral chrome struct ([`PaneChrome`]): header
-//!   tone, accent outline, and state chips. Consumers map their domain state
+//!   tone, selection outline, and state chips. Consumers map their domain state
 //!   (`UiStatusKind`, `DirtySummary`, …) onto it; the pane imports no node,
 //!   project, or device types.
 //! - `actions` — contextual [`UiPaneAction`]s rendered as icon buttons that
@@ -53,7 +53,7 @@ pub fn StudioPane(
     /// Optional kind/subtype text after the title.
     #[props(default)]
     kind: Option<String>,
-    /// Neutral chrome: header tone, accent outline, state chips.
+    /// Neutral chrome: header tone, selection outline, state chips.
     #[props(default)]
     chrome: PaneChrome,
     /// Contextual header actions rendered as icon buttons.
@@ -74,7 +74,7 @@ pub fn StudioPane(
 ) -> Element {
     let collapsed = collapse.as_ref().is_some_and(|collapse| collapse.collapsed);
     let show_body = body.is_some() && !collapsed;
-    let surface_class = pane_surface_class(chrome.accent);
+    let surface_class = pane_surface_class(chrome.selected);
     let header_class = pane_header_class(chrome.tone, collapse.is_some(), !show_body);
 
     rsx! {
@@ -132,7 +132,7 @@ pub fn StudioPane(
 
 /// Neutral chrome for one pane: everything the pane draws that is not an
 /// element slot. Consumers map their domain state onto it (`UiStatusKind` →
-/// [`PaneTone`], `DirtySummary` → chips, focus → `accent`, …).
+/// [`PaneTone`], `DirtySummary` → chips, focus → `selected`, …).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PaneChrome {
     /// Tone family washing the header strip.
@@ -140,7 +140,7 @@ pub struct PaneChrome {
     /// Draw the pane outline in the neutral selection color (e.g. the
     /// focused node) — deliberately not a status color, so selection never
     /// reads as semantic beside a dirty tint.
-    pub accent: bool,
+    pub selected: bool,
     /// State chips after the title; empty renders no chip.
     pub chips: Vec<PaneChip>,
 }
@@ -271,8 +271,8 @@ fn PaneActionButton(
     }
 }
 
-fn pane_surface_class(accent: bool) -> String {
-    let border_class = if accent {
+fn pane_surface_class(selected: bool) -> String {
+    let border_class = if selected {
         "tw:border-selection-border"
     } else {
         "tw:border-border"
@@ -363,7 +363,7 @@ fn pane_action_button_class(primary: bool, enabled: bool) -> &'static str {
             "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-dim-foreground tw:opacity-50 tw:cursor-not-allowed"
         }
         (true, true) => {
-            "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-accent tw:hover:bg-card-subtle/60"
+            "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-strong-foreground tw:hover:bg-card-subtle/60"
         }
         (false, true) => {
             "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:bg-card-subtle/60 tw:hover:text-strong-foreground"

@@ -20,7 +20,7 @@ pub(crate) fn all_slots() -> Element {
             kind: "Node".to_string(),
             chrome: PaneChrome {
                 tone: PaneTone::Warning,
-                accent: false,
+                selected: false,
                 chips: vec![
                     PaneChip {
                         tone: PaneTone::Warning,
@@ -57,7 +57,7 @@ pub(crate) fn header_only() -> Element {
             kind: "Project".to_string(),
             chrome: PaneChrome {
                 tone: PaneTone::Neutral,
-                accent: false,
+                selected: false,
                 chips: vec![PaneChip {
                     tone: PaneTone::Neutral,
                     text: "unchanged".to_string(),
@@ -72,7 +72,7 @@ pub(crate) fn header_only() -> Element {
 }
 
 #[story(
-    description = "Collapsed pane: the collapse rail folds the pane to its header; accent outline, live header tint, live chip."
+    description = "Collapsed pane: the collapse rail folds the pane to its header; selection outline, live header tint, live chip."
 )]
 pub(crate) fn collapsed() -> Element {
     rsx! {
@@ -82,7 +82,7 @@ pub(crate) fn collapsed() -> Element {
             title: "Playlist",
             chrome: PaneChrome {
                 tone: PaneTone::Live,
-                accent: true,
+                selected: true,
                 chips: vec![PaneChip {
                     tone: PaneTone::Live,
                     text: "1 live".to_string(),

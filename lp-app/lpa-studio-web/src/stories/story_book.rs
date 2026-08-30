@@ -616,13 +616,13 @@ fn story_nav_story_list_class(expanded: bool) -> &'static str {
 fn story_nav_link_class(overview: bool, active: bool) -> &'static str {
     match (overview, active) {
         (true, true) => {
-            "tw:block tw:min-w-0 tw:border-l-2 tw:border-accent-border tw:bg-[linear-gradient(90deg,var(--studio-status-good-bg),transparent_90%)] tw:py-1 tw:pl-2.5 tw:text-sm tw:font-extrabold tw:leading-tight tw:text-strong-foreground tw:no-underline tw:break-words"
+            "tw:block tw:min-w-0 tw:border-l-2 tw:border-selection-border tw:bg-[linear-gradient(90deg,var(--studio-color-selection-bg),transparent_90%)] tw:py-1 tw:pl-2.5 tw:text-sm tw:font-extrabold tw:leading-tight tw:text-strong-foreground tw:no-underline tw:break-words"
         }
         (true, false) => {
             "tw:block tw:min-w-0 tw:border-l-2 tw:border-transparent tw:py-1 tw:pl-2.5 tw:text-sm tw:font-extrabold tw:leading-tight tw:text-soft-foreground tw:no-underline tw:break-words tw:hover:text-strong-foreground"
         }
         (false, true) => {
-            "tw:block tw:min-w-0 tw:border-l-2 tw:border-accent-border tw:bg-[linear-gradient(90deg,var(--studio-status-good-bg),transparent_90%)] tw:py-1 tw:pl-2.5 tw:text-sm tw:leading-tight tw:text-strong-foreground tw:no-underline tw:break-words"
+            "tw:block tw:min-w-0 tw:border-l-2 tw:border-selection-border tw:bg-[linear-gradient(90deg,var(--studio-color-selection-bg),transparent_90%)] tw:py-1 tw:pl-2.5 tw:text-sm tw:leading-tight tw:text-strong-foreground tw:no-underline tw:break-words"
         }
         (false, false) => {
             "tw:block tw:min-w-0 tw:border-l-2 tw:border-transparent tw:py-1 tw:pl-2.5 tw:text-sm tw:leading-tight tw:text-muted-foreground tw:no-underline tw:break-words tw:hover:text-strong-foreground"
@@ -632,7 +632,7 @@ fn story_nav_link_class(overview: bool, active: bool) -> &'static str {
 
 fn viewport_button_class(active: bool) -> &'static str {
     if active {
-        "tw:grid tw:min-w-[58px] tw:gap-px tw:rounded-sm tw:border tw:border-accent-border tw:bg-card-raised tw:px-2.5 tw:py-1.5 tw:text-left tw:leading-tight"
+        "tw:grid tw:min-w-[58px] tw:gap-px tw:rounded-sm tw:border tw:border-selection-border tw:bg-card-raised tw:px-2.5 tw:py-1.5 tw:text-left tw:leading-tight"
     } else {
         "tw:grid tw:min-w-[58px] tw:gap-px tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-raised tw:px-2.5 tw:py-1.5 tw:text-left tw:leading-tight"
     }

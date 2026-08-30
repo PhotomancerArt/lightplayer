@@ -865,7 +865,7 @@ const ACTION_CLASS: &str = "tw:flex tw:flex-none tw:items-center";
 /// A name box.
 const INPUT_CLASS: &str = "tw:h-7 tw:w-full tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-2 tw:text-strong-foreground tw:disabled:text-dim-foreground";
 /// A quiet in-row action.
-const LINK_BUTTON_CLASS: &str = "tw:cursor-pointer tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1.5 tw:py-1 tw:text-subtle-foreground tw:transition-colors tw:hover:bg-background-wash tw:hover:text-accent";
+const LINK_BUTTON_CLASS: &str = "tw:cursor-pointer tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1.5 tw:py-1 tw:text-subtle-foreground tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
 /// The same, in the refusal tone.
 const DANGER_LINK_CLASS: &str = "tw:cursor-pointer tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1.5 tw:py-1 tw:text-status-error-foreground tw:transition-colors tw:hover:bg-status-error-bg";
 /// The mono pill grammar (provider label, `current`).

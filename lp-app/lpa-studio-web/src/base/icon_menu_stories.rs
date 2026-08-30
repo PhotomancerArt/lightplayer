@@ -26,7 +26,7 @@ fn tones() -> Element {
             }
             IconMenuStoryButton {
                 label: "Bound",
-                tone: IconMenuTone::Accent,
+                tone: IconMenuTone::Action,
                 icon: StudioIconName::BoundValue,
                 active: true,
             }
@@ -100,7 +100,7 @@ fn trigger_states() -> Element {
         ),
         (
             "Bound",
-            IconMenuTone::Accent,
+            IconMenuTone::Action,
             StudioIconName::BoundValue,
             true,
         ),
@@ -208,7 +208,7 @@ fn AttachedIconMenuStoryCase(side: &'static str, align: &'static str) -> Element
 
     rsx! {
         div {
-            class: "ux-popover-chrome-accent",
+            class: "ux-popover-chrome-neutral",
             style: "position: relative; width: {STAGE_W}px; height: {STAGE_H}px;",
             svg {
                 style: "position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none;",
