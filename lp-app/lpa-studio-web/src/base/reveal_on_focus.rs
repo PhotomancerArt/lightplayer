@@ -43,6 +43,21 @@ pub fn use_reveal_on_focus(focused: bool) -> Callback<Event<MountedData>> {
     })
 }
 
+/// The RE-CLICK half of the reveal: clicking a tree row that is ALREADY
+/// focused edits no state, so the edge-triggered hook above stays quiet
+/// and the pane never scrolls back into view ("I lost my place and want
+/// to go back to the selected node"). The focused pane marks itself with
+/// `data-selected-pane="true"` (see `layout::studio_pane`); this finds it
+/// imperatively and applies the same mostly-hidden restraint.
+pub fn reveal_selected_pane() {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    if let Ok(Some(target)) = document.query_selector("[data-selected-pane=\"true\"]") {
+        reveal_if_mostly_hidden(&target);
+    }
+}
+
 /// Scroll `target` into view unless it is already mostly visible in its
 /// nearest scrollable ancestor. No ancestor scrolls (everything fits) —
 /// nothing to do.

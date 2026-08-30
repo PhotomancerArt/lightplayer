@@ -16,8 +16,8 @@ use lpa_studio_core::{
 use crate::app::affordance::{affordance_indicator_class, affordance_trigger_style};
 use crate::app::node::AddNodePicker;
 use crate::base::{
-    PopoverPlacement, StudioIcon, StudioIconName, focus_ring_class, node_kind_icon, row_edge_class,
-    use_reveal_on_focus,
+    PopoverPlacement, StudioIcon, StudioIconName, focus_ring_class, node_kind_icon,
+    reveal_selected_pane, row_edge_class, use_reveal_on_focus,
 };
 
 #[component]
@@ -128,7 +128,15 @@ fn ProjectNodeTreeItemView(
                 disabled: running,
                 style: "padding-left: {indent}px;",
                 title: "{title}",
-                onclick: move |_| on_action.call(action.clone()),
+                // Re-clicking the focused row edits no state, so the
+                // pane's edge-triggered reveal can't fire — reveal it
+                // imperatively ("go back to the selected node").
+                onclick: move |_| {
+                    if focused {
+                        reveal_selected_pane();
+                    }
+                    on_action.call(action.clone());
+                },
                 onmounted: reveal,
                 span { class: "tw:inline-flex tw:h-4 tw:w-4 tw:items-center tw:justify-center tw:text-subtle-foreground",
                     StudioIcon {

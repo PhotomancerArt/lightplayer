@@ -78,7 +78,13 @@ pub fn StudioPane(
     let header_class = pane_header_class(chrome.tone, collapse.is_some(), !show_body);
 
     rsx! {
-        article { class: "{surface_class}",
+        article {
+            class: "{surface_class}",
+            // The re-click reveal hook: `reveal_selected_pane` (base::
+            // reveal_on_focus) finds the focused pane by this attribute
+            // when clicking an already-focused tree row can't fire the
+            // edge-triggered reveal (no state changes).
+            "data-selected-pane": if chrome.selected { "true" } else { "false" },
             header { class: "{header_class}",
                 if let Some(collapse) = collapse {
                     PaneCollapseButton { collapse }
