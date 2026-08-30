@@ -25,7 +25,6 @@ pub mod patch;
 pub mod project;
 #[cfg(feature = "stories")]
 pub(crate) mod readme_stories;
-pub mod roster;
 /// The sharing surface: the project popover's access controls, the live
 /// roster behind them, and the archive.
 pub mod share;

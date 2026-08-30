@@ -870,10 +870,7 @@ mod tests {
     /// question rather than the whole bar's.
     #[test]
     fn each_segment_names_only_its_own_question() {
-        assert_eq!(
-            device_label(&session(Some("ESP32-C6"))),
-            "Sim · ESP32-C6"
-        );
+        assert_eq!(device_label(&session(Some("ESP32-C6"))), "Sim · ESP32-C6");
         assert_eq!(device_label(&session(None)), "Sim");
 
         assert_eq!(
