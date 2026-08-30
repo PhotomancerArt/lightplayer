@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Relationship control — spike playground</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* =====================================================================
+   Palette: verbatim from src/style.css (Aurora, post-#467).
+   NOTE the no-hue reckoning (PR #478) deletes the accent family — the
+   faces below deliberately never wear accent. Status semantics stay:
+   amber=unsaved, blue=live, violet=bound (never used here), warn/attn.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --bg:#0d0d13; --surface:#14141c; --surface-subtle:#101017;
+  --raised:#1d1d28; --raised-strong:#252532; --terminal:#09090e;
+  --bd:#343444; --bd-muted:#2b2b39; --bd-subtle:#30303d; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --tx-strong:#fffaf0; --tx-muted:#c9c9d2;
+  --tx-subtle:#9c9cab; --tx-dim:#9ea0ac; --heading:#e9e9ef;
+
+  --st-neutral-bg:#12171c; --st-neutral-bd:#3a444c; --st-neutral-tx:#d9e2df;
+  --st-good-bg:#13241d;    --st-good-bd:#365545;    --st-good-tx:#7be0b2;
+  --st-live-bg:#142330;    --st-live-bd:#3c5c78;    --st-live-tx:#9cc8ee;
+  --st-warn-bg:#292614;    --st-warn-bd:#796c33;    --st-warn-tx:#f0dc7a;
+  --st-attn-bg:#291f14;    --st-attn-bd:#795833;    --st-attn-tx:#f0b97a;
+  --st-error-bg:#301b1d;   --st-error-bd:#874b4b;   --st-error-tx:#ffc7c7;
+
+  /* accent kept ONLY for the current-production reproduction (§1). */
+  --legacy-accent:#8be2c0; --legacy-accent-bd:#5fc79d;
+  --legacy-accent-wash:rgba(139,226,192,.10); --legacy-accent-fg:#08130d;
+
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+}
+* { box-sizing: border-box; }
+body { margin:0; padding:28px 32px 160px; background:var(--shell-bg);
+  color:var(--shell-tx); font:14px/1.45 var(--font); }
+h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut);
+  text-transform:uppercase; margin:0 0 6px; }
+p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 18px; max-width:820px; }
+h2 { font-size:12px; letter-spacing:.1em; color:var(--shell-mut);
+  text-transform:uppercase; margin:40px 0 6px; }
+h2 .n { color:var(--shell-dim); margin-right:6px; }
+p.sub { color:var(--shell-dim); font-size:12px; margin:0 0 14px; max-width:880px; }
+p.sub b { color:var(--shell-mut); }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls { display:flex; gap:16px; flex-wrap:wrap; align-items:center;
+  padding:10px 14px; border:1px dashed var(--shell-bd-strong); border-radius:8px;
+  color:var(--shell-mut); font-size:12px; position:sticky; top:8px; z-index:50;
+  background:rgba(11,12,14,.92); backdrop-filter:blur(8px); }
+.controls .grp { display:flex; gap:4px; align-items:center; }
+.controls b { color:var(--shell-tx); font-weight:600; margin-right:2px; }
+.controls button { appearance:none; font:inherit; cursor:pointer; background:#16181c;
+  color:var(--shell-tx); border:1px solid var(--shell-bd-strong); border-radius:6px;
+  padding:3px 10px; font-size:11.5px; }
+.controls button:hover { background:#1e2126; }
+.controls button.active { border-color:#9cc8ee; color:#9cc8ee; }
+
+/* =====================================================================
+   App-toned frames each concept renders inside.
+   ===================================================================== */
+/* overflow stays visible so popovers can escape; corners are rounded on
+   the topbar/body themselves instead of clipped by the frame. */
+.bar-frame { background:var(--bg); border:1px solid var(--shell-bd);
+  border-radius:12px; padding:0; }
+.topbar { display:flex; align-items:center; gap:14px; padding:8px 14px;
+  background:var(--surface-subtle); border-bottom:1px solid var(--bd-muted);
+  min-height:44px; border-radius:11px 11px 0 0; }
+.stage-body { border-radius:0 0 11px 11px; }
+.topbar .logo { width:20px; height:20px; border-radius:5px; flex:none;
+  background:conic-gradient(from 210deg,#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e,#5fe08b);
+  opacity:.9; }
+.topbar .navtabs { display:flex; gap:2px; flex:none; }
+.topbar .navtab { font-size:11px; font-weight:600; color:var(--tx-subtle);
+  padding:4px 9px; border-radius:6px; }
+.topbar .navtab.on { color:var(--tx); background:var(--raised); }
+.topbar .spacer { flex:1; min-width:8px; }
+.topbar .avatar { width:24px; height:24px; border-radius:999px; flex:none;
+  background:var(--raised-strong); border:1px solid var(--bd-strong);
+  color:var(--tx-muted); font-size:10px; font-weight:700; display:inline-flex;
+  align-items:center; justify-content:center; }
+.stage-body { padding:14px; background:var(--bg); color:var(--tx-dim);
+  font-size:11px; min-height:52px; }
+
+/* ---- the lockup, faithful to session_control.rs classes ------------- */
+.lockup { display:inline-flex; min-width:0; cursor:pointer; align-items:stretch;
+  overflow:hidden; border-radius:7px; border:1px solid var(--bd-strong);
+  background:var(--surface-subtle); padding:0; text-align:left;
+  transition:border-color .12s; font:inherit; color:inherit; }
+.lockup:hover { border-color:var(--tx-subtle); }
+.seg { display:inline-flex; min-width:0; align-items:center; gap:6px;
+  padding:4px 10px; }
+.seg .glyph { display:inline-flex; color:var(--tx-subtle); flex:none; }
+.seg .dot { width:7px; height:7px; border-radius:999px; flex:none;
+  background:var(--st-good-tx); box-shadow:0 0 5px rgba(123,224,178,.55); }
+.seg .name { min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; font-size:11px; font-weight:600; color:var(--tx-muted); }
+.seg .suffix { flex:none; font-size:10.5px; color:var(--tx-dim); }
+.divider { width:1px; flex:none; align-self:stretch; background:var(--bd-subtle); }
+.pill-example-legacy { flex:none; border-radius:999px; border:1px solid var(--legacy-accent-bd);
+  background:var(--legacy-accent-wash); padding:0 6px; font-size:9.5px;
+  font-weight:600; color:var(--legacy-accent); }
+.pill-count { flex:none; border-radius:999px; border:1px solid var(--st-warn-bd);
+  background:var(--st-warn-bg); padding:0 6px; font-family:var(--mono);
+  font-size:9.5px; font-weight:600; color:var(--st-warn-tx); }
+.btn-save { display:inline-flex; flex:none; cursor:pointer; align-items:center;
+  border-radius:6px; border:1px solid var(--st-warn-bd); background:var(--st-warn-bg);
+  padding:3px 10px; font-size:11px; font-weight:600; color:var(--st-warn-tx);
+  font-family:var(--font); transition:border-color .12s; }
+.btn-save:hover { border-color:var(--st-warn-tx); }
+.btn-revert { display:inline-flex; flex:none; cursor:pointer; align-items:center;
+  border-radius:6px; border:1px solid transparent; background:transparent;
+  padding:3px 6px; color:var(--st-warn-tx); font-size:12px; }
+.btn-revert:hover { border-color:var(--st-warn-bd); background:var(--st-warn-bg); }
+.cluster { display:flex; min-width:0; align-items:center; gap:6px; }
+
+/* legacy Share pill (current production, §1) */
+.pill-share-legacy { display:inline-flex; flex:none; cursor:pointer; align-items:center;
+  gap:6px; border-radius:999px; border:1px solid var(--st-neutral-bd);
+  background:var(--st-neutral-bg); padding:5px 12px; color:var(--st-neutral-tx);
+  font-size:11px; font-weight:600; font-family:var(--font); }
+.pill-share-legacy:hover { border-color:var(--legacy-accent-bd); color:var(--tx-strong); }
+
+/* ---- the relationship control -------------------------------------- */
+/* A: fused third segment — same box, hairline divider, but its OWN button
+   overlaid at the lockup's right edge. Rendered here as sibling button
+   styled to continue the lockup geometry. */
+.rel-fused { display:inline-flex; align-items:center; gap:6px; cursor:pointer;
+  border:1px solid var(--bd-strong); border-left:none;
+  border-radius:0 7px 7px 0; background:var(--surface-subtle);
+  padding:4px 10px; font:inherit; color:var(--tx-muted);
+  transition:border-color .12s, background .12s; position:relative; }
+.rel-fused::before { content:""; position:absolute; left:0; top:0; bottom:0;
+  width:1px; background:var(--bd-subtle); }
+.rel-fused:hover { background:var(--raised); color:var(--tx); }
+.lockup.fused-left { border-radius:7px 0 0 7px; border-right:none; }
+/* B: detached pill — the Save-button pattern, a small gap away. */
+.rel-detached { display:inline-flex; align-items:center; gap:6px; cursor:pointer;
+  border:1px solid var(--st-neutral-bd); border-radius:999px;
+  background:var(--st-neutral-bg); padding:4px 11px; font:inherit;
+  color:var(--st-neutral-tx); transition:border-color .12s; }
+.rel-detached:hover { border-color:var(--tx-subtle); color:var(--tx-strong); }
+.rel-face { display:inline-flex; align-items:center; gap:6px; min-width:0; }
+.rel-face svg { flex:none; opacity:.85; }
+.rel-face .word { font-size:11px; font-weight:600; white-space:nowrap; }
+.rel-open { outline:1px solid var(--tx-subtle); outline-offset:-1px; }
+/* C: display-in-lockup (vision's Shape B): word inside the project segment,
+   actions stay wherever they were. */
+.rel-inline-word { flex:none; font-size:9.5px; font-weight:600; color:var(--tx-dim);
+  border:1px solid var(--bd-strong); border-radius:999px; padding:0 6px;
+  background:transparent; }
+
+/* faces carry at most a QUIET tint; §3 compares tinted alternatives. */
+.face-neutral { color:var(--tx-muted); }
+.face-neutral svg { color:var(--tx-subtle); }
+.face-live   { color:var(--st-live-tx); }
+.face-live svg { color:var(--st-live-tx); }
+.face-warn   { color:var(--st-warn-tx); }
+.face-warn svg { color:var(--st-warn-tx); }
+
+/* ---- popover panels -------------------------------------------------- */
+.pop { width:340px; max-width:100%; border-radius:12px; border:1px solid var(--bd-strong);
+  background:var(--raised); box-shadow:0 18px 44px rgba(0,0,0,.5);
+  padding:14px; color:var(--tx); font-size:12px; }
+.pop .head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.pop .head .t { min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; font-size:12.5px; font-weight:700; color:var(--tx-strong); }
+.pop .head .x { margin-left:auto; color:var(--tx-dim); cursor:pointer;
+  background:none; border:none; font:inherit; font-size:13px; padding:2px 5px; }
+.pop .rel-line { display:flex; align-items:center; gap:7px; font-size:11px;
+  color:var(--tx-subtle); margin-bottom:10px; }
+.pop .rel-line svg { flex:none; opacity:.8; }
+.pop .rel-line b { color:var(--tx-muted); font-weight:600; }
+.pop .hero-btn { display:flex; width:100%; align-items:center; justify-content:center;
+  gap:8px; border-radius:8px; border:1px solid var(--st-good-bd);
+  background:var(--st-good-bg); color:var(--st-good-tx); padding:9px 12px;
+  font:inherit; font-size:12px; font-weight:700; cursor:pointer;
+  transition:border-color .12s; }
+.pop .hero-btn:hover { border-color:var(--st-good-tx); }
+.pop .hero-sub { font-size:10px; color:var(--tx-dim); text-align:center;
+  margin:6px 0 0; line-height:1.5; }
+.pop .urlhero { display:flex; min-width:0; align-items:center; gap:8px;
+  border-radius:6px; border:1px solid var(--bd); background:var(--terminal);
+  padding:8px 10px; margin:10px 0 4px; }
+.pop .urlhero .u { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; font-family:var(--mono); font-size:10.5px; font-weight:600;
+  color:var(--tx-subtle); }
+.pop .urlhero .u .s { color:var(--heading); }
+.pop .urlhero .copy { display:inline-flex; flex:none; align-items:center; gap:5px;
+  border-radius:6px; border:1px solid var(--bd-strong); background:var(--raised-strong);
+  color:var(--tx); padding:5px 10px; font:inherit; font-size:10.5px; font-weight:700;
+  cursor:pointer; }
+.pop .urlhero .copy:hover { border-color:var(--tx-subtle); }
+.pop .note { margin:4px 0 0; padding:0 2px; font-size:10px; line-height:1.5;
+  color:var(--tx-dim); }
+.pop .grouphead { display:block; margin:12px 0 5px; font-size:9.5px; font-weight:700;
+  letter-spacing:.08em; text-transform:uppercase; color:var(--tx-dim); }
+.pop .segrow { display:flex; border:1px solid var(--bd-strong); border-radius:7px;
+  overflow:hidden; }
+.pop .segrow button { flex:1; font:inherit; font-size:10.5px; font-weight:600;
+  color:var(--tx-subtle); background:var(--surface-subtle); border:none;
+  border-right:1px solid var(--bd-subtle); padding:6px 4px; cursor:pointer; }
+.pop .segrow button:last-child { border-right:none; }
+.pop .segrow button.on { background:var(--raised-strong); color:var(--tx-strong); }
+.pop .segdesc { margin:6px 0 0; padding:0 2px; font-size:10.5px; line-height:1.5;
+  color:var(--tx-dim); min-height:26px; }
+.pop .person { display:flex; align-items:center; gap:9px; padding:4px 2px; }
+.pop .person .av { width:24px; height:24px; flex:none; border-radius:999px;
+  display:inline-flex; align-items:center; justify-content:center; font-size:9px;
+  font-weight:700; border:1px solid var(--st-live-bd); background:var(--st-live-bg);
+  color:var(--st-live-tx); }
+.pop .person .who { min-width:0; flex:1; }
+.pop .person .who .em { font-size:11px; color:var(--tx-muted); overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.pop .person .role { flex:none; font-size:9.5px; color:var(--tx-dim); }
+.pop .statusline { display:flex; align-items:center; gap:7px; border-radius:6px;
+  padding:7px 10px; font-size:10.5px; line-height:1.45; margin-top:10px;
+  border:1px solid var(--bd); background:var(--surface-subtle); color:var(--tx-subtle); }
+.pop .statusline.warn { border-color:var(--st-warn-bd); background:var(--st-warn-bg);
+  color:var(--st-warn-tx); }
+.pop .statusline.attn { border-color:var(--st-attn-bd); background:var(--st-attn-bg);
+  color:var(--st-attn-tx); }
+.pop .statusline.good { border-color:var(--st-good-bd); background:var(--st-good-bg);
+  color:var(--st-good-tx); }
+.pop .provenance { display:flex; align-items:center; gap:7px; font-size:10.5px;
+  color:var(--tx-dim); margin-top:12px; padding-top:10px;
+  border-top:1px solid var(--bd-muted); }
+.pop .provenance b { color:var(--tx-subtle); font-weight:600; }
+.pop .verstrip { display:flex; align-items:center; gap:8px; margin-top:7px;
+  font-size:10.5px; color:var(--tx-dim); }
+.pop .verstrip .v { font-family:var(--mono); font-weight:700; color:var(--tx-muted); }
+.pop .verstrip .hist { margin-left:auto; color:var(--st-live-tx); cursor:pointer;
+  background:none; border:none; font:inherit; font-size:10.5px; }
+.pop .verstrip .hist:hover { text-decoration:underline; }
+.pop .utilrow { display:flex; gap:6px; margin-top:12px; }
+.pop .utilrow button { flex:1; font:inherit; font-size:10px; color:var(--tx-dim);
+  background:transparent; border:1px dashed var(--bd-strong); border-radius:6px;
+  padding:5px 4px; cursor:pointer; }
+.pop .utilrow button:hover { color:var(--tx-subtle); border-color:var(--tx-dim); }
+
+/* section layout helpers */
+.rowgrid { display:grid; gap:18px; }
+.concept { min-width:0; }
+.concept .chead { display:flex; align-items:baseline; gap:10px; margin:0 0 7px; }
+.concept .chead .name { font-size:13.5px; font-weight:700; }
+.concept .chead .thesis { font-size:12px; color:var(--shell-dim); }
+.cnotes { font-size:11.5px; color:var(--shell-mut); margin:8px 2px 0; line-height:1.55; }
+.cnotes b { color:var(--shell-tx); font-weight:600; }
+.cnotes .t { color:#f0b97a; }
+.missing { font-size:11px; color:var(--st-error-tx); opacity:.85; }
+.okline { font-size:11px; color:var(--st-good-tx); opacity:.85; }
+
+/* face matrix (§3) */
+.facetable { border-collapse:collapse; background:var(--bg);
+  border:1px solid var(--shell-bd); border-radius:12px; overflow:hidden;
+  display:inline-block; }
+.facetable table { border-collapse:collapse; }
+.facetable th, .facetable td { padding:10px 16px; border-bottom:1px solid var(--bd-muted);
+  border-right:1px solid var(--bd-muted); text-align:left; }
+.facetable th { font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--tx-dim); font-weight:700; background:var(--surface-subtle); }
+.facetable td.state { font-size:11px; color:var(--tx-subtle); }
+.facetable tr:last-child td { border-bottom:none; }
+.facetable th:last-child, .facetable td:last-child { border-right:none; }
+
+/* popover gallery (§4) */
+.popgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr));
+  gap:18px; align-items:start; }
+.popwrap .pname { font-size:12px; font-weight:700; margin:0 0 6px; }
+.popwrap .pnote { font-size:11px; color:var(--shell-dim); margin:6px 0 0; line-height:1.5; }
+
+/* narrow (§5) */
+.phones { display:flex; gap:22px; flex-wrap:wrap; }
+.phone { width:375px; flex:none; }
+.phone .bar-frame { border-radius:14px; }
+
+/* fork moment (§6) */
+.forkstage { position:relative; }
+.toast { position:absolute; left:50%; top:54px; transform:translateX(-50%) translateY(-6px);
+  background:var(--raised-strong); border:1px solid var(--st-good-bd);
+  color:var(--st-good-tx); border-radius:8px; padding:7px 14px; font-size:11.5px;
+  font-weight:600; opacity:0; transition:opacity .25s, transform .25s;
+  pointer-events:none; box-shadow:0 10px 30px rgba(0,0,0,.5); white-space:nowrap; }
+.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* inline popover anchoring in §2 */
+.anchor { position:relative; }
+.anchor .pop { position:absolute; top:calc(100% + 8px); left:0; z-index:30; max-width:none; }
+.hiddenpop { display:none; }
+</style>
+</head>
+<body>
+
+<h1>Relationship control — placement · faces · popovers</h1>
+<p class="hint">
+Thesis (vision 2026-08-30-0204): one always-present control beside the project name states your
+relationship to the project — example, yours, someone else's — and its popover is where fork,
+share/access, publish status, provenance, and (read-only) history live. It grows out of the existing
+Share pill (which today gates itself invisible on <code>members.is_some()</code>) and honors the
+#432 ruling that the lockup is inspect-only: the control is always a <b>sibling button</b>, whatever
+it looks like. Faces avoid accent (no-hue reckoning #478). Use the strip below to drive every concept.
+</p>
+
+<div class="controls">
+  <div class="grp"><b>Relationship</b>
+    <button data-rel="example" class="active">Example</button>
+    <button data-rel="minelocal">Mine · private</button>
+    <button data-rel="minepub">Mine · shared</button>
+    <button data-rel="member">Member</button>
+    <button data-rel="visitor">Viewing</button>
+  </div>
+  <div class="grp"><b>Dirty</b>
+    <button id="ctl-dirty">off</button>
+  </div>
+  <div class="grp"><b>Publish (private)</b>
+    <button id="ctl-pub">not published</button>
+  </div>
+  <div class="grp"><b>Long name</b>
+    <button id="ctl-long">off</button>
+  </div>
+</div>
+
+<!-- ================= §1 current production ================= -->
+<h2><span class="n">§1</span> Current production — where the affordances go missing</h2>
+<p class="sub">
+Faithful reproduction: the session·project lockup (device seg · project seg, dead
+accent "example" pill, amber count), the sibling Save/↺, and the legacy Share pill —
+which renders <b>only</b> in the Mine·shared state. Cycle the relationship strip and watch
+the affordance inventory under the bar.
+</p>
+<div class="bar-frame" style="max-width:880px">
+  <div class="topbar">
+    <div class="logo"></div>
+    <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
+    <div class="cluster" id="cur-cluster">
+      <span class="lockup" id="cur-lockup">
+        <span class="seg"><span class="glyph">▣</span><span class="dot"></span><span class="name">Garage dome</span><span class="suffix">· classic</span></span>
+        <span class="divider"></span>
+        <span class="seg">
+          <span class="glyph" id="cur-proj-glyph">◈</span>
+          <span class="name" id="cur-proj-name">Plasma Duo</span>
+          <span class="pill-example-legacy" id="cur-example-pill" title="Viewing an example — save to make your own copy">example</span>
+          <span class="pill-count" id="cur-count" style="display:none">3</span>
+        </span>
+      </span>
+      <button class="btn-save" id="cur-save" style="display:none">Save</button>
+      <button class="btn-revert" id="cur-revert" style="display:none" title="Revert">↺</button>
+    </div>
+    <div class="spacer"></div>
+    <button class="pill-share-legacy" id="cur-share" style="display:none">⤴ Share</button>
+    <span class="avatar">Y</span>
+  </div>
+  <div class="stage-body" id="cur-inventory"></div>
+</div>
+<p class="cnotes">
+<b>The driving pain lives here:</b> in the pristine Example state the bar offers <b>zero</b>
+relationship affordances — the pill is a dead span, Save only exists while dirty, the Share
+pill is gated out. Visiting and member states lean on a separate banner strip (not shown)
+for fork/access. <span class="t">The accent pill also dies with #478.</span>
+</p>
+
+<!-- ================= §2 placement ================= -->
+<h2><span class="n">§2</span> Placement — three ways the control can stand</h2>
+<p class="sub">
+All three react to the strip. <b>Click each control</b> to open its (stub) popover — full
+per-state popovers are §4. A and B are the vision's Shape A (sibling button); C is the
+rejected-but-comparable Shape B (display only, actions elsewhere).
+</p>
+<div class="rowgrid">
+
+  <div class="concept">
+    <div class="chead"><span class="name">A · Fused third segment</span>
+      <span class="thesis">continues the lockup box — one project bar, three facts; still its own button.</span></div>
+    <div class="bar-frame" style="max-width:880px">
+      <div class="topbar">
+        <div class="logo"></div>
+        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
+        <div class="cluster">
+          <span class="lockup fused-left">
+            <span class="seg"><span class="glyph">▣</span><span class="dot"></span><span class="name">Garage dome</span><span class="suffix">· classic</span></span>
+            <span class="divider"></span>
+            <span class="seg">
+              <span class="glyph rel-proj-glyph">◈</span>
+              <span class="name rel-proj-name">Plasma Duo</span>
+              <span class="pill-count rel-count" style="display:none">3</span>
+            </span>
+          </span>
+          <span class="anchor">
+            <button class="rel-fused rel-control" data-pop="a" style="margin-left:0">
+              <span class="rel-face face-neutral"><span class="rel-glyph"></span><span class="word rel-word">Example</span></span>
+            </button>
+            <div class="pop hiddenpop" data-popfor="a"></div>
+          </span>
+          <button class="btn-save rel-save" style="display:none">Save</button>
+          <button class="btn-revert rel-revert" style="display:none" title="Revert">↺</button>
+        </div>
+        <div class="spacer"></div>
+        <span class="avatar">Y</span>
+      </div>
+      <div class="stage-body">A reads as "the project bar grew a third segment" — device · project · standing. The hairline and shared geometry promise one family; the separate hover/click keeps the #432 inspect-vs-act split honest.</div>
+    </div>
+    <p class="cnotes"><b>Risk:</b> two adjacent click targets on one visual box open two different popovers — the lockup's session panel vs the relationship popover. <span class="t">Does that read as coherent?</span> (gate Q)</p>
+  </div>
+
+  <div class="concept">
+    <div class="chead"><span class="name">B · Detached pill</span>
+      <span class="thesis">the Save-button pattern — clearly its own control, a breath away from the lockup.</span></div>
+    <div class="bar-frame" style="max-width:880px">
+      <div class="topbar">
+        <div class="logo"></div>
+        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
+        <div class="cluster">
+          <span class="lockup">
+            <span class="seg"><span class="glyph">▣</span><span class="dot"></span><span class="name">Garage dome</span><span class="suffix">· classic</span></span>
+            <span class="divider"></span>
+            <span class="seg">
+              <span class="glyph rel-proj-glyph">◈</span>
+              <span class="name rel-proj-name">Plasma Duo</span>
+              <span class="pill-count rel-count" style="display:none">3</span>
+            </span>
+          </span>
+          <span class="anchor">
+            <button class="rel-detached rel-control" data-pop="b">
+              <span class="rel-face face-neutral"><span class="rel-glyph"></span><span class="word rel-word">Example</span></span>
+            </button>
+            <div class="pop hiddenpop" data-popfor="b"></div>
+          </span>
+          <button class="btn-save rel-save" style="display:none">Save</button>
+          <button class="btn-revert rel-revert" style="display:none" title="Revert">↺</button>
+        </div>
+        <div class="spacer"></div>
+        <span class="avatar">Y</span>
+      </div>
+      <div class="stage-body">B inherits the legacy Share pill's slot-in-the-row feel but moves it home, beside the project it describes. No shared-box ambiguity; costs a little more width and reads slightly less "of the project bar".</div>
+    </div>
+    <p class="cnotes"><b>Risk:</b> a rounded pill between the lockup and Save makes the action row busier; three shapes (box, pill, button) where A has two.</p>
+  </div>
+
+  <div class="concept">
+    <div class="chead"><span class="name">C · Display-in-lockup (vision's rejected Shape B, kept comparable)</span>
+      <span class="thesis">the word lives inside the project segment; clicking still opens the shared session panel.</span></div>
+    <div class="bar-frame" style="max-width:880px">
+      <div class="topbar">
+        <div class="logo"></div>
+        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
+        <div class="cluster">
+          <span class="lockup">
+            <span class="seg"><span class="glyph">▣</span><span class="dot"></span><span class="name">Garage dome</span><span class="suffix">· classic</span></span>
+            <span class="divider"></span>
+            <span class="seg">
+              <span class="glyph rel-proj-glyph">◈</span>
+              <span class="name rel-proj-name">Plasma Duo</span>
+              <span class="rel-inline-word rel-word">Example</span>
+              <span class="pill-count rel-count" style="display:none">3</span>
+            </span>
+          </span>
+          <button class="btn-save rel-save" style="display:none">Save</button>
+          <button class="btn-revert rel-revert" style="display:none" title="Revert">↺</button>
+        </div>
+        <div class="spacer"></div>
+        <span class="avatar">Y</span>
+      </div>
+      <div class="stage-body">C is today's example-pill pattern generalized: cheapest, but the actions (fork/share/access) must live in the session panel — the popover with the pending-edit lists and stats — burying the driving-pain fix two levels deep.</div>
+    </div>
+    <p class="cnotes"><b>Why the vision leans away:</b> a pristine example still has no one-click "Save a copy"; the relationship stays inspectable but not actionable.</p>
+  </div>
+</div>
+
+<!-- ================= §3 faces ================= -->
+<h2><span class="n">§3</span> The five faces — vocabulary and tint</h2>
+<p class="sub">
+Rows are the relationship enum; columns are vocabulary options. All neutral-family
+(no accent, #478). Below the matrix: the one tint question worth asking — should
+<b>Mine·shared</b> borrow the live-blue status family ("reachable by others" is a live fact),
+or stay neutral like everything else?
+</p>
+<div class="facetable"><table id="facematrix"></table></div>
+<div style="margin-top:14px">
+  <span style="font-size:11px;color:var(--shell-mut);margin-right:10px">Tint question, Mine·shared:</span>
+  <span class="rel-detached" style="cursor:default"><span class="rel-face face-neutral"><span id="tint-n"></span><span class="word">Shared</span></span></span>
+  <span class="rel-detached" style="cursor:default;margin-left:8px;border-color:var(--st-live-bd);background:var(--st-live-bg)"><span class="rel-face face-live"><span id="tint-l"></span><span class="word">Shared</span></span></span>
+  <span style="font-size:11px;color:var(--shell-dim);margin-left:10px">neutral vs status-live</span>
+</div>
+<p class="cnotes"><b>Lean:</b> V2 (glyph + word) everywhere wide, V3 (glyph-only) as the narrow fold;
+neutral tint — the face states identity, not status. The owner-name future ("eshan's") slots into
+the word position unchanged. <span class="t">Trap noted:</span> violet stays reserved for
+binding/bus; green reads "good", blue reads "live" — any tint borrows a meaning.</p>
+
+<!-- ================= §4 popovers ================= -->
+<h2><span class="n">§4</span> The popover, per state — where everything lives</h2>
+<p class="sub">
+One panel grammar for all five states: header → relationship line → the one hero action
+this state deserves → link/access → status → provenance + version strip with the
+<b>History →</b> seam (read-only in this effort). The pristine-example hero is the driving-pain fix:
+<b>Save a copy</b> without editing first.
+</p>
+<div class="popgrid" id="popgallery"></div>
+
+<!-- ================= §5 narrow ================= -->
+<h2><span class="n">§5</span> Narrow — 375&nbsp;px phone bar</h2>
+<p class="sub">
+Below the 560px cut segment padding tightens and the device name already folds to glyph+dot
+(the 900px cut). The relationship face folds to glyph-only. A and B compared at true width,
+Example state with dirty on — the worst-case row.
+</p>
+<div class="phones">
+  <div class="phone">
+    <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">A · fused, folded</div>
+    <div class="bar-frame">
+      <div class="topbar" style="gap:8px;padding:8px 10px">
+        <div class="logo"></div>
+        <div class="cluster" style="min-width:0">
+          <span class="lockup fused-left">
+            <span class="seg" style="padding:4px 7px"><span class="glyph">▣</span><span class="dot"></span></span>
+            <span class="divider"></span>
+            <span class="seg" style="padding:4px 7px">
+              <span class="glyph">◈</span>
+              <span class="name" style="max-width:96px" id="narrow-name-a">Plasma Duo</span>
+              <span class="pill-count">3</span>
+            </span>
+          </span>
+          <button class="rel-fused" style="padding:4px 8px">
+            <span class="rel-face face-neutral"><span id="narrow-glyph-a"></span></span>
+          </button>
+          <button class="btn-save" style="padding:3px 8px">Save</button>
+        </div>
+        <div class="spacer"></div>
+        <span class="avatar">Y</span>
+      </div>
+      <div class="stage-body" style="font-size:10.5px">Glyph-only face; the title attribute still names the state. Save keeps its word — it is the rarer, more urgent control.</div>
+    </div>
+  </div>
+  <div class="phone">
+    <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">B · detached, folded</div>
+    <div class="bar-frame">
+      <div class="topbar" style="gap:8px;padding:8px 10px">
+        <div class="logo"></div>
+        <div class="cluster" style="min-width:0">
+          <span class="lockup">
+            <span class="seg" style="padding:4px 7px"><span class="glyph">▣</span><span class="dot"></span></span>
+            <span class="divider"></span>
+            <span class="seg" style="padding:4px 7px">
+              <span class="glyph">◈</span>
+              <span class="name" style="max-width:96px">Plasma Duo</span>
+              <span class="pill-count">3</span>
+            </span>
+          </span>
+          <button class="rel-detached" style="padding:4px 8px">
+            <span class="rel-face face-neutral"><span id="narrow-glyph-b"></span></span>
+          </button>
+          <button class="btn-save" style="padding:3px 8px">Save</button>
+        </div>
+        <div class="spacer"></div>
+        <span class="avatar">Y</span>
+      </div>
+      <div class="stage-body" style="font-size:10.5px">The pill circles up to a round glyph button. Slightly wider than A folded (its own borders both sides).</div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= §6 fork moment ================= -->
+<h2><span class="n">§6</span> The fork moment — pristine example → yours, one click</h2>
+<p class="sub">
+The driving pain, fixed: open an example, click the face, hit <b>Save a copy</b> — no edit
+required. Watch the face flip Example→Private, the URL heal, and the toast confirm.
+<b>Try it</b> (reset restores).
+</p>
+<div class="forkstage">
+  <div class="bar-frame" style="max-width:880px">
+    <div class="topbar">
+      <div class="logo"></div>
+      <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
+      <div class="cluster">
+        <span class="lockup fused-left">
+          <span class="seg"><span class="glyph">▣</span><span class="dot"></span><span class="name">Garage dome</span><span class="suffix">· classic</span></span>
+          <span class="divider"></span>
+          <span class="seg"><span class="glyph">◈</span><span class="name" id="fork-name">Plasma Duo</span></span>
+        </span>
+        <span class="anchor">
+          <button class="rel-fused" id="fork-face-btn">
+            <span class="rel-face face-neutral"><span id="fork-glyph"></span><span class="word" id="fork-word">Example</span></span>
+          </button>
+          <div class="pop hiddenpop" id="fork-pop" style="position:absolute;top:calc(100% + 8px);left:0;z-index:30"></div>
+        </span>
+      </div>
+      <div class="spacer"></div>
+      <span class="avatar">Y</span>
+    </div>
+    <div class="stage-body">
+      <span style="font-family:var(--mono);font-size:10.5px" id="fork-url">lightplayer.app<span style="color:var(--tx-subtle)">/p/</span><span style="color:var(--heading)">plasma-duo</span></span>
+      <button id="fork-reset" style="margin-left:14px;font:inherit;font-size:10px;color:var(--shell-dim);background:none;border:1px dashed var(--shell-bd-strong);border-radius:5px;padding:2px 8px;cursor:pointer">reset</button>
+    </div>
+  </div>
+  <div class="toast" id="fork-toast">Saved — this copy is yours.</div>
+</div>
+<p class="cnotes"><b>Mechanism note (Q5):</b> in code this is the visitor-fork path — dispatch
+<code>SaveOverlay</code> on a clean overlay; the plan must verify a clean save reaches
+<code>fork_transient_at_save</code> rather than short-circuiting.</p>
+
+<script>
+/* ---------------- glyph set (inline SVG, 12px, currentColor) ------------- */
+const G = {
+  example: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8L20 12l-6.1 3.2L12 21l-1.9-5.8L4 12l6.1-3.2z"/></svg>',
+  lock:    '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+  link:    '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>',
+  users:   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/></svg>',
+  eye:     '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>',
+};
+
+/* ---------------- relationship model ------------------------------------ */
+const REL = {
+  example:  { word:'Example',  glyph:G.example, title:'Built-in example — save a copy to make it yours', name:'Plasma Duo',  longname:'Plasma Duo — Big Dome Radiance Tour Edit' },
+  minelocal:{ word:'Private',  glyph:G.lock,    title:'Yours — not shared', name:'Aurora Field', longname:'Aurora Field (autumn tour, hall B, rev 7)' },
+  minepub:  { word:'Shared',   glyph:G.link,    title:'Yours — anyone with the link can view', name:'Aurora Field', longname:'Aurora Field (autumn tour, hall B, rev 7)' },
+  member:   { word:'Member',   glyph:G.users,   title:"Eshan's project — you can edit", name:'Halcyon Drift', longname:'Halcyon Drift — collab w/ the Radiance crew' },
+  visitor:  { word:'Viewing',  glyph:G.eye,     title:"Someone else's project — fork to keep changes", name:'Halcyon Drift', longname:'Halcyon Drift — collab w/ the Radiance crew' },
+};
+const PUBSTATES = ['not published','publishing…','retrying','restricted'];
+let state = { rel:'example', dirty:false, pub:0, long:false };
+
+/* ---------------- popover content builders ------------------------------ */
+function urlHero(slug, uid, copyLabel) {
+  const tail = uid ? '-'+uid : '';
+  return `<div class="urlhero"><span class="u">lightplayer.app/p/<span class="s">${slug}</span>${tail}</span>
+    <button class="copy">⧉ ${copyLabel||'Copy'}</button></div>`;
+}
+function verStrip(v, when, hist) {
+  return `<div class="verstrip"><span class="v">v${v}</span><span>saved ${when}</span>
+    ${hist?'<button class="hist">History →</button>':''}</div>`;
+}
+function popHead(name) {
+  return `<div class="head"><span class="t">${name}</span><button class="x">✕</button></div>`;
+}
+function popContent(rel) {
+  const r = REL[rel];
+  const nm = state.long ? r.longname : r.name;
+  switch (rel) {
+    case 'example': return popHead(nm) + `
+      <div class="rel-line">${G.example}<span><b>Built-in example.</b> Play freely — nothing is saved until you keep a copy.</span></div>
+      <button class="hero-btn">${G.example} Save a copy</button>
+      <p class="hero-sub">Makes it yours: it joins your library, gets its own link, and edits start saving.</p>
+      ${urlHero('plasma-duo','','Copy link')}
+      <p class="note">The example's canonical link — safe to share, opens for anyone.</p>
+      <div class="provenance">${G.example}<span>Curated example · <b>Photomancer</b></span></div>`;
+    case 'minelocal': {
+      const pub = PUBSTATES[state.pub];
+      const line = {
+        'not published': `<div class="statusline attn">◌ Not published yet — it publishes on your next save.</div>`,
+        'publishing…':   `<div class="statusline">↻ Publishing…</div>`,
+        'retrying':      `<div class="statusline warn">⚠ Publish retrying — last attempt couldn't reach the cloud.</div>`,
+        'restricted':    `<div class="statusline">🔒 Published, restricted — only you can open the link.</div>`,
+      }[pub];
+      return popHead(nm) + `
+      <div class="rel-line">${G.lock}<span><b>Yours, private.</b> Only this browser has it${pub==='restricted'?' — the cloud copy is restricted':''}.</span></div>
+      <span class="grouphead">General access</span>
+      <div class="segrow"><button class="on">Restricted</button><button>Anyone can view</button><button>Anyone can edit</button></div>
+      <p class="segdesc"><b>Only people added below</b> can open the link. Everyone else sees nothing — not even that it exists.</p>
+      ${line}
+      ${urlHero('aurora-field','prj7g2k9m3qxw4tn0b')}
+      <div class="provenance">${G.example}<span>Forked from <b>Plasma Duo</b> · 3 days ago</span></div>
+      ${verStrip(3,'2 h ago',true)}
+      <div class="utilrow"><button>Download .zip</button><button>Copy as JSON</button></div>`;
+    }
+    case 'minepub': return popHead(nm) + `
+      <div class="rel-line">${G.link}<span><b>Yours, shared.</b> Anyone with the link can open it running.</span></div>
+      <span class="grouphead">General access</span>
+      <div class="segrow"><button>Restricted</button><button class="on">Anyone can view</button><button>Anyone can edit</button></div>
+      <p class="segdesc">Opens <b>running</b> for anyone with the link — no account needed. Only the people below can save changes.</p>
+      ${urlHero('aurora-field','prj7g2k9m3qxw4tn0b')}
+      <p class="note">Same link as the address bar — copying either works.</p>
+      <span class="grouphead">People</span>
+      <div class="person"><span class="av">YA</span><span class="who"><span class="em">hypher@gmail.com</span></span><span class="role">owner</span></div>
+      <div class="person"><span class="av" style="border-color:var(--st-good-bd);background:var(--st-good-bg);color:var(--st-good-tx)">EK</span><span class="who"><span class="em">eshan@radiancecrew.org</span></span><span class="role">can edit</span></div>
+      <div class="provenance">${G.example}<span>Forked from <b>Plasma Duo</b> · 3 days ago</span></div>
+      ${verStrip(12,'20 min ago',true)}
+      <div class="utilrow"><button>Download .zip</button><button>Copy as JSON</button></div>`;
+    case 'member': return popHead(nm) + `
+      <div class="rel-line">${G.users}<span><b>Shared with you — you can edit.</b> Saves go to the shared project.</span></div>
+      ${urlHero('halcyon-drift','prjc4w8n2ke5mrxa1z')}
+      <span class="grouphead">People</span>
+      <div class="person"><span class="av" style="border-color:var(--st-good-bd);background:var(--st-good-bg);color:var(--st-good-tx)">EK</span><span class="who"><span class="em">eshan@radiancecrew.org</span></span><span class="role">owner</span></div>
+      <div class="person"><span class="av">YA</span><span class="who"><span class="em">hypher@gmail.com</span></span><span class="role">can edit</span></div>
+      <button class="hero-btn" style="margin-top:12px">${G.example} Fork my own copy</button>
+      <p class="hero-sub">Splits off an independent copy in your library; the shared one is untouched.</p>
+      <div class="provenance">${G.users}<span>Owned by <b>eshan@radiancecrew.org</b></span></div>
+      ${verStrip(41,'5 min ago · by Eshan',true)}`;
+    case 'visitor': return popHead(nm) + `
+      <div class="rel-line">${G.eye}<span><b>Viewing someone else's project.</b> Play freely — nothing you touch changes their copy.</span></div>
+      <button class="hero-btn">${G.example} Fork — make it yours</button>
+      <p class="hero-sub">Keeps your tweaks: a fresh copy in your library with its own link.</p>
+      ${urlHero('halcyon-drift','prjc4w8n2ke5mrxa1z','Copy link')}
+      <p class="note">You hold <b>view</b> access — the link is the key, no account needed.</p>
+      <div class="provenance">${G.users}<span>Owned by <b>someone else</b> · you're a guest</span></div>`;
+  }
+}
+
+/* ---------------- §1 current production --------------------------------- */
+const CUR_NAMES = { example:'Plasma Duo', minelocal:'Aurora Field', minepub:'Aurora Field', member:'Halcyon Drift', visitor:'Halcyon Drift' };
+function renderCurrent() {
+  const rel = state.rel;
+  document.getElementById('cur-proj-name').textContent =
+    state.long ? REL[rel].longname : CUR_NAMES[rel];
+  document.getElementById('cur-example-pill').style.display = rel==='example' ? '' : 'none';
+  document.getElementById('cur-share').style.display = rel==='minepub' ? '' : 'none';
+  const dirty = state.dirty;
+  document.getElementById('cur-save').style.display = dirty ? '' : 'none';
+  document.getElementById('cur-revert').style.display = dirty ? '' : 'none';
+  document.getElementById('cur-count').style.display = dirty ? '' : 'none';
+  const inv = {
+    example: dirty
+      ? '<span class="okline">Save (forks silently — nothing says so beforehand)</span> · <span class="missing">no fork-without-edit · no link copy · dead pill</span>'
+      : '<span class="missing">ZERO affordances: pill is a dead span, Save absent, Share gated out. The driving pain.</span>',
+    minelocal: '<span class="missing">no Share pill (unpublished ⇒ members=None) · publish outcome invisible · no provenance/history anywhere</span>',
+    minepub: '<span class="okline">Share pill renders (owner of a published project)</span> · <span class="missing">nothing says "shared" at rest — the pill looks identical before opening</span>',
+    member: '<span class="missing">no pill (roster answered but this reproduction matches the common visitor-banner path) · role invisible in the bar</span>',
+    visitor: '<span class="missing">no pill · fork lives in a separate banner strip · access level invisible</span>',
+  }[rel];
+  document.getElementById('cur-inventory').innerHTML = '<b style="color:var(--tx-subtle)">Affordance inventory:</b> ' + inv;
+}
+
+/* ---------------- §2 placements ------------------------------------------ */
+function renderPlacements() {
+  const r = REL[state.rel];
+  document.querySelectorAll('.rel-proj-name').forEach(el =>
+    el.textContent = state.long ? r.longname : r.name);
+  document.querySelectorAll('.rel-word').forEach(el => el.textContent = r.word);
+  document.querySelectorAll('.rel-glyph').forEach(el => el.innerHTML = r.glyph);
+  document.querySelectorAll('.rel-control').forEach(el => el.title = r.title);
+  document.querySelectorAll('.rel-save').forEach(el =>
+    el.style.display = state.dirty ? '' : 'none');
+  document.querySelectorAll('.rel-revert').forEach(el =>
+    el.style.display = state.dirty ? '' : 'none');
+  document.querySelectorAll('.rel-count').forEach(el =>
+    el.style.display = state.dirty ? '' : 'none');
+  document.querySelectorAll('[data-popfor]').forEach(el => {
+    if (!el.classList.contains('hiddenpop')) el.innerHTML = popContent(state.rel);
+  });
+}
+document.querySelectorAll('.rel-control').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const pop = document.querySelector(`[data-popfor="${btn.dataset.pop}"]`);
+    const wasHidden = pop.classList.contains('hiddenpop');
+    document.querySelectorAll('[data-popfor]').forEach(p => p.classList.add('hiddenpop'));
+    document.querySelectorAll('.rel-control').forEach(b => b.classList.remove('rel-open'));
+    if (wasHidden) {
+      pop.innerHTML = popContent(state.rel);
+      pop.classList.remove('hiddenpop');
+      btn.classList.add('rel-open');
+    }
+  });
+});
+
+/* ---------------- §3 face matrix ----------------------------------------- */
+function faceCell(rel, kind) {
+  const r = REL[rel];
+  const inner = kind==='v1' ? `<span class="word">${r.word}</span>`
+    : kind==='v2' ? `${r.glyph}<span class="word">${r.word}</span>`
+    : r.glyph;
+  return `<span class="rel-detached" style="cursor:default"><span class="rel-face face-neutral">${inner}</span></span>`;
+}
+(function(){
+  const rows = Object.keys(REL).map(rel => `<tr>
+    <td class="state">${{example:'Example',minelocal:'Mine · private',minepub:'Mine · shared',member:'Member of someone else’s',visitor:'Viewing someone else’s'}[rel]}</td>
+    <td>${faceCell(rel,'v1')}</td><td>${faceCell(rel,'v2')}</td><td>${faceCell(rel,'v3')}</td></tr>`).join('');
+  document.getElementById('facematrix').innerHTML =
+    `<tr><th>State</th><th>V1 · word</th><th>V2 · glyph + word</th><th>V3 · glyph (fold)</th></tr>` + rows;
+  document.getElementById('tint-n').innerHTML = G.link;
+  document.getElementById('tint-l').innerHTML = G.link;
+  document.getElementById('narrow-glyph-a').innerHTML = G.example;
+  document.getElementById('narrow-glyph-b').innerHTML = G.example;
+})();
+
+/* ---------------- §4 popover gallery ------------------------------------- */
+(function(){
+  const notes = {
+    example: 'Hero = the driving-pain fix. No history strip: a transient session has saved nothing yet; provenance names the curation instead.',
+    minelocal: 'Publish status finally has a product face (cycle it with the strip). Access segment present but Restricted; zip/JSON retire here from the old detail-popup rows.',
+    minepub: 'The existing SharePanel content, re-homed: URL hero, access segment + gate-approved descriptions, people. Plus provenance + version strip it never had.',
+    member: 'You appear in the roster; fork is secondary (you can already edit). Version strip shows the collaborator’s save.',
+    visitor: 'The visitor banner’s fork, re-homed. Access stated plainly; no roster (the service answers members to members only).',
+  };
+  const names = { example:'Example', minelocal:'Mine · private', minepub:'Mine · shared', member:'Member', visitor:'Viewing' };
+  document.getElementById('popgallery').innerHTML = Object.keys(REL).map(rel => `
+    <div class="popwrap"><p class="pname">${names[rel]}</p>
+      <div class="pop" data-static="${rel}">${popContent(rel)}</div>
+      <p class="pnote">${notes[rel]}</p></div>`).join('');
+})();
+
+/* ---------------- §6 fork moment ----------------------------------------- */
+let forked = false;
+const forkBtn = document.getElementById('fork-face-btn');
+const forkPop = document.getElementById('fork-pop');
+function renderFork() {
+  document.getElementById('fork-word').textContent = forked ? 'Private' : 'Example';
+  document.getElementById('fork-glyph').innerHTML = forked ? G.lock : G.example;
+  document.getElementById('fork-name').textContent = forked ? 'Plasma Duo' : 'Plasma Duo';
+  document.getElementById('fork-url').innerHTML = forked
+    ? 'lightplayer.app<span style="color:var(--tx-subtle)">/p/</span><span style="color:var(--heading)">plasma-duo</span><span style="color:var(--tx-subtle)">-prjde04x7q2nwk9rbtm</span>'
+    : 'lightplayer.app<span style="color:var(--tx-subtle)">/p/</span><span style="color:var(--heading)">plasma-duo</span>';
+}
+forkBtn.addEventListener('click', () => {
+  if (forkPop.classList.contains('hiddenpop')) {
+    forkPop.innerHTML = forked ? popContent('minelocal') : popContent('example');
+    forkPop.classList.remove('hiddenpop');
+    if (!forked) {
+      const hero = forkPop.querySelector('.hero-btn');
+      hero && hero.addEventListener('click', () => {
+        forked = true; renderFork();
+        forkPop.classList.add('hiddenpop');
+        const t = document.getElementById('fork-toast');
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 2600);
+      });
+    }
+  } else forkPop.classList.add('hiddenpop');
+});
+document.getElementById('fork-reset').addEventListener('click', () => {
+  forked = false; renderFork(); forkPop.classList.add('hiddenpop');
+});
+
+/* ---------------- controls strip ------------------------------------------ */
+function renderAll() { renderCurrent(); renderPlacements(); }
+document.querySelectorAll('[data-rel]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.rel = btn.dataset.rel;
+    document.querySelectorAll('[data-rel]').forEach(b => b.classList.toggle('active', b===btn));
+    renderAll();
+  });
+});
+document.getElementById('ctl-dirty').addEventListener('click', e => {
+  state.dirty = !state.dirty;
+  e.target.textContent = state.dirty ? 'on' : 'off';
+  e.target.classList.toggle('active', state.dirty);
+  renderAll();
+});
+document.getElementById('ctl-pub').addEventListener('click', e => {
+  state.pub = (state.pub + 1) % PUBSTATES.length;
+  e.target.textContent = PUBSTATES[state.pub];
+  document.querySelectorAll('[data-static="minelocal"]').forEach(p => p.innerHTML = popContent('minelocal'));
+  renderAll();
+});
+document.getElementById('ctl-long').addEventListener('click', e => {
+  state.long = !state.long;
+  e.target.textContent = state.long ? 'on' : 'off';
+  e.target.classList.toggle('active', state.long);
+  renderAll();
+});
+renderAll(); renderFork();
+</script>
+</body>
+</html>
