@@ -39,18 +39,24 @@ const PAD_SIZE: (f32, f32, f32) = (1.9, 4.2, 0.6);
 const TRI: (f32, f32, f32) = (15.4, 16.0, 7.6);
 const TRI_CORNER_RATIO: f32 = 0.16;
 
-/// SVG path for the brand triangle: equilateral, pointing right, centered
-/// (cx, cy) with circumradius r. Corners are true circular fillets of
-/// radius rho — tangent points on each edge joined by arcs, G1-continuous
-/// with the straight edges. Sweep flag 1: the path winds clockwise in
-/// SVG's y-down space.
-pub(crate) fn fillet_tri_path(cx: f32, cy: f32, r: f32, rho: f32) -> String {
+/// The brand triangle's three filleted corners as `[enter, leave]` tangent
+/// points: where each corner's arc leaves the incoming edge and rejoins the
+/// outgoing one, corner 0 first, in path order.
+///
+/// The triangle is equilateral, pointing right, centered (cx, cy) with
+/// circumradius r; the fillets are true circular arcs of radius rho, so the
+/// tangent points are G1-continuous with the straight edges.
+///
+/// Separate from [`fillet_tri_path`] because the triangle is used as
+/// *geometry* as well as as a `d` string — the `examples/logo-sign` map2d
+/// generator flattens it into a lamp-carrying outline — and the two must be
+/// the same triangle, not two constructions of one.
+pub(crate) fn fillet_tri_corners(cx: f32, cy: f32, r: f32, rho: f32) -> [[(f32, f32); 2]; 3] {
     let vs: [(f32, f32); 3] = std::array::from_fn(|i| {
         let t = (i as f32 * 120.0).to_radians();
         (cx + r * t.cos(), cy + r * t.sin())
     });
-    let mut d = String::new();
-    for i in 0..3 {
+    std::array::from_fn(|i| {
         let v = vs[i];
         let a = vs[(i + 2) % 3];
         let b = vs[(i + 1) % 3];
@@ -60,8 +66,19 @@ pub(crate) fn fillet_tri_path(cx: f32, cy: f32, r: f32, rho: f32) -> String {
         let nb = ((b.0 - v.0) / lb, (b.1 - v.1) / lb);
         let phi = (na.0 * nb.0 + na.1 * nb.1).clamp(-1.0, 1.0).acos();
         let t = rho / (phi / 2.0).tan();
-        let p1 = (v.0 + na.0 * t, v.1 + na.1 * t);
-        let p2 = (v.0 + nb.0 * t, v.1 + nb.1 * t);
+        [
+            (v.0 + na.0 * t, v.1 + na.1 * t),
+            (v.0 + nb.0 * t, v.1 + nb.1 * t),
+        ]
+    })
+}
+
+/// SVG path for the brand triangle: the [`fillet_tri_corners`] tangent
+/// points joined by straight edges and corner arcs. Sweep flag 1: the path
+/// winds clockwise in SVG's y-down space.
+pub(crate) fn fillet_tri_path(cx: f32, cy: f32, r: f32, rho: f32) -> String {
+    let mut d = String::new();
+    for (i, [p1, p2]) in fillet_tri_corners(cx, cy, r, rho).into_iter().enumerate() {
         let cmd = if i == 0 { 'M' } else { 'L' };
         d.push_str(&format!(
             "{cmd}{:.2} {:.2}A{rho:.2} {rho:.2} 0 0 1 {:.2} {:.2}",

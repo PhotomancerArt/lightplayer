@@ -363,13 +363,31 @@ fn editor_toolbar_fixture() -> Element {
 }
 
 #[story(
-    description = "The same strip, dived state (the morph is a data swap): breadcrumb back to the project, V/G/R/P tools, view toggles, and the save cluster with an unsaved edit."
+    description = "The same strip, dived state (the morph is a data swap): breadcrumb back to the project, V/G/R/P/O tools, view toggles, and the save cluster with an unsaved edit."
 )]
 fn editor_toolbar_dived() -> Element {
     rsx! {
         ToolbarStrip {
             groups: super::dive_toolbar(
                 &MapTool::Select,
+                Default::default(),
+                &story_asset_editor(),
+                true,
+                None,
+            ),
+            on_item: move |_| {},
+        }
+    }
+}
+
+#[story(
+    description = "The polygon tool active, with its OPTION beside it: one tool button (never two), and the outline/filled population segment that appears only while the tool is up — the mode is a property of the object the gesture will make, not a second tool."
+)]
+fn editor_toolbar_polygon_mode() -> Element {
+    rsx! {
+        ToolbarStrip {
+            groups: super::dive_toolbar(
+                &MapTool::polygon(lpa_mapping_editor::PolygonMode::Filled),
                 Default::default(),
                 &story_asset_editor(),
                 true,

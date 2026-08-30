@@ -6,7 +6,7 @@
 
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
-    CircleDashed, Download, Grid3x3, Hash, MousePointer, Route, Scan, Spline, Upload,
+    CircleDashed, Download, Grid3x3, Hash, MousePointer, Pentagon, Route, Scan, Spline, Upload,
 };
 
 use crate::base::icon::{StudioIcon, StudioIconName};
@@ -19,6 +19,7 @@ pub(crate) enum ToolbarIcon {
     Grid,
     Ring,
     Path,
+    Polygon,
     Numbers,
     Arrows,
     FitPreview,
@@ -42,6 +43,9 @@ impl ToolbarIcon {
             },
             Self::Path => rsx! {
                 Spline { size: 13 }
+            },
+            Self::Polygon => rsx! {
+                Pentagon { size: 13 }
             },
             Self::Numbers => rsx! {
                 Hash { size: 13 }

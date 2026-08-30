@@ -14,9 +14,10 @@ survive a load → write round trip byte-for-byte
 
 ## In the Studio gallery
 
-Eleven are compiled into the app and listed in the gallery's *Examples*
-section — `fyeah-sign`, `plasma`, `meteor`, `comet`, `palette-waves`,
-`fire2012`, `plasma-duo`, `zook-dome`, `small-dome`, `peach-1d`, `peach-2d`.
+Twelve are compiled into the app and listed in the gallery's *Examples*
+section — `fyeah-sign`, `logo-sign`, `plasma`, `meteor`, `comet`,
+`palette-waves`, `fire2012`, `plasma-duo`, `zook-dome`, `small-dome`,
+`peach-1d`, `peach-2d`.
 Their file lists live in
 `lp-app/lpa-studio-core/src/app/home/embedded_example.rs`
 (`include_bytes!` against this directory), so a change here reaches
@@ -32,6 +33,7 @@ authored binding to a bus channel
 | Example | Publishes | Shows off |
 |---|---|---|
 | `fyeah-sign` | `glow`, `palette` (via the active playlist entry) | the full bus: clock, button + radio onto `bus:trigger`, playlist switching idle/blast, and an authored palette cycling three moods. The Studio demo project. |
+| `logo-sign` | `speed`, `bands`, `tilt`, `palette` | the brand as a buildable piece: a shaped PCB matrix in the outline of the play triangle (132 lamps, map2d `filled_polygon` — the outline and the 11.5 pitch are authored, the count is *derived*) plus "LightPlayer" as 11 single-stroke letter strands (109 lamps) on ONE canvas, which is the landing hero's own stage. Generated, not drawn: `sign.map2d.json` comes from the brand triangle geometry and from `letters.svg` through the corpus SVG importer, and `logo_sign_gen.rs` in `lpa-studio-web` fails if the committed document falls behind the mark |
 | `plasma` | `speed`, `scale`, `palette` | the smallest non-empty panel: one shader, three bound uniforms. Also the `what-is-a-shader` article's live figure. |
 | `plasma-duo` | `speed`, `scale`, `palette` | one shader and one palette channel feeding two fixtures (disc + grid) with separate outputs |
 | `zook-dome` | `speed` | a real 1500-LED dome across five output channels |
