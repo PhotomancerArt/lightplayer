@@ -1072,11 +1072,13 @@ pub fn App() -> Element {
     // no box of its own now — see `app::workbench`), and below the fold
     // breakpoint the frame bleeds this padding back out so its summon strip
     // reads as a full-width toolbar under the site chrome; the chrome itself
-    // keeps the inset.
+    // keeps the inset. Top padding matches the workbench's on BOTH arms
+    // (pt-2 / narrow pt-1): the site chrome must sit at the same y on every
+    // route, or entering/leaving the studio makes the nav jump (G1 2026-08-30).
     let main_class = if workbench_route {
         "tw:mx-auto tw:flex tw:h-dvh tw:min-h-0 tw:w-[min(1520px,100%)] tw:flex-col tw:px-3 tw:pb-2 tw:pt-2 tw:max-[820px]:px-[10px] tw:max-[820px]:pb-0 tw:max-[820px]:pt-1"
     } else {
-        "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]"
+        "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-2 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-1"
     };
     rsx! {
         style { "{STYLE}" }

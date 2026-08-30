@@ -10,7 +10,10 @@ use crate::stories::story::StoryDescriptor;
 /// the previous default (`studio/layout/studio-shell/simulator-idle`)
 /// retired with the step-stack device pane, and the storybook rendered
 /// an empty body, so capture discovered ZERO stories.
-pub const DEFAULT_STORY_ID: &str = "studio/home/home-gallery/populated";
+// The design-language page is the design library's MAIN page — the book
+// opens on the idiom sheet (Yona's standing ask: "I want to understand
+// what our design idioms and ideas are").
+pub const DEFAULT_STORY_ID: &str = "studio/design-language/page";
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/story_registry.generated.rs"));

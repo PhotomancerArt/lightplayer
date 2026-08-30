@@ -4,11 +4,9 @@
 //! only when announced (clean, healthy rows stay silent; no status words, no
 //! count badges: the breakdown lives in the row tooltip, the counts in the
 //! node/project detail popups). Dirty rows keep the node-header tint
-//! treatment (the P3 header-only gradient over the subtle card surface); the
-//! dominant dirty status color is layered through a `--studio-tree-dirty-bg`
-//! CSS custom property so the selection highlight can *derive* from it: a
-//! selected dirty row color-mixes the dirty color into the selection
-//! background instead of flatly overriding the edited treatment.
+//! treatment (the P3 header-only gradient over the subtle card surface),
+//! focused or not — the focused row's ONLY selection paint is the cool
+//! spectrum ring, so selection never overrides the edited treatment.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -18,8 +16,8 @@ use lpa_studio_core::{
 use crate::app::affordance::{affordance_indicator_class, affordance_trigger_style};
 use crate::app::node::AddNodePicker;
 use crate::base::{
-    PopoverPlacement, StudioIcon, StudioIconName, focus_ring_class, node_kind_icon, row_edge_class,
-    use_reveal_on_focus,
+    PopoverPlacement, StudioIcon, StudioIconName, focus_ring_class, node_kind_icon,
+    reveal_selected_pane, row_edge_class, use_reveal_on_focus,
 };
 
 #[component]
@@ -88,7 +86,7 @@ pub fn ProjectNodeTree(
 /// a node. The explicit `bg-transparent` matters: without it the user-agent
 /// button face paints a gray pill under the dashed border.
 fn tree_add_row_class(open: bool) -> String {
-    const BASE: &str = "tw:grid tw:w-full tw:cursor-pointer tw:appearance-none tw:grid-cols-[18px_minmax(0,1fr)] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-dashed tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-subtle-foreground tw:hover:bg-card-muted tw:hover:text-soft-foreground";
+    const BASE: &str = "tw:grid tw:w-full tw:cursor-pointer tw:appearance-none tw:grid-cols-[18px_minmax(0,1fr)] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-dashed tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-subtle-foreground tw:hover:text-soft-foreground";
     let light = format!("{} {}", row_edge_class(), focus_ring_class());
     if open {
         format!("{BASE} {light} tw:bg-card-muted tw:text-soft-foreground")
@@ -130,7 +128,15 @@ fn ProjectNodeTreeItemView(
                 disabled: running,
                 style: "padding-left: {indent}px;",
                 title: "{title}",
-                onclick: move |_| on_action.call(action.clone()),
+                // Re-clicking the focused row edits no state, so the
+                // pane's edge-triggered reveal can't fire — reveal it
+                // imperatively ("go back to the selected node").
+                onclick: move |_| {
+                    if focused {
+                        reveal_selected_pane();
+                    }
+                    on_action.call(action.clone());
+                },
                 onmounted: reveal,
                 span { class: "tw:inline-flex tw:h-4 tw:w-4 tw:items-center tw:justify-center tw:text-subtle-foreground",
                     StudioIcon {
@@ -175,29 +181,39 @@ fn ProjectNodeTreeItemView(
 /// - an unfocused dirty row paints the node-header tint: the same
 ///   `linear-gradient(90deg, <status bg>, transparent 62%)` over the subtle
 ///   card surface as the P3 header-only treatment;
-/// - the focused row keeps its neutral selection border, and its highlight fill
-///   color-mixes the dirty color into the selection background so selection
-///   adapts to (never erases) the edited treatment; on a clean focused row
-///   the variable falls back to the selection color, mixing it with itself.
+/// - the focused row wears the chosen-object ring (`ux-sel-ring
+///   ux-sel-ring-cool`, the selection grammar's SELECTION mark — G1 ruled
+///   the tree's focused row IS selection, not nav; cool variant because
+///   the full sweep compresses to attention-orange at row radius). The
+///   ring is the ONLY selection paint (G1 rd 3: no grey wash — "the
+///   rainbow highlight does well enough on its own"), so a focused row
+///   keeps its natural background: transparent when clean, the dirty
+///   tint when edited — selection never erases the edited treatment.
 fn tree_item_row_class(focused: bool, dirty: DirtySummary) -> String {
     const BASE: &str = "tw:grid tw:w-full tw:grid-cols-[18px_minmax(0,1fr)_auto] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:px-2 tw:py-1.5 tw:text-left";
     let dirty_var = tree_item_dirty_var_class(dirty);
     let focus = focus_ring_class();
     if focused {
+        let state_bg = if dirty.is_clean() {
+            "tw:bg-transparent"
+        } else {
+            "tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-tree-dirty-bg),transparent_62%)]"
+        };
         return format!(
-            "{BASE} {focus} {dirty_var} tw:border-selection-border tw:bg-[color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))_45%,var(--studio-color-selection-bg))]"
+            "{BASE} {focus} {dirty_var} ux-sel-ring ux-sel-ring-cool tw:border-transparent {state_bg}"
         );
     }
-    // Unfocused rows take the dense-row interaction light: a spectrum left
-    // edge plus the bloom, never a full ring (Aurora R2 — a ring per row
-    // reads as noise). The FOCUSED row is left alone on purpose: selection
-    // is the neutral white outline and the spectrum never speaks for it.
+    // Unfocused rows take the dense-row interaction light: the hover bloom,
+    // never a full ring (Aurora R2 — a ring per row reads as noise). The
+    // FOCUSED row doesn't take the hover light: its static ring already
+    // marks it, and the moving hover light must stay a different kind of
+    // light from the still selection mark.
     let edge = format!("{} {focus}", row_edge_class());
     if dirty.is_clean() {
-        format!("{BASE} {edge} tw:border-transparent tw:bg-transparent tw:hover:bg-card-muted")
+        format!("{BASE} {edge} tw:border-transparent tw:bg-transparent")
     } else {
         format!(
-            "{BASE} {edge} {dirty_var} tw:border-transparent tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-tree-dirty-bg),transparent_62%)] tw:hover:bg-card-muted"
+            "{BASE} {edge} {dirty_var} tw:border-transparent tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-tree-dirty-bg),transparent_62%)]"
         )
     }
 }
@@ -273,23 +289,27 @@ mod tests {
     }
 
     #[test]
-    fn focused_dirty_row_mixes_the_dirty_color_into_the_selection_highlight() {
+    fn focused_dirty_row_keeps_the_dirty_tint_under_the_ring() {
         let class = tree_item_row_class(true, dirty(2, 0));
-        assert!(class.contains("tw:border-selection-border"));
+        // The cool ring is the ONLY selection paint (G1 rd 3 — no grey
+        // wash); the row keeps its dirty tint, so selection never erases
+        // the edited treatment.
+        assert!(class.contains("ux-sel-ring ux-sel-ring-cool"));
+        assert!(class.contains("tw:border-transparent"));
         assert!(class.contains("--studio-tree-dirty-bg:var(--studio-status-warning-bg)"));
-        assert!(class.contains(
-            "color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))_45%,var(--studio-color-selection-bg))"
-        ));
-        assert!(!class.contains("linear-gradient"));
+        assert!(class.contains("linear-gradient(90deg,var(--studio-tree-dirty-bg)"));
+        assert!(!class.contains("color-mix"));
+        assert!(!class.contains("bg-selection-bg"));
     }
 
     #[test]
-    fn focused_clean_row_falls_back_to_the_plain_selection_highlight() {
+    fn focused_clean_row_is_ring_only_over_a_transparent_ground() {
         let class = tree_item_row_class(true, DirtySummary::clean());
-        assert!(class.contains("tw:border-selection-border"));
-        // No variable set: the color-mix falls back to the neutral selection color.
+        assert!(class.contains("ux-sel-ring ux-sel-ring-cool"));
+        // Ring alone: no dirty variable, no wash, no gradient.
         assert!(!class.contains("--studio-tree-dirty-bg:var"));
-        assert!(class.contains("var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))"));
+        assert!(class.contains("tw:bg-transparent"));
+        assert!(!class.contains("bg-selection-bg"));
     }
 
     #[test]
