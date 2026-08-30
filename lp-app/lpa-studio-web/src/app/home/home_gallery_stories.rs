@@ -514,18 +514,27 @@ fn roster_fixture() -> DeviceRosterView {
             pending: vec![
                 PendingLinkView {
                     link: DeviceLinkId(3),
+                    device: DeviceId(103),
                     title: "Fake ESP32 (usb-3)".to_string(),
                     state_label: "New device found — identifying…".to_string(),
                     detail: Some("chip: esp32c6".to_string()),
                     can_adopt: true,
+                    // Mid-identification: no settled verdict, no flash face.
+                    needs_firmware: false,
+                    detected_chip: Some("esp32c6".to_string()),
                     escapes: vec![DeviceEscape::Forget],
                 },
                 PendingLinkView {
                     link: DeviceLinkId(4),
+                    device: DeviceId(104),
                     title: "Fake ESP32 (usb-4)".to_string(),
                     state_label: "New device found — Blank flash — needs firmware".to_string(),
                     detail: Some("invalid header: 0xffffffff".to_string()),
                     can_adopt: true,
+                    // Settled blank: the needs-firmware face (board pick +
+                    // Flash) rides this pending card.
+                    needs_firmware: true,
+                    detected_chip: Some("esp32c6".to_string()),
                     escapes: vec![DeviceEscape::Forget],
                 },
             ],
@@ -538,6 +547,8 @@ fn roster_fixture() -> DeviceRosterView {
                     detail: Some("LightPlayer · dig-uno".to_string()),
                     freshness_label: Some("last heard 3 s ago".to_string()),
                     identity_label: Some("dev000000daqf6dvvqz".to_string()),
+                    detected_chip: None,
+                    needs_firmware: false,
                     activity: None,
                     last_outcome: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
@@ -550,6 +561,8 @@ fn roster_fixture() -> DeviceRosterView {
                     detail: Some("chip: esp32c6".to_string()),
                     freshness_label: Some("last heard just now".to_string()),
                     identity_label: Some("60:55:f9:0a:0b:0c".to_string()),
+                    detected_chip: Some("esp32c6".to_string()),
+                    needs_firmware: false,
                     activity: Some(DeviceActivityView {
                         kind: DeviceActivityKind::Identify,
                         label: "Identifying…".to_string(),
@@ -573,6 +586,8 @@ fn roster_fixture() -> DeviceRosterView {
                     detail: Some("chip: esp32c6".to_string()),
                     freshness_label: None,
                     identity_label: Some("dev000000000shelf01".to_string()),
+                    detected_chip: Some("esp32c6".to_string()),
+                    needs_firmware: true,
                     activity: None,
                     last_outcome: Some(OutcomeView {
                         summary: "identification timed out".to_string(),

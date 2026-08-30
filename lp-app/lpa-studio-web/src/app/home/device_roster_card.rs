@@ -12,34 +12,36 @@
 //!    I3 lives in the model, but a renderer that dropped an escape would
 //!    defeat it from outside, which is exactly how the shipped card lost its
 //!    danger zone in the states that needed it.
-//! 2. **Nothing is offered that cannot happen.** Setup is round 2, so a blank
-//!    or foreign board shows its honest classification with the setup verb
-//!    DISABLED and a note saying so — never a button that does nothing.
+//! 2. **Nothing is offered that cannot happen.** The needs-firmware face
+//!    (round 2, the card ruling: no wizard — the card is the whole flow)
+//!    offers a board pick + one primary verb, and only when the model's
+//!    fold says the board wants firmware AND a served build resolves;
+//!    otherwise the face says honestly why not.
 //!
-//! Plain on purpose: this milestone is the wiring, not the visual design.
+//! Plain on purpose: dress-up belongs to the design spike.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceActivityView, DeviceStatus, DeviceView, PendingLinkView, UiAction, UiStatus,
-    device_escape_action, device_status_kind, pending_escape_action,
+    DeviceAction, DeviceActivityView, DeviceId, DeviceView, DevicesOp, PendingLinkView, UiAction,
+    UiStatus, device_escape_action, device_status_kind, flash_offer, pending_escape_action,
 };
 
+use crate::base::icon::StudioIconName;
+use crate::base::option_cards::{OptionCard, OptionCards};
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip};
-
-/// What a card says where a Setup button will go in round 2.
-const SETUP_COMING_BACK: &str =
-    "Setting a board up (firmware, naming, a first project) is coming back soon.";
 
 /// One device card.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DeviceRosterCard(card: DeviceView, on_action: EventHandler<UiAction>) -> Element {
     let device = card.id;
-    let needs_setup = card.status == DeviceStatus::NeedsAttention;
     let status = UiStatus {
         label: card.state_label.clone(),
         kind: device_status_kind(card.status),
     };
+    // The flash face appears on a settled needs-firmware verdict, never
+    // while an activity runs (the activity row is the face then).
+    let offer_flash = card.needs_firmware && card.activity.is_none();
 
     rsx! {
         article { class: card_class(),
@@ -75,16 +77,11 @@ pub(crate) fn DeviceRosterCard(card: DeviceView, on_action: EventHandler<UiActio
                 ActivityRow { activity }
             }
 
-            if needs_setup {
-                div { class: note_class(),
-                    p { class: "tw:m-0", "{SETUP_COMING_BACK}" }
-                    button {
-                        class: disabled_button_class(),
-                        r#type: "button",
-                        disabled: true,
-                        title: "{SETUP_COMING_BACK}",
-                        "Set up this device"
-                    }
+            if offer_flash {
+                FlashFace {
+                    device,
+                    detected_chip: card.detected_chip.clone(),
+                    on_action,
                 }
             }
 
@@ -109,7 +106,9 @@ pub(crate) fn DeviceRosterCard(card: DeviceView, on_action: EventHandler<UiActio
 ///
 /// It is deliberately not a device card: nothing about it is known yet, and
 /// promoting it to one before the fold settles is how the shipped system ended
-/// up with two cards for one board.
+/// up with two cards for one board. Once the verdict settles at
+/// needs-firmware, the SAME flash face appears here — the gesture adopts the
+/// link, so flashing IS the "keep this one" decision.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn PendingLinkCard(
@@ -135,20 +134,23 @@ pub(crate) fn PendingLinkCard(
                 p { class: quiet_line_class(), "{detail}" }
             }
 
-            // `can_adopt` is the MODEL saying a user gesture may create a
-            // device here — a blank chip may never identify itself. The
-            // gesture it creates is Setup's, and Setup is round 2, so the
-            // affordance is shown honestly disabled rather than hidden.
-            if pending.can_adopt {
-                div { class: note_class(),
-                    p { class: "tw:m-0", "{SETUP_COMING_BACK}" }
-                    button {
-                        class: disabled_button_class(),
-                        r#type: "button",
-                        disabled: true,
-                        title: "{SETUP_COMING_BACK}",
-                        "Set up this device"
-                    }
+            if pending.needs_firmware {
+                FlashFace {
+                    device: pending.device,
+                    detected_chip: pending.detected_chip.clone(),
+                    on_action,
+                }
+            } else if pending.can_adopt {
+                // A blank chip may never identify itself, so a user gesture
+                // must be able to keep it. On a needs-firmware verdict the
+                // Flash verb IS that gesture; here the plain adopt is live
+                // (it was a disabled "coming back soon" stub through round
+                // 1).
+                ActionButton {
+                    action: DevicesOp::action_for(DeviceAction::AdoptLink { link }),
+                    running: false,
+                    variant: ActionButtonVariant::Outline,
+                    on_action,
                 }
             }
 
@@ -161,6 +163,95 @@ pub(crate) fn PendingLinkCard(
                         variant: ActionButtonVariant::Quiet,
                         on_action,
                     }
+                }
+            }
+        }
+    }
+}
+
+/// The needs-firmware face: the board pick (the EXPLAINING selector, filtered
+/// to the detected chip's compatible boards) + ONE primary verb.
+///
+/// The board choice is ephemeral UI state; picking journals nothing. The
+/// decision is journaled by the Flash ACTION it parameterizes — board id and
+/// resolved build id ride the gesture into the model, and there is no wizard
+/// state anywhere (the card ruling).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn FlashFace(
+    device: DeviceId,
+    detected_chip: Option<String>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let offer = flash_offer(detected_chip.as_deref());
+    let mut picked = use_signal(|| offer.preselect.clone());
+    // A late-arriving boot banner can grow the offer after first render;
+    // a stale pick that no longer exists must not survive it.
+    let pick_exists = picked
+        .read()
+        .as_deref()
+        .is_some_and(|id| offer.candidates.iter().any(|card| card.board_id == id));
+    let effective = match pick_exists {
+        true => picked.read().clone(),
+        false => offer.preselect.clone(),
+    };
+
+    if let Some(unavailable) = offer.unavailable {
+        return rsx! {
+            div { class: note_class(),
+                p { class: "tw:m-0", "{unavailable}" }
+            }
+        };
+    }
+
+    let choice = effective.as_deref().and_then(|id| {
+        offer
+            .candidates
+            .iter()
+            .find(|candidate| candidate.board_id == id)
+            .cloned()
+    });
+    let options: Vec<OptionCard> = offer
+        .candidates
+        .iter()
+        .map(|candidate| {
+            OptionCard::new(
+                &candidate.board_id,
+                StudioIconName::Usb,
+                &candidate.title,
+                &candidate.blurb,
+            )
+        })
+        .collect();
+
+    rsx! {
+        div { class: "tw:grid tw:gap-2",
+            OptionCards {
+                label: Some("Which board is this?".to_string()),
+                options,
+                selected: effective.clone(),
+                on_pick: move |id: String| picked.set(Some(id)),
+            }
+            if let Some(choice) = choice {
+                ActionButton {
+                    action: DevicesOp::action_for(DeviceAction::Flash {
+                        device,
+                        board_id: choice.board_id.clone(),
+                        build_id: choice.build_id.clone(),
+                    }),
+                    running: false,
+                    variant: ActionButtonVariant::Solid,
+                    on_action,
+                }
+            } else {
+                // No pick yet (several candidates): the verb waits, honestly
+                // disabled, rather than guessing a board.
+                button {
+                    class: disabled_button_class(),
+                    r#type: "button",
+                    disabled: true,
+                    title: "Pick the board first — the pin map is written to the device.",
+                    "Flash firmware"
                 }
             }
         }
@@ -185,9 +276,13 @@ fn ActivityRow(activity: DeviceActivityView) -> Element {
     };
     // A requested cancel is a STATE, not the absence of one: the activity is
     // winding down and will be evicted if it does not. Saying so beats a
-    // button that has stopped responding.
+    // button that has stopped responding. A flash's cancel can hold for the
+    // rest of the write window — esptool cannot stop mid-image cleanly.
     let label = match activity.cancel_requested {
-        true => format!("{} — cancelling", activity.label),
+        true => format!(
+            "{} — cancelling (finishing the current write)",
+            activity.label
+        ),
         false => activity.label.clone(),
     };
 
