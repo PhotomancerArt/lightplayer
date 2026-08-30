@@ -328,6 +328,7 @@ mod tests {
             memory: None,
             recovery: None,
             outputs: None,
+            link: None,
         }
     }
 }
