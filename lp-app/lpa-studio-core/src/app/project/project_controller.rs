@@ -1060,30 +1060,33 @@ impl ProjectController {
         Some(lpc_wire::WireScopeRef::Module { owner })
     }
 
-    /// The frame published by an OUTPUT node this scope owns, when it has one
-    /// worth drawing.
+    /// The frame the OUTPUT nodes this scope owns compose together, when it
+    /// is worth drawing.
     ///
     /// Direct children only: "owns an output" is the question, and an output
-    /// two scopes down belongs to the module that holds it. A frame whose
-    /// geometry the engine refused (dome scale, over the wire budget) is not
-    /// worth drawing — the lens has no synthesis to stand in, and a card
-    /// saying "no display layout" is worse than the mirror it displaced — so
-    /// that scope keeps the ordinary two-channel hero.
+    /// two scopes down belongs to the module that holds it. EVERY owned
+    /// output joins the picture (`ProjectSync::composed_output_frame`) — a
+    /// scope driving two wires heroes both, which is how the small dome's
+    /// second box stopped vanishing from the module face. A composite whose
+    /// geometry the engine refused entirely (dome scale over a budgeted
+    /// wire) is not worth drawing — the lens has no synthesis to stand in,
+    /// and a card saying "no display layout" is worse than the mirror it
+    /// displaced — so that scope keeps the ordinary two-channel hero.
     fn scope_output_frame(
         &self,
         children: &[crate::UiNodeChild],
     ) -> Option<crate::UiControlProductPreview> {
         let sync = self.sync.as_ref()?;
-        children
+        let outputs: Vec<NodeId> = children
             .iter()
             .filter(|child| child.kind == OUTPUT_KIND_LABEL)
-            .find_map(|child| {
+            .filter_map(|child| {
                 let address = ProjectNodeAddress::parse(&child.detail).ok()?;
-                let node = self.node(&address)?;
-                sync.output_frame(node.target().node_id)
-                    .filter(|frame| frame.display_layout.is_some())
-                    .cloned()
+                Some(self.node(&address)?.target().node_id)
             })
+            .collect();
+        sync.composed_output_frame(&outputs)
+            .filter(|frame| frame.display_layout.is_some())
     }
 
     /// The product a scope's named channel resolved to, when it resolved to

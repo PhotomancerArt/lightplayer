@@ -1199,11 +1199,10 @@ impl StudioController {
             match outcome {
                 Some(events) => {
                     let outputs = output_frame_entries(&events);
-                    let feed = session.card_feed_mut();
-                    if let Some(entry) = feed.pick_entry(&outputs).cloned() {
-                        let applied = feed.apply_entry(&entry, now);
-                        new_frame = applied.new_frame;
-                    }
+                    // Every entry folds in: the card composes ALL published
+                    // outputs into one picture (the small dome's two boxes).
+                    let applied = session.card_feed_mut().apply(&outputs, now);
+                    new_frame = applied.new_frame;
                 }
                 // A read that timed out or errored says nothing about the
                 // handle staying valid — a device-side reload retires it —
