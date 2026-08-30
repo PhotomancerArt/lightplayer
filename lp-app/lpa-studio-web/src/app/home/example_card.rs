@@ -108,8 +108,14 @@ fn example_card_class(opening: bool, busy: bool) -> &'static str {
         (false, true) => {
             "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
         }
+        // The card is `overflow-hidden`, so its hover ring is the INSET
+        // variant (`ux-ir-ring-inset`) — an outset ring would be clipped
+        // away entirely. It paints at z-3, above the glass footer (z-2) and
+        // the stretched open link (z-1), and takes no pointer events. The
+        // resting border goes transparent on hover so the ring IS the edge
+        // rather than a second line inside a grey one.
         (false, false) => {
-            "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+            "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-transparent ux-ir-ring ux-ir-ring-inset ux-card-lift"
         }
     }
 }

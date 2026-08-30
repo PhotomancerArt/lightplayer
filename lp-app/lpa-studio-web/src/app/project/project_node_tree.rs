@@ -18,7 +18,8 @@ use lpa_studio_core::{
 use crate::app::affordance::{affordance_indicator_class, affordance_trigger_style};
 use crate::app::node::AddNodePicker;
 use crate::base::{
-    PopoverPlacement, StudioIcon, StudioIconName, node_kind_icon, use_reveal_on_focus,
+    PopoverPlacement, StudioIcon, StudioIconName, focus_ring_class, node_kind_icon, row_edge_class,
+    use_reveal_on_focus,
 };
 
 #[component]
@@ -88,10 +89,11 @@ pub fn ProjectNodeTree(
 /// button face paints a gray pill under the dashed border.
 fn tree_add_row_class(open: bool) -> String {
     const BASE: &str = "tw:grid tw:w-full tw:cursor-pointer tw:appearance-none tw:grid-cols-[18px_minmax(0,1fr)] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-dashed tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-subtle-foreground tw:hover:bg-card-muted tw:hover:text-soft-foreground";
+    let light = format!("{} {}", row_edge_class(), focus_ring_class());
     if open {
-        format!("{BASE} tw:bg-card-muted tw:text-soft-foreground")
+        format!("{BASE} {light} tw:bg-card-muted tw:text-soft-foreground")
     } else {
-        BASE.to_string()
+        format!("{BASE} {light}")
     }
 }
 
@@ -180,16 +182,22 @@ fn ProjectNodeTreeItemView(
 fn tree_item_row_class(focused: bool, dirty: DirtySummary) -> String {
     const BASE: &str = "tw:grid tw:w-full tw:grid-cols-[18px_minmax(0,1fr)_auto] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:px-2 tw:py-1.5 tw:text-left";
     let dirty_var = tree_item_dirty_var_class(dirty);
+    let focus = focus_ring_class();
     if focused {
         return format!(
-            "{BASE} {dirty_var} tw:border-selection-border tw:bg-[color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))_45%,var(--studio-color-selection-bg))]"
+            "{BASE} {focus} {dirty_var} tw:border-selection-border tw:bg-[color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))_45%,var(--studio-color-selection-bg))]"
         );
     }
+    // Unfocused rows take the dense-row interaction light: a spectrum left
+    // edge plus the bloom, never a full ring (Aurora R2 — a ring per row
+    // reads as noise). The FOCUSED row is left alone on purpose: selection
+    // is the neutral white outline and the spectrum never speaks for it.
+    let edge = format!("{} {focus}", row_edge_class());
     if dirty.is_clean() {
-        format!("{BASE} tw:border-transparent tw:bg-transparent tw:hover:bg-card-muted")
+        format!("{BASE} {edge} tw:border-transparent tw:bg-transparent tw:hover:bg-card-muted")
     } else {
         format!(
-            "{BASE} {dirty_var} tw:border-transparent tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-tree-dirty-bg),transparent_62%)] tw:hover:bg-card-muted"
+            "{BASE} {edge} {dirty_var} tw:border-transparent tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-tree-dirty-bg),transparent_62%)] tw:hover:bg-card-muted"
         )
     }
 }

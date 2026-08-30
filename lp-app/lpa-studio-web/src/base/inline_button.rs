@@ -11,9 +11,15 @@
 //! with the tone's wash/background so the button answers the pointer in its
 //! own color. Disabled keeps the identical footprint on the muted surface
 //! (rows stay anchored, the control just goes inert).
+//!
+//! Aurora R2 (2026-08-29) adds one split on top of that: the two
+//! decoration-free tones (Accent, Neutral) also take the iridescent hover
+//! ring, and every enabled tone takes the app-wide focus ring. Status tones
+//! deliberately do NOT take the ring — see [`tone_takes_the_ring`].
 
 use dioxus::prelude::*;
 
+use crate::base::interaction_light::{focus_ring_class, ir_ring_class};
 use crate::base::{StudioIcon, StudioIconName};
 
 /// Glyph size inside the fixed `h-6 w-6` icon-only shape.
@@ -139,11 +145,27 @@ fn compose(base: &str, tone: InlineButtonTone, disabled: bool) -> String {
         // Identical footprint on the muted surface: inert, still anchored.
         format!("{base} tw:border-border-muted tw:bg-card-muted tw:text-subtle-foreground")
     } else {
-        format!(
-            "{base} tw:cursor-pointer tw:transition-colors tw:bg-terminal {}",
+        let mut class = format!(
+            "{base} tw:cursor-pointer tw:transition-colors tw:bg-terminal {} {}",
+            focus_ring_class(),
             tone_class(tone)
-        )
+        );
+        if tone_takes_the_ring(tone) {
+            class.push(' ');
+            class.push_str(ir_ring_class());
+        }
+        class
     }
+}
+
+/// Whether a tone answers the pointer with the iridescent ring or with its
+/// own hue. Only the two decoration-free tones take the ring: a STATUS tone
+/// means something, and "status never relies on color alone" also means a
+/// status control must not flash rainbow on hover. The ring is an
+/// absolutely-positioned pseudo-element, so this choice never moves a
+/// button's footprint either way.
+fn tone_takes_the_ring(tone: InlineButtonTone) -> bool {
+    matches!(tone, InlineButtonTone::Accent | InlineButtonTone::Neutral)
 }
 
 /// Tone fragment: colored border + toned glyph at rest, tone-filled on
@@ -243,6 +265,32 @@ mod tests {
         assert!(!class.contains("tw:cursor-pointer"), "{class}");
         assert!(!class.contains("tw:hover:"), "{class}");
         assert!(class.contains("tw:bg-card-muted"), "{class}");
+    }
+
+    #[test]
+    fn only_the_decoration_free_tones_take_the_iridescent_ring() {
+        // A status tone means something; the spectrum ring is decoration.
+        // Letting Error or Bound flash rainbow on hover would put a second,
+        // meaningless color on a control whose color IS the message.
+        for tone in ALL_TONES {
+            let class = inline_icon_button_class(tone, false);
+            let expected = matches!(tone, InlineButtonTone::Accent | InlineButtonTone::Neutral);
+            assert_eq!(class.contains("ux-ir-ring"), expected, "{class}");
+        }
+    }
+
+    #[test]
+    fn enabled_buttons_are_keyboard_visible_and_disabled_ones_are_inert() {
+        for tone in ALL_TONES {
+            assert!(
+                inline_icon_button_class(tone, false).contains("ux-focus-ring"),
+                "{tone:?}"
+            );
+        }
+        // Disabled buttons are not focusable and take no interaction light.
+        let class = inline_icon_button_class(InlineButtonTone::Accent, true);
+        assert!(!class.contains("ux-ir-ring"), "{class}");
+        assert!(!class.contains("ux-focus-ring"), "{class}");
     }
 
     #[test]

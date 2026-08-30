@@ -78,8 +78,11 @@ pub fn IconActionButton(
     }
 }
 
+/// Material-free (P4): every caller renders this through the merged-outline
+/// popover (`ux-svg-popover-panel` forces background/border-color/shadow to
+/// nothing — `style.css`), so only layout and type survive here.
 fn default_icon_menu_popup_class() -> &'static str {
-    "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-3 tw:text-sm tw:text-muted-foreground tw:shadow-lg"
+    "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-3 tw:rounded-md tw:border tw:p-3 tw:text-sm tw:text-muted-foreground"
 }
 
 /// Popover chrome class for a tone: sets the merged-outline gradient

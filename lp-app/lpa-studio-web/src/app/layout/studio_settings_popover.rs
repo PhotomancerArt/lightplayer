@@ -12,7 +12,10 @@ use lpa_studio_core::{
     UiAgentSettingsView, UiModelOption, UiSettingsView,
 };
 
-use crate::base::{IconPopoverButton, PopoverPlacement, StudioIconName};
+use crate::base::{
+    IconPopoverButton, InlineButtonTone, PopoverPlacement, StudioIconName, inline_text_button_class,
+};
+use crate::core::outline_action_class;
 use crate::local_model_probe::ProbeRequest;
 
 /// The model dropdown's free-text escape hatch (its option value; never a
@@ -139,7 +142,7 @@ fn ProbeFindingCard(finding: ProbeFinding, on_settings: EventHandler<SettingsCom
                     for model in finding.models.iter().take(MAX_LISTED_MODELS) {
                         button {
                             key: "{model}",
-                            class: MODEL_CHIP_CLASS,
+                            class: inline_text_button_class(InlineButtonTone::Accent, false),
                             r#type: "button",
                             title: "Use this server and model",
                             onclick: {
@@ -161,7 +164,7 @@ fn ProbeFindingCard(finding: ProbeFinding, on_settings: EventHandler<SettingsCom
                 // Nothing to pick, but the address itself is worth keeping
                 // (the CORS case: right port, one server setting away).
                 button {
-                    class: "{CLEAR_BUTTON_CLASS} tw:justify-self-start",
+                    class: format!("{} tw:justify-self-start", inline_text_button_class(InlineButtonTone::Neutral, false)),
                     r#type: "button",
                     title: "Save this address as the base URL",
                     onclick: move |_| {
@@ -299,7 +302,7 @@ pub fn AgentSettingsSection(
                         }
                         if agent.base_url_override.is_some() {
                             button {
-                                class: CLEAR_BUTTON_CLASS,
+                                class: inline_text_button_class(InlineButtonTone::Neutral, false),
                                 r#type: "button",
                                 title: "Clear the base URL saved in this browser",
                                 onclick: move |_| on_settings.call(SettingsCommand::SetAgentCustomBaseUrl(None)),
@@ -312,7 +315,7 @@ pub fn AgentSettingsSection(
                     // "does this address work?" and "where is my server?".
                     div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:pt-0.5",
                         button {
-                            class: PROBE_BUTTON_CLASS,
+                            class: inline_text_button_class(InlineButtonTone::Neutral, probe.running),
                             r#type: "button",
                             disabled: probe.running,
                             title: "Ask this server for its model list",
@@ -327,7 +330,7 @@ pub fn AgentSettingsSection(
                             "Test connection"
                         }
                         button {
-                            class: PROBE_BUTTON_CLASS,
+                            class: inline_text_button_class(InlineButtonTone::Neutral, probe.running),
                             r#type: "button",
                             disabled: probe.running,
                             title: "Try the ports Ollama, LM Studio, llama.cpp, vLLM and friends use",
@@ -374,7 +377,7 @@ pub fn AgentSettingsSection(
                                 span { class: HINT_CLASS, "{hint}" }
                             }
                             button {
-                                class: CLEAR_BUTTON_CLASS,
+                                class: inline_text_button_class(InlineButtonTone::Neutral, false),
                                 r#type: "button",
                                 title: "Forget this key (also revocable at openrouter.ai)",
                                 onclick: move |_| {
@@ -386,7 +389,7 @@ pub fn AgentSettingsSection(
                         }
                     } else {
                         button {
-                            class: CONNECT_BUTTON_CLASS,
+                            class: outline_action_class(false),
                             r#type: "button",
                             title: "Sign in on openrouter.ai and come right back — no key to paste",
                             onclick: move |_| {
@@ -420,7 +423,7 @@ pub fn AgentSettingsSection(
                             }
                             if agent.api_key_overridden {
                                 button {
-                                    class: CLEAR_BUTTON_CLASS,
+                                    class: inline_text_button_class(InlineButtonTone::Neutral, false),
                                     r#type: "button",
                                     title: "Remove the key saved in this browser",
                                     onclick: move |_| on_settings.call(set_key_command(key_field_provider, None)),
@@ -458,7 +461,7 @@ pub fn AgentSettingsSection(
                         "Model"
                     }
                     button {
-                        class: CLEAR_BUTTON_CLASS,
+                        class: inline_text_button_class(InlineButtonTone::Neutral, false),
                         r#type: "button",
                         title: "Fetch the provider's model list again",
                         onclick: move |_| {
@@ -529,7 +532,7 @@ pub fn AgentSettingsSection(
                     }
                     if agent.model_override.is_some() {
                         button {
-                            class: CLEAR_BUTTON_CLASS,
+                            class: inline_text_button_class(InlineButtonTone::Neutral, false),
                             r#type: "button",
                             title: "Clear the model override",
                             onclick: move |_| on_settings.call(SettingsCommand::SetAgentModel(None)),
@@ -581,12 +584,11 @@ pub fn AgentSettingsSection(
 // convention.
 const TRIGGER_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-bound-border tw:bg-status-bound-bg tw:p-0 tw:text-status-bound-foreground";
 const TRIGGER_OPEN_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-bound-border tw:bg-card-raised tw:p-0 tw:text-status-bound-foreground";
-const POPUP_CLASS: &str = "tw:grid tw:w-[min(340px,calc(100vw-24px))] tw:overflow-hidden tw:rounded-md tw:border tw:border-status-neutral-border tw:bg-card tw:bg-[linear-gradient(90deg,var(--studio-status-neutral-bg),transparent_74%)] tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+/// Material-free (P4): the merged-outline popover already paints
+/// background/border/shadow (and the neutral-status gradient wash was dead
+/// under it too), so this carries only layout and type.
+const POPUP_CLASS: &str = "tw:grid tw:w-[min(340px,calc(100vw-24px))] tw:overflow-hidden tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 const INPUT_CLASS: &str = "tw:h-7 tw:w-full tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-1.5 tw:font-mono tw:text-xs tw:text-muted-foreground";
-const CLEAR_BUTTON_CLASS: &str = "tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-1.5 tw:py-0.5 tw:text-[11px] tw:text-muted-foreground tw:hover:text-soft-foreground";
-const CONNECT_BUTTON_CLASS: &str = "tw:justify-self-start tw:cursor-pointer tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-accent tw:transition tw:duration-300 tw:hover:bg-accent-wash";
-const PROBE_BUTTON_CLASS: &str = "tw:cursor-pointer tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-muted tw:px-2 tw:py-1 tw:text-[11px] tw:font-bold tw:text-muted-foreground tw:transition tw:duration-200 tw:hover:text-strong-foreground tw:disabled:cursor-default tw:disabled:text-dim-foreground";
-const MODEL_CHIP_CLASS: &str = "tw:cursor-pointer tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[11px] tw:text-accent tw:hover:bg-accent-wash";
 /// How many served model ids a finding lists before collapsing the rest.
 const MAX_LISTED_MODELS: usize = 6;
 const LABEL_CLASS: &str = "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground";

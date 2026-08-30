@@ -41,7 +41,11 @@ use lpc_cloud_api::{Access, MemberRole};
 
 use crate::app::share::share_person::SharePerson;
 use crate::app::share::share_url::ShareUrl;
-use crate::base::{PopoverButton, PopoverCloseHandle, PopoverPlacement};
+use crate::base::{
+    InlineButtonTone, PopoverButton, PopoverCloseHandle, PopoverPlacement,
+    inline_icon_button_class, inline_text_button_class,
+};
+use crate::core::outline_action_class;
 
 /// The chrome's Share pill and its anchored panel.
 ///
@@ -146,7 +150,7 @@ pub fn SharePanel(
                 }
                 if let Some(mut close) = close {
                     button {
-                        class: PANEL_CLOSE_CLASS,
+                        class: inline_icon_button_class(InlineButtonTone::Neutral, false),
                         r#type: "button",
                         aria_label: "Close",
                         onclick: move |_| close.close(),
@@ -332,7 +336,7 @@ fn PersonRow(person: SharePerson, on_remove: Option<EventHandler<String>>) -> El
                     "Editor"
                 }
                 button {
-                    class: ROW_ACTION_CLASS,
+                    class: inline_text_button_class(InlineButtonTone::Neutral, false),
                     r#type: "button",
                     title: "Remove {person.email} from this project",
                     onclick: move |_| {
@@ -340,7 +344,7 @@ fn PersonRow(person: SharePerson, on_remove: Option<EventHandler<String>>) -> El
                             on_remove.call(email.clone());
                         }
                     },
-                    span { class: "tw:text-[11px] tw:font-semibold", "Remove" }
+                    "Remove"
                 }
             }
         }
@@ -405,9 +409,9 @@ fn AddPersonRow(on_add: Option<EventHandler<String>>, adding: bool) -> Element {
                 },
             }
             button {
-                class: ADD_SUBMIT_CLASS,
+                class: outline_action_class(false),
                 r#type: "submit",
-                span { class: "tw:text-[11px] tw:font-bold", "Add" }
+                "Add"
             }
         }
     }
@@ -461,10 +465,11 @@ const SHARE_PILL_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw
 const SHARE_PILL_OPEN_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-accent-border tw:bg-accent-wash tw:px-3 tw:py-1.5 tw:text-strong-foreground";
 /// The panel, at the spike's 348px. Plain `w-[…]`, the shipped ⋯ menu's
 /// idiom: `.ux-popover-panel` already caps every panel at
-/// `calc(100vw - 24px)`.
-const SHARE_POPUP_CLASS: &str = "tw:grid tw:w-[348px] tw:min-w-0 tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:text-sm tw:text-muted-foreground tw:shadow-lg";
-/// The header's ×.
-const PANEL_CLOSE_CLASS: &str = "tw:ml-auto tw:inline-flex tw:h-5 tw:w-5 tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:p-0 tw:text-dim-foreground tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
+/// `calc(100vw - 24px)`. Material-free (P4): the merged-outline popover's
+/// `ux-svg-popover-panel` already paints background/border/shadow, so this
+/// carries only layout and type.
+const SHARE_POPUP_CLASS: &str =
+    "tw:grid tw:w-[348px] tw:min-w-0 tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 /// The URL hero's box: the terminal surface, because it holds an address.
 const URL_HERO_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-border tw:bg-terminal tw:px-2.5 tw:py-2";
 /// The one filled button in the panel — the link IS the share.
@@ -480,14 +485,12 @@ const GROUP_HEADER_CLASS: &str =
 /// The pending-invitation badge: warn-toned, because it is a promise the
 /// service has not been able to keep yet.
 const INVITED_BADGE_CLASS: &str = "tw:inline-flex tw:flex-none tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:py-px tw:font-mono tw:text-[8.5px] tw:font-bold tw:uppercase tw:tracking-wide tw:text-status-warning-foreground";
-/// A quiet per-row verb (Remove).
-const ROW_ACTION_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-1.5 tw:py-1 tw:text-subtle-foreground tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
-/// The dashed add row, at the list's bottom.
+/// The dashed add row, at the list's bottom — the idiom `device_card`'s
+/// entry cards mirror (P4: kept bespoke on purpose; it is the pattern
+/// source, not a one-off).
 const ADD_ROW_CLASS: &str = "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-2.5 tw:py-2 tw:text-left tw:text-subtle-foreground tw:transition-colors tw:hover:border-dim-foreground tw:hover:text-foreground";
 /// The same row, unfolded into its email box.
 const ADD_INPUT_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-border tw:bg-card-muted tw:px-2.5 tw:py-1.5";
-/// The box's submit.
-const ADD_SUBMIT_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-accent-border tw:bg-transparent tw:px-2 tw:py-1 tw:text-accent tw:transition-colors tw:hover:bg-accent-wash";
 
 #[cfg(test)]
 mod tests {
@@ -520,11 +523,8 @@ mod tests {
         for class in [
             SHARE_PILL_CLASS,
             SHARE_PILL_OPEN_CLASS,
-            PANEL_CLOSE_CLASS,
             COPY_BUTTON_CLASS,
-            ROW_ACTION_CLASS,
             ADD_ROW_CLASS,
-            ADD_SUBMIT_CLASS,
         ] {
             assert!(class.contains("tw:bg-"), "no background in `{class}`");
         }
