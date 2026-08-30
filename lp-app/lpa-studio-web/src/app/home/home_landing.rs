@@ -126,7 +126,7 @@ pub fn HomePage(
             section { class: "tw:grid tw:w-[min(880px,100%)] tw:gap-4",
                 SectionDivider { title: "Examples" }
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-muted-foreground",
-                    "Real projects, running live — open one to play with it. Saving makes a copy that's yours."
+                    "Explore an example in the simulator. Customize it, share it, and flash it to hardware to see it in action."
                 }
                 div { class: "{crate::app::home::card_grid_class()} tw:text-left",
                     for card in examples {
