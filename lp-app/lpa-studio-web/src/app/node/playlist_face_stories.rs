@@ -2,10 +2,11 @@
 //! renders below the card as a sibling — P2c item 2).
 //!
 //! Four entries with duration chips, one cue-tagged entry, and the
-//! "ACTIVE" placard replacing the playing entry's thumbnail (Yona Q5:
-//! ACTIVE, matching `PlaylistState.active_entry`). Coverage: the strip
-//! alone, the active child's card stacked below as its own card, and the
-//! empty playlist.
+//! "ACTIVE" badge riding the playing entry's thumbnail (Yona Q5: ACTIVE,
+//! matching `PlaylistState.active_entry`; the thumbnail stays — hiding it
+//! made the playing entry the one chip you couldn't recognize). Coverage:
+//! the strip alone, the active child's card stacked below as its own card,
+//! and the empty playlist.
 
 use dioxus::prelude::*;
 use lpa_studio_core::app::project::node::add_node_menu;
@@ -24,7 +25,7 @@ fn PlaylistCardCanvas(children: Element) -> Element {
 }
 
 #[story(
-    description = "Entry strip: four entries with m:ss duration chips, the cue-tagged Tide entry (hold), and the ACTIVE placard on Aurora — no child card (nothing derived yet, e.g. before the mirror loads)."
+    description = "Entry strip: four entries with m:ss duration chips, the cue-tagged Tide entry (hold), and the ACTIVE badge over Aurora's thumbnail — no child card (nothing derived yet, e.g. before the mirror loads)."
 )]
 fn strip() -> Element {
     let mut view = playlist_node_face_view();
