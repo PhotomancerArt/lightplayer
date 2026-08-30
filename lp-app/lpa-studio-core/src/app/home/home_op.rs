@@ -84,12 +84,23 @@ pub enum HomeOp {
     OpenPackage {
         key: String,
     },
-    /// Open an example: seed it into the library once, then open the copy.
-    /// Was the ONE way to start a project (D17: "new project" is the
-    /// examples place) until 2026-07-27, when [`Self::CreateProject`]
-    /// deviated from D17 (`docs/adr/2026-07-27-node-authoring-operations.md`).
+    /// Open an example as a TRANSIENT view session (examples vision D2):
+    /// nothing installed, nothing seeded; the explicit save forks it.
+    /// (Until 2026-08-28 this seeded a library copy — the seed-once model
+    /// the examples vision reversed.)
     OpenExample {
         id: String,
+    },
+    /// Open someone else's View-access shared project as a TRANSIENT view
+    /// session (examples vision P5): the platform edge fetched the
+    /// working copy + history and hands the bytes through — the cloud
+    /// document's own uid, nothing installed. Explicit save forks with a
+    /// fresh identity.
+    OpenSharedTransient {
+        uid: String,
+        name: String,
+        package_files: Vec<(String, Vec<u8>)>,
+        history_files: Vec<(String, Vec<u8>)>,
     },
     /// Create a project from a template and OPEN it — create-and-open is
     /// the gesture: the user lands in the editor with something to do next.
@@ -190,6 +201,7 @@ impl HomeOp {
             self,
             Self::OpenPackage { .. }
                 | Self::OpenExample { .. }
+                | Self::OpenSharedTransient { .. }
                 | Self::CreateProject { .. }
                 | Self::CreateFromPattern { .. }
         )
@@ -203,7 +215,10 @@ impl HomeOp {
     /// run, because its catalog transaction is real work the user asked
     /// for and no later click repeats it.
     pub fn is_pure_open(&self) -> bool {
-        matches!(self, Self::OpenPackage { .. } | Self::OpenExample { .. })
+        matches!(
+            self,
+            Self::OpenPackage { .. } | Self::OpenExample { .. } | Self::OpenSharedTransient { .. }
+        )
     }
 }
 
@@ -219,6 +234,12 @@ impl ControllerOp for HomeOp {
             Self::OpenExample { .. } => ActionMeta::new(
                 "Open example",
                 "Run this example; it becomes yours on first save.",
+                ActionPriority::Primary,
+            )
+            .with_icon("play"),
+            Self::OpenSharedTransient { .. } => ActionMeta::new(
+                "Open shared project",
+                "Run this shared project; saving forks your own copy.",
                 ActionPriority::Primary,
             )
             .with_icon("play"),
@@ -340,6 +361,7 @@ impl ControllerOp for HomeOp {
             // same open, so it shares the budget.
             Self::OpenPackage { .. }
             | Self::OpenExample { .. }
+            | Self::OpenSharedTransient { .. }
             | Self::CreateProject { .. }
             | Self::CreateFromPattern { .. } => ActionClass::Foreground {
                 deadline: PROJECT_LOAD_DEADLINE,

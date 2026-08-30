@@ -24,7 +24,9 @@ pub use board_project::{
     DEFAULT_STRIP_PIXELS, GenerateProjectError, GeneratedProject, generate_board_project,
 };
 pub use card_ui_state::{CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb};
-pub use embedded_example::{EmbeddedExample, embedded_example, embedded_examples};
+pub use embedded_example::{
+    EmbeddedExample, embedded_example, embedded_example_by_slug, embedded_examples,
+};
 pub use home_op::{HOME_NODE_ID, HomeOp, ProjectTemplate, ZipBytes};
 pub use home_view_builder::{
     HomeDeviceEvidence, HomePoolEvidence, HomeSimEvidence, importable_patterns,

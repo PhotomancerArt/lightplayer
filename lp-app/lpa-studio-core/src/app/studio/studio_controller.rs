@@ -282,8 +282,16 @@ struct SessionIdentity {
 enum PendingOpen {
     /// A library package, by key (`prj…` uid or slug).
     Package(String),
-    /// An embedded example, by id (seeded into the library on first open).
+    /// An embedded example, by id (opened as a transient view session).
     Example(String),
+    /// A fetched View-access shared project (P5): the bytes ride the
+    /// pending open so a cold link can boot the sim first.
+    SharedTransient {
+        uid: String,
+        name: String,
+        package_files: Vec<(String, Vec<u8>)>,
+        history_files: Vec<(String, Vec<u8>)>,
+    },
 }
 
 impl PendingOpen {
@@ -292,6 +300,7 @@ impl PendingOpen {
         match self {
             PendingOpen::Package(key) => key,
             PendingOpen::Example(id) => id,
+            PendingOpen::SharedTransient { uid, .. } => uid,
         }
     }
 
@@ -302,6 +311,17 @@ impl PendingOpen {
         let op = match self {
             PendingOpen::Package(key) => HomeOp::OpenPackage { key: key.clone() },
             PendingOpen::Example(id) => HomeOp::OpenExample { id: id.clone() },
+            PendingOpen::SharedTransient {
+                uid,
+                name,
+                package_files,
+                history_files,
+            } => HomeOp::OpenSharedTransient {
+                uid: uid.clone(),
+                name: name.clone(),
+                package_files: package_files.clone(),
+                history_files: history_files.clone(),
+            },
         };
         UiAction::from_op(crate::ControllerId::new(HOME_NODE_ID), op)
     }
@@ -1284,6 +1304,11 @@ impl StudioController {
                 self.project.active_library_uid(),
                 self.project.active_library_display_name(),
             )
+            .with_transient(
+                self.project.active_is_transient(),
+                self.project.active_transient_example(),
+                self.project.transient_fork_generation(),
+            )
             .with_device_sync(self.ambient_device_sync().cloned())
             .with_lens_card(self.lens_device_card())
             .with_session(self.session_control())
@@ -2005,8 +2030,9 @@ impl StudioController {
     /// dispatch) drains it.
     pub fn attach_library(&mut self, host: Rc<dyn LibraryHost>) {
         let clock = std::rc::Rc::clone(&self.now_secs);
+        let random = std::rc::Rc::clone(&self.random);
         self.library_host = Some(Rc::clone(&host));
-        self.project.set_library(host, clock);
+        self.project.set_library(host, clock, random);
         self.request_library_refresh();
     }
 
@@ -4251,6 +4277,24 @@ impl StudioController {
             HomeOp::OpenExample { id } => {
                 return self.open_from_home(PendingOpen::Example(id), updates).await;
             }
+            HomeOp::OpenSharedTransient {
+                uid,
+                name,
+                package_files,
+                history_files,
+            } => {
+                return self
+                    .open_from_home(
+                        PendingOpen::SharedTransient {
+                            uid,
+                            name,
+                            package_files,
+                            history_files,
+                        },
+                        updates,
+                    )
+                    .await;
+            }
             HomeOp::CreateProject { template } => {
                 // Create-and-open (the D17 deviation, 2026-07-27): the
                 // package lands in the library — slugged/dated/deduped by
@@ -5722,7 +5766,27 @@ impl StudioController {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             match &pending {
                 PendingOpen::Package(key) => self.project.open_library_package(server, key).await,
-                PendingOpen::Example(id) => self.project.open_example_package(server, id).await,
+                // Examples open as TRANSIENT view sessions (vision D2):
+                // no seed, no library entry, no persisted uid. The
+                // explicit-save gesture is what installs a copy.
+                PendingOpen::Example(id) => self.project.open_example_transient(server, id).await,
+                // A View-access share link, likewise (P5): the fetched
+                // bytes run the cloud document's own uid; save forks.
+                PendingOpen::SharedTransient {
+                    uid,
+                    name,
+                    package_files,
+                    history_files,
+                } => match uid.parse() {
+                    Ok(uid) => {
+                        self.project
+                            .open_shared_transient(server, uid, name, package_files, history_files)
+                            .await
+                    }
+                    Err(e) => Err(UiError::MissingSession(format!(
+                        "shared open: invalid uid {uid:?}: {e}"
+                    ))),
+                },
             }
         };
         match result {
@@ -5785,6 +5849,11 @@ impl StudioController {
                     let server = self.pool.lens_session_mut()?.client_mut()?;
                     self.project.save_overlay(server).await
                 };
+                // A save can be the FORK of a transient session (D7), and a
+                // shared-view fork changes the active project's identity —
+                // re-note so the lens (and therefore the URL) follows the
+                // fork. Idempotent for every ordinary save.
+                self.note_sim_loaded_project();
                 self.record_project_edit_run(run)
             }
             ProjectOp::RevertAllEdits => {
@@ -8055,6 +8124,11 @@ impl StudioController {
     }
 
     /// The runtime pool, for e2e assertions about session coexistence.
+    #[cfg(test)]
+    pub(crate) fn project_for_test(&self) -> &ProjectController {
+        &self.project
+    }
+
     pub(crate) fn runtime_pool_for_test(&self) -> &RuntimePool {
         &self.pool
     }

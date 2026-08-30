@@ -241,6 +241,7 @@ fn person(given: &str, family: &str, email: &str, photo: bool, provider: &str, s
         picture_url: photo.then(|| PHOTO.to_string()),
         provider_label: provider.to_string(),
         created_at: 1_752_000_000_000.0,
+        anonymous: false,
     }
 }
 

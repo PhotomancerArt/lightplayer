@@ -220,6 +220,10 @@ pub struct ProjectController {
     /// P3's designation editor bumps this via
     /// [`Self::invalidate_export_lint`].
     export_lint_epoch: std::cell::Cell<u64>,
+    /// Bumped once per completed fork-at-save (D7) — the web shell watches
+    /// it on the view to raise the one-line fork toast (a state transition
+    /// alone can't distinguish "forked" from "opened another project").
+    transient_fork_generation: u64,
 }
 
 /// The local `editor.json` answer, three ways (unified-editor P2): the
@@ -384,6 +388,12 @@ struct PendingNodeFocus {
 struct LibraryContext {
     host: std::rc::Rc<dyn crate::app::library::LibraryHost>,
     now_secs: std::rc::Rc<dyn Fn() -> f64>,
+    /// The platform's identity-minting entropy (the studio controller's
+    /// injected `random`) — transient view sessions mint their project
+    /// uid from it at open, and a fork-at-save persists exactly that uid,
+    /// so it must be as unguessable as any other uid (the link IS the
+    /// access token, D6).
+    random: std::rc::Rc<dyn Fn() -> [u8; 16]>,
     active: Option<ActiveLibraryProject>,
     /// Projects that stopped being active on a synchronous path (state
     /// reset, replacement open) and still hold their host-side lock.
@@ -398,6 +408,28 @@ struct ActiveLibraryProject {
     /// Runtime fs revision the library is synced to (advances on each
     /// successful save-as-pull).
     last_synced: lpc_model::FsVersion,
+    /// `Some` while this is a transient view session (examples vision D2):
+    /// the handle's stores are memory-backed, the uid is ephemeral RAM
+    /// identity, and NOTHING host-side exists for it — no lock to release
+    /// (never queued into `pending_close`), no catalog row, and no
+    /// `notify_saved` broadcast (the cloud sync engine must never be
+    /// offered a transient uid). The web layer reads this through
+    /// [`UiStudioView::open_project_transient`](crate::UiStudioView) to
+    /// keep transient sessions off `/p/<slug>-<uid>` URLs.
+    transient: Option<TransientOrigin>,
+}
+
+/// Where a transient view session's content came from — what the
+/// fork-at-explicit-save step records as provenance, and what the web
+/// layer needs to address the session honestly (a bare `/p/<slug>`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TransientOrigin {
+    /// An embedded example, by id (`examples/fyeah-sign`).
+    Example { id: String },
+    /// Someone else's View-access shared project (P5): the session runs
+    /// the cloud document's own uid over fetched content; a fork mints a
+    /// FRESH identity (the parent uid stays the parent's).
+    SharedView { parent_project: String },
 }
 
 impl ProjectController {
@@ -441,6 +473,7 @@ impl ProjectController {
             open_notices: Vec::new(),
             export_lint: std::cell::RefCell::new(None),
             export_lint_epoch: std::cell::Cell::new(0),
+            transient_fork_generation: 0,
         }
     }
 
@@ -455,16 +488,28 @@ impl ProjectController {
         &self.runtime_storage_id
     }
 
+    /// A file from the ACTIVE package's store (transient e2e assertions:
+    /// the memory copy is unreachable from outside the controller).
+    #[cfg(test)]
+    pub(crate) fn active_package_file_for_test(&self, path: &str) -> Option<Vec<u8>> {
+        use lpc_model::AsLpPath;
+        let active = self.library.as_ref()?.active.as_ref()?;
+        let view = active.handle.package_fs.borrow();
+        view.read_file(path.as_path()).ok()
+    }
+
     /// Attach the injected library host (browser shell, once the store
     /// backing it is ready).
     pub fn set_library(
         &mut self,
         host: std::rc::Rc<dyn crate::app::library::LibraryHost>,
         now_secs: std::rc::Rc<dyn Fn() -> f64>,
+        random: std::rc::Rc<dyn Fn() -> [u8; 16]>,
     ) {
         self.library = Some(LibraryContext {
             host,
             now_secs,
+            random,
             active: None,
             pending_close: Vec::new(),
         });
@@ -2589,8 +2634,10 @@ impl ProjectController {
         server: &mut StudioServerClient,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         if self.library.is_some() {
+            // The demo IS example viewing: a transient session, like every
+            // example entry point (D2) — an explicit save forks it.
             return self
-                .open_example_package(server, crate::app::project::demo_project::DEMO_PROJECT_ID)
+                .open_example_transient(server, crate::app::project::demo_project::DEMO_PROJECT_ID)
                 .await;
         }
         self.mark_opening_project();
@@ -2644,34 +2691,265 @@ impl ProjectController {
             std::rc::Rc::clone(&context.host)
         };
         let opened = host.open_project(key).await.map_err(UiError::from)?;
-        self.open_opened_package(server, opened).await
+        self.open_opened_package(server, opened, None).await
     }
 
-    /// Open an example: seed it into the library once (a catalog
-    /// transaction — found by provenance on every later open, it never
-    /// reseeds), then open the copy like any package.
-    pub(crate) async fn open_example_package(
+    /// Open an embedded example as a **transient view session** (examples
+    /// vision D2): memory-backed stores, no catalog transaction, no OPFS
+    /// write, no persisted uid — the whole editor runs over the memory
+    /// copy through the ordinary funnel, and an explicit save later is
+    /// what installs it into the real library (fork-at-save).
+    ///
+    /// A library context must still be attached — the transient session
+    /// borrows its clock and lives in its active slot — but the host's
+    /// store is never touched.
+    pub(crate) async fn open_example_transient(
         &mut self,
         server: &mut StudioServerClient,
         id: &str,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         self.mark_opening_project();
-        let host = {
+        let example = crate::app::home::embedded_example(id)
+            .ok_or_else(|| UiError::MissingSession(format!("unknown example {id}")))?;
+        let (now, random) = {
             let context = self.library.as_ref().ok_or_else(no_library_error)?;
-            std::rc::Rc::clone(&context.host)
+            ((context.now_secs)(), (context.random)())
         };
-        let outcome = host
-            .catalog(crate::app::library::CatalogOp::EnsureExampleSeeded { id: id.to_string() })
-            .await
-            .map_err(UiError::from)?;
-        let summary = outcome.summary.ok_or_else(|| {
-            UiError::MissingSession(format!("seeding example {id} produced no package"))
+        // PD2: the session's uid is minted HERE, in RAM, from host entropy —
+        // never persisted and never shown while the session stays transient.
+        // It lives in the memory manifest (so the runtime and library copies
+        // can only ever agree), and the fork-at-save step promotes exactly
+        // this uid into the library — which is why it must be real entropy:
+        // once persisted it is the share link's access token (D6).
+        let opened = crate::app::library::transient::transient_opened_project(
+            example.slug(),
+            &example.files(),
+            crate::app::library::PackageProvenance::SeededFrom {
+                source: id.to_string(),
+            },
+            &random,
+            now,
+        )
+        .map_err(library_ui_error)?;
+        self.open_opened_package(
+            server,
+            opened,
+            Some(TransientOrigin::Example { id: id.to_string() }),
+        )
+        .await
+    }
+
+    /// The transient view session's origin example id, when the active
+    /// session is one (`None` for ordinary library-backed sessions). The
+    /// studio view exposes this so the web layer can address the session
+    /// as `/p/<slug>` and gate URL healing off it.
+    pub(crate) fn active_transient_example(&self) -> Option<String> {
+        match self.library.as_ref()?.active.as_ref()?.transient.as_ref()? {
+            TransientOrigin::Example { id } => Some(id.clone()),
+            TransientOrigin::SharedView { .. } => None,
+        }
+    }
+
+    /// Whether the active session is ANY kind of transient view (example
+    /// or shared) — the view's transient marker for shared views carries
+    /// no example id, so this is the general predicate.
+    pub(crate) fn active_is_transient(&self) -> bool {
+        self.library
+            .as_ref()
+            .and_then(|context| context.active.as_ref())
+            .is_some_and(|active| active.transient.is_some())
+    }
+
+    /// Completed fork-at-save count (see the field).
+    pub(crate) fn transient_fork_generation(&self) -> u64 {
+        self.transient_fork_generation
+    }
+
+    /// Open someone else's View-access shared project as a transient view
+    /// session (P5): pre-fetched working copy + real history, the cloud
+    /// document's own uid (D17), nothing installed. The explicit save
+    /// forks it into a fresh identity.
+    pub(crate) async fn open_shared_transient(
+        &mut self,
+        server: &mut StudioServerClient,
+        uid: lpc_history::PrefixedUid,
+        name: &str,
+        package_files: &[(String, Vec<u8>)],
+        history_files: &[(String, Vec<u8>)],
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        self.mark_opening_project();
+        let opened = crate::app::library::transient::transient_opened_project_prefetched(
+            uid,
+            name,
+            package_files,
+            history_files,
+        )
+        .map_err(library_ui_error)?;
+        self.open_opened_package(
+            server,
+            opened,
+            Some(TransientOrigin::SharedView {
+                parent_project: uid.to_string(),
+            }),
+        )
+        .await
+    }
+
+    /// D7 — the identity moment: on a transient view session, the explicit
+    /// save gesture forks the memory copy into the real library.
+    ///
+    /// The files (which already carry the session's uid in their manifest —
+    /// see `transient_opened_project`) and the full history install
+    /// **verbatim** through `InstallSyncedProject`, so the library copy is
+    /// byte-identical to both the memory copy and the runtime's; then the
+    /// installed project is opened on the real host (taking its lock) and
+    /// swapped in place under the running session — same uid, same content,
+    /// no re-push, no visible reload. Subsequent saves flow to the OPFS
+    /// handle, and the host's catalog broadcast is what wakes the gallery
+    /// and (with `SeededFrom`/`ForkedFrom` provenance) the cloud publish.
+    ///
+    /// `Ok(None)` = not a transient session, nothing to do. On failure the
+    /// session simply STAYS transient — the caller warns, and the next save
+    /// retries the whole install (the uid is not yet in the library, so a
+    /// retry cannot collide).
+    async fn fork_transient_at_save(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<Option<UiNotice>, UiError> {
+        let name = self.active_library_display_name();
+        let (host, origin, uid, memory_hash, head, package_files, history_files, last_synced) = {
+            // No library, no active, or not transient: nothing to fork —
+            // the ordinary save is already complete.
+            let Some(context) = self.library.as_ref() else {
+                return Ok(None);
+            };
+            let Some(active) = context.active.as_ref() else {
+                return Ok(None);
+            };
+            let Some(origin) = active.transient.clone() else {
+                return Ok(None);
+            };
+            let package_files = active.handle.read_all_files().map_err(library_ui_error)?;
+            let history_files =
+                crate::app::library::transient::all_store_files(&active.handle.history_fs)
+                    .map_err(library_ui_error)?;
+            (
+                std::rc::Rc::clone(&context.host),
+                origin,
+                active.handle.uid,
+                active.handle.content_hash().map_err(library_ui_error)?,
+                active.handle.history.head(),
+                package_files,
+                history_files,
+                active.last_synced,
+            )
+        };
+        let name = name.ok_or_else(|| {
+            UiError::MissingSession("the transient session has no display name".to_string())
         })?;
+
+        // The two origins install differently. An EXAMPLE session's uid is
+        // this browser's own mint, so it is PROMOTED: the files (manifest
+        // uid included) and history install verbatim, and nothing about the
+        // running session changes. A SHARED VIEW runs the PARENT cloud
+        // document's uid, which the fork must NOT claim — a fresh identity
+        // is minted at install, the fork starts a fresh history at its
+        // `ForkedFrom` origin, and the runtime is re-pushed afterwards so
+        // its manifest agrees with the library copy (project.json is part
+        // of the canonical hash; skipping the re-push would trip the
+        // save-as-pull corruption tripwire on every later save).
+        let (op, promoted) = match &origin {
+            TransientOrigin::Example { id } => (
+                crate::app::library::CatalogOp::InstallSyncedProject {
+                    name,
+                    package_files,
+                    history_files,
+                    provenance: crate::app::library::PackageProvenance::SeededFrom {
+                        source: id.clone(),
+                    },
+                },
+                true,
+            ),
+            TransientOrigin::SharedView { parent_project } => {
+                let parent_version = head.ok_or_else(|| {
+                    UiError::MissingSession(
+                        "the shared view has no saved version to fork".to_string(),
+                    )
+                })?;
+                (
+                    crate::app::library::CatalogOp::ForkTransientCopy {
+                        name,
+                        files: package_files
+                            .into_iter()
+                            .filter(|(path, _)| path != ".lp" && !path.starts_with(".lp/"))
+                            .collect(),
+                        provenance: crate::app::library::PackageProvenance::ForkedFrom {
+                            parent_project: parent_project.clone(),
+                            parent_version: parent_version.to_string(),
+                        },
+                    },
+                    false,
+                )
+            }
+        };
+        let outcome = host.catalog(op).await.map_err(UiError::from)?;
+        let installed = outcome.summary.ok_or_else(|| {
+            UiError::MissingSession("the fork install produced no package".to_string())
+        })?;
+        if promoted && installed.uid != uid {
+            // install_synced preserves the manifest uid by contract; a
+            // different one back means the library did something else.
+            return Err(UiError::MissingSession(format!(
+                "the fork install changed identity: {} != {uid}",
+                installed.uid
+            )));
+        }
         let opened = host
-            .open_project(&summary.uid.to_string())
+            .open_project(&installed.uid.to_string())
             .await
             .map_err(UiError::from)?;
-        self.open_opened_package(server, opened).await
+        let crate::app::library::OpenedProject {
+            uid: opened_uid,
+            slug,
+            package_fs,
+            history_fs,
+            receipt,
+        } = opened;
+        let handle =
+            crate::app::library::PackageHandle::load(opened_uid, slug, package_fs, history_fs)
+                .map_err(library_ui_error)?;
+        if promoted {
+            // The install wrote the same files — the runtime already runs
+            // this exact content, so the swap needs no re-push. Verify
+            // rather than trust: a divergent copy under a live session
+            // would corrupt the next save-as-pull.
+            let installed_hash = handle.content_hash().map_err(library_ui_error)?;
+            if installed_hash != memory_hash {
+                return Err(UiError::MissingSession(format!(
+                    "the fork install diverged from the session: {installed_hash} != {memory_hash}"
+                )));
+            }
+        }
+        let context = self.library.as_mut().ok_or_else(no_library_error)?;
+        // The memory-backed active is simply dropped: it held no host lock,
+        // and its content lives on in both the runtime and the new handle.
+        context.active = Some(ActiveLibraryProject {
+            handle,
+            last_synced,
+            transient: None,
+        });
+        // Active: the ordinary close path owns the project lock from here.
+        receipt.commit();
+        if !promoted {
+            // Shared-view fork: push the library copy (fresh uid in its
+            // manifest) over the runtime's parent-uid content. One engine
+            // reload at the fork moment; every later save is ordinary.
+            self.reload_active_from_library(server).await?;
+        }
+        self.transient_fork_generation += 1;
+        Ok(Some(UiNotice::info(
+            "Saved — this project is now in your library",
+        )))
     }
 
     /// Push a host-opened project to the runtime and make it the active
@@ -2687,6 +2965,7 @@ impl ProjectController {
         &mut self,
         server: &mut StudioServerClient,
         opened: crate::app::library::OpenedProject,
+        transient: Option<TransientOrigin>,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         let crate::app::library::OpenedProject {
             uid,
@@ -2711,7 +2990,9 @@ impl ProjectController {
         let now = {
             let context = self.library.as_mut().ok_or_else(no_library_error)?;
             if let Some(previous) = context.active.take() {
-                if previous.handle.uid != uid {
+                // A transient session holds nothing host-side — no lock,
+                // no flusher — so there is nothing to queue a close for.
+                if previous.handle.uid != uid && previous.transient.is_none() {
                     context.pending_close.push(previous.handle.uid.to_string());
                 }
             }
@@ -2742,6 +3023,7 @@ impl ProjectController {
         context.active = Some(ActiveLibraryProject {
             handle,
             last_synced: loaded.synced_version,
+            transient,
         });
         // Active: the close path owns the host's lock from here on.
         receipt.commit();
@@ -2770,7 +3052,7 @@ impl ProjectController {
         &mut self,
         server: &mut StudioServerClient,
     ) -> Result<Vec<UiLogDraft>, UiError> {
-        let (uid, slug, package_fs, history_fs) = {
+        let (uid, slug, package_fs, history_fs, transient) = {
             let context = self.library.as_ref().ok_or_else(no_library_error)?;
             let active = context.active.as_ref().ok_or_else(|| {
                 UiError::MissingSession("no active library project to reload".to_string())
@@ -2780,6 +3062,7 @@ impl ProjectController {
                 active.handle.slug.clone(),
                 std::rc::Rc::clone(&active.handle.package_fs),
                 std::rc::Rc::clone(&active.handle.history_fs),
+                active.transient.clone(),
             )
         };
         let handle = crate::app::library::PackageHandle::load(uid, slug, package_fs, history_fs)
@@ -2794,6 +3077,7 @@ impl ProjectController {
         context.active = Some(ActiveLibraryProject {
             handle,
             last_synced: loaded.synced_version,
+            transient,
         });
         self.mark_ready(title, loaded.handle_id, loaded.inventory);
         self.project_fs_root = loaded.fs_root;
@@ -2919,8 +3203,13 @@ impl ProjectController {
         }
         active.handle.record_save(now).map_err(library_ui_error)?;
         active.last_synced = pulled.version;
-        // fire-and-forget: hosts broadcast so other tabs' galleries refresh
-        context.host.notify_saved(&active.handle.uid.to_string());
+        // fire-and-forget: hosts broadcast so other tabs' galleries refresh.
+        // NOT for transient sessions: the uid is ephemeral RAM identity, and
+        // the broadcast is also the cloud sync engine's save trigger — a
+        // transient save must never enqueue a publish.
+        if active.transient.is_none() {
+            context.host.notify_saved(&active.handle.uid.to_string());
+        }
 
         // corruption tripwire: library copy must now match the runtime
         let local = active
@@ -5055,9 +5344,12 @@ impl ProjectController {
         // the library binding follows the loaded project: a disconnected or
         // failed project must not keep pulling saves into (or advertising)
         // the previously open package. Its host lock is queued for release
-        // (this path is sync; the settle points drain the queue).
+        // (this path is sync; the settle points drain the queue). A
+        // transient session holds no host lock, so nothing is queued.
         if let Some(library) = self.library.as_mut() {
-            if let Some(previous) = library.active.take() {
+            if let Some(previous) = library.active.take()
+                && previous.transient.is_none()
+            {
                 library.pending_close.push(previous.handle.uid.to_string());
             }
         }
@@ -5649,15 +5941,34 @@ impl ProjectController {
             UiNotice::info(format!("Saved {written} project file(s)"))
         };
         let mut notices = UiNotices::new().with_notice(notice);
+        let mut pulled = true;
         if written > 0 {
             // save-as-pull: the library copy tracks every committed save
             match self.pull_committed_changes_into_library(server).await {
                 Ok(Some(warning)) => notices = notices.with_notice(warning),
                 Ok(None) => {}
                 Err(e) => {
+                    pulled = false;
                     log::warn!("save-as-pull failed (will retry on next save): {e:?}");
                     notices = notices.with_notice(UiNotice::warning(
                         "Saved to the running project, but not yet to your library — will retry on the next save",
+                    ));
+                }
+            }
+        }
+        // D7: on a TRANSIENT session the explicit save is the fork moment —
+        // the memory copy (which now holds the committed save) installs
+        // into the real library and the session becomes an ordinary one.
+        // Skipped when the pull failed: the memory copy would be missing
+        // the very save the user just made; the next save retries both.
+        if pulled {
+            match self.fork_transient_at_save(server).await {
+                Ok(Some(forked)) => notices = notices.with_notice(forked),
+                Ok(None) => {}
+                Err(e) => {
+                    log::warn!("fork-at-save failed (session stays transient): {e:?}");
+                    notices = notices.with_notice(UiNotice::warning(
+                        "Saved in this session, but couldn't add the project to your library — will retry on the next save",
                     ));
                 }
             }
