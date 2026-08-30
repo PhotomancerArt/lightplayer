@@ -161,7 +161,11 @@ impl BrowserLinkInner {
     /// observation window: whatever we concluded about the previous
     /// generation describes a machine that no longer exists.
     async fn open_port(&self, baud: u32) {
-        let session = match self.session.borrow().clone() {
+        // Hoisted clone: a `match` scrutinee's `Ref` lives to the end of the
+        // whole match, so borrowing inside an arm (or across the connect
+        // await) would panic the RefCell.
+        let known_session = self.session.borrow().clone();
+        let session = match known_session {
             Some(session) => session,
             None => match self.provider.connect(&self.endpoint).await {
                 Ok(session) => {
@@ -194,7 +198,11 @@ impl BrowserLinkInner {
         // Release the reader/writer AND the provider session. The GRANT
         // survives: revoking it is `forget_endpoint`'s job, which the model
         // asks for separately through `Command::RevokeGrant`.
-        if let Some(session) = self.session.borrow().clone() {
+        // Hoisted clone, same reason as `open_port`: an `if let` scrutinee's
+        // `Ref` lives through the block — across both awaits and the
+        // `borrow_mut` below.
+        let known_session = self.session.borrow().clone();
+        if let Some(session) = known_session {
             if let Err(error) = self.provider.release_protocol(&session).await {
                 self.fail("release", &error);
             }
