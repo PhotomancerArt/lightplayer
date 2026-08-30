@@ -78,6 +78,10 @@ pub fn publish_slots(channels: &[u8]) {
 /// `raise`/`reset` are single register writes with no shared state.
 #[esp_hal::ram]
 pub fn ring_doorbell() {
+    // ⚠️ swi1 is claimed HERE, via steal(), as the wire pusher's doorbell —
+    // invisible to `SoftwareInterruptControl` ownership. Anything else
+    // wanting a SWI must not touch 1 (the io executor learned this the hard
+    // way; see docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md).
     unsafe { SoftwareInterrupt::<1>::steal() }.raise();
 }
 

@@ -51,6 +51,7 @@ pub fn sample_user(uid: PrefixedUid, email: &str) -> CloudUser {
         picture_url: None,
         provider: "google".to_string(),
         created_at: 1.0,
+        anonymous: false,
     }
 }
 

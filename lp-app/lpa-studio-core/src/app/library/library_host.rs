@@ -70,16 +70,10 @@ pub enum CatalogOp {
     ImportJson {
         text: String,
     },
-    /// Seed-once: find by `SeededFrom` provenance or install the embedded
-    /// example — atomic under the catalog lock (two fresh tabs racing the
-    /// same example must produce ONE package).
-    EnsureExampleSeeded {
-        id: String,
-    },
     /// Generate a first project for a catalog board (the setup flow's
     /// provision step, P03/P06) and install it. Creation-shaped: it touches
-    /// no existing project, and unlike `EnsureExampleSeeded` it is NOT
-    /// seed-once — every provision makes its own package.
+    /// no existing project, and NOT seed-once — every provision makes its
+    /// own package.
     GenerateForBoard {
         board_id: String,
     },
@@ -92,6 +86,18 @@ pub enum CatalogOp {
     /// `upgraded_from` is `None`.
     UpgradePackageFormat {
         project_uid: String,
+    },
+    /// Fork a TRANSIENT view session's working copy into a new library
+    /// project at the explicit save (examples vision P5): a fresh uid is
+    /// minted at install (the incoming manifest's uid — the PARENT cloud
+    /// document's — is dropped), the provenance seeds a fresh history
+    /// (`ForkedFrom` origin + the initial save), and the parent's own log
+    /// stays with the parent. Creation-shaped, like `Duplicate` without a
+    /// library source.
+    ForkTransientCopy {
+        name: String,
+        files: Vec<(String, Vec<u8>)>,
+        provenance: super::package_meta::PackageProvenance,
     },
     /// Install a project whose content AND history already exist in full —
     /// a cloud tracking copy (`open_shared`, P6) or a locally forked line —
@@ -358,7 +364,6 @@ pub fn apply_catalog_op(
             upgraded_from = outcome.upgraded_from;
             Some(outcome.summary)
         }
-        CatalogOp::EnsureExampleSeeded { id } => Some(ensure_example_seeded(store, &id, now)?),
         CatalogOp::GenerateForBoard { board_id } => {
             Some(generate_for_board(store, &board_id, now)?)
         }
@@ -377,6 +382,11 @@ pub fn apply_catalog_op(
             }
             Some(summary_for(store, uid)?)
         }
+        CatalogOp::ForkTransientCopy {
+            name,
+            files,
+            provenance,
+        } => Some(store.install_files_with_fresh_uid(&name, &files, provenance, now)?),
         CatalogOp::InstallSyncedProject {
             name,
             package_files,
@@ -402,28 +412,6 @@ fn import_refusal(error: &LibraryError, context: String) -> LibraryHostError {
         LibraryError::Format(message) => LibraryHostError::Refused(format!("{context}: {message}")),
         other => LibraryHostError::Host(format!("{context}: {other}")),
     }
-}
-
-/// The seed-once transaction body: the package seeded from example `id`,
-/// installing the embedded files on first use.
-fn ensure_example_seeded(
-    store: &LibraryStore,
-    id: &str,
-    now: f64,
-) -> Result<PackageSummary, LibraryHostError> {
-    if let Some(existing) = store.find_seeded_from(id)? {
-        return Ok(existing);
-    }
-    let example = crate::app::home::embedded_example(id)
-        .ok_or_else(|| LibraryHostError::NotFound(format!("unknown example {id}")))?;
-    Ok(store.install_package(
-        example.name,
-        &example.files(),
-        PackageProvenance::SeededFrom {
-            source: id.to_string(),
-        },
-        now,
-    )?)
 }
 
 /// Install a freshly generated first project for `board_id`.

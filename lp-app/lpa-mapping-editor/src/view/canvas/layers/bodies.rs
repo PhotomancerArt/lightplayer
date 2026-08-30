@@ -11,12 +11,17 @@
 //! This is what gives the `align` control its picture: change it in the
 //! properties panel and the next render re-derives the outline and the cell
 //! centers from the edited document.
+//!
+//! A shaped matrix is the one kind with NO band ([`CellSeeding::Field`]): a
+//! band swept along its serpentine describes the wire, not the shape, and
+//! self-overlaps doing it. Its lamps take field-seeded cells instead, and the
+//! authored silhouette (drawn by the doc layer) carries the outline.
 
 use std::collections::BTreeMap;
 
 use lpc_mapping::{Map2dDoc, Map2dShape, PathAlign, ResolvedMap2d, path_gap_breaks};
 
-use super::cells::{LampCell, lamp_cells};
+use super::cells::{LampCell, lamp_cells, point_cells};
 use super::outline::aligned_outline;
 use super::outline::hull_path_d;
 
@@ -31,6 +36,23 @@ const PITCH_REACH: f64 = 0.65;
 /// are arbitrary (the G1 scale ruling), so nothing absolute may appear.
 const FOOTPRINT_REACH: f64 = 0.55;
 
+/// How an object's lamps take voronoi cells — the seeding mode, not a
+/// yes/no, because a ribbon and a field are cut differently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellSeeding {
+    /// No cells: the lamps stay dots inside their band (grid, ring).
+    None,
+    /// Strand-seeded ([`lamp_cells`]): one radius per lit run from its own
+    /// median pitch, shifted off the path by the authored alignment. What a
+    /// ribbon — path, polygon perimeter — reads as.
+    Strand,
+    /// Field-seeded ([`point_cells`]): one radius for the whole object from
+    /// the median nearest-neighbour distance, no strand grain. The SAME call
+    /// the product previews make, because a shaped matrix's lamps are a field
+    /// whose wiring order says nothing about which lamps are neighbours.
+    Field,
+}
+
 /// One drawn body: a single physical strand-group of one object.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ObjectBody {
@@ -42,8 +64,8 @@ pub(crate) struct ObjectBody {
     /// Outline loops, painted with fill-rule nonzero.
     pub outline: Vec<Vec<[f32; 2]>>,
     /// Voronoi cells, `lamp` re-indexed to the ABSOLUTE wiring index (so a
-    /// cell keys and reads like the lamp dot it belongs to). Empty for the
-    /// field kinds (grid, ring), which stay dots inside a neutral band.
+    /// cell keys and reads like the lamp dot it belongs to). Empty for grid
+    /// and ring, which stay dots inside a neutral band.
     pub cells: Vec<LampCell>,
 }
 
@@ -70,12 +92,28 @@ pub(crate) fn object_bodies(doc: &Map2dDoc, resolved: &ResolvedMap2d) -> Vec<Obj
         while let Map2dShape::Repeat(repeat) = shape {
             shape = &repeat.shape;
         }
-        let (align, celled, closed, breaks) = match shape {
-            Map2dShape::Path(path) => (path.align, true, false, path_gap_breaks(path)),
-            Map2dShape::Polygon(polygon) => (polygon.align, true, true, Vec::new()),
-            // Grid and ring lamps are a FIELD, not a ribbon: the neutral
-            // on-path band, and their dots keep speaking for themselves.
-            _ => (PathAlign::On, false, false, Vec::new()),
+        let (align, seeding, banded, closed, breaks) = match shape {
+            Map2dShape::Path(path) => (
+                path.align,
+                CellSeeding::Strand,
+                true,
+                false,
+                path_gap_breaks(path),
+            ),
+            Map2dShape::Polygon(polygon) => {
+                (polygon.align, CellSeeding::Strand, true, true, Vec::new())
+            }
+            // A shaped matrix gets NO BAND (G1: swept along the serpentine it
+            // self-overlaps and snakes through its own lattice, describing the
+            // wire instead of the shape). Its picture is the authored
+            // silhouette plus field-seeded cells — the same mosaic the product
+            // preview draws for the same lamps.
+            Map2dShape::FilledPolygon(_) => {
+                (PathAlign::On, CellSeeding::Field, false, false, Vec::new())
+            }
+            // Grid and ring lamps are a field inside a neutral band, dots
+            // speaking for themselves.
+            _ => (PathAlign::On, CellSeeding::None, true, false, Vec::new()),
         };
         // Cut the span at each jumper: one strand per lit run, and the
         // absolute lamp index of every point alongside.
@@ -118,21 +156,32 @@ pub(crate) fn object_bodies(doc: &Map2dDoc, resolved: &ResolvedMap2d) -> Vec<Obj
         } else {
             strands.clone()
         };
-        let cells = if celled {
-            lamp_cells(&strands, align, doc.sample_diameter)
-                .into_iter()
-                .filter(|cell| cell.polygon.len() >= 3)
-                .filter_map(|cell| {
-                    lamp_indices.get(cell.lamp).map(|index| LampCell {
-                        lamp: *index,
-                        polygon: cell.polygon,
-                    })
+        // Both seedings share one clipping core and one footprint floor; only
+        // where the radius comes from differs. `point_cells` takes a RADIUS,
+        // the doc declares a diameter.
+        let seeded = match seeding {
+            CellSeeding::None => Vec::new(),
+            CellSeeding::Strand => lamp_cells(&strands, align, doc.sample_diameter),
+            CellSeeding::Field => {
+                let field: Vec<[f32; 2]> = strands.iter().flatten().copied().collect();
+                point_cells(&field, doc.sample_diameter / 2.0)
+            }
+        };
+        let cells: Vec<LampCell> = seeded
+            .into_iter()
+            .filter(|cell| cell.polygon.len() >= 3)
+            .filter_map(|cell| {
+                lamp_indices.get(cell.lamp).map(|index| LampCell {
+                    lamp: *index,
+                    polygon: cell.polygon,
                 })
-                .collect()
+            })
+            .collect();
+        let outline = if banded {
+            aligned_outline(&outline_strands, align, reach)
         } else {
             Vec::new()
         };
-        let outline = aligned_outline(&outline_strands, align, reach);
         if outline.is_empty() && cells.is_empty() {
             continue;
         }
@@ -343,6 +392,36 @@ mod tests {
             assert_eq!(body.instance, index);
             assert_eq!(body.cells.len(), 5);
             assert!(!body.outline.is_empty());
+        }
+    }
+
+    /// A shaped matrix is the inverse of a grid: NO band (swept along the
+    /// serpentine it snakes through its own lattice), and every lamp wears a
+    /// field-seeded cell — the exact call the product preview makes, so both
+    /// surfaces draw the same mosaic for the same lamps.
+    #[test]
+    fn a_filled_polygon_gets_cells_and_no_band() {
+        let doc = doc_with(Map2dShape::FilledPolygon(lpc_mapping::FilledPolygonShape {
+            points: vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]],
+            pitch: 26.0,
+            angle_deg: 0.0,
+            origin: [0.0, 0.0],
+            routing: lpc_mapping::GridRouting::Snake,
+            start_corner: lpc_mapping::GridCorner::default(),
+        }));
+        let resolved = resolve(&doc).expect("resolves");
+        let body = &bodies_of(&doc)[0];
+        assert!(body.outline.is_empty(), "no band on a shaped matrix");
+        assert_eq!(body.cells.len(), 16, "a 4×4 lattice, one cell each");
+        assert_eq!(
+            body.cells.iter().map(|cell| cell.lamp).collect::<Vec<_>>(),
+            (0..16).collect::<Vec<_>>()
+        );
+        // Field seeding, not strand seeding: the cells are exactly what the
+        // product preview's `point_cells` makes of the same positions.
+        let expected = point_cells(&resolved.positions(), doc.sample_diameter / 2.0);
+        for (cell, want) in body.cells.iter().zip(expected.iter()) {
+            assert_eq!(cell.polygon, want.polygon);
         }
     }
 

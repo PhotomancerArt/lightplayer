@@ -60,7 +60,9 @@ pub fn CloudAccountControl(
     // whole chrome, and the remembered list only moves when the session
     // does (the provider writes it on entering `SignedIn`).
     let remembered = use_memo(move || match session() {
-        CloudSession::SignedIn { me, .. } => other_accounts(&account_memory::load(), &me.email),
+        CloudSession::SignedIn { me, .. } if !me.anonymous => {
+            other_accounts(&account_memory::load(), &me.email)
+        }
         _ => Vec::new(),
     });
     // Recomputed per render: the chrome re-renders on every route change,
@@ -70,6 +72,20 @@ pub fn CloudAccountControl(
         CloudSession::Pending => Some(rsx! {
             PendingPill {}
         }),
+        // A GUEST session (examples vision D8) is real to the sync engine
+        // but must not read as an account: the chrome keeps the signed-out
+        // affordance — signing in is still the door this slot offers.
+        CloudSession::SignedIn { me, options } if me.anonymous => {
+            options.and_then(|options| match sign_in_affordance(&options, &next) {
+                SignInAffordance::Direct(href) => Some(rsx! {
+                    SignInLink { href }
+                }),
+                SignInAffordance::Chooser => Some(rsx! {
+                    SignInMenu { options, next }
+                }),
+                SignInAffordance::Nothing => None,
+            })
+        }
         CloudSession::Anonymous { options } => {
             // Options that never landed: an affordance pointing nowhere
             // is worse than none (P4's `Anonymous { options: None }`).
@@ -765,12 +781,15 @@ const AVATAR_TRIGGER_OPEN_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:flex-no
 /// primitive's own `.ux-popover-panel` already caps every panel at
 /// `calc(100vw - 24px)`, and a second viewport clamp inside the width fought
 /// the measured layout.
-const ACCOUNT_POPUP_CLASS: &str = "tw:grid tw:w-[236px] tw:min-w-0 tw:gap-0.5 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+/// Material-free (P4): the merged-outline popover already paints
+/// background/border/shadow.
+const ACCOUNT_POPUP_CLASS: &str = "tw:grid tw:w-[236px] tw:min-w-0 tw:gap-0.5 tw:rounded-md tw:border tw:p-1.5 tw:text-sm tw:text-muted-foreground";
 /// The signed-out chooser (§4): the ⋯ menu's 288px, because provider rows
 /// carry copy. No `overflow-hidden` — the merged outline draws this panel's
 /// chrome, and clipping the body only hides a layout fault instead of
-/// showing it.
-const SIGN_IN_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:min-w-0 tw:rounded-md tw:border tw:border-border tw:bg-card tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+/// showing it. Material-free (P4) for the same reason.
+const SIGN_IN_POPUP_CLASS: &str =
+    "tw:grid tw:w-[288px] tw:min-w-0 tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 /// The quiet word as a popover trigger — the secondary tab's treatment on a
 /// `button` instead of an `a`.
 ///

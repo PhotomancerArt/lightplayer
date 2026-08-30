@@ -21,7 +21,7 @@ use axum::routing::{get, post};
 
 use crate::api::api_route;
 use crate::app_state::AppState;
-use crate::auth::{dev_auth, google_auth};
+use crate::auth::{dev_auth, google_auth, guest_auth};
 use crate::content::{blob_route, tree_route};
 use crate::page::page_route;
 
@@ -51,6 +51,7 @@ pub fn build_router(state: AppState) -> Router {
             google_auth::CALLBACK_PATH,
             get(google_auth::get_google_callback),
         )
+        .route("/auth/guest", post(guest_auth::post_guest_auth))
         .route("/auth/logout", post(google_auth::post_logout))
         .route("/auth/dev", get(dev_auth::get_dev_auth))
         .route("/healthz", get(page_route::get_healthz))

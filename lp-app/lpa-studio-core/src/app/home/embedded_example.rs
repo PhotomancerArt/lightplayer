@@ -1,15 +1,17 @@
-//! The compiled-in example packages (offline/first-run fallback).
+//! The compiled-in example packages: the offline/dev content source for
+//! the canonical example identities.
 //!
-//! Until the examples place lands (M6, D17), the gallery's *Examples*
-//! section lists these. The id doubles as the seed-once provenance source
-//! (`SeededFrom { source }`), so a package seeded by the pre-M4 demo flow
-//! and one opened from the gallery are the same package.
+//! Examples are first-party published projects (examples vision D1) with
+//! bare-slug addresses (`/p/<slug>`, the id tail). Opening one is
+//! STATELESS (D2): a transient memory-backed session, nothing installed —
+//! an explicit save forks a copy with `SeededFrom { source: id }`
+//! provenance (the "Remixed from" line). The home landing and Explore
+//! both list this table.
 //!
 //! Each package's files are `include_bytes!`d from `examples/<name>/`, so
 //! the wasm bundle carries them and the checked-in example IS what the
-//! gallery opens. Adding an example means adding its file table here —
-//! and remembering that an existing library store keeps the package it
-//! already seeded (delete the gallery package to re-seed).
+//! gallery opens. Adding an example means adding its file table here
+//! (slug uniqueness is test-pinned — the id tail is the URL).
 
 /// One file in an embedded package: its package-relative path and bytes.
 pub type ExampleFile = (&'static str, &'static [u8]);
@@ -20,6 +22,10 @@ pub struct EmbeddedExample {
     pub id: &'static str,
     pub name: &'static str,
     pub kind: &'static str,
+    /// One line about the fixture this example runs on — the shelf
+    /// card's hover-reveal content: a browsing shelf answers "what
+    /// would this look like on my thing" before a click.
+    pub blurb: &'static str,
     /// The package's files, in deploy order (`project.json` first).
     pub files: &'static [ExampleFile],
 }
@@ -31,6 +37,15 @@ impl EmbeddedExample {
             .iter()
             .map(|(path, bytes)| ((*path).to_string(), bytes.to_vec()))
             .collect()
+    }
+
+    /// The example's canonical bare slug — the id tail
+    /// (`examples/fyeah-sign` → `fyeah-sign`). This is the `/p/<slug>`
+    /// address (PD3): example directories are `[a-z0-9-]` names, so the
+    /// tail is URL-ready as-is. Uniqueness across the table is pinned by
+    /// a test below.
+    pub fn slug(&self) -> &'static str {
+        self.id.rsplit('/').next().unwrap_or(self.id)
     }
 }
 
@@ -88,6 +103,48 @@ pub static FYEAH_SIGN_FILES: &[ExampleFile] = &[
     (
         "fyeah.map2d.json",
         include_bytes!("../../../../../examples/fyeah-sign/fyeah.map2d.json"),
+    ),
+];
+
+/// `examples/logo-sign` — the brand as a buildable LED piece: a shaped
+/// PCB matrix in the outline of the play triangle (map2d `filled_polygon`,
+/// count derived from the outline and the pitch) plus "LightPlayer" as a
+/// string of single-stroke letter strands, on one canvas that is the
+/// landing hero's own stage. Generated from the brand geometry — see
+/// `logo_sign_gen.rs` in `lpa-studio-web`, whose in-sync test fails if this
+/// package's mapping falls behind the mark.
+pub static LOGO_SIGN_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/logo-sign/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/logo-sign/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/logo-sign/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/logo-sign/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/logo-sign/output.json"),
+    ),
+    (
+        "shader.json",
+        include_bytes!("../../../../../examples/logo-sign/shader.json"),
+    ),
+    (
+        "shader.glsl",
+        include_bytes!("../../../../../examples/logo-sign/shader.glsl"),
+    ),
+    (
+        "sign.map2d.json",
+        include_bytes!("../../../../../examples/logo-sign/sign.map2d.json"),
     ),
 ];
 
@@ -390,82 +447,88 @@ pub static ZOOK_DOME_FILES: &[ExampleFile] = &[
     ),
 ];
 
-/// `examples/mini-dome` — the mini RADIANCE stand-in: a 5-way repeated
-/// dome (30 lamps a sector — eight suspended triangle panels on one gapped
-/// path, map2d format 3 stable ids) AND three always-lit chevron doors,
-/// scattered across TWO named outputs with
-/// shared ports — many-to-many, the patching archetype
-/// (`docs/use-cases/2026-08-09-mini-dome.md`). The `.patch.json` files
-/// carry the as-built permutation as format-2 path-identity rows
-/// (`/sector/2`), reversal and stride-stepped rotation included.
-pub static MINI_DOME_FILES: &[ExampleFile] = &[
+/// `examples/small-dome` — Yona's real 16' 2V dome at full scale: 50
+/// suspended triangle panels of 119 lamps each (ten 5-way-repeated polygon
+/// objects, map2d format 4) AND one always-lit 360-lamp chevron door,
+/// scattered across TWO named outputs (the build's two control boxes, 13
+/// ports each) with a shared port tail — many-to-many, the patching
+/// archetype (`docs/use-cases/2026-08-09-mini-dome.md`), and a
+/// desktop-scale stress fixture (6,310 lamps). The `.patch.json` files
+/// carry the as-built install as format-2 path-identity rows
+/// (`/band-a/3`), reversal and stride-stepped rotation included; all six
+/// wiring artifacts regenerate via `cargo run -p lpt-geodome`.
+pub static SMALL_DOME_FILES: &[ExampleFile] = &[
     (
         "project.json",
-        include_bytes!("../../../../../examples/mini-dome/project.json"),
+        include_bytes!("../../../../../examples/small-dome/project.json"),
     ),
     (
         "module.json",
-        include_bytes!("../../../../../examples/mini-dome/module.json"),
+        include_bytes!("../../../../../examples/small-dome/module.json"),
     ),
     (
         "clock.json",
-        include_bytes!("../../../../../examples/mini-dome/clock.json"),
+        include_bytes!("../../../../../examples/small-dome/clock.json"),
+    ),
+    (
+        "editor.json",
+        include_bytes!("../../../../../examples/small-dome/editor.json"),
     ),
     (
         "out_a.json",
-        include_bytes!("../../../../../examples/mini-dome/out_a.json"),
+        include_bytes!("../../../../../examples/small-dome/out_a.json"),
     ),
     (
         "out_b.json",
-        include_bytes!("../../../../../examples/mini-dome/out_b.json"),
+        include_bytes!("../../../../../examples/small-dome/out_b.json"),
     ),
     (
         "dome/module.json",
-        include_bytes!("../../../../../examples/mini-dome/dome/module.json"),
+        include_bytes!("../../../../../examples/small-dome/dome/module.json"),
     ),
     (
         "dome/dome.json",
-        include_bytes!("../../../../../examples/mini-dome/dome/dome.json"),
+        include_bytes!("../../../../../examples/small-dome/dome/dome.json"),
     ),
     (
         "dome/dome.map2d.json",
-        include_bytes!("../../../../../examples/mini-dome/dome/dome.map2d.json"),
+        include_bytes!("../../../../../examples/small-dome/dome/dome.map2d.json"),
     ),
     (
         "dome/dome.patch.json",
-        include_bytes!("../../../../../examples/mini-dome/dome/dome.patch.json"),
+        include_bytes!("../../../../../examples/small-dome/dome/dome.patch.json"),
     ),
     (
         "dome/dome_sky.json",
-        include_bytes!("../../../../../examples/mini-dome/dome/dome_sky.json"),
+        include_bytes!("../../../../../examples/small-dome/dome/dome_sky.json"),
     ),
     (
         "dome/dome_sky.glsl",
-        include_bytes!("../../../../../examples/mini-dome/dome/dome_sky.glsl"),
+        include_bytes!("../../../../../examples/small-dome/dome/dome_sky.glsl"),
     ),
     (
         "doors/module.json",
-        include_bytes!("../../../../../examples/mini-dome/doors/module.json"),
+        include_bytes!("../../../../../examples/small-dome/doors/module.json"),
     ),
     (
         "doors/doors.json",
-        include_bytes!("../../../../../examples/mini-dome/doors/doors.json"),
+        include_bytes!("../../../../../examples/small-dome/doors/doors.json"),
     ),
     (
         "doors/doors.map2d.json",
-        include_bytes!("../../../../../examples/mini-dome/doors/doors.map2d.json"),
+        include_bytes!("../../../../../examples/small-dome/doors/doors.map2d.json"),
     ),
     (
         "doors/doors.patch.json",
-        include_bytes!("../../../../../examples/mini-dome/doors/doors.patch.json"),
+        include_bytes!("../../../../../examples/small-dome/doors/doors.patch.json"),
     ),
     (
         "doors/door_warm.json",
-        include_bytes!("../../../../../examples/mini-dome/doors/door_warm.json"),
+        include_bytes!("../../../../../examples/small-dome/doors/door_warm.json"),
     ),
     (
         "doors/door_warm.glsl",
-        include_bytes!("../../../../../examples/mini-dome/doors/door_warm.glsl"),
+        include_bytes!("../../../../../examples/small-dome/doors/door_warm.glsl"),
     ),
 ];
 
@@ -620,66 +683,84 @@ static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
         id: crate::STUDIO_DEMO_PROJECT_ID,
         name: "Fyeah Sign",
         kind: "Module",
+        blurb: "A letter sign strung with LEDs — the Studio demo",
         files: FYEAH_SIGN_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/logo-sign",
+        name: "Logo Sign",
+        kind: "Module",
+        blurb: "The LightPlayer logo as real LED art: a shaped matrix and a letter string",
+        files: LOGO_SIGN_FILES,
     },
     EmbeddedExample {
         id: "examples/plasma",
         name: "Plasma",
         kind: "Module",
+        blurb: "The classic plasma effect on a dome",
         files: PLASMA_FILES,
     },
     EmbeddedExample {
         id: "examples/meteor",
         name: "Meteor",
         kind: "Module",
+        blurb: "Meteors falling across six parallel strips",
         files: METEOR_FILES,
     },
     EmbeddedExample {
         id: "examples/comet",
         name: "Comet",
         kind: "Module",
+        blurb: "A comet trail on a single 120-LED strip",
         files: COMET_FILES,
     },
     EmbeddedExample {
         id: "examples/palette-waves",
         name: "Palette Waves",
         kind: "Module",
+        blurb: "Palette-driven waves washing over a dome",
         files: PALETTE_WAVES_FILES,
     },
     EmbeddedExample {
         id: "examples/fire2012",
         name: "Fire 2012",
         kind: "Module",
+        blurb: "The classic Fire2012 flame on one strip",
         files: FIRE2012_FILES,
     },
     EmbeddedExample {
         id: "examples/plasma-duo",
         name: "Plasma Duo",
         kind: "Module",
+        blurb: "One shader driving two fixtures — a disc and a grid",
         files: PLASMA_DUO_FILES,
     },
     EmbeddedExample {
         id: "examples/zook-dome",
         name: "Zook dome",
         kind: "Module",
+        blurb: "A geodesic dome lit along its struts",
         files: ZOOK_DOME_FILES,
     },
     EmbeddedExample {
-        id: "examples/mini-dome",
-        name: "Mini Dome",
+        id: "examples/small-dome",
+        name: "Small Dome",
         kind: "Module",
-        files: MINI_DOME_FILES,
+        blurb: "A 16' geodesic dome — 50 lit panels and a door",
+        files: SMALL_DOME_FILES,
     },
     EmbeddedExample {
         id: "examples/peach-1d",
         name: "Peach (1D)",
         kind: "Module",
+        blurb: "A peach-shaped fixture sampled in 1D",
         files: PEACH_1D_FILES,
     },
     EmbeddedExample {
         id: "examples/peach-2d",
         name: "Peach (2D)",
         kind: "Module",
+        blurb: "The same peach sampled in 2D",
         files: PEACH_2D_FILES,
     },
 ];
@@ -695,6 +776,15 @@ pub fn embedded_example(id: &str) -> Option<EmbeddedExample> {
         .iter()
         .copied()
         .find(|example| example.id == id)
+}
+
+/// Look up an embedded example by its bare slug (the id tail) — the
+/// `/p/<slug>` resolution leg. An unknown slug is `None`, never a guess.
+pub fn embedded_example_by_slug(slug: &str) -> Option<EmbeddedExample> {
+    embedded_examples()
+        .iter()
+        .copied()
+        .find(|example| example.slug() == slug)
 }
 
 #[cfg(test)]
@@ -718,6 +808,26 @@ mod tests {
     #[test]
     fn unknown_example_is_none() {
         assert!(embedded_example("examples/unknown").is_none());
+    }
+
+    /// Bare slugs are the `/p/<slug>` grammar (PD3): every id tail must be
+    /// unique or two examples would share an address.
+    #[test]
+    fn example_slugs_are_unique_id_tails() {
+        let mut seen = std::collections::BTreeSet::new();
+        for example in embedded_examples() {
+            assert_eq!(example.id, format!("examples/{}", example.slug()));
+            assert!(
+                seen.insert(example.slug()),
+                "duplicate example slug: {}",
+                example.slug()
+            );
+        }
+        assert_eq!(
+            embedded_example_by_slug("fyeah-sign").map(|e| e.id),
+            Some("examples/fyeah-sign")
+        );
+        assert!(embedded_example_by_slug("unknown").is_none());
     }
 
     /// The docs-example contract: plasma-duo drives the SAME shader (and

@@ -417,7 +417,10 @@ impl Engine {
 
     /// The declared transport display-layout budget (see
     /// [`Self::set_display_layout_budget`]).
-    pub(crate) fn display_layout_budget(&self) -> Option<usize> {
+    /// The declared display-layout byte budget (`None` = unbounded). Public
+    /// so embedders and tests can assert the link state actually landed on
+    /// an engine — the wire-load path once forgot to.
+    pub fn display_layout_budget(&self) -> Option<usize> {
         self.display_layout_budget
     }
 
@@ -555,6 +558,13 @@ impl Engine {
     }
 
     pub fn tick(&mut self, registry: &ProjectRegistry, delta_ms: u32) -> Result<(), EngineError> {
+        // Tick-scoped OOM attribution: without an entry context, a tick-path
+        // allocation failure reports whichever scope the last request handler
+        // happened to set — on device that misdirected the zook-playback
+        // reset hunt (defect 2026-08-29-flash-write-wedges-under-zook-playback).
+        // Narrower scopes (shader compile, server handlers) still override
+        // while they run.
+        lpc_shared::backtrace::set_oom_context("engine: tick");
         lp_perf::emit_begin!(lp_perf::EVENT_FRAME);
         let result = (|| {
             self.tick_nodes(registry, delta_ms)?;
@@ -569,6 +579,7 @@ impl Engine {
             Ok(())
         })();
         lp_perf::emit_end!(lp_perf::EVENT_FRAME);
+        lpc_shared::backtrace::clear_oom_context();
         result
     }
 
@@ -780,7 +791,11 @@ impl Engine {
             display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
         };
-        host.render_node_texture(product, request)
+        // Render-scoped OOM attribution, same rationale as [`Self::tick`].
+        lpc_shared::backtrace::set_oom_context("engine: render texture product");
+        let result = host.render_node_texture(product, request);
+        lpc_shared::backtrace::clear_oom_context();
+        result
     }
 
     /// Ask a visual product's producer what space it renders in (plan D17),

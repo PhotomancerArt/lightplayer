@@ -14,9 +14,9 @@ pub fn LocalStoreBanner(status: LocalStoreStatus) -> Element {
         LocalStoreStatus::Initializing | LocalStoreStatus::Ready => rsx! {},
         LocalStoreStatus::Unavailable(reason) => rsx! {
             div {
-                class: "tw:mb-3.5 tw:rounded-md tw:border tw:border-red-600/40 tw:bg-red-500/10 tw:px-4 tw:py-2.5 tw:text-sm tw:text-red-200",
+                class: "tw:mb-3.5 tw:rounded-md tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-4 tw:py-2.5 tw:text-sm tw:text-status-error-foreground",
                 span { "This browser can't store projects locally. Changes won't survive a reload." }
-                span { class: "tw:ml-2 tw:text-red-300/70", "({reason})" }
+                span { class: "tw:ml-2 tw:text-status-error-foreground/70", "({reason})" }
             }
         },
     }

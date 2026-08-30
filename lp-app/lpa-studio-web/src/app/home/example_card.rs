@@ -3,13 +3,30 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{HomeOp, PreviewSource, UiAction, UiExampleCard};
 
+use crate::app::home::card_footer::CardGlassFooter;
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::gallery_preview::{ThumbMode, card_hover_handlers};
 use crate::app::home::package_card::home_action;
 use crate::app::home::project_opening_frame::OpeningProgressLine;
 
-/// One example. Click → running simulator, zero choices; the copy becomes
-/// yours in the library (seed-once) and forks on first divergent save.
+/// The compiled-in examples as cards — the same projection the home view
+/// builder makes. Shared by Explore's no-gallery-slice mounts and the
+/// landing grid.
+pub(crate) fn embedded_example_cards() -> Vec<UiExampleCard> {
+    lpa_studio_core::app::home::embedded_examples()
+        .iter()
+        .map(|example| UiExampleCard {
+            id: example.id.to_string(),
+            name: example.name.to_string(),
+            kind: example.kind.to_string(),
+            blurb: example.blurb.to_string(),
+        })
+        .collect()
+}
+
+/// One example. Click → running simulator, zero choices, NOTHING
+/// installed (a transient view session, examples vision D2); an explicit
+/// save is what forks your copy into the library.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn ExampleCard(
@@ -56,18 +73,24 @@ pub(crate) fn ExampleCard(
                 // go. Explore shows a dozen of these at once.
                 mode: ThumbMode::PosterFirst,
             }
-            div { class: "tw:grid tw:gap-0.5 tw:p-3",
-                p { class: "tw:m-0 tw:truncate tw:text-sm tw:font-semibold tw:text-strong-foreground",
-                    "{card.name}"
-                }
+            // The face is the art; the words are one shallow glass bar
+            // (card-overlay redesign). Title ONLY at rest — no menu, no
+            // glyphs, and no "Example" label: the shelf's own section
+            // header already says it, and repeating it on every card
+            // read as noise at the G1 gate (2026-08-26). Hover slides
+            // the bar up over the example's fixture blurb, in step with
+            // the live preview the same hover starts.
+            CardGlassFooter {
+                title: card.name.clone(),
+                reveal: (!opening && !card.blurb.is_empty()).then(|| rsx! {
+                    p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "{card.blurb}" }
+                }),
                 if opening {
                     // The live pipeline, not a static "Opening…": an example
                     // open never routes to the full opening frame, so on a
                     // slow connection this line is the only honest indicator
                     // of the engine download it is waiting on.
                     OpeningProgressLine {}
-                } else {
-                    p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "Example" }
                 }
             }
         }
@@ -77,15 +100,22 @@ pub(crate) fn ExampleCard(
 /// The card's treatment while an open runs. Busy is a DIMMING, not a
 /// disabling: the cursor stays a pointer because the card still acts.
 fn example_card_class(opening: bool, busy: bool) -> &'static str {
+    // tw:relative anchors the glass footer over the art box
     match (opening, busy) {
         (true, _) => {
-            "tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
+            "tw:group tw:relative tw:cursor-wait tw:overflow-hidden tw:rounded-md tw:border tw:border-status-working-border tw:bg-card"
         }
         (false, true) => {
-            "tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
+            "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
         }
+        // The card is `overflow-hidden`, so its hover ring is the INSET
+        // variant (`ux-ir-ring-inset`) — an outset ring would be clipped
+        // away entirely. It paints at z-3, above the glass footer (z-2) and
+        // the stretched open link (z-1), and takes no pointer events. The
+        // resting border goes transparent on hover so the ring IS the edge
+        // rather than a second line inside a grey one.
         (false, false) => {
-            "tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+            "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-transparent ux-ir-ring ux-ir-ring-inset ux-card-lift"
         }
     }
 }

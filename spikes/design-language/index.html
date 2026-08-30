@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Design-language refresh — spike playground</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* =====================================================================
+   Shared ground + STATUS FAMILIES (verbatim from src/style.css :root).
+   Status semantics are load-bearing (violet=binding, amber=unsaved,
+   orange=health, gold=engaged, blue=live) and stay CONSTANT across every
+   direction below — the refresh moves chrome/surfaces/materials, not
+   meaning.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
+  --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
+  --st-warn-bg:#292614;      --st-warn-bd:#796c33;      --st-warn-tx:#f0dc7a;
+  --st-attn-bg:#291f14;      --st-attn-bd:#795833;      --st-attn-tx:#f0b97a;
+  --st-engaged-bg:#292213;   --st-engaged-bd:#8a6f35;   --st-engaged-tx:#e8c56b;
+  --st-error-bg:#301b1d;     --st-error-bd:#874b4b;     --st-error-tx:#ffc7c7;
+  --st-bound-bg:#241a33;     --st-bound-bd:#5f4a85;     --st-bound-tx:#c9b1f5;
+
+  --spectrum: #5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
+  --lab-blur: 22px;
+
+  /* page chrome (spike shell itself, deliberately plain) */
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 28px 32px 140px;
+  background: var(--shell-bg); color: var(--shell-tx);
+  font: 14px/1.45 var(--font);
+}
+h1 { font-size: 13px; letter-spacing: .12em; color: var(--shell-mut);
+     text-transform: uppercase; margin: 0 0 6px; }
+p.hint { color: var(--shell-dim); font-size: 12px; margin: 0 0 18px; max-width: 760px; }
+h2 { font-size: 12px; letter-spacing: .1em; color: var(--shell-mut);
+     text-transform: uppercase; margin: 38px 0 6px; }
+h2 .n { color: var(--shell-dim); margin-right: 6px; }
+p.sub { color: var(--shell-dim); font-size: 12px; margin: 0 0 14px; max-width: 860px; }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls {
+  display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+  padding: 10px 14px; border: 1px dashed var(--shell-bd-strong);
+  border-radius: 8px; color: var(--shell-mut); font-size: 12px;
+  position: sticky; top: 8px; z-index: 50;
+  background: rgba(11,12,14,.9); backdrop-filter: blur(8px);
+}
+.controls b { color: var(--shell-tx); font-weight: 600; }
+.controls button {
+  appearance: none; font: inherit; cursor: pointer;
+  background: #16181c; color: var(--shell-tx);
+  border: 1px solid var(--shell-bd-strong); border-radius: 6px;
+  padding: 3px 10px;
+}
+.controls button:hover { background: #1e2126; }
+.controls button.active { border-color: #7be0b2; color: #7be0b2; }
+.controls input[type=range] { width: 110px; accent-color: #7be0b2; }
+
+/* =====================================================================
+   STAGE = one direction applied to the same composite mini-app.
+   Every knob a direction can turn is a --s-* var; behavior differences
+   (glass, glow, gradients) key off the stage's dir- class.
+   ===================================================================== */
+.stagegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(560px, 1fr)); gap: 22px; }
+.stagewrap { min-width: 0; }
+.stagehead { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+.stagehead .name { font-size: 14px; font-weight: 700; letter-spacing: .02em; }
+.stagehead .thesis { font-size: 12px; color: var(--shell-dim); }
+.stagenotes { font-size: 11.5px; color: var(--shell-mut); margin: 8px 2px 0; line-height: 1.55; }
+.stagenotes .t { color: #f0b97a; }
+.stagenotes b { color: var(--shell-tx); font-weight: 600; }
+
+.stage {
+  position: relative; overflow: hidden;
+  border-radius: 12px; border: 1px solid var(--shell-bd);
+  background: var(--s-bg); color: var(--s-text);
+  padding: 0 0 16px;
+  font-size: 13px;
+}
+
+/* ---------- direction palettes ---------- */
+.dir-current {
+  --s-bg:#101317; --s-surface:#171b20; --s-subtle:#14181d; --s-raised:#20272e;
+  --s-raised-strong:#26313a; --s-terminal:#0c1114;
+  --s-bd:#2a3138; --s-bd-mut:#252d34; --s-bd-strong:#3e4852;
+  --s-text:#f2f0e8; --s-strong:#fffaf0; --s-muted:#c7cbd0; --s-dim:#99a2ad;
+  --s-heading:#94b8aa;
+  --s-accent:#7be0b2; --s-accent-bd:#65bd96; --s-accent-fg:#08130d;
+  --s-accent-wash:rgba(123,224,178,.08);
+  --s-sel-bd:#d6dae0; --s-sel-bg:rgba(214,218,224,.12);
+  --s-glass-bg:#171b20; --s-glass-blur:0px; --s-glass-sat:1;
+  --s-glass-edge:transparent; --s-glass-bd:#2a3138;
+  --s-glow:transparent;
+  --s-footer-bg:rgba(13,17,21,.85);
+  --s-focus:#7be0b2;
+}
+.dir-phosphor {
+  --s-bg:#0c0e11; --s-surface:#14171c; --s-subtle:#101318; --s-raised:#1d2229;
+  --s-raised-strong:#242b34; --s-terminal:#080a0d;
+  --s-bd:#333b45; --s-bd-mut:#2a323b; --s-bd-strong:#4a5560;
+  --s-text:#f2f0e8; --s-strong:#fffaf0; --s-muted:#c9cdd2; --s-dim:#9aa3ae;
+  --s-heading:#e9ede9;
+  --s-accent:#3df59e; --s-accent-bd:#2bd184; --s-accent-fg:#04130b;
+  --s-accent-wash:rgba(61,245,158,.12);
+  --s-sel-bd:#d6dae0; --s-sel-bg:rgba(214,218,224,.12);
+  --s-glass-bg:rgba(10,13,16,.72); --s-glass-blur:14px; --s-glass-sat:1.2;
+  --s-glass-edge:rgba(255,255,255,.08); --s-glass-bd:rgba(255,255,255,.09);
+  --s-glow:rgba(61,245,158,.32);
+  --s-footer-bg:rgba(8,11,14,.66);
+  --s-focus:#3df59e;
+}
+.dir-ice {
+  --s-bg:#080b10; --s-surface:#10141b; --s-subtle:#0c1016; --s-raised:#182029;
+  --s-raised-strong:#1f2a36; --s-terminal:#05080c;
+  --s-bd:#2e3947; --s-bd-mut:#273140; --s-bd-strong:#46556a;
+  --s-text:#eef2f6; --s-strong:#ffffff; --s-muted:#c6cfd9; --s-dim:#93a1b1;
+  --s-heading:#dfe7ee;
+  --s-accent:#eaf4ff; --s-accent-bd:#9fc5e2; --s-accent-fg:#0a1520;
+  --s-accent-wash:rgba(207,233,255,.10);
+  --s-sel-bd:#d6dae0; --s-sel-bg:rgba(214,218,224,.12);
+  --s-glass-bg:rgba(8,12,18,.6); --s-glass-blur:22px; --s-glass-sat:1.5;
+  --s-glass-edge:rgba(255,255,255,.14); --s-glass-bd:rgba(255,255,255,.1);
+  --s-glow:rgba(190,225,255,.32);
+  --s-footer-bg:rgba(5,8,12,.55);
+  --s-focus:#bfe1ff;
+}
+.dir-aurora {
+  --s-bg:#0d0d13; --s-surface:#14141c; --s-subtle:#101017; --s-raised:#1d1d28;
+  --s-raised-strong:#252532; --s-terminal:#09090e;
+  --s-bd:#343444; --s-bd-mut:#2b2b39; --s-bd-strong:#4a4a5e;
+  --s-text:#f2f0e8; --s-strong:#fffaf0; --s-muted:#c9c9d2; --s-dim:#9c9cab;
+  --s-heading:#e9e9ef;
+  --s-accent:#8be2c0; --s-accent-bd:#5fc79d; --s-accent-fg:#08130d;
+  --s-accent-wash:rgba(139,226,192,.10);
+  --s-sel-bd:#d6dae0; --s-sel-bg:rgba(214,218,224,.12);
+  --s-glass-bg:rgba(12,12,20,.68); --s-glass-blur:18px; --s-glass-sat:1.35;
+  --s-glass-edge:rgba(255,255,255,.1); --s-glass-bd:rgba(255,255,255,.09);
+  --s-glow:rgba(140,170,255,.3);
+  --s-footer-bg:rgba(9,9,14,.6);
+  --s-focus:#a5b8ff;
+}
+.dir-limelight {
+  --s-bg:#0a0a0c; --s-surface:#131316; --s-subtle:#0f0f12; --s-raised:#1c1c21;
+  --s-raised-strong:#232329; --s-terminal:#060608;
+  --s-bd:#303038; --s-bd-mut:#28282f; --s-bd-strong:#454550;
+  --s-text:#f0efec; --s-strong:#fffdf8; --s-muted:#c8c8c6; --s-dim:#98989c;
+  --s-heading:#d9d9d6;
+  --s-accent:#f4f4f2; --s-accent-bd:#c9c9c4; --s-accent-fg:#101012;
+  --s-accent-wash:rgba(244,244,242,.08);
+  --s-sel-bd:#d6dae0; --s-sel-bg:rgba(214,218,224,.12);
+  --s-glass-bg:rgba(8,8,10,.7); --s-glass-blur:18px; --s-glass-sat:1.3;
+  --s-glass-edge:rgba(255,255,255,.1); --s-glass-bd:rgba(255,255,255,.08);
+  --s-glow:var(--art-accent-glow, rgba(255,255,255,.25));
+  --s-footer-bg:rgba(6,6,8,.6);
+  --s-focus:#f4f4f2;
+}
+
+/* ---------- composite: chrome bar ---------- */
+.s-chrome {
+  display: flex; align-items: center; gap: 14px;
+  padding: 9px 14px; border-bottom: 1px solid var(--s-bd-mut);
+  background: var(--s-terminal);
+}
+.s-brand {
+  font-weight: 800; font-size: 13.5px; letter-spacing: .01em;
+  background: linear-gradient(90deg, var(--spectrum), #5fe08b);
+  background-size: 300% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: brandsweep 14s linear infinite;
+}
+@keyframes brandsweep { to { background-position: 300% 0; } }
+.s-nav { display: flex; gap: 4px; font-size: 12px; color: var(--s-dim); }
+.s-nav span { padding: 3px 9px; border-radius: 6px; cursor: default; }
+.s-nav span.on { color: var(--s-strong); background: var(--s-raised); }
+.s-nav span.hoverable:hover, .s-nav span.hoverable.hov { color: var(--s-strong); background: var(--s-raised); }
+.s-chrome .s-sess {
+  margin-left: auto; font: 11px var(--mono); color: var(--st-live-tx);
+  border: 1px solid var(--st-live-bd); background: var(--st-live-bg);
+  border-radius: 999px; padding: 2px 9px;
+}
+
+/* ---------- composite: example cards ---------- */
+.s-cards { display: flex; gap: 12px; padding: 14px 14px 4px; }
+.s-card {
+  position: relative; width: 176px; flex: none;
+  border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--s-bd);
+  background: var(--s-surface);
+  transition: box-shadow .18s, border-color .18s, transform .18s;
+}
+.s-card .art { position: relative; height: 132px; }
+.s-card .art::after {  /* LED texture */
+  content: ""; position: absolute; inset: 0;
+  background-image: radial-gradient(rgba(0,0,0,.55) 1px, transparent 1.4px);
+  background-size: 5px 5px; mix-blend-mode: multiply; opacity: .5;
+}
+.s-card .bar {
+  position: absolute; inset: auto 0 0 0; z-index: 2;
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 9px;
+  background: var(--s-footer-bg);
+  backdrop-filter: blur(var(--s-glass-blur)) saturate(var(--s-glass-sat));
+  -webkit-backdrop-filter: blur(var(--s-glass-blur)) saturate(var(--s-glass-sat));
+  border-top: 1px solid rgba(255,255,255,.06);
+  font-size: 12px; color: #f2f0e8;
+}
+.s-card .bar .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.s-card .bar .g { margin-left: auto; flex: none; font-size: 11px; }
+.g-dev { color: var(--st-good-tx); }  .g-sim { color: var(--st-live-tx); }
+.g-attn { color: var(--st-attn-tx); font-weight: 800; }
+.s-card.blocked { border-color: var(--st-attn-bd); }
+/* hover: direction-specific */
+.s-card.hoverable:hover, .s-card.hoverable.hov { border-color: var(--s-bd-strong); }
+.dir-phosphor .s-card.hoverable:hover, .dir-phosphor .s-card.hoverable.hov,
+.dir-ice .s-card.hoverable:hover, .dir-ice .s-card.hoverable.hov,
+.dir-limelight .s-card.hoverable:hover, .dir-limelight .s-card.hoverable.hov {
+  border-color: var(--s-bd-strong);
+  box-shadow: 0 0 0 1px var(--s-bd-strong), 0 4px 26px var(--s-glow);
+  transform: translateY(-1px);
+}
+.dir-aurora .s-card.hoverable:hover, .dir-aurora .s-card.hoverable.hov {
+  border-color: transparent; transform: translateY(-1px);
+  box-shadow: 0 4px 26px var(--s-glow);
+}
+.dir-aurora .s-card.hoverable:hover::before, .dir-aurora .s-card.hoverable.hov::before {
+  content: ""; position: absolute; inset: -1px; z-index: 3; pointer-events: none;
+  border-radius: 10px; padding: 1px;
+  background: conic-gradient(from var(--ir-a, 0deg), var(--spectrum), #5fe08b);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: irspin 3.2s linear infinite;
+}
+@property --ir-a { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+@keyframes irspin { to { --ir-a: 360deg; } }
+
+/* ---------- artworks (stand-ins for live renders) ---------- */
+.art-spectrum {
+  background:
+    radial-gradient(90px 70px at 24% 30%, #53c6f2cc, transparent 70%),
+    radial-gradient(110px 80px at 78% 24%, #a58af7bb, transparent 70%),
+    radial-gradient(120px 90px at 60% 82%, #5fe08bcc, transparent 70%),
+    radial-gradient(80px 70px at 14% 84%, #f5e04e88, transparent 70%),
+    #0a0f14;
+  animation: drift 9s ease-in-out infinite alternate;
+}
+.art-ember {
+  background:
+    radial-gradient(120px 90px at 30% 72%, #ff5d2fcc, transparent 70%),
+    radial-gradient(90px 70px at 74% 30%, #ffab4acc, transparent 70%),
+    radial-gradient(140px 100px at 82% 86%, #a3172bcc, transparent 75%),
+    #120a08;
+  animation: drift 11s ease-in-out infinite alternate;
+}
+.art-nebula {
+  background:
+    radial-gradient(120px 80px at 70% 30%, #6d5df2cc, transparent 70%),
+    radial-gradient(100px 90px at 22% 60%, #2f7ff2aa, transparent 70%),
+    radial-gradient(130px 100px at 62% 88%, #c04ae2aa, transparent 75%),
+    #0a0714;
+  animation: drift 13s ease-in-out infinite alternate;
+}
+@keyframes drift { to { background-position: 14px -10px, -12px 8px, 10px -14px, -8px 6px; } }
+
+/* ---------- composite: mid row (popover + stack) ---------- */
+.s-mid { display: flex; gap: 14px; padding: 12px 14px 0; align-items: flex-start; }
+
+/* detail popover */
+.s-pop {
+  width: 252px; flex: none; border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--s-glass-bd);
+  background: var(--s-glass-bg);
+  backdrop-filter: blur(var(--s-glass-blur)) saturate(var(--s-glass-sat));
+  -webkit-backdrop-filter: blur(var(--s-glass-blur)) saturate(var(--s-glass-sat));
+  box-shadow: inset 0 1px 0 var(--s-glass-edge), 0 16px 40px rgba(0,0,0,.4);
+  font-size: 12.5px; color: var(--s-muted);
+}
+.dir-current .s-pop { box-shadow: 0 10px 30px rgba(0,0,0,.34); }
+/* gradient border that respects the radius (border-image renders SQUARE —
+   the round-1 glitch): masked padding overlay instead */
+.dir-aurora .s-pop { position: relative; }
+.dir-aurora .s-pop::after {
+  content: ""; position: absolute; inset: 0; border-radius: 10px; padding: 1px;
+  background: linear-gradient(120deg, rgba(95,224,139,.4), rgba(83,198,242,.35) 45%, rgba(165,138,247,.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none;
+}
+.s-pop .ph {
+  display: flex; align-items: center; gap: 8px; padding: 9px 11px;
+  font-weight: 700; color: var(--s-strong); font-size: 13px;
+}
+.s-pop .ph .k { margin-left: auto; font: 10px var(--mono); color: var(--s-dim);
+  border: 1px solid var(--s-bd); border-radius: 4px; padding: 1px 5px; }
+.s-pop .sec {
+  padding: 7px 11px 8px; border-top: 1px solid var(--s-bd-mut);
+}
+.s-pop .sec .st {
+  font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  margin-bottom: 3px;
+}
+.s-pop .sec.good { background: linear-gradient(90deg, var(--st-good-bg), transparent 72%); }
+.s-pop .sec.good .st { color: var(--st-good-tx); }
+.s-pop .sec.warn { background: linear-gradient(90deg, var(--st-warn-bg), transparent 72%); }
+.s-pop .sec.warn .st { color: var(--st-warn-tx); }
+.s-pop .sec.bound { background: linear-gradient(90deg, var(--st-bound-bg), transparent 72%); }
+.s-pop .sec.bound .st { color: var(--st-bound-tx); }
+.s-pop .sec .m { color: var(--s-muted); }
+.s-pop .sec .m code { font: 11px var(--mono); color: var(--s-text); }
+
+/* stack: buttons, chips, tree, input */
+.s-stack { flex: 1; min-width: 0; display: grid; gap: 10px; align-content: start; }
+.s-heading {
+  font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--s-heading);
+}
+.s-btnrow { display: flex; gap: 8px; align-items: center; }
+.s-btn {
+  appearance: none; font: 600 12.5px var(--font); cursor: pointer;
+  border-radius: 7px; padding: 7px 14px; border: 1px solid transparent;
+  transition: box-shadow .15s, background .15s, filter .15s;
+}
+.s-btn.primary { background: var(--s-accent); border-color: var(--s-accent-bd); color: var(--s-accent-fg); }
+.s-btn.primary.hoverable:hover, .s-btn.primary.hoverable.hov { filter: brightness(1.08); box-shadow: 0 2px 18px var(--s-glow); }
+.dir-aurora .s-btn.primary {
+  background: linear-gradient(105deg, #5fe08b, #53c6f2 55%, #a58af7);
+  color: #071010; border-color: rgba(255,255,255,.25);
+}
+.s-btn.secondary { background: var(--s-raised); border-color: var(--s-bd-strong); color: var(--s-text); }
+.s-btn.secondary.hoverable:hover, .s-btn.secondary.hoverable.hov { background: var(--s-raised-strong); box-shadow: 0 2px 14px var(--s-glow); }
+.s-btn.quiet { background: transparent; color: var(--s-dim); }
+.s-btn.quiet.hoverable:hover, .s-btn.quiet.hoverable.hov { color: var(--st-error-tx); background: var(--st-error-bg); }
+
+.s-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.s-chip {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .05em;
+  border-radius: 5px; padding: 2px 7px; border: 1px solid;
+}
+.s-chip.good { color: var(--st-good-tx); border-color: var(--st-good-bd); background: var(--st-good-bg); }
+.s-chip.live { color: var(--st-live-tx); border-color: var(--st-live-bd); background: var(--st-live-bg); }
+.s-chip.warn { color: var(--st-warn-tx); border-color: var(--st-warn-bd); background: var(--st-warn-bg); }
+.s-chip.bound { color: var(--st-bound-tx); border-color: var(--st-bound-bd); background: var(--st-bound-bg); }
+.s-chip.engaged { color: var(--st-engaged-tx); border-color: var(--st-engaged-bd); background: var(--st-engaged-bg); }
+
+.s-tree { border: 1px solid var(--s-bd); border-radius: 8px; overflow: hidden; background: var(--s-subtle); }
+.s-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+  font-size: 12.5px; color: var(--s-muted); border-top: 1px solid var(--s-bd-mut);
+  white-space: nowrap; overflow: hidden;
+}
+.s-row:first-child { border-top: 0; }
+.s-row .ic { flex: none; color: var(--s-dim); font-size: 11px; }
+.s-row .nm { overflow: hidden; text-overflow: ellipsis; }
+.s-row .dot { width: 7px; height: 7px; border-radius: 99px; flex: none; margin-left: auto; }
+.s-row .dot.bound { background: var(--st-bound-tx); box-shadow: 0 0 6px rgba(201,177,245,.6); }
+.s-row.sel {
+  color: var(--s-strong);
+  background: var(--s-sel-bg);
+  box-shadow: inset 0 0 0 1px var(--s-sel-bd);
+}
+.s-row.hoverable:hover, .s-row.hoverable.hov { color: var(--s-strong); background: var(--s-raised); }
+.dir-phosphor .s-row.hoverable:hover, .dir-phosphor .s-row.hoverable.hov,
+.dir-ice .s-row.hoverable:hover, .dir-ice .s-row.hoverable.hov {
+  box-shadow: inset 2px 0 0 var(--s-accent);
+}
+.dir-aurora .s-row.hoverable:hover, .dir-aurora .s-row.hoverable.hov {
+  box-shadow: inset 2px 0 0 #53c6f2, 0 0 14px var(--s-glow);
+}
+/* aurora: iridescent ring is the hover language (ruled 2026-08-29) */
+.dir-aurora .s-btn { position: relative; }
+.dir-aurora .s-btn.hoverable:hover:not(.quiet)::before,
+.dir-aurora .s-btn.hoverable.hov:not(.quiet)::before {
+  content: ""; position: absolute; inset: -1px; border-radius: 8px; padding: 1px;
+  background: conic-gradient(from var(--ir-a, 0deg), var(--spectrum), #5fe08b);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: irspin 3.2s linear infinite; pointer-events: none;
+}
+
+/* ---------- aurora extras: the fun-CSS sampler ---------- */
+.stage.extras { padding: 14px; margin-top: 12px; }
+.xrow { display: flex; gap: 14px; flex-wrap: wrap; }
+.xcell {
+  flex: 1 1 200px; min-width: 200px; border: 1px solid var(--s-bd);
+  border-radius: 9px; background: var(--s-subtle); padding: 12px 14px 16px;
+  display: grid; gap: 12px; justify-items: start; align-content: start;
+}
+.xlabel { font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--s-dim); }
+.spin {
+  width: 22px; height: 22px; border-radius: 99px;
+  background: conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  -webkit-mask: radial-gradient(circle closest-side, transparent 62%, #000 66%);
+  mask: radial-gradient(circle closest-side, transparent 62%, #000 66%);
+  animation: spinrot 1.1s linear infinite;
+}
+@keyframes spinrot { to { transform: rotate(360deg); } }
+.iribar {
+  width: 100%; height: 8px; border-radius: 99px;
+  background: var(--s-terminal); border: 1px solid var(--s-bd); overflow: hidden;
+}
+.iribar i {
+  display: block; height: 100%; width: 64%; border-radius: 99px;
+  background: linear-gradient(90deg, var(--spectrum), #5fe08b);
+  background-size: 300% 100%; animation: brandsweep 4s linear infinite;
+}
+.dragchip {
+  position: relative; font-size: 12.5px; color: var(--s-strong);
+  background: var(--s-raised); border-radius: 7px; padding: 6px 12px;
+  transform: rotate(-2deg);
+  box-shadow: 0 10px 26px rgba(0,0,0,.5), 0 2px 20px var(--s-glow);
+}
+.dragchip::before {
+  content: ""; position: absolute; inset: -1px; border-radius: 7px; padding: 1px;
+  background: conic-gradient(from var(--ir-a, 0deg), var(--spectrum), #5fe08b);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: irspin 3.2s linear infinite;
+}
+.flare:active, .flare.hov {
+  box-shadow: 0 0 0 3px rgba(140,170,255,.35), 0 2px 26px var(--s-glow);
+}
+
+/* round-1 contrast strip: same stages, zoomed down */
+.stagegrid.mini { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+.stagegrid.mini .stage { zoom: .58; }
+.stagegrid.mini .stagenotes { font-size: 11px; }
+
+.s-inrow { display: flex; gap: 8px; align-items: center; }
+.s-input {
+  flex: 1; font: 12.5px var(--font); color: var(--s-text);
+  background: var(--s-terminal); border: 1px solid var(--s-bd);
+  border-radius: 7px; padding: 6px 10px;
+}
+.s-input.demo-focus {
+  border-color: var(--s-focus);
+  outline: 2px solid color-mix(in srgb, var(--s-focus) 45%, transparent);
+  outline-offset: 1px;
+}
+.dir-current .s-input.demo-focus { outline: none; } /* current reality: border only */
+.s-inlab { font-size: 10.5px; color: var(--s-dim); flex: none; }
+
+/* ---------- section 1 pain callouts ---------- */
+.painwrap { display: grid; grid-template-columns: minmax(560px, 760px) 1fr; gap: 22px; align-items: start; }
+.painlist { font-size: 12.5px; color: var(--shell-mut); line-height: 1.6; margin: 0; padding: 0 0 0 2px; list-style: none; }
+.painlist li { margin-bottom: 9px; }
+.painlist .b { display: inline-block; width: 17px; height: 17px; border-radius: 99px;
+  background: #291f14; border: 1px solid #795833; color: #f0b97a;
+  font-size: 10.5px; font-weight: 700; text-align: center; line-height: 16px; margin-right: 7px; }
+.painlist b { color: var(--shell-tx); }
+
+/* =====================================================================
+   Section 3 — glass lab
+   ===================================================================== */
+.artband {
+  border-radius: 12px; border: 1px solid var(--shell-bd);
+  background: #0d0f13;
+  padding: 18px;
+  display: flex; gap: 18px; justify-content: space-evenly; flex-wrap: wrap;
+}
+/* IDENTICAL backdrop tile behind every material, so only the material differs */
+.tile {
+  position: relative; height: 236px; border-radius: 10px; overflow: hidden;
+  background:
+    radial-gradient(150px 120px at 28% 38%, #53c6f2, transparent 70%),
+    radial-gradient(160px 130px at 78% 62%, #5fe08b, transparent 70%),
+    radial-gradient(140px 110px at 60% 12%, #ff9d4a, transparent 72%),
+    radial-gradient(150px 130px at 12% 85%, #a58af7, transparent 70%),
+    #0a0d12;
+  animation: drift 10s ease-in-out infinite alternate;
+}
+.tile::before {  /* sharp bright detail: occluded flat, smeared at 10px, glow at 22px */
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    radial-gradient(circle 5px at 17px 17px, #ffffff 5px, transparent 6.5px),
+    radial-gradient(circle 4px at 40px 44px, #7ae0ff 4px, transparent 5.5px),
+    radial-gradient(circle 4px at 62px 20px, #ffc76a 4px, transparent 5.5px),
+    radial-gradient(circle 3.5px at 28px 66px, #8dffb9 3.5px, transparent 5px),
+    radial-gradient(circle 3.5px at 70px 70px, #ff8db0 3.5px, transparent 5px),
+    repeating-linear-gradient(90deg, transparent 0 52px, rgba(255,255,255,.5) 52px 60px, transparent 60px 132px);
+  background-size: 84px 84px, 84px 84px, 84px 84px, 84px 84px, 84px 84px, 132px 100%;
+}
+.tile::after {  /* LED grid */
+  content: ""; position: absolute; inset: 0;
+  background-image: radial-gradient(rgba(0,0,0,.5) 1px, transparent 1.5px);
+  background-size: 6px 6px; opacity: .45;
+}
+.matwrap { position: relative; width: 264px; }
+.matwrap .mat {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 212px; z-index: 2;
+}
+.matlabel { font-size: 11px; color: #e8e6e1; opacity: .85; margin-top: 8px; text-align: center;
+  text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+.mat {
+  border-radius: 10px; overflow: hidden; font-size: 12.5px; color: #c7cbd0;
+}
+.mat .ph { display: flex; align-items: center; gap: 8px; padding: 9px 11px;
+  font-weight: 700; color: #fffaf0; font-size: 13px; }
+.mat .sec { padding: 7px 11px 8px; border-top: 1px solid rgba(255,255,255,.06); }
+.mat .sec .st { font-size: 10px; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; margin-bottom: 3px; }
+.mat .sec.good { background: linear-gradient(90deg, rgba(19,36,29,.85), transparent 72%); }
+.mat .sec.good .st { color: var(--st-good-tx); }
+.mat .sec.bound { background: linear-gradient(90deg, rgba(36,26,51,.85), transparent 72%); }
+.mat .sec.bound .st { color: var(--st-bound-tx); }
+.m-flat { background: #171b20; border: 1px solid #2a3138; box-shadow: 0 10px 30px rgba(0,0,0,.34); }
+.m-tint {
+  background: rgba(13,17,21,.72); border: 1px solid rgba(255,255,255,.07);
+  backdrop-filter: blur(10px) saturate(1.15); -webkit-backdrop-filter: blur(10px) saturate(1.15);
+  box-shadow: 0 14px 36px rgba(0,0,0,.42);
+}
+.m-liquid {
+  background: rgba(10,14,18,.6); border: 1px solid rgba(255,255,255,.1);
+  backdrop-filter: blur(var(--lab-blur)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--lab-blur)) saturate(1.5);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 24px 60px rgba(0,0,0,.5);
+  border-radius: 13px;
+}
+.m-spectrum {
+  background: rgba(10,12,18,.62);
+  backdrop-filter: blur(var(--lab-blur)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--lab-blur)) saturate(1.5);
+  border: 1px solid transparent; border-radius: 13px;
+  background-clip: padding-box;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 24px 60px rgba(0,0,0,.5);
+  position: relative;
+}
+.m-spectrum::before {
+  content: ""; position: absolute; inset: -1px; border-radius: 13px; padding: 1px;
+  background: linear-gradient(130deg, rgba(95,224,139,.5), rgba(83,198,242,.4) 40%, rgba(165,138,247,.5) 75%, rgba(255,171,74,.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* =====================================================================
+   Section 4 — highlight & hover lab
+   ===================================================================== */
+.hovlab { display: grid; grid-template-columns: 170px 1fr 1fr; gap: 10px 16px;
+  align-items: center; max-width: 900px;
+  background: #101317; border: 1px solid var(--shell-bd); border-radius: 12px;
+  padding: 16px 18px; color: #f2f0e8; }
+.hovlab .hd { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: #99a2ad; }
+.hovlab .tname { font-size: 12.5px; color: #c7cbd0; }
+.hovlab .tname small { display: block; color: #667080; font-size: 10.5px; }
+.hb {
+  appearance: none; font: 600 12.5px var(--font); cursor: pointer;
+  background: #20272e; color: #f2f0e8; border: 1px solid #3e4852;
+  border-radius: 7px; padding: 7px 14px; position: relative;
+  justify-self: start;
+}
+.hrow {
+  display: flex; align-items: center; gap: 8px; padding: 5px 10px; font-size: 12.5px;
+  color: #c7cbd0; background: #14181d; border: 1px solid #252d34; border-radius: 7px;
+  position: relative; min-width: 190px;
+}
+/* t1 current */
+.t1.on { color: #fffaf0; background: #26313a; }
+.hrow.t1.on { background: #20272e; }
+/* t2 glow ring */
+.t2.on { border-color: #2bd184; box-shadow: 0 0 0 1px #2bd184, 0 2px 18px rgba(61,245,158,.32); color: #fffaf0; }
+/* t3 underline sweep */
+.t3 { overflow: hidden; }
+.t3::after { content: ""; position: absolute; left: 8%; right: 92%; bottom: 3px; height: 2px;
+  border-radius: 2px; background: linear-gradient(90deg, #5fe08b, #53c6f2); transition: right .25s; }
+.t3.on::after { right: 8%; }
+.t3.on { color: #fffaf0; }
+/* t4 iridescent ring */
+.t4.on { border-color: transparent; color: #fffaf0; box-shadow: 0 2px 20px rgba(140,170,255,.3); }
+.t4.on::before { content: ""; position: absolute; inset: -1px; border-radius: 7px; padding: 1px;
+  background: conic-gradient(from var(--ir-a, 0deg), var(--spectrum), #5fe08b);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: irspin 3.2s linear infinite; }
+/* t5 focus ring */
+.t5.on { border-color: #3df59e; outline: 2px solid rgba(61,245,158,.45); outline-offset: 2px; }
+
+/* =====================================================================
+   Section 5 — token sheet
+   ===================================================================== */
+.sheet { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; max-width: 1100px; }
+.sheetcol { background: #101317; border: 1px solid var(--shell-bd); border-radius: 12px; padding: 14px 16px; }
+.sheetcol h3 { margin: 0 0 10px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #99a2ad; }
+.tok { display: flex; align-items: center; gap: 9px; font: 11.5px var(--mono); color: #c7cbd0; margin-bottom: 7px; }
+.tok .sw { width: 26px; height: 16px; border-radius: 4px; border: 1px solid rgba(255,255,255,.12); flex: none; }
+.tok .val { margin-left: auto; color: #667080; }
+.rules { font-size: 12.5px; color: #c7cbd0; line-height: 1.65; margin: 0; padding-left: 18px; }
+.rules b { color: #f2f0e8; }
+.rules li { margin-bottom: 7px; }
+
+body.no-motion * { animation-play-state: paused !important; }
+</style>
+</head>
+<body>
+
+<h1>Design-language refresh — spike playground</h1>
+<p class="hint">
+  Thesis: LightPlayer is an LED art engine and should feel like one — today the chrome is a
+  flat pale-green wash with weak structural contrast, flat popovers, and near-invisible hovers.
+  Each stage below applies a complete candidate direction to the <em>same</em> composite mini-app
+  (chrome bar, example cards, detail popover, buttons, status chips, tree, focus ring).
+  Status hues (violet=binding, amber=unsaved, orange=health, gold=engaged, blue=live) are held
+  constant in every direction — the refresh moves surfaces, accent, materials, and interaction
+  light, not meaning.
+</p>
+
+<div class="controls">
+  <b>Explore:</b>
+  <button id="btnHover">Simulate hover</button>
+  <button id="btnMotion" class="active">Motion</button>
+  <label>Liquid blur <input id="blurRange" type="range" min="0" max="40" value="22"> <span id="blurVal">22px</span></label>
+  <span style="opacity:.6">Hover anything for real, too — every direction styles its own hover light.</span>
+</div>
+
+<h2><span class="n">1</span>Current production (baseline)</h2>
+<p class="sub">Faithful reproduction of today's tokens, verbatim from <code>style.css</code>. Pain points annotated at right.</p>
+<div class="painwrap">
+  <div class="stagewrap">
+    <div class="stage dir-current" data-stage></div>
+  </div>
+  <ul class="painlist">
+    <li><span class="b">1</span><b>Structural contrast ~1.3:1</b> — border <code>#2a3138</code> on surface <code>#171b20</code> is nearly invisible; panels, cards and tree read as one flat sheet.</li>
+    <li><span class="b">2</span><b>Hover is an 8%-alpha mint wash</b> — barely perceptible; the dominant idiom is "text gets slightly brighter".</li>
+    <li><span class="b">3</span><b>Sage headings + mint accent gray-green the whole page</b> — brand green is used as chrome, so the actual LED art never gets to be the colorful thing.</li>
+    <li><span class="b">4</span><b>Popover is the same color as the card behind it</b> — flat fill, no material change, weak separation.</li>
+    <li><span class="b">5</span><b>No focus-ring convention</b> — 9 focus utilities in the whole app; keyboard focus is a slightly greener border.</li>
+  </ul>
+</div>
+
+<h2><span class="n">2</span>C · Aurora — ruled winner, developed</h2>
+<p class="sub">Ruled at the 2026-08-29 gate. The spectrum is the interaction light: iridescent rings on hover (cards, rows, buttons),
+gradient primaries, liquid-glass popover with a spectrum edge (now correctly rounded — round 1's square frame was
+<code>border-image</code> ignoring <code>border-radius</code>; it's a masked-gradient overlay now). Below the composite, a sampler of
+the fun-CSS moments this direction unlocks.</p>
+<div class="stagewrap" style="max-width:1100px">
+  <div class="stage dir-aurora" data-stage></div>
+  <div class="stage dir-aurora extras">
+    <div class="xrow">
+      <div class="xcell"><div class="xlabel">Working — conic spinner</div><div class="spin"></div></div>
+      <div class="xcell"><div class="xlabel">Render progress</div><div class="iribar"><i></i></div></div>
+      <div class="xcell"><div class="xlabel">Drag in flight</div><div class="dragchip">palette: dusk ember</div></div>
+      <div class="xcell"><div class="xlabel">Press flare (hold it)</div><button class="s-btn secondary flare hoverable">Flash device</button></div>
+    </div>
+  </div>
+  <div class="stagenotes">
+    <b>Kept from the ruling:</b> selection stays the neutral white outline (standing style.css ruling — hover/press/drag get the
+    spectrum instead); status hues untouched; iridescence is a moment, never resting chrome.
+    <span class="t">Open:</span> does the gradient primary button survive, or do primaries go quiet and only their hover ring is spectral?
+  </div>
+</div>
+
+<h2><span class="n">3</span>Round-1 directions — kept for contrast</h2>
+<p class="sub">Not picked at the gate; shrunk for reference.</p>
+<div class="stagegrid mini">
+  <div class="stagewrap">
+    <div class="stagehead"><span class="name">A · Phosphor</span><span class="thesis">rejected — keeps green as chrome</span></div>
+    <div class="stage dir-phosphor" data-stage></div>
+  </div>
+  <div class="stagewrap">
+    <div class="stagehead"><span class="name">B · Ice</span><span class="thesis">rejected — achromatic, quieter than wanted</span></div>
+    <div class="stage dir-ice" data-stage></div>
+  </div>
+  <div class="stagewrap">
+    <div class="stagehead"><span class="name">D · Limelight</span><span class="thesis">rejected — art-lit chrome; harvest the idea later</span></div>
+    <div class="stage dir-limelight" data-stage></div>
+  </div>
+</div>
+
+<h2><span class="n">4</span>Glass lab — popover materials over identical art</h2>
+<p class="sub">The same detail popover in four materials, each over an <b>identical</b> backdrop tile so only the material differs (round-1 feedback: different backgrounds made them incomparable).
+Implementation note: the SVG merged-outline popover keeps fill+border+shadow on the path — glass means a translucent path fill plus
+<code>backdrop-filter</code> on a <code>clip-path: path()</code> layer beneath it; the card-sheet scrim and card footer already use small blurs today.</p>
+<div class="artband">
+  <div class="matwrap"><div class="tile"><div class="mat m-flat" data-mat></div></div><div class="matlabel">Flat card fill — today's popover</div></div>
+  <div class="matwrap"><div class="tile"><div class="mat m-tint" data-mat></div></div><div class="matlabel">Tinted glass — 10px blur (card-footer recipe)</div></div>
+  <div class="matwrap"><div class="tile"><div class="mat m-liquid" data-mat></div></div><div class="matlabel">Liquid glass — 22px + saturate + edge light</div></div>
+  <div class="matwrap"><div class="tile"><div class="mat m-spectrum" data-mat></div></div><div class="matlabel">Liquid + spectrum edge</div></div>
+</div>
+
+<h2><span class="n">5</span>Highlight &amp; hover lab</h2>
+<p class="sub">Candidate interaction-light treatments (left = rest, right = hover/focus forced). <b>Iridescent ring ruled the hover language 2026-08-29</b>; the others stay for contrast and for quiet contexts.</p>
+<div class="hovlab">
+  <div class="hd">Treatment</div><div class="hd">Button — rest / hover</div><div class="hd">Row — rest / hover</div>
+
+  <div class="tname">Current<small>bg lifts, text brightens</small></div>
+  <div><button class="hb t1">Duplicate</button> <button class="hb t1 on">Duplicate</button></div>
+  <div style="display:flex;gap:8px"><div class="hrow t1"><span>◈</span> speed</div><div class="hrow t1 on"><span>◈</span> speed</div></div>
+
+  <div class="tname">Glow ring<small>1px accent ring + soft bloom</small></div>
+  <div><button class="hb t2">Duplicate</button> <button class="hb t2 on">Duplicate</button></div>
+  <div style="display:flex;gap:8px"><div class="hrow t2"><span>◈</span> speed</div><div class="hrow t2 on"><span>◈</span> speed</div></div>
+
+  <div class="tname">Underline sweep<small>gradient sweeps in, quiet</small></div>
+  <div><button class="hb t3">Duplicate</button> <button class="hb t3 on">Duplicate</button></div>
+  <div style="display:flex;gap:8px"><div class="hrow t3"><span>◈</span> speed</div><div class="hrow t3 on"><span>◈</span> speed</div></div>
+
+  <div class="tname">Iridescent ring ✦ RULED<small>animated spectrum border</small></div>
+  <div><button class="hb t4">Duplicate</button> <button class="hb t4 on">Duplicate</button></div>
+  <div style="display:flex;gap:8px"><div class="hrow t4"><span>◈</span> speed</div><div class="hrow t4 on"><span>◈</span> speed</div></div>
+
+  <div class="tname">Focus ring (proposal)<small>2px offset ring, new token</small></div>
+  <div><button class="hb t5">Duplicate</button> <button class="hb t5 on">Duplicate</button></div>
+  <div style="display:flex;gap:8px"><div class="hrow t5"><span>◈</span> speed</div><div class="hrow t5 on"><span>◈</span> speed</div></div>
+</div>
+
+<h2><span class="n">6</span>Candidate standards (Aurora)</h2>
+<p class="sub">The re-theme is a ~50-line edit to <code>style.css :root</code> — token discipline is already near-total (~2105 token usages, 7 stragglers). These are the rules the winning direction would be written down as.</p>
+<div class="sheet">
+  <div class="sheetcol">
+    <h3>New token groups</h3>
+    <div class="tok"><span class="sw" style="background:rgba(10,14,18,.6);backdrop-filter:blur(4px)"></span>--glass-bg / -blur / -sat / -edge <span class="val">overlay material</span></div>
+    <div class="tok"><span class="sw" style="background:#3df59e"></span>--color-focus-ring <span class="val">NEW — a11y gap</span></div>
+    <div class="tok"><span class="sw" style="background:linear-gradient(90deg,#5fe08b,#53c6f2,#a58af7)"></span>--spectrum <span class="val">brand, moments only</span></div>
+    <div class="tok"><span class="sw" style="background:radial-gradient(circle,rgba(61,245,158,.4),transparent)"></span>--glow <span class="val">hover bloom color</span></div>
+  </div>
+  <div class="sheetcol">
+    <h3>Rules</h3>
+    <ol class="rules">
+      <li><b>Status hues never move.</b> Violet=binding, amber=unsaved, orange=health, gold=engaged, blue=live, stripes=error/debug. Chrome may not borrow them.</li>
+      <li><b>Glass is for overlays only</b> — popovers, sheets, card footers. Resting surfaces stay opaque (readability + paint cost).</li>
+      <li><b>Multi-color is a moment, not a wall</b> — the iridescent ring is the hover/press/drag language (ruled 2026-08-29); brand mark and hero keep the spectrum; never resting chrome, never selection (stays neutral).</li>
+      <li><b>Structural contrast floor:</b> borders ≥ ~1.8:1 against their surface; raised surfaces ≥ 1 visible step.</li>
+    </ol>
+  </div>
+  <div class="sheetcol">
+    <h3>Consolidation debt (with the refresh)</h3>
+    <ol class="rules">
+      <li><b>~70 ad-hoc button class strings</b> (site chrome, share, settings, account) fold into <code>ActionButton</code> / <code>InlineButton</code>.</li>
+      <li><b>7 raw <code>red-*</code> classes</b> in devices_page / local_store_banner move to error tokens.</li>
+      <li><b>Focus ring token</b> applied everywhere keyboard reaches.</li>
+      <li>Full baseline flip: ~1938 story PNGs re-baseline in one PR (merge-is-acceptance).</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+/* ?static=1 freezes all animation (screenshot / capture mode). */
+if (new URLSearchParams(location.search).has("static")) {
+  document.body.classList.add("no-motion");
+  const btn = document.getElementById("btnMotion");
+  if (btn) btn.classList.remove("active");
+}
+
+/* Build the identical composite into every [data-stage] so directions stay comparable. */
+const CARDS = [
+  { title: "logo-sign",  art: "art-spectrum", glyph: '<span class="g g-dev" title="playing on device">⚡ DOM-Z-102</span>', accent: "#5fe08b", cls: "" },
+  { title: "zook dome",  art: "art-ember",    glyph: '<span class="g g-sim" title="playing in sim">▶ sim</span>',           accent: "#ffab4a", cls: "" },
+  { title: "Radiance Dome — 5V geodesic, 24k LEDs (production rig)", art: "art-nebula",
+    glyph: '<span class="g g-attn" title="needs attention">!</span>', accent: "#a58af7", cls: "blocked" },
+];
+
+function stageHTML() {
+  return `
+  <div class="s-chrome">
+    <span class="s-brand">LightPlayer</span>
+    <div class="s-nav"><span class="on">Home</span><span class="hoverable">Devices</span><span class="hoverable">Explore</span></div>
+    <span class="s-sess">▶ session · sim</span>
+  </div>
+  <div class="s-cards">
+    ${CARDS.map(c => `
+      <div class="s-card hoverable ${c.cls}" style="--art-accent:${c.accent};--art-accent-glow:${c.accent}55">
+        <div class="art ${c.art}"></div>
+        <div class="bar"><span class="t">${c.title}</span>${c.glyph}</div>
+      </div>`).join("")}
+  </div>
+  <div class="s-mid">
+    <div class="s-pop">
+      <div class="ph">logo-sign <span class="k">esc</span></div>
+      <div class="sec good"><div class="st">Playing</div><div class="m">On <code>DOM-Z-102</code> · 60 fps · 1.2 A</div></div>
+      <div class="sec warn"><div class="st">Unsaved</div><div class="m">2 nodes edited · <code>palette</code>, <code>speed</code></div></div>
+      <div class="sec bound"><div class="st">Bound</div><div class="m"><code>speed ← bus A</code> · panel 1</div></div>
+    </div>
+    <div class="s-stack">
+      <div class="s-heading">Project · logo-sign</div>
+      <div class="s-btnrow">
+        <button class="s-btn primary hoverable">Open project</button>
+        <button class="s-btn secondary hoverable">Duplicate</button>
+        <button class="s-btn quiet hoverable">Delete</button>
+      </div>
+      <div class="s-chips">
+        <span class="s-chip good">✓ VALID</span><span class="s-chip live">● LIVE</span>
+        <span class="s-chip warn">✎ UNSAVED</span><span class="s-chip bound">◆ BOUND</span>
+        <span class="s-chip engaged">◉ ENGAGED</span>
+      </div>
+      <div class="s-tree">
+        <div class="s-row sel"><span class="ic">▶</span><span class="nm">scene: aurora sweep</span></div>
+        <div class="s-row hoverable"><span class="ic">◈</span><span class="nm">speed</span><span class="dot bound"></span></div>
+        <div class="s-row hoverable"><span class="ic">◈</span><span class="nm">palette: dusk ember with a very long descriptive name</span></div>
+        <div class="s-row hoverable"><span class="ic">□</span><span class="nm">output: matrix 50×119</span></div>
+      </div>
+      <div class="s-inrow">
+        <input class="s-input demo-focus" value="radiance-dome" spellcheck="false">
+        <span class="s-inlab">← focus ring</span>
+      </div>
+    </div>
+  </div>`;
+}
+document.querySelectorAll("[data-stage]").forEach(el => el.innerHTML = stageHTML());
+
+/* glass-lab popover bodies */
+const MAT = `
+  <div class="ph">logo-sign <span style="margin-left:auto;font:10px var(--mono);opacity:.6">esc</span></div>
+  <div class="sec good"><div class="st">Playing</div><div>On <code style="font:11px var(--mono)">DOM-Z-102</code> · 60 fps</div></div>
+  <div class="sec bound"><div class="st">Bound</div><div><code style="font:11px var(--mono)">speed ← bus A</code></div></div>`;
+document.querySelectorAll("[data-mat]").forEach(el => el.innerHTML = MAT);
+
+/* controls */
+const btnHover = document.getElementById("btnHover");
+btnHover.addEventListener("click", () => {
+  const on = btnHover.classList.toggle("active");
+  document.querySelectorAll(".hoverable").forEach(el => el.classList.toggle("hov", on));
+});
+const btnMotion = document.getElementById("btnMotion");
+btnMotion.addEventListener("click", () => {
+  const on = btnMotion.classList.toggle("active");
+  document.body.classList.toggle("no-motion", !on);
+});
+const blurRange = document.getElementById("blurRange");
+blurRange.addEventListener("input", () => {
+  document.documentElement.style.setProperty("--lab-blur", blurRange.value + "px");
+  document.getElementById("blurVal").textContent = blurRange.value + "px";
+});
+</script>
+</body>
+</html>

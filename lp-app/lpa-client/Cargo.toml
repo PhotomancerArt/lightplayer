@@ -25,11 +25,11 @@ serialport = { version = "4.8", optional = true }
 # single-bit ioctls serialport's per-line calls use).
 libc = { version = "0.2", optional = true }
 hashbrown = { workspace = true, optional = true }
-log = { workspace = true, features = ["std"], optional = true }
+log = { workspace = true, features = ["std"] }
 
 [features]
 default = ["host"]
-host = ["dep:anyhow", "dep:futures-util", "dep:log", "dep:lpc-shared", "dep:tokio"]
+host = ["dep:anyhow", "dep:futures-util", "dep:lpc-shared", "dep:tokio"]
 serial = [
     "host",
     "lp-riscv-elf",

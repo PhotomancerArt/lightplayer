@@ -28,9 +28,9 @@
 //!
 //! - `fetch` itself failing (no network, DNS, refused connection) ⇒
 //!   [`TransportError::Offline`].
-//! - `502`/`503`/`504` ⇒ [`TransportError::Offline`] too: a proxy answering
-//!   for a service it could not reach is the offline case wearing a status
-//!   code.
+//! - every `5xx` ⇒ [`TransportError::Offline`] too: a proxy answering for a
+//!   service it could not reach, or the service failing to answer, is the
+//!   offline case wearing a status code.
 //! - `404` on a content-plane `GET` ⇒ [`TransportError::MissingBlob`].
 //! - anything else non-2xx, and every decode failure ⇒
 //!   [`TransportError::Protocol`]. That deliberately includes the `400` a
@@ -176,9 +176,15 @@ impl CloudPort for FetchCloudPort {
 
 /// A non-2xx status, sorted into the two families the trait names.
 fn status_error(what: &str, status: u16) -> TransportError {
-    // A gateway status is the service being unreachable *through* something
-    // that is reachable — the retryable family, not a protocol violation.
-    if matches!(status, 502 | 503 | 504) {
+    // The whole 5xx family is the service (or something in front of it)
+    // failing to answer, not a disagreement about the request: a gateway
+    // answering for a dead upstream (502/503/504, and the dev proxy's
+    // bare 500), or the service itself mid-crash. All of it is the
+    // retryable family — classifying a 500 as a protocol violation made
+    // the sync queue drop the trip outright, so one transient server
+    // error meant "publish never happens until the next save"
+    // (`docs/defects/2026-08-28-auto-publish-outcomes-invisible.md`).
+    if status >= 500 {
         TransportError::Offline
     } else {
         TransportError::Protocol(format!("{what}: HTTP {status}"))
@@ -236,13 +242,17 @@ mod tests {
         assert_eq!(format!("{TREE_PREFIX}{hash}"), format!("/t/{hash}"));
     }
 
-    /// Gateway statuses are the offline family; everything else non-2xx is a
+    /// The 5xx family is offline (retryable); everything else non-2xx is a
     /// protocol violation, including the 400 a stale service returns for a
     /// `CloudCall` it cannot decode.
     #[test]
     fn statuses_sort_into_the_right_family() {
         assert_eq!(status_error("POST /api", 503), TransportError::Offline);
         assert_eq!(status_error("POST /api", 502), TransportError::Offline);
+        // The bare 500 a dev proxy (or a crashing service) answers with is
+        // the retryable family too — Protocol here meant the publish was
+        // silently dropped instead of retried.
+        assert_eq!(status_error("POST /api", 500), TransportError::Offline);
         assert!(matches!(
             status_error("POST /api", 400),
             TransportError::Protocol(_)

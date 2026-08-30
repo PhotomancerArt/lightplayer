@@ -385,7 +385,7 @@ The console model lives in `core/log/` (ADR
   target as detail). The controller's `on_entry` hook is the single
   JS-console mirroring point.
 - `DeviceOp::SetLogLevel` sets the connected server's runtime verbosity over
-  the wire (`ClientMsgBody::SetLogLevel` → `log::set_max_level`); the console
+  the wire (`ClientRequest::SetLogLevel` → `log::set_max_level`); the console
   toolbar sends it as `ConsoleCommand::SetDeviceLogLevel`, converted to the
   device action at actor intake. Not persisted device-side; tracked
   optimistically per connection.

@@ -44,7 +44,7 @@ pub(crate) mod workbench_stories;
 use dioxus::prelude::*;
 use lpa_mapping_editor::MapEditorSession;
 use lpa_studio_core::{
-    NodeId, ProjectEditorView, UiAction, UiPaneView, UiPatchSurface, UiPatchTarget, UiSimCard,
+    NodeId, ProjectEditorView, UiAction, UiPaneView, UiPatchSurface, UiSelection, UiSimCard,
     UiViewContent,
 };
 
@@ -350,9 +350,21 @@ pub fn WorkbenchFrame(
     // session (one selection/document for the canvas, the Fixtures tree,
     // and the Props pane), and the Props pane's commit bump (plain data
     // across the dock boundary; the session host applies on change).
-    let dive_focused = use_signal(|| None::<NodeId>);
+    // The DERIVED dive (unified-selection P4): the entered fixture IS the
+    // selection's scope — no independent dive state to drift. Rendering
+    // the scope as a dive is MAPPING's activity (grain follows activity):
+    // Patching reads the same selection with no dive, so an object picked
+    // there simply arrives already-entered when the view switches here.
+    let dive_focused = matches!(view, WorkbenchView::Mapping)
+        .then(|| project_editor.patch_selection.entered())
+        .flatten();
     let dive_session = use_signal(|| MapEditorSession::new(lpc_mapping::Map2dDoc::new()));
     let dive_commits = use_signal(|| 0u64);
+    // ONE auto-pack slot store for BOTH canvas-bearing views (G1 round 1):
+    // per-center signals computed at different mount times diverged — the
+    // peach's body packed differently in Map and Patch. One conceptual
+    // space means one slot truth.
+    let pack_slots = use_signal(crate::app::editor_shell::arrange::PackSlots::new);
     // The patching activity's cross-dock state: verbs arm in the center
     // (`a` / `s`) and complete on a counterpart click in the Outputs or
     // Tree dock — frame scope, like the dive signals, so every side reads
@@ -406,7 +418,7 @@ pub fn WorkbenchFrame(
             })
             .unwrap_or(0);
         let fingerprint = (selection, placed);
-        let mut last = use_signal(|| None::<(Option<UiPatchTarget>, u64)>);
+        let mut last = use_signal(|| None::<(UiSelection, u64)>);
         use_effect(use_reactive!(|fingerprint| {
             let changed = last
                 .peek()
@@ -481,6 +493,7 @@ pub fn WorkbenchFrame(
                             crate::app::editor_shell::EditorShellCenter {
                                 surface: surface.clone(),
                                 selection: patch_selection.clone(),
+                                pack_slots,
                                 project_editor,
                                 dive_focused,
                                 dive_session,
@@ -495,6 +508,7 @@ pub fn WorkbenchFrame(
                             crate::app::editor_shell::patching::PatchingShellCenter {
                                 surface: surface.clone(),
                                 selection: patch_selection.clone(),
+                                pack_slots,
                                 project_editor,
                                 on_action,
                             }
@@ -782,8 +796,8 @@ fn PanelDock(
     panes: Vec<UiPaneView>,
     lens_card: Option<UiSimCard>,
     surface: Option<UiPatchSurface>,
-    patch_selection: Option<UiPatchTarget>,
-    dive_focused: Signal<Option<NodeId>>,
+    patch_selection: UiSelection,
+    dive_focused: Option<NodeId>,
     dive_session: Signal<MapEditorSession>,
     dive_commits: Signal<u64>,
     /// The Nodes view's route — the Props stack's context-strip link.
@@ -878,8 +892,8 @@ fn PanelBody(
     panes: Vec<UiPaneView>,
     lens_card: Option<UiSimCard>,
     surface: Option<UiPatchSurface>,
-    patch_selection: Option<UiPatchTarget>,
-    dive_focused: Signal<Option<NodeId>>,
+    patch_selection: UiSelection,
+    dive_focused: Option<NodeId>,
     dive_session: Signal<MapEditorSession>,
     dive_commits: Signal<u64>,
     /// The Nodes view's route — the Props stack's context-strip link.
@@ -941,7 +955,7 @@ fn PanelBody(
                             })
                             .unwrap_or_default(),
                     ),
-                    dive: (*dive_focused.read()).map(|node| (node, dive_session)),
+                    dive: dive_focused.map(|node| (node, dive_session)),
                     on_action,
                 }
             }

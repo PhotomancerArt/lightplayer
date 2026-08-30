@@ -54,6 +54,12 @@ pub struct CloudUser {
     /// When the account was first seen, f64 epoch seconds from the clock
     /// port.
     pub created_at: f64,
+    /// A guest account (examples vision D8): minted for an anonymous
+    /// fork's publish, owned by whoever holds its browser session cookie.
+    /// **The pruning mark** — D8 requires guest-owned rows to be clearly
+    /// queryable, and this flag (mirrored by `provider = "anonymous"`) is
+    /// that lever: guest users → their owned projects is one obvious join.
+    pub anonymous: bool,
 }
 
 impl CloudUser {
@@ -113,6 +119,7 @@ mod tests {
             picture_url: None,
             provider: "google".to_string(),
             created_at: 1.0,
+            anonymous: false,
         }
     }
 

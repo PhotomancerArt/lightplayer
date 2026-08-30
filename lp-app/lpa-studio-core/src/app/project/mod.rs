@@ -67,8 +67,8 @@ pub use asset::{
 pub use dirty_summary::DirtySummary;
 pub use edit_journal::{EDIT_JOURNAL_CAP, UiEditJournalEntry, UiEditJournalEvent, UiEditorMode};
 pub use editor_meta_op::{
-    EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture, EditorMetaOp, EditorMetaVerb,
-    editor_meta_artifact,
+    EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture, EditorMetaOp, EditorMetaSet,
+    EditorMetaVerb, editor_meta_artifact,
 };
 pub use export_lint::{ExportGraphContext, ExportGraphNode, check_export_graph};
 pub use loaded_project_choice::LoadedProjectChoice;
@@ -120,6 +120,6 @@ pub use slot::{
 pub use ui_affordance::UiAffordance;
 pub use ui_patch_surface::{
     UiArrangeFootprint, UiArrangeMeta, UiArrangeTransform, UiPatchInstance, UiPatchSurface,
-    UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput, UiPatchTarget,
+    UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput, UiPatchTarget, UiSelection,
 };
 pub use ui_pending_edit::{UiPendingEdit, UiPendingEditKind, UiPendingEditPhase};

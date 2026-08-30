@@ -223,6 +223,35 @@ pub fn App() -> Element {
     let loop_unsaved = Rc::clone(&unsaved);
     let loop_library_uids = Rc::clone(&library_uids);
     let loop_pending_project = Rc::clone(&pending_project_route);
+    // Whether the last emitted view ran a transient session (the nav
+    // listener's leave-discards-work evidence) and the fork generation the
+    // toast watches (D7): the counter is the core's own "a fork happened"
+    // signal — state transitions alone cannot distinguish a fork from
+    // opening another project.
+    let last_transient = use_hook(|| Rc::new(Cell::new(false)));
+    let loop_last_transient = Rc::clone(&last_transient);
+    let loop_fork_generation = use_hook(|| Rc::new(Cell::new(0u64)));
+    let mut loop_toasts = toasts;
+    // The anonymous-fork hook (examples vision D3/D8): a fork by a browser
+    // with no session mints a GUEST account, then refreshes the session —
+    // whose false→true `syncs()` edge sweeps the library (D7) and
+    // publishes the fork. Signed-in (and already-guest) forks skip it.
+    // (consumed under cfg(wasm32) below; hooks stay unconditional so the
+    // hook order is identical on every build)
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        allow(unused_variables, reason = "the guest mint is browser-only")
+    )]
+    let loop_cloud_session = use_context::<Signal<crate::cloud::CloudSession>>();
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        allow(
+            unused_variables,
+            unused_mut,
+            reason = "the guest mint is browser-only"
+        )
+    )]
+    let mut loop_cloud_refresh = use_context::<crate::cloud::CloudSessionRefresh>();
     let bridge = use_hook(move || {
         install_log_sink();
         let mut controller = StudioController::new(now_secs);
@@ -312,6 +341,30 @@ pub fn App() -> Element {
                     .open_project_uid
                     .clone()
                     .zip(next.open_project_name.clone());
+                // The fork-at-save moment (examples vision D7): the core
+                // bumps the generation once per completed fork. The URL
+                // heal rides the lens reconciliation below; this is the
+                // one-line confirmation.
+                if next.transient_fork_generation > loop_fork_generation.get() {
+                    loop_toasts.say(crate::app::share::visitor_session::FORKED_COPY_LINE);
+                    // Signed out? The fork needs an owner before it can
+                    // publish (D3): mint the guest session, then re-ask
+                    // whoami — the session refresh is what wakes the sync
+                    // engine's library sweep.
+                    #[cfg(target_arch = "wasm32")]
+                    if matches!(
+                        &*loop_cloud_session.peek(),
+                        crate::cloud::CloudSession::Anonymous { .. }
+                    ) {
+                        spawn(async move {
+                            if crate::cloud::ensure_guest_session().await {
+                                loop_cloud_refresh.refresh();
+                            }
+                        });
+                    }
+                }
+                loop_fork_generation.set(next.transient_fork_generation);
+                loop_last_transient.set(next.open_project_transient);
                 // Latch the library roster and answer any `/p/<uid>` route
                 // that has been waiting for it (the boot case — navigation
                 // mid-session reads the same latch synchronously).
@@ -385,7 +438,10 @@ pub fn App() -> Element {
                 // A lens CHANGE (`bound_changed`) rewrites from anywhere.
                 let on_shell_route = matches!(
                     current,
-                    StudioRoute::Devices | StudioRoute::Projects | StudioRoute::Project { .. }
+                    StudioRoute::Devices
+                        | StudioRoute::Projects
+                        | StudioRoute::Project { .. }
+                        | StudioRoute::Example { .. }
                 );
                 // …and never while a nav teardown is in flight. Leaving
                 // the studio is initiated BY navigation to a site route
@@ -403,7 +459,10 @@ pub fn App() -> Element {
                     if let Some(target) = bound
                         && !target.same_session(&current)
                     {
-                        if matches!(current, StudioRoute::Project { .. }) {
+                        if matches!(
+                            current,
+                            StudioRoute::Project { .. } | StudioRoute::Example { .. }
+                        ) {
                             // boot/forward resolution on a lens route
                             // (uid → slug, identity landing): same place,
                             // no duplicate entries
@@ -419,7 +478,10 @@ pub fn App() -> Element {
                     // an unaddressable lens (no library identity yet, or a
                     // device whose identity has not landed) keeps the URL
                     // as-is
-                } else if matches!(current, StudioRoute::Project { .. }) {
+                } else if matches!(
+                    current,
+                    StudioRoute::Project { .. } | StudioRoute::Example { .. }
+                ) {
                     // the editor went away: home without an in-flight open
                     // (after one started) means the open ended — the URL
                     // goes back to the gallery the cards live on
@@ -529,6 +591,13 @@ pub fn App() -> Element {
     // the move instead.
     let nav_bridge = bridge.clone();
     let nav_open_ids = Rc::clone(&open_ids_now);
+    // Transient-session guard (G1 bug ruling, 2026-08-29): the teardown
+    // path's "the draft is durable" premise is FALSE for a transient view
+    // session — its stores are memory, so leaving really does discard
+    // unsaved work. The latch is the view loop's transient uid; the
+    // confirmed flag stops the click-then-moved double prompt.
+    let nav_transient = Rc::clone(&last_transient);
+    let nav_leave_confirmed = use_hook(|| Rc::new(Cell::new(false)));
     let nav_session = Rc::clone(&session_now);
     let nav_leaving = Rc::clone(&leaving_session);
     let nav_unsaved = Rc::clone(&unsaved);
@@ -548,9 +617,22 @@ pub fn App() -> Element {
                 router::NavEvent::Moved => router::current_route(),
             };
             let plan = nav_session_plan(nav_session.borrow().as_ref(), &target, nav_unsaved.get());
+            // Leaving a TRANSIENT session with unsaved work discards it for
+            // real (memory stores — no durable draft), so this one teardown
+            // asks first. Ordinary sessions keep R8-4's no-prompt rule.
+            let leave_discards_transient = matches!(plan, NavSessionPlan::Leave { .. })
+                && nav_unsaved.get()
+                && nav_transient.get();
             if let router::NavEvent::ClickIntent(_) = event {
                 return match plan {
-                    // Everything is settled on arrival, below: the
+                    NavSessionPlan::Leave { .. } if leave_discards_transient => {
+                        let proceed =
+                            unsaved_gate::confirm_discarding_unsaved(TRANSIENT_LEAVE_PROMPT);
+                        // remembered so the arrival below doesn't re-ask
+                        nav_leave_confirmed.set(proceed);
+                        proceed
+                    }
+                    // Everything else is settled on arrival, below: the
                     // click's own history write happens between the two
                     // calls, and acting twice would tear down twice.
                     _ => true,
@@ -560,6 +642,16 @@ pub fn App() -> Element {
             let old = route.peek().clone();
             if new_route == old {
                 return true;
+            }
+            if leave_discards_transient && !nav_leave_confirmed.take() {
+                // Back/forward or a manual URL edit already spent the
+                // history entry; ask now, and put the URL back on decline
+                // (a push, like the Refuse path — restoring what the back
+                // consumed leaves history as it was).
+                if !unsaved_gate::confirm_discarding_unsaved(TRANSIENT_LEAVE_PROMPT) {
+                    router::navigate(&old);
+                    return true;
+                }
             }
             match plan {
                 NavSessionPlan::Leave { teardown, said } => {
@@ -597,6 +689,13 @@ pub fn App() -> Element {
                         .as_ref()
                         .is_some_and(|(open, _)| *open == uid_string);
                     if !already_bound
+                        && nav_unsaved.get()
+                        && !unsaved_gate::confirm_discarding_unsaved(OPEN_DISCARDS_PROMPT)
+                    {
+                        router::navigate(&old);
+                        return true;
+                    }
+                    if !already_bound
                         && !resolve_project_route(
                             *uid,
                             &nav_library_uids,
@@ -609,6 +708,37 @@ pub fn App() -> Element {
                         // the library has not mounted yet (a very early
                         // in-app link): hold the intent for the view loop
                         *nav_pending_project.borrow_mut() = Some(*uid);
+                    }
+                }
+                StudioRoute::Example { slug, .. } => {
+                    // An example's bare address resolves client-side (the
+                    // parser only produces slugs the embedded table has) —
+                    // no roster needed, so it dispatches straight into the
+                    // same stateless open an Explore card uses (D2). This
+                    // dispatch bypasses `on_action`'s unsaved gate, so it
+                    // carries its own (same message, same predicate).
+                    let already_bound = matches!(
+                        &*nav_bound_route.borrow(),
+                        Some(StudioRoute::Example { slug: bound, .. }) if bound == slug
+                    );
+                    if !already_bound
+                        && nav_unsaved.get()
+                        && !unsaved_gate::confirm_discarding_unsaved(OPEN_DISCARDS_PROMPT)
+                    {
+                        router::navigate(&old);
+                        return true;
+                    }
+                    if !already_bound
+                        && let Some(example) =
+                            lpa_studio_core::app::home::embedded_example_by_slug(slug)
+                    {
+                        nav_pending_route_open.set(true);
+                        nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
+                            HOME_NODE_ID,
+                            HomeOp::OpenExample {
+                                id: example.id.to_string(),
+                            },
+                        )));
                     }
                 }
                 StudioRoute::Devices
@@ -674,7 +804,9 @@ pub fn App() -> Element {
     // open runs, or opens would go through the legacy (storeless) path on
     // first paint. The probe is awaited here; the sim still starts
     // (without persistence) if the store is unavailable.
+    let startup_route = use_hook(|| route.peek().clone());
     let startup_bridge = bridge.clone();
+    let startup_pending_route_open = Rc::clone(&pending_route_open);
     use_hook(move || {
         spawn(async move {
             local_store::request_persist();
@@ -700,6 +832,37 @@ pub fn App() -> Element {
             // `/device/<uid>` reload's granted-port connect + attach), the
             // D32 auto-connect sweep and the serial hotplug listener all
             // went with M2 of the device-model rebuild.
+            match &startup_route {
+                // A cold `/p/<slug>` load: the example is compiled in, so
+                // no roster wait — open transiently the moment the library
+                // host is attached (the open funnel needs its clock and
+                // active slot, never its store).
+                StudioRoute::Example { slug, .. } => {
+                    if let Some(example) =
+                        lpa_studio_core::app::home::embedded_example_by_slug(slug)
+                    {
+                        startup_pending_route_open.set(true);
+                        startup_bridge
+                            .tx
+                            .send(StudioCommand::Action(UiAction::from_op(
+                                HOME_NODE_ID,
+                                HomeOp::OpenExample {
+                                    id: example.id.to_string(),
+                                },
+                            )));
+                    }
+                }
+                StudioRoute::Home
+                | StudioRoute::Project { .. }
+                | StudioRoute::Devices
+                | StudioRoute::Projects
+                | StudioRoute::Explore
+                | StudioRoute::Account
+                | StudioRoute::Stories { .. }
+                | StudioRoute::Boards { .. }
+                | StudioRoute::BoardEditor
+                | StudioRoute::Docs { .. } => {}
+            }
         });
     });
 
@@ -760,8 +923,10 @@ pub fn App() -> Element {
     // route resolution above lands it on Home with a pending intent.
     let current_view = view.read().clone();
     let current_route = route.read().clone();
-    let opening_frame = matches!(current_route, StudioRoute::Project { .. })
-        && !current_route.project_matches_view(&current_view);
+    let opening_frame = matches!(
+        current_route,
+        StudioRoute::Project { .. } | StudioRoute::Example { .. }
+    ) && !current_route.project_matches_view(&current_view);
     // Play mode (panel.md P12) is a zoom on the SAME session: the flag only
     // picks what the shell renders, and the toggle only rewrites the URL.
     let project_view = current_route.project_view();
@@ -776,7 +941,10 @@ pub fn App() -> Element {
     let workbench_hrefs = current_route.is_lens().then(|| {
         workbench::WorkbenchHrefs::from_entries(workbench::VIEWS.iter().map(|spec| {
             let addressable = spec.view == workbench::WorkbenchView::default()
-                || matches!(&current_route, StudioRoute::Project { .. });
+                || matches!(
+                    &current_route,
+                    StudioRoute::Project { .. } | StudioRoute::Example { .. }
+                );
             (
                 spec.view,
                 addressable.then(|| current_route.with_view(spec.route_view).path()),
@@ -840,6 +1008,7 @@ pub fn App() -> Element {
         .then(|| current_view.session.clone())
         .flatten()
         .map(|session| ChromeSessionControl {
+            example: current_view.open_transient_example.is_some(),
             session,
             project: current_view.panes.iter().find_map(|pane| match &pane.body {
                 lpa_studio_core::UiViewContent::ProjectEditor(editor) => {
@@ -943,7 +1112,10 @@ pub fn App() -> Element {
             VisitorBannerHost {}
             match current_route {
                 StudioRoute::Home => rsx! {
-                    crate::app::HomePage { on_action }
+                    crate::app::HomePage {
+                        on_action,
+                        home: current_view.home.clone().map(|home| *home),
+                    }
                 },
                 StudioRoute::Account => rsx! {
                     crate::app::AccountPage {}
@@ -1001,6 +1173,16 @@ pub fn App() -> Element {
         }
     }
 }
+
+/// The transient-session leave prompt (G1 bug ruling, 2026-08-29): a
+/// transient view session's stores are memory — leaving really discards.
+const TRANSIENT_LEAVE_PROMPT: &str = "You're viewing an example — unsaved changes here are discarded when you leave.\n\nLeave anyway?";
+
+/// The route-dispatched open's unsaved gate — the same message
+/// `on_action`'s gate uses, for the opens the route listener dispatches
+/// directly (typed URLs, back/forward into another project).
+const OPEN_DISCARDS_PROMPT: &str =
+    "This project has unsaved changes. Opening another project will discard them.\n\nOpen anyway?";
 
 /// What a navigation does to the tab's ONE runtime session.
 ///
@@ -1132,9 +1314,10 @@ fn resolve_project_route(
     true
 }
 
-/// Consume one pending shared-project intent (P6): fetch the project as a
-/// tracking copy into the library, then open it through the same funnel a
-/// gallery card uses. A refusal lands in `state` for Home's one quiet
+/// Consume one pending shared-project intent (P6/P5): fetch the project
+/// and open it — as a tracking copy through the ordinary funnel (member /
+/// Edit link), or as a TRANSIENT view session (View link — nothing
+/// installed, D1/D2). A refusal lands in `state` for Home's one quiet
 /// line; the URL stays exactly as the sender wrote it, so a reload
 /// retries.
 #[cfg(target_arch = "wasm32")]
@@ -1145,16 +1328,34 @@ fn consume_shared_intent(
     tx: CommandSender,
     pending_route_open: Rc<Cell<bool>>,
 ) {
+    use crate::cloud::shared_open::SharedOpenOutcome;
     state.set(SharedOpenState::Opening);
     spawn(async move {
-        match crate::cloud::shared_open::open_shared_into_library(uid).await {
-            Ok(summary) => {
+        match crate::cloud::shared_open::open_shared_link(uid).await {
+            Ok(SharedOpenOutcome::Installed(summary)) => {
                 state.set(SharedOpenState::Idle);
                 pending_route_open.set(true);
                 tx.send(StudioCommand::Action(UiAction::from_op(
                     HOME_NODE_ID,
                     HomeOp::OpenPackage {
                         key: summary.uid.to_string(),
+                    },
+                )));
+            }
+            Ok(SharedOpenOutcome::Transient {
+                name,
+                package_files,
+                history_files,
+            }) => {
+                state.set(SharedOpenState::Idle);
+                pending_route_open.set(true);
+                tx.send(StudioCommand::Action(UiAction::from_op(
+                    HOME_NODE_ID,
+                    HomeOp::OpenSharedTransient {
+                        uid: uid.to_string(),
+                        name,
+                        package_files,
+                        history_files,
                     },
                 )));
             }
@@ -1458,7 +1659,7 @@ mod tests {
     fn project_route() -> StudioRoute {
         StudioRoute::Project {
             uid: "prj0000000000000000".parse().expect("a project uid"),
-            slug: Some("mini-dome".to_string()),
+            slug: Some("small-dome".to_string()),
             view: router::ProjectView::Workspace,
         }
     }

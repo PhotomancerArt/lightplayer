@@ -499,27 +499,6 @@ impl LibraryStore {
         PackageHandle::load(uid, slug, package_fs, history_fs)
     }
 
-    /// Find a package by its provenance source (seed-once checks).
-    pub fn find_seeded_from(&self, source: &str) -> Result<Option<PackageSummary>, LibraryError> {
-        for slug in self.package_slugs()? {
-            let package_fs = self.chroot_package(&slug)?;
-            let meta = {
-                let view = package_fs.borrow();
-                package_meta::read_meta(&*view)?
-            };
-            if let Some(PackageMeta {
-                provenance: PackageProvenance::SeededFrom { source: s },
-                ..
-            }) = meta
-            {
-                if s == source {
-                    return Ok(Some(self.read_summary(&slug)?));
-                }
-            }
-        }
-        Ok(None)
-    }
-
     pub(crate) fn install_files_with_fresh_uid(
         &self,
         name: &str,
@@ -866,8 +845,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(summary.name, "demo");
-        assert!(store.find_seeded_from("examples/basic").unwrap().is_some());
-        assert!(store.find_seeded_from("examples/other").unwrap().is_none());
     }
 
     /// The P6 tracking-copy install: uid preserved from the manifest,

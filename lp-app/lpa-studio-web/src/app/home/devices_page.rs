@@ -26,7 +26,7 @@ pub fn DevicesPage(home: UiHomeView, on_action: EventHandler<UiAction>) -> Eleme
     rsx! {
         div { class: "tw:grid tw:content-start tw:gap-7",
             if let Some(issue) = home.issue.clone() {
-                div { class: "tw:flex tw:items-center tw:gap-3 tw:rounded-md tw:border tw:border-red-600/40 tw:bg-red-500/10 tw:px-4 tw:py-2.5 tw:text-sm tw:text-red-200",
+                div { class: "tw:flex tw:items-center tw:gap-3 tw:rounded-md tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-4 tw:py-2.5 tw:text-sm tw:text-status-error-foreground",
                     span { "{issue.message}" }
                 }
             }

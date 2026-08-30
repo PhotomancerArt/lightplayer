@@ -1,4 +1,4 @@
-//! Shared patch-surface STORY FIXTURES: hand-built DTOs (mini-dome,
+//! Shared patch-surface STORY FIXTURES: hand-built DTOs (small-dome,
 //! peach) the workbench and editor-shell stories pin their looks with —
 //! derivation is covered by unit tests and e2e. Frames are deliberately
 //! absent (cells draw their honest "no frame yet"): live pixels are the
@@ -84,13 +84,16 @@ fn finish_surface(mut surface: UiPatchSurface) -> UiPatchSurface {
     surface
 }
 
-/// The mini-dome's shape: two named outputs sharing sectors and doors.
-pub(crate) fn mini_dome_surface(contested: bool) -> UiPatchSurface {
-    let surface = build_mini_dome_surface(contested);
+/// A hand-built MINIATURE in the small-dome's shape (two named outputs
+/// sharing repeated instances and doors) — deliberately kept at story
+/// scale (five 30-lamp "sectors", three 9-lamp doors, five ports), NOT
+/// the real example's 6,310 lamps: stories pin UI structure, not scale.
+pub(crate) fn small_dome_surface(contested: bool) -> UiPatchSurface {
+    let surface = build_small_dome_surface(contested);
     finish_surface(surface)
 }
 
-fn build_mini_dome_surface(contested: bool) -> UiPatchSurface {
+fn build_small_dome_surface(contested: bool) -> UiPatchSurface {
     let mut sector2 = cell("dome:0:60:0", "dome", 60, 30, 0);
     sector2.contested = contested;
     let mut door0 = cell("doors:0:0:30", "doors", 0, 9, 30);
@@ -99,7 +102,7 @@ fn build_mini_dome_surface(contested: bool) -> UiPatchSurface {
         // The example's real tree shape: each fixture lives in its OWN
         // sub-module under the root show.
         modules: vec![
-            module(1, "mini_dome", 0),
+            module(1, "small_dome", 0),
             module(20, "Dome", 1),
             module(21, "Doors", 1),
         ],
@@ -238,10 +241,10 @@ fn build_mini_dome_surface(contested: bool) -> UiPatchSurface {
     }
 }
 
-/// The mini-dome posed for the WALK-UP: both fixtures MANUAL, with the last
+/// The small-dome posed for the WALK-UP: both fixtures MANUAL, with the last
 /// sector and the last door taken off the wire.
 ///
-/// The auto-mapped pose ([`mini_dome_surface`]) is the world where nothing is
+/// The auto-mapped pose ([`small_dome_surface`]) is the world where nothing is
 /// ever waiting — objects flow onto the wire by themselves — so the panel's
 /// invitation, armed and object-first states have nothing to be about there
 /// (P5c left the story fixtures auto; P6 poses the other half). Manual flow
@@ -253,8 +256,8 @@ fn build_mini_dome_surface(contested: bool) -> UiPatchSurface {
 /// size of the sector waiting for them) and the door at the end of `IO2`
 /// (nine free at its tail) — one empty port and one part-used one, because
 /// those read differently in every picker and occupancy line.
-pub(crate) fn mini_dome_walkup_surface() -> UiPatchSurface {
-    let mut surface = build_mini_dome_surface(false);
+pub(crate) fn small_dome_walkup_surface() -> UiPatchSurface {
+    let mut surface = build_small_dome_surface(false);
     let unpatched = ["dome:0:120:39", "doors:0:18:99"];
     let keep = |cell: &UiPatchCell| !unpatched.contains(&cell.id.as_str());
     for output in &mut surface.outputs {
@@ -381,7 +384,7 @@ mod tests {
     /// the captures showing paired states under armed names.
     #[test]
     fn walkup_pose_leaves_two_objects_waiting() {
-        let surface = mini_dome_walkup_surface();
+        let surface = small_dome_walkup_surface();
         assert!(
             surface.fixtures.iter().all(|fixture| fixture.manual_flow),
             "the walk-up pose is the MANUAL world"
@@ -400,7 +403,7 @@ mod tests {
     /// pickers explain: one empty port, one part-used, the rest full.
     #[test]
     fn walkup_pose_frees_one_whole_port_and_one_tail() {
-        let surface = mini_dome_walkup_surface();
+        let surface = small_dome_walkup_surface();
         let free: Vec<(String, u32)> = surface
             .outputs
             .iter()

@@ -5,6 +5,7 @@
 //! chrome C reorg split it.
 
 pub(crate) mod brand_hero;
+pub(crate) mod card_footer;
 pub(crate) mod card_sheet;
 pub(crate) mod card_thumb;
 pub mod devices_page;
@@ -17,6 +18,10 @@ pub(crate) mod home_gallery_stories;
 pub mod home_landing;
 #[cfg(feature = "stories")]
 pub(crate) mod home_landing_stories;
+/// The `examples/logo-sign` mapping generator plus its drift gate. Test-only:
+/// the running app reads the committed document, never this.
+#[cfg(test)]
+mod logo_sign_gen;
 pub(crate) mod new_project_menu;
 #[cfg(feature = "stories")]
 pub(crate) mod new_project_menu_stories;

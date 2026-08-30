@@ -133,7 +133,11 @@ pub fn use_cloud_session_provider() {
         session.set(CloudSession::Pending);
         spawn(async move {
             let next = load_session(&FetchCloudPort::new()).await;
-            if let CloudSession::SignedIn { me, .. } = &next {
+            // Guests are not accounts to come back to: no login can ever
+            // reach one again, so the switcher must not remember them.
+            if let CloudSession::SignedIn { me, .. } = &next
+                && !me.anonymous
+            {
                 account_memory::remember(me, js_sys::Date::now());
             }
             // The auto-publish driver's one input: whether there is an
@@ -215,6 +219,7 @@ mod tests {
             picture_url: None,
             provider_label: "Google".to_string(),
             created_at: 1.0,
+            anonymous: false,
         }
     }
 

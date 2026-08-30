@@ -27,7 +27,7 @@ use crate::app::node::slot_edit_actions::{
 };
 use crate::base::{
     DetailSectionTint, InlineButton, InlineButtonTone, StudioIcon, StudioIconName,
-    detail_popover_section_class,
+    detail_popover_section_class, inline_text_button_class,
 };
 
 #[component]
@@ -272,7 +272,7 @@ fn BindingChannelChoice(
 
     rsx! {
         button {
-            class: "tw:flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:overflow-hidden tw:rounded-xs tw:border tw:border-status-bound-border tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:text-left tw:leading-none tw:text-status-bound-foreground tw:transition-colors tw:hover:border-status-bound-foreground",
+            class: "{inline_text_button_class(InlineButtonTone::Bound, false)} tw:overflow-hidden",
             r#type: "button",
             title,
             onclick: move |event| {

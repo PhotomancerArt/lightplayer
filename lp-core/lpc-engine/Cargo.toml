@@ -111,7 +111,12 @@ lpc-mapping = { path = "../lpc-mapping", default-features = false, optional = tr
 lpc-model = { path = "../lpc-model", default-features = false }
 lpc-hardware = { path = "../lpc-hardware", default-features = false }
 lpc-registry = { path = "../lpc-registry", default-features = false }
-lpc-wire = { path = "../lpc-wire", default-features = false }
+# `ser-write-json` lets the stream batch tree deltas against real on-wire
+# byte counts (same serializer the ESP32 writes with), matching lpc-shared's
+# frame batcher.
+lpc-wire = { path = "../lpc-wire", default-features = false, features = [
+    "ser-write-json",
+] }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lp-recovery = { workspace = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
@@ -123,6 +128,10 @@ libm = "0.2"
 # Concrete CPU graphics backend for tests and examples (the engine itself
 # depends only on the `lp-gfx` traits; hosts construct the backend).
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false }
+# Unconditional for tests (the lib's copy is optional behind node-fixture):
+# small_dome_scatter derives its expectations through the mapping resolver,
+# and the gates-off clippy pass compiles tests with every node gate closed.
+lpc-mapping = { path = "../lpc-mapping" }
 # Per-thread ambient revision so parallel engine tests that tick/stamp
 # revisions cannot race each other through the process-wide clock.
 lpc-model = { path = "../lpc-model", features = ["test-support"] }

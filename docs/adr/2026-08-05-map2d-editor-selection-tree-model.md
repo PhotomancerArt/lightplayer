@@ -7,7 +7,13 @@
   that made the document a tree), `2026-07-04-studio-editing-model.md`
   (the editing-model lineage this extends)
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** None (model intact; **amended 2026-08-27**: the
+  model is LIFTED to project scope by
+  `2026-08-27-one-selection-one-tree.md` — the project is the tree's
+  root, fixtures are root siblings, scope derivation now includes the
+  fixture level, and the popover/breadcrumb presentation of decision 4
+  is fully gone: scope reads from the dimmed neighbours, the Props
+  stack, and the tree)
 
 ## Context
 
