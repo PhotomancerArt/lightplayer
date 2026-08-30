@@ -8,8 +8,10 @@
 //! a walk-up user needs from a control they have never met.
 //!
 //! The look was ruled in the node face's space section (the shape/modifier
-//! tiles, G1b: "inline tiles, no popover, no dropdown", selected = accent
-//! border + accent wash + a check badge). That site drew its own faces from
+//! tiles, G1b: "inline tiles, no popover, no dropdown", selected = a strong
+//! border + wash + a check badge — recolored to the app-wide neutral
+//! SELECTION family by the accent reckoning: a picked card IS a selection,
+//! and selection never wears a hue). That site drew its own faces from
 //! projection glyphs and dispatches slot-op sequences, so it keeps its own
 //! component and shares the STYLING here ([`option_card_grid_class`],
 //! [`option_card_class`], [`OPTION_CARD_CHECK_CLASS`]) — one visual
@@ -46,19 +48,23 @@ pub fn option_card_grid_class() -> &'static str {
     "tw:grid tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] tw:gap-1.5"
 }
 
-/// One card. Selected = accent border + accent wash + the check badge —
-/// three signals, because the old filled-grey treatment was ruled hard to
-/// read.
+/// One card. Selected = the static spectrum ring (`ux-sel-ring`, the
+/// selection grammar's chosen-object mark — a picked card IS a chosen
+/// object) + selection wash + the check badge — three signals, because
+/// the old filled-grey treatment was ruled hard to read. The ring is
+/// static on purpose: the ANIMATED ring stays hover territory.
 pub fn option_card_class(selected: bool) -> &'static str {
     if selected {
-        "tw:relative tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-accent tw:bg-accent-wash tw:p-1.5 tw:text-left tw:text-strong-foreground"
+        "ux-sel-ring tw:relative tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-transparent tw:bg-selection-bg tw:p-1.5 tw:text-left tw:text-strong-foreground"
     } else {
         "tw:relative tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:p-1.5 tw:text-left tw:text-muted-foreground tw:hover:border-border-strong tw:hover:text-strong-foreground"
     }
 }
 
-/// The selected card's check badge, over its top-right corner.
-pub const OPTION_CARD_CHECK_CLASS: &str = "tw:absolute tw:right-1 tw:top-1 tw:inline-flex tw:h-4 tw:w-4 tw:items-center tw:justify-center tw:rounded-pill tw:bg-accent tw:text-accent-foreground";
+/// The selected card's check badge, over its top-right corner — the
+/// selection border tone filled solid, with the dark page color for the
+/// glyph so the check reads at 10px.
+pub const OPTION_CARD_CHECK_CLASS: &str = "tw:absolute tw:right-1 tw:top-1 tw:inline-flex tw:h-4 tw:w-4 tw:items-center tw:justify-center tw:rounded-pill tw:bg-selection-border tw:text-background";
 
 /// A single-select row of explaining cards.
 ///
@@ -133,14 +139,20 @@ mod tests {
 
     /// Selected cards wear all three signals; unselected ones wear none of
     /// them — the G1b ruling, in the one place both card sets read it from.
+    /// A picked card is a SELECTION, so it wears the neutral selection
+    /// family (accent reckoning), never a hue.
     #[test]
-    fn the_selected_card_wears_the_accent_and_the_plain_one_does_not() {
+    fn the_selected_card_wears_the_selection_family_and_the_plain_one_does_not() {
         let picked = option_card_class(true);
-        assert!(picked.contains("tw:border-accent"));
-        assert!(picked.contains("tw:bg-accent-wash"));
+        // The chosen-object mark is the STATIC spectrum ring over the
+        // neutral selection wash (selection grammar, 2026-08-30). The
+        // spectrum is not a status hue; "accent" stays dead either way.
+        assert!(picked.contains("ux-sel-ring"));
+        assert!(picked.contains("tw:bg-selection-bg"));
+        assert!(!picked.contains("accent"));
         let plain = option_card_class(false);
-        assert!(!plain.contains("tw:border-accent"));
-        assert!(!plain.contains("tw:bg-accent-wash"));
+        assert!(!plain.contains("ux-sel-ring"));
+        assert!(!plain.contains("tw:bg-selection-bg"));
         assert!(plain.contains("tw:hover:border-border-strong"));
         // Both position the check badge, which is absolutely placed.
         assert!(picked.contains("tw:relative") && plain.contains("tw:relative"));

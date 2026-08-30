@@ -25,7 +25,7 @@
 //! consecutive cancels the next passive run is promoted to a foreground
 //! action's [`PassiveStanding`], so only recovery work — which owns the
 //! connection — still preempts it. Both passive lanes (the lens project pull
-//! and the device cards' frame feeds) run at one standing per tick.
+//! and the runtime cards' frame feeds) run at one standing per tick.
 //!
 //! # Runtime neutrality
 //!
@@ -51,8 +51,8 @@ use crate::app::studio::studio_view_channel::{
 };
 use crate::core::log::take_pending_records;
 use crate::{
-    ControllerId, DeviceController, DeviceOp, ProjectRefreshOutcome, SlotEditOp, StudioController,
-    UiAction, UiLogDraft, UiLogLevel, UiLogOrigin, UiStudioView, UxUpdate, UxUpdateSink,
+    ControllerId, ProjectRefreshOutcome, RuntimeOp, SlotEditOp, StudioController, UiAction,
+    UiLogDraft, UiLogLevel, UiLogOrigin, UiStudioView, UxUpdate, UxUpdateSink,
 };
 
 /// The surface the UI holds after spawning the actor: a sender for commands, a
@@ -134,7 +134,7 @@ impl Default for StudioActorOptions {
 /// The actor: owns the controller and drives it from the command queue.
 ///
 /// Tick policy is per session (runtime-pool P2): the passive pull follows
-/// the LENS session, non-lens device sessions get the slow status
+/// the LENS session, non-lens sessions get the slow status
 /// heartbeat, and cadence/backoff live on the sessions themselves — the
 /// controller derives the published delay as the minimum over sessions.
 pub struct StudioActor<MakeTimer> {
@@ -229,6 +229,19 @@ where
         let mut agent_timer = make_timer.clone();
         controller
             .set_agent_timer(move |delay| Box::pin(agent_timer(delay)) as crate::AgentTimerFuture);
+        // The device effects layer waits on the SAME platform timer the pull
+        // deadlines use, and pushes every link event, timer fire and port
+        // arrival back onto THIS queue — which is what makes the fold
+        // synchronous and invariant I7 structural rather than a rule someone
+        // has to remember.
+        let mut device_timer = make_timer.clone();
+        controller.set_device_timer(move |delay| {
+            Box::pin(device_timer(delay)) as crate::DeviceTimerFuture
+        });
+        controller.set_device_input_sink({
+            let tx = tx.clone();
+            move |input| tx.send(StudioCommand::Device(input))
+        });
         // The initial project sync's progress deadline runs on the same
         // platform timer (see StudioController::set_sync_timer): without it a
         // device reset mid-read hangs "Syncing project" forever.
@@ -293,6 +306,19 @@ where
         for feedback in plan.agent {
             self.controller.apply_agent_feedback(feedback);
         }
+        // Device folds run BEFORE this batch's actions, and each is
+        // synchronous (invariant I7 — the fold never awaits device IO). A
+        // gesture that lands beside a burst of link events therefore acts on
+        // evidence that already includes them, which is what stops a card
+        // from being clicked in a state it has already left.
+        for step in plan.device {
+            match step {
+                DeviceStep::Input(input) => self.controller.fold_device_input(input),
+                DeviceStep::Hotplug(edge) => self.controller.note_device_hotplug(edge),
+            }
+        }
+        // The one asynchronous half: registry writes the folds asked for.
+        self.controller.settle_device_records().await;
         for action in plan.actions {
             self.run_action(action).await;
         }
@@ -307,19 +333,16 @@ where
             // standing, decided before the tick: either both are ordinary
             // passive work, or — after a starving run of preemptions — both
             // are promoted for this tick, so a drag cannot freeze the
-            // project preview and the device cards' ▶ feeds independently.
+            // project preview and the runtime cards' ▶ feeds independently.
             let standing = self.passive_standing();
             let refresh_preempted = self.run_refresh_tick(standing).await;
             self.controller.run_due_heartbeats();
-            // D32 (M6): the quiet PortHeld retry rides the same cadence —
-            // a no-op unless a held port's retry interval elapsed.
-            self.controller.run_due_connect_retry().await;
             // Sim crash detection + guarded auto-reboot rides the same
-            // cadence too — a no-op while the sim worker is healthy.
+            // cadence — a no-op while the sim worker is healthy.
             self.controller.run_due_sim_crash_recovery().await;
-            // LAST in the tick: the device-card frame feed is a picture,
-            // and nothing structural should wait behind one. A no-op
-            // unless some card is showing its ▶ tab on a Ready device.
+            // LAST in the tick: the card frame feed is a picture, and
+            // nothing structural should wait behind one. A no-op unless a
+            // card is showing its ▶ tab on a running runtime.
             let feed_preempted = self.run_card_feed_tick(standing).await;
             self.note_passive_run_end(refresh_preempted || feed_preempted);
         }
@@ -385,17 +408,7 @@ where
                         // `push_live` applies the view's carried filter state,
                         // keeping the live view consistent with the change-gated
                         // snapshot that will replace it.
-                        view.console.push_live(entry.clone());
-                        // A card mid-op also shows the work's own output in
-                        // its overlay (the technical-details region).
-                        view.push_card_op_console(entry);
-                        publisher.send(view.clone());
-                    }
-                }
-                UxUpdate::CardOp { session_key, op } => {
-                    let mut live = live.borrow_mut();
-                    if let Some(view) = live.as_mut() {
-                        view.apply_card_op(&session_key, op);
+                        view.console.push_live(entry);
                         publisher.send(view.clone());
                     }
                 }
@@ -501,7 +514,7 @@ where
         preempted
     }
 
-    /// Run the due device-card frame feeds under the same preempt watch
+    /// Run the due card frame feeds under the same preempt watch
     /// the lens pull uses: a feed is [`ActionClass::Passive`], so an
     /// arriving user gesture flips the cancel flag and the in-flight read
     /// ends at its next frame boundary rather than making the gesture wait
@@ -592,6 +605,9 @@ where
 /// coalesced), the ordered actions to run, whether a tick should run
 /// (coalesced to at most one), and whether shutdown was requested.
 struct CommandPlan {
+    /// Device-model inputs and hotplug edges, in queue order. Never
+    /// coalesced: an event stream's order is its meaning.
+    device: Vec<DeviceStep>,
     console: Vec<ConsoleCommand>,
     /// Settings mutations/loads, applied synchronously in queue order
     /// (each is a distinct gesture or layer arrival; never coalesced).
@@ -610,8 +626,15 @@ struct CommandPlan {
     library_changed: bool,
 }
 
+/// One planned device step: fold an input, or make the effects layer look.
+enum DeviceStep {
+    Input(lpa_devices::Input),
+    Hotplug(crate::app::studio::studio_command::DeviceHotplug),
+}
+
 impl CommandPlan {
     fn from_batch(batch: Vec<StudioCommand>) -> Self {
+        let mut device = Vec::new();
         let mut console = Vec::new();
         let mut settings = Vec::new();
         let mut agent = Vec::new();
@@ -623,17 +646,20 @@ impl CommandPlan {
         for command in batch {
             match command {
                 StudioCommand::AttachLibrary(attachment) => attach_library = Some(attachment),
+                StudioCommand::Device(input) => device.push(DeviceStep::Input(input)),
+                StudioCommand::DeviceHotplug(edge) => device.push(DeviceStep::Hotplug(edge)),
                 StudioCommand::LibraryChanged => library_changed = true,
                 StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
-                // Not a local console mutation: a device-level change is a
-                // server round-trip, so convert it into the equivalent device
-                // action here and let it ride the normal async action path.
+                // Not a local console mutation: a runtime-level change is
+                // a server round-trip, so convert it into the equivalent
+                // runtime action here and let it ride the normal async
+                // action path.
                 StudioCommand::Console(ConsoleCommand::SetDeviceLogLevel(level)) => {
                     push_action_coalesced(
                         &mut actions,
                         UiAction::from_op(
-                            ControllerId::new(DeviceController::NODE_ID),
-                            DeviceOp::SetLogLevel { level },
+                            ControllerId::new(RuntimeOp::NODE_ID),
+                            RuntimeOp::SetLogLevel { level },
                         ),
                     );
                 }
@@ -649,6 +675,7 @@ impl CommandPlan {
             }
         }
         Self {
+            device,
             console,
             settings,
             agent,

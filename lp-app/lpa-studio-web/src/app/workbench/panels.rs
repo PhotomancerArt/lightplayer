@@ -140,9 +140,9 @@ const CHIP: &str = "tw:whitespace-nowrap tw:rounded tw:border tw:border-border-s
 /// `ux-row-edge` is the dense-row interaction light (see
 /// [`row_edge_class`](crate::base::row_edge_class)): a spectrum left edge
 /// and bloom on hover, not the full ring the buttons wear. It rides the
-/// IDLE row only — the selected row keeps the neutral white outline.
-const ROW_IDLE: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash ux-row-edge";
-const ROW_SELECTED: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1";
+/// IDLE row only — the selected row wears the chosen-object ring (cool).
+const ROW_IDLE: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 ux-row-edge";
+const ROW_SELECTED: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md ux-sel-ring ux-sel-ring-cool tw:border tw:border-transparent tw:px-1.5 tw:py-1";
 /// Indent per tree level as an inline style — arbitrary depth (nested
 /// modules, nested repeats) must never outrun a generated tailwind class.
 fn indent_style(level: usize) -> String {
@@ -1000,9 +1000,9 @@ fn OutputBox(
     let chevron = if expanded { "▾" } else { "▸" };
     let output_target = UiPatchTarget::Output { node: output.node };
     let header_class = if is_selected(&selection, &output_target) {
-        "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1"
+        "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md ux-sel-ring ux-sel-ring-cool tw:border tw:border-transparent tw:px-1.5 tw:py-1"
     } else {
-        "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash ux-row-edge"
+        "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 ux-row-edge"
     };
     rsx! {
         section { class: "tw:grid tw:content-start", style: indent_style(indent),
@@ -1096,9 +1096,9 @@ fn PortRow(
         format!("left: {left}%; width: {width}%;")
     };
     let line_class = if is_selected(&selection, &target) {
-        "tw:flex tw:cursor-pointer tw:items-baseline tw:gap-1.5 tw:rounded tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1"
+        "tw:flex tw:cursor-pointer tw:items-baseline tw:gap-1.5 tw:rounded ux-sel-ring ux-sel-ring-cool tw:border tw:border-transparent tw:px-1"
     } else {
-        "tw:flex tw:cursor-pointer tw:items-baseline tw:gap-1.5 tw:rounded tw:border tw:border-transparent tw:px-1 tw:hover:bg-background-wash ux-row-edge"
+        "tw:flex tw:cursor-pointer tw:items-baseline tw:gap-1.5 tw:rounded tw:border tw:border-transparent tw:px-1 ux-row-edge"
     };
     rsx! {
         div {
@@ -1160,7 +1160,7 @@ fn PortRow(
                 // something to move.
                 if let Some((start , span)) = selected_segment {
                     div {
-                        class: "tw:pointer-events-none tw:absolute tw:top-0 tw:h-full tw:rounded-[3px] tw:border tw:border-selection-border tw:bg-selection-bg",
+                        class: "tw:pointer-events-none tw:absolute tw:top-0 tw:h-full tw:rounded-[3px] ux-sel-ring ux-sel-ring-cool tw:border tw:border-transparent tw:bg-selection-bg",
                         style: span_style(start, span),
                     }
                 }
@@ -1189,7 +1189,7 @@ fn PortCell(
     let class = if cell.contested {
         "tw:absolute tw:top-0 tw:flex tw:h-full tw:cursor-pointer tw:items-center tw:justify-center tw:overflow-hidden tw:rounded-[3px] tw:border tw:border-status-error-border tw:bg-status-error-bg"
     } else if is_selected(&selection, &target) {
-        "tw:absolute tw:top-0 tw:flex tw:h-full tw:cursor-pointer tw:items-center tw:justify-center tw:overflow-hidden tw:rounded-[3px] tw:border tw:border-selection-border tw:bg-selection-bg"
+        "tw:absolute tw:top-0 tw:flex tw:h-full tw:cursor-pointer tw:items-center tw:justify-center tw:overflow-hidden tw:rounded-[3px] ux-sel-ring ux-sel-ring-cool ux-sel-ring-inset tw:border tw:border-transparent tw:bg-card-raised"
     } else {
         "tw:absolute tw:top-0 tw:flex tw:h-full tw:cursor-pointer tw:items-center tw:justify-center tw:overflow-hidden tw:rounded-[3px] tw:border tw:border-border-strong tw:bg-card-raised tw:hover:border-dim-foreground"
     };

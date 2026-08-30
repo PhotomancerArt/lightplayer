@@ -10,6 +10,8 @@ pub(crate) mod affordance;
 pub(crate) mod board_diagram_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod board_editor_stories;
+#[cfg(feature = "stories")]
+pub(crate) mod design_language_stories;
 pub mod docs;
 pub mod editor_shell;
 pub mod home;

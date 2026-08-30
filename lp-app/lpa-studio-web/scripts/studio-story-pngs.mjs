@@ -819,7 +819,21 @@ async function launchCaptureBrowser(pageCount) {
         child.kill("SIGTERM");
       }
       await Promise.race([childExited, delay(1_000)]);
-      await rm(userDataDir, { recursive: true, force: true });
+      // Chrome may still be flushing profile writes when it goes down (the
+      // 1s exit race above can elapse first), so an eager recursive removal
+      // races those writes — CI died with ENOTEMPTY here AFTER every PNG was
+      // captured. Retry briefly, and never let cleanup fail the run: a
+      // leftover temp profile dir is harmless.
+      try {
+        await rm(userDataDir, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 200,
+        });
+      } catch (error) {
+        console.warn(`leaving Chrome profile dir ${userDataDir}: ${error.message}`);
+      }
     },
   };
 }
@@ -901,12 +915,22 @@ async function createCapturePage(cdp) {
       await settleFocus(cdp, sessionId, storyId);
       const box = await waitForCaptureBox(cdp, sessionId, storyId);
       const clip = captureClip(box);
+      // Chromium silently drops `backdrop-filter` from beyond-viewport
+      // captures — even when the clip is entirely on screen — so glass
+      // surfaces bake into baselines without their blur (see
+      // docs/defects/story-capture-drops-backdrop-filter.md). Ask for a
+      // beyond-viewport capture only when the clip actually overflows the
+      // viewport: `fitViewportToStory` restores the base height before the
+      // shot, so tall stories still need it (flipping unconditionally
+      // truncates them at the fold).
+      const clipFitsViewport =
+        clip.x + clip.width <= viewport.width && clip.y + clip.height <= viewport.height;
       const shoot = async () => {
         const { data } = await cdp.send(
           "Page.captureScreenshot",
           {
             format: "png",
-            captureBeyondViewport: true,
+            captureBeyondViewport: !clipFitsViewport,
             fromSurface: true,
             clip,
           },

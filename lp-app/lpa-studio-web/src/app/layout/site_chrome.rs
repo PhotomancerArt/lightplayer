@@ -1,14 +1,17 @@
 //! [`SiteChrome`]: the one top bar shared by every section of the app.
 //!
-//! Home, Devices, Projects, Explore, Boards, and Docs are sections of a
+//! Home, Devices, Projects, Boards, and Docs are sections of a
 //! single cohesive app; this bar is their common navigation — "chrome C"
 //! (vision D1/D11, gate-judged spike `spikes/gallery-rework/index.html`;
 //! the original three-tab bar was spike PR #269, `spikes/top-bar/`):
 //!
 //! - **Split weights.** The primary family (Devices, Projects — your
 //!   things) sits by the brand at full weight; the secondary family
-//!   (Explore, Boards, Docs — the world's things) rides the right
-//!   cluster, lighter, with no divider between the families.
+//!   (Boards, Docs — the world's things) rides the right cluster,
+//!   lighter, with no divider between the families. (Explore was a
+//!   secondary tab too, hidden with the landing round 2026-08-29: until
+//!   a real content system exists it only repeated the landing's
+//!   example grid. `/explore` still renders for typed URLs.)
 //! - **The brand lockup is the way to Home.** The logo links to `/` —
 //!   Home is the root landing (Yona 2026-08-06) — and there is
 //!   deliberately no Home tab, and no Studio tab either (the sections
@@ -17,7 +20,7 @@
 //!   menus read as clutter — merge them ALL). The single ⋯ at the bar's
 //!   end always holds the tools, and grows the secondary sections at
 //!   narrow widths when the inline tabs collapse (the bar is a
-//!   container; the cut is where three secondary tabs stop fitting, not
+//!   container; the cut is where the secondary tabs stop fitting, not
 //!   a viewport magic number). The brand word yields at narrow too — the
 //!   mark stays.
 //! - **The narrow ladder is conditional on load.** A bar carrying the
@@ -46,9 +49,7 @@
 //!   lens route, going anywhere else ENDS the tab's session. Docs and
 //!   Boards are the exception, and they earn it by not going anywhere —
 //!   in studio mode they open a NEW tab, so reference material never
-//!   costs you the thing you were building. Explore is a plain exit: it
-//!   is a gallery of live projects, a real section of the app (ruling
-//!   R8-3, amended 8.1).
+//!   costs you the thing you were building (ruling R8-3, amended 8.1).
 //! - **The editors are tools, not sections.** The mapping editor and
 //!   board editor stay outside the tab row, in the ⋯ menu's Tools group.
 //!
@@ -155,9 +156,7 @@ pub fn SiteChrome(
     // session (single-session policy — leaving ends it). Docs and Boards
     // are reference material you read WHILE building, so from here they
     // open a new tab and the session behind them keeps running (ruling
-    // R8-3, amended 8.1). Explore deliberately does not: it is a gallery
-    // of live projects — a real section of the app, and going there is
-    // going somewhere.
+    // R8-3, amended 8.1).
     let studio_mode = section == SiteSection::Session;
     // The narrow ladder's rungs. "The cut is where things stop fitting"
     // (module docs) — and a bar carrying the session control plus its
@@ -249,12 +248,6 @@ pub fn SiteChrome(
                 // when they don't.
                 nav { class: "{secondary_nav}",
                     NavTab {
-                        label: "Explore",
-                        href: "/explore",
-                        active: section == SiteSection::Explore,
-                        secondary: true,
-                    }
-                    NavTab {
                         label: "Boards",
                         href: "/boards",
                         active: section == SiteSection::Boards,
@@ -335,7 +328,6 @@ fn ChromeOverflowMenu(
                         NavMenuItem { label: "Devices", href: "/devices", active: section == SiteSection::Devices }
                         NavMenuItem { label: "Projects", href: "/projects", active: section == SiteSection::Projects }
                     }
-                    NavMenuItem { label: "Explore", href: "/explore", active: section == SiteSection::Explore }
                     NavMenuItem {
                         label: "Boards",
                         href: "/boards",
@@ -472,7 +464,7 @@ pub fn PlayToggle(href: String, playing: bool) -> Element {
     }
 }
 
-/// One nav tab. Active: heading color + accent underline; inactive: subtle
+/// One nav tab. Active: heading color + selection underline; inactive: subtle
 /// text that brightens on hover. `secondary` is the lighter family
 /// treatment (reduced weight, dimmer at rest, full strength on
 /// hover/active — the spike's `.secondary`).
@@ -558,23 +550,23 @@ fn ToolCard(
     }
 }
 
-/// Current-destination treatment: heading color plus the accent underline.
-const NAV_TAB_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-heading tw:after:content-['']";
+/// Current-destination treatment: heading color plus the selection underline.
+const NAV_TAB_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-[linear-gradient(90deg,var(--studio-spectrum))] tw:after:content-['']";
 /// Idle treatment: subtle text that brightens on hover.
 const NAV_TAB_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
 /// Secondary-family active: the same current-destination grammar, one
 /// weight lighter — the family reads quieter even when it is where you
 /// are.
-const NAV_TAB_SECONDARY_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-heading tw:after:content-['']";
+const NAV_TAB_SECONDARY_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-[linear-gradient(90deg,var(--studio-spectrum))] tw:after:content-['']";
 /// Secondary-family idle: reduced weight and dimmed, full strength on
 /// hover.
 pub(crate) const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-subtle-foreground/70 tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
 
-/// The lockup's wrapper at Home: the tabs' accent underline under the
+/// The lockup's wrapper at Home: the tabs' selection underline under the
 /// brand — the logo IS Home's tab, so at Home it marks the place like
 /// one. The offset differs from the tabs' because the lockup's box is
 /// shorter; both land the bar on the header's border line.
-const LOGO_HOME_ACTIVE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[14px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-heading tw:after:content-['']";
+const LOGO_HOME_ACTIVE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[14px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-[linear-gradient(90deg,var(--studio-spectrum))] tw:after:content-['']";
 
 /// ⋯ menu section row, idle.
 pub(crate) const NAV_MENU_ITEM_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";

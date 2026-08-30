@@ -28,7 +28,6 @@ use lpfs::LpFs;
 
 use super::library_store::{LibraryError, LibraryStore, PackageSummary};
 use super::package_meta::PackageProvenance;
-use crate::app::places::RegisteredDevice;
 
 /// Single-threaded boxed future, the shape every seam method returns.
 /// (`Rc`-world, matching the actor; not `Send`.)
@@ -78,61 +77,6 @@ pub enum CatalogOp {
     GenerateForBoard {
         board_id: String,
     },
-    UpsertRegisteredDevice(RegisteredDevice),
-    /// Rename a registered device (D34). Registry-only — the identity
-    /// write-back to a live device is the studio controller's.
-    RenameRegisteredDevice {
-        uid: String,
-        name: String,
-    },
-    /// Remove a device from the registry (D34 hygiene). Idempotent.
-    ForgetRegisteredDevice {
-        uid: String,
-    },
-    /// Lazy re-key at sighting (device identity design §4): a board that
-    /// was remembered under a stamped uid has resolved to a derived one,
-    /// so its row moves — or merges, when both rows exist. Runs BEFORE
-    /// the sighting upsert, under the same catalog lock every other
-    /// registry write takes. Idempotent: nothing under `old_uid` is a
-    /// no-op.
-    RekeyRegisteredDevice {
-        old_uid: String,
-        new_uid: String,
-        /// Canonical origin string ([`HardwareId`](crate::app::places::HardwareId)'s
-        /// `Display`) recorded on the surviving row.
-        hardware_id: String,
-    },
-    /// Connect-as-pull (D8) for a project NOT open in this tab: bank the
-    /// observed device copy into that project's history (no-op when the
-    /// hash is known) and refresh the registry entry. The host takes the
-    /// project's lock first (structural ordering) — refusal means the
-    /// project is open in another tab and the observation is skipped by
-    /// the caller (that tab owns the history subtree).
-    RecordDeviceObservation {
-        project_uid: String,
-        device: RegisteredDevice,
-        observed: lpc_history::ContentHash,
-        files: Vec<(String, Vec<u8>)>,
-    },
-    /// Adopt a device's unknown project as a new library package (D11),
-    /// keeping its on-device uid; registry entry recorded.
-    AdoptDevicePackage {
-        device: RegisteredDevice,
-        files: Vec<(String, Vec<u8>)>,
-    },
-    /// Diverged verb (D11): a banked observed version becomes the
-    /// project's new head.
-    AdoptObservedVersion {
-        project_uid: String,
-        observed: lpc_history::ContentHash,
-    },
-    /// Diverged verb (D11): fork a banked observed version into a new
-    /// project named after the device (D9).
-    ForkObservedVersion {
-        project_uid: String,
-        observed: lpc_history::ContentHash,
-        device_name: String,
-    },
     /// Migrate a package's own bytes to the current project format and
     /// save the result (P5's Upgrade verb; the same body P3 runs on open).
     ///
@@ -142,13 +86,6 @@ pub enum CatalogOp {
     /// `upgraded_from` is `None`.
     UpgradePackageFormat {
         project_uid: String,
-    },
-    /// Record a completed push: history `Pushed` event + device
-    /// association.
-    RecordPush {
-        project_uid: String,
-        device: RegisteredDevice,
-        version: lpc_history::ContentHash,
     },
     /// Fork a TRANSIENT view session's working copy into a new library
     /// project at the explicit save (examples vision P5): a fresh uid is
@@ -183,6 +120,20 @@ pub enum CatalogOp {
         /// The history root, verbatim — must include a non-empty event log.
         history_files: Vec<(String, Vec<u8>)>,
         provenance: super::package_meta::PackageProvenance,
+    },
+    /// Write one device MODEL record into the registry (M3 of the
+    /// device-model rebuild — the effects layer's `Command::PersistRecord`).
+    ///
+    /// Registry-only, and a MERGE: only the fields the model owns are
+    /// written, so a row's `association`, `board_id` and `previous_uids`
+    /// survive a sighting. The registry was read-only between the teardown
+    /// and here; this and [`CatalogOp::ForgetRegisteredDevice`] are its two
+    /// writers, and both are driven by the roster, never by a UI flow.
+    UpsertRegisteredDevice(Box<crate::app::places::RegisteredDevice>),
+    /// Remove a device from the registry (`Command::DeleteRecord`).
+    /// Idempotent — forgetting an unknown row is a no-op.
+    ForgetRegisteredDevice {
+        uid: String,
     },
 }
 
@@ -431,15 +382,8 @@ pub fn apply_catalog_op(
             Some(generate_for_board(store, &board_id, now)?)
         }
         CatalogOp::UpsertRegisteredDevice(device) => {
-            // merge semantics: sight-only upserts (association None) must
-            // not erase what was last pushed
-            crate::app::places::device_session::upsert_device_merged(store, device)
-                .map_err(|e| LibraryHostError::Host(e.to_string()))?;
-            None
-        }
-        CatalogOp::RenameRegisteredDevice { uid, name } => {
             crate::app::places::DeviceRegistry::new(store.fs_handle())
-                .rename(&uid, &name)
+                .upsert_model_fields(*device)
                 .map_err(LibraryHostError::from)?;
             None
         }
@@ -449,58 +393,6 @@ pub fn apply_catalog_op(
                 .map_err(LibraryHostError::from)?;
             None
         }
-        CatalogOp::RekeyRegisteredDevice {
-            old_uid,
-            new_uid,
-            hardware_id,
-        } => {
-            crate::app::places::DeviceRegistry::new(store.fs_handle())
-                .rekey_or_merge(&old_uid, &new_uid, &hardware_id)
-                .map_err(LibraryHostError::from)?;
-            None
-        }
-        CatalogOp::RecordDeviceObservation {
-            project_uid,
-            device,
-            observed,
-            files,
-        } => {
-            crate::app::places::device_session::record_device_observation(
-                store,
-                &project_uid,
-                &device,
-                observed,
-                &files,
-                now,
-            )?;
-            Some(summary_for(store, parse_uid(&project_uid)?)?)
-        }
-        CatalogOp::AdoptDevicePackage { device, files } => Some(
-            crate::app::places::device_session::adopt_device_package(store, &device, &files, now)?,
-        ),
-        CatalogOp::AdoptObservedVersion {
-            project_uid,
-            observed,
-        } => {
-            crate::app::places::device_session::adopt_observed_version(
-                store,
-                &project_uid,
-                observed,
-                now,
-            )?;
-            Some(summary_for(store, parse_uid(&project_uid)?)?)
-        }
-        CatalogOp::ForkObservedVersion {
-            project_uid,
-            observed,
-            device_name,
-        } => Some(crate::app::places::device_session::fork_observed_version(
-            store,
-            &project_uid,
-            observed,
-            &device_name,
-            now,
-        )?),
         CatalogOp::UpgradePackageFormat { project_uid } => {
             let uid = parse_uid(&project_uid)?;
             let mut handle = store.open(uid)?;
@@ -515,20 +407,6 @@ pub fn apply_catalog_op(
                 Err(other) => return Err(other.into()),
             }
             Some(summary_for(store, uid)?)
-        }
-        CatalogOp::RecordPush {
-            project_uid,
-            device,
-            version,
-        } => {
-            crate::app::places::device_session::record_push(
-                store,
-                &project_uid,
-                &device,
-                version,
-                now,
-            )?;
-            Some(summary_for(store, parse_uid(&project_uid)?)?)
         }
         CatalogOp::ForkTransientCopy {
             name,
@@ -690,19 +568,9 @@ impl LibraryHost for MemoryLibraryHost {
             CatalogOp::Rename { uid, .. }
             | CatalogOp::Duplicate { uid }
             | CatalogOp::Delete { uid }
-            | CatalogOp::RecordDeviceObservation {
-                project_uid: uid, ..
+            | CatalogOp::UpgradePackageFormat { project_uid: uid } => {
+                self.refuses(uid).then(|| uid.clone())
             }
-            | CatalogOp::AdoptObservedVersion {
-                project_uid: uid, ..
-            }
-            | CatalogOp::ForkObservedVersion {
-                project_uid: uid, ..
-            }
-            | CatalogOp::UpgradePackageFormat { project_uid: uid }
-            | CatalogOp::RecordPush {
-                project_uid: uid, ..
-            } => self.refuses(uid).then(|| uid.clone()),
             _ => None,
         };
         let result = match refused {

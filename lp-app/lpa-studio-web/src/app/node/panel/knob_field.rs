@@ -3,8 +3,9 @@
 //! SVG anatomy from the node-card spike: a 270° track arc with the filled
 //! value arc riding it, min/mid/max (plus quarter) tick marks, a restrained
 //! radial-gradient body, and a pointer line. The value arc and pointer wear
-//! the accent color, or the violet bound family when the backing slot is
-//! bound (never green — green is valid-only).
+//! the bright neutral (accent reckoning D4 — an authored value is chrome),
+//! or the violet bound family when the backing slot is bound (never green —
+//! green is valid-only).
 //!
 //! Interaction: vertical drag (up = increase) dispatching
 //! `SlotEditOp::SetValue` with `oninput` semantics — a continuous flood the
@@ -26,7 +27,7 @@
 //! the sweep is cut into one squared-off block per increment, lighting whole
 //! rather than growing smoothly, and the fixed tick marks drop away — the
 //! gaps between blocks ARE the scale. Overlaid ticks were tried first and
-//! disappeared against the accent arc. A step too fine to block legibly
+//! disappeared against the value arc. A step too fine to block legibly
 //! falls back to the continuous rendering.
 
 use dioxus::prelude::*;
@@ -597,7 +598,9 @@ pub(crate) fn knob_key_value(
 
 /// Stroke for the value arc and pointer: amber when a panel writer has it
 /// engaged, violet when bound, error when invalid, subtle when read-only,
-/// accent otherwise (green stays valid-only).
+/// bright neutral otherwise (accent reckoning D4: the plain authored value
+/// is chrome — the artwork and the status families glow, the control
+/// doesn't; green stays valid-only).
 ///
 /// Engaged outranks bound: a captured control is no longer following the
 /// thing it is wired to, and the panel's whole point is that you can see
@@ -615,7 +618,7 @@ fn knob_value_stroke(
     } else if state.invalid.is_some() {
         "var(--studio-status-error-text)"
     } else if editable {
-        "var(--studio-color-accent)"
+        "var(--studio-color-text-strong)"
     } else {
         "var(--studio-color-text-subtle)"
     }
@@ -853,7 +856,7 @@ mod tests {
         );
         assert_eq!(
             knob_value_stroke(&UiSlotFieldState::editable(), false, false, true),
-            "var(--studio-color-accent)"
+            "var(--studio-color-text-strong)"
         );
         assert_eq!(
             knob_value_stroke(&UiSlotFieldState::readonly(), false, false, false),

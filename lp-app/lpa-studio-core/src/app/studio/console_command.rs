@@ -16,11 +16,11 @@ pub enum ConsoleCommand {
     SetOriginEnabled(UiLogOrigin, bool),
     /// Empty the log ring.
     Clear,
-    /// Ask the connected server/device to change its runtime log level.
+    /// Ask the connected server to change its runtime log level.
     ///
     /// Unlike the other console commands this is not a synchronous local
     /// mutation: the actor converts it at intake into a
-    /// [`DeviceOp::SetLogLevel`](crate::DeviceOp) action (see
+    /// [`RuntimeOp::SetLogLevel`](crate::RuntimeOp) action (see
     /// `CommandPlan::from_batch`), so it runs on the normal async action
     /// path with its error handling. The web toolbar still sends it as a
     /// console command so components stay op-agnostic.

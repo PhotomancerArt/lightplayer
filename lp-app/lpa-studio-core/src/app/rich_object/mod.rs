@@ -17,8 +17,9 @@
 //!   (worst ACTIONABLE section's tone = the indicator; that section's
 //!   affordance = the primary affordance; Advisory/Danger never roll up).
 //!
-//! The device builder lives with its evidence in
-//! [`crate::app::roster::device_rich_object`].
+//! The SIM builder lives with its evidence in
+//! [`crate::app::roster::sim_rich_object`]; the device builder went with
+//! M2 of the device-model rebuild.
 
 pub mod rich_object_view;
 pub mod rich_section;

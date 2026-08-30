@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Landing cohesion — one designed front page, design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette (lp-app/lpa-studio-web/src/style.css post-Aurora +
+     accent reckoning, distilled). Mint accent RETIRED: chrome holds no hue
+     at rest; the spectrum is moments only (hover light, brand, hero). ---- */
+  :root {
+    --bg: #101317;
+    --bg-wash: rgba(255,255,255,.04);
+    --surface: #171b20;
+    --surface-subtle: #14181d;
+    --surface-muted: #11161b;
+    --surface-raised: #20272e;
+    --terminal: #0c1114;
+    --border: #2a3138;
+    --border-muted: #252d34;
+    --border-strong: #3e4852;
+    --text: #f2f0e8;
+    --strong: #fffaf0;
+    --muted: #c7cbd0;
+    --subtle: #99a2ad;
+    --dim: #9ba4ad;
+    --heading: #e9e9ef;               /* Aurora: heading went neutral */
+    --spectrum: #5fe08b, #53c6f2, #a58af7, #ff5d5d, #ffab4a, #f5e04e;
+    --glow: rgba(140,170,255,.3);
+    --glass-bg: rgba(12,12,20,.55);
+    --glass-blur: 22px;
+    --glass-edge: rgba(255,255,255,.14);
+    --glass-border: rgba(255,255,255,.09);
+    --focus-ring: #a5b8ff;
+    --live-text: #9cc8ee;
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 28px 32px 160px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 14px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 22px; max-width: 920px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--muted);
+       text-transform: uppercase; margin: 46px 0 4px; }
+  h2 .n { color: var(--dim); margin-right: 6px; }
+  p.sub { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 920px; }
+  p.sub b { color: var(--muted); font-weight: 600; }
+  button { font-family: var(--sans); }
+
+  /* ---------- exploration controls ---------- */
+  .controls {
+    border: 1px dashed var(--border-strong); border-radius: 8px;
+    padding: 10px 14px; margin: 0 0 8px;
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+    font-size: 12px; color: var(--subtle);
+  }
+  .controls .grp { display: flex; gap: 6px; align-items: center; }
+  .controls .lbl { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  .controls button {
+    background: var(--surface-raised); color: var(--muted);
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 12px; padding: 3px 10px; cursor: pointer;
+  }
+  .controls button.on { border-color: var(--focus-ring); color: var(--strong); }
+
+  /* ---------- page frame ---------- */
+  .frame {
+    border: 1px solid var(--border-muted); border-radius: 10px;
+    background: var(--bg); overflow: hidden; margin: 10px 0 0;
+    container-type: inline-size;
+  }
+  .frame.narrow { max-width: 700px; }
+  .chrome {
+    display: flex; align-items: center; gap: 18px;
+    padding: 10px 22px; border-bottom: 1px solid var(--border-muted);
+    font-size: 13px; background: var(--bg);
+  }
+  .chrome .mark { width: 17px; height: 17px; flex: none; position: relative; }
+  .chrome .mark::before {
+    content: ""; position: absolute; inset: 0;
+    background: conic-gradient(from 210deg, var(--spectrum), #5fe08b);
+    clip-path: polygon(8% 0%, 100% 50%, 8% 100%);
+    border-radius: 2px;
+  }
+  .chrome .brand { font-weight: 800; color: var(--strong); letter-spacing: .01em; margin-right: 8px; }
+  .chrome a { color: var(--muted); text-decoration: none; font-weight: 600; }
+  .chrome a.primary { color: var(--text); }
+  .chrome .right { margin-left: auto; display: flex; gap: 16px; align-items: center; }
+  .chrome a.sec { color: var(--subtle); font-weight: 500; }
+  .chrome .dots { color: var(--subtle); letter-spacing: 2px; }
+
+  /* ---------- hero (current monument treatment, kept) ---------- */
+  .tri {
+    position: relative; width: var(--tri, 120px); height: var(--tri, 120px);
+    filter: drop-shadow(0 0 26px rgba(140,170,255,.35));
+  }
+  .tri::before {
+    content: ""; position: absolute; inset: 0;
+    background:
+      radial-gradient(90% 90% at 30% 25%, rgba(255,255,255,.25), transparent 55%),
+      conic-gradient(from 210deg, var(--spectrum), #5fe08b);
+    clip-path: polygon(10% 2%, 98% 50%, 10% 98%);
+    border-radius: 6px;
+    animation: hue 14s linear infinite;
+  }
+  @keyframes hue { to { filter: hue-rotate(360deg); } }
+  body.static .tri::before, body.static .art i { animation: none !important; }
+  .wordmark {
+    font-weight: 800; letter-spacing: -0.01em; margin: 0;
+    background: linear-gradient(90deg, var(--spectrum));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .tagline { color: var(--strong); font-weight: 500; margin: 0; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--border-strong); border-radius: 999px;
+    background: var(--surface); color: var(--muted);
+    font-size: 12.5px; font-weight: 600; padding: 6px 14px; cursor: pointer;
+    position: relative;
+  }
+  .pill .pi { font-size: 12px; }
+
+  /* ---------- interaction light (style.css .ux-ir-ring idea) ---------- */
+  @property --ir-a { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+  .ir { position: relative; }
+  .ir::before {
+    content: ""; position: absolute; inset: var(--ir-inset, -1px); z-index: 3;
+    border-radius: inherit; padding: 1px;
+    background: conic-gradient(from var(--ir-a), var(--spectrum), #5fe08b);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    opacity: 0; pointer-events: none;
+  }
+  .ir:hover::before, .ir.hov::before { opacity: 1; animation: irspin 3.2s linear infinite; }
+  .ir:hover, .ir.hov { box-shadow: 0 2px 20px var(--glow); }
+  @keyframes irspin { to { --ir-a: 360deg; } }
+  .ir-inset { --ir-inset: 0px; }
+
+  /* ---------- example cards ---------- */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+  .card {
+    position: relative; border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden; background: var(--surface); cursor: pointer;
+    transition: transform 180ms ease, box-shadow 180ms ease, border-color 150ms;
+  }
+  .card:hover, .card.hov { transform: translateY(-1px); border-color: transparent; }
+  .art { aspect-ratio: 4 / 3; position: relative; overflow: hidden; }
+  .art i {
+    position: absolute; inset: -30%;
+    animation: drift 26s ease-in-out infinite alternate;
+  }
+  @keyframes drift { to { transform: rotate(8deg) scale(1.12); } }
+  .cbar {
+    position: absolute; inset: auto 0 0 0; z-index: 2;
+    border-top: 1px solid rgba(255,255,255,.05);
+    background: rgba(13,17,21,.68);
+    backdrop-filter: blur(10px) saturate(1.15);
+    padding: 6px 10px 8px;
+    font-size: 13px; font-weight: 600; color: var(--strong);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .empty {
+    border: 1px dashed var(--border-strong); border-radius: 8px;
+    color: var(--subtle); font-size: 12.5px; padding: 26px; text-align: center;
+  }
+
+  /* ---------- doors ---------- */
+  .door {
+    display: grid; justify-items: center; gap: 8px; text-align: center;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface); padding: 18px 14px 16px;
+    cursor: pointer; text-decoration: none; color: inherit;
+    transition: transform 180ms ease, box-shadow 180ms ease;
+  }
+  .door:hover { transform: translateY(-1px); }
+  .door .ic {
+    width: 34px; height: 34px; display: grid; place-items: center;
+    border: 1px solid var(--border); border-radius: 7px;
+    background: var(--surface-muted); font-size: 16px; color: var(--muted);
+  }
+  .door .dt { font-size: 13.5px; font-weight: 700; color: var(--strong); }
+  .door .dd { font-size: 12px; line-height: 1.35; color: var(--subtle); }
+
+  /* ---------- footer ---------- */
+  .foot {
+    margin-top: 44px; border-top: 1px solid var(--border-muted);
+    padding: 16px 26px 18px; display: flex; flex-wrap: wrap; gap: 8px 22px;
+    align-items: center; font-size: 12px; color: var(--subtle);
+  }
+  .foot a { color: var(--subtle); text-decoration: none; font-weight: 600; }
+  .foot a:hover { color: var(--strong); text-decoration: underline; }
+  .foot .ver { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+
+  /* =========================================================
+     THE PICK — B′: centered monument hero + sectioned column
+     ========================================================= */
+  .pick .page { width: min(880px, 100%); margin: 0 auto; padding: 34px 26px 0; }
+  .pick .hero {
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    text-align: center; padding: 14px 0 26px;
+  }
+  .pick .wordmark { font-size: 34px; }
+  .pick .tagline { font-size: 15px; }
+
+  /* section header: extrabold small-caps + hairline rule(s).
+     Left (B round-1) vs centered (round-2 ask) — toggled live. */
+  .sech { display: flex; align-items: center; gap: 14px; margin: 36px 0 14px; }
+  .sech .t {
+    font-size: 15px; font-weight: 800; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--heading); margin: 0; flex: none;
+  }
+  .sech .rule { flex: 1; height: 1px; background: var(--border-muted); }
+  .sech .rule.lead { display: none; }
+  .sech .meta { font-size: 12px; color: var(--subtle); flex: none; }
+  .centered .sech .rule.lead { display: block; }
+  .centered .sech .meta { display: none; }
+  .centered .sech + .secsub { text-align: center; }
+
+  .secsub { margin: -4px 0 14px; font-size: 12px; color: var(--subtle); line-height: 1.4; }
+  .pick .doors { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @container (max-width: 720px) { .pick .doors { grid-template-columns: 1fr 1fr; } }
+
+  /* ---------- divider lab ---------- */
+  .hlab { display: grid; gap: 18px; max-width: 880px; }
+  .hlab .hrow { display: grid; gap: 10px; border: 1px solid var(--border-muted); border-radius: 8px; padding: 14px 18px 18px; }
+  .hlab .tag { font-size: 10.5px; color: var(--dim); text-transform: uppercase; letter-spacing: .1em; }
+  .hlab .sech { margin: 0; }
+
+  /* ---------- rejected strip ---------- */
+  .rejected { display: grid; gap: 8px; max-width: 880px; }
+  .rejected .r {
+    display: flex; gap: 10px; align-items: baseline;
+    border: 1px solid var(--border-muted); border-radius: 8px;
+    padding: 10px 14px; font-size: 12px; color: var(--subtle);
+  }
+  .rejected b { color: var(--muted); flex: none; }
+</style>
+</head>
+<body>
+
+<h1>Landing cohesion — one designed front page</h1>
+<p class="hint">
+  <b>RULED 2026-08-30 (design record):</b> concept B's column + the current centered hero;
+  <b>centered</b> section dividers (rules both sides — the toggle records the losing left variant);
+  four doors (Connect, Simulator, <b>Docs</b>, <b>Supported boards</b>) and the footer ratified.
+  Post-Aurora language throughout; spectrum only as moments (hero, hover light).
+</p>
+
+<div class="controls">
+  <span class="lbl">Explore:</span>
+  <span class="grp">
+    <span class="lbl">Headers</span>
+    <button data-align>Left + rule</button>
+    <button data-align class="on">Centered</button>
+  </span>
+  <span class="grp">
+    <button data-w class="on">Desktop</button>
+    <button data-w>Narrow ~680</button>
+  </span>
+  <span class="grp">
+    <span class="lbl">Examples</span>
+    <button data-n class="on">12</button>
+    <button data-n>3</button>
+    <button data-n>0</button>
+  </span>
+  <span class="grp">
+    <button data-hov>Show hover light</button>
+    <button data-static>Freeze motion</button>
+  </span>
+</div>
+
+<h2><span class="n">1.</span> The pick — centered hero + sectioned column</h2>
+<p class="sub">B's bones under the current hero: the monument stays the page's opening beat, then the
+column takes over — GET STARTED (four doors), EXAMPLES (ruled header + one intro line), footer.
+Use the <b>Headers</b> toggle to compare left-anchored vs centered dividers.</p>
+<section class="frame pick centered" data-frame data-page>
+  <div class="chrome" data-chrome></div>
+  <div class="page">
+    <div class="hero">
+      <div class="tri"></div>
+      <p class="wordmark">LightPlayer</p>
+      <p class="tagline">Friendly shaders, everywhere</p>
+      <button class="pill ir"><span class="pi">✎</span> Edit the logo</button>
+    </div>
+    <div class="sech"><span class="rule lead"></span><p class="t">Get started</p><span class="rule"></span></div>
+    <div class="doors">
+      <a class="door ir"><span class="ic">⭍</span><span class="dt">Connect a device</span>
+        <span class="dd">Plug a board in over USB.</span></a>
+      <a class="door ir"><span class="ic">▦</span><span class="dt">Try the simulator</span>
+        <span class="dd">Open an example, no hardware.</span></a>
+      <a class="door ir"><span class="ic">✎</span><span class="dt">Read the docs</span>
+        <span class="dd">Shaders, mapping, devices.</span></a>
+      <a class="door ir"><span class="ic">⌗</span><span class="dt">Supported boards</span>
+        <span class="dd">QuinLED, DevKitC, XIAO…</span></a>
+    </div>
+    <div class="sech"><span class="rule lead"></span><p class="t">Examples</p><span class="rule"></span><span class="meta" data-count></span></div>
+    <p class="secsub">Explore an example in the simulator. Customize it, share it, and flash it to hardware to see it in action.</p>
+    <div class="grid" data-grid></div>
+  </div>
+  <div class="foot" data-foot></div>
+</section>
+
+<h2><span class="n">2.</span> Divider lab — the same header, three anchors</h2>
+<p class="sub">Isolated so the choice is about the divider, not the page around it.</p>
+<div class="hlab">
+  <div class="hrow"><span class="tag">left + trailing rule (B round-1; meta fact rides the right end)</span>
+    <div class="sech"><p class="t">Examples</p><span class="rule"></span><span class="meta">12 examples</span></div></div>
+  <div class="hrow"><span class="tag">centered — rules both sides (round-2 ask)</span>
+    <div class="sech"><span class="rule"></span><p class="t">Examples</p><span class="rule"></span></div></div>
+  <div class="hrow"><span class="tag">centered, no rules — whitespace only</span>
+    <div class="sech" style="justify-content:center"><p class="t">Examples</p></div></div>
+</div>
+
+<h2><span class="n">3.</span> Rejected this round</h2>
+<div class="rejected">
+  <div class="r"><b>A · current</b> reads as stacked sections — three widths, no doors to Docs/Boards, no footer; the complaint this spike exists for.</div>
+  <div class="r"><b>B round-1 hero band</b> left-aligning the hero demoted the monument to a masthead — ruled out; the centered hero stays.</div>
+  <div class="r"><b>C · hero + door rail</b> the rail read as a menu beside the hero, but split the page into two competing halves above the fold.</div>
+  <div class="r"><b>D · examples-first masthead</b> trusts the art most, but buries "connect a device" — the actual first-run job.</div>
+</div>
+
+<script>
+  const EXAMPLES = [
+    ["Fyeah Sign",   [160, 195]], ["Logo Sign", [10, 260]],  ["Plasma",   [280, 320]],
+    ["Meteor",       [230, 260]], ["Comet",     [120, 160]], ["Palette Waves", [190, 300]],
+    ["Fire 2012",    [20, 45]],   ["Plasma Duo",[300, 30]],  ["Zook dome", [90, 140]],
+    ["Small Dome",   [140, 110]], ["Peach (1D)",[330, 20]],  ["Peach (2D)", [25, 340]],
+  ];
+  function art(h1, h2, i) {
+    return `<div class="art"><i style="background:
+      radial-gradient(70% 90% at ${20 + (i * 13) % 55}% ${25 + (i * 29) % 50}%, hsl(${h1} 75% 62% / .85), transparent 60%),
+      radial-gradient(80% 70% at ${65 - (i * 7) % 40}% ${70 - (i * 17) % 45}%, hsl(${h2} 70% 55% / .75), transparent 65%),
+      linear-gradient(${(i * 47) % 360}deg, #0c1114, #171b20)"></i></div>`;
+  }
+  const chromeHtml = `
+    <span class="mark"></span><span class="brand">LightPlayer</span>
+    <a class="primary">Devices</a><a class="primary">Projects</a>
+    <div class="right"><a class="sec">Boards</a><a class="sec">Docs</a><span class="dots">⋯</span></div>`;
+  const footHtml = `
+    <a>Docs</a><a>Supported boards</a><a>What's a shader?</a>
+    <span class="ver">2026.08.30-1</span>`;
+  document.querySelectorAll("[data-chrome]").forEach(el => el.innerHTML = chromeHtml);
+  document.querySelectorAll("[data-foot]").forEach(el => el.innerHTML = footHtml);
+
+  let count = 12;
+  function renderGrids() {
+    document.querySelectorAll("[data-grid]").forEach(grid => {
+      if (count === 0) {
+        grid.innerHTML = `<div class="empty" style="grid-column:1/-1">No examples in this build —
+          examples ship with the app, so this is the broken-bundle case, not a first-run one.</div>`;
+        return;
+      }
+      grid.innerHTML = EXAMPLES.slice(0, count).map(([name, [a, b]], i) =>
+        `<div class="card ir ir-inset">${art(a, b, i)}<div class="cbar">${name}</div></div>`).join("");
+    });
+    document.querySelectorAll("[data-count]").forEach(el =>
+      el.textContent = count ? `${count} examples` : "");
+  }
+  renderGrids();
+
+  const on = (sel, fn) => document.querySelectorAll(sel).forEach(b =>
+    b.addEventListener("click", () => fn(b)));
+  const mono = (b) => { [...b.parentElement.querySelectorAll("button")].forEach(x => x.classList.remove("on")); b.classList.add("on"); };
+  on("[data-align]", b => { mono(b);
+    document.querySelectorAll("[data-page]").forEach(f =>
+      f.classList.toggle("centered", b.textContent.includes("Centered"))); });
+  on("[data-w]", b => { mono(b);
+    document.querySelectorAll("[data-frame]").forEach(f =>
+      f.classList.toggle("narrow", b.textContent.includes("680"))); });
+  on("[data-n]", b => { mono(b); count = parseInt(b.textContent, 10); renderGrids(); });
+  on("[data-hov]", b => { b.classList.toggle("on");
+    const onNow = b.classList.contains("on");
+    document.querySelectorAll("[data-frame]").forEach(f => {
+      const targets = f.querySelectorAll(".card, .door, .pill");
+      [targets[2] || targets[0]].forEach(t => t && t.classList.toggle("hov", onNow));
+    }); });
+  on("[data-static]", b => { b.classList.toggle("on");
+    document.body.classList.toggle("static", b.classList.contains("on")); });
+  if (new URLSearchParams(location.search).get("static")) document.body.classList.add("static");
+</script>
+</body>
+</html>

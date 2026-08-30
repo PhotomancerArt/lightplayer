@@ -269,9 +269,9 @@ fn boot_sim(spec: &'static DocsSimSpec) -> DocsSim {
     use lpa_studio_core::StudioController;
 
     let mut controller = StudioController::new(crate::web_app::now_secs);
-    // Device-session deadlines run on browser timers; without this the
-    // core default fires every deadline immediately.
-    controller.set_device_timers(crate::web_app::make_device_timers());
+    // The simulator's connect-ladder backoff runs on browser timers;
+    // without this the core default resolves every sleep immediately.
+    controller.set_sim_timers(crate::web_app::make_device_timers());
     controller.set_random(crate::library_host_opfs::random_bytes);
 
     let mut host = DocsSimHost::boot(

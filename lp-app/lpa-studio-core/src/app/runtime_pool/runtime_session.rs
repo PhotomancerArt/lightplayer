@@ -1,30 +1,28 @@
 //! One attached runtime: its payload, wire client, and per-session state.
 //!
-//! A [`RuntimeSession`] bundles what used to be smeared across two single
-//! slots — `DeviceController.attachment` (the runtime payload) and the
-//! retired `ServerController` (the wire client + server protocol state) —
-//! plus the per-device reconcile bundle that used to live on
-//! `StudioController`. The payload keeps D22's rule in the type system
-//! (the sim is not a device):
+//! ⚠️ The DEVICE payload arm is gone (M2 of the device-model rebuild):
+//! `DeviceHandle`, the per-device reconcile bundle (`device_sync`,
+//! `hardware_id`, versions, drift times, storage id), the in-flight
+//! `operation` flag, the observed-device-state heartbeat baseline and the
+//! device console sink all died with the flows that wrote them. The pool
+//! was reduced to the SIM's needs (vision R1: the sim keeps its existing
+//! path untouched through round 1); the rebuilt device model owns its own
+//! session shape.
 //!
-//! - [`RuntimePayload::Sim`] — the browser-worker simulator. Connect +
-//!   worker io, no boot, no readiness states, no management plane.
-//! - [`RuntimePayload::Device`] — real hardware, owned end to end by an
-//!   `lpa_link` [`DeviceSession`] (state machine, hello-first readiness,
-//!   management, reconnect-that-rebuilds).
+//! A [`RuntimeSession`] therefore bundles: the simulator attachment, the
+//! wire client it owns, the server protocol state, the per-session console
+//! tail, the card frame feed, and this session's refresh/heartbeat pacing.
 //!
-//! There is no `None` arm: absence of a runtime is absence from the
+//! There is no `None` payload: absence of a runtime is absence from the
 //! [`RuntimePool`](super::RuntimePool).
 
 use core::time::Duration;
-use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
 use lpa_client::BackoffPolicy;
-use lpa_link::{DeviceSession, DeviceState, LinkConnection, LinkConnector, LinkSession};
+use lpa_link::{LinkConnection, LinkConnector, LinkSession};
 
-use crate::app::places::{DeviceSyncState, HardwareId};
 use crate::app::runtime_pool::card_feed::CardFeedState;
 use crate::app::studio::refresh_cadence::{
     DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL, PASSIVE_REFRESH_BACKOFF_BASE,
@@ -38,42 +36,6 @@ use crate::{
 /// How many stamped lines the per-session console tail retains (D42: the
 /// card's console is a bounded ring, not the full history).
 pub const CONSOLE_TAIL_LEN: usize = 40;
-
-/// What kind of runtime a session is attached to (D22: the sim is not a
-/// device). Derived from the payload; never stored separately.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RuntimeKind {
-    /// The browser-worker simulator.
-    Sim,
-    /// Real hardware behind a [`DeviceSession`].
-    Device,
-}
-
-/// The runtime a session is attached to.
-pub enum RuntimePayload {
-    /// The browser-worker simulator (BrowserWorker): a live provider
-    /// session whose server io is the worker post-message channel.
-    Sim(SimAttachment),
-    /// Attached hardware, driven through its [`DeviceSession`].
-    Device(DeviceHandle),
-}
-
-impl RuntimePayload {
-    pub fn kind(&self) -> RuntimeKind {
-        match self {
-            Self::Sim(_) => RuntimeKind::Sim,
-            Self::Device(_) => RuntimeKind::Device,
-        }
-    }
-
-    /// The wire-level link session record behind this payload.
-    pub(crate) fn link_session(&self) -> Option<LinkSession> {
-        match self {
-            Self::Sim(sim) => Some(sim.session.clone()),
-            Self::Device(handle) => handle.session().map(DeviceSession::session),
-        }
-    }
-}
 
 /// The project a SIM session currently runs — identity for the live sim
 /// card's chip (D36) and the project card's "Running in simulator"
@@ -96,144 +58,31 @@ pub struct SimAttachment {
     pub connection: LinkConnection,
 }
 
-/// A hardware attachment. In product code this is always a live
-/// [`DeviceSession`]; tests that only exercise view/derivation logic can
-/// stub the session with a fixed [`DeviceState`] instead of scripting a
-/// whole fake device.
-pub enum DeviceHandle {
-    Session {
-        session: DeviceSession,
-        /// Device console lines observed by THIS session's event sink,
-        /// buffered per session (runtime-pool P2) and drained into the
-        /// studio log ring by dispatch settles and status heartbeats.
-        console_logs: Rc<RefCell<Vec<UiLogDraft>>>,
-        /// The endpoint's human label as the connect flow knew it
-        /// ("ESP32 Serial (0x303a:0x1001)") — captured at connect because
-        /// Web Serial exposes only VID:PID, and this string is everything
-        /// the browser will ever say about which physical port this is.
-        /// The card's Technical tab renders it (gate-1 sitting,
-        /// 2026-08-03: an unflashed card showed nothing identifying).
-        endpoint_label: String,
-    },
-    #[cfg(test)]
-    Stub(StubDevice),
-}
-
-/// Test-only hardware stand-in: a fixed device state, no wire. Carries a
-/// console-log buffer so heartbeat drains stay exercisable without a live
-/// session.
-#[cfg(test)]
-pub struct StubDevice {
-    pub state: DeviceState,
-    pub console_logs: Rc<RefCell<Vec<UiLogDraft>>>,
-}
-
-impl DeviceHandle {
-    /// The session's current device state.
-    pub fn state(&self) -> DeviceState {
-        match self {
-            Self::Session { session, .. } => session.state(),
-            #[cfg(test)]
-            Self::Stub(stub) => stub.state.clone(),
-        }
-    }
-
-    /// The live session, when this handle holds one.
-    pub fn session(&self) -> Option<&DeviceSession> {
-        match self {
-            Self::Session { session, .. } => Some(session),
-            #[cfg(test)]
-            Self::Stub(_) => None,
-        }
-    }
-
-    /// The endpoint's human label captured at connect (`None` for stubs).
-    pub fn endpoint_label(&self) -> Option<&str> {
-        match self {
-            Self::Session { endpoint_label, .. } => Some(endpoint_label),
-            #[cfg(test)]
-            Self::Stub(_) => None,
-        }
-    }
-
-    /// This session's device-console log buffer.
-    fn console_logs(&self) -> &Rc<RefCell<Vec<UiLogDraft>>> {
-        match self {
-            Self::Session { console_logs, .. } => console_logs,
-            #[cfg(test)]
-            Self::Stub(stub) => &stub.console_logs,
-        }
-    }
-
-    /// Close the underlying session (attachment teardown).
-    pub async fn close(self) -> Result<(), UiError> {
-        match self {
-            Self::Session { session, .. } => session
-                .close()
-                .await
-                .map_err(|error| UiError::Link(error.to_string())),
-            #[cfg(test)]
-            Self::Stub(_) => Ok(()),
-        }
-    }
-}
-
-/// One runtime session in the pool: the attached runtime payload, its wire
-/// client (each session owns its OWN [`StudioServerClient`]), the server
-/// protocol state, and — for device sessions — the connect-as-pull
-/// reconcile bundle.
+/// One runtime session in the pool: the attached simulator, its wire
+/// client (each session owns its OWN [`StudioServerClient`]), and the
+/// server protocol state.
 pub struct RuntimeSession {
     id: RuntimeId,
-    payload: RuntimePayload,
+    payload: SimAttachment,
     client: Option<StudioServerClient>,
+    /// The sim's server-protocol standing: opening, connected, or failed.
+    ///
+    /// Kept through the device teardown because it is the SIM's own state,
+    /// not a device store: [`ServerFailureKind::SimCrashed`] is how a
+    /// poisoned worker instance reaches the user, and the reboot-under-a-
+    /// flap-guard recovery reads it.
     server_state: ServerState,
     /// The last log level Studio asked this session's server to apply,
     /// shown optimistically in the console's device-level selector (there
-    /// is no read-back on the wire). Reset to the device's init default
-    /// (`Info`) whenever a connection is (re)established, since a reboot
-    /// reverts it.
+    /// is no read-back on the wire). Reset to the init default (`Info`)
+    /// whenever a connection is (re)established.
     requested_log_level: UiLogLevel,
-    /// What the attached DEVICE holds, computed by connect-as-pull (D8)
-    /// right after the server protocol attaches to hardware.
-    device_sync: Option<DeviceSyncState>,
-    /// Where THIS session's identity came from (device identity design
-    /// §3): the efuse MAC the hello/probe reported, or the minted uid a
-    /// legacy stamp carried. Resolved alongside `device_sync` at connect
-    /// and cleared with it — it is evidence about the live board, not a
-    /// remembered fact. The registry row's `hardware_id` column is
-    /// written from this.
-    hardware_id: Option<HardwareId>,
-    /// The device copy's and local head's version numbers on the project
-    /// line (`ProjectHistory::version_number`), computed alongside
-    /// `device_sync` when the pull classifies against a known project —
-    /// the roster's "Running vN"/"Push vN" evidence. `(None, None)`
-    /// otherwise; only read while `device_sync` holds a `Known` content.
-    device_versions: (Option<usize>, Option<usize>),
-    /// Drift wall-clock evidence (§3c-3), computed alongside
-    /// `device_versions`: when the LOCAL head was last saved
-    /// (`ProjectHistory::saved_at`) and when WE last pushed to this device
-    /// (its registry association's `at`). Feeds the Edited-on-device
-    /// card's plain-words time copy; `(None, None)` otherwise.
-    device_drift_times: (Option<f64>, Option<f64>),
-    /// The project storage dir the attached device actually runs from
-    /// (discovered from its loaded project at connect) — pull and push
-    /// target it so one dir replaces in place.
-    device_storage_id: Option<String>,
-    /// A long-running wire operation (flash / erase / reset / push) in
-    /// flight on this session, carrying its human label ("Installing
-    /// firmware", "Pushing v5"). While set, the pool refuses a same-kind
-    /// replace (DQ-A swap semantics) AND the roster narrates the session's
-    /// card through the `ConnectEvidence::OperationInFlight` lane — one
-    /// flag, both consequences, so the card can never claim idleness while
-    /// a replace would be refused.
-    operation: Option<String>,
     /// This session's passive-refresh backoff (runtime-pool P2: the shared
     /// actor singleton became per-session). Only the LENS session's
     /// advances — only the lens runs the fallible project pull.
     backoff: BackoffPolicy,
     /// When the last status heartbeat ran (injected-clock epoch seconds).
-    /// `None` = never: the first heartbeat is immediately due, so a fresh
-    /// session baselines its observed device state right away.
+    /// `None` = never: the first heartbeat is immediately due.
     last_heartbeat_at: Option<f64>,
     /// When the last passive project pull COMPLETED (injected-clock epoch
     /// seconds). `None` = never: the first pull is immediately due.
@@ -241,20 +90,13 @@ pub struct RuntimeSession {
     /// this stamp, so a pull slower than the gap pushes the next one out
     /// instead of running back-to-back.
     last_refresh_completed_at: Option<f64>,
-    /// The device state the last heartbeat observed, for surfacing state
-    /// changes through the change gate (view builds read the live state;
-    /// the heartbeat's job is marking the view dirty when it moved).
-    heartbeat_device_state: Option<DeviceState>,
-    /// What the SIM session runs (see [`SimLoadedProject`]). Always `None`
-    /// on device sessions — their loaded project is reconcile-bundle
-    /// evidence (`device_sync`), never this field.
+    /// What this SIM session runs (see [`SimLoadedProject`]).
     sim_loaded_project: Option<SimLoadedProject>,
     /// The board the SIM session claims to be (gallery-rework vision D4),
     /// in the registry's `vendor/product` vocabulary — the same strings as
     /// `RegisteredDevice.board_id` and `ProjectManifest.target`.
     ///
-    /// Advisory context ONLY: nothing about the worker changes, exactly as
-    /// the registry's `board_id` changes nothing about a device. It feeds
+    /// Advisory context ONLY: nothing about the worker changes. It feeds
     /// the card's "as \<board\>" line and the output face's pin diagram.
     ///
     /// INHERITED from the project the sim runs: load-as-push sets it from
@@ -265,14 +107,14 @@ pub struct RuntimeSession {
     /// (re)creation before any project has landed. `None` — no board known
     /// — is the ordinary default.
     sim_board_id: Option<String>,
-    /// The per-device console tail (D42): the last [`CONSOLE_TAIL_LEN`]
+    /// The per-session console tail (D42): the last [`CONSOLE_TAIL_LEN`]
     /// stamped lines this session's drains produced. The card's console
     /// strip + tab render this; it dies with the session (the console is
     /// the session's, not the app's).
     console_tail: VecDeque<UiLogEntry>,
     /// This session's live frame feed — the ▶ card tab's state
     /// (honest-device preview P2). Deliberately NOT cleared when the server
-    /// protocol detaches: the last in-session frame is what an offline card
+    /// protocol detaches: the last in-session frame is what a stopped card
     /// shows (Q4). Only its connection-scoped half (project handle,
     /// geometry) is invalidated, in [`Self::disconnect_server`] and at each
     /// fresh attach.
@@ -280,25 +122,18 @@ pub struct RuntimeSession {
 }
 
 impl RuntimeSession {
-    /// A fresh session around a payload: no wire client yet, server
+    /// A fresh session around an attachment: no wire client yet, server
     /// protocol `Disconnected` until [`Self::attach_server`] runs.
-    pub(crate) fn new(id: RuntimeId, payload: RuntimePayload) -> Self {
+    pub(crate) fn new(id: RuntimeId, payload: SimAttachment) -> Self {
         Self {
             id,
             payload,
             client: None,
             server_state: ServerState::Disconnected,
             requested_log_level: UiLogLevel::Info,
-            device_sync: None,
-            hardware_id: None,
-            device_versions: (None, None),
-            device_drift_times: (None, None),
-            device_storage_id: None,
-            operation: None,
             backoff: BackoffPolicy::new(PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX),
             last_heartbeat_at: None,
             last_refresh_completed_at: None,
-            heartbeat_device_state: None,
             sim_loaded_project: None,
             sim_board_id: None,
             console_tail: VecDeque::new(),
@@ -310,76 +145,14 @@ impl RuntimeSession {
         self.id
     }
 
-    pub fn kind(&self) -> RuntimeKind {
-        self.payload.kind()
-    }
-
-    pub fn is_sim(&self) -> bool {
-        matches!(self.kind(), RuntimeKind::Sim)
-    }
-
-    pub fn is_device(&self) -> bool {
-        matches!(self.kind(), RuntimeKind::Device)
-    }
-
-    pub fn payload(&self) -> &RuntimePayload {
+    pub fn payload(&self) -> &SimAttachment {
         &self.payload
     }
 
-    /// Tear the session apart into its payload (attachment teardown: the
-    /// wire client and per-session state drop here).
-    pub fn into_payload(self) -> RuntimePayload {
+    /// Tear the session apart into its attachment (teardown: the wire
+    /// client and per-session state drop here).
+    pub fn into_payload(self) -> SimAttachment {
         self.payload
-    }
-
-    /// The attached hardware's device state, when this is a device session.
-    pub fn device_state(&self) -> Option<DeviceState> {
-        match &self.payload {
-            RuntimePayload::Device(handle) => Some(handle.state()),
-            RuntimePayload::Sim(_) => None,
-        }
-    }
-
-    /// The live hardware [`DeviceSession`], when this is a device session
-    /// holding one.
-    pub fn hardware_session(&self) -> Option<&DeviceSession> {
-        match &self.payload {
-            RuntimePayload::Device(handle) => handle.session(),
-            RuntimePayload::Sim(_) => None,
-        }
-    }
-
-    /// The endpoint's human label captured at connect, when this is a
-    /// device session holding a live handle. Everything Web Serial will
-    /// ever say about which physical port this is (VID:PID — the OS path
-    /// is not exposed to pages).
-    pub fn endpoint_label(&self) -> Option<&str> {
-        match &self.payload {
-            RuntimePayload::Device(handle) => handle.endpoint_label(),
-            RuntimePayload::Sim(_) => None,
-        }
-    }
-
-    /// The `dev` uid this session is associated with, once known.
-    ///
-    /// A device session's identity rides the wire hello: the association
-    /// exists exactly from the moment the hello lands (the session state
-    /// reaches `Ready { hello }`). The sim never has one (D22). The
-    /// [`RuntimeId`] stays the stable pool key either way.
-    pub fn device_uid(&self) -> Option<String> {
-        match self.device_state() {
-            Some(DeviceState::Ready { hello }) => hello.device_uid,
-            _ => None,
-        }
-    }
-
-    /// The board manifest's measured total-LED envelope from the hello, when
-    /// the device reported one (a SOFT limit — evidence, never a refusal).
-    pub fn total_led_budget(&self) -> Option<u32> {
-        match self.device_state() {
-            Some(DeviceState::Ready { hello }) => hello.hardware.total_led_budget,
-            _ => None,
-        }
     }
 
     /// The latest heartbeat-reported per-wire output status, if one has
@@ -390,34 +163,27 @@ impl RuntimeSession {
             .and_then(StudioServerClient::output_wire_status)
     }
 
-    /// The project this SIM session runs, when one has been pushed onto it
-    /// (`None` on device sessions and on a sim with nothing loaded).
+    /// The project this SIM session runs, when one has been pushed onto it.
     pub fn sim_loaded_project(&self) -> Option<&SimLoadedProject> {
         self.sim_loaded_project.as_ref()
     }
 
-    /// Record what load-as-push put on this SIM session (the live sim
-    /// card's identity evidence). Ignored on device sessions — their
-    /// loaded project is reconcile evidence, never this field.
+    /// Record what load-as-push put on this session (the live sim card's
+    /// identity evidence).
     pub fn set_sim_loaded_project(&mut self, project: Option<SimLoadedProject>) {
-        if self.is_sim() {
-            self.sim_loaded_project = project;
-        }
+        self.sim_loaded_project = project;
     }
 
     /// The board this SIM session claims to be (see [`Self::sim_board_id`]'s
-    /// field doc). Always `None` on device sessions — a device's board is
-    /// the registry's `board_id`, never this.
+    /// field doc).
     pub fn sim_board_id(&self) -> Option<&str> {
         self.sim_board_id.as_deref()
     }
 
-    /// Give the SIM session a board identity (D4), or clear it. Ignored on
-    /// device sessions. Advisory: no engine or worker behavior follows.
+    /// Give the session a board identity (D4), or clear it. Advisory: no
+    /// engine or worker behavior follows.
     pub fn set_sim_board_id(&mut self, board_id: Option<String>) {
-        if self.is_sim() {
-            self.sim_board_id = board_id;
-        }
+        self.sim_board_id = board_id;
     }
 
     // -----------------------------------------------------------------
@@ -434,46 +200,29 @@ impl RuntimeSession {
 
     /// The log level Studio last requested from this session's server, or
     /// `None` when the server protocol is not connected (the console's
-    /// device-level selector disables itself on `None`).
+    /// runtime-level selector disables itself on `None`).
     pub fn requested_log_level(&self) -> Option<UiLogLevel> {
         self.is_connected().then_some(self.requested_log_level)
     }
 
-    /// Record a successfully applied device log level for optimistic
-    /// display.
+    /// Record a successfully applied log level for optimistic display.
     pub fn set_requested_log_level(&mut self, level: UiLogLevel) {
         self.requested_log_level = level;
     }
 
-    /// Attach the server protocol to this session's runtime: the hardware
-    /// session hands over its readiness-gated channel; the sim keeps its
-    /// worker io.
+    /// Attach the server protocol to this session's runtime: the sim's
+    /// worker io becomes the wire.
     pub fn attach_server(&mut self, updates: UxUpdateSink) -> Result<(), UiError> {
-        match &self.payload {
-            RuntimePayload::Sim(sim) => {
-                // Direct field write (not a &mut self helper) so the state
-                // transition can happen while the payload is borrowed.
-                self.server_state = connecting_state();
-                let client = StudioServerClient::from_sim_connection(
-                    Rc::clone(&sim.connector),
-                    &sim.connection,
-                    updates,
-                )?;
-                self.install_client(client);
-                Ok(())
-            }
-            RuntimePayload::Device(handle) => match handle.session() {
-                Some(session) => {
-                    self.server_state = connecting_state();
-                    let client = StudioServerClient::from_device_session(session);
-                    self.install_client(client);
-                    Ok(())
-                }
-                None => Err(UiError::MissingSession(
-                    "hardware attachment has no live device session".to_string(),
-                )),
-            },
-        }
+        // Direct field write (not a &mut self helper) so the state
+        // transition can happen while the payload is borrowed.
+        self.server_state = connecting_state();
+        let client = StudioServerClient::from_sim_connection(
+            Rc::clone(&self.payload.connector),
+            &self.payload.connection,
+            updates,
+        )?;
+        self.install_client(client);
+        Ok(())
     }
 
     // -----------------------------------------------------------------
@@ -537,25 +286,6 @@ impl RuntimeSession {
             .unwrap_or_default()
     }
 
-    /// The latest heartbeat-reported recovery status from this session's
-    /// attached client (safe-mode clamp evidence for the device card).
-    pub fn recovery_status(&self) -> Option<&lpc_wire::server::RecoveryStatus> {
-        self.client
-            .as_ref()
-            .and_then(StudioServerClient::recovery_status)
-    }
-
-    /// Drain device-console lines buffered by this session's event sink
-    /// (device sessions; the sim buffers nothing here).
-    pub fn take_device_console_logs(&mut self) -> Vec<UiLogDraft> {
-        match &self.payload {
-            RuntimePayload::Device(handle) => {
-                core::mem::take(&mut *handle.console_logs().borrow_mut())
-            }
-            RuntimePayload::Sim(_) => Vec::new(),
-        }
-    }
-
     /// Append stamped lines to this session's console tail (D42), keeping
     /// only the newest [`CONSOLE_TAIL_LEN`].
     ///
@@ -564,7 +294,7 @@ impl RuntimeSession {
     /// per-tick lines, wire chatter) would drown the 40-line ring in
     /// noise; they still reach the devtools mirror, which fires on the
     /// full drain before this filter. The floor is fixed until a
-    /// per-device level control lands (flagged at the P2 review).
+    /// per-runtime level control lands (flagged at the P2 review).
     pub fn push_console_tail(&mut self, entries: impl IntoIterator<Item = UiLogEntry>) {
         self.console_tail.extend(
             entries
@@ -576,7 +306,7 @@ impl RuntimeSession {
         }
     }
 
-    /// The per-device console tail, oldest first (D42: the card's console
+    /// The per-session console tail, oldest first (D42: the card's console
     /// strip shows the last line; the Console tab shows the whole tail).
     pub fn console_tail(&self) -> &VecDeque<UiLogEntry> {
         &self.console_tail
@@ -586,27 +316,10 @@ impl RuntimeSession {
     // Tick policy (runtime-pool P2: per-session cadence/backoff/heartbeat)
     // -----------------------------------------------------------------
 
-    /// A long-running operation (flash / erase / reset / push) is in
-    /// flight on this session; the pool refuses a same-kind replace.
-    pub fn op_in_flight(&self) -> bool {
-        self.operation.is_some()
-    }
-
-    /// The in-flight operation's human label, for the card's
-    /// Operation-in-flight narration (`None` while idle).
-    pub fn operation_label(&self) -> Option<&str> {
-        self.operation.as_deref()
-    }
-
-    /// Mark (`Some(label)`) or clear (`None`) the in-flight operation.
-    pub(crate) fn set_operation(&mut self, operation: Option<String>) {
-        self.operation = operation;
-    }
-
     /// The passive project-refresh completion-gap while the lens is on this
-    /// session (kind policy: sim fast, device calm).
+    /// session.
     pub fn cadence_interval(&self) -> Duration {
-        RefreshCadence::for_kind(self.kind()).interval()
+        RefreshCadence::simulator().interval()
     }
 
     /// Stamp a passive pull's completion (injected-clock epoch seconds);
@@ -648,8 +361,7 @@ impl RuntimeSession {
     }
 
     /// Whether a status heartbeat is due at `now` (injected-clock epoch
-    /// seconds). A session that never heartbeated is due immediately, so
-    /// the first heartbeat baselines the observed device state.
+    /// seconds). A session that never heartbeated is due immediately.
     pub(crate) fn heartbeat_due(&self, now: f64) -> bool {
         match self.last_heartbeat_at {
             None => true,
@@ -673,28 +385,8 @@ impl RuntimeSession {
         self.last_heartbeat_at = Some(now);
     }
 
-    /// Record the currently observed device state and report whether it
-    /// moved since the last heartbeat. The first observation baselines
-    /// silently (attach flows already emitted their views).
-    pub(crate) fn note_device_state_change(&mut self) -> bool {
-        let current = self.device_state();
-        let changed = match (&self.heartbeat_device_state, &current) {
-            (Some(last), Some(current)) => last != current,
-            (None, _) | (_, None) => false,
-        };
-        self.heartbeat_device_state = current;
-        changed
-    }
-
     pub fn fail(&mut self, message: impl Into<String>) {
         self.fail_with_kind(message, ServerFailureKind::Unknown);
-    }
-
-    pub fn fail_no_firmware(&mut self) {
-        self.fail_with_kind(
-            "No LightPlayer firmware detected.",
-            ServerFailureKind::NoFirmware,
-        );
     }
 
     pub fn fail_with_kind(&mut self, message: impl Into<String>, kind: ServerFailureKind) {
@@ -706,87 +398,20 @@ impl RuntimeSession {
     }
 
     /// Detach the server protocol (drop the wire client) while keeping the
-    /// runtime payload attached.
+    /// runtime attachment.
     pub fn disconnect_server(&mut self) {
         self.client = None;
         self.server_state = ServerState::Disconnected;
         // The handle and the geometry were claims about the connection that
-        // just ended; the last frame is a fact about the board and stays.
+        // just ended; the last frame is a fact about the runtime and stays.
         self.card_feed.invalidate_connection();
-    }
-
-    // -----------------------------------------------------------------
-    // Reconcile bundle (connect-as-pull state, device sessions only)
-    // -----------------------------------------------------------------
-
-    pub fn device_sync(&self) -> Option<&DeviceSyncState> {
-        self.device_sync.as_ref()
-    }
-
-    pub fn device_sync_mut(&mut self) -> Option<&mut DeviceSyncState> {
-        self.device_sync.as_mut()
-    }
-
-    pub fn set_device_sync(&mut self, sync: Option<DeviceSyncState>) {
-        self.device_sync = sync;
-    }
-
-    /// This session's resolved identity source (device identity design
-    /// §3), or `None` while the board is anonymous (A4) or the pull has
-    /// not classified yet.
-    pub fn hardware_id(&self) -> Option<HardwareId> {
-        self.hardware_id
-    }
-
-    pub fn set_hardware_id(&mut self, hardware_id: Option<HardwareId>) {
-        self.hardware_id = hardware_id;
-    }
-
-    pub fn device_versions(&self) -> (Option<usize>, Option<usize>) {
-        self.device_versions
-    }
-
-    pub fn set_device_versions(&mut self, versions: (Option<usize>, Option<usize>)) {
-        self.device_versions = versions;
-    }
-
-    /// (local head saved-at, last-push-to-this-device at) — §3c-3.
-    pub fn device_drift_times(&self) -> (Option<f64>, Option<f64>) {
-        self.device_drift_times
-    }
-
-    pub fn set_device_drift_times(&mut self, times: (Option<f64>, Option<f64>)) {
-        self.device_drift_times = times;
-    }
-
-    pub fn device_storage_id(&self) -> Option<&str> {
-        self.device_storage_id.as_deref()
-    }
-
-    pub fn set_device_storage_id(&mut self, storage_id: Option<String>) {
-        self.device_storage_id = storage_id;
-    }
-
-    /// Reset the whole reconcile bundle (a fresh pull is about to run, or
-    /// the server protocol detached).
-    pub fn clear_reconcile(&mut self) {
-        self.device_sync = None;
-        self.hardware_id = None;
-        self.device_versions = (None, None);
-        self.device_storage_id = None;
     }
 }
 
 /// Test seams: stubbed payloads and direct state injection for
-/// view/derivation tests that must not script a whole fake device.
+/// view/derivation tests that must not stand up a whole worker.
 #[cfg(test)]
 impl RuntimeSession {
-    /// Replace the payload in place, keeping the wire client and server
-    /// state (the retired slots were independently settable in tests).
-    pub(crate) fn set_payload_for_test(&mut self, payload: RuntimePayload) {
-        self.payload = payload;
-    }
-
     pub(crate) fn set_server_state_for_test(&mut self, state: ServerState) {
         self.server_state = state;
     }
@@ -797,35 +422,19 @@ impl RuntimeSession {
         self.server_state = ServerState::Connected { protocol };
         self.requested_log_level = UiLogLevel::Info;
     }
-
-    /// Push a console line into the device-console buffer, as the live
-    /// session's event sink would (heartbeat-drain tests).
-    pub(crate) fn push_device_console_log_for_test(&mut self, draft: UiLogDraft) {
-        if let RuntimePayload::Device(handle) = &self.payload {
-            handle.console_logs().borrow_mut().push(draft);
-        }
-    }
 }
 
 #[cfg(test)]
-impl RuntimePayload {
-    /// A stubbed hardware payload in the given device state.
-    pub(crate) fn stub_device_for_test(state: DeviceState) -> Self {
-        Self::Device(DeviceHandle::Stub(StubDevice {
-            state,
-            console_logs: Rc::new(RefCell::new(Vec::new())),
-        }))
-    }
-
-    /// A stubbed SIMULATOR payload (record-level fake connector, synthetic
-    /// session records) — the "connected but not hardware" fixture. The
-    /// connector holds no real session, so flows that close it will error;
-    /// fixtures using this only read views and speak through an injected
-    /// server client.
-    pub(crate) fn stub_sim_for_test() -> Self {
+impl SimAttachment {
+    /// A stubbed SIMULATOR attachment (record-level fake connector,
+    /// synthetic session records) — the "connected but not hardware"
+    /// fixture. The connector holds no real session, so flows that close it
+    /// will error; fixtures using this only read views and speak through an
+    /// injected server client.
+    pub(crate) fn stub_for_test() -> Self {
         use lpa_link::providers::fake::FakeProvider;
         use lpa_link::{LinkCapabilities, LinkConnectionKind, LinkProviderKind};
-        Self::Sim(SimAttachment {
+        Self {
             connector: Rc::new(LinkConnector::Fake(FakeProvider::new())),
             session: LinkSession::new(
                 "fake-session",
@@ -835,7 +444,7 @@ impl RuntimePayload {
                 LinkCapabilities::esp32_serial_base(),
             ),
             connection: LinkConnection::fake("fake-runtime", "fake-session"),
-        })
+        }
     }
 }
 
@@ -844,29 +453,5 @@ impl RuntimePayload {
 fn connecting_state() -> ServerState {
     ServerState::Connecting {
         progress: crate::ProgressState::new("Opening server protocol"),
-    }
-}
-
-/// A `Ready { hello }` device state for stubbed hardware in tests.
-#[cfg(test)]
-pub fn ready_state_for_test() -> DeviceState {
-    DeviceState::Ready {
-        hello: lpc_wire::ServerHello {
-            proto: lpc_wire::WIRE_PROTO_VERSION,
-            build: lpc_wire::BuildFacts {
-                features: lpc_model::LpFeature::ALL.to_vec(),
-                package: "fw-test".to_string(),
-                commit: "0000000".to_string(),
-                dirty: false,
-                profile: "test".to_string(),
-            },
-            hardware: lpc_wire::HardwareFacts {
-                radio: true,
-                button: true,
-                board_id: None,
-                ..Default::default()
-            },
-            device_uid: None,
-        },
     }
 }

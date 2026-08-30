@@ -60,7 +60,7 @@ extern "C" {
     fn js_get_granted_ports() -> Promise;
 
     #[wasm_bindgen(js_name = openPort)]
-    fn js_open(id: u32, baud_rate: u32) -> Promise;
+    fn js_open(id: u32, baud_rate: u32, reset: bool) -> Promise;
 
     #[wasm_bindgen(js_name = writeLine)]
     fn js_write_line(id: u32, line: &str) -> Promise;
@@ -133,8 +133,12 @@ fn port_handle(value: &JsValue) -> Result<BrowserSerialPortHandle, LinkError> {
     })
 }
 
-pub async fn open(id: u32, baud_rate: u32) -> Result<BrowserSerialProtocolOpenResult, LinkError> {
-    let value = JsFuture::from(js_open(id, baud_rate))
+pub async fn open(
+    id: u32,
+    baud_rate: u32,
+    reset: bool,
+) -> Result<BrowserSerialProtocolOpenResult, LinkError> {
+    let value = JsFuture::from(js_open(id, baud_rate, reset))
         .await
         .map_err(js_error)?;
     Ok(BrowserSerialProtocolOpenResult {

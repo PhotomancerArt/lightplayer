@@ -48,9 +48,9 @@ use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
-    DeviceTimers, HOME_NODE_ID, HomeOp, ProjectController, ProjectOp, STUDIO_LOG_SINK,
-    SettingsCommand, StudioActor, StudioCommand, StudioController, UiAction,
-    UiChromeSessionControl, UiLogEntry, UiLogLevel, UiStudioView, has_unsaved_work,
+    HOME_NODE_ID, HomeOp, RuntimeOp, STUDIO_LOG_SINK, SettingsCommand, StudioActor, StudioCommand,
+    StudioController, UiAction, UiChromeSessionControl, UiLogEntry, UiLogLevel, UiStudioView,
+    has_unsaved_work,
 };
 use lpc_cloud_api::share_link;
 use lpc_history::PrefixedUid;
@@ -265,10 +265,9 @@ pub fn App() -> Element {
         // Device event trace (M0): persist lifecycle records across
         // refreshes and stream to a capture sink when the URL asks.
         crate::device_events_io::install(&mut controller);
-        // Device-session deadlines (connect / readiness / request-idle /
-        // request-total) run on browser timers; without this the core
-        // default fires every deadline immediately.
-        controller.set_device_timers(make_device_timers());
+        // The simulator's connect-ladder backoff runs on browser timers;
+        // without this the core default resolves every sleep immediately.
+        controller.set_sim_timers(make_device_timers());
         // Crypto randomness for identity minting (`dev` uids). Host
         // builds keep the core's clock-derived fallback.
         #[cfg(target_arch = "wasm32")]
@@ -338,6 +337,22 @@ pub fn App() -> Element {
                     })
                 }
             });
+        }
+        // The rebuilt device layer (M3): the roster's effects run device IO
+        // in spawned futures on the browser's executor, and reach real ports
+        // through the Web Serial provider. A browser without Web Serial
+        // installs no transport, and the devices page says so rather than
+        // showing an empty roster that reads like "you have none".
+        #[cfg(target_arch = "wasm32")]
+        {
+            controller.set_device_spawner(wasm_bindgen_futures::spawn_local);
+            let provider = Rc::new(lpa_studio_core::BrowserSerialEsp32Provider::with_options(
+                Default::default(),
+            ));
+            match lpa_studio_core::BrowserSerialTransport::new(provider) {
+                Some(transport) => controller.set_device_transport(Rc::new(transport)),
+                None => log::info!("this browser has no Web Serial; devices are unavailable"),
+            }
         }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;
@@ -449,7 +464,6 @@ pub fn App() -> Element {
                         | StudioRoute::Projects
                         | StudioRoute::Project { .. }
                         | StudioRoute::Example { .. }
-                        | StudioRoute::Device { .. }
                 );
                 // …and never while a nav teardown is in flight. Leaving
                 // the studio is initiated BY navigation to a site route
@@ -469,9 +483,7 @@ pub fn App() -> Element {
                     {
                         if matches!(
                             current,
-                            StudioRoute::Project { .. }
-                                | StudioRoute::Example { .. }
-                                | StudioRoute::Device { .. }
+                            StudioRoute::Project { .. } | StudioRoute::Example { .. }
                         ) {
                             // boot/forward resolution on a lens route
                             // (uid → slug, identity landing): same place,
@@ -490,9 +502,7 @@ pub fn App() -> Element {
                     // as-is
                 } else if matches!(
                     current,
-                    StudioRoute::Project { .. }
-                        | StudioRoute::Example { .. }
-                        | StudioRoute::Device { .. }
+                    StudioRoute::Project { .. } | StudioRoute::Example { .. }
                 ) {
                     // the editor went away: home without an in-flight open
                     // (after one started) means the open ended — the URL
@@ -637,10 +647,6 @@ pub fn App() -> Element {
                 && nav_transient.get();
             if let router::NavEvent::ClickIntent(_) = event {
                 return match plan {
-                    NavSessionPlan::Refuse(line) => {
-                        nav_toasts.warn(line);
-                        false
-                    }
                     NavSessionPlan::Leave { .. } if leave_discards_transient => {
                         let proceed =
                             unsaved_gate::confirm_discarding_unsaved(TRANSIENT_LEAVE_PROMPT);
@@ -670,17 +676,6 @@ pub fn App() -> Element {
                 }
             }
             match plan {
-                NavSessionPlan::Refuse(line) => {
-                    // Back/forward (or a manual edit) has already spent
-                    // the entry, so nav is refused by putting the URL
-                    // back. A PUSH, not a replace: after a back, pushing
-                    // the entry the back consumed leaves history exactly
-                    // as it was, and the forward stack it truncates is
-                    // the one the back created.
-                    router::navigate(&old);
-                    nav_toasts.warn(line);
-                    return true;
-                }
                 NavSessionPlan::Leave { teardown, said } => {
                     // The studio is being left: end the session. No
                     // prompt, on dirty or otherwise — the draft overlay
@@ -768,24 +763,6 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Device { uid, play: _ } => {
-                    let already_bound = matches!(
-                        &*nav_bound_route.borrow(),
-                        Some(StudioRoute::Device { uid: bound, .. }) if bound == uid
-                    );
-                    if !already_bound {
-                        // attach the existing session for this uid, or
-                        // granted-port connect (M1) + attach; the gallery's
-                        // connect evidence renders the window honestly
-                        nav_pending_route_open.set(true);
-                        nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
-                            ProjectController::NODE_ID,
-                            ProjectOp::OpenDeviceProject {
-                                uid: Some(uid.clone()),
-                            },
-                        )));
-                    }
-                }
                 StudioRoute::Devices
                 | StudioRoute::Projects
                 | StudioRoute::Home
@@ -853,7 +830,6 @@ pub fn App() -> Element {
     let startup_bridge = bridge.clone();
     let startup_pending_route_open = Rc::clone(&pending_route_open);
     use_hook(move || {
-        let startup_bridge = startup_bridge.clone();
         spawn(async move {
             local_store::request_persist();
             let status = local_store::init_local_store().await;
@@ -865,27 +841,27 @@ pub fn App() -> Element {
                     ));
                 }
                 install_library_listeners(&startup_bridge.tx);
+                // Hotplug (M3): a granted port (re)appearing makes the
+                // effects layer sweep for grants it has not attached; one
+                // leaving makes it detach the links that stopped being open.
+                // Both edges are "go look", not "here is a port" — the
+                // browser's listeners carry no argument. Listener lifetime =
+                // page lifetime (forget).
+                install_serial_hotplug(&startup_bridge.tx);
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            let _ = &startup_bridge;
             store_status.set(status);
-            // Reload = re-derivation (D37): the pool died with the page,
-            // so the route rebuilds its runtime — a device route connects
-            // the granted port (M1) and attaches, with the
-            // connecting/failed window rendering honestly on the gallery's
-            // device card. A `/p/<uid>` route rebuilds too, but not from
-            // here: it first has to learn whether this library HAS that
-            // project, so the view loop resolves it against the roster.
+            // Reload = re-derivation (D37): the pool died with the page, so
+            // the route rebuilds its runtime. A `/p/<uid>` route rebuilds
+            // from the view loop, which first has to learn whether this
+            // library HAS that project.
+            //
+            // The devices half re-derives too, and needs nothing from here:
+            // the roster rehydrates the registry's rows at the first library
+            // settle, and the granted-port sweep is armed when the transport
+            // is installed.
             match &startup_route {
-                StudioRoute::Device { uid, play: _ } => {
-                    startup_pending_route_open.set(true);
-                    startup_bridge
-                        .tx
-                        .send(StudioCommand::Action(UiAction::from_op(
-                            ProjectController::NODE_ID,
-                            ProjectOp::OpenDeviceProject {
-                                uid: Some(uid.clone()),
-                            },
-                        )));
-                }
                 // A cold `/p/<slug>` load: the example is compiled in, so
                 // no roster wait — open transiently the moment the library
                 // host is attached (the open funnel needs its clock and
@@ -916,22 +892,6 @@ pub fn App() -> Element {
                 | StudioRoute::BoardEditor
                 | StudioRoute::Docs { .. } => {}
             }
-            // D32 auto-connect (M6): the load-time attach sweep — queued
-            // AFTER the route dispatch, so a `/device/<uid>` reload's own
-            // connect runs first and the sweep no-ops on the live session
-            // (the core guard makes it idempotent). Attach + pull + show,
-            // nothing else; failures land softly on card evidence.
-            startup_bridge
-                .tx
-                .send(StudioCommand::Action(UiAction::from_op(
-                    lpa_studio_core::DeviceController::NODE_ID,
-                    lpa_studio_core::DeviceOp::AutoConnect,
-                )));
-            // Hotplug (M6): a granted port (re)appearing re-runs the
-            // sweep; a departing port hastens the Gone classification
-            // with a tick. Listener lifetime = page lifetime (forget).
-            #[cfg(target_arch = "wasm32")]
-            install_serial_hotplug(&startup_bridge.tx);
         });
     });
 
@@ -1151,11 +1111,13 @@ pub fn App() -> Element {
     // no box of its own now — see `app::workbench`), and below the fold
     // breakpoint the frame bleeds this padding back out so its summon strip
     // reads as a full-width toolbar under the site chrome; the chrome itself
-    // keeps the inset.
+    // keeps the inset. Top padding matches the workbench's on BOTH arms
+    // (pt-2 / narrow pt-1): the site chrome must sit at the same y on every
+    // route, or entering/leaving the studio makes the nav jump (G1 2026-08-30).
     let main_class = if workbench_route {
         "tw:mx-auto tw:flex tw:h-dvh tw:min-h-0 tw:w-[min(1520px,100%)] tw:flex-col tw:px-3 tw:pb-2 tw:pt-2 tw:max-[820px]:px-[10px] tw:max-[820px]:pb-0 tw:max-[820px]:pt-1"
     } else {
-        "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]"
+        "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-2 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-1"
     };
     rsx! {
         style { "{STYLE}" }
@@ -1280,8 +1242,6 @@ const OPEN_DISCARDS_PROMPT: &str =
 enum NavSessionPlan {
     /// The session (if any) survives this arrival.
     Keep,
-    /// Refused — an operation is in flight, and this line names it.
-    Refuse(String),
     /// The studio is being left: run `teardown`, then say `said`.
     Leave { teardown: UiAction, said: String },
 }
@@ -1475,30 +1435,17 @@ fn nav_session_plan(
     ) {
         return NavSessionPlan::Keep;
     }
-    if let Some(operation) = session.busy.as_deref() {
-        return NavSessionPlan::Refuse(format!(
-            "{operation} in progress — finish or cancel it before leaving"
-        ));
-    }
     NavSessionPlan::Leave {
         teardown: session_teardown(session),
         said: session_stopped_line(session, dirty),
     }
 }
 
-/// The action that ends `session`: the sim's own stop verb, or the
-/// board's disconnect aimed by the card key the control carries — the
-/// same op the card's danger-zone row dispatches, so leaving the studio
-/// and clicking Disconnect are literally the same teardown.
-fn session_teardown(session: &UiChromeSessionControl) -> UiAction {
-    let op = if session.sim {
-        lpa_studio_core::DeviceOp::StopSimulator
-    } else {
-        lpa_studio_core::DeviceOp::DisconnectDevice {
-            target: lpa_studio_core::DeviceTarget::card(session.key.clone()),
-        }
-    };
-    UiAction::from_op(lpa_studio_core::DeviceController::NODE_ID, op)
+/// The action that ends `session`: the sim's own stop verb — the same op
+/// the card's danger-zone row dispatches, so leaving the studio and
+/// clicking Stop are literally the same teardown.
+fn session_teardown(_session: &UiChromeSessionControl) -> UiAction {
+    UiAction::from_op(RuntimeOp::NODE_ID, RuntimeOp::StopSimulator)
 }
 
 /// The one line a teardown-by-nav leaves behind (ruled copy, R8-4).
@@ -1506,12 +1453,8 @@ fn session_teardown(session: &UiChromeSessionControl) -> UiAction {
 /// The draft clause is conditional: with nothing unsaved there is no
 /// draft to reassure anyone about, and a promise made on every stop is a
 /// promise nobody reads.
-fn session_stopped_line(session: &UiChromeSessionControl, dirty: bool) -> String {
-    let stopped = if session.sim {
-        "Simulator stopped".to_string()
-    } else {
-        format!("{} disconnected", session.name)
-    };
+fn session_stopped_line(_session: &UiChromeSessionControl, dirty: bool) -> String {
+    let stopped = "Simulator stopped".to_string();
     if dirty {
         format!("{stopped} — your edits are saved as a draft")
     } else {
@@ -1663,10 +1606,10 @@ pub(crate) fn make_pull_timer(delay: Duration) -> TimeoutFuture {
     TimeoutFuture::new(delay.as_millis() as u32)
 }
 
-/// DeviceSession timers on wasm: the same `setTimeout` future, boxed for
+/// Link-session timers on wasm: the same `setTimeout` future, boxed for
 /// the session's injected factory (the `make_pull_timer` pattern).
-pub(crate) fn make_device_timers() -> DeviceTimers {
-    DeviceTimers::new(|delay| Box::pin(TimeoutFuture::new(delay.as_millis() as u32)))
+pub(crate) fn make_device_timers() -> lpa_link::DeviceTimers {
+    lpa_link::DeviceTimers::new(|delay| Box::pin(TimeoutFuture::new(delay.as_millis() as u32)))
 }
 
 /// Warm the browser engine's assets once, at page load.
@@ -1741,25 +1684,26 @@ fn preload_engine_assets() {
     });
 }
 
-/// M6 (D32): the `navigator.serial` hotplug listeners. A `connect`
-/// event (a granted port re-appearing) re-runs the auto-connect sweep;
-/// a `disconnect` sends a tick so the Gone classification lands without
-/// waiting for the next cadence beat.
+/// The `navigator.serial` hotplug listeners (M3 of the device-model
+/// rebuild).
+///
+/// Both edges are re-derivation triggers, not events carrying a port: the
+/// browser's `connect`/`disconnect` listeners take no argument, so `connect`
+/// becomes "sweep the grants you hold" and `disconnect` becomes "detach the
+/// links that stopped being open". The effects layer answers both.
 #[cfg(target_arch = "wasm32")]
 fn install_serial_hotplug(tx: &CommandSender) {
+    use lpa_studio_core::app::studio::studio_command::DeviceHotplug;
     use wasm_bindgen::JsCast;
     use wasm_bindgen::prelude::Closure;
 
     let connect_tx = tx.clone();
     let on_connect = Closure::wrap(Box::new(move || {
-        connect_tx.send(StudioCommand::Action(UiAction::from_op(
-            lpa_studio_core::DeviceController::NODE_ID,
-            lpa_studio_core::DeviceOp::AutoConnect,
-        )));
+        connect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Connected));
     }) as Box<dyn FnMut()>);
-    let tick_tx = tx.clone();
+    let disconnect_tx = tx.clone();
     let on_disconnect = Closure::wrap(Box::new(move || {
-        tick_tx.send(StudioCommand::RefreshTick);
+        disconnect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Disconnected));
     }) as Box<dyn FnMut()>);
     let installed = lpa_link::providers::browser_serial_esp32::install_serial_events(
         on_connect.as_ref().unchecked_ref(),
@@ -1928,14 +1872,12 @@ mod tests {
     use lpa_studio_core::{UiChromeSessionStatus, UiLogOrigin, UiLogSource};
 
     /// The tab's session, as the view loop latches it for the listener.
-    fn session(sim: bool, busy: Option<&str>) -> UiChromeSessionControl {
+    fn session() -> UiChromeSessionControl {
         UiChromeSessionControl {
-            key: if sim { "sim" } else { "dev7k2" }.to_string(),
-            sim,
-            name: if sim { "Sim" } else { "Attic strip" }.to_string(),
-            board: sim.then(|| "ESP32-C6".to_string()),
+            key: "runtime-sim".to_string(),
+            name: "Sim".to_string(),
+            board: Some("ESP32-C6".to_string()),
             status: UiChromeSessionStatus::Run,
-            busy: busy.map(str::to_string),
             stat_line: None,
         }
     }
@@ -1952,14 +1894,14 @@ mod tests {
     /// the sim's teardown is `StopSimulator` (never a detach).
     #[test]
     fn leaving_the_studio_stops_the_sim() {
-        let plan = nav_session_plan(Some(&session(true, None)), &StudioRoute::Projects, false);
+        let plan = nav_session_plan(Some(&session()), &StudioRoute::Projects, false);
 
         let NavSessionPlan::Leave { teardown, said } = plan else {
             panic!("a site route must end the session");
         };
         assert!(matches!(
-            teardown.op_as::<lpa_studio_core::DeviceOp>(),
-            Some(lpa_studio_core::DeviceOp::StopSimulator)
+            teardown.op_as::<RuntimeOp>(),
+            Some(RuntimeOp::StopSimulator)
         ));
         // Nothing unsaved: no draft to promise.
         assert_eq!(said, "Simulator stopped");
@@ -1984,7 +1926,7 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    nav_session_plan(Some(&session(true, None)), &target, false),
+                    nav_session_plan(Some(&session()), &target, false),
                     NavSessionPlan::Leave { .. }
                 ),
                 "{} kept the session alive",
@@ -1997,65 +1939,26 @@ mod tests {
     /// there is unsaved work the draft is holding.
     #[test]
     fn the_draft_clause_follows_the_dirty_flag() {
-        let dirty = nav_session_plan(Some(&session(true, None)), &StudioRoute::Home, true);
+        let dirty = nav_session_plan(Some(&session()), &StudioRoute::Home, true);
         let NavSessionPlan::Leave { said, .. } = dirty else {
             panic!("leaving");
         };
         assert_eq!(said, "Simulator stopped — your edits are saved as a draft");
-
-        let hardware = nav_session_plan(Some(&session(false, None)), &StudioRoute::Home, true);
-        let NavSessionPlan::Leave { said, teardown } = hardware else {
-            panic!("leaving");
-        };
-        assert_eq!(
-            said,
-            "Attic strip disconnected — your edits are saved as a draft"
-        );
-        // The board is named by the card key the control carries — the
-        // same key the card's own Disconnect row hands the op.
-        assert!(matches!(
-            teardown.op_as::<lpa_studio_core::DeviceOp>(),
-            Some(lpa_studio_core::DeviceOp::DisconnectDevice { target })
-                if target.card_key() == Some("dev7k2")
-        ));
     }
 
-    /// The only refusal (R8-4): an operation in flight, named, with both
-    /// ways out of it.
-    #[test]
-    fn an_operation_in_flight_refuses_the_move() {
-        let plan = nav_session_plan(
-            Some(&session(false, Some("Deploy"))),
-            &StudioRoute::Explore,
-            true,
-        );
-
-        let NavSessionPlan::Refuse(line) = plan else {
-            panic!("a busy session must refuse the move");
-        };
-        assert_eq!(
-            line,
-            "Deploy in progress — finish or cancel it before leaving"
-        );
-    }
-
-    /// A busy session still moves freely INSIDE the studio: play, patch
-    /// and mapping are zooms on the same session, and refusing them would
-    /// lock the user out of watching the very operation they started.
+    /// A session moves freely INSIDE the studio: play, patch and mapping
+    /// are zooms on the same session, and refusing them would lock the
+    /// user out of watching their own project run.
     #[test]
     fn the_guard_never_blocks_movement_inside_the_studio() {
         for target in [
             project_route(),
             project_route().with_play(true),
             project_route().with_view(router::ProjectView::Patch),
-            StudioRoute::Device {
-                uid: "dev7k2".to_string(),
-                play: false,
-            },
         ] {
             assert!(
                 matches!(
-                    nav_session_plan(Some(&session(true, Some("Deploy"))), &target, true),
+                    nav_session_plan(Some(&session()), &target, true),
                     NavSessionPlan::Keep
                 ),
                 "{} was not treated as the studio",
@@ -2094,7 +1997,7 @@ mod tests {
             StudioRoute::BoardEditor,
         ] {
             assert!(matches!(
-                nav_session_plan(Some(&session(true, None)), &target, false),
+                nav_session_plan(Some(&session()), &target, false),
                 NavSessionPlan::Keep
             ));
         }

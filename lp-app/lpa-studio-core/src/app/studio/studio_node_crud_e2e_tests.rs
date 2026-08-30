@@ -283,11 +283,20 @@ fn create_into_playlist_adds_entry_and_child() {
         .add_node_menu
         .as_ref()
         .expect("playlist cards carry the add-node picker");
+    // The playlist site's picker offers only visual-producing kinds — an
+    // entry is something the playlist can blend and show.
+    assert!(
+        menu.entries
+            .iter()
+            .all(|entry| entry.kind.produces_visual()),
+        "playlist picker offers visual kinds only: {:?}",
+        menu.entries.iter().map(|e| e.kind).collect::<Vec<_>>()
+    );
     let entry = menu
         .entries
         .iter()
-        .find(|entry| entry.kind == NodeKind::Texture)
-        .expect("texture entry offered");
+        .find(|entry| entry.kind == NodeKind::Shader)
+        .expect("shader entry offered");
 
     // Create into the playlist by dispatching the picker entry's own action
     // (pane grammar: the controller-produced action is the whole gesture).
@@ -300,11 +309,11 @@ fn create_into_playlist_adds_entry_and_child() {
     // file, and the child node mounted under the playlist in the tree.
     let playlist_def = read_file(&server, "playlist.json");
     assert!(
-        playlist_def.contains("texture.json"),
+        playlist_def.contains("shader.json"),
         "playlist entry references the created def: {playlist_def}"
     );
     assert!(
-        file_exists(&server, "texture.json"),
+        file_exists(&server, "shader.json"),
         "the entry's def file exists"
     );
     let tree = &project_editor(&snapshot).tree;
@@ -359,7 +368,7 @@ fn create_into_playlist_adds_entry_and_child() {
     assert!(
         editor.pending_edits.iter().any(|edit| {
             matches!(&edit.kind, UiPendingEditKind::AssetBody { detail } if detail == "deleted")
-                && edit.slot_path_display == "/texture.json"
+                && edit.slot_path_display == "/shader.json"
         }),
         "the entry's def stages as a deleted file row: {:?}",
         editor.pending_edits
@@ -375,14 +384,14 @@ fn create_into_playlist_adds_entry_and_child() {
         .expect("playlist still offers the picker")
         .entries
         .iter()
-        .find(|entry| entry.kind == NodeKind::Clock)
-        .expect("clock entry offered");
+        .find(|entry| entry.kind == NodeKind::Fluid)
+        .expect("fluid entry offered");
     handle.tx.send(StudioCommand::Action(entry.action.clone()));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("re-add emits a snapshot");
     let playlist_def = read_file(&server, "playlist.json");
     assert!(
-        playlist_def.contains("\"2\"") && playlist_def.contains("clock_2.json"),
+        playlist_def.contains("\"2\"") && playlist_def.contains("fluid.json"),
         "the re-added entry landed in the base def at key 2: {playlist_def}"
     );
     assert!(

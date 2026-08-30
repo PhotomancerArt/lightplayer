@@ -112,27 +112,76 @@ Studio's palette is the Aurora direction: violet-tinted graphite surfaces with
 the spectrum reserved for interaction, not decoration
 (`docs/adr/2026-08-30-studio-design-language-aurora.md`).
 
+**There is no accent hue.** The accent reckoning (D1, 2026-08-30) retired the
+mint accent outright: at rest, chrome is neutral — saturated color belongs to
+artwork, status, and interaction light. What used to reach for accent now
+picks its role:
+
+- **Actions** are neutral chips whose interaction answer is the spectrum:
+  the outline CTA (`outline_action_class`) and the `InlineButtonTone::Action`
+  default are bright-neutral at rest and take the iridescent hover ring; the
+  one loud fill is the gradient Primary.
+- **Links** are neutral at rest — muted text, underline, brightening to the
+  strong neutral on hover (`markdown_text`, `help_link`).
+- **Selected / current / you-are-here** wears the selection grammar (below):
+  a static spectrum line for you-are-here nav, a static spectrum ring for a
+  chosen object, over the neutral selection family's fill — never a status
+  hue.
+- **Authored values** (knob arcs, fader fills, sliders, the tape playhead)
+  are the bright neutral `--studio-color-text-strong`: the artwork and the
+  status families glow, the control doesn't.
+- **Progress** is the iridescent fill vocabulary, never a flat colored bar.
+
+Do not reintroduce an accent token; a hard spot argues a per-surface
+exception at a review gate, never a blanket revival.
+
 Status hues never move, and chrome may never borrow them. Each family means
 one thing and nothing else may wear its color: violet is a bus/binding
 relationship, amber is an unsaved edit, orange is device/roster attention,
 gold is "your hand is on this control right now" (engaged), blue is live,
-sage is export, green is good/valid, and diagonal stripes mark error or debug
-surfaces. A new feature that wants "a color" should reach for a neutral tone
-or the spectrum before it reaches for a status hue — status hues are load
-bearing, and test-enforced (see `inline_button.rs`'s
+sage is export, lavender-grey is example provenance ("you are viewing a
+read-only example"), green is good/valid, and diagonal stripes mark error or
+debug surfaces. A new feature that wants "a color" should reach for a
+neutral tone or the spectrum before it reaches for a status hue — status
+hues are load bearing, and test-enforced (see `inline_button.rs`'s
 `violet_stays_the_binding_convention`).
 
-Selection is the neutral white-ish outline (`--studio-color-selection-*`),
-never the spectrum. Hover, press, and drag-in-flight are the spectrum's
-territory instead: the iridescent ring (`ux-ir-ring`) on hover, the press
-flare (`ux-press-flare`) on `:active`, and the pinned ring plus a lifted
-shadow (`ux-drag-chip`) while a card is mid-drag. Keeping selection out of
-the spectrum's reach means a selected row never gets confused with a row
-you're merely passing over.
+**The selection grammar** (spike `spikes/spectrum-selection`, ruled
+2026-08-30): selection and navigation are separate concepts and never share
+a mark.
+
+- **Nav "you are here"** is a STATIC spectrum line on the nav axis's edge:
+  the full-rainbow underline on the view tabs and the site chrome's nav
+  (`ux-here-line-x` grammar), the cool-sweep side line on vertical navs —
+  the story-book nav (`ux-here-line-y`, `--studio-spectrum-cool`).
+- **Object selection** is a STATIC spectrum ring around the chosen thing
+  (`ux-sel-ring`): option cards, the workbench tree's focused row, and the
+  Map/Patch fixtures tree, output headers, and port cells (one
+  `UiSelection`). Small radii take the cool variant (`ux-sel-ring-cool`) —
+  the full sweep compresses to its warm stops there and reads as
+  attention-orange; clipping hosts add `ux-sel-ring-inset`.
+- **Intensity scales with size**: large marks carry the full spectrum,
+  small marks the cool sweep, so the warm stops never sit beside the
+  amber/red status tints they resemble.
+- On rows and cells the ring is the ONLY selection paint — no grey wash
+  (G1: "the rainbow highlight does well enough on its own"), so a selected
+  row keeps its natural ground: transparent when clean, its dirty tint
+  when edited. Option cards keep the low-alpha selection wash and the
+  neutral check badge under their ring; the neutral selection family
+  (`--studio-color-selection-*`) survives there and in span markers.
+
+Every selection mark is static; the pointer answers in its own light: the
+iridescent ring (`ux-ir-ring`) on card/button hover, the press flare
+(`ux-press-flare`) on `:active`, and the pinned ring plus a lifted shadow
+(`ux-drag-chip`) mid-drag. Dense rows go QUIET instead (`ux-row-edge`): a
+plain white outline on hover — no shadow, no wash — that flashes into the
+static spectrum hairline on press, previewing the selection ring the
+click lands. A selected row and a row you're merely passing over never
+share a paint.
 
 Multi-color is a moment, not a wall. The spectrum belongs on hover/press/drag
-feedback, the brand mark, and the hero — never on resting chrome, never on
-selection, and never on a status-toned control (a status color already
+feedback, the selection grammar's static marks, the brand mark, and the hero
+— never on resting chrome, and never on a status-toned control (a status color already
 answers "what is this," and a rainbow sweeping across it would contradict its
 own meaning). The four "extras" this refresh shipped are the standard
 vocabulary for working/progress/drag/press moments and are not optional

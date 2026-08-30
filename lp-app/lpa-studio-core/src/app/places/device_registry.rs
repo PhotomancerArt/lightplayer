@@ -17,7 +17,11 @@ use crate::app::library::LibraryError;
 pub const REGISTRY_PATH: &str = "/registry.json";
 
 /// One remembered device.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// [`Default`] exists so the additive fields below can be filled by
+/// `..Default::default()` rather than restated at every construction site —
+/// the shape has grown three times now, and it will grow again.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegisteredDevice {
     /// `dev…` uid (string form; stamped on the device per M5's flow).
@@ -47,6 +51,24 @@ pub struct RegisteredDevice {
     /// design §4) — lets old history events resolve for display.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub previous_uids: Vec<String>,
+    /// The rebuilt device model's own handle for this row
+    /// (`lpa_devices::DeviceId`), so a `PersistRecord` after a refresh finds
+    /// the row it belongs to instead of minting a second one. `None` = a row
+    /// written before the model existed; the next sighting fills it.
+    ///
+    /// Additive, like every field below the original four: the on-disk format
+    /// is the same file, and a legacy row loads with these absent (see
+    /// `legacy_registry_json_with_no_new_fields_still_parses`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<u64>,
+    /// The name the DEVICE reports for itself (its provisioned name).
+    /// Distinct from [`Self::name`], which stays the user-facing truth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
+    /// Whether the user asked for this device's port to be opened whenever
+    /// it appears (the model's `Intent::autoconnect`).
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub autoconnect: bool,
 }
 
 /// Load/save wrapper over the store.
@@ -75,6 +97,44 @@ impl DeviceRegistry {
             Some(existing) => *existing = device,
             None => file.devices.push(device),
         }
+        self.save(&file)
+    }
+
+    /// Upsert only the fields the device MODEL owns, leaving everything else
+    /// a row already carries alone.
+    ///
+    /// The device model's `Command::PersistRecord` describes identity and
+    /// preferences and nothing else (a record that said "flashing" would be a
+    /// state machine with a disk). A whole-row [`Self::upsert`] would
+    /// therefore erase what the row remembers about pushes — `association`,
+    /// `board_id`, `previous_uids` — every time a board said hello.
+    ///
+    /// The user-facing `name` follows the same rule as the merge above: a
+    /// model record with no user name does not blank a name the registry
+    /// already holds.
+    pub fn upsert_model_fields(&self, device: RegisteredDevice) -> Result<(), LibraryError> {
+        let mut file = self.load()?;
+        let Some(existing) = file.devices.iter_mut().find(|row| row.uid == device.uid) else {
+            file.devices.push(device);
+            return self.save(&file);
+        };
+        if !device.name.is_empty() {
+            existing.name = device.name;
+        }
+        if !device.transport.is_empty() {
+            existing.transport = device.transport;
+        }
+        if device.last_seen_at > existing.last_seen_at {
+            existing.last_seen_at = device.last_seen_at;
+        }
+        if device.hardware_id.is_some() {
+            existing.hardware_id = device.hardware_id;
+        }
+        if device.device_name.is_some() {
+            existing.device_name = device.device_name;
+        }
+        existing.device_id = device.device_id.or(existing.device_id);
+        existing.autoconnect = device.autoconnect;
         self.save(&file)
     }
 
@@ -226,6 +286,13 @@ fn merge_registered_devices(
         board_id,
         hardware_id: Some(hardware_id.to_string()),
         previous_uids,
+        // Model-side fields follow the same recent-row-wins rule as the rest.
+        device_id: recent.device_id.or(other.device_id),
+        device_name: recent
+            .device_name
+            .clone()
+            .or_else(|| other.device_name.clone()),
+        autoconnect: old_row.autoconnect || new_row.autoconnect,
     }
 }
 
@@ -252,9 +319,7 @@ mod tests {
                 version: ContentHash::of(b"v3"),
                 at: 1.0,
             }),
-            board_id: None,
-            hardware_id: None,
-            previous_uids: Vec::new(),
+            ..RegisteredDevice::default()
         };
         registry.upsert(device.clone()).unwrap();
         registry
@@ -284,9 +349,7 @@ mod tests {
                 transport: "USB".to_string(),
                 last_seen_at: 1.0,
                 association: None,
-                board_id: None,
-                hardware_id: None,
-                previous_uids: Vec::new(),
+                ..RegisteredDevice::default()
             })
             .unwrap();
 
@@ -312,9 +375,7 @@ mod tests {
                 transport: "USB".to_string(),
                 last_seen_at: 1.0,
                 association: None,
-                board_id: None,
-                hardware_id: None,
-                previous_uids: Vec::new(),
+                ..RegisteredDevice::default()
             })
             .unwrap();
 
@@ -365,8 +426,7 @@ mod tests {
                 last_seen_at: 1.0,
                 association: None,
                 board_id: Some("esp32-c6-devkit".to_string()),
-                hardware_id: None,
-                previous_uids: Vec::new(),
+                ..RegisteredDevice::default()
             })
             .unwrap();
 
@@ -407,9 +467,8 @@ mod tests {
                     version: ContentHash::of(b"v1"),
                     at: 10.0,
                 }),
-                board_id: None,
-                hardware_id: None,
                 previous_uids: vec!["dev00000000ev1ct10n".to_string()],
+                ..RegisteredDevice::default()
             })
             .unwrap();
 
@@ -428,7 +487,7 @@ mod tests {
                 }),
                 board_id: Some("esp32-c6-devkit".to_string()),
                 hardware_id: Some("efuse:aa:bb:cc:dd:ee:ff".to_string()),
-                previous_uids: Vec::new(),
+                ..RegisteredDevice::default()
             })
             .unwrap();
 
@@ -483,9 +542,7 @@ mod tests {
                 transport: "USB".to_string(),
                 last_seen_at: 1.0,
                 association: None,
-                board_id: None,
-                hardware_id: None,
-                previous_uids: Vec::new(),
+                ..RegisteredDevice::default()
             })
             .unwrap();
 
@@ -513,9 +570,7 @@ mod tests {
                 transport: "USB".to_string(),
                 last_seen_at: 1.0,
                 association: None,
-                board_id: None,
-                hardware_id: None,
-                previous_uids: Vec::new(),
+                ..RegisteredDevice::default()
             })
             .unwrap();
 
@@ -529,6 +584,92 @@ mod tests {
 
         let listed = registry.list().unwrap();
         assert_eq!(listed[0].hardware_id, None, "same uid: untouched");
+    }
+
+    /// The model owns identity and preferences; the row owns what was
+    /// pushed to the board. A sighting must not erase the latter — the
+    /// whole reason `upsert_model_fields` exists beside `upsert`.
+    #[test]
+    fn a_model_upsert_preserves_what_the_row_remembers_about_pushes() {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let registry = DeviceRegistry::new(fs);
+        let association = DeviceAssociation {
+            device: PrefixedUid::mint(UidPrefix::Device, &[1u8; 16]),
+            project: PrefixedUid::mint(UidPrefix::Project, &[2u8; 16]),
+            version: ContentHash::of(b"v3"),
+            at: 5.0,
+        };
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev0000000000000001".to_string(),
+                name: "Porch sign".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 5.0,
+                association: Some(association.clone()),
+                board_id: Some("esp32-c6-devkit".to_string()),
+                previous_uids: vec!["dev00000000000past1".to_string()],
+                ..RegisteredDevice::default()
+            })
+            .unwrap();
+
+        registry
+            .upsert_model_fields(RegisteredDevice {
+                uid: "dev0000000000000001".to_string(),
+                // The model holds no user name for this board yet.
+                name: String::new(),
+                transport: "USB".to_string(),
+                last_seen_at: 9.0,
+                hardware_id: Some("efuse:aa:bb:cc:dd:ee:ff".to_string()),
+                device_id: Some(4),
+                device_name: Some("Bench board".to_string()),
+                autoconnect: true,
+                ..RegisteredDevice::default()
+            })
+            .unwrap();
+
+        let row = registry.list().unwrap().pop().expect("one row");
+        assert_eq!(row.association, Some(association), "the push survived");
+        assert_eq!(row.board_id.as_deref(), Some("esp32-c6-devkit"));
+        assert_eq!(row.previous_uids, vec!["dev00000000000past1".to_string()]);
+        assert_eq!(
+            row.name, "Porch sign",
+            "an empty model name never blanks the user's"
+        );
+        assert_eq!(row.device_id, Some(4));
+        assert_eq!(row.device_name.as_deref(), Some("Bench board"));
+        assert!(row.autoconnect);
+        assert_eq!(row.last_seen_at, 9.0);
+    }
+
+    /// The additive fields serialize only when they carry something, so a
+    /// registry written by this build stays readable by one that predates
+    /// them — the on-disk format is the same file, not a new one.
+    #[test]
+    fn the_model_fields_are_absent_on_disk_until_they_hold_something() {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let registry = DeviceRegistry::new(fs.clone());
+        registry
+            .upsert(RegisteredDevice {
+                uid: "dev0000000000000001".to_string(),
+                name: "Porch sign".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 1.0,
+                ..RegisteredDevice::default()
+            })
+            .unwrap();
+
+        let bytes = fs
+            .borrow()
+            .read_file(REGISTRY_PATH.as_path())
+            .expect("the registry file");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let row = &json["devices"][0];
+        for absent in ["deviceId", "deviceName", "autoconnect"] {
+            assert!(
+                row.get(absent).is_none(),
+                "{absent} should be absent: {row}"
+            );
+        }
     }
 
     #[test]

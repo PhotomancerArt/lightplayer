@@ -9,8 +9,8 @@ use std::rc::Rc;
 use crate::app::project::project_controller::ProjectController;
 use crate::app::studio::studio_view_channel::{CommandSender, StudioViewReceiver};
 use crate::{
-    ControllerId, DeviceController, DeviceOp, ProjectOp, StudioActor, StudioActorOptions,
-    StudioCommand, StudioController, StudioHandle, UiAction,
+    ControllerId, ProjectOp, RuntimeOp, StudioActor, StudioActorOptions, StudioCommand,
+    StudioController, StudioHandle, UiAction,
 };
 
 /// A leased studio instance for one docs sim: a real controller + actor
@@ -20,7 +20,7 @@ use crate::{
 /// # Lifecycle contract (leak-critical)
 ///
 /// Nothing in the actor/controller/pool/session chain terminates the
-/// worker on drop — only [`DeviceOp::StopSimulator`] reaches
+/// worker on drop — only [`RuntimeOp::StopSimulator`] reaches
 /// `worker.terminate()`. [`DocsSimHost::shutdown`] enqueues exactly that
 /// followed by [`StudioCommand::Shutdown`]; the actor's batch plan runs
 /// actions before honoring shutdown, so one enqueue is a complete,
@@ -41,8 +41,8 @@ impl DocsSimHost {
     /// Boot a docs sim host.
     ///
     /// `controller` is caller-built so platform seams stay in the shell
-    /// (clock via [`StudioController::new`], device timers via
-    /// [`StudioController::set_device_timers`]); the caller must **not**
+    /// (clock via [`StudioController::new`], sim timers via
+    /// [`StudioController::set_sim_timers`]); the caller must **not**
     /// install the global log sink for it. `spawn` runs the actor future
     /// and must outlive the component that booted it (on the web:
     /// `wasm_bindgen_futures::spawn_local`, *not* a scope-tied spawn —
@@ -141,8 +141,8 @@ impl DocsSimHost {
             return;
         }
         self.tx.send(StudioCommand::Action(UiAction::from_op(
-            ControllerId::new(DeviceController::NODE_ID),
-            DeviceOp::StopSimulator,
+            ControllerId::new(RuntimeOp::NODE_ID),
+            RuntimeOp::StopSimulator,
         )));
         self.tx.send(StudioCommand::Shutdown);
     }

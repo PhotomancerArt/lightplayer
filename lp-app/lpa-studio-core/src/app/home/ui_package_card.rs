@@ -41,14 +41,9 @@ pub struct UiPackageCard {
     /// Structural actions refuse while set; the card gets the badge
     /// treatment (M4b P4).
     pub open_elsewhere: bool,
-    /// A LIVE connected device currently holds this project — D24: one
-    /// card, connected indication (no separate device card).
-    pub connected_device: Option<UiCardConnection>,
     /// The live SIM session currently runs this project (the D28 grammar's
     /// sim arm — one fact, two views: the sim card wears the project chip,
-    /// this card wears the "Running in simulator" indication). Independent
-    /// of `connected_device`: a device and the sim can honestly run the
-    /// same project at once.
+    /// this card wears the "Running in simulator" indication).
     pub running_in_sim: bool,
     /// The project's advisory `target` (gallery-rework vision D3): a board
     /// catalog id in the registry's `vendor/product` vocabulary, straight
@@ -63,17 +58,4 @@ pub struct UiPackageCard {
     /// says what was found and what to do instead of the package quietly
     /// not being here (P3).
     pub health: PackageHealth,
-}
-
-/// The live-device indication a unified project card carries (D24).
-#[derive(Clone, Debug, PartialEq)]
-pub struct UiCardConnection {
-    /// The connected device's CARD KEY — what a push from this project
-    /// card addresses (M4). Project-side push rows are the one place a
-    /// device verb is dispatched from a card that is not the device's,
-    /// so the key has to travel with the connection.
-    pub device_key: String,
-    pub device_name: String,
-    /// How the device's copy relates to the library line.
-    pub relation: lpc_history::SyncRelation,
 }

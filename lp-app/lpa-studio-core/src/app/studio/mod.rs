@@ -11,6 +11,12 @@ pub mod studio_actor;
 mod studio_agent_e2e_tests;
 pub mod studio_command;
 pub mod studio_controller;
+/// End-to-end device tests: the REAL effects layer driving the REAL model
+/// over the scripted fake device's bytes (host-only, like the edit e2e
+/// tests). See the module doc for why nothing here fakes at the model's own
+/// vocabulary.
+#[cfg(test)]
+mod studio_device_e2e_tests;
 /// End-to-end edit-flow tests against an in-process `lpa-server` (host-only
 /// dev-dependency; never part of the wasm lib build).
 #[cfg(test)]
@@ -31,10 +37,6 @@ mod studio_face_e2e_tests;
 /// picker, and composing a whole new project around one.
 #[cfg(test)]
 mod studio_import_e2e_tests;
-/// End-to-end tests through the REAL link path (provider → endpoint →
-/// connect → readiness → pull) against the scripted byte-level fake device.
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod studio_link_e2e_tests;
 /// End-to-end node create/remove tests (authoring P4): every picker kind
 /// against a real server, playlist-entry attach, staged removal rows,
 /// revert, and save-materialized deletion.

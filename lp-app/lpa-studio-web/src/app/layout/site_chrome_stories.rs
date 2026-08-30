@@ -30,7 +30,7 @@ use crate::app::story_fixtures::project_editor_fixture;
 use crate::base::{LogoLockup, LogoMark};
 
 #[story(
-    description = "Wide bar, one row per section: primary family (Devices, Projects) full weight by the brand; secondary family (Explore, Boards, Docs) lighter on the right; Home lights no tab — the logo is its affordance."
+    description = "Wide bar, one row per section: primary family (Devices, Projects) full weight by the brand; secondary family (Boards, Docs) lighter on the right; Home lights no tab — the logo is its affordance."
 )]
 pub(crate) fn sections_active() -> Element {
     rsx! {
@@ -38,7 +38,6 @@ pub(crate) fn sections_active() -> Element {
             for section in [
                 SiteSection::Devices,
                 SiteSection::Projects,
-                SiteSection::Explore,
                 SiteSection::Boards,
                 SiteSection::Docs,
                 SiteSection::Home,
@@ -119,7 +118,7 @@ pub(crate) fn overflow_menu_project_group() -> Element {
 }
 
 #[story(
-    description = "The three-segment session·project control (spike \u{a7}2-E) across every project state — saved / unsaved / failed / syncing — crossed with device kind: the sim naming its board, a boardless sim (bare \"Sim\", ruling Q6), and hardware (the device name IS the board, no suffix). The dirty wash lives on the CHANGES segment now (D8), so the project segment stays neutral and nothing is announced twice; failed here is the failed-ONLY edge (persisted=0, failed>0) — red changes bed with a red count, and no Save, because the controller only publishes actions while persisted edits are pending (see docs/debt/failed-only-asset-edit-header-blindness.md); syncing shows the busy dot with a quiet \u{2713}."
+    description = "The three-segment session·project control (spike \u{a7}2-E) across every project state — saved / unsaved / failed / syncing — crossed with device rows: the sim naming its board, a boardless sim (bare \"Sim\", ruling Q6), and the hardware stand-in (a boardless sim until the rebuilt device model returns). The dirty wash lives on the CHANGES segment now (D8), so the project segment stays neutral and nothing is announced twice; failed here is the failed-ONLY edge (persisted=0, failed>0) — red changes bed with a red count, and no Save, because the controller only publishes actions while persisted edits are pending (see docs/debt/failed-only-asset-edit-header-blindness.md); syncing shows the busy dot with a quiet \u{2713}."
 )]
 pub(crate) fn control_states() -> Element {
     rsx! {
@@ -249,7 +248,7 @@ pub(crate) fn control_fold_sm() -> Element {
 
 #[story(
     label = "Studio mode — Docs/Boards \u{2197}",
-    description = "A lens route fronted (single-session policy): Boards and Docs carry the \u{2197} new-tab mark in the secondary family, because from here they open a NEW tab rather than ending the session (ruling R8-3, amended 8.1) — Explore stays a plain link, a real exit."
+    description = "A lens route fronted (single-session policy): Boards and Docs carry the \u{2197} new-tab mark in the secondary family, because from here they open a NEW tab rather than ending the session (ruling R8-3, amended 8.1)."
 )]
 pub(crate) fn studio_mode_bar() -> Element {
     control_row(
@@ -419,28 +418,18 @@ fn control_row_as(
 /// "Sim" when the project names no board (ruling Q6).
 fn sim_control(board: Option<&str>) -> UiChromeSessionControl {
     UiChromeSessionControl {
-        key: "sim".to_string(),
-        sim: true,
+        key: "runtime-sim".to_string(),
         name: "Sim".to_string(),
         board: board.map(str::to_string),
         status: UiChromeSessionStatus::Run,
-        busy: None,
         stat_line: board.map(|_| "60 fps · 217 lamps".to_string()),
     }
 }
 
-/// A connected, running hardware session — the device's own name IS the
-/// board, so it never wears a suffix (only the sim does, ruling 8.1).
+/// The hardware-session rows went with M2 of the device-model rebuild;
+/// what stands in is a boardless sim (the same lockup with no suffix).
 fn hardware_control() -> UiChromeSessionControl {
-    UiChromeSessionControl {
-        key: "dev_c6f0".to_string(),
-        sim: false,
-        name: "Garage dome".to_string(),
-        board: None,
-        status: UiChromeSessionStatus::Run,
-        busy: None,
-        stat_line: Some("USB · 217 lamps".to_string()),
-    }
+    sim_control(None)
 }
 
 /// A connected hardware session with nothing loaded — the honest-empty

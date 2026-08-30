@@ -1,18 +1,17 @@
 //! The gallery pages (P09 split, vision D9/D10/D14): Devices (the
-//! roster + creation flow), Projects (the library), Explore (examples),
-//! and the Home landing stub — plus the cards they share. One combined
-//! gallery page lived here until the chrome C reorg split it.
+//! runtime roster — being rebuilt, see [`devices_page`]), Projects (the
+//! library), Explore (examples), and the Home landing stub — plus the
+//! cards they share. One combined gallery page lived here until the
+//! chrome C reorg split it.
 
 pub(crate) mod brand_hero;
 pub(crate) mod card_footer;
 pub(crate) mod card_sheet;
 pub(crate) mod card_thumb;
-pub(crate) mod device_card;
-pub(crate) mod device_play_tab;
+pub(crate) mod device_roster_card;
 pub mod devices_page;
 pub(crate) mod example_card;
 pub mod explore_page;
-pub(crate) mod failure_report;
 pub(crate) mod gallery_paste;
 pub(crate) mod gallery_preview;
 #[cfg(feature = "stories")]
@@ -35,9 +34,8 @@ pub mod project_opening_frame;
 #[cfg(feature = "stories")]
 pub(crate) mod project_opening_frame_stories;
 pub mod projects_page;
-pub(crate) mod setup_wizard;
-#[cfg(feature = "stories")]
-pub(crate) mod setup_wizard_stories;
+pub(crate) mod sim_card;
+pub(crate) mod sim_play_tab;
 /// Poster capture is the wasm thumb path; host builds of this crate render
 /// no live preview at all and only run the cache's unit tests.
 #[cfg_attr(

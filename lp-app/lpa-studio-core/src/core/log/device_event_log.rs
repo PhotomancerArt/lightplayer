@@ -67,7 +67,9 @@ pub enum DeviceEventKind {
     /// A `DeviceState` transition. `from` is `None` only for the initial
     /// entry into `booting` at connect.
     State { from: Option<String>, to: String },
-    /// A `ConnectFlowState` transition in the device controller.
+    /// A connect-flow transition. Producer-less since M2 of the
+    /// device-model rebuild deleted the old connect flow; the kind stays
+    /// because the JSONL contract is append-only (extend, never rename).
     Flow { from: String, to: String },
     /// A runtime-pool lifecycle action (`install`, `remove`, `clear-slot`).
     Pool { action: String, detail: String },
@@ -87,6 +89,18 @@ pub enum DeviceEventKind {
     Rx { line: String },
     /// One protocol frame written to the device (capture mode only).
     Tx { frame: String },
+    /// One line of the device model's own journal (M3 of the device-model
+    /// rebuild): the flight recorder's inputs and derived notes, in order.
+    ///
+    /// The model's `Journal` is an in-memory ring that dies with the page,
+    /// and the defect class this log exists for is "jank a refresh fixed" —
+    /// so every journal line is mirrored here, where the web edge persists it
+    /// to storage and the previous session's copy survives the refresh.
+    /// `scope` is the model's `Scope` rendering (`roster`, `device:3`,
+    /// `pending-link:1`), which is what makes a trace readable per board.
+    ///
+    /// Additive, per this module's JSONL contract.
+    Journal { scope: String, entry: String },
 }
 
 impl DeviceEventKind {
@@ -161,6 +175,11 @@ impl Serialize for DeviceEventRecord {
             DeviceEventKind::Tx { frame } => {
                 map.serialize_entry("kind", "tx")?;
                 map.serialize_entry("frame", frame)?;
+            }
+            DeviceEventKind::Journal { scope, entry } => {
+                map.serialize_entry("kind", "journal")?;
+                map.serialize_entry("scope", scope)?;
+                map.serialize_entry("entry", entry)?;
             }
         }
         map.end()

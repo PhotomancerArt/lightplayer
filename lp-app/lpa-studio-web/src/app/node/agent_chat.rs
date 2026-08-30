@@ -208,7 +208,7 @@ pub fn AgentChatPane(
             // handle) — the gate-feedback "cramped box" fix.
             div { class: "tw:flex tw:min-w-0 tw:items-end tw:gap-2 tw:border-t tw:border-border-muted tw:bg-card tw:px-3 tw:py-2",
                 textarea {
-                    class: "tw:field-sizing-content tw:min-h-20 tw:max-h-40 tw:min-w-0 tw:flex-1 tw:resize-y tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card-subtle tw:px-2.5 tw:py-2 tw:font-sans tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent-border",
+                    class: "tw:field-sizing-content tw:min-h-20 tw:max-h-40 tw:min-w-0 tw:flex-1 tw:resize-y tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card-subtle tw:px-2.5 tw:py-2 tw:font-sans tw:text-sm tw:text-strong-foreground tw:outline-none",
                     rows: 3,
                     placeholder: if source_resolved { "Ask for a change… (Enter sends, Shift+Enter for a new line)" } else { "Loading shader source…" },
                     value: "{draft}",
@@ -663,7 +663,7 @@ fn NeedsKeyState(
                     for (label , url) in guidance.links {
                         a {
                             key: "{url}",
-                            class: "tw:text-xs tw:text-accent tw:underline",
+                            class: "tw:text-xs tw:text-muted-foreground tw:underline tw:transition-colors tw:hover:text-strong-foreground",
                             href: "{url}",
                             target: "_blank",
                             rel: "noopener noreferrer",
@@ -739,7 +739,7 @@ fn ExportButtons(
 /// Export button chrome: quiet text buttons, enabled/disabled in place.
 fn export_button_class(enabled: bool) -> String {
     let state = if enabled {
-        "tw:cursor-pointer tw:border-border-subtle tw:text-muted-foreground tw:hover:border-accent-border tw:hover:bg-accent-wash tw:hover:text-accent"
+        "tw:cursor-pointer tw:border-border-subtle tw:text-muted-foreground tw:hover:border-border-strong tw:hover:bg-card-raised tw:hover:text-strong-foreground"
     } else {
         "tw:cursor-default tw:border-border-subtle tw:text-subtle-foreground tw:opacity-40"
     };
@@ -777,7 +777,7 @@ fn history_chip_class(busy: bool) -> String {
     let state = if busy {
         "tw:cursor-default tw:opacity-50"
     } else {
-        "tw:cursor-pointer tw:hover:border-accent-border tw:hover:bg-accent-wash"
+        "tw:cursor-pointer tw:hover:border-border-strong tw:hover:bg-card-raised"
     };
     format!(
         "tw:flex tw:flex-none tw:flex-col tw:items-center tw:gap-0.5 tw:rounded-xs tw:border tw:border-transparent tw:bg-transparent tw:p-1 tw:transition tw:duration-300 {state}"
@@ -809,7 +809,7 @@ fn tool_dot_class(row: &UiAgentToolRow) -> &'static str {
 /// Send button chrome: enabled/disabled in place, constant geometry.
 fn send_button_class(enabled: bool) -> String {
     let state = if enabled {
-        "tw:cursor-pointer tw:border-accent-border tw:text-accent tw:hover:bg-accent-wash"
+        "tw:cursor-pointer tw:border-border-strong tw:text-strong-foreground tw:hover:bg-card-raised"
     } else {
         "tw:cursor-default tw:border-border-subtle tw:text-subtle-foreground tw:opacity-40"
     };

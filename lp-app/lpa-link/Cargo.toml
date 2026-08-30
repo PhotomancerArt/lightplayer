@@ -21,6 +21,10 @@ fw-host = { path = "../../lp-fw/fw-host", optional = true }
 # no dependencies of its own, so wasm builds pay nothing for it.
 lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
 lpa-client = { path = "../lpa-client", optional = true, default-features = false }
+# The device model whose `Link` contract `device_link` implements (dependency
+# inversion, vision R2). Sans-IO and serde-only, so it costs a wasm build
+# nothing beyond what serde already pays.
+lpa-devices = { path = "../lpa-devices", optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire", optional = true }
 # The fake device's raw-filesystem read returns a REAL littlefs image (see
@@ -64,12 +68,21 @@ serde_json = { workspace = true }
 [features]
 default = []
 browser-serial-esp32 = [
+    "device-link",
     "device-session",
     "dep:js-sys",
     "dep:lpc-model",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
 ]
+# `lpa-devices`' transport contract (`Link`), implemented over this crate's
+# transports (`device_link`). The model defines the trait, `lpa-link` adapts
+# to it, and `device_link::wire` is the ONE place the two frame vocabularies
+# meet. Implied by the provider features that carry a transport for it
+# (`browser-serial-esp32`, `fake-device`) so a build that can open a device
+# can also drive the model — including plain `cargo test`, which unifies
+# `fake-device` in.
+device-link = ["dep:lpa-devices", "dep:lpc-wire"]
 # The worker envelope speaks the wire's published-frame vocabulary
 # (`OutputFrameEntry`, `ControlDisplayLayoutRead`) so the preview host and the
 # device card feed read output frames through one set of types.
@@ -90,6 +103,7 @@ device-session = ["dep:async-trait", "dep:lpa-client", "dep:lpc-wire"]
 # lpa-client's tokio-full host runtime).
 device-session-host = ["device-session", "lpa-client/host"]
 fake-device = [
+    "device-link",
     "device-session-host",
     "dep:fw-host",
     "dep:littlefs-rust",

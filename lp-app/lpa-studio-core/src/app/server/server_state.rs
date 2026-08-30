@@ -17,7 +17,6 @@ pub enum ServerState {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ServerFailureKind {
-    NoFirmware,
     /// The sim worker's wasm instance is condemned (a panic escaped a
     /// panic=abort export — poisoned-instance defect). The issue message
     /// carries the primary panic; recovery is a worker reboot, which the

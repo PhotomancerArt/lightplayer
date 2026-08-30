@@ -1,6 +1,6 @@
 pub mod agent;
 pub mod bus;
-pub mod device;
+pub mod devices;
 pub mod docs_host;
 pub mod home;
 pub mod library;
@@ -15,6 +15,5 @@ pub mod roster;
 pub mod runtime_pool;
 pub mod server;
 pub mod settings;
-pub mod setup_flow;
 pub mod share;
 pub mod studio;

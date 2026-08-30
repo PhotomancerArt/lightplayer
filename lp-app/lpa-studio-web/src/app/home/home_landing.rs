@@ -1,5 +1,8 @@
-//! The Home landing page (`/`, vision D14 / spike §5): the brand hero, a
-//! one-line tagline, three dive-in cards. Still no marketing depth — but
+//! The Home landing page (`/`, vision D14; landing-cohesion spike, ruled
+//! 2026-08-30): the centered brand hero, then ONE 880px sectioned column —
+//! centered dividers, a four-door "Get started" row (device, simulator,
+//! docs, boards), the full example grid, and a quiet reference footer.
+//! Still no marketing depth — but
 //! the stub's static lockup is gone: [`BrandHero`] makes the mark's
 //! triangle a window onto a live engine shader, so the landing demonstrates
 //! the product instead of describing it. Reached through the logo only —
@@ -16,10 +19,10 @@ use crate::app::home::brand_hero::BrandHero;
 use crate::app::home::example_card::{ExampleCard, embedded_example_cards};
 use crate::app::home::gallery_preview::HoveredCard;
 use crate::app::home::package_card::home_action;
-use crate::base::{StudioIcon, StudioIconName};
+use crate::base::{NodeKindIcon, StudioIcon, StudioIconName};
 use crate::cloud::SharedOpenState;
 
-/// The landing stub: the brand, what this is, three ways in, and the
+/// The landing stub: the brand, what this is, two ways in, and the
 /// example grid.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -72,32 +75,46 @@ pub fn HomePage(
                 }
                 EditArtworkPill { on_action }
             }
-            nav { class: "tw:grid tw:w-[min(680px,100%)] tw:grid-cols-3 tw:gap-3 tw:max-[640px]:grid-cols-1",
-                DiveInCard {
-                    icon: StudioIconName::Usb,
-                    title: "Devices",
-                    detail: "Your boards and the simulator — set up, connect, play.",
-                    href: "/devices",
-                }
-                // The sim path: land on Devices WITH the wizard already
-                // walking the simulate-a-device flow (same op as the
-                // Devices page's entry card).
-                DiveInCard {
-                    icon: StudioIconName::Simulator,
-                    title: "Try the simulator",
-                    detail: "Set up the simulator as a board — no hardware needed.",
-                    href: "/devices",
-                    on_press: on_action.map(|on_action| {
-                        EventHandler::new(move |()| {
-                            on_action.call(home_action(HomeOp::StartSetup { sim: true }));
-                        })
-                    }),
-                }
-                DiveInCard {
-                    icon: StudioIconName::Play,
-                    title: "Explore",
-                    detail: "Example projects to open, run, and make yours.",
-                    href: "/explore",
+            // One 880px column holds everything below the hero (landing
+            // cohesion spike, ruled 2026-08-30: B's sectioned column under
+            // the centered monument hero — no section is a width outlier).
+            // Section dividers are CENTERED, continuing the hero's axis.
+            section { class: "tw:grid tw:w-[min(880px,100%)] tw:gap-4",
+                SectionDivider { title: "Get started" }
+                // Four doors, equal citizens (spike ruling: Docs and
+                // Supported boards join the row — the landing had no door
+                // to either). The setup wizard went with M2 of the
+                // device-model rebuild, so "Connect a device" is a plain
+                // door to Devices, whose empty state IS the add-device
+                // flow now (card-is-the-flow); opening any example puts a
+                // project on the simulator, which is what "try the
+                // simulator" now means. Explore's own card stays gone —
+                // it only showed the examples this page lists in full.
+                nav { class: "tw:grid tw:grid-cols-4 tw:gap-3 tw:max-[820px]:grid-cols-2 tw:max-[480px]:grid-cols-1",
+                    DiveInCard {
+                        icon: StudioIconName::Usb,
+                        title: "Connect a device",
+                        detail: "Plug a board in over USB and set it up.",
+                        href: "/devices",
+                    }
+                    DiveInCard {
+                        icon: StudioIconName::Simulator,
+                        title: "Try the simulator",
+                        detail: "Open an example and watch it run — no hardware needed.",
+                        href: "/explore",
+                    }
+                    DiveInCard {
+                        icon: StudioIconName::Info,
+                        title: "Read the docs",
+                        detail: "Shaders, mapping, connecting devices.",
+                        href: "/docs",
+                    }
+                    DiveInCard {
+                        icon: StudioIconName::NodeKind(NodeKindIcon::Compute),
+                        title: "Supported boards",
+                        detail: "QuinLED, ESP32 DevKitC, XIAO, and more.",
+                        href: "/boards",
+                    }
                 }
             }
             // The example grid (D5, widened at G1 to ALL examples): real,
@@ -106,21 +123,12 @@ pub fn HomePage(
             // literally the model now. Rendered dispatcher-less too
             // (stories, host mounts): the cards are compiled-in content
             // and clicks just no-op there.
-            section { class: "tw:grid tw:w-[min(1080px,100%)] tw:gap-3 tw:text-left",
-                header { class: "tw:flex tw:items-baseline tw:justify-between",
-                    h2 { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
-                        "Examples"
-                    }
-                    a {
-                        // Neutral at rest (Aurora: no resting mint text) —
-                        // the accent-as-link role goes to the accent
-                        // reckoning follow-up.
-                        class: "tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:hover:text-strong-foreground tw:hover:underline ux-focus-ring",
-                        href: "/explore",
-                        "Explore all →"
-                    }
+            section { class: "tw:grid tw:w-[min(880px,100%)] tw:gap-4",
+                SectionDivider { title: "Examples" }
+                p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-muted-foreground",
+                    "Explore an example in the simulator. Customize it, share it, and flash it to hardware to see it in action."
                 }
-                div { class: crate::app::home::card_grid_class(),
+                div { class: "{crate::app::home::card_grid_class()} tw:text-left",
                     for card in examples {
                         ExampleCard {
                             key: "{card.id}",
@@ -132,6 +140,36 @@ pub fn HomePage(
                     }
                 }
             }
+            // The page ends on purpose: a quiet footer of reference doors
+            // (spike ruling 2026-08-30) instead of the grid just stopping.
+            footer { class: "tw:mt-6 tw:flex tw:w-[min(880px,100%)] tw:flex-wrap tw:items-center tw:justify-center tw:gap-x-6 tw:gap-y-2 tw:border-t tw:border-border-muted tw:pt-4 tw:pb-1 tw:text-xs",
+                a { class: FOOTER_LINK_CLASS, href: "/docs", "Docs" }
+                a { class: FOOTER_LINK_CLASS, href: "/boards", "Supported boards" }
+                a {
+                    class: FOOTER_LINK_CLASS,
+                    href: crate::app::docs::docs_links::what_is_a_shader::HREF,
+                    "What's a shader?"
+                }
+            }
+        }
+    }
+}
+
+/// A centered section divider: extrabold small-caps title with hairline
+/// rules to both sides. Centered, not left-anchored, so the dividers
+/// continue the hero's center axis and the page reads as ONE column
+/// (landing cohesion spike, ruled 2026-08-30 — the left-ruled variant
+/// re-split the page).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SectionDivider(title: &'static str) -> Element {
+    rsx! {
+        div { class: "tw:mt-3 tw:flex tw:items-center tw:gap-3.5",
+            span { class: "tw:h-px tw:flex-1 tw:bg-border-muted" }
+            h2 { class: "tw:m-0 tw:text-[15px]/none tw:font-extrabold tw:uppercase tw:tracking-[0.06em] tw:text-heading",
+                "{title}"
+            }
+            span { class: "tw:h-px tw:flex-1 tw:bg-border-muted" }
         }
     }
 }
@@ -144,8 +182,8 @@ pub fn HomePage(
 /// A labelled pill, not the earlier bare pencil: the hero's whole claim is
 /// that the artwork is *editable*, and a 24px glyph beside the tagline
 /// never said so out loud (G1 ruling, 2026-08-26). Deliberately a QUIET
-/// secondary — neutral border and surface, accent only on hover — after
-/// the solid accent fill proved the loudest thing on the page (G2 ruling,
+/// secondary — neutral border and surface, brightening on hover — after
+/// the old solid fill proved the loudest thing on the page (G2 ruling,
 /// 2026-08-28; a broader design-language pass is planned, so this stays
 /// inside today's idiom rather than inventing ahead of it).
 #[component]
@@ -181,7 +219,7 @@ fn EditArtworkPill(#[props(default)] on_action: Option<EventHandler<UiAction>>) 
 }
 
 /// The quiet secondary pill: neutral border on the card surface, strong
-/// text, and the accent reserved for hover — the invite is the LABEL, the
+/// text, brightening on hover — the invite is the LABEL, the
 /// hero above it already carries the color. Same footprint as the docs'
 /// `open-in-studio` button so the product's one "open this example"
 /// gesture keeps one size everywhere. `max-w-full` + `whitespace-nowrap`
@@ -189,7 +227,7 @@ fn EditArtworkPill(#[props(default)] on_action: Option<EventHandler<UiAction>>) 
 /// the label breaking mid-word.
 fn edit_artwork_pill_class(live: bool) -> &'static str {
     if live {
-        "tw:inline-flex tw:max-w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border tw:bg-card tw:px-4 tw:py-2 tw:text-sm tw:font-semibold tw:leading-none tw:text-strong-foreground tw:transition-colors tw:hover:border-accent-border tw:hover:text-accent"
+        "tw:inline-flex tw:max-w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border tw:bg-card tw:px-4 tw:py-2 tw:text-sm tw:font-semibold tw:leading-none tw:text-strong-foreground tw:transition-colors tw:hover:border-selection-border tw:hover:text-strong-foreground"
     } else {
         "tw:inline-flex tw:max-w-full tw:cursor-not-allowed tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border-muted tw:bg-card-muted tw:px-4 tw:py-2 tw:text-sm tw:font-semibold tw:leading-none tw:text-dim-foreground"
     }
@@ -226,6 +264,10 @@ fn DiveInCard(
 }
 
 const DIVE_IN_CARD_CLASS: &str = "tw:grid tw:justify-items-center tw:gap-2 tw:rounded-md tw:border tw:border-border tw:bg-card tw:px-4 tw:py-5 tw:no-underline tw:transition-colors tw:hover:bg-card-raised ux-ir-ring ux-card-lift ux-focus-ring";
+
+/// Footer reference links — the canonical neutral link look (accent
+/// reckoning D1: links hold no hue at rest).
+const FOOTER_LINK_CLASS: &str = "tw:font-semibold tw:text-muted-foreground tw:no-underline tw:hover:text-strong-foreground tw:hover:underline ux-focus-ring";
 
 /// The one quiet line for a `/p/` link's fate (tone classes appended).
 const SHARED_LINE_CLASS: &str =

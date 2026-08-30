@@ -32,6 +32,9 @@ pub(crate) struct CardStatusGlyph {
 /// blue `status-working` = live/working, amber = needs attention).
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum GlyphTone {
+    /// Green went with the connected-device glyph (M2 of the device-model
+    /// rebuild — its only wearer); the rebuilt device model re-adds it.
+    #[allow(dead_code, reason = "the rebuilt device model re-wears green")]
     Good,
     Live,
     Attention,
@@ -75,11 +78,14 @@ pub(crate) fn CardGlassFooter(
     title: String,
     #[props(default)] context: Option<CardContextLine>,
     #[props(default)] glyphs: Vec<CardStatusGlyph>,
-    /// The title row's trailing control — the ⋯ menu lives IN the bar
+    /// The bar's trailing control — the ⋯ menu lives IN the bar
     /// (G1 feedback 2026-08-26: floating on the art took space from the
-    /// picture). Rises above the stretched open link so it stays
-    /// clickable; negative margins keep the 24px trigger from
-    /// inflating the slim bar.
+    /// picture), pinned to the card's lower-right CORNER, not the title
+    /// row: the hover reveal grows the bar upward, and a control that
+    /// rides the title row slides out from under the pointer mid-click
+    /// (it also strands an already-open popup, whose anchor only
+    /// re-measures on scroll/resize). Rises above the stretched open
+    /// link so it stays clickable.
     #[props(default)]
     trailing: Option<Element>,
     /// Quiet facts revealed while the CARD is hovered (the card must
@@ -96,8 +102,15 @@ pub(crate) fn CardGlassFooter(
     /// progress line) — rendered after the static line, if any.
     children: Element,
 ) -> Element {
+    // The bar keeps its own right padding clear of the corner-pinned ⋯
+    // so no row — title, context, or reveal — ever slides under it.
+    let bar_pad_right = if trailing.is_some() {
+        "tw:pr-8"
+    } else {
+        "tw:pr-2.5"
+    };
     rsx! {
-        div { class: "tw:pointer-events-none tw:absolute tw:inset-x-0 tw:bottom-0 tw:z-[2] tw:border-t tw:border-white/5 tw:bg-[rgba(13,17,21,0.68)] tw:px-2.5 tw:pt-1.5 tw:pb-2 tw:backdrop-blur-[10px] tw:backdrop-saturate-[1.15]",
+        div { class: "tw:pointer-events-none tw:absolute tw:inset-x-0 tw:bottom-0 tw:z-[2] tw:border-t tw:border-white/5 tw:bg-[rgba(13,17,21,0.68)] tw:pl-2.5 {bar_pad_right} tw:pt-1.5 tw:pb-2 tw:backdrop-blur-[10px] tw:backdrop-saturate-[1.15]",
             div { class: "tw:flex tw:items-center tw:gap-1.5",
                 p { class: "tw:m-0 tw:min-w-0 tw:flex-1 tw:truncate tw:text-[13px]/[17px] tw:font-semibold tw:text-strong-foreground",
                     "{title}"
@@ -111,11 +124,6 @@ pub(crate) fn CardGlassFooter(
                                 StudioIcon { name: glyph.icon, size: 11 }
                             }
                         }
-                    }
-                }
-                if let Some(trailing) = trailing {
-                    span { class: "tw:pointer-events-auto tw:-my-1 tw:-mr-1 tw:flex-none",
-                        {trailing}
                     }
                 }
             }
@@ -137,6 +145,15 @@ pub(crate) fn CardGlassFooter(
                 }
             }
             {children}
+            if let Some(trailing) = trailing {
+                // Pinned to the card's lower-right corner — the bar's
+                // bottom edge never moves, so neither does the ⋯: the
+                // hover reveal grows the bar UPWARD past it. 5.5px
+                // centers the 20px trigger in the 31px resting bar.
+                span { class: "tw:pointer-events-auto tw:absolute tw:right-1.5 tw:bottom-[5.5px]",
+                    {trailing}
+                }
+            }
         }
     }
 }

@@ -5945,6 +5945,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-devices"
+version = "40.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lpa-fs-opfs"
 version = "40.0.0"
 dependencies = [
@@ -5970,6 +5978,7 @@ dependencies = [
  "littlefs-rust",
  "lp-bootctl",
  "lpa-client",
+ "lpa-devices",
  "lpc-model",
  "lpc-wire",
  "lpfs",
@@ -6047,6 +6056,7 @@ dependencies = [
  "lpa-agent",
  "lpa-boards",
  "lpa-client",
+ "lpa-devices",
  "lpa-link",
  "lpa-server",
  "lpa-upgrade",

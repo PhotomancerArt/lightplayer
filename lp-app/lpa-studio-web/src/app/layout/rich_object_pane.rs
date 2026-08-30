@@ -49,7 +49,7 @@ pub fn RichObjectPane(
     tone: PaneTone,
     /// Draw the pane outline in the neutral selection color (focus).
     #[props(default = false)]
-    accent: bool,
+    selected: bool,
     /// Contextual header actions rendered as icon buttons.
     #[props(default)]
     actions: Vec<UiPaneAction>,
@@ -76,7 +76,7 @@ pub fn RichObjectPane(
             kind,
             chrome: PaneChrome {
                 tone,
-                accent,
+                selected,
                 // P6: no header chips — the affordance-following detail
                 // trigger is the whole announcement.
                 chips: Vec::new(),
