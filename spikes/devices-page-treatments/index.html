@@ -208,7 +208,9 @@ body[data-mode=empty] .card.sample { display: none; }
   transition: opacity .3s;
 }
 .cta-spectrum:hover::before { opacity: 1; animation: ir-spin 3.2s linear infinite; }
-.cta-spectrum:hover { box-shadow: 0 2px 20px var(--glow); }
+/* G3 nit: "a touch more glow on hover" — the standard bloom plus a wider,
+   softer halo so the chosen Primary answers the pointer a step louder. */
+.cta-spectrum:hover { box-shadow: 0 2px 24px var(--glow), 0 0 46px rgba(140,170,255,.22); }
 body.drift .cta-spectrum::before { animation: ir-spin 14s linear infinite; }
 .no-motion .cta-spectrum::before, .no-motion .cta-spectrum:hover::before { animation: none; }
 .cta-spectrum svg { display: block; }
@@ -284,6 +286,23 @@ body.drift .cta-spectrum::before { animation: ir-spin 14s linear infinite; }
 .v-morph .l-armed b { font-weight: 800; }
 .no-motion .v-morph { transition: background-color .16s, border-color .16s; }
 
+/* 2K · "Confirm Forget": the verb-led armed label ruled in at gate rd 2,
+   carrying the round-1 composite's mechanics — width tween, 160ms ramp,
+   knock, drain track. */
+.v-ck { transition: width .22s ease, background-color .16s ease-in,
+        border-color .16s ease-in;
+  white-space: nowrap; overflow: hidden; justify-content: center; }
+.v-ck.armed { background: var(--st-error-bg); border-color: var(--st-error-bd);
+  animation: knock .22s ease-out; }
+.v-ck:not(.armed) { transition: width .22s ease, background-color .5s ease-out,
+  border-color .5s ease-out; }
+.v-ck::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 1px;
+  height: 2px; border-radius: 2px; background: var(--st-error-tx);
+  transform-origin: left; transform: scaleX(0); opacity: 0; }
+.v-ck.armed::after { opacity: .85; animation: drain var(--win) linear forwards; }
+.no-motion .v-ck.armed { animation: none; }
+.no-motion .v-ck.armed::after { animation: none; transform: scaleX(1); }
+
 /* 2H · Blast radius: arming marks the CARD as what dies — content dims
    and desaturates behind a red inset ring; the chip goes solid. The
    consequence previews itself (iOS jiggle-mode's cousin). */
@@ -340,15 +359,15 @@ body.drift .cta-spectrum::before { animation: ir-spin 14s linear infinite; }
 </head>
 <body data-mode="populated">
 
-<h1>Devices page — add-card CTA &amp; armed confirm · round 2</h1>
+<h1>Devices page — add-card CTA &amp; armed confirm · round 3</h1>
 <p class="hint">
-  Gate feedback applied. <b>Section 1</b>: down to the baseline vs a <b>spectrum
-  outline</b> — the rainbow moves from the Primary's fill (dark-text-on-gradient
-  didn't work) to the border, text stays white — shown on the add slot AND across
-  the CTA family, since this generalizes beyond one button. <b>Section 2</b>: the
-  two-click system stays, but arming now TRANSFORMS — naming the device, marking
-  the card, or asking in a full-width bar — so the state change itself asks
-  "are you <i>sure</i>?".
+  Converging. <b>Section 1</b>: the spectrum outline (1F) is <b>chosen as the
+  Primary voice for now</b> — gradient fill stands down; hover glow bumped per the
+  nit. Remaining detail: whether the quieter outline family (Connect/Save) stays
+  neutral 1A under it. <b>Section 2</b>: trying <b>"Forget" → "Confirm Forget"</b>
+  as the armed-label pattern — verb-led, no question mark — plain and with the
+  card marked; the named question (2G) stays for comparison. The footer question
+  bar flickered at the gate and is out.
 </p>
 
 <div class="controls">
@@ -374,37 +393,19 @@ body.drift .cta-spectrum::before { animation: ir-spin 14s linear infinite; }
 </div>
 
 <!-- ================================================================ -->
-<h2><span class="n">1</span> Add-a-device CTA — baseline vs spectrum outline</h2>
+<h2><span class="n">1</span> Add-a-device CTA — 1F chosen as the Primary voice</h2>
 <p class="sub">
-  1A is the shipped Outline chip (nits fixed). 1F trades its white border for a
-  standing 1px spectrum ring at 62% — hover brightens and spins it, and the
-  "drift at rest" toggle above slow-rotates it instead. The family strip shows
-  the same treatment where outline_action_class lives today (Connect / Save) and
-  against the gradient Primary it might succeed.
+  Ruled at gate round 2: the spectrum outline is the Primary for now. Hover now
+  adds a wider soft halo on top of the standard bloom (the glow nit) — hover the
+  chips to judge it. The family strip shows the ruling applied: Primary-tier
+  buttons wear 1F; the quieter outline rows (Connect / Save) are drawn staying
+  neutral 1A beneath it — flag if those should go spectrum too.
 </p>
 
 <div class="conceptrow" id="s1">
   <div class="concept">
-    <div class="chead"><span class="name">1A · Baseline</span>
-      <span class="thesis">neutral outline; spectrum only answers hover (D1)</span></div>
-    <div class="stage"><div class="grid">
-      <div class="slot">
-        <p class="copy">Plug in a LightPlayer board and pick its USB port.</p>
-        <button class="cta-outline ir fr" type="button">
-          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 1.5v9M1.5 6h9"/></svg>
-          Add a device
-        </button>
-      </div>
-      <div class="card sample" data-card="porch"></div>
-      <div class="card sample" data-card="zook"></div>
-    </div></div>
-    <p class="cnotes"><b>The G1 ruling as shipped-plus-nits.</b> Fully D1-clean; the
-      page's action reads through position and the dashed slot, not through color.</p>
-  </div>
-
-  <div class="concept">
-    <div class="chead"><span class="name">1F · Spectrum outline</span>
-      <span class="thesis">the rainbow moves to the border; text stays white</span></div>
+    <div class="chead"><span class="name">1F · Chosen</span>
+      <span class="thesis">spectrum border, white text; hover = spin + bumped glow</span></div>
     <div class="stage"><div class="grid">
       <div class="slot">
         <p class="copy">Plug in a LightPlayer board and pick its USB port.</p>
@@ -416,65 +417,125 @@ body.drift .cta-spectrum::before { animation: ir-spin 14s linear infinite; }
       <div class="card sample" data-card="porch"></div>
       <div class="card sample" data-card="zook"></div>
     </div></div>
-    <p class="cnotes"><b>Standing hue, one place only.</b> If this wins, it becomes the
-      CTA voice (a D1 amendment: the spectrum ring marks THE standing action, as the
-      gradient fill did) — note the small-radius conic can read orange-heavy; the
-      selection family's cool ring stays distinct.</p>
+    <p class="cnotes"><b>The page's action wears the spectrum ring standing</b> (62%
+      at rest, bright + spinning + haloed on hover; "drift at rest" toggle above).
+      D1 amendment to record at planning: the ring marks THE standing action, as
+      the gradient fill used to.</p>
   </div>
 
   <div class="concept">
-    <div class="chead"><span class="name">1G · The family, generalized</span>
-      <span class="thesis">same treatment where the outline CTA lives today</span></div>
+    <div class="chead"><span class="name">1G · The ruling, generalized</span>
+      <span class="thesis">Primary = 1F; outline family stays neutral (confirm)</span></div>
     <div class="stage"><div class="famrow">
       <div class="r">
-        <div class="t"><b>Device link</b><span>settings popover row</span></div>
+        <div class="t"><b>Primary tier</b><span>1F replaces the gradient fill</span></div>
         <div class="pair">
-          <span class="lblc">1A<button class="cta-outline sm ir fr" type="button">Connect</button></span>
-          <span class="lblc">1F<button class="cta-spectrum sm fr" type="button">Connect</button></span>
-        </div>
-      </div>
-      <div class="r">
-        <div class="t"><b>Share panel</b><span>compact footer CTA</span></div>
-        <div class="pair">
-          <span class="lblc">1A<button class="cta-outline sm ir fr" type="button">Save</button></span>
-          <span class="lblc">1F<button class="cta-spectrum sm fr" type="button">Save</button></span>
-        </div>
-      </div>
-      <div class="r">
-        <div class="t"><b>Primary tier</b><span>gradient fill today vs spectrum outline</span></div>
-        <div class="pair">
-          <span class="lblc">today<button class="cta-gradient fr" type="button">Create project</button></span>
+          <span class="lblc">replaced<button class="cta-gradient fr" type="button" style="opacity:.45">Create project</button></span>
           <span class="lblc">1F<button class="cta-spectrum fr" type="button">Create project</button></span>
         </div>
       </div>
+      <div class="r">
+        <div class="t"><b>Device link</b><span>outline family — stays neutral 1A?</span></div>
+        <div class="pair">
+          <span class="lblc">1A<button class="cta-outline sm ir fr" type="button">Connect</button></span>
+          <span class="lblc">or 1F<button class="cta-spectrum sm fr" type="button">Connect</button></span>
+        </div>
+      </div>
+      <div class="r">
+        <div class="t"><b>Share panel</b><span>outline family — stays neutral 1A?</span></div>
+        <div class="pair">
+          <span class="lblc">1A<button class="cta-outline sm ir fr" type="button">Save</button></span>
+          <span class="lblc">or 1F<button class="cta-spectrum sm fr" type="button">Save</button></span>
+        </div>
+      </div>
     </div></div>
-    <p class="cnotes"><b>"Updating the designs in general."</b> The bottom row is the
-      real question: does the spectrum outline + white text succeed the gradient
-      Primary ("rainbow-bg + black text didn't work"), with 1A as the Secondary
-      voice below it?</p>
+    <p class="cnotes"><b>Hierarchy check.</b> If every outline CTA goes spectrum, the
+      Primary loses its rank — the working read is Primary=1F, outline family=1A,
+      so one standing rainbow per surface. Hover both Connects to compare.</p>
   </div>
 </div>
 
-<div class="rejected"><b>Rejected at gate round 1:</b>
+<div class="rejected"><b>Ruled out across rounds 1–2:</b>
   <ul>
+    <li><b>1A-as-CTA</b> — stays as the neutral outline/Secondary voice, lost the Primary seat to 1F.</li>
     <li><b>1B tile-as-button</b> — biggest target, but the CTA chose chip-in-slot.</li>
-    <li><b>1C white outline + rainbow glow</b> — the standing blurred wash read heavy on pixels; the ring (1F) keeps the hue but crisp.</li>
+    <li><b>1C white outline + rainbow glow</b> — standing blurred wash read heavy; the crisp ring won.</li>
     <li><b>1D raised / 1E breathing</b> — elevation and motion both lost to "baseline or rainbow".</li>
+    <li><b>gradient Primary</b> — "rainbow-bg + black text just didn't work" (kept dimmed in 1G for contrast).</li>
   </ul>
 </div>
 
 <!-- ================================================================ -->
-<h2><span class="n">2</span> Armed chip — the state change that asks the question</h2>
+<h2><span class="n">2</span> Armed chip — "Forget" → "Confirm Forget"</h2>
 <p class="sub">
-  Two-click stays (prior art calls this the right weight for a recoverable
-  destructive act — dialogs breed confirmation fatigue; type-to-confirm is for the
-  irreversible). What changes: arming must transform, not tint. 2G names the
-  object, 2H marks what dies, 2J asks in a sentence with an explicit Keep, and 2I
-  is the hold-to-confirm school (Linear) for calibration. 2A/2X carry over as
-  references. All live — window slider, slow-mo, arm-all above.
+  Ruled at gate round 2: two-click stays; trying the verb-led <b>"Confirm
+  Forget"</b> armed label — an instruction, not a question mark. 2K is that
+  pattern carrying the round-1 mechanics (width tween, 160ms ramp, knock, drain);
+  2K+ composes the card-marking on top. 2G's named question and 2A stay for
+  side-by-side. The footer question bar flickered at the gate — out.
 </p>
 
 <div class="conceptrow" id="s2">
+  <div class="concept">
+    <div class="chead"><span class="name">2K · Confirm Forget</span>
+      <span class="thesis">the verb-led pattern, full mechanics</span></div>
+    <div class="stage"><div class="footrow">
+      <div class="who"><b>Porch sign</b> ready · esp32-s3</div>
+      <footer>
+        <button class="q fr">Reconnect</button>
+        <button class="q danger fr confirm v-ck" data-confirm data-tween>
+          <span class="l-idle">Forget</span>
+          <span class="l-armed">Confirm Forget</span>
+        </button>
+      </footer>
+    </div></div>
+    <p class="cnotes"><b>An instruction, not a question.</b> "Confirm Forget" tells
+      you what the second click IS — the armed chip becomes a different button.
+      Width tweens 220ms, red ramps in with the knock, the drain shows the window.</p>
+  </div>
+
+  <div class="concept">
+    <div class="chead"><span class="name">2K+ · Confirm Forget, card marked</span>
+      <span class="thesis">the pattern + the consequence previewed</span></div>
+    <div class="stage">
+      <div class="card" data-armed-scope style="min-height:0">
+        <div class="dim">
+          <div class="head"><h3>Workshop zook</h3><span class="chip neutral">Offline</span></div>
+          <p class="id">esp32 · dev0000002b</p>
+          <p class="quiet">last seen 2 days ago</p>
+        </div>
+        <footer>
+          <button class="q fr">Reconnect</button>
+          <button class="q danger fr confirm v-ck" data-confirm data-tween>
+            <span class="l-idle">Forget</span>
+            <span class="l-armed">Confirm Forget</span>
+          </button>
+        </footer>
+      </div>
+    </div>
+    <p class="cnotes"><b>Both halves of "sure?".</b> The chip says what the click
+      does; the dimmed card behind the red ring says what it does it TO. Standing
+      down restores the card.</p>
+  </div>
+
+  <div class="concept">
+    <div class="chead"><span class="name">2G · Names the device</span>
+      <span class="thesis">comparison — the question form</span></div>
+    <div class="stage"><div class="footrow">
+      <div class="who"><b>Porch sign</b> ready · esp32-s3</div>
+      <footer>
+        <button class="q fr">Reconnect</button>
+        <button class="q danger fr confirm v-morph" data-confirm data-tween>
+          <span class="l-idle">Forget</span>
+          <span class="l-armed">Forget&nbsp;<b>Porch sign</b>?</span>
+        </button>
+      </footer>
+    </div></div>
+    <p class="cnotes">The named-question alternative, kept for the side-by-side:
+      strongest per prior art, but longer — and "Confirm Forget" stays one shape
+      for every device name.</p>
+  </div>
+
   <div class="concept">
     <div class="chead"><span class="name">2A · Shipped</span>
       <span class="thesis">reference — tint + "Forget?"</span></div>
@@ -487,108 +548,16 @@ body.drift .cta-spectrum::before { animation: ir-spin 14s linear infinite; }
         </button>
       </footer>
     </div></div>
-    <p class="cnotes">The round-1 complaints, kept reproducible: snap tint, footprint
-      nudge, invisible window.</p>
+    <p class="cnotes">What ships today, for distance-travelled.</p>
   </div>
+</div>
 
-  <div class="concept">
-    <div class="chead"><span class="name">2X · Round-1 composite</span>
-      <span class="thesis">"closer" — knock + ramp + drain + locked footprint</span></div>
-    <div class="stage"><div class="footrow">
-      <div class="who"><b>Porch sign</b> ready · esp32-s3</div>
-      <footer>
-        <button class="q fr">Reconnect</button>
-        <button class="q danger fr confirm v-composite" data-confirm>
-          <span class="stack"><span class="l-idle">Forget</span><span class="l-armed">Forget?</span></span>
-        </button>
-      </footer>
-    </div></div>
-    <p class="cnotes">Round 1's lean, kept as the bar to clear: mechanically polished,
-      but the chip still only recolors — it doesn't yet <b>ask</b>.</p>
-  </div>
-
-  <div class="concept">
-    <div class="chead"><span class="name">2G · Names the device</span>
-      <span class="thesis">the chip grows into the question</span></div>
-    <div class="stage"><div class="footrow">
-      <div class="who"><b>Porch sign</b> ready · esp32-s3</div>
-      <footer>
-        <button class="q fr">Reconnect</button>
-        <button class="q danger fr confirm v-morph" data-confirm>
-          <span class="l-idle">Forget</span>
-          <span class="l-armed">Forget&nbsp;<b>Porch sign</b>?</span>
-        </button>
-      </footer>
-    </div></div>
-    <p class="cnotes"><b>The object at stake enters the sentence.</b> "Forget
-      <b>Porch sign</b>?" is a different question from "Forget?" — you confirm a
-      device, not a verb. Width tweens 220ms; the named form is the strongest
-      "are you sure" per prior art (Trello, GitLab consequence-stating).</p>
-  </div>
-
-  <div class="concept">
-    <div class="chead"><span class="name">2H · Marks what dies</span>
-      <span class="thesis">the card previews its own removal</span></div>
-    <div class="stage">
-      <div class="card" data-armed-scope style="min-height:0">
-        <div class="dim">
-          <div class="head"><h3>Workshop zook</h3><span class="chip neutral">Offline</span></div>
-          <p class="id">esp32 · dev0000002b</p>
-          <p class="quiet">last seen 2 days ago</p>
-        </div>
-        <footer>
-          <button class="q fr">Reconnect</button>
-          <button class="q danger fr confirm v-blast" data-confirm>
-            <span class="l-idle">Forget</span><span class="l-armed">Forget?</span>
-          </button>
-        </footer>
-      </div>
-    </div>
-    <p class="cnotes"><b>The consequence, previewed.</b> Arming dims and desaturates
-      the card body behind a red ring — this card is what disappears. Standing down
-      restores it; the question is asked by the page, not the chip.</p>
-  </div>
-
-  <div class="concept">
-    <div class="chead"><span class="name">2J · Footer question bar</span>
-      <span class="thesis">a sentence with an explicit Keep</span></div>
-    <div class="stage"><div class="footrow" data-qbar data-armed-scope>
-      <div class="who"><b>Backyard mega-installation west pergola strand B</b> ready</div>
-      <div class="foot-idle">
-        <button class="q fr">Reconnect</button>
-        <button class="q danger fr confirm v-qbar" data-confirm>
-          <span class="l-idle">Forget</span><span class="l-armed">Forget</span>
-        </button>
-      </div>
-      <div class="qbar">
-        <span class="qtext">Forget <b>this device</b>?</span>
-        <button class="go" data-qbar-go>Forget</button>
-        <button class="keep fr" data-qbar-keep>Keep</button>
-      </div>
-    </div></div>
-    <p class="cnotes"><b>Progressive disclosure, inline.</b> The footer swaps into the
-      question — full sentence, red Forget, neutral Keep. Cancel is a target, not a
-      timeout; costs the row swap (footprint changes deliberately).</p>
-  </div>
-
-  <div class="concept">
-    <div class="chead"><span class="name">2I · Hold to confirm</span>
-      <span class="thesis">prior-art contrast (Linear) — not two-click</span></div>
-    <div class="stage"><div class="footrow">
-      <div class="who"><b>usb-3</b> identifying · CH340 1a86:7523</div>
-      <footer>
-        <button class="q fr">Retry</button>
-        <button class="q danger fr v-hold" data-hold>
-          <span class="fill"></span>
-          <span>Hold to dismiss</span>
-        </button>
-      </footer>
-    </div></div>
-    <p class="cnotes"><b>Sustained intent instead of a second click.</b> Press fills
-      the chip over 900ms, release snaps back. Here to calibrate: it asks "are you
-      sure" with the body, but repeated holds grate and it fights the app's
-      click-verb grammar.</p>
-  </div>
+<div class="rejected"><b>Ruled out across rounds 1–2 (§2):</b>
+  <ul>
+    <li><b>2J footer question bar</b> — janked/flickered at the gate; the row swap is a layout jump.</li>
+    <li><b>2I hold-to-confirm</b> — calibration only; fights the app's click-verb grammar.</li>
+    <li><b>2X composite / 2B / 2C / 2D / 2E / 2F</b> — mechanics folded into 2K (knock, ramp, drain, locked-width tween); stripes read as refusal, split-✕ costs a second decision.</li>
+  </ul>
 </div>
 
 <script>
@@ -656,14 +625,14 @@ function scopeOf(el) { return el.closest("[data-armed-scope]"); }
 function disarm(el) {
   el.classList.remove("armed");
   scopeOf(el)?.classList.remove("scope-armed");
-  if (el.classList.contains("v-morph")) el.style.width = "";
+  if ("tween" in el.dataset) el.style.width = "";
   clearTimeout(armed.get(el)); armed.delete(el);
 }
 function arm(el) {
   el.classList.remove("armed"); void el.offsetWidth;
   el.classList.add("armed");
   scopeOf(el)?.classList.add("scope-armed");
-  if (el.classList.contains("v-morph")) {
+  if ("tween" in el.dataset) {
     // width tween: measure idle, swap label, measure target, animate
     const idle = el.getBoundingClientRect().width;
     el.style.width = idle + "px"; void el.offsetWidth;
