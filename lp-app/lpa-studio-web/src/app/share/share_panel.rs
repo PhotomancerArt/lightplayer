@@ -23,8 +23,18 @@
 //!
 //! Everything here is **pure** — props in, events out — so the stories
 //! mount the three access states and the awkward people set with no cloud
-//! service, no session and no context. `project_share_control` is the live
-//! half that fills these props and answers the events.
+//! service, no session and no context. [`super::project_roster`] is the
+//! live half that fills these props and answers the events.
+//!
+//! # Two homes for the pieces
+//!
+//! [`ShareUrlHero`], [`AccessSegment`], [`AccessDescription`],
+//! [`PeopleList`] and [`AddPersonRow`] are also the **relationship
+//! panel's** Where and Access sections
+//! ([`super::project_relationship_panel`], vision D9) — the same controls,
+//! the same gate-approved strings, mounted under the project segment
+//! instead of the pill. They are `pub(crate)` for that reason. When the
+//! pill retires (P5) [`SharePanel`] goes with it and the pieces stay.
 //!
 //! # Tailwind traps (crate README)
 //!
@@ -208,7 +218,11 @@ pub(crate) fn ShareUrlHero(url: ShareUrl, on_copy: Option<EventHandler<()>>) -> 
 /// The three-way general-access control (D4: `none | view | edit`).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AccessSegment(access: Access, busy: bool, on_access: Option<EventHandler<Access>>) -> Element {
+pub(crate) fn AccessSegment(
+    access: Access,
+    busy: bool,
+    on_access: Option<EventHandler<Access>>,
+) -> Element {
     rsx! {
         div { class: SEGMENT_CLASS, role: "group", aria_label: "General access",
             for level in [Access::None, Access::View, Access::Edit] {
@@ -238,7 +252,7 @@ fn AccessSegment(access: Access, busy: bool, on_access: Option<EventHandler<Acce
 /// the spike's words (gate-approved — do not paraphrase).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AccessDescription(access: Access) -> Element {
+pub(crate) fn AccessDescription(access: Access) -> Element {
     let tone = if access == Access::Edit {
         "tw:text-status-warning-foreground"
     } else {
@@ -274,9 +288,16 @@ fn AccessDescription(access: Access) -> Element {
 /// The member rows. An empty list is a real state (the service has not
 /// answered yet, or the roster is genuinely only you and the row is still
 /// loading) and renders as one quiet line rather than a headed void.
+///
+/// `on_remove: None` makes the list **read-only** — the relationship
+/// panel's Member state shows you who else is on a project you do not
+/// administer, and a Remove button there would refuse every click.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PeopleList(people: Vec<SharePerson>, on_remove: Option<EventHandler<String>>) -> Element {
+pub(crate) fn PeopleList(
+    people: Vec<SharePerson>,
+    on_remove: Option<EventHandler<String>>,
+) -> Element {
     if people.is_empty() {
         return rsx! {
             p { class: "tw:m-0 tw:px-0.5 tw:text-[10.5px] tw:leading-snug tw:text-dim-foreground",
@@ -335,16 +356,17 @@ fn PersonRow(person: SharePerson, on_remove: Option<EventHandler<String>>) -> El
                 span { class: "tw:flex-none tw:px-1 tw:text-[11px] tw:font-semibold tw:text-subtle-foreground",
                     "Editor"
                 }
-                button {
-                    class: inline_text_button_class(InlineButtonTone::Neutral, false),
-                    r#type: "button",
-                    title: "Remove {person.email} from this project",
-                    onclick: move |_| {
-                        if let Some(on_remove) = on_remove {
-                            on_remove.call(email.clone());
-                        }
-                    },
-                    "Remove"
+                // Same rule as the owner row above: no `on_remove`, no
+                // button. A read-only roster states who is here; it does
+                // not offer a verb it cannot carry out.
+                if let Some(on_remove) = on_remove {
+                    button {
+                        class: inline_text_button_class(InlineButtonTone::Neutral, false),
+                        r#type: "button",
+                        title: "Remove {person.email} from this project",
+                        onclick: move |_| on_remove.call(email.clone()),
+                        "Remove"
+                    }
                 }
             }
         }
@@ -357,7 +379,7 @@ fn PersonRow(person: SharePerson, on_remove: Option<EventHandler<String>>) -> El
 /// service resolves at that person's first login.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AddPersonRow(on_add: Option<EventHandler<String>>, adding: bool) -> Element {
+pub(crate) fn AddPersonRow(on_add: Option<EventHandler<String>>, adding: bool) -> Element {
     let mut open = use_signal(|| adding);
     let mut draft = use_signal(String::new);
     if !open() {

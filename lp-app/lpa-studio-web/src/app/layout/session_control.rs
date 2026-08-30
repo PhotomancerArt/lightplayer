@@ -38,25 +38,39 @@
 //! glyphs stay), the changes segment goes count-only and the padding tightens
 //! below 560px.
 //!
+//! **Three popovers, three concepts.** The device segment states what is
+//! running; the changes segment lists what is in flight; the project
+//! segment opens [`ProjectRelationshipPanel`] — the fixed skeleton (Where /
+//! Access / action row, with History as a tab) rendered for all five
+//! [`ProjectRelationship`] states. The detail sections that used to hang
+//! here are not homeless: they sit behind that panel's ⋯ menu.
+//!
 //! The control is presentational: everything it renders comes from
 //! [`UiChromeSessionControl`] (core's projection of THE session), the open
 //! project's [`ProjectDetailContent`] — the same value the pane's [i]
 //! renders, so the chrome and the pane can never disagree about a project —
-//! and the derived [`ProjectRelationship`] the caller computes.
+//! the derived [`ProjectRelationship`] the caller computes, and
+//! [`ProjectPopoverInputs`] (the address, roster, publish ledger, and
+//! dispatches only the web shell can gather).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
     DirtySummary, UiAction, UiAffordance, UiChromeSessionControl, UiChromeSessionStatus,
     UiPaneAction,
 };
+use lpc_cloud_api::Access;
 
 use crate::app::affordance::affordance_trigger_style;
+use crate::app::home::package_export::ExportTarget;
 use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
 };
 use crate::app::project::project_pane::{ProjectDetailRow, state_label};
-use crate::app::project::{ProjectChanges, ProjectDetailContent, ProjectDetailSections};
-use crate::app::share::{ProjectRelationship, relationship_face};
+use crate::app::project::{ProjectChanges, ProjectDetailContent};
+use crate::app::share::{
+    ProjectRelationship, ProjectRelationshipPanel, PublishStatus, RosterFacts, ShareUrl,
+    relationship_face,
+};
 use crate::base::{
     DetailPopover, DetailSection, DetailSectionTint, IconMenuTone, InlineButton, InlineButtonTone,
     PopoverPlacement, StudioIcon, StudioIconName,
@@ -90,10 +104,42 @@ pub struct ChromeSessionControl {
     /// replaces the retired accent "example" pill, which could only say one
     /// of those five things.
     pub relationship: ProjectRelationship,
+    /// The live halves of the PROJECT segment's popover — the address, the
+    /// roster, the publish ledger, and the fork/copy dispatches. Gathered
+    /// by the web shell (only it holds the route, the `CloudSession`, and
+    /// the command channel); default-empty everywhere else, which the
+    /// panel renders honestly rather than blankly.
+    pub project_popover: ProjectPopoverInputs,
     /// Dispatch for the popovers' rows and the Save sibling.
     pub on_action: EventHandler<UiAction>,
     /// Open one segment's popover immediately (stories only).
     pub initially_open: Option<ControlSegment>,
+}
+
+/// What the project popover needs that [`ProjectDetailContent`] does not
+/// carry: the things only the web shell can answer.
+///
+/// The bar stays presentational — it forwards this straight through to
+/// [`ProjectRelationshipPanel`]. Every field is optional because every one
+/// of them can honestly be unknown: a session with no addressable project,
+/// a service that has not answered, a publish driver that has run no trip.
+#[derive(Clone, Default, PartialEq)]
+pub struct ProjectPopoverInputs {
+    /// The project's canonical address — the Where section's hero.
+    pub url: Option<ShareUrl>,
+    /// The Access section's live half, when the service answered.
+    pub roster: Option<RosterFacts>,
+    /// The auto-publish ledger's last word (the `MineLocal` line).
+    pub publish: Option<PublishStatus>,
+    /// The fork-family verb's dispatch; `None` renders it disabled with
+    /// [`Self::fork_blocked`] as the explanation.
+    pub on_fork: Option<EventHandler<()>>,
+    /// Why the fork verb cannot act, when it cannot.
+    pub fork_blocked: String,
+    pub on_copy: Option<EventHandler<()>>,
+    pub on_access: Option<EventHandler<Access>>,
+    pub on_add: Option<EventHandler<String>>,
+    pub on_remove: Option<EventHandler<String>>,
 }
 
 /// The E bar: the three-segment shell with Save standing beside it while the
@@ -112,6 +158,7 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
         session,
         project,
         relationship,
+        project_popover,
         on_action,
         initially_open,
     } = control;
@@ -262,11 +309,30 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
                     trigger_open_class: segment_class(project_edge, SegmentTint::None, true),
                     layer_keeps_layout: true,
                     initially_open: initially_open == Some(ControlSegment::Project),
-                    // P3 replaces this with the relationship skeleton; until
-                    // then the existing sections mount unchanged so the app
-                    // stays whole.
+                    // THE relationship skeleton (D9): Where / Access /
+                    // action row, one shape for all five states. The
+                    // settings/identity/stats sections it replaced are not
+                    // homeless — they live behind its ⋯ menu's Details row.
                     if let Some(project) = project.clone() {
-                        ProjectDetailSections { content: project }
+                        ProjectRelationshipPanel {
+                            name: project.project_name().to_string(),
+                            relationship,
+                            url: project_popover.url.clone(),
+                            roster: project_popover.roster.clone(),
+                            publish: project_popover.publish.clone(),
+                            export: project.library_identity().map(|(uid, slug)| ExportTarget {
+                                uid: uid.clone(),
+                                slug: slug.clone(),
+                            }),
+                            unsaved: project.unsaved_count(),
+                            details: Some(project.clone()),
+                            on_fork: project_popover.on_fork,
+                            fork_blocked: project_popover.fork_blocked.clone(),
+                            on_copy: project_popover.on_copy,
+                            on_access: project_popover.on_access,
+                            on_add: project_popover.on_add,
+                            on_remove: project_popover.on_remove,
+                        }
                     } else {
                         DetailSection {
                             p { class: "tw:m-0 tw:text-xs tw:italic tw:leading-snug tw:text-dim-foreground",

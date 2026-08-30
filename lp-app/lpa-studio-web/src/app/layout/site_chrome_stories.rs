@@ -17,7 +17,9 @@ use lpa_studio_core::{
 };
 use lpa_studio_web_story_macros::story;
 
-use crate::app::layout::session_control::{ChromeSessionControl, ControlSegment};
+use crate::app::layout::session_control::{
+    ChromeSessionControl, ControlSegment, ProjectPopoverInputs,
+};
 use crate::app::layout::site_chrome::{
     ChromeModeToggle, ChromeProjectMenu, SiteChrome, SiteSection,
 };
@@ -181,7 +183,7 @@ pub(crate) fn control_device_popover_open() -> Element {
 
 #[story(
     label = "Project popover open — the document",
-    description = "The PROJECT segment's popover, still mounting today's detail sections (identity + status word, project settings, share, stats). P3 replaces this content with the fixed relationship skeleton; the segment, its face, and the popover it opens are what this phase settles."
+    description = "The PROJECT segment's popover in the real chrome: the relationship skeleton (Where \u{2192} Access \u{2192} action row, with History as a tab) hanging off the Example face. Mounted with empty popover inputs \u{2014} no address, no roster, no ledger \u{2014} which is the honest cold-start shape; the panel's own stories cover the five states with their data."
 )]
 pub(crate) fn control_project_popover_open() -> Element {
     rsx! {
@@ -326,6 +328,7 @@ fn lens_frame(width: u32, menu_open: bool) -> Element {
                     session: sim_control(Some("ESP32-C6")),
                     project: Some(control_content(1, 0, UiStatus::good("Ready"))),
                     relationship: ProjectRelationship::MineLocal,
+                    project_popover: ProjectPopoverInputs::default(),
                     on_action: EventHandler::new(|_| {}),
                     initially_open: None,
                 }),
@@ -401,6 +404,7 @@ fn control_row_as(
                     session,
                     project,
                     relationship,
+                    project_popover: ProjectPopoverInputs::default(),
                     on_action: EventHandler::new(|_| {}),
                     initially_open,
                 }),

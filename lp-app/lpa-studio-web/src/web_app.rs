@@ -23,15 +23,21 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use crate::app::StudioShell;
+use crate::app::home::package_card::home_action;
 use crate::app::layout::LocalStoreBanner;
+use crate::app::layout::session_control::ProjectPopoverInputs;
 use crate::app::layout::{
     ChromeModeToggle, ChromeProjectMenu, ChromeSessionControl, CloudAccountControl, SiteChrome,
     SiteSection, StudioSettingsPopover, VersionBadge,
 };
 use crate::app::project::ProjectDetailContent;
+use crate::app::share::share_person::people_of;
+use crate::app::share::share_url::current_origin;
 use crate::app::share::{
-    ProjectShareControl, VisitorBannerHost, VisitorShareSlot, archive_project, derive_relationship,
-    use_visitor_session,
+    ProjectRelationship, ProjectRoster, ProjectShareControl, PublishStatus, RosterFacts,
+    RosterState, ShareUrl, VisitorBannerHost, VisitorShareSlot, archive_project,
+    derive_relationship, fork_transient_session, use_project_roster, use_visitor_session,
+    viewer_actor,
 };
 use crate::app::workbench;
 use crate::base::{ToastHost, use_toast_provider};
@@ -1061,6 +1067,18 @@ pub fn App() -> Element {
     // Shared by the chrome and the section body below: an EventHandler is
     // Copy, the raw closure is not.
     let on_action = EventHandler::new(on_action);
+    // The relationship control's live half (P3). ONE `GetProject` about the
+    // project in the address bar answers all three signals P1's derivation
+    // was left waiting on: whether the service put this viewer on the
+    // roster, what the link grants, and who owns it. The session's own
+    // actor is the other side of that owner comparison.
+    //
+    // The standalone Share pill mounts the same hook until it retires (P5),
+    // so a project route asks twice this phase — see the two-mounts note in
+    // `app::share::project_roster`.
+    let roster = use_project_roster(project_uid);
+    let roster_state = (roster.state)();
+    let cloud_session = use_context::<Signal<crate::cloud::CloudSession>>();
     // THE session·project control: this tab's ONE session (core's control
     // projection) paired with the SAME detail content the pane's [i]
     // renders, so device state and project state (unsaved / failed /
@@ -1078,26 +1096,36 @@ pub fn App() -> Element {
                 }
                 _ => None,
             });
-            // The project segment's FACE (vision D1). The roster half of the
-            // derivation is not wired yet: `roster_answered: false` and both
-            // actors `None` mean a library project reads `MineLocal`
-            // ("Private") and the Shared/Member faces stay unreachable —
-            // P3 wires the `GetProject` answer and the session's own actor
-            // through, and the same call then produces all five.
+            let library_uid = editor.as_ref().and_then(|(editor, _)| {
+                editor
+                    .library_identity
+                    .as_ref()
+                    .map(|(uid, _)| uid.to_string())
+            });
+            // The project segment's FACE (vision D1), from the real roster.
             let relationship = derive_relationship(
                 current_view.open_project_transient,
                 current_view.open_transient_example.is_some(),
-                editor
-                    .as_ref()
-                    .is_some_and(|(editor, _)| editor.library_identity.is_some()),
-                false,
-                None,
-                None,
+                library_uid.is_some(),
+                roster_state.answered(),
+                roster_state.owner(),
+                viewer_actor(&cloud_session()),
             );
             ChromeSessionControl {
                 session,
                 project: editor.map(|(editor, status)| ProjectDetailContent::new(editor, status)),
                 relationship,
+                project_popover: project_popover_inputs(
+                    relationship,
+                    &current_route,
+                    current_view.open_project_name.as_deref(),
+                    library_uid,
+                    &roster_state,
+                    roster,
+                    bridge.tx.clone(),
+                    on_action,
+                    toasts,
+                ),
                 on_action,
                 initially_open: None,
             }
@@ -1278,6 +1306,150 @@ enum NavSessionPlan {
     Refuse(String),
     /// The studio is being left: run `teardown`, then say `said`.
     Leave { teardown: UiAction, said: String },
+}
+
+/// Gather the project popover's live halves (relationship-control P3).
+///
+/// The bar is presentational and the panel is pure, so this is the one
+/// place that knows *both* the app's plumbing and the panel's needs: the
+/// canonical address off the route, the roster off the service, the
+/// publish line off the tab's auto-publish ledger, and the two dispatches
+/// the action row makes.
+///
+/// **The address** comes from the ROUTE, not from a construction of our
+/// own: `/p/<slug>-<uid>` for a real project (the slug half is the same
+/// `slugify(display name)` the address bar heals to, so the hero and the
+/// browser agree), and the bare `/p/<slug>` for an embedded example, whose
+/// transient uid is RAM-minted and must never reach a URL.
+///
+/// **The fork verb** splits by mechanism, not by taste. A transient
+/// session (example or visit) forks by dispatching `SaveOverlay` — a clean
+/// save commits nothing but still runs `fork_transient_at_save`, which is
+/// exactly why a PRISTINE example can be kept without editing it first
+/// (the driving pain, vision Q5/Q9). A project already in the library
+/// forks by duplicating its package: `HomeOp::DuplicatePackage` is
+/// "fork at head, independent copy, fork provenance"
+/// (`library_store::duplicate`) — the same verb, and the same word, the
+/// gallery card uses. Without a library package there is nothing to
+/// duplicate, and the slot says so rather than pretending.
+///
+/// **Provenance is not here.** The "forked from X · 3 days ago" line the
+/// spike shows lives on `PackageMeta.provenance` and reaches the UI only
+/// through `UiPackageCard` — and `view.home` is `None` while an editor is
+/// open, so an open project cannot see its own provenance today. The
+/// panel's Where sub-line says what this surface actually knows; carrying
+/// provenance onto `ProjectEditorView` is core work, deliberately not done
+/// here (noted for P5/G1).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one gather point; every argument is a distinct live source"
+)]
+fn project_popover_inputs(
+    relationship: ProjectRelationship,
+    route: &StudioRoute,
+    project_name: Option<&str>,
+    library_uid: Option<String>,
+    roster_state: &RosterState,
+    roster: ProjectRoster,
+    tx: CommandSender,
+    on_action: EventHandler<UiAction>,
+    toasts: crate::base::Toasts,
+) -> ProjectPopoverInputs {
+    let url = match route {
+        // The example's canonical address is the bare slug (PD3).
+        StudioRoute::Example { slug, .. } => Some(ShareUrl {
+            origin: current_origin(),
+            slug: slug.clone(),
+            uid: None,
+        }),
+        StudioRoute::Project { uid, .. } => Some(ShareUrl {
+            origin: current_origin(),
+            slug: project_name
+                .map(share_link::slugify)
+                .filter(|slug| !slug.is_empty())
+                .unwrap_or_default(),
+            uid: Some(*uid),
+        }),
+        _ => None,
+    };
+
+    // Access is administrable by the people the service put on the roster —
+    // except an editor on somebody ELSE's project, who sees the roster they
+    // are on and administers nothing.
+    let roster_facts = match roster_state {
+        RosterState::Ready {
+            access, members, ..
+        } => Some(RosterFacts {
+            access: *access,
+            people: people_of(members, (roster.me_email)().as_deref()),
+            busy: (roster.busy)(),
+            can_administer: relationship != ProjectRelationship::MemberOfSomeoneElses,
+        }),
+        _ => None,
+    };
+
+    // The publish line, from the ledger the auto-publish driver keeps for
+    // this tab. No row is not a failure — it is a driver that has not
+    // concluded a trip for this project — and the panel says so.
+    let publish = library_uid
+        .as_ref()
+        .filter(|_| relationship == ProjectRelationship::MineLocal)
+        .and_then(|uid| {
+            crate::cloud::sync::sync_status::snapshot()
+                .rows
+                .into_iter()
+                .find(|row| &row.uid == uid)
+        })
+        .map(|row| PublishStatus {
+            label: row.kind.label().to_string(),
+            detail: row.detail,
+            trouble: row.kind.is_failure(),
+        });
+
+    let transient = matches!(
+        relationship,
+        ProjectRelationship::Example | ProjectRelationship::ViewingSomeoneElses
+    );
+    let (on_fork, fork_blocked) = if transient {
+        (
+            Some(EventHandler::new(move |()| fork_transient_session(&tx))),
+            String::new(),
+        )
+    } else if let Some(uid) = library_uid {
+        let duplicate = home_action(HomeOp::DuplicatePackage { uid });
+        (
+            Some(EventHandler::new(move |()| {
+                on_action.call(duplicate.clone())
+            })),
+            String::new(),
+        )
+    } else {
+        (
+            None,
+            "This project has no package in your library to duplicate.".to_string(),
+        )
+    };
+
+    let copy_url = url.as_ref().map(ShareUrl::absolute);
+    let on_copy = copy_url.map(|copy_url| {
+        EventHandler::new(move |()| {
+            crate::clipboard::write_text(&copy_url);
+            let mut toasts = toasts;
+            toasts.say("Link copied");
+        })
+    });
+
+    ProjectPopoverInputs {
+        url,
+        roster: roster_facts,
+        publish,
+        on_fork,
+        fork_blocked,
+        on_copy,
+        on_access: Some(roster.on_access),
+        on_add: Some(roster.on_add),
+        on_remove: Some(roster.on_remove),
+    }
 }
 
 /// Decide what arriving at `target` does to `session` (ruling R8-4).

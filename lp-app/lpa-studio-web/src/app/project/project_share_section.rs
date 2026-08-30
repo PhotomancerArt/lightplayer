@@ -94,9 +94,15 @@ pub fn ProjectShareSection(
 
 /// One share affordance: icon, label, and a disabled state that explains
 /// itself through the row's title.
+///
+/// Shared with the relationship panel's ⋯ overflow
+/// (`app::share::project_relationship_panel`), which carries Download .zip
+/// and Copy as JSON — the same two forms, the same dirty-disable rule, and
+/// the same explanatory line. This section retires in P5; the rows survive
+/// in the popover.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ShareRow(
+pub(crate) fn ShareRow(
     label: &'static str,
     hint: &'static str,
     icon: StudioIconName,

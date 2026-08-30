@@ -108,7 +108,7 @@ fn url() -> ShareUrl {
     ShareUrl {
         origin: "lightplayer.app".to_string(),
         slug: "radiance-dome".to_string(),
-        uid: PrefixedUid::mint(UidPrefix::Project, &[11u8; 16]),
+        uid: Some(PrefixedUid::mint(UidPrefix::Project, &[11u8; 16])),
     }
 }
 

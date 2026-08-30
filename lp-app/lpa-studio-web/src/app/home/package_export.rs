@@ -17,7 +17,7 @@ use lpa_studio_core::UiPackageCard;
 
 /// What a package is being exported as.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ExportForm {
+pub enum ExportForm {
     /// A `.zip` download.
     Zip,
     /// An `lp.package` envelope on the clipboard.
@@ -27,7 +27,7 @@ pub(crate) enum ExportForm {
 /// Identify a package for export. The card carries both fields already;
 /// the editor popup supplies them from the open project.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ExportTarget {
+pub struct ExportTarget {
     /// `prj…` uid or slug — anything `LibraryStore::resolve_key` takes.
     pub uid: String,
     /// Human-facing slug, used for the download filename.
@@ -46,7 +46,7 @@ impl From<&UiPackageCard> for ExportTarget {
 /// Export a package. Best-effort: failures log and give up, matching the
 /// house style for browser-edge work.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn export_package_as(target: ExportTarget, form: ExportForm) {
+pub fn export_package_as(target: ExportTarget, form: ExportForm) {
     use lpa_studio_core::PackageEnvelope;
     use lpa_studio_core::app::library::{LibraryStore, export_package};
 
@@ -109,7 +109,7 @@ pub(crate) fn export_package_as(target: ExportTarget, form: ExportForm) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn export_package_as(_target: ExportTarget, _form: ExportForm) {}
+pub fn export_package_as(_target: ExportTarget, _form: ExportForm) {}
 
 /// Host builds (story capture, view tests) have no browser to download to.
 #[cfg(not(target_arch = "wasm32"))]

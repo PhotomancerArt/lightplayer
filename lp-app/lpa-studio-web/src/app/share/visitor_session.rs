@@ -150,7 +150,7 @@ impl VisitorSession {
         Some(ShareUrl {
             origin: current_origin(),
             slug: lpc_cloud_api::share_link::slugify(&ux.name),
-            uid,
+            uid: Some(uid),
         })
     }
 

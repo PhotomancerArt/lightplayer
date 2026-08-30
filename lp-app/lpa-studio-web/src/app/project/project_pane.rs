@@ -28,8 +28,9 @@
 //! affordances, any sync issue, and the tree on the panel's own background.
 //! The dock is already titled "Nodes", so a card inside it was box-in-box; and
 //! the popup that used to hang off this header lives on the header
-//! session·project control instead — [`ProjectDetailSections`] under its
-//! PROJECT segment, the pending edits under its CHANGES segment
+//! session·project control instead — the relationship panel under its
+//! PROJECT segment (which reaches [`ProjectDetailSections`] through its ⋯
+//! menu's Details row), the pending edits under its CHANGES segment
 //! (single-session policy). Every other mount keeps the card, header, and
 //! popup exactly as before.
 
@@ -109,6 +110,14 @@ impl ProjectDetailContent {
     /// Unsaved persisted edits — the header control's amber count.
     pub fn unsaved_count(&self) -> usize {
         self.dirty.persisted
+    }
+
+    /// The open project's library package, as `(uid, slug)` — `None` for
+    /// the storeless demo path or a device-hosted project this library does
+    /// not know. The relationship panel's ⋯ export rows and its Duplicate
+    /// verb both address the package by this uid.
+    pub fn library_identity(&self) -> Option<&(String, String)> {
+        self.library_identity.as_ref()
     }
 
     /// The controller's contextual header actions (Save / Revert-to-saved),
@@ -339,10 +348,10 @@ fn ProjectDetailPopover(
 
 /// The project popup's SECTIONS, without the popover around them — the
 /// re-housable unit (ruling 2). Rendered inside the project pane's own [i]
-/// on every non-workbench mount, and inside the header control's PROJECT
-/// segment popover on every mount (single-session policy) — the workbench's
-/// flat Nodes dock has no header of its own to hang a popup from, so that
-/// mount is the ONLY place its project state shows.
+/// on every non-workbench mount, and behind the header control's project
+/// popover ⋯ menu's **Details** row on every mount (single-session policy)
+/// — the workbench's flat Nodes dock has no header of its own to hang a
+/// popup from, so that mount is the ONLY place its project state shows.
 ///
 /// Purely presentational now: the change lists (which carried the per-entry
 /// revert dispatch) moved to the changes popup, so these sections take no

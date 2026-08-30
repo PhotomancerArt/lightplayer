@@ -8,10 +8,16 @@
 //! (`none | view | edit`), orthogonally to who has been added by name, and
 //! how a project leaves the library without anything being destroyed.
 //!
-//! - [`share_panel`] — the pill and the panel, pure and story-mountable.
-//! - [`project_share_control`] — the live half: one `GetProject` decides
-//!   whether the door exists at all, and the panel's events become
-//!   `SetAccess` / `AddMember` / `RemoveMember`.
+//! - [`share_panel`] — the pill and the panel, pure and story-mountable;
+//!   its Access and URL pieces are also the relationship panel's.
+//! - [`project_roster`] — the live half: one `GetProject` decides whether
+//!   the door exists at all, and the events become `SetAccess` /
+//!   `AddMember` / `RemoveMember`. Both sharing surfaces call its hook.
+//! - [`project_share_control`] — the pill's thin mount over that hook,
+//!   plus the archive verb (retires in relationship-control P5).
+//! - [`project_relationship_panel`] — the PROJECT segment's popover
+//!   (relationship-control D9): one skeleton — Where / Access / action row
+//!   — rendered for all five [`ProjectRelationship`] states.
 //! - [`share_person`] / [`share_url`] — the two small view models the panel
 //!   renders from, host-tested away from the markup.
 //! - [`archived_projects`] — the Projects page's collapsed archive drawer
@@ -29,6 +35,10 @@
 pub mod archived_projects;
 #[cfg(feature = "stories")]
 pub(crate) mod archived_projects_stories;
+pub mod project_relationship_panel;
+#[cfg(feature = "stories")]
+pub(crate) mod project_relationship_panel_stories;
+pub mod project_roster;
 pub mod project_share_control;
 pub mod relationship;
 pub mod share_panel;
@@ -44,6 +54,10 @@ pub mod visitor_popover;
 pub mod visitor_session;
 
 pub use archived_projects::{ArchivedProject, ArchivedProjectsList, ArchivedProjectsSection};
+pub use project_relationship_panel::{
+    ForkVerb, PanelTab, ProjectRelationshipPanel, PublishStatus, RosterFacts, fork_verb,
+};
+pub use project_roster::{ProjectRoster, RosterState, use_project_roster, viewer_actor};
 pub use project_share_control::{ProjectShareControl, archive_project};
 pub use relationship::{
     ProjectRelationship, RelationshipFace, derive_relationship, fork_transient_session,
