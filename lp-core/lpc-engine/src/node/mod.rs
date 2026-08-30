@@ -36,6 +36,30 @@ pub use scope::ScopeRef;
 pub use sync::{tree_deltas_since, tree_deltas_since_iter};
 pub use tree_error::TreeError;
 
+/// Size a node's persistent scratch buffer, failing softly on OOM.
+///
+/// Per-tick read-back sinks hold one reusable buffer and resize it here
+/// instead of materializing a fresh `Vec` every tick (the per-tick clone
+/// was enough to reset a playing classic — see the flash-write-wedge
+/// defect's memory findings). Growth goes through `try_reserve_exact`, so
+/// on a memory-starved device the tick fails with a [`NodeError`] instead
+/// of aborting inside the allocator.
+pub fn ensure_scratch_len<T: Clone + Default>(
+    scratch: &mut alloc::vec::Vec<T>,
+    len: usize,
+) -> Result<(), NodeError> {
+    let additional = len.saturating_sub(scratch.len());
+    if additional > 0 {
+        scratch.try_reserve_exact(additional).map_err(|_| {
+            NodeError::msg(alloc::format!(
+                "scratch buffer allocation failed ({len} elements)"
+            ))
+        })?;
+    }
+    scratch.resize(len, T::default());
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) fn test_placeholder_spine() -> lpc_model::NodeInvocation {
     lpc_model::NodeInvocation::new(lpc_model::ArtifactSpec::path("__test__.vis"))

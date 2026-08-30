@@ -20,7 +20,7 @@ use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
     initialize_channel_accumulators, mapping_from_map2d_doc,
 };
-use lp_gfx::{SampleOutHandle, SamplePointsHandle, TextureData, TextureHandle};
+use lp_gfx::{SampleOutHandle, SamplePointsHandle, TextureHandle};
 use lpc_model::nodes::texture::TextureFormat;
 
 use crate::node::{
@@ -159,6 +159,10 @@ pub struct FixtureNode {
     last_visual_product: Option<VisualProduct>,
     last_settings: Option<FixtureRenderSettings>,
     render_target: Option<TextureHandle>,
+    /// Persistent buffer the TextureArea/1D paths read `render_target` back
+    /// into each tick. A fresh full-texture `Vec` per tick is a device OOM
+    /// on large fixtures (flash-write-wedge defect, remaining exposure).
+    read_back_scratch: alloc::vec::Vec<u8>,
     sample_points: Option<FixtureSamplePoints>,
     sample_target: Option<SampleOutHandle>,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
@@ -217,6 +221,7 @@ impl FixtureNode {
             last_visual_product: None,
             last_settings: None,
             render_target: None,
+            read_back_scratch: alloc::vec::Vec::new(),
             sample_points: None,
             sample_target: None,
             precomputed: None,
@@ -1245,10 +1250,13 @@ impl FixtureNode {
             let texture =
                 ensure_fixture_render_target(&mut self.render_target, &texture_request, ctx)?;
             ctx.render_texture_into(visual_product, &texture_request, texture)?;
-            let texture_data = ctx
-                .graphics()
+            let byte_len = texture.width() as usize
+                * texture.height() as usize
+                * texture.format().bytes_per_pixel();
+            crate::node::ensure_scratch_len(&mut self.read_back_scratch, byte_len)?;
+            ctx.graphics()
                 .ok_or_else(|| NodeError::msg("fixture strip accumulation requires graphics"))?
-                .read_back(texture)
+                .read_back_into(texture, &mut self.read_back_scratch)
                 .map_err(err_ctx("fixture strip render target read back"))?;
             let channels = self
                 .direct_channels
@@ -1256,7 +1264,8 @@ impl FixtureNode {
                 .map(|(_, channels)| channels.as_slice())
                 .ok_or_else(|| NodeError::msg("fixture strip render missing cached channels"))?;
             let accumulators = accumulate_fixture_channels_from_strip(
-                &texture_data,
+                texture,
+                &self.read_back_scratch,
                 channels,
                 settings.wire_reversed,
             )?;
@@ -1287,13 +1296,17 @@ impl FixtureNode {
         };
         let texture = ensure_fixture_render_target(&mut self.render_target, &texture_request, ctx)?;
         ctx.render_texture_into(visual_product, &texture_request, texture)?;
-        let texture_data = ctx
-            .graphics()
+        let byte_len = texture.width() as usize
+            * texture.height() as usize
+            * texture.format().bytes_per_pixel();
+        crate::node::ensure_scratch_len(&mut self.read_back_scratch, byte_len)?;
+        ctx.graphics()
             .ok_or_else(|| NodeError::msg("fixture texture accumulation requires graphics"))?
-            .read_back(texture)
+            .read_back_into(texture, &mut self.read_back_scratch)
             .map_err(err_ctx("fixture render target read back"))?;
-        let accumulators = accumulate_fixture_channels_from_texture_data(
-            &texture_data,
+        let accumulators = accumulate_fixture_channels_from_texture_bytes(
+            texture,
+            &self.read_back_scratch,
             mapping_entries,
             settings.width,
             settings.height,
@@ -1545,11 +1558,13 @@ fn fixture_strip_point_coords(count: u32, wire_reversed: bool) -> Vec<i32> {
 }
 
 /// One texel per lamp, straight off an `(N, 1)` strip render — the 1D
-/// answer to `accumulate_fixture_channels_from_texture_data`. There is no
+/// answer to `accumulate_fixture_channels_from_texture_bytes`. There is no
 /// area to integrate here, so there is no sampler and no u8 round trip:
-/// the RGBA16 texel IS the lamp value.
+/// the RGBA16 texel IS the lamp value. `bytes` is the target read back
+/// into the caller's scratch, described by the handle's shape.
 fn accumulate_fixture_channels_from_strip(
-    texture: &TextureData,
+    texture: &TextureHandle,
+    bytes: &[u8],
     channels: &[u32],
     wire_reversed: bool,
 ) -> Result<ChannelAccumulators, NodeError> {
@@ -1575,7 +1590,6 @@ fn accumulate_fixture_channels_from_strip(
         b: alloc::vec![Q32::ZERO; len],
         max_channel,
     };
-    let bytes = texture.bytes();
     for (index, channel) in channels.iter().enumerate() {
         // The reversed wire reads the strip back to front: lamp `k` takes
         // texel `N-1-k` (the along-the-wire direction option).
@@ -1940,8 +1954,9 @@ fn apply_brightness_unorm16(value: u16, brightness_u8: u8, brightness: Q32) -> u
     Q32((((i64::from(value)) * i64::from(brightness.0)) >> 16) as i32).to_u16_saturating()
 }
 
-fn accumulate_fixture_channels_from_texture_data(
-    texture: &TextureData,
+fn accumulate_fixture_channels_from_texture_bytes(
+    texture: &TextureHandle,
+    bytes: &[u8],
     mapping_entries: &[PixelMappingEntry],
     width: u32,
     height: u32,
@@ -1952,7 +1967,7 @@ fn accumulate_fixture_channels_from_texture_data(
     {
         return Ok(accumulate_from_mapping(
             mapping_entries,
-            texture.bytes(),
+            bytes,
             TextureFormat::Rgba16,
             width,
             height,
@@ -1963,7 +1978,7 @@ fn accumulate_fixture_channels_from_texture_data(
         texture.width(),
         texture.height(),
         texture.format(),
-        texture.bytes().to_vec(),
+        bytes.to_vec(),
     )
     .map_err(err_ctx("fixture render target product"))?;
     accumulate_fixture_channels_from_texture_product(

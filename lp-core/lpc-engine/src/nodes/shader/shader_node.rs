@@ -3677,6 +3677,10 @@ mod tests {
             self.inner.read_back(texture)
         }
 
+        fn read_back_into(&self, texture: &TextureHandle, out: &mut [u8]) -> Result<(), GfxError> {
+            self.inner.read_back_into(texture, out)
+        }
+
         fn create_sample_points(&self, count: u32) -> Result<SamplePointsHandle, GfxError> {
             self.inner.create_sample_points(count)
         }
