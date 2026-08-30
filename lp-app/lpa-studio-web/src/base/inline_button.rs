@@ -5,15 +5,22 @@
 //! `h-6` footprint, a **colored border** in the action's tone family, a
 //! clear toned glyph, and the dark terminal background.
 //!
-//! Tone picks meaning, not decoration: ordinary available actions wear the
-//! brand accent (teal); binding actions wear violet (the app-wide bound
-//! convention); revert/discard-edit wears the warning amber. Hover fills
-//! with the tone's wash/background so the button answers the pointer in its
-//! own color. Disabled keeps the identical footprint on the muted surface
-//! (rows stay anchored, the control just goes inert).
+//! Tone picks meaning, not decoration: ordinary available actions are
+//! bright neutral (the accent reckoning, D1 2026-08-30 — chrome holds no
+//! hue at rest); binding actions wear violet (the app-wide bound
+//! convention); revert/discard-edit wears the warning amber. Status tones
+//! answer the pointer by filling with their own wash/background. Disabled
+//! keeps the identical footprint on the muted surface (rows stay anchored,
+//! the control just goes inert).
+//!
+//! Aurora R2 (2026-08-29) adds one split on top of that: the two
+//! decoration-free tones (Action, Neutral) also take the iridescent hover
+//! ring, and every enabled tone takes the app-wide focus ring. Status tones
+//! deliberately do NOT take the ring — see [`tone_takes_the_ring`].
 
 use dioxus::prelude::*;
 
+use crate::base::interaction_light::{focus_ring_class, ir_ring_class};
 use crate::base::{StudioIcon, StudioIconName};
 
 /// Glyph size inside the fixed `h-6 w-6` icon-only shape.
@@ -21,15 +28,17 @@ pub const INLINE_ICON_SIZE: u32 = 14;
 /// Glyph size beside text in the content-width shape.
 pub const INLINE_TEXT_ICON_SIZE: u32 = 12;
 
-/// Tone family for an inline button. The default is [`Self::Accent`]:
-/// gestures are available actions, so they wear the brand accent rather
-/// than a status family — status tones are opted into only where the action
-/// belongs to that family's meaning.
+/// Tone family for an inline button. The default is [`Self::Action`]:
+/// gestures are available actions, so they wear the bright-neutral action
+/// tone rather than a status family — status tones are opted into only
+/// where the action belongs to that family's meaning.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum InlineButtonTone {
-    /// Ordinary available actions: brand-accent (teal) border and glyph.
+    /// Ordinary available actions: bright neutral — one visible lightness
+    /// step above [`Self::Neutral`] (border-strong + strong glyph). The
+    /// difference between the two hue-less tones is lightness, never hue.
     #[default]
-    Accent,
+    Action,
     /// Truly tone-free chrome (cancel/dismiss of a transient UI state).
     Neutral,
     Good,
@@ -139,11 +148,27 @@ fn compose(base: &str, tone: InlineButtonTone, disabled: bool) -> String {
         // Identical footprint on the muted surface: inert, still anchored.
         format!("{base} tw:border-border-muted tw:bg-card-muted tw:text-subtle-foreground")
     } else {
-        format!(
-            "{base} tw:cursor-pointer tw:transition-colors tw:bg-terminal {}",
+        let mut class = format!(
+            "{base} tw:cursor-pointer tw:transition-colors tw:bg-terminal {} {}",
+            focus_ring_class(),
             tone_class(tone)
-        )
+        );
+        if tone_takes_the_ring(tone) {
+            class.push(' ');
+            class.push_str(ir_ring_class());
+        }
+        class
     }
+}
+
+/// Whether a tone answers the pointer with the iridescent ring or with its
+/// own hue. Only the two decoration-free tones take the ring: a STATUS tone
+/// means something, and "status never relies on color alone" also means a
+/// status control must not flash rainbow on hover. The ring is an
+/// absolutely-positioned pseudo-element, so this choice never moves a
+/// button's footprint either way.
+fn tone_takes_the_ring(tone: InlineButtonTone) -> bool {
+    matches!(tone, InlineButtonTone::Action | InlineButtonTone::Neutral)
 }
 
 /// Tone fragment: colored border + toned glyph at rest, tone-filled on
@@ -152,8 +177,8 @@ fn compose(base: &str, tone: InlineButtonTone, disabled: bool) -> String {
 /// state, not gestures.
 fn tone_class(tone: InlineButtonTone) -> &'static str {
     match tone {
-        InlineButtonTone::Accent => {
-            "tw:border-accent-border tw:text-accent tw:hover:border-accent tw:hover:bg-accent-wash"
+        InlineButtonTone::Action => {
+            "tw:border-border-strong tw:text-strong-foreground tw:hover:border-selection-border tw:hover:bg-card-raised"
         }
         InlineButtonTone::Neutral => {
             "tw:border-border-strong tw:text-muted-foreground tw:hover:border-selection-border tw:hover:text-strong-foreground"
@@ -187,7 +212,7 @@ mod tests {
     use super::*;
 
     const ALL_TONES: [InlineButtonTone; 9] = [
-        InlineButtonTone::Accent,
+        InlineButtonTone::Action,
         InlineButtonTone::Neutral,
         InlineButtonTone::Good,
         InlineButtonTone::Working,
@@ -239,18 +264,44 @@ mod tests {
 
     #[test]
     fn disabled_keeps_the_footprint_and_drops_the_affordance() {
-        let class = inline_icon_button_class(InlineButtonTone::Accent, true);
+        let class = inline_icon_button_class(InlineButtonTone::Action, true);
         assert!(!class.contains("tw:cursor-pointer"), "{class}");
         assert!(!class.contains("tw:hover:"), "{class}");
         assert!(class.contains("tw:bg-card-muted"), "{class}");
     }
 
     #[test]
+    fn only_the_decoration_free_tones_take_the_iridescent_ring() {
+        // A status tone means something; the spectrum ring is decoration.
+        // Letting Error or Bound flash rainbow on hover would put a second,
+        // meaningless color on a control whose color IS the message.
+        for tone in ALL_TONES {
+            let class = inline_icon_button_class(tone, false);
+            let expected = matches!(tone, InlineButtonTone::Action | InlineButtonTone::Neutral);
+            assert_eq!(class.contains("ux-ir-ring"), expected, "{class}");
+        }
+    }
+
+    #[test]
+    fn enabled_buttons_are_keyboard_visible_and_disabled_ones_are_inert() {
+        for tone in ALL_TONES {
+            assert!(
+                inline_icon_button_class(tone, false).contains("ux-focus-ring"),
+                "{tone:?}"
+            );
+        }
+        // Disabled buttons are not focusable and take no interaction light.
+        let class = inline_icon_button_class(InlineButtonTone::Action, true);
+        assert!(!class.contains("ux-ir-ring"), "{class}");
+        assert!(!class.contains("ux-focus-ring"), "{class}");
+    }
+
+    #[test]
     fn violet_stays_the_binding_convention() {
         // Bound violet is the app-wide binding signal: no other tone may
-        // borrow it, and the default tone is Accent — an ordinary gesture
+        // borrow it, and the default tone is Action — an ordinary gesture
         // never accidentally reads as bound.
-        assert_eq!(InlineButtonTone::default(), InlineButtonTone::Accent);
+        assert_eq!(InlineButtonTone::default(), InlineButtonTone::Action);
         for tone in ALL_TONES {
             let class = inline_icon_button_class(tone, false);
             assert_eq!(

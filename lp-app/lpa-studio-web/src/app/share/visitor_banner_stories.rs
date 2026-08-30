@@ -18,7 +18,7 @@ use crate::app::share::visitor_popover::VisitorSharePopover;
 
 #[story(
     label = "Visitor banner, pristine",
-    description = "A tracking copy that IS the service's line: live tint, \"updates arrive as they happen\", quiet Copy link and the accent Fork. Project-name-centric copy — the API exposes no owner profile (deviation from the spike's owner-name phrasing, flagged for G1)."
+    description = "A tracking copy that IS the service's line: live tint, \"updates arrive as they happen\", quiet Copy link and the gradient Fork. Project-name-centric copy — the API exposes no owner profile (deviation from the spike's owner-name phrasing, flagged for G1)."
 )]
 pub(crate) fn visitor_banner_pristine() -> Element {
     strip(VisitorBannerView::ViewPristine {

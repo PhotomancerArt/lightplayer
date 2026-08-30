@@ -32,11 +32,11 @@
     --color-subtle-foreground: var(--studio-color-text-subtle);
     --color-dim-foreground: var(--studio-color-text-dim);
     --color-heading: var(--studio-color-heading);
-    --color-accent: var(--studio-color-accent);
-    --color-accent-border: var(--studio-color-accent-border);
-    --color-accent-hover: var(--studio-color-accent-hover);
-    --color-accent-foreground: var(--studio-color-accent-text-on-fill);
-    --color-accent-wash: var(--studio-color-accent-wash);
+
+    --color-focus-ring: var(--studio-color-focus-ring);
+    --color-glass-bg: var(--studio-glass-bg);
+    --color-glass-edge: var(--studio-glass-edge);
+    --color-glass-border: var(--studio-glass-border);
 
     --color-selection-border: var(--studio-color-selection-border);
     --color-selection-bg: var(--studio-color-selection-bg);
@@ -71,6 +71,9 @@
     --color-status-export-bg: var(--studio-status-export-bg);
     --color-status-export-border: var(--studio-status-export-border);
     --color-status-export-foreground: var(--studio-status-export-text);
+    --color-status-example-bg: var(--studio-status-example-bg);
+    --color-status-example-border: var(--studio-status-example-border);
+    --color-status-example-foreground: var(--studio-status-example-text);
 
     --color-step-marker: var(--studio-step-marker-bg);
     --color-step-active: var(--studio-step-active-bg);

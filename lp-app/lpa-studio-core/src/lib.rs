@@ -5,11 +5,7 @@
 /// FFI lives in lpa-link; stories stay prop-injected).
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Provider;
-pub use lpa_link::{
-    DeviceEvent, DeviceEventSink, DeviceLineOrigin, DeviceSession,
-    DeviceSnapshot as LinkDeviceSnapshot, DeviceState, DeviceTimers, LinkEndpointId,
-    LinkEndpointStatus, LinkProviderKind,
-};
+pub use lpa_link::{LinkEndpointId, LinkEndpointStatus, LinkProviderKind};
 pub use lpc_model::{
     ArtifactLocation, ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d,
     ControlLayout2d, ControlPathSpan2d, ControlSampleEncoding, ControlSampleLayout,
@@ -37,20 +33,19 @@ pub use app::agent::{
 pub use app::bus::{
     UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
 };
-pub use app::device::{
-    BootloaderEntryFlow, ConnectFlowState, ConnectedDeviceSummary, DEPLOY_NODE_ID, DeployOp,
-    DeployTarget, DeviceController, DeviceOp, DeviceOpenOutcome, DeviceTarget, EndpointChoice,
-    GrantPortPlan, GrantedPortSummary, PortChoice, ProviderChoice, RecoveryInstructions,
-    RecoveryStep, UiDeviceBackup, plan_for_granted_ports,
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+pub use app::devices::BrowserSerialTransport;
+pub use app::devices::{
+    DeviceEffects, DeviceRoster, DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture,
+    DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink, JournalLine,
+    device_escape_action, device_status_kind, pending_escape_action,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::home::{
-    CardOp, CardOpPhase, CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS,
-    GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeDeviceEvidence, HomeOp,
-    HomePoolEvidence, HomeSimEvidence, ProjectTemplate, SIM_CARD_KEY, SetupSession,
-    UiCardConnection, UiDeviceCard, UiDeviceProjectChip, UiExampleCard, UiHomeView, UiPackageCard,
-    UiSetupProject, UiSetupRailPhase, UiSetupRailStep, UiSetupWizard, ZipBytes,
-    generate_board_project, setup_rail, template_project_files,
+    CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS, GenerateProjectError,
+    GeneratedProject, HOME_NODE_ID, HomeOp, HomePoolEvidence, HomeSimEvidence, ProjectTemplate,
+    SIM_CARD_KEY, UiExampleCard, UiHomeView, UiPackageCard, UiSimCard, UiSimProjectChip, ZipBytes,
+    generate_board_project, template_project_files,
 };
 pub use app::node::{
     UiAssetEditor, UiAssetEditorKind, UiBindingAuthoring, UiBindingAuthoringDirection,
@@ -114,36 +109,23 @@ pub use app::rich_object::{
 };
 pub use app::roster::board_display_name;
 pub use app::roster::{
-    BundledFirmware, CardTabView, ConnectEvidence, ConnectPhase, DegradedReason, DeviceCardTab,
-    DeviceDetailAffordance, DeviceFormatStanding, DeviceRichInput, RosterAffordance,
-    RosterCardState, RosterEvidence, RosterStateSpec, RosterTreatment, SimDetailAffordance,
-    SimRichInput, derive_roster_card_state, device_card_tabs, device_rich_object,
-    firmware_update_available, sim_rich_object,
+    CardTab, CardTabView, SimCardState, SimDetailAffordance, SimRichInput, card_tabs,
+    sim_rich_object,
 };
 pub use app::runtime_pool::{
-    CardFeedApply, CardFeedState, DEVICE_SESSION_CAPACITY, DeviceHandle, InstallRefusal, RuntimeId,
-    RuntimeKind, RuntimePayload, RuntimePool, RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment,
-    SimLoadedProject,
+    CardFeedApply, CardFeedState, RuntimeId, RuntimeOp, RuntimePool, RuntimeSession,
+    SIM_SESSION_CAPACITY, SimAttachment, SimLink, SimLoadedProject,
 };
 pub use app::server::{
-    LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,
-    ServerState, StudioCreateNode, StudioFsRead, StudioOverlayCommit, StudioOverlayMutation,
-    StudioOverlayRead, StudioProjectRead, StudioProjectReadOutcome, StudioRemoveNode,
-    StudioServerClient,
+    LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerSnapshot, ServerState,
+    StudioCreateNode, StudioFsRead, StudioOverlayCommit, StudioOverlayMutation, StudioOverlayRead,
+    StudioProjectRead, StudioProjectReadOutcome, StudioRemoveNode, StudioServerClient,
 };
 pub use app::settings::{
     AgentProvider, AgentProviderGuidance, AgentSettings, BrowserFacts, COMMON_LOCAL_SERVERS,
     DEFAULT_AGENT_MODEL, FindingKind, LocalModelProbeState, LocalServer, ProbeFinding, ProbeLevel,
     ProbeOutcome, ProbeSummary, SettingsCommand, SettingsLayer, SettingsStore, StudioSettings,
     UiAgentSettingsView, UiModelOption, UiSettingsView, provider_guidance,
-};
-pub use app::setup_flow::{
-    BoardPickState, BoardProbe, BoardVerdict, CloseReason, ConnectHint, HardwareSetupTarget,
-    PortRequestStrategy, ProbeEvidence, ProvisionPhase, ProvisionState, SetupCapabilities,
-    SetupCommand, SetupContext, SetupDispatch, SetupEvent, SetupEventKind, SetupExecutorContext,
-    SetupFlow, SetupGesture, SetupGrantedPort, SetupState, SetupStateKind, SetupStep, SetupTarget,
-    SimulatorSetupTarget, classify_board, derive_device_name, dispatch_for, known_device_for,
-    month_day_label, unique_device_name,
 };
 pub use app::share::{
     NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,
@@ -169,6 +151,19 @@ pub use core::{
     PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE,
     PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView,
     UiProgress, UiStatus, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
+};
+/// The device model's own vocabulary, re-exported so the web crate renders
+/// and dispatches it without a second dependency edge. The model is the ONE
+/// device vocabulary — there is no `Ui*` mirror of it, on purpose.
+pub use lpa_devices::view::{
+    ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape, OutcomeView,
+    PendingLinkView, RosterView,
+};
+pub use lpa_devices::{
+    Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,
+    EndpointKey as DeviceEndpointKey, Event as DeviceEvent, Input as DeviceInput,
+    LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo, Millis as DeviceMillis,
+    RosterConfig as DeviceRosterConfig,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";

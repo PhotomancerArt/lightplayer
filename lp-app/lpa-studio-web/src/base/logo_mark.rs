@@ -91,7 +91,7 @@ pub(crate) fn fillet_tri_path(cx: f32, cy: f32, r: f32, rho: f32) -> String {
 
 /// The brand mark at `size`×`size` CSS pixels, entirely `currentColor`.
 /// `animated` is the icon-only form: the play triangle cycles the LED
-/// rainbow (starts on the brand accent, so frozen frames look canonical).
+/// rainbow (starts on the brand green, so frozen frames look canonical).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn LogoMark(size: u32, #[props(default = false)] animated: bool) -> Element {
@@ -228,7 +228,7 @@ pub fn LogoStacked(
 
 /// `public/favicon.svg`, generated from the same geometry as [`LogoMark`].
 /// Ink follows the browser's color scheme; the play triangle holds the brand
-/// accent (the static frame of the icon-only animation).
+/// brand green (the static frame of the icon-only animation).
 pub fn favicon_svg() -> String {
     let (px, py, pw, ph, prx, psw) = PKG;
     let (padw, padh, padrx) = PAD_SIZE;

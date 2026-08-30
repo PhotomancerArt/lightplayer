@@ -78,8 +78,11 @@ pub fn IconActionButton(
     }
 }
 
+/// Material-free (P4): every caller renders this through the merged-outline
+/// popover (`ux-svg-popover-panel` forces background/border-color/shadow to
+/// nothing — `style.css`), so only layout and type survive here.
 fn default_icon_menu_popup_class() -> &'static str {
-    "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-3 tw:text-sm tw:text-muted-foreground tw:shadow-lg"
+    "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-3 tw:rounded-md tw:border tw:p-3 tw:text-sm tw:text-muted-foreground"
 }
 
 /// Popover chrome class for a tone: sets the merged-outline gradient
@@ -89,7 +92,7 @@ pub(crate) fn icon_menu_chrome_class(tone: IconMenuTone) -> &'static str {
     match tone {
         IconMenuTone::Quiet => "ux-popover-chrome-quiet",
         IconMenuTone::Neutral => "ux-popover-chrome-neutral",
-        IconMenuTone::Accent => "ux-popover-chrome-accent",
+        IconMenuTone::Action => "ux-popover-chrome-neutral",
         IconMenuTone::Good => "ux-popover-chrome-good",
         IconMenuTone::Working => "ux-popover-chrome-working",
         IconMenuTone::Live => "ux-popover-chrome-live",
@@ -105,7 +108,7 @@ pub(crate) fn icon_menu_chrome_class(tone: IconMenuTone) -> &'static str {
 pub enum IconMenuTone {
     Quiet,
     Neutral,
-    Accent,
+    Action,
     Good,
     Working,
     /// Live-only (transient) edit state, blue.
@@ -156,11 +159,11 @@ fn icon_menu_class(tone: IconMenuTone, active: bool) -> &'static str {
         (IconMenuTone::Neutral, true) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-muted tw:p-0 tw:text-muted-foreground tw:transition-colors tw:hover:text-strong-foreground"
         }
-        (IconMenuTone::Accent, false) => {
-            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:transition-colors tw:hover:border-accent-border tw:hover:text-accent"
+        (IconMenuTone::Action, false) => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground"
         }
-        (IconMenuTone::Accent, true) => {
-            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:p-0 tw:text-accent tw:transition-colors tw:hover:border-status-good-foreground tw:hover:text-status-good-foreground"
+        (IconMenuTone::Action, true) => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-selection-border tw:bg-transparent tw:p-0 tw:text-strong-foreground tw:transition-colors"
         }
         (IconMenuTone::Good, _) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-good-border tw:bg-status-good-bg tw:p-0 tw:text-status-good-foreground tw:transition-colors tw:hover:border-status-good-foreground"
@@ -200,11 +203,11 @@ fn icon_menu_hover_class(tone: IconMenuTone, active: bool) -> &'static str {
         (IconMenuTone::Neutral, true) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-muted tw:p-0 tw:text-strong-foreground tw:transition-colors"
         }
-        (IconMenuTone::Accent, false) => {
-            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:p-0 tw:text-accent tw:transition-colors"
+        (IconMenuTone::Action, false) => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:p-0 tw:text-strong-foreground tw:transition-colors"
         }
-        (IconMenuTone::Accent, true) => {
-            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-good-foreground tw:bg-transparent tw:p-0 tw:text-status-good-foreground tw:transition-colors"
+        (IconMenuTone::Action, true) => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-selection-border tw:bg-transparent tw:p-0 tw:text-strong-foreground tw:transition-colors"
         }
         (IconMenuTone::Good, _) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-good-foreground tw:bg-status-good-bg tw:p-0 tw:text-status-good-foreground tw:transition-colors"
@@ -241,8 +244,8 @@ fn icon_menu_open_class(tone: IconMenuTone) -> &'static str {
         IconMenuTone::Neutral => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-subtle tw:p-0 tw:text-strong-foreground"
         }
-        IconMenuTone::Accent => {
-            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:p-0 tw:text-accent"
+        IconMenuTone::Action => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:p-0 tw:text-strong-foreground"
         }
         IconMenuTone::Good => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-good-border tw:bg-status-good-bg tw:p-0 tw:text-status-good-foreground"

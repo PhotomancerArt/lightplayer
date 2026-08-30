@@ -34,7 +34,7 @@ use lpc_cloud_api::request::{ListMyProjects, RestoreProject};
 use lpc_cloud_api::{ProjectMeta, share_link};
 use lpc_history::PrefixedUid;
 
-use crate::base::Toasts;
+use crate::base::{InlineButtonTone, Toasts, inline_text_button_class};
 use crate::cloud::{CloudSession, FetchCloudPort};
 
 /// One archived project, as a row needs it.
@@ -188,7 +188,7 @@ fn ArchivedRow(project: ArchivedProject, on_restore: Option<EventHandler<Prefixe
                 }
             }
             button {
-                class: RESTORE_BUTTON_CLASS,
+                class: inline_text_button_class(InlineButtonTone::Action, false),
                 r#type: "button",
                 title: "Bring this project back to the library",
                 onclick: move |_| {
@@ -196,7 +196,7 @@ fn ArchivedRow(project: ArchivedProject, on_restore: Option<EventHandler<Prefixe
                         on_restore.call(uid);
                     }
                 },
-                span { class: "tw:text-[11.5px] tw:font-semibold", "Restore" }
+                "Restore"
             }
         }
     }
@@ -219,8 +219,6 @@ pub fn archived_of(projects: &[ProjectMeta]) -> Vec<ArchivedProject> {
 
 /// The drawer's own header — a disclosure, not a card.
 const DRAWER_HEADER_CLASS: &str = "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-0.5 tw:py-1 tw:text-left tw:text-subtle-foreground tw:transition-colors tw:hover:text-strong-foreground";
-/// Restore is the loud verb here (the row is otherwise all dim).
-const RESTORE_BUTTON_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-border-strong tw:bg-transparent tw:px-2.5 tw:py-1 tw:text-heading tw:transition-colors tw:hover:border-accent-border tw:hover:bg-accent-wash tw:hover:text-accent";
 
 #[cfg(test)]
 mod tests {
@@ -261,12 +259,10 @@ mod tests {
         assert_eq!(project.path(), format!("/p/{}", project.uid));
     }
 
-    /// No preflight: the drawer's buttons name their own backgrounds.
+    /// No preflight: the drawer's disclosure header names its own background.
     #[test]
-    fn every_button_class_names_a_background() {
-        for class in [DRAWER_HEADER_CLASS, RESTORE_BUTTON_CLASS] {
-            assert!(class.contains("tw:bg-"), "no background in `{class}`");
-        }
+    fn the_drawer_header_names_a_background() {
+        assert!(DRAWER_HEADER_CLASS.contains("tw:bg-"));
     }
 
     fn meta(slug: &str, seed: u8, archived: bool) -> ProjectMeta {

@@ -38,7 +38,10 @@
 
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{GitBranch, Link2, Pencil, Radio};
+use lpa_studio_core::ActionPriority;
 use lpc_history::{ContentHash, ProjectHistory, SyncRelation};
+
+use crate::core::solid_action_class;
 
 /// Which of the strip's two worlds the tracking copy is in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,7 +167,7 @@ pub fn VisitorBanner(
 fn QuietButton(label: &'static str, on_press: Option<EventHandler<()>>) -> Element {
     rsx! {
         button {
-            class: QUIET_BUTTON_CLASS,
+            class: solid_action_class(ActionPriority::Tertiary),
             r#type: "button",
             onclick: move |_| {
                 if let Some(on_press) = on_press {
@@ -179,13 +182,13 @@ fn QuietButton(label: &'static str, on_press: Option<EventHandler<()>>) -> Eleme
     }
 }
 
-/// The accent action — the banner is the fork's home (§3-A note).
+/// The gradient-primary action — the banner is the fork's home (§3-A note).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ForkButton(label: &'static str, on_press: Option<EventHandler<()>>) -> Element {
     rsx! {
         button {
-            class: FORK_BUTTON_CLASS,
+            class: solid_action_class(ActionPriority::Primary),
             r#type: "button",
             onclick: move |_| {
                 if let Some(on_press) = on_press {
@@ -206,9 +209,6 @@ const WARN_TINT: &str = "tw:border-status-warning-border tw:bg-status-warning-bg
 const STRIP_TEXT: &str = "tw:min-w-0 tw:text-xs tw:leading-snug tw:text-muted-foreground";
 const STRONG_TEXT: &str = "tw:font-bold tw:text-strong-foreground";
 const ACTIONS: &str = "tw:ml-auto tw:flex tw:flex-none tw:items-center tw:gap-2";
-/// No preflight (crate README): every button names its own background.
-const QUIET_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-border-strong tw:bg-transparent tw:px-2.5 tw:py-1.5 tw:text-subtle-foreground tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
-const FORK_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-accent-border tw:bg-accent tw:px-2.5 tw:py-1.5 tw:text-accent-foreground tw:transition-colors tw:hover:bg-accent-hover";
 
 #[cfg(test)]
 mod tests {
@@ -301,11 +301,7 @@ mod tests {
         assert!(!should_apply_fast_forward(false, true));
     }
 
-    /// No preflight: every strip button names its own background.
-    #[test]
-    fn every_banner_button_names_a_background() {
-        for class in [QUIET_BUTTON_CLASS, FORK_BUTTON_CLASS] {
-            assert!(class.contains("tw:bg-"), "no background in `{class}`");
-        }
-    }
+    // The strip's Copy/Fork buttons now render through
+    // `solid_action_class` (P4 consolidation) — its own no-preflight
+    // background coverage lives in `action_button.rs`.
 }

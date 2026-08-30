@@ -1,12 +1,9 @@
 //! A "Your projects" gallery card.
 
-use std::cell::RefCell;
-
 use dioxus::prelude::*;
 use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
-    ActionConfirmation, ControllerId, DEPLOY_NODE_ID, DeployOp, DeviceTarget, HOME_NODE_ID, HomeOp,
-    PreviewSource, SyncRelation, UiAction, UiPackageCard,
+    ActionConfirmation, ControllerId, HOME_NODE_ID, HomeOp, PreviewSource, UiAction, UiPackageCard,
 };
 
 use lpa_studio_core::core::time_ago::time_ago;
@@ -43,14 +40,6 @@ pub(crate) fn PackageCard(
     /// Fixed clock for stories; `None` uses the platform clock.
     #[props(default)]
     now_secs: Option<f64>,
-    /// Names of connected-EMPTY devices (state-flow model §1-A, settled
-    /// 2026-07-26): each grows an explicit "⚡ Put on <name>" button on
-    /// this card — the gallery IS the chooser for a freshly set-up board,
-    /// and the target is always named, never guessed. Empty = no buttons.
-    #[props(default)]
-    /// The Connected-empty boards this card offers a one-click push to,
-    /// as (card key, display name) — the key is the push target (M4).
-    empty_devices: Vec<(String, String)>,
     /// Open the card menu immediately (stories only).
     #[props(default = false)]
     menu_initially_open: bool,
@@ -89,20 +78,9 @@ pub(crate) fn PackageCard(
 
     rsx! {
         article {
-            class: package_card_class(opening, busy, blocked.is_some()),
+            class: package_card_class(opening, busy, blocked.is_some(), false),
             onmouseenter: hover_enter,
             onmouseleave: hover_leave,
-            // drag a project onto a device card = the push-confirm sheet
-            draggable: blocked.is_none(),
-            ondragstart: {
-                let uid = card.uid.clone();
-                let draggable = blocked.is_none();
-                move |_| {
-                    if draggable {
-                        set_dragged_project(uid.clone());
-                    }
-                }
-            },
             // Opening a card is NAVIGATION, so it is a real <a> to the
             // project route (D37: the URL points at a runtime — a project
             // always opens on the sim, never a device takeover): plain
@@ -173,7 +151,6 @@ pub(crate) fn PackageCard(
                         edited_line,
                         open_href: blocked.is_none().then(|| open_href.clone()),
                         opening,
-                        empty_devices,
                         on_action,
                     }
                 },
@@ -218,16 +195,6 @@ fn face_status_glyphs(card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGlyp
         }];
     }
     let mut glyphs = Vec::new();
-    if let Some(connection) = card.connected_device.as_ref() {
-        glyphs.push(CardStatusGlyph {
-            icon: StudioIconName::Apply,
-            tone: match connection.relation {
-                SyncRelation::AtHead => GlyphTone::Good,
-                SyncRelation::Behind | SyncRelation::Diverged => GlyphTone::Attention,
-            },
-            words: connected_line(&connection.device_name, connection.relation),
-        });
-    }
     if card.running_in_sim {
         glyphs.push(CardStatusGlyph {
             icon: StudioIconName::Simulator,
@@ -263,12 +230,6 @@ pub(crate) fn PackageCardMenu(
     /// This card's open is in flight — the open row holds navigation.
     #[props(default = false)]
     opening: bool,
-    /// Connected-empty boards offered a one-click push, as (card key,
-    /// display name) — the former face chips, now rows (model §1-A: the
-    /// explicit row IS the D11 consent; pushing to a blank board
-    /// destroys nothing).
-    #[props(default)]
-    empty_devices: Vec<(String, String)>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let mut rename_value = use_signal(|| card.slug.clone());
@@ -309,22 +270,6 @@ pub(crate) fn PackageCardMenu(
         (!blocked && card.project_kind == PATTERN_KIND_LABEL && !card.exports.is_empty())
             .then(|| card.exports.clone());
 
-    // M8′ (dialog-free): the menu row IS the D11 consent, exactly like
-    // the card's Push button — the push runs directly, progress on the
-    // device card's Operation-in-flight lane.
-    let push_to_device = card.connected_device.as_ref().map(|connection| {
-        UiAction::from_op(
-            ControllerId::new(DEPLOY_NODE_ID),
-            DeployOp::PushProject {
-                key: card.uid.clone(),
-                target: DeviceTarget::card(&connection.device_key),
-            },
-        )
-        .with_label(format!("Push to {}", connection.device_name))
-        .with_summary("Push this project to the connected device.")
-        .with_icon("upload")
-    });
-
     // The status facts, in words — everything the slim face compresses
     // away (card-overlay redesign). Derived here so the section renders
     // from the same helpers the face's tooltips use.
@@ -336,11 +281,7 @@ pub(crate) fn PackageCardMenu(
         PackageHealth::UpgradesOnOpen { found } => Some(found),
         _ => None,
     };
-    let association = card
-        .connected_device
-        .is_none()
-        .then(|| card.on_device.clone())
-        .flatten();
+    let association = card.on_device.clone();
     let live = live_presence_line(&card);
 
     rsx! {
@@ -466,41 +407,7 @@ pub(crate) fn PackageCardMenu(
                             span { "Open in sim" }
                         }
                     }
-                    // One "Put on <name>" per connected-empty device
-                    // (model §1-A): the row IS the D11 consent, and
-                    // pushing to a blank board destroys nothing.
-                    for (device_key, device_name) in empty_devices.iter().filter(|_| !blocked).cloned() {
-                        button {
-                            class: menu_item_action_class(),
-                            r#type: "button",
-                            title: "Put this project on \"{device_name}\" — it's empty and ready.",
-                            onclick: {
-                                let key = card.uid.clone();
-                                move |_| {
-                                    on_action.call(UiAction::from_op(
-                                        ControllerId::new(DEPLOY_NODE_ID),
-                                        DeployOp::PushProject {
-                                            key: key.clone(),
-                                            target: DeviceTarget::card(&device_key),
-                                        },
-                                    ));
-                                }
-                            },
-                            span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
-                                StudioIcon { name: StudioIconName::Apply, size: 14 }
-                            }
-                            span { "Put on \"{device_name}\"" }
-                        }
-                    }
                     if !blocked {
-                        if let Some(push) = push_to_device {
-                            ActionButton {
-                                action: push,
-                                running: false,
-                                variant: ActionButtonVariant::MenuItem,
-                                on_action,
-                            }
-                        }
                         ActionButton {
                             action: duplicate,
                             running: false,
@@ -656,8 +563,16 @@ const CARD_MENU_TRIGGER_CLASS: &str = "tw:grid tw:h-5 tw:w-5 tw:flex-none tw:cur
 /// The card's treatment while an open runs. `busy` is a DIMMING, not a
 /// disabling: the card still acts (it supersedes), so it keeps its
 /// pointer cursor.
-fn package_card_class(opening: bool, busy: bool, blocked: bool) -> &'static str {
+fn package_card_class(opening: bool, busy: bool, blocked: bool, dragging: bool) -> &'static str {
     // tw:relative anchors the stretched open link (see the card markup)
+    if dragging {
+        // Drag in flight: the pointer has left the card, so the ring is
+        // pinned on rather than hover-gated, and the shadow says "lifted
+        // off the page". The HTML5 drag image is a snapshot taken at
+        // dragstart, so this styles the SOURCE — which is the card the eye
+        // is tracking anyway while the ghost follows the cursor.
+        return "tw:group tw:relative tw:cursor-grabbing tw:overflow-hidden tw:rounded-md tw:border tw:border-transparent tw:bg-card ux-ir-ring ux-ir-ring-inset ux-ir-ring-on ux-drag-chip";
+    }
     if blocked {
         // amber edge, default cursor: the card is a statement, not a door
         "tw:group tw:relative tw:overflow-hidden tw:rounded-md tw:border tw:border-status-attention-border tw:bg-card"
@@ -666,23 +581,19 @@ fn package_card_class(opening: bool, busy: bool, blocked: bool) -> &'static str 
     } else if busy {
         "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
     } else {
-        "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+        // Inset ring: the card clips its own overflow, so an outset ring
+        // would be clipped away entirely (same trap .ux-glass-panel::after
+        // documents). It paints at z-3, above the glass footer (z-2) and
+        // the stretched open link (z-1), and takes no pointer events. The
+        // resting border goes transparent on hover so the ring IS the edge
+        // rather than a second line inside a grey one.
+        "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-transparent ux-ir-ring ux-ir-ring-inset ux-card-lift"
     }
 }
 
-thread_local! {
-    /// The project uid mid-drag (HTML5 dataTransfer is awkward through
-    /// Dioxus; a same-page hand-off cell is all card→card drag needs).
-    static DRAGGED_PROJECT: RefCell<Option<String>> = const { RefCell::new(None) };
-}
-
-pub(crate) fn set_dragged_project(uid: String) {
-    DRAGGED_PROJECT.with(|cell| *cell.borrow_mut() = Some(uid));
-}
-
-pub(crate) fn take_dragged_project() -> Option<String> {
-    DRAGGED_PROJECT.with(|cell| cell.borrow_mut().take())
-}
+// The card→card drag hand-off (drop a project onto a device card = the
+// push-confirm sheet) went with M2 of the device-model rebuild: there is
+// no drop target left. The rebuilt device model re-adds both halves.
 
 /// One rendered runtime-presence line (the D28 chip family).
 #[derive(Debug, PartialEq, Eq)]
@@ -695,55 +606,21 @@ struct LivePresenceLine {
 }
 
 const LIVE_LINE_GOOD: &str = "tw:m-0 tw:truncate tw:text-xs tw:text-status-good-foreground";
-const LIVE_LINE_ATTENTION: &str = "tw:m-0 tw:truncate tw:text-xs tw:text-status-working-foreground";
 
-/// The card's runtime-presence line (D28, full semantics):
+/// The card's runtime-presence line (D28): "Running in simulator" while
+/// the sim runs this project's head — load-as-push always runs the head,
+/// so the sim is current (green).
 ///
-/// - live device only → the D24 connected line (green only when current —
-///   green = good; behind/diverged read as facts needing attention);
-/// - sim only → "Running in simulator" (load-as-push always runs the
-///   head, so the sim is current: green);
-/// - BOTH → the aggregate "Live in 2 places" (the pool cap makes 2 the
-///   max for now), amber whenever the device side needs attention, with
-///   the tooltip spelling the places out.
+/// ⚠️ The DEVICE lines (the D24 connected line and the "Live in 2 places"
+/// aggregate) went with M2 of the device-model rebuild, along with the
+/// `connected_device` connection the card carried. The rebuilt device
+/// model re-adds them.
 fn live_presence_line(card: &UiPackageCard) -> Option<LivePresenceLine> {
-    match (card.connected_device.as_ref(), card.running_in_sim) {
-        (Some(connection), true) => Some(LivePresenceLine {
-            text: "Live in 2 places".to_string(),
-            class: match connection.relation {
-                SyncRelation::AtHead => LIVE_LINE_GOOD,
-                SyncRelation::Behind | SyncRelation::Diverged => LIVE_LINE_ATTENTION,
-            },
-            title: Some(format!(
-                "{} · running in simulator",
-                connected_line(&connection.device_name, connection.relation)
-            )),
-        }),
-        (Some(connection), false) => Some(LivePresenceLine {
-            text: connected_line(&connection.device_name, connection.relation),
-            class: match connection.relation {
-                SyncRelation::AtHead => LIVE_LINE_GOOD,
-                SyncRelation::Behind | SyncRelation::Diverged => LIVE_LINE_ATTENTION,
-            },
-            title: None,
-        }),
-        (None, true) => Some(LivePresenceLine {
-            text: "Running in simulator".to_string(),
-            class: LIVE_LINE_GOOD,
-            title: None,
-        }),
-        (None, false) => None,
-    }
-}
-
-/// The D24 connected indication: green only when the device is current
-/// (green = good); behind/diverged read as facts needing attention.
-fn connected_line(device_name: &str, relation: SyncRelation) -> String {
-    match relation {
-        SyncRelation::AtHead => format!("On {device_name} — connected ✓"),
-        SyncRelation::Behind => format!("On {device_name} — behind your copy"),
-        SyncRelation::Diverged => format!("On {device_name} — edited elsewhere"),
-    }
+    card.running_in_sim.then(|| LivePresenceLine {
+        text: "Running in simulator".to_string(),
+        class: LIVE_LINE_GOOD,
+        title: None,
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -783,11 +660,9 @@ mod target_display_name_tests {
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::UiCardConnection;
-
     use super::*;
 
-    fn card(connected: Option<SyncRelation>, running_in_sim: bool) -> UiPackageCard {
+    fn card(running_in_sim: bool) -> UiPackageCard {
         UiPackageCard {
             uid: "prj1".to_string(),
             kind: "Module".to_string(),
@@ -798,11 +673,6 @@ mod tests {
             provenance: None,
             on_device: None,
             open_elsewhere: false,
-            connected_device: connected.map(|relation| UiCardConnection {
-                device_key: "runtime-1".to_string(),
-                device_name: "Porch sign".to_string(),
-                relation,
-            }),
             running_in_sim,
             target: None,
             health: PackageHealth::Ready,
@@ -813,7 +683,7 @@ mod tests {
     fn a_blocked_card_offers_only_the_remedies_that_work_on_raw_files() {
         // The gallery's contract after P3: an unopenable project is still
         // here, still named, still exportable and deletable.
-        let mut blocked = card(None, false);
+        let mut blocked = card(false);
         blocked.health = PackageHealth::Blocked {
             headline: "Format 3 — too old for this Studio".to_string(),
             remedy: "Export a copy or delete it.".to_string(),
@@ -823,52 +693,45 @@ mod tests {
             blocked.health.blocked().map(|(headline, _)| headline),
             Some("Format 3 — too old for this Studio")
         );
-        assert!(package_card_class(false, false, true).contains("status-attention-border"));
+        assert!(package_card_class(false, false, true, false).contains("status-attention-border"));
     }
 
     #[test]
     fn an_upgradable_card_stays_a_normal_card() {
-        let mut upgradable = card(None, false);
+        let mut upgradable = card(false);
         upgradable.health = PackageHealth::UpgradesOnOpen { found: 4 };
         assert!(upgradable.health.is_openable());
         assert_eq!(upgradable.health.blocked(), None);
-        assert!(!package_card_class(false, false, false).contains("status-attention-border"));
-    }
-
-    #[test]
-    fn both_runtimes_aggregate_to_live_in_2_places() {
-        // D28 aggregate: one line, not two — the pool cap makes 2 the max
-        let line = live_presence_line(&card(Some(SyncRelation::AtHead), true)).unwrap();
-        assert_eq!(line.text, "Live in 2 places");
-        assert_eq!(line.class, LIVE_LINE_GOOD, "both places current = good");
-        assert_eq!(
-            line.title.as_deref(),
-            Some("On Porch sign — connected ✓ · running in simulator"),
-            "the tooltip spells the places out"
+        assert!(
+            !package_card_class(false, false, false, false).contains("status-attention-border")
         );
     }
 
     #[test]
-    fn a_behind_device_turns_the_aggregate_amber() {
-        let line = live_presence_line(&card(Some(SyncRelation::Behind), true)).unwrap();
-        assert_eq!(line.text, "Live in 2 places");
-        assert_eq!(
-            line.class, LIVE_LINE_ATTENTION,
-            "one place needing attention colors the aggregate"
-        );
+    fn a_card_in_flight_pins_the_ring_and_a_resting_one_does_not() {
+        // The drag ghost is a snapshot taken at dragstart, so the SOURCE
+        // card carries the in-flight light — and the pointer has left it,
+        // so the ring cannot be hover-gated there.
+        let dragging = package_card_class(false, false, false, true);
+        assert!(dragging.contains("ux-ir-ring-on"), "{dragging}");
+        assert!(dragging.contains("ux-drag-chip"), "{dragging}");
+        for resting in [
+            package_card_class(false, false, false, false),
+            package_card_class(true, false, false, false),
+            package_card_class(false, true, false, false),
+            package_card_class(false, false, true, false),
+        ] {
+            assert!(!resting.contains("ux-ir-ring-on"), "{resting}");
+        }
     }
 
     #[test]
-    fn single_runtimes_keep_their_own_lines() {
-        let device = live_presence_line(&card(Some(SyncRelation::Behind), false)).unwrap();
-        assert_eq!(device.text, "On Porch sign — behind your copy");
-        assert_eq!(device.class, LIVE_LINE_ATTENTION);
-        assert_eq!(device.title, None);
-
-        let sim = live_presence_line(&card(None, true)).unwrap();
+    fn the_sim_line_appears_exactly_while_the_sim_runs_this_project() {
+        let sim = live_presence_line(&card(true)).expect("the sim line");
         assert_eq!(sim.text, "Running in simulator");
-        assert_eq!(sim.class, LIVE_LINE_GOOD);
+        assert_eq!(sim.class, LIVE_LINE_GOOD, "the sim always runs the head");
+        assert_eq!(sim.title, None);
 
-        assert_eq!(live_presence_line(&card(None, false)), None);
+        assert_eq!(live_presence_line(&card(false)), None);
     }
 }

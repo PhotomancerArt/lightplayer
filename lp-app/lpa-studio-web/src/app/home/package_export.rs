@@ -111,21 +111,12 @@ pub(crate) fn export_package_as(target: ExportTarget, form: ExportForm) {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn export_package_as(_target: ExportTarget, _form: ExportForm) {}
 
-/// Host builds (story capture, view tests) have no browser to download to.
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn trigger_zip_download(_file_name: &str, _bytes: &[u8]) -> Result<(), ()> {
-    Ok(())
-}
-
 /// Download a package as a zip (the gallery card's affordance).
 pub(crate) fn export_package_to_download(card: &UiPackageCard) {
     export_package_as(ExportTarget::from(card), ExportForm::Zip);
 }
 
 /// Hand `bytes` to the browser as a named `.zip` download.
-///
-/// Shared with the device filesystem backup, which produces its zip in core
-/// and only needs the browser half.
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn trigger_zip_download(
     file_name: &str,

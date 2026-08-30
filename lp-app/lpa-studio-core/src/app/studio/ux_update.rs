@@ -1,4 +1,4 @@
-use crate::{CardOp, ControllerId, UiActivityView, UiLogDraft, UiStatus, UiStudioView};
+use crate::{ControllerId, UiActivityView, UiLogDraft, UiStatus, UiStudioView};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum UxUpdate {
@@ -12,24 +12,6 @@ pub enum UxUpdate {
     /// (producers have no clock); the consumer stamps it — the controller via
     /// `push_log`, the actor with the controller's shared clock.
     Log(UiLogDraft),
-    /// The CARD-OWNED op flow's live state (state-flow model §2), emitted
-    /// as the op ticks so the card's in-place overlay — its progress bar
-    /// and its narration — tracks the work instead of freezing at the
-    /// dispatch-time label.
-    ///
-    /// The controller's own `device_card_ops` map is the authority (it is
-    /// what a full view build reads); this is the delta that carries the
-    /// same value to the live view BETWEEN full snapshots, because a
-    /// management op holds `&mut controller` for its whole duration and
-    /// cannot rebuild a view mid-flight.
-    CardOp {
-        /// The managed SESSION's key (`RuntimeId` rendering) — matched by
-        /// [`UiDeviceCard::takes_card_op`](crate::UiDeviceCard::takes_card_op).
-        /// The session rather than the uid, because a first-provision
-        /// flash stamps a uid mid-op and the card's key moves with it.
-        session_key: String,
-        op: CardOp,
-    },
 }
 
 /// Which pane a progressive activity update lands on.

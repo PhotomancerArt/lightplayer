@@ -34,8 +34,9 @@
 
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
-use lpa_studio_core::{OpenStage, UiAction};
+use lpa_studio_core::{ActionPriority, OpenStage, UiAction};
 
+use crate::core::solid_action_class;
 use crate::router::StudioRoute;
 
 /// How often the frame re-reads the platform's open signals.
@@ -383,7 +384,7 @@ pub fn ProjectOpeningFrame(
                         aria_valuemax: "100",
                         aria_valuenow: "{(fraction * 100.0).round()}",
                         div {
-                            class: "tw:h-full tw:rounded-pill tw:bg-accent tw:transition-[width]",
+                            class: "tw:h-full tw:rounded-pill tw:transition-[width] ux-iri-fill-static",
                             style: "width: {(fraction * 100.0).round()}%;",
                         }
                     }
@@ -449,7 +450,7 @@ pub(crate) fn OpeningProgressLine() -> Element {
                     aria_valuemax: "100",
                     aria_valuenow: "{(fraction * 100.0).round()}",
                     div {
-                        class: "tw:h-full tw:rounded-pill tw:bg-accent tw:transition-[width]",
+                        class: "tw:h-full tw:rounded-pill tw:transition-[width] ux-iri-fill-static",
                         style: "width: {(fraction * 100.0).round()}%;",
                     }
                 }
@@ -487,7 +488,7 @@ pub(crate) fn OpenFailureNotice(
             div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-2.5",
                 button {
                     r#type: "button",
-                    class: "tw:cursor-pointer tw:rounded-md tw:border tw:border-border-strong tw:bg-transparent tw:px-3 tw:py-2 tw:text-sm tw:font-semibold tw:text-strong-foreground tw:hover:border-accent tw:hover:text-accent",
+                    class: solid_action_class(ActionPriority::Secondary),
                     onclick: move |_| {
                         if let Some(on_action) = on_action {
                             on_action.call(retry.clone());

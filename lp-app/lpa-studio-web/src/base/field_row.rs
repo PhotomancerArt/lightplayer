@@ -4,7 +4,10 @@ use dioxus::prelude::*;
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn FieldRow(label: String, value: String, changed: bool, detail: Option<String>) -> Element {
     let class = if changed {
-        "tw:grid tw:grid-cols-[minmax(120px,0.35fr)_minmax(0,1fr)] tw:gap-3 tw:rounded-sm tw:border tw:border-accent-border tw:bg-status-good-bg tw:p-3"
+        // "Modified" is an unsaved edit, so the row wears the amber warning
+        // family — the app-wide unsaved-edit convention (accent reckoning
+        // swept the old accent-on-good mix, D1 2026-08-30).
+        "tw:grid tw:grid-cols-[minmax(120px,0.35fr)_minmax(0,1fr)] tw:gap-3 tw:rounded-sm tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-3"
     } else {
         "tw:grid tw:grid-cols-[minmax(120px,0.35fr)_minmax(0,1fr)] tw:gap-3 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-card-muted tw:p-3"
     };
@@ -14,7 +17,7 @@ pub fn FieldRow(label: String, value: String, changed: bool, detail: Option<Stri
             div { class: "tw:grid tw:min-w-0 tw:gap-1",
                 span { "{label}" }
                 if changed {
-                    small { class: "tw:text-xs tw:font-bold tw:uppercase tw:text-accent", "modified" }
+                    small { class: "tw:text-xs tw:font-bold tw:uppercase tw:text-status-warning-foreground", "modified" }
                 }
             }
             div { class: "tw:grid tw:min-w-0 tw:gap-1 tw:text-right",

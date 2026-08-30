@@ -357,11 +357,11 @@ fn refresh_action() -> UiAction {
     )
 }
 
-/// A recovery-class action (device reset) — preempts everything.
+/// A recovery-class action (stop the simulator) — preempts everything.
 fn recovery_action() -> UiAction {
     UiAction::from_op(
-        ControllerId::new(crate::DeviceController::NODE_ID),
-        crate::DeviceOp::RefreshConnections,
+        ControllerId::new(crate::RuntimeOp::NODE_ID),
+        crate::RuntimeOp::StopSimulator,
     )
 }
 

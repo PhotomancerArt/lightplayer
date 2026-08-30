@@ -17,9 +17,10 @@
 //! precedent.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{HOME_NODE_ID, HomeOp, UiAction};
+use lpa_studio_core::{ActionPriority, HOME_NODE_ID, HomeOp, UiAction};
 
 use crate::base::{StudioIcon, StudioIconName};
+use crate::core::solid_action_class;
 
 use super::docs_sims::DocsStudioActions;
 
@@ -69,12 +70,12 @@ pub(crate) fn OpenInStudioButton(
     }
 }
 
-/// Prominent and friendly: the accent-filled shape, big enough to read as
+/// Prominent and friendly: the gradient Primary shape, big enough to read as
 /// the page's call to action rather than another inline chip. Inert keeps
 /// the identical footprint on the muted surface.
 fn open_button_class(live: bool) -> &'static str {
     if live {
-        "tw:inline-flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-accent-border tw:bg-accent tw:px-4 tw:py-2 tw:text-sm tw:font-bold tw:text-accent-foreground tw:transition-colors tw:hover:bg-accent-hover"
+        solid_action_class(ActionPriority::Primary)
     } else {
         "tw:inline-flex tw:cursor-not-allowed tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-border-muted tw:bg-card-muted tw:px-4 tw:py-2 tw:text-sm tw:font-bold tw:text-dim-foreground"
     }

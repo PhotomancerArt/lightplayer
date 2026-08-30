@@ -128,11 +128,11 @@ pub fn CloudAccountControl(
 }
 
 /// The account slot's you're-here underline on /account: the tabs'
-/// accent bar under whatever the slot renders, landing on the header's
+/// underline bar under whatever the slot renders, landing on the header's
 /// border line like `LOGO_HOME_ACTIVE_WRAP` does for the logo at Home.
 /// The offset suits the slot's 28px controls. `pub(crate)` for the
 /// story that shows it against the header border.
-pub(crate) const ACCOUNT_HERE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[12px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-accent tw:after:content-['']";
+pub(crate) const ACCOUNT_HERE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[12px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-selection-border tw:after:content-['']";
 
 /// The boot shimmer: the slot at its signed-out size, holding its shape
 /// while `whoami` is in flight.
@@ -781,12 +781,15 @@ const AVATAR_TRIGGER_OPEN_CLASS: &str = "tw:inline-flex tw:h-7 tw:w-7 tw:flex-no
 /// primitive's own `.ux-popover-panel` already caps every panel at
 /// `calc(100vw - 24px)`, and a second viewport clamp inside the width fought
 /// the measured layout.
-const ACCOUNT_POPUP_CLASS: &str = "tw:grid tw:w-[236px] tw:min-w-0 tw:gap-0.5 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-1.5 tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+/// Material-free (P4): the merged-outline popover already paints
+/// background/border/shadow.
+const ACCOUNT_POPUP_CLASS: &str = "tw:grid tw:w-[236px] tw:min-w-0 tw:gap-0.5 tw:rounded-md tw:border tw:p-1.5 tw:text-sm tw:text-muted-foreground";
 /// The signed-out chooser (§4): the ⋯ menu's 288px, because provider rows
 /// carry copy. No `overflow-hidden` — the merged outline draws this panel's
 /// chrome, and clipping the body only hides a layout fault instead of
-/// showing it.
-const SIGN_IN_POPUP_CLASS: &str = "tw:grid tw:w-[288px] tw:min-w-0 tw:rounded-md tw:border tw:border-border tw:bg-card tw:text-sm tw:text-muted-foreground tw:shadow-lg";
+/// showing it. Material-free (P4) for the same reason.
+const SIGN_IN_POPUP_CLASS: &str =
+    "tw:grid tw:w-[288px] tw:min-w-0 tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 /// The quiet word as a popover trigger — the secondary tab's treatment on a
 /// `button` instead of an `a`.
 ///
@@ -802,9 +805,9 @@ const SIGN_IN_TRIGGER_CLASS: &str = "tw:cursor-pointer tw:rounded-sm tw:border t
 /// the frame before the first measurement lands).
 const SIGN_IN_TRIGGER_OPEN_CLASS: &str = "tw:cursor-pointer tw:rounded-sm tw:border tw:border-border-strong tw:bg-terminal tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-strong-foreground tw:no-underline";
 /// One connection row in the chooser.
-const PROVIDER_BUTTON_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-3 tw:py-2 tw:text-xs tw:font-bold tw:text-strong-foreground tw:no-underline tw:transition-colors tw:hover:border-accent-border tw:hover:text-accent";
+const PROVIDER_BUTTON_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-3 tw:py-2 tw:text-xs tw:font-bold tw:text-strong-foreground tw:no-underline tw:transition-colors tw:hover:border-selection-border tw:hover:text-strong-foreground";
 /// One dev-picker profile row.
-const PICK_ROW_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2.5 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1.5 tw:no-underline tw:transition-colors tw:hover:border-accent-border tw:hover:bg-accent-wash";
+const PICK_ROW_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2.5 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-1.5 tw:no-underline tw:transition-colors tw:hover:border-selection-border tw:hover:bg-card-raised";
 /// One switch-account row: the menu row's rhythm at avatar height.
 const SWITCH_ROW_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2.5 tw:rounded-sm tw:px-2 tw:py-1 tw:no-underline tw:transition-colors tw:hover:bg-card-raised";
 const LABEL_CLASS: &str = "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground";

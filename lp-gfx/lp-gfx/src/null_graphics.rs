@@ -158,6 +158,10 @@ impl LpGraphics for NullGraphics {
         Err(unsupported("read a texture back"))
     }
 
+    fn read_back_into(&self, _texture: &TextureHandle, _out: &mut [u8]) -> Result<(), GfxError> {
+        Err(unsupported("read a texture back"))
+    }
+
     fn supports_read_back(&self) -> bool {
         // Keeps the trait default (`true`), stated explicitly because the
         // reasoning is not obvious: this backend can read nothing back, but
@@ -196,7 +200,11 @@ impl LpGraphics for NullGraphics {
         Err(unsupported("write sample outputs"))
     }
 
-    fn read_sample_out(&self, _out: &SampleOutHandle) -> Result<Vec<u16>, GfxError> {
+    fn read_sample_out_into(
+        &self,
+        _out: &SampleOutHandle,
+        _dst: &mut [u16],
+    ) -> Result<(), GfxError> {
         Err(unsupported("read sample outputs back"))
     }
 
@@ -289,10 +297,12 @@ mod tests {
         assert!(graphics.write_texture(&mut texture, &[0; 8]).is_err());
         assert!(graphics.clear_texture(&mut texture).is_err());
         assert!(graphics.read_back(&texture).is_err());
+        assert!(graphics.read_back_into(&texture, &mut [0; 8]).is_err());
         assert!(graphics.write_sample_points(&mut points, &[0, 0]).is_err());
         assert!(graphics.read_sample_points(&points).is_err());
         assert!(graphics.write_sample_out(&mut out, &[0; 4]).is_err());
         assert!(graphics.read_sample_out(&out).is_err());
+        assert!(graphics.read_sample_out_into(&out, &mut [0; 4]).is_err());
         assert!(graphics.clear_sample_out(&mut out).is_err());
 
         let other = TextureHandle::from_backend_parts(

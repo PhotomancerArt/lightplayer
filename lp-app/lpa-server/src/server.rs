@@ -52,6 +52,47 @@ pub type ReadHeadroomProbe = fn() -> Option<u32>;
 /// OOMs) cannot serve any read shape and SHOULD be refused.
 pub const PROJECT_READ_MIN_HEADROOM_BYTES: u32 = 32 * 1024;
 
+/// Minimum heap headroom (largest free block) to attempt a `LoadProject`.
+///
+/// Same refusal-not-reset posture as [`PROJECT_READ_MIN_HEADROOM_BYTES`]
+/// (ADR `2026-08-28-project-reads-bounded-streamed-refusable`, D7): loading
+/// materializes the whole engine — mapping lamp lists, node graph, shader
+/// JIT — through infallible allocs, so an unaffordable load abort-resets the
+/// board instead of failing the request
+/// (`docs/defects/2026-08-29-load-project-resets-instead-of-refusing.md`).
+///
+/// The floor is a can-anything-load bound, not a fit check — the server
+/// cannot know a project's real cost without parsing it, and parsing is
+/// itself part of the allocation being guarded. 64 KiB comes from the
+/// observed reset: the classic died mid-load on a single 64 KiB mapping ask
+/// with a 24 KiB largest free block, and even with the resolver's exact
+/// reserve a dome-scale lamp list is one contiguous ask of that order
+/// (5,950 lamps × 16 B ≈ 93 KiB). A heap that cannot hand over one 64 KiB
+/// block right after unloading every project is too pressed to finish any
+/// real load. A big-enough project can still OOM past the gate — the floor
+/// only catches boards that could never succeed, and refusing those with a
+/// structured error always beats resetting.
+pub const PROJECT_LOAD_MIN_HEADROOM_BYTES: u32 = 64 * 1024;
+
+/// The `LoadProject` headroom gate, shared by the wire handler and the
+/// host-call path (`LpServer::load_project`, which boot-time startup loads
+/// use — a refused startup project boots to an idle server instead of a
+/// reset loop). No probe (hosts, browser) = never refused.
+pub(crate) fn check_load_headroom(probe: Option<ReadHeadroomProbe>) -> Result<(), ServerError> {
+    if let Some(headroom) = probe.and_then(|probe| probe())
+        && headroom < PROJECT_LOAD_MIN_HEADROOM_BYTES
+    {
+        let message = format!(
+            "load refused: heap headroom too low (largest free block {headroom} B < \
+             {PROJECT_LOAD_MIN_HEADROOM_BYTES} B); power-cycle the device or load a smaller \
+             project"
+        );
+        log::warn!("load_project: {message}");
+        return Err(ServerError::Core(message));
+    }
+    Ok(())
+}
+
 /// Main server struct for processing client-server messages.
 ///
 /// Message responses are sent through [`ServerTransport`] so large project-read
@@ -82,8 +123,9 @@ pub struct LpServer {
     project_read_frame_budget: Option<usize>,
     /// Optional memory stats callback for logging (ESP32 passes impl, others pass None)
     memory_stats: Option<MemoryStatsFn>,
-    /// Optional largest-free-block probe backing the ProjectRead headroom
-    /// refusal gate. Unset (hosts/browser) = reads are never refused.
+    /// Optional largest-free-block probe backing the ProjectRead and
+    /// LoadProject headroom refusal gates. Unset (hosts/browser) = requests
+    /// are never refused.
     read_headroom_probe: Option<ReadHeadroomProbe>,
     /// Optional time provider for perf timing (e.g. shader comp). ESP32/emu pass, others None.
     time_provider: Option<Rc<dyn TimeProvider>>,
@@ -656,6 +698,7 @@ impl LpServer {
                                 &mut *self.base_fs,
                                 &self.output_provider,
                                 self.memory_stats.as_ref(),
+                                self.read_headroom_probe,
                                 self.time_provider.clone(),
                                 self.button_service.clone(),
                                 self.radio_service.clone(),
@@ -725,9 +768,9 @@ impl LpServer {
     }
 
     /// Get the memory stats callback
-    /// Install the largest-free-block probe the ProjectRead headroom gate
-    /// consults (see [`PROJECT_READ_MIN_HEADROOM_BYTES`]). Unset = never
-    /// refuse.
+    /// Install the largest-free-block probe the ProjectRead and LoadProject
+    /// headroom gates consult (see [`PROJECT_READ_MIN_HEADROOM_BYTES`] and
+    /// [`PROJECT_LOAD_MIN_HEADROOM_BYTES`]). Unset = never refuse.
     pub fn set_read_headroom_probe(&mut self, probe: Option<ReadHeadroomProbe>) {
         self.read_headroom_probe = probe;
     }
@@ -743,6 +786,7 @@ impl LpServer {
         &mut self,
         path: &lpfs::lp_path::LpPath,
     ) -> Result<lpc_wire::WireProjectHandle, ServerError> {
+        check_load_headroom(self.read_headroom_probe)?;
         let handle = self.project_manager.load_project(
             path,
             &mut *self.base_fs,

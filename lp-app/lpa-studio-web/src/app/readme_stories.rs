@@ -13,10 +13,9 @@ use lpa_studio_web_story_macros::story;
 use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     ProjectController, ProjectEditorView, ProjectNodeStatusTone, ProjectNodeTreeView,
-    ProjectSyncPhase, RosterCardState, UiAgentStatus, UiDeviceCard, UiDeviceProjectChip,
-    UiExampleCard, UiHomeView, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNodeFace,
-    UiNodeHeader, UiNodeTab, UiNodeView, UiPackageCard, UiPaneView, UiStatus, UiStudioView,
-    UiViewContent,
+    ProjectSyncPhase, SimCardState, UiAgentStatus, UiExampleCard, UiHomeView, UiLogEntry,
+    UiLogLevel, UiLogOrigin, UiLogSource, UiNodeFace, UiNodeHeader, UiNodeTab, UiNodeView,
+    UiPackageCard, UiPaneView, UiSimCard, UiSimProjectChip, UiStatus, UiStudioView, UiViewContent,
 };
 
 use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
@@ -53,18 +52,13 @@ fn studio_hero() -> Element {
 
 #[story(
     screenshot,
-    description = "README home shot: the gallery with the simulator running a project, a connected device, the project library, and examples. Single-state, fixed clock, seeded thumbs; the repo README embeds the lg capture."
+    description = "README home shot: the gallery with the simulator running a project, the project library, and examples. Single-state, fixed clock, seeded thumbs; the repo README embeds the lg capture."
 )]
 fn home_gallery() -> Element {
     rsx! {
         section { class: "tw:p-4",
             div { class: "tw:grid tw:gap-10",
-                DevicesPage {
-                    home: readme_home_view(),
-                    now_secs: Some(STORY_NOW),
-                    has_ever_granted: Some(true),
-                    on_action: |_| {},
-                }
+                DevicesPage { home: readme_home_view(), on_action: |_| {} }
                 ProjectsPage {
                     home: readme_home_view(),
                     now_secs: Some(STORY_NOW),
@@ -197,7 +191,7 @@ fn readme_playlist_node() -> UiNodeView {
 
 /// The hero's lens card: the simulator running this show, with a healthy
 /// console tail so the card's permanent console region reads as live.
-fn readme_lens_card() -> UiDeviceCard {
+fn readme_lens_card() -> UiSimCard {
     let line = |offset: f64, message: &str| {
         UiLogEntry::new(
             STORY_NOW + offset,
@@ -206,38 +200,28 @@ fn readme_lens_card() -> UiDeviceCard {
             message,
         )
     };
-    UiDeviceCard {
-        frame_preview: None,
-        frame_age_secs: None,
-        frame_fps: None,
-        port_label: None,
-        session_key: None,
-        uid: None,
-        name: "Simulator".to_string(),
-        transport: String::new(),
-        state: RosterCardState::RunningUpToDate,
-        project: Some(UiDeviceProjectChip {
+    UiSimCard {
+        state: SimCardState::Running,
+        project: Some(UiSimProjectChip {
             uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
             name: "evening-glow".to_string(),
         }),
-        fw: None,
-        hardware: None,
-        safe_clamp: None,
-        sim: true,
+        board_id: None,
         console_tail: vec![
             line(0.0, "engine: project loaded · 241 points"),
             line(1.0, "engine: frame 41022 · 60fps"),
             line(2.0, "shader: aurora.glsl compiled · 3 uniforms"),
             line(3.0, "engine: frame 41142 · 60fps"),
         ],
+        frame_preview: None,
+        frame_age_secs: None,
+        frame_fps: None,
         ui: Default::default(),
-        detected_chip: None,
-        board_id: None,
     }
 }
 
-/// Home gallery content for the README shot: simulator running a project,
-/// a live device, a small library, and the example row.
+/// Home gallery content for the README shot: the simulator running a
+/// project, a small library, and the example row.
 fn readme_home_view() -> UiHomeView {
     let projects = vec![
         UiPackageCard {
@@ -250,12 +234,7 @@ fn readme_home_view() -> UiHomeView {
             provenance: None,
             on_device: None,
             open_elsewhere: false,
-            connected_device: Some(lpa_studio_core::UiCardConnection {
-                device_key: "runtime-1".to_string(),
-                device_name: "Workbench ESP32".to_string(),
-                relation: lpa_studio_core::SyncRelation::AtHead,
-            }),
-            running_in_sim: false,
+            running_in_sim: true,
             target: None,
             health: PackageHealth::Ready,
         },
@@ -269,7 +248,6 @@ fn readme_home_view() -> UiHomeView {
             provenance: Some("Remixed from Basic".to_string()),
             on_device: None,
             open_elsewhere: false,
-            connected_device: None,
             running_in_sim: true,
             target: None,
             health: PackageHealth::Ready,
@@ -284,72 +262,36 @@ fn readme_home_view() -> UiHomeView {
             provenance: Some("Forked from 2026-07-02-0930-porch-sign".to_string()),
             on_device: None,
             open_elsewhere: false,
-            connected_device: None,
             running_in_sim: false,
             target: None,
             health: PackageHealth::Ready,
         },
     ];
-    let devices = vec![
-        UiDeviceCard {
-            frame_preview: None,
-            frame_age_secs: None,
-            frame_fps: None,
-            port_label: None,
-            session_key: None,
-            uid: None,
-            name: "Simulator".to_string(),
-            transport: String::new(),
-            state: RosterCardState::RunningUpToDate,
-            project: Some(UiDeviceProjectChip {
-                uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
-                name: "2026-07-04-1102-evening-glow".to_string(),
-            }),
-            fw: None,
-            hardware: None,
-            safe_clamp: None,
-            sim: true,
-            console_tail: Vec::new(),
-            ui: Default::default(),
-            detected_chip: None,
-            board_id: None,
-        },
-        UiDeviceCard {
-            frame_preview: None,
-            frame_age_secs: None,
-            frame_fps: None,
-            port_label: None,
-            session_key: None,
-            uid: Some("dev7pQr5St89uVwXy2CzDaFbg".to_string()),
-            name: "Workbench ESP32".to_string(),
-            transport: "USB".to_string(),
-            state: RosterCardState::RunningUpToDate,
-            project: Some(UiDeviceProjectChip {
-                uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
-                name: "2026-07-02-0930-porch-sign".to_string(),
-            }),
-            fw: None,
-            hardware: None,
-            safe_clamp: None,
-            sim: false,
-            console_tail: Vec::new(),
-            ui: Default::default(),
-            detected_chip: None,
-            board_id: None,
-        },
-    ];
+    let sim = Some(UiSimCard {
+        state: SimCardState::Running,
+        project: Some(UiSimProjectChip {
+            uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
+            name: "2026-07-02-0930-porch-sign".to_string(),
+        }),
+        board_id: None,
+        console_tail: Vec::new(),
+        frame_preview: None,
+        frame_age_secs: None,
+        frame_fps: None,
+        ui: Default::default(),
+    });
     UiHomeView {
-        devices,
+        sim,
         projects,
         examples: vec![UiExampleCard {
             id: "examples/basic".to_string(),
             name: "Basic".to_string(),
             kind: "Module".to_string(),
         }],
+        devices: Default::default(),
+        remembered: Vec::new(),
         library_available: true,
         opening: None,
         issue: None,
-        backup: None,
-        setup: None,
     }
 }

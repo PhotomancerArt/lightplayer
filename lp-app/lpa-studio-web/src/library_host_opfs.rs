@@ -528,6 +528,9 @@ fn sync_trigger_for(op: &CatalogOp) -> Option<SyncTrigger> {
             provenance: PackageProvenance::OpenedFromLink,
             ..
         } => None,
+        // The device registry is local hardware bookkeeping, not project
+        // content: a board saying hello is nothing to publish.
+        CatalogOp::UpsertRegisteredDevice(_) | CatalogOp::ForgetRegisteredDevice { .. } => None,
         _ => Some(SyncTrigger::Installed),
     }
 }
@@ -734,28 +737,15 @@ fn structural_target_uid(op: &CatalogOp) -> Option<&str> {
         CatalogOp::Rename { uid, .. }
         | CatalogOp::Duplicate { uid }
         | CatalogOp::Delete { uid }
-        | CatalogOp::RecordDeviceObservation {
-            project_uid: uid, ..
-        }
-        | CatalogOp::AdoptObservedVersion {
-            project_uid: uid, ..
-        }
-        | CatalogOp::ForkObservedVersion {
-            project_uid: uid, ..
-        }
-        | CatalogOp::UpgradePackageFormat { project_uid: uid }
-        | CatalogOp::RecordPush {
-            project_uid: uid, ..
-        } => Some(uid),
+        | CatalogOp::UpgradePackageFormat { project_uid: uid } => Some(uid),
         CatalogOp::Create { .. }
         | CatalogOp::ImportZip { .. }
         | CatalogOp::ImportJson { .. }
         | CatalogOp::GenerateForBoard { .. }
+        // Registry-only: the device rows live beside the packages, not
+        // inside one, so no project lock is involved.
         | CatalogOp::UpsertRegisteredDevice(_)
-        | CatalogOp::RenameRegisteredDevice { .. }
-        | CatalogOp::RekeyRegisteredDevice { .. }
         | CatalogOp::ForgetRegisteredDevice { .. }
-        | CatalogOp::AdoptDevicePackage { .. }
         // Creation-shaped: the transient fork mints a fresh uid, and the
         // synced install refuses a uid the library already holds, so
         // neither has an existing project to lock.

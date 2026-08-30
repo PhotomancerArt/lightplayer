@@ -59,13 +59,6 @@ use super::{
 pub struct ProjectController {
     state: ProjectState,
     running_project_status: RunningProjectStatus,
-    /// The lens session's runtime kind, pushed down by the studio
-    /// controller (dispatch + passive tick chokepoints). Drives the
-    /// runtime-tiered probe policy: visual probe resolution
-    /// ([`Self::visual_preview_frame`]) and the product-subscription node
-    /// scope. `None` (no lens / tests) behaves like a device lens for
-    /// subscription scope and uses the default probe resolution.
-    lens_runtime_kind: Option<crate::RuntimeKind>,
     /// The lens DEVICE's reported build features, pushed down beside the
     /// runtime kind. `None` = no device has said otherwise (sim/host lens,
     /// or a link that is not Ready): the add-node picker then offers every
@@ -439,7 +432,6 @@ impl ProjectController {
         Self {
             state: ProjectState::NotLoaded,
             running_project_status: RunningProjectStatus::Unknown,
-            lens_runtime_kind: None,
             lens_device_features: None,
             import_patterns: Vec::new(),
             active_editor_target: None,
@@ -513,92 +505,6 @@ impl ProjectController {
             active: None,
             pending_close: Vec::new(),
         });
-    }
-
-    /// Bank a device observation on the ACTIVE library project — this tab
-    /// owns its history subtree (M4b), so the catalog-transaction path
-    /// must not be used for it. Returns `false` when the active project
-    /// doesn't match `project_uid` (the caller falls back to a catalog
-    /// transaction).
-    pub(crate) fn record_device_observation_on_active(
-        &mut self,
-        project_uid: &str,
-        device: lpc_history::PrefixedUid,
-        observed: lpc_history::ContentHash,
-        files: &[(String, Vec<u8>)],
-        now: f64,
-    ) -> Result<bool, UiError> {
-        let Some(context) = self.library.as_mut() else {
-            return Ok(false);
-        };
-        let Some(active) = context.active.as_mut() else {
-            return Ok(false);
-        };
-        if active.handle.uid.to_string() != project_uid {
-            return Ok(false);
-        }
-        crate::app::places::device_session::bank_observation_on_handle(
-            &mut active.handle,
-            device,
-            observed,
-            files,
-            now,
-        )
-        .map_err(library_ui_error)?;
-        Ok(true)
-    }
-
-    /// The active library project's push payload (files + canonical
-    /// hash), when it matches `project_uid`. The deploy flow prefers the
-    /// live handle over a snapshot so an about-to-push copy is exactly
-    /// what the editor shows as saved.
-    pub(crate) fn active_package_payload(
-        &self,
-        project_uid: &str,
-    ) -> Result<Option<(Vec<(String, Vec<u8>)>, lpc_history::ContentHash)>, UiError> {
-        let Some(context) = self.library.as_ref() else {
-            return Ok(None);
-        };
-        let Some(active) = context.active.as_ref() else {
-            return Ok(None);
-        };
-        if active.handle.uid.to_string() != project_uid {
-            return Ok(None);
-        }
-        let files = active.handle.read_all_files().map_err(library_ui_error)?;
-        let hash = active.handle.content_hash().map_err(library_ui_error)?;
-        Ok(Some((files, hash)))
-    }
-
-    /// Record a push on the ACTIVE library project (this tab owns its
-    /// history subtree — M4b). Returns `false` when the active project
-    /// doesn't match (the caller uses the catalog transaction instead).
-    pub(crate) fn record_push_on_active(
-        &mut self,
-        project_uid: &str,
-        device: lpc_history::PrefixedUid,
-        version: lpc_history::ContentHash,
-        now: f64,
-    ) -> Result<bool, UiError> {
-        let Some(context) = self.library.as_mut() else {
-            return Ok(false);
-        };
-        let Some(active) = context.active.as_mut() else {
-            return Ok(false);
-        };
-        if active.handle.uid.to_string() != project_uid {
-            return Ok(false);
-        }
-        let event = active
-            .handle
-            .history
-            .record_push(version, device, now, None)
-            .map_err(|e| UiError::MissingSession(format!("record push: {e}")))?;
-        let history_fs = active.handle.history_fs.borrow();
-        lpc_history::EventLog::new(&*history_fs)
-            .append(&event)
-            .map_err(|e| UiError::MissingSession(format!("record push: {e}")))?;
-        Ok(true)
     }
 
     /// Release host-side project locks for projects that stopped being
@@ -4473,8 +4379,9 @@ impl ProjectController {
             // The manifest is library-owned. Looking at a project through a
             // device lens, the bytes you would be editing are not the ones
             // in front of you, so the row disables and says so (planning
-            // Q4).
-            device_session: matches!(self.lens_runtime_kind, Some(crate::RuntimeKind::Device)),
+            // Q4) — no device lens exists while the device system is being
+            // rebuilt, so the row is always live.
+            device_session: false,
         })
     }
 
@@ -5000,19 +4907,16 @@ impl ProjectController {
 
     fn node_subscribes_products(&self, node: &NodeController) -> bool {
         match node.state().product_subscription_intent {
-            ProjectProductSubscriptionIntent::Default => match self.lens_runtime_kind {
-                // Sim probes ride an in-memory postMessage wire and (post
-                // probe-performance plan) render onto canvases, so every
-                // expanded node keeps live previews. `collapsed` is the
-                // controller-side signal; today the web pane's collapse
-                // toggle is view-local (always false here — effectively
-                // "all nodes") and this gate becomes real when the UI
-                // state audit moves live collapse state into core.
-                Some(crate::RuntimeKind::Sim) => !node.state().collapsed,
-                // Device serial bandwidth is precious: focused node only
-                // (the primary visual is unioned in regardless).
-                Some(crate::RuntimeKind::Device) | None => self.is_focused_node(node),
-            },
+            // Sim probes ride an in-memory postMessage wire and (post
+            // probe-performance plan) render onto canvases, so every
+            // expanded node keeps live previews. `collapsed` is the
+            // controller-side signal; today the web pane's collapse
+            // toggle is view-local (always false here — effectively
+            // "all nodes") and this gate becomes real when the UI
+            // state audit moves live collapse state into core. (The
+            // device arm — focused node only, serial bandwidth being
+            // precious — returns with the rebuilt device model.)
+            ProjectProductSubscriptionIntent::Default => !node.state().collapsed,
             ProjectProductSubscriptionIntent::Subscribed => true,
             ProjectProductSubscriptionIntent::Unsubscribed => false,
         }
@@ -5224,18 +5128,9 @@ impl ProjectController {
             .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))
     }
 
-    /// Record the lens session's runtime kind (probe-policy input). Pushed
-    /// by the studio controller at its dispatch and passive-tick
-    /// chokepoints, so the policy tracks lens moves without lifecycle
-    /// wiring.
-    pub fn set_lens_runtime_kind(&mut self, kind: Option<crate::RuntimeKind>) {
-        self.lens_runtime_kind = kind;
-    }
-
-    /// Record the lens DEVICE's reported build features (the add-node
-    /// picker's gate). Pushed by the studio controller from the same
-    /// chokepoint as [`Self::set_lens_runtime_kind`]; `None` for a sim/host
-    /// lens or a link that has not reported a hello.
+    /// Record the lens runtime's reported build features (the add-node
+    /// picker's gate). `None` — the only case while the device system is
+    /// being rebuilt — offers every node kind.
     pub fn set_lens_device_features(&mut self, features: Option<Vec<lpc_model::LpFeature>>) {
         self.lens_device_features = features;
     }
@@ -5248,12 +5143,11 @@ impl ProjectController {
         self.import_patterns = patterns;
     }
 
-    /// The runtime-tiered visual probe resolution for the current lens.
+    /// The visual probe resolution for the current lens. The tiered
+    /// device resolution (`VISUAL_DEVICE`) returns with the rebuilt device
+    /// model; a sim lens has always used the default.
     fn visual_preview_frame(&self) -> crate::UiProductPreviewFrame {
-        match self.lens_runtime_kind {
-            Some(crate::RuntimeKind::Device) => crate::UiProductPreviewFrame::VISUAL_DEVICE,
-            Some(crate::RuntimeKind::Sim) | None => crate::UiProductPreviewFrame::VISUAL_DEFAULT,
-        }
+        crate::UiProductPreviewFrame::VISUAL_DEFAULT
     }
 
     /// The sync handle for building a read request, with the lens-tier
@@ -10658,7 +10552,11 @@ mod tests {
         assert_eq!(products[0].name, "Output");
         assert_eq!(products[0].kind, UiProductKind::Visual);
         assert_eq!(products[0].preview, UiProductPreview::Pending);
-        assert_eq!(products[0].tracking, UiProductTrackingState::Untracked);
+        // An EXPANDED default node subscribes (the sim is local and cheap),
+        // so the badge says Tracking with no frame in hand yet. The
+        // Untracked badge belonged to the focused-node-only device lens,
+        // deleted in M2 of the device-model rebuild.
+        assert_eq!(products[0].tracking, UiProductTrackingState::Tracking);
         assert_eq!(
             products[0].product,
             Some(UiProductRef::from_visual_product(VisualProduct::new(
@@ -10669,7 +10567,7 @@ mod tests {
         assert_eq!(products[1].name, "Control");
         assert_eq!(products[1].kind, UiProductKind::Control);
         assert_eq!(products[1].preview, UiProductPreview::Pending);
-        assert_eq!(products[1].tracking, UiProductTrackingState::Untracked);
+        assert_eq!(products[1].tracking, UiProductTrackingState::Tracking);
         assert_eq!(
             products[1].product,
             Some(UiProductRef::from_control_product(ControlProduct::new(
@@ -11538,16 +11436,22 @@ mod tests {
 
     #[test]
     fn the_primary_control_product_is_always_subscribed() {
-        // Nothing focused, device lens: the project's rendered lamps still
-        // stream, or no surface outside the focused fixture card could ever
-        // show them.
+        // The primary visual is unioned in regardless of node scope, or no
+        // surface outside the focused fixture card could ever show the
+        // project's rendered lamps. Every node here is opted OUT, so the
+        // primary is the ONLY thing that can put it in the list.
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         project.apply_project_view(&view).unwrap();
         clear_node_focus(&mut project.root_nodes);
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        for address in ["/demo.module", "/demo.module/orbit.shader"] {
+            if let Some(node) = project.node_mut(&node_address(address)) {
+                node.state_mut().product_subscription_intent =
+                    ProjectProductSubscriptionIntent::Unsubscribed;
+            }
+        }
         let scope = lpc_wire::WireScopeRef::Module {
             owner: lpc_model::NodeId::new(1),
         };
@@ -11777,9 +11681,8 @@ mod tests {
             face.preview.expect("the inner module's output hero")
         };
 
-        // Sim lens: an expanded child node is subscribed, so its hero is
-        // live and must say so.
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        // An expanded child node is subscribed, so its hero is live and
+        // must say so.
         let hero = child_hero(&project);
         assert_eq!(
             hero.product,
@@ -11791,14 +11694,16 @@ mod tests {
             "the bytes behind this hero are still being pulled"
         );
 
-        // Device lens, nothing focused: the product genuinely stopped
-        // streaming, and Paused is the honest word for the cached frame.
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        // Opt every node OUT and the product genuinely stops streaming:
+        // Paused is the honest word for the cached frame. (The
+        // focused-node-only DEVICE lens produced the same state until M2
+        // of the device-model rebuild deleted the device arm.)
+        unsubscribe_every_node(&mut project.root_nodes);
         assert!(
             !project
                 .subscribed_products()
                 .contains(&UiProductRef::from_visual_product(product)),
-            "the fixture's premise: nothing subscribes this product"
+            "an opted-out node subscribes nothing"
         );
         assert_eq!(
             child_hero(&project).tracking,
@@ -11806,8 +11711,19 @@ mod tests {
         );
     }
 
+    /// Opt every node in the tree OUT of product subscription — the one
+    /// state that still silences a node now that the focused-node-only
+    /// device lens is gone (M2 of the device-model rebuild).
+    fn unsubscribe_every_node(nodes: &mut [NodeController]) {
+        for node in nodes.iter_mut() {
+            node.state_mut().product_subscription_intent =
+                ProjectProductSubscriptionIntent::Unsubscribed;
+            unsubscribe_every_node(node.children_mut());
+        }
+    }
+
     #[test]
-    fn sim_lens_subscribes_unfocused_nodes_device_stays_focused_only() {
+    fn an_unfocused_expanded_node_still_streams_its_products() {
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
@@ -11815,14 +11731,10 @@ mod tests {
         project.apply_project_view(&view).unwrap();
         clear_node_focus(&mut project.root_nodes);
 
-        // Device lens (and unknown): an unfocused node contributes nothing.
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
-        assert_eq!(project.subscribed_products(), Vec::new());
-        project.set_lens_runtime_kind(None);
-        assert_eq!(project.subscribed_products(), Vec::new());
-
-        // Sim lens: the unfocused (expanded) node's products stream too.
-        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        // The sim is local and cheap, so an EXPANDED node keeps its live
+        // previews whether or not it is focused. (The focused-node-only
+        // arm belonged to the device lens, deleted in M2 of the
+        // device-model rebuild.)
         assert_eq!(
             project.subscribed_products(),
             vec![
@@ -12535,15 +12447,27 @@ mod tests {
     }
 
     #[test]
-    fn focused_default_node_subscribes_product_preview_probes() {
+    fn a_default_node_subscribes_product_preview_probes() {
         let node = node_address("/demo.module/orbit.shader");
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
         project.apply_project_view(&view).unwrap();
 
+        // Opted OUT, nothing streams — the one state that still silences a
+        // node now that the focused-node-only device lens is gone.
+        project
+            .node_mut(&node)
+            .unwrap()
+            .state_mut()
+            .product_subscription_intent = ProjectProductSubscriptionIntent::Unsubscribed;
         assert!(project.subscribed_products().is_empty());
 
+        project
+            .node_mut(&node)
+            .unwrap()
+            .state_mut()
+            .product_subscription_intent = ProjectProductSubscriptionIntent::Default;
         project.node_mut(&node).unwrap().state_mut().focused = true;
         assert_eq!(
             project.subscribed_products(),
@@ -12587,6 +12511,9 @@ mod tests {
         let mut project = ProjectController::new();
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         project.apply_project_view(&view).unwrap();
+        // The subject is the CACHED frame surviving a stopped stream, so
+        // opt out: the tracking column must read Paused deterministically.
+        unsubscribe_every_node(&mut project.root_nodes);
         let product = VisualProduct::new(NodeId::new(1), 0);
         let bytes = vec![10, 20, 30, 40, 50, 60];
         let request = project

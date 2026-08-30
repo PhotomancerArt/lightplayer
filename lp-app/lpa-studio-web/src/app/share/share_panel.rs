@@ -41,14 +41,18 @@ use lpc_cloud_api::{Access, MemberRole};
 
 use crate::app::share::share_person::SharePerson;
 use crate::app::share::share_url::ShareUrl;
-use crate::base::{PopoverButton, PopoverCloseHandle, PopoverPlacement};
+use crate::base::{
+    InlineButtonTone, PopoverButton, PopoverCloseHandle, PopoverPlacement,
+    inline_icon_button_class, inline_text_button_class,
+};
+use crate::core::outline_action_class;
 
 /// The chrome's Share pill and its anchored panel.
 ///
-/// Quiet by design (G1 ruling): the neutral chip family, with the accent
-/// living only in the person glyph — the bar already carries the URL, so
-/// this is a door, not an advertisement. Opening tints the border with the
-/// accent.
+/// Quiet by design (G1 ruling): the neutral chip family — the bar already
+/// carries the URL, so this is a door, not an advertisement. Opening
+/// brightens the border to the selection tone (accent reckoning: no hue on
+/// chrome; open-state is a selection-ish "you are here").
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn SharePillPopover(
@@ -81,7 +85,7 @@ pub fn SharePillPopover(
             class: SHARE_PILL_CLASS.to_string(),
             open_class: SHARE_PILL_OPEN_CLASS.to_string(),
             trigger: rsx! {
-                span { class: "tw:flex tw:flex-none tw:text-accent",
+                span { class: "tw:flex tw:flex-none tw:text-strong-foreground",
                     UserRound { size: 13 }
                 }
                 // The word carries its own type: `style.css` resets
@@ -146,7 +150,7 @@ pub fn SharePanel(
                 }
                 if let Some(mut close) = close {
                     button {
-                        class: PANEL_CLOSE_CLASS,
+                        class: inline_icon_button_class(InlineButtonTone::Neutral, false),
                         r#type: "button",
                         aria_label: "Close",
                         onclick: move |_| close.close(),
@@ -332,7 +336,7 @@ fn PersonRow(person: SharePerson, on_remove: Option<EventHandler<String>>) -> El
                     "Editor"
                 }
                 button {
-                    class: ROW_ACTION_CLASS,
+                    class: inline_text_button_class(InlineButtonTone::Neutral, false),
                     r#type: "button",
                     title: "Remove {person.email} from this project",
                     onclick: move |_| {
@@ -340,7 +344,7 @@ fn PersonRow(person: SharePerson, on_remove: Option<EventHandler<String>>) -> El
                             on_remove.call(email.clone());
                         }
                     },
-                    span { class: "tw:text-[11px] tw:font-semibold", "Remove" }
+                    "Remove"
                 }
             }
         }
@@ -405,9 +409,9 @@ fn AddPersonRow(on_add: Option<EventHandler<String>>, adding: bool) -> Element {
                 },
             }
             button {
-                class: ADD_SUBMIT_CLASS,
+                class: outline_action_class(false),
                 r#type: "submit",
-                span { class: "tw:text-[11px] tw:font-bold", "Add" }
+                "Add"
             }
         }
     }
@@ -425,13 +429,13 @@ fn segment_label(access: Access) -> &'static str {
 /// One segment button's class. `Anyone can edit` is warn-toned when
 /// pressed (post-gate refinement): the pressed state is the one that says
 /// "the link is write access right now", and it must not read like a
-/// friendly accent confirmation.
+/// friendly plain-selection confirmation.
 fn segment_button_class(access: Access, pressed: bool) -> String {
     let state = match (access, pressed) {
         (Access::Edit, true) => {
             "tw:bg-status-warning-bg tw:text-status-warning-foreground tw:hover:text-status-warning-foreground"
         }
-        (_, true) => "tw:bg-accent-wash tw:text-accent tw:hover:text-accent",
+        (_, true) => "tw:bg-selection-bg tw:text-strong-foreground tw:hover:text-strong-foreground",
         (Access::Edit, false) => {
             "tw:bg-transparent tw:text-subtle-foreground tw:hover:bg-background-wash tw:hover:text-status-warning-foreground"
         }
@@ -454,21 +458,24 @@ fn initials_style(hue: u16) -> String {
     )
 }
 
-/// The pill at rest: the neutral chip family, accent only in the glyph.
-const SHARE_PILL_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:px-3 tw:py-1.5 tw:text-status-neutral-foreground tw:transition-colors tw:hover:border-accent-border tw:hover:text-strong-foreground";
-/// The pill while open: the accent border tint the spike's `.sharebtn.open`
-/// wears. Same box, so opening cannot nudge the bar.
-const SHARE_PILL_OPEN_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-accent-border tw:bg-accent-wash tw:px-3 tw:py-1.5 tw:text-strong-foreground";
+/// The pill at rest: the neutral chip family, the glyph strong.
+const SHARE_PILL_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:px-3 tw:py-1.5 tw:text-status-neutral-foreground tw:transition-colors tw:hover:border-selection-border tw:hover:text-strong-foreground";
+/// The pill while open: the selection border-brightening the spike's
+/// `.sharebtn.open` idea, hue-less. Same box, so opening cannot nudge the
+/// bar.
+const SHARE_PILL_OPEN_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-pill tw:border tw:border-selection-border tw:bg-selection-bg tw:px-3 tw:py-1.5 tw:text-strong-foreground";
 /// The panel, at the spike's 348px. Plain `w-[…]`, the shipped ⋯ menu's
 /// idiom: `.ux-popover-panel` already caps every panel at
-/// `calc(100vw - 24px)`.
-const SHARE_POPUP_CLASS: &str = "tw:grid tw:w-[348px] tw:min-w-0 tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:text-sm tw:text-muted-foreground tw:shadow-lg";
-/// The header's ×.
-const PANEL_CLOSE_CLASS: &str = "tw:ml-auto tw:inline-flex tw:h-5 tw:w-5 tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:p-0 tw:text-dim-foreground tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
+/// `calc(100vw - 24px)`. Material-free (P4): the merged-outline popover's
+/// `ux-svg-popover-panel` already paints background/border/shadow, so this
+/// carries only layout and type.
+const SHARE_POPUP_CLASS: &str =
+    "tw:grid tw:w-[348px] tw:min-w-0 tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 /// The URL hero's box: the terminal surface, because it holds an address.
 const URL_HERO_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-border tw:bg-terminal tw:px-2.5 tw:py-2";
-/// The one filled button in the panel — the link IS the share.
-const COPY_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-accent-border tw:bg-accent tw:px-2.5 tw:py-1.5 tw:text-accent-foreground tw:transition-colors tw:hover:bg-accent-hover";
+/// The one filled button in the panel — the link IS the share, so it wears
+/// the Primary gradient (the app's one loud fill; accent reckoning D1).
+const COPY_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:px-2.5 tw:py-1.5 tw:transition-colors ux-primary-gradient ux-focus-ring";
 /// The three-way segment's frame.
 const SEGMENT_CLASS: &str =
     "tw:flex tw:min-w-0 tw:overflow-hidden tw:rounded-sm tw:border tw:border-border-strong";
@@ -480,14 +487,12 @@ const GROUP_HEADER_CLASS: &str =
 /// The pending-invitation badge: warn-toned, because it is a promise the
 /// service has not been able to keep yet.
 const INVITED_BADGE_CLASS: &str = "tw:inline-flex tw:flex-none tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:py-px tw:font-mono tw:text-[8.5px] tw:font-bold tw:uppercase tw:tracking-wide tw:text-status-warning-foreground";
-/// A quiet per-row verb (Remove).
-const ROW_ACTION_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-1.5 tw:py-1 tw:text-subtle-foreground tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";
-/// The dashed add row, at the list's bottom.
+/// The dashed add row, at the list's bottom — the idiom `device_card`'s
+/// entry cards mirror (P4: kept bespoke on purpose; it is the pattern
+/// source, not a one-off).
 const ADD_ROW_CLASS: &str = "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-2.5 tw:py-2 tw:text-left tw:text-subtle-foreground tw:transition-colors tw:hover:border-dim-foreground tw:hover:text-foreground";
 /// The same row, unfolded into its email box.
 const ADD_INPUT_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-border tw:bg-card-muted tw:px-2.5 tw:py-1.5";
-/// The box's submit.
-const ADD_SUBMIT_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-accent-border tw:bg-transparent tw:px-2 tw:py-1 tw:text-accent tw:transition-colors tw:hover:bg-accent-wash";
 
 #[cfg(test)]
 mod tests {
@@ -500,17 +505,19 @@ mod tests {
         assert_eq!(segment_label(Access::Edit), "Anyone can edit");
     }
 
-    /// The pressed `Anyone can edit` segment must be WARN, never the accent
-    /// every other pressed segment wears (post-gate refinement).
+    /// The pressed `Anyone can edit` segment must be WARN — write access is
+    /// a warning-family fact, while every other pressed segment is a plain
+    /// selection (post-gate refinement, recolored by the accent reckoning:
+    /// selected = the neutral selection family, never a hue).
     #[test]
-    fn pressed_edit_is_warn_and_pressed_view_is_accent() {
+    fn pressed_edit_is_warn_and_pressed_view_is_selection() {
         let edit = segment_button_class(Access::Edit, true);
         assert!(edit.contains("tw:bg-status-warning-bg"));
-        assert!(!edit.contains("tw:text-accent"));
+        assert!(!edit.contains("tw:bg-selection-bg"));
 
         let view = segment_button_class(Access::View, true);
-        assert!(view.contains("tw:bg-accent-wash"));
-        assert!(view.contains("tw:text-accent"));
+        assert!(view.contains("tw:bg-selection-bg"));
+        assert!(!view.contains("accent"));
     }
 
     /// No preflight: every one of these buttons must name its own
@@ -520,13 +527,16 @@ mod tests {
         for class in [
             SHARE_PILL_CLASS,
             SHARE_PILL_OPEN_CLASS,
-            PANEL_CLOSE_CLASS,
             COPY_BUTTON_CLASS,
-            ROW_ACTION_CLASS,
             ADD_ROW_CLASS,
-            ADD_SUBMIT_CLASS,
         ] {
-            assert!(class.contains("tw:bg-"), "no background in `{class}`");
+            // `.ux-primary-gradient` carries fill, edge, and text together
+            // (style.css) — it names a background the same way `tw:bg-*`
+            // does, just as the Primary action tier composes it.
+            assert!(
+                class.contains("tw:bg-") || class.contains("ux-primary-gradient"),
+                "no background in `{class}`"
+            );
         }
         for access in [Access::None, Access::View, Access::Edit] {
             for pressed in [false, true] {

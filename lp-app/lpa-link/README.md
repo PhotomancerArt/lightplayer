@@ -207,6 +207,50 @@ Key contracts:
   management progress. On `Incompatible`/`Unresponsive`/`Gone` the session
   record's status becomes `LinkSessionStatus::Error`.
 
+## The device-model Link (`device_link`)
+
+`lpa-devices` — the event-fold device model — defines the transport contract
+(`Link`, `LinkEvent`, `LinkCommand`, `ResetKind`) and `lpa-link` implements it.
+The dependency runs that way on purpose (dependency inversion, vision R2): the
+model never calls a transport, and no transport classifies a device. The hello
+gate, the boot-line diagnosis and the foreign-firmware detection all live in
+the device fold, which is what makes verdicts non-sticky.
+
+Module `device_link`, feature `device-link` (implied by `browser-serial-esp32`
+and `fake-device`):
+
+| module | what it adapts |
+|---|---|
+| `device_link::wire` | `lpc_wire` frames ⇄ the model's minimal mirror — the ONE meeting point of the two vocabularies, and where `WIRE_PROTO_VERSION` is read (`roster_config()`) |
+| `device_link::demux` | whole serial lines → `LinkEvent`s (the `M!` demux, with resync on an embedded marker) |
+| `device_link::byte_stream` | `ByteStreamLink<S>` over the sync `DeviceByteStream` seam — no executor, because `read_available` already means "whatever is ready" |
+| `device_link::fake` | `FakeDeviceLink` = `ByteStreamLink<FakeDeviceByteStream>`: the model's host test vehicle |
+| `device_link::browser_serial` | `BrowserSerialLink` — a WRAPPER over `BrowserSerialEsp32Provider` and the shipped JS controller (wasm only) |
+
+The browser adapter is where the executor lives: Web Serial is promise-shaped,
+so each command runs in a `spawn_local` future that pushes events onto a shared
+queue (commands drained one at a time, so a `Close` cannot overtake the `Open`
+it follows). Reading needs no future at all — the provider's `take_lines` /
+`take_errors` are synchronous, so `poll_event` just drains what the JS read
+pump already buffered. That is invariant I7: the model's fold loop never awaits
+device IO.
+
+Two adapter limits worth knowing:
+
+- `ByteStreamLink`'s reset dances write the right pin EDGES but no inter-step
+  delays (it may not block). That suits the fake, which keys on edges; a
+  host-serial instantiation must drive its reset from a thread that can sleep,
+  as `lpa_client::transport_serial::hardware` does.
+- `BrowserSerialLink` implements `ResetKind::Normal` only (via the protocol
+  re-open, whose `openProtocol` performs exactly that dance). The other kinds
+  are refused loudly rather than silently performing a different reset;
+  `BothThenDrop` (the CH34x sequence) is not in the JS controller at all yet.
+
+End-to-end host coverage lives in `device_link::tests`: a real `Roster` driven
+through a real `Link` over the scripted fake device, including the mid-stream
+connect and the response-starvation wire (which must settle on honest evidence,
+never hang).
+
 ## Providers
 
 `LinkProviderRegistry` is a **catalog + factory**, not a store of live

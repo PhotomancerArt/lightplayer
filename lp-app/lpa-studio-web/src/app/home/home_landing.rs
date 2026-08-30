@@ -72,35 +72,27 @@ pub fn HomePage(
                 }
                 EditArtworkPill { on_action }
             }
-            // Two ways in, and both ARE the setup flow (landing round
-            // 2026-08-29): "Devices" used to land on a bare roster page,
-            // so both cards now ride the sim card's pattern — land on
-            // Devices WITH the wizard already walking the right flow
-            // (same op as the Devices page's own entry cards). Explore's
-            // card is gone with the page's nav presence: it only showed
-            // the examples this very page lists in full.
+            // Two ways in (landing round 2026-08-29; Explore's card is
+            // gone with the page's nav presence — it only showed the
+            // examples this very page lists in full). The setup wizard
+            // went with M2 of the device-model rebuild, so "Connect a
+            // device" is a plain door to Devices, whose empty state IS
+            // the add-device flow now (card-is-the-flow).
             nav { class: "tw:grid tw:w-[min(480px,100%)] tw:grid-cols-2 tw:gap-3 tw:max-[640px]:grid-cols-1",
                 DiveInCard {
                     icon: StudioIconName::Usb,
                     title: "Connect a device",
                     detail: "Plug a board in over USB and set it up.",
                     href: "/devices",
-                    on_press: on_action.map(|on_action| {
-                        EventHandler::new(move |()| {
-                            on_action.call(home_action(HomeOp::StartSetup { sim: false }));
-                        })
-                    }),
                 }
+                // Opening any example puts a project on the simulator,
+                // which is what "try the simulator" now means: the
+                // setup wizard went with M2 of the device-model rebuild.
                 DiveInCard {
                     icon: StudioIconName::Simulator,
                     title: "Try the simulator",
-                    detail: "Set up the simulator as a board — no hardware needed.",
-                    href: "/devices",
-                    on_press: on_action.map(|on_action| {
-                        EventHandler::new(move |()| {
-                            on_action.call(home_action(HomeOp::StartSetup { sim: true }));
-                        })
-                    }),
+                    detail: "Open an example and watch it run — no hardware needed.",
+                    href: "/explore",
                 }
             }
             // The example grid (D5, widened at G1 to ALL examples): real,
@@ -147,8 +139,8 @@ pub fn HomePage(
 /// A labelled pill, not the earlier bare pencil: the hero's whole claim is
 /// that the artwork is *editable*, and a 24px glyph beside the tagline
 /// never said so out loud (G1 ruling, 2026-08-26). Deliberately a QUIET
-/// secondary — neutral border and surface, accent only on hover — after
-/// the solid accent fill proved the loudest thing on the page (G2 ruling,
+/// secondary — neutral border and surface, brightening on hover — after
+/// the old solid fill proved the loudest thing on the page (G2 ruling,
 /// 2026-08-28; a broader design-language pass is planned, so this stays
 /// inside today's idiom rather than inventing ahead of it).
 #[component]
@@ -184,7 +176,7 @@ fn EditArtworkPill(#[props(default)] on_action: Option<EventHandler<UiAction>>) 
 }
 
 /// The quiet secondary pill: neutral border on the card surface, strong
-/// text, and the accent reserved for hover — the invite is the LABEL, the
+/// text, brightening on hover — the invite is the LABEL, the
 /// hero above it already carries the color. Same footprint as the docs'
 /// `open-in-studio` button so the product's one "open this example"
 /// gesture keeps one size everywhere. `max-w-full` + `whitespace-nowrap`
@@ -192,7 +184,7 @@ fn EditArtworkPill(#[props(default)] on_action: Option<EventHandler<UiAction>>) 
 /// the label breaking mid-word.
 fn edit_artwork_pill_class(live: bool) -> &'static str {
     if live {
-        "tw:inline-flex tw:max-w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border tw:bg-card tw:px-4 tw:py-2 tw:text-sm tw:font-semibold tw:leading-none tw:text-strong-foreground tw:transition-colors tw:hover:border-accent-border tw:hover:text-accent"
+        "tw:inline-flex tw:max-w-full tw:cursor-pointer tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border tw:bg-card tw:px-4 tw:py-2 tw:text-sm tw:font-semibold tw:leading-none tw:text-strong-foreground tw:transition-colors tw:hover:border-selection-border tw:hover:text-strong-foreground"
     } else {
         "tw:inline-flex tw:max-w-full tw:cursor-not-allowed tw:items-center tw:gap-2 tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-border-muted tw:bg-card-muted tw:px-4 tw:py-2 tw:text-sm tw:font-semibold tw:leading-none tw:text-dim-foreground"
     }
@@ -219,7 +211,7 @@ fn DiveInCard(
                     on_press.call(());
                 }
             },
-            span { class: "tw:flex tw:h-9 tw:w-9 tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-border tw:bg-card-muted tw:text-accent",
+            span { class: "tw:flex tw:h-9 tw:w-9 tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-border tw:bg-card-muted tw:text-heading",
                 StudioIcon { name: icon, size: 18 }
             }
             span { class: "tw:text-sm tw:font-bold tw:text-strong-foreground", "{title}" }
@@ -228,7 +220,7 @@ fn DiveInCard(
     }
 }
 
-const DIVE_IN_CARD_CLASS: &str = "tw:grid tw:justify-items-center tw:gap-2 tw:rounded-md tw:border tw:border-border tw:bg-card tw:px-4 tw:py-5 tw:no-underline tw:transition-colors tw:hover:border-accent-border tw:hover:bg-card-raised";
+const DIVE_IN_CARD_CLASS: &str = "tw:grid tw:justify-items-center tw:gap-2 tw:rounded-md tw:border tw:border-border tw:bg-card tw:px-4 tw:py-5 tw:no-underline tw:transition-colors tw:hover:bg-card-raised ux-ir-ring ux-card-lift ux-focus-ring";
 
 /// The one quiet line for a `/p/` link's fate (tone classes appended).
 const SHARED_LINE_CLASS: &str =
