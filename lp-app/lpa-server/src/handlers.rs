@@ -4,7 +4,7 @@ extern crate alloc;
 
 use crate::error::ServerError;
 use crate::project_manager::ProjectManager;
-use crate::server::MemoryStatsFn;
+use crate::server::{MemoryStatsFn, ReadHeadroomProbe, check_load_headroom};
 use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use lpc_engine::{ButtonService, LpGraphics, RadioService};
@@ -75,6 +75,7 @@ pub fn handle_client_message(
     base_fs: &mut dyn LpFs,
     output_provider: &Rc<RefCell<dyn OutputProvider>>,
     memory_stats: Option<&MemoryStatsFn>,
+    read_headroom_probe: Option<ReadHeadroomProbe>,
     time_provider: Option<Rc<dyn TimeProvider>>,
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
@@ -116,6 +117,7 @@ pub fn handle_client_message(
             base_fs,
             output_provider,
             memory_stats,
+            read_headroom_probe,
             time_provider,
             button_service,
             radio_service,
@@ -283,6 +285,7 @@ fn handle_load_project(
     base_fs: &mut dyn LpFs,
     output_provider: &Rc<RefCell<dyn OutputProvider>>,
     memory_stats: Option<&MemoryStatsFn>,
+    read_headroom_probe: Option<ReadHeadroomProbe>,
     time_provider: Option<Rc<dyn TimeProvider>>,
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
@@ -302,6 +305,10 @@ fn handle_load_project(
         project_manager.unload_all_projects()?;
         log_memory(memory_stats, "load_project unload existing after");
     }
+    // Gated AFTER the unload on purpose: the probe must read the heap the
+    // load would actually run in, and refusing before freeing the outgoing
+    // project would reject loads that fit.
+    check_load_headroom(read_headroom_probe)?;
     log_memory(memory_stats, "load_project before");
     let handle = project_manager.load_project(
         path,

@@ -220,6 +220,7 @@ fn run(args: &Args) -> Result<(), String> {
                 None,
                 None,
                 None,
+                None,
                 graphics.clone(),
                 &hello,
                 lpa_server::handlers::EngineLinkState::default(),
