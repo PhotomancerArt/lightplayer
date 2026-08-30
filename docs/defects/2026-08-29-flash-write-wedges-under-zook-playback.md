@@ -37,3 +37,25 @@ for FLASH ops even though the transport no longer needs it).
 `with_app_core_stalled` under zook vs small-dome; check whether the
 wedge is a livelock (never returns) or extreme slowness; bisect wire
 count (2 vs 5 outputs) on the same project.
+
+**2026-08-29 follow-up (bring-up session, same board/firmware)** — the
+4.6 KB write got no response in **120 s** while zook played
+(shader red-gated, black output, 5 wires live) — and the whole time
+heartbeats kept arriving on schedule and `frame_count` kept climbing
+at a steady 22.85 fps. **The tick loop is NOT blocked**, which
+falsifies the "tick loop waits on the sync handler" picture above: a
+handler stuck inside `with_app_core_stalled` would stall the whole
+server loop, heartbeats included. The request dies somewhere between
+io_task frame assembly and handler dispatch (or its ack dies on a path
+heartbeats don't share). Small C4-shaped requests round-trip under the
+identical load, so the discriminating variable is inbound frame size
+(4.6 KB ≈ 50 ms of line time > one 43 ms tick) — yet link counters
+stayed zero and the same-size write completes under small-dome ticks.
+`fw-esp32v3` now carries debug-level `[FLASH]` start/end trace pairs
+(flash_storage.rs, armed via `setLogLevel debug`): no `[FLASH]` lines
+during a wedged write = the op never reached littlefs; start-without-
+end = stall window; endless pairs = a loop above storage. A useful
+extra probe: a debug line at fs-request dequeue, to split "never
+dispatched" from "response lost". Note `PUSHER_CAP = 4`
+(wire_pusher.rs) vs zook's 5 wires — the 4-vs-5 bisect sits exactly on
+that boundary.
