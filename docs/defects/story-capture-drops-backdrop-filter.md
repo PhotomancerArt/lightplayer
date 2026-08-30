@@ -1,6 +1,6 @@
 # Story capture bakes glass surfaces without their blur
 
-**Status:** open
+**Status:** fixed (2026-08-30, PR #479 — conditional `captureBeyondViewport`)
 **Filed:** 2026-08-30 (design-language refresh, PR #467)
 
 ## Mechanism
@@ -22,15 +22,27 @@ blur, so diffs remain deterministic and the visual-regression contract
 still catches unrelated drift. The defect is coverage, not flake — blur
 regressions on glass surfaces are invisible to CI.
 
-## Fix shape (untried)
+## Fix (PR #479)
 
-Flip `captureBeyondViewport` to `false`; the viewport is already fitted
-per story, so the flag should be redundant. Risks to check before
-trusting it: stories whose content overflows the fitted viewport
-(truncation), and the capture-wedge/concurrency lore in
-`docs/adr/2026-07-26-ci-canonical-story-capture.md` and the
-story-capture memory files. A full re-baseline follows whichever way it
-lands (merge-is-acceptance).
+A plain flip to `false` turned out to be wrong: `fitViewportToStory`
+deliberately RESTORES the base 760px viewport before the shot (so
+viewport-keyed layout growth is not baked into tall baselines), which
+leaves 290/1940 baseline stories taller than the viewport at capture
+time (up to 5162px) — with the flag off they truncate at the fold. The
+landed fix computes the flag per shot: `false` when the capture clip
+fits the viewport (1650/1940 stories, including every glass surface —
+glass is overlays-only by design), `true` only when the clip overflows
+(tall stories keep the previous behaviour exactly).
+
+Verified locally (macOS): full 1940-story A/B against the unpatched
+script was 1924/1940 byte-identical, the remainder being run-to-run
+churn (same-script double-capture differed on 11/160 in the same story
+families); no truncation anywhere; glass blur present in captures.
+Caveat: this macOS Chrome does NOT exhibit the drop (flag true/false
+byte-identical), so the drop is environment-dependent — the pinned CI
+Chrome's re-baseline on PR #479 is the authoritative readout, via the
+normal drift-comment merge-is-acceptance flow. Either way the
+conditional flag pins the more correct capture request.
 
 ## References
 
