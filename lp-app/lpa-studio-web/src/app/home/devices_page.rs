@@ -121,7 +121,7 @@ fn AddDeviceCard(on_action: EventHandler<UiAction>) -> Element {
             // so a network path can join later as a sibling verb rather
             // than a rewrite.
             p { class: "tw:m-0 tw:max-w-56 tw:text-center tw:text-xs tw:leading-relaxed tw:text-muted-foreground",
-                "Connect a LightPlayer board to control it."
+                "Connect a LightPlayer board to control\u{a0}it."
             }
             ActionButton {
                 action: DevicesOp::action_for(DeviceAction::AddFromUsb),

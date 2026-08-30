@@ -138,14 +138,18 @@ pub fn ActionButton(
                 }
                 // The "Confirm " prefix is always in the DOM (a content
                 // swap cannot drive a width transition); arming opens its
-                // grid column. Hidden from AT — the armed `title` carries
-                // the confirmation message.
-                if inline_confirm {
-                    span { class: "ux-armed-prefix", aria_hidden: "true",
-                        span { "Confirm\u{a0}" }
+                // grid column. Prefix and verb share one wrapper so the
+                // button's flex gap can't open a seam between them; the
+                // prefix is hidden from AT — the armed `title` carries the
+                // confirmation message.
+                span { class: "tw:inline-flex",
+                    if inline_confirm {
+                        span { class: "ux-armed-prefix", aria_hidden: "true",
+                            span { "Confirm\u{a0}" }
+                        }
                     }
+                    span { "{shown_label}" }
                 }
-                span { "{shown_label}" }
             }
             if let Some(reason) = disabled_reason.as_ref() {
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-dim-foreground", "{reason}" }
