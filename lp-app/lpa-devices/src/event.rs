@@ -83,6 +83,18 @@ pub enum Action {
     Identify {
         device: DeviceId,
     },
+    /// Flash firmware onto this board (round 2's first coarse effect). The
+    /// board is the user's pick from the chip-compatible list; the build id
+    /// was resolved by the app from (board, detected chip) — **no fallback
+    /// build** (Yona 2026-08-03), so an unresolvable pick never reaches the
+    /// model. Aimed at a pending link's provisional device, this gesture
+    /// adopts the link first: flashing a board is the strongest possible
+    /// "keep this one".
+    Flash {
+        device: DeviceId,
+        board_id: String,
+        build_id: String,
+    },
     SetName {
         device: DeviceId,
         name: String,
@@ -102,6 +114,7 @@ impl Action {
             | Self::Forget { device }
             | Self::CancelActivity { device }
             | Self::Identify { device }
+            | Self::Flash { device, .. }
             | Self::SetName { device, .. }
             | Self::SetAutoconnect { device, .. } => Some(*device),
             Self::AddFromUsb
@@ -139,6 +152,15 @@ pub enum Event {
     ActivityMarker {
         device: DeviceId,
         marker: ActivityMarker,
+    },
+    /// Identity a coarse effect learned out-of-band (the flash preflight
+    /// reads the base MAC between the chip guard and the write). It enters
+    /// the model the same way every fact does — as an event folded into
+    /// evidence (I6) — so a blank board is identity-joined the moment the
+    /// preflight reads its silicon, before any hello.
+    IdentityObserved {
+        device: DeviceId,
+        identity: crate::identity::PeerIdentity,
     },
 }
 
@@ -182,6 +204,31 @@ pub enum Command {
     DeleteRecord(DeviceId),
     /// Hand a grant back so the port stops being ours.
     RevokeGrant(LinkInfo),
+    /// Run a coarse effect OUTSIDE the model (the round-2 seam): the effects
+    /// layer borrows the wire exclusively, runs the operation through the
+    /// platform's intact machinery (esptool-js for flash), and reports back
+    /// as [`Event::ActivityMarker`] progress/end — plus
+    /// [`Event::IdentityObserved`] for identity learned along the way. The
+    /// model never sees the operation itself; this arm is data.
+    RunEffect {
+        device: DeviceId,
+        link: LinkId,
+        effect: EffectRequest,
+    },
+}
+
+/// The closed set of coarse effects (data, not behavior). M3 adds `Push`;
+/// M4 adds `Pull`/`Erase`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum EffectRequest {
+    /// Write a firmware image with esptool. The chip guard and the pre-write
+    /// base-MAC read live in the platform layer and are load-bearing.
+    Flash { build_id: String, board_id: String },
+    /// Write the chosen board's runtime manifest to the device's
+    /// `/hardware.json` over the app protocol (effective next boot — the old
+    /// provision's D4 ruling). Emitted by the Flash activity once the
+    /// post-flash hello proves the app protocol is up.
+    WriteBoardManifest { board_id: String },
 }
 
 #[cfg(test)]
@@ -197,6 +244,11 @@ mod tests {
             Action::Forget { device },
             Action::CancelActivity { device },
             Action::Identify { device },
+            Action::Flash {
+                device,
+                board_id: "seeed-xiao-esp32c6".to_string(),
+                build_id: "esp32c6-4mb".to_string(),
+            },
             Action::SetName {
                 device,
                 name: "n".to_string(),

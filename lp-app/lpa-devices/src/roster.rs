@@ -60,6 +60,19 @@ pub struct RosterConfig {
     /// settles at "no response" (a fresh window each time). A replugged
     /// board answering on the second window shouldn't need a human retry.
     pub identify_auto_retries: u32,
+    /// Supervision backstop for the whole Flash activity: the esptool write
+    /// window (a minute or more at full images) plus the reconnect ladder.
+    pub flash_deadline_ms: u64,
+    /// Wind-down grace for a cancelled flash. Wide because esptool-js cannot
+    /// abort a write cleanly — the reducer holds the cancel through the
+    /// write window with an honest label; this is the bound on that hold.
+    pub flash_cancel_grace_ms: u64,
+    /// How long each rung of the post-flash reconnect ladder waits for the
+    /// boot hello before escalating (reopen → Normal → BothThenDrop → fail).
+    pub flash_rung_ms: u64,
+    /// The retry/ask cadence inside a rung: reopen a closed port (session
+    /// adoption absorbs a re-enumerated one) or re-ask a quiet open one.
+    pub flash_reopen_retry_ms: u64,
     /// Silence before freshness flips to quiet. Wider than two heartbeat
     /// periods on purpose: a lossy wire must not flap the timeline.
     pub quiet_after_ms: u64,
@@ -76,6 +89,10 @@ impl Default for RosterConfig {
             cancel_grace_ms: 2_000,
             supervision_slack_ms: 1_000,
             identify_auto_retries: 2,
+            flash_deadline_ms: 240_000,
+            flash_cancel_grace_ms: 180_000,
+            flash_rung_ms: 8_000,
+            flash_reopen_retry_ms: 1_000,
             quiet_after_ms: 12_000,
             journal_capacity: 512,
         }
@@ -239,6 +256,23 @@ impl Roster {
                     .record_input(now, Scope::Device(*device), input);
                 vec![Command::RequestUsbGrant]
             }
+            // Flashing a still-pending link adopts it first: writing our
+            // firmware onto a board is the strongest possible "keep this
+            // one", and the adopted entry is what renders progress, outcome
+            // and every escape. The provisional id survives adoption, so the
+            // same gesture then reaches the device it created.
+            Action::Flash { device, .. } => match self.holder_of(*device) {
+                Some(Holder::Pending(index)) => {
+                    let mut commands = self.adopt_pending_entry(now, index);
+                    commands.extend(self.dispatch_to_device(now, *device, input));
+                    commands
+                }
+                Some(Holder::Device) => self.dispatch_to_device(now, *device, input),
+                None => {
+                    self.state.journal.record_input(now, Scope::Roster, input);
+                    Vec::new()
+                }
+            },
             _ => {
                 // Device-targeted gestures reach pending links too: their
                 // provisional entry is a real fold with a real activity, so
@@ -277,7 +311,9 @@ impl Roster {
                 }
             },
             Event::TimerFired { timer } => self.dispatch_timer(now, *timer, input),
-            Event::ActivityMarker { device, .. } => self.dispatch_to_device(now, *device, input),
+            Event::ActivityMarker { device, .. } | Event::IdentityObserved { device, .. } => {
+                self.dispatch_to_device(now, *device, input)
+            }
         }
     }
 
@@ -591,7 +627,20 @@ impl Roster {
         let Some(index) = self.pending_index(link) else {
             return Vec::new();
         };
+        let mut commands = self.adopt_pending_entry(now, index);
+        let Self { devices, state, .. } = self;
+        let device = devices.last_mut().expect("adoption just pushed");
+        commands.extend(device.spawn_identify(now, &mut state.ctx()));
+        commands
+    }
+
+    /// The adoption itself (exit 3's mechanics, shared with flash-adopts):
+    /// promote the pending entry to a device, journal the creation, keep the
+    /// route. What runs NEXT — identify for a plain adopt, the flash for a
+    /// flash gesture — is the caller's.
+    fn adopt_pending_entry(&mut self, now: Millis, index: usize) -> Vec<Command> {
         let entry = self.pending.remove(index);
+        let link = entry.link;
         let mut provisional = entry.provisional;
         provisional.intent.setup_requested = true;
         provisional.intent.connection = crate::intent::ConnectionIntent::Connected;
@@ -614,11 +663,8 @@ impl Roster {
         );
         self.routes.insert(link, device_id);
         self.devices.push(provisional);
-        let Self { devices, state, .. } = self;
-        let device = devices.last_mut().expect("just pushed");
-        let mut commands = vec![Command::PersistRecord(device.record_snapshot())];
-        commands.extend(device.spawn_identify(now, &mut state.ctx()));
-        commands
+        let device = self.devices.last_mut().expect("just pushed");
+        vec![Command::PersistRecord(device.record_snapshot())]
     }
 
     fn dismiss_pending(&mut self, now: Millis, link: LinkId) -> Vec<Command> {

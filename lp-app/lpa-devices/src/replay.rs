@@ -162,6 +162,33 @@ pub enum Step {
     Identify {
         device: u64,
     },
+    /// The Flash gesture: board picked, build resolved by the app.
+    Flash {
+        device: u64,
+        board: String,
+        build: String,
+    },
+    /// A coarse effect's progress marker, as the effects layer sinks it.
+    EffectProgress {
+        device: u64,
+        label: String,
+        #[serde(default)]
+        percent: Option<u8>,
+    },
+    /// A coarse effect's end marker. `ok` scripts the success/failure fork;
+    /// `message` is the outcome line.
+    EffectEnded {
+        device: u64,
+        ok: bool,
+        #[serde(default)]
+        message: Option<String>,
+    },
+    /// Identity a coarse effect learned out-of-band (the flash preflight's
+    /// efuse MAC read).
+    MacObserved {
+        device: u64,
+        mac: String,
+    },
     SetName {
         device: u64,
         name: String,
@@ -334,6 +361,48 @@ impl Step {
             Self::Identify { device } => Input::Action(Action::Identify {
                 device: DeviceId(device),
             }),
+            Self::Flash {
+                device,
+                board,
+                build,
+            } => Input::Action(Action::Flash {
+                device: DeviceId(device),
+                board_id: board,
+                build_id: build,
+            }),
+            Self::EffectProgress {
+                device,
+                label,
+                percent,
+            } => Input::Event(Event::ActivityMarker {
+                device: DeviceId(device),
+                marker: crate::event::ActivityMarker::Progress { label, percent },
+            }),
+            Self::EffectEnded {
+                device,
+                ok,
+                message,
+            } => Input::Event(Event::ActivityMarker {
+                device: DeviceId(device),
+                marker: crate::event::ActivityMarker::Ended {
+                    kind: ActivityKind::Flash,
+                    outcome: match ok {
+                        true => crate::activity::ActivityOutcome::Succeeded {
+                            summary: message.unwrap_or_else(|| "done".to_string()),
+                        },
+                        false => crate::activity::ActivityOutcome::Failed {
+                            message: message.unwrap_or_else(|| "failed".to_string()),
+                        },
+                    },
+                },
+            }),
+            Self::MacObserved { device, mac } => Input::Event(Event::IdentityObserved {
+                device: DeviceId(device),
+                identity: PeerIdentity {
+                    mac: Some(MacAddress(mac)),
+                    ..Default::default()
+                },
+            }),
             Self::SetName { device, name } => Input::Action(Action::SetName {
                 device: DeviceId(device),
                 name,
@@ -361,6 +430,8 @@ pub struct Expect {
     pub activity: Option<ActivityKind>,
     pub cancel_requested: Option<bool>,
     pub escapes: Option<Vec<Escape>>,
+    /// Whether the card wears the needs-firmware face (board pick + Flash).
+    pub needs_firmware: Option<bool>,
     pub outcome_ok: Option<bool>,
     pub outcome_contains: Option<String>,
     pub pending_index: Option<usize>,
@@ -491,6 +562,14 @@ impl Expect {
                 format!("expected state {expected:?}, saw {:?}", device.state_label)
             })?;
         }
+        if let Some(expected) = self.needs_firmware {
+            require(device.needs_firmware == expected, || {
+                format!(
+                    "expected needs_firmware={expected}, saw {}",
+                    device.needs_firmware
+                )
+            })?;
+        }
         if let Some(expected) = self.device_status {
             require(device.status == expected, || {
                 format!("expected status {expected:?}, saw {:?}", device.status)
@@ -593,6 +672,7 @@ impl Expect {
             || self.activity.is_some()
             || self.cancel_requested.is_some()
             || self.escapes.is_some()
+            || self.needs_firmware.is_some()
             || self.outcome_ok.is_some()
             || self.outcome_contains.is_some()
     }

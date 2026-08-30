@@ -24,6 +24,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::activity::activity_cell::Reducer;
+use crate::activity::flash::FlashActivity;
 use crate::activity::identify::IdentifyActivity;
 use crate::activity::{
     ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityProgress, ActivityStep,
@@ -242,6 +243,41 @@ impl Device {
         commands
     }
 
+    /// Spawn the Flash activity, unless the device is already busy (I5) or
+    /// has no link to flash over. The build id was resolved by the app from
+    /// (board, detected chip); the model treats both as opaque.
+    pub(crate) fn spawn_flash(
+        &mut self,
+        now: Millis,
+        board_id: &str,
+        build_id: &str,
+        ctx: &mut ModelCtx<'_>,
+    ) -> Vec<Command> {
+        if self.activity.is_some() || self.link().is_none() {
+            return Vec::new();
+        }
+        let reducer = FlashActivity::new(self.id, board_id.to_string(), build_id.to_string());
+        let commands = {
+            let activity_ctx = ActivityCtx {
+                link: self.evidence.link(),
+                evidence: &self.evidence,
+                config: ctx.config,
+            };
+            reducer.spawn_commands(&activity_ctx)
+        };
+        let cell = ActivityCell::new(
+            now,
+            now.plus_ms(ctx.config.flash_deadline_ms),
+            Reducer::Flash(reducer),
+        );
+        let kind = cell.kind;
+        self.activity = Some(cell);
+        ctx.journal
+            .note(now, self.scope(), JournalNote::ActivityStarted { kind });
+        self.raise_marker(now, ActivityMarker::Started { kind }, ctx);
+        commands
+    }
+
     pub(crate) fn scope(&self) -> Scope {
         Scope::Device(self.id)
     }
@@ -277,6 +313,13 @@ impl Device {
             Action::Identify { .. } => {
                 self.identify_retries = 0;
                 self.spawn_identify(now, ctx)
+            }
+            Action::Flash {
+                board_id, build_id, ..
+            } => {
+                // Flashing implies wanting the board connected afterwards.
+                self.intent.connection = ConnectionIntent::Connected;
+                self.spawn_flash(now, board_id, build_id, ctx)
             }
             Action::SetName { name, .. } => {
                 self.intent.name = Some(name.clone());
@@ -462,7 +505,7 @@ impl Device {
         let Some(cell) = &self.activity else {
             return Vec::new();
         };
-        if cell.cancel_grace_expired(now, ctx.config.cancel_grace_ms) {
+        if cell.cancel_grace_expired(now, cell.kind.cancel_grace_ms(ctx.config)) {
             return self.evict(now, EvictionReason::CancelGraceExpired, ctx);
         }
         if now >= cell.deadline {
@@ -517,7 +560,7 @@ impl Device {
     fn rearm(&mut self, now: Millis, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
         let mut soonest: Option<Millis> = None;
         if let Some(cell) = &self.activity {
-            soonest = Some(cell.next_deadline(ctx.config.cancel_grace_ms));
+            soonest = Some(cell.next_deadline(cell.kind.cancel_grace_ms(ctx.config)));
         }
         if let Some(quiet_at) = self
             .evidence

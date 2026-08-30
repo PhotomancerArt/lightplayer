@@ -46,6 +46,12 @@ pub struct DeviceView {
     pub freshness_label: Option<String>,
     /// Strongest identity binding, for disambiguating two similar boards.
     pub identity_label: Option<String>,
+    /// Chip read off the boot banner, normalized ("esp32c6"). What the
+    /// needs-firmware face filters the board pick by.
+    pub detected_chip: Option<String>,
+    /// The fold says this board wants firmware (blank, bootloader, foreign,
+    /// or incompatible) — the face that offers a board pick + Flash.
+    pub needs_firmware: bool,
     pub activity: Option<ActivityView>,
     /// Survives disconnect; cleared when a new activity supersedes it.
     pub last_outcome: Option<OutcomeView>,
@@ -90,12 +96,20 @@ pub enum Escape {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PendingLinkView {
     pub link: LinkId,
+    /// The provisional device id, minted at discovery — what a Flash gesture
+    /// on this entry targets (the gesture adopts, and adoption keeps the id).
+    pub device: DeviceId,
     pub title: String,
     pub state_label: String,
     pub detail: Option<String>,
     /// "Set up this device" — always offered, because a blank chip may never
     /// identify itself.
     pub can_adopt: bool,
+    /// The settled verdict says this board wants firmware — the pending
+    /// entry's needs-firmware face (board pick + Flash, which adopts).
+    pub needs_firmware: bool,
+    /// Chip read off the boot banner, normalized ("esp32c6").
+    pub detected_chip: Option<String>,
     /// Dismiss, expressed as [`Escape::Forget`].
     pub escapes: Vec<Escape>,
 }
@@ -165,10 +179,26 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         detail: detail(device),
         freshness_label: freshness_label(device, now),
         identity_label: device.identity.strongest_label(),
+        detected_chip: device.evidence.detected_chip().map(str::to_string),
+        needs_firmware: needs_firmware(&device.evidence.classification),
         activity,
         last_outcome: device.evidence.last_outcome.as_ref().map(outcome_view),
         escapes,
     }
+}
+
+/// Whether a classification is one Flash fixes: blank or erased flash, a
+/// board parked in the ROM downloader, somebody else's firmware, or a
+/// LightPlayer this build cannot speak to. All four get the board pick +
+/// "Flash firmware" face.
+fn needs_firmware(classification: &Classification) -> bool {
+    matches!(
+        classification,
+        Classification::Blank
+            | Classification::Bootloader
+            | Classification::Foreign { .. }
+            | Classification::Incompatible { .. }
+    )
 }
 
 /// Project one pending link.
@@ -195,6 +225,7 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
 
     PendingLinkView {
         link: entry.link,
+        device: entry.device_id(),
         title: if entry.info.label.is_empty() {
             "New device".to_string()
         } else {
@@ -203,6 +234,10 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
         state_label,
         detail,
         can_adopt: true,
+        // Only a SETTLED verdict offers the flash face: mid-identification
+        // the honest face is "identifying…", not a premature verb.
+        needs_firmware: entry.verdict().is_some_and(needs_firmware),
+        detected_chip: entry.evidence().detected_chip().map(str::to_string),
         escapes: vec![Escape::Forget],
     }
 }

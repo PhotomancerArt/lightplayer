@@ -96,6 +96,14 @@ impl Evidence {
             Event::ActivityMarker { marker, .. } => {
                 notes.extend(self.fold_marker(marker));
             }
+            // Identity learned out-of-band by a coarse effect (the flash
+            // preflight's efuse MAC read). Pure identity news: it moves no
+            // presence and opens no window.
+            Event::IdentityObserved {
+                identity: observed, ..
+            } => {
+                notes.extend(identity_notes(identity.learn(observed)));
+            }
         }
         self.reclassify(now, config);
         notes

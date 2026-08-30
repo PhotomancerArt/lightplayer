@@ -10,15 +10,19 @@
 //! what makes eviction safe — there is no half-finished future holding
 //! controller state — and what makes every flow testable by event script.
 //!
-//! M1 ships one activity, [`identify::IdentifyActivity`]. Setup, Flash,
-//! Provision, Push and Pull are round-2 variants of [`ActivityKind`] and
-//! `Reducer`.
+//! Shipped activities: [`identify::IdentifyActivity`] (round 1) and
+//! [`flash::FlashActivity`] (round 2's coarse-effect centerpiece). Push and
+//! Pull are the remaining round-2 variants of [`ActivityKind`] and
+//! `Reducer` (M3/M4); the old Setup/Provision orchestrators dissolved into
+//! the card ruling — Flash and Push ARE the flows.
 
 pub(crate) mod activity_cell;
+pub mod flash;
 pub mod identify;
 
 pub use activity_cell::{
     ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityProgress, ActivityReducer,
     ActivityStep, CancelPhase,
 };
+pub use flash::FlashActivity;
 pub use identify::IdentifyActivity;
