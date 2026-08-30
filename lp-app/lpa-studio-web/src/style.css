@@ -3011,87 +3011,147 @@ label:has(> input:not(:disabled)) {
     max-width: calc(100vw - 24px);
 }
 
+/* Liquid glass material (Aurora, R3 2026-08-29): the overlay panel
+   surface. Overlays ONLY — popovers, sheets, card bars — never resting
+   surfaces (backdrop-filter promotes a compositing layer, and glass under
+   glass reads as mud). The blur/saturate/edge knobs live in :root
+   (--studio-glass-*) so a gate can tune them in one place. */
+.ux-glass-panel {
+    position: relative;
+    background: var(--studio-glass-bg);
+    backdrop-filter: blur(var(--studio-glass-blur)) saturate(var(--studio-glass-saturate));
+    -webkit-backdrop-filter: blur(var(--studio-glass-blur)) saturate(var(--studio-glass-saturate));
+    border: 1px solid var(--studio-glass-border);
+    box-shadow:
+        inset 0 1px 0 var(--studio-glass-edge),
+        0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+/* Spectrum edge: a masked-overlay ring. NOT border-image — border-image
+   ignores border-radius and paints a square frame (spike round-1 defect).
+   Two solid mask layers XOR'd leave only the 1px padding visible, and the
+   ring clips to the element's own radius. `inset: 0` (not -1px) because
+   glass panels are overflow-hidden; the ring hugs the inside of the
+   border, which is the spike-gated look. */
+.ux-glass-panel::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+        130deg,
+        rgba(95, 224, 139, 0.4),
+        rgba(83, 198, 242, 0.35) 45%,
+        rgba(165, 138, 247, 0.4)
+    );
+    mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    pointer-events: none;
+}
+
+/* The merged-outline popover's glass: a fixed full-viewport layer clipped
+   to the SAME path string the outline SVG draws (both are fixed/inset-0 in
+   CSS-pixel space, so the silhouettes coincide). It sits under the SVG in
+   DOM order; the path keeps stroke + drop-shadow and its (now translucent)
+   tone gradient, this layer supplies base fill + blur. */
+.ux-popover-glass {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    background: var(--studio-glass-bg);
+    backdrop-filter: blur(var(--studio-glass-blur)) saturate(var(--studio-glass-saturate));
+    -webkit-backdrop-filter: blur(var(--studio-glass-blur)) saturate(var(--studio-glass-saturate));
+    pointer-events: none;
+}
+
 .ux-popover-chrome-quiet {
     --ux-popover-border-color: var(--studio-color-border-strong);
     --ux-popover-icon-color: var(--studio-color-text-strong);
-    --ux-popover-trigger-fill-top: var(--studio-color-terminal);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-terminal);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-color-terminal) 55%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-terminal) 45%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
 }
 
 .ux-popover-chrome-neutral {
     --ux-popover-border-color: var(--studio-color-border-strong);
     --ux-popover-icon-color: var(--studio-color-text-strong);
-    --ux-popover-trigger-fill-top: var(--studio-color-surface-raised-strong);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-color-surface-raised-strong) 55%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
 }
 
 .ux-popover-chrome-accent,
 .ux-popover-chrome-good {
     --ux-popover-border-color: var(--studio-color-accent-border);
     --ux-popover-icon-color: var(--studio-color-accent);
-    --ux-popover-trigger-fill-top: var(--studio-status-good-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-good-bg) 72%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
 }
 
 .ux-popover-chrome-working {
     --ux-popover-border-color: var(--studio-status-working-border);
     --ux-popover-icon-color: var(--studio-status-working-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-working-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-working-bg) 72%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
 }
 
 .ux-popover-chrome-live {
     --ux-popover-border-color: var(--studio-status-live-border);
     --ux-popover-icon-color: var(--studio-status-live-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-live-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-live-bg) 72%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
 }
 
 .ux-popover-chrome-debug {
     --ux-popover-border-color: var(--studio-status-debug-border);
     --ux-popover-icon-color: var(--studio-status-debug-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-debug-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-debug-bg) 72%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
 }
 
 .ux-popover-chrome-bound {
     --ux-popover-border-color: var(--studio-status-bound-border);
     --ux-popover-icon-color: var(--studio-status-bound-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-bound-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-bound-bg) 72%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
 }
 
 .ux-popover-chrome-warning {
     --ux-popover-border-color: var(--studio-status-warning-border);
     --ux-popover-icon-color: var(--studio-status-warning-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-warning-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-warning-bg) 72%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
 }
 
 .ux-popover-chrome-attention {
     --ux-popover-border-color: var(--studio-status-attention-border);
     --ux-popover-icon-color: var(--studio-status-attention-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-attention-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-attention-bg) 72%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
 }
 
 .ux-popover-chrome-error {
     --ux-popover-border-color: var(--studio-status-error-border);
     --ux-popover-icon-color: var(--studio-status-error-text);
-    --ux-popover-trigger-fill-top: var(--studio-status-error-bg);
-    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
-    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-error-bg) 72%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
 }
-
 /* Contiguous popover chrome: one SVG path (see base/outline.rs) draws the
    merged trigger+panel fill, border, and shadow. The tone variables above
    (.ux-popover-chrome-*) are consumed by the path's gradient and stroke. */
@@ -3159,6 +3219,22 @@ label:has(> input:not(:disabled)) {
     background: transparent;
     border-color: transparent;
     box-shadow: none;
+}
+
+/* A glass panel hosted AS the merged-outline popover's panel: the outline
+   system already supplies the material (translucent path fill over the
+   `.ux-popover-glass` blur layer), so the body's own glass stands down —
+   a nested backdrop-filter would double the blur cost, and the spectrum
+   ring would fight the tone stroke (semantic border beats decoration).
+   Standalone `ux-glass-panel` uses (anchored detail panels, static story
+   sheets) keep the full material. */
+.ux-popover-panel.ux-svg-popover-panel.ux-glass-panel {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+.ux-popover-panel.ux-svg-popover-panel.ux-glass-panel::after {
+    content: none;
 }
 
 .ux-node-ui-popup strong,

@@ -388,6 +388,18 @@ pub fn PopoverButton(
                             open.set(false);
                         },
                     }
+                    // Liquid glass under the chrome: a full-viewport layer
+                    // clipped to the SAME path string the outline SVG draws
+                    // (both are fixed/inset-0 in CSS-pixel space). It re-renders
+                    // with `outline` each entrance frame, so the blur region
+                    // morphs with the silhouette. Single-property style: the
+                    // Dioxus style-persistence rule (see panel_clip_style) is
+                    // satisfied trivially.
+                    div {
+                        class: "ux-popover-glass",
+                        "aria-hidden": "true",
+                        style: "clip-path: path(evenodd, '{outline}');",
+                    }
                     // One path draws the merged trigger+panel chrome: fill (a
                     // gradient flowing continuously across both), border, and
                     // shadow. See base/outline.rs.
