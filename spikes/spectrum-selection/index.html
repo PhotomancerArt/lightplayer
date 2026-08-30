@@ -55,9 +55,17 @@
   --shell-dim: #6f6d66; --shell-bd: #262a31; --shell-bd-strong: #3a3f48;
 }
 
-/* The one live paint variable every treatment reads. */
-body { --sel-stops: var(--stops-full); }
-body.cool { --sel-stops: var(--stops-cool); }
+/* Round-3 grammar defaults: full rainbow on LARGE marks (tab underline,
+   card ring), reduced (cool tri) on SMALL side marks — "full rainbow on
+   large things, and less on small things". Overrides let the mix be
+   compared against all-full / all-cool. */
+body {
+  --stops-tabs: var(--stops-full);
+  --stops-side: var(--stops-cool);
+  --stops-ring: var(--stops-full);
+}
+body.allfull { --stops-side: var(--stops-full); }
+body.allcool { --stops-tabs: var(--stops-cool); --stops-ring: var(--stops-cool); }
 
 * { box-sizing: border-box; }
 body {
@@ -111,23 +119,23 @@ p.hint em { color: var(--shell-tx); font-style: italic; }
 /* =====================================================================
    The static you-are-here / chosen-object paints (shared by sections).
    ===================================================================== */
-/* the line, horizontal axis (bottom edge) */
+/* the line, horizontal axis (bottom edge) — large mark, full rainbow */
 .mk-underline::after {
   content: ""; position: absolute; left: 8px; right: 8px; bottom: 0;
   height: 2.5px; border-radius: 999px;
-  background: linear-gradient(90deg, var(--sel-stops));
+  background: linear-gradient(90deg, var(--stops-tabs));
 }
-/* the line, vertical axis (leading edge) */
+/* the line, vertical axis (leading edge) — small mark, reduced spectrum */
 .mk-sideline::after {
   content: ""; position: absolute; left: 0; top: 3px; bottom: 3px;
   width: 3px; border-radius: 999px;
-  background: linear-gradient(180deg, var(--sel-stops));
+  background: linear-gradient(180deg, var(--stops-side));
 }
 /* the static ring (chosen object) */
 .mk-ring::before {
   content: ""; position: absolute; inset: -1px; border-radius: inherit;
   padding: 1px;
-  background: conic-gradient(from 210deg, var(--sel-stops), #5fe08b);
+  background: conic-gradient(from 210deg, var(--stops-ring), #5fe08b);
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   mask-composite: exclude;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -175,16 +183,6 @@ p.hint em { color: var(--shell-tx); font-style: italic; }
   height: 2.5px; border-radius: 999px; background: var(--sel-bd);
 }
 [data-t="line"] .tab.active { /* mk-underline applied in markup */ }
-[data-t="ring"] .tab.active::before {
-  content: ""; position: absolute; inset: 5px 1px; border-radius: 8px;
-  padding: 1px;
-  background: conic-gradient(from 210deg, var(--sel-stops), #5fe08b);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  pointer-events: none;
-}
 .topbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .pillbtn {
   font: 600 12px/1 var(--font); color: var(--text-muted);
@@ -309,21 +307,23 @@ body.seldirty .row.is-selected .bdg { display: inline-block; }
 </head>
 <body>
 
-<h1>Spectrum-in-selection — round 2: the you-are-here line vs the ring</h1>
+<h1>Spectrum-in-selection — round 3: the grammar</h1>
 <p class="hint">
-Round-1 ruling converged on an idiom, not a single treatment: <em>the
-you-are-here line</em> — a static spectrum line on the nav axis's edge (bottom
-for horizontal tabs, leading side for vertical lists) — versus <em>the static
-ring</em>, which marks a <em>chosen object</em>, not a location. All paint
-stays STATIC; the animated ring remains hover/drag territory. Sections below
-put the two head-to-head on each surface, with the surface's real meaning
-stated so the nav-vs-object call is makeable.
+Converged rules from rounds 1–2: <em>nav never wears the ring</em> — the
+you-are-here mark is a static spectrum LINE on the nav axis's edge (bottom for
+horizontal tabs, leading side for vertical lists). <em>The static ring marks a
+chosen object</em> (selection), never a location — selection and nav are
+separate concepts. Intensity scales with size: <em>full rainbow on large
+marks</em> (tab underline, card ring), <em>cool sweep on small side marks</em>.
+Hover/drag stays the only animated light. Open call: is the tree's focused row
+nav (side line) or selection (ring)? Both are shown in §2.
 </p>
 
 <div class="controls">
   <div class="grp"><span class="lbl">Spectrum</span>
-    <button id="c-full" class="on">Full rainbow</button>
-    <button id="c-cool">Cool sweep (Primary tri)</button>
+    <button id="c-mix" class="on">Grammar mix</button>
+    <button id="c-full">All full</button>
+    <button id="c-cool">All cool</button>
   </div>
   <div class="grp"><span class="lbl">Adjacent hover</span>
     <button id="c-hover" class="on">Pinned</button>
@@ -337,54 +337,55 @@ stated so the nav-vs-object call is makeable.
   </div>
 </div>
 
-<h2>1 · View tabs — horizontal nav → bottom line</h2>
+<h2>1 · View tabs — RULED: gradient underline (full rainbow)</h2>
 <p class="hint">
-Round-1: "T1 or T4 — underline already means current-nav-item, but the ring is
-prettier." Head-to-head, plus the neutral baseline. The ring here would spend
-the object mark on a location — see section 4 for where it pays instead.
+Round-2: not the ring — "selection is different than nav; those are clearly
+separate concepts." The underline already means current-nav-item; it goes
+spectrum. Large mark → full rainbow.
 </p>
 <div class="bars" id="bars"></div>
 
-<h2>2 · Workbench tree — this IS navigation</h2>
+<h2>2 · Workbench tree — the open call: nav or selection?</h2>
 <p class="hint">
-What the selected row means: <em>"Ocean Ripple" is the focused node — the one
-whose editor is open in the center pane.</em> Clicking a row navigates the
-workbench there (unified selection: one live surface follows selection). So by
-the round-1 rule this is a vertical nav list → the side line, like the
-story-nav. The ring variant is kept for comparison since round-1 leaned T4
-"but not if it's nav."
+<em>"Ocean Ripple" is the focused node — its editor is open in the center
+pane; clicking a row moves the workbench there.</em> If that reads as
+navigation, the grammar gives it the side line (cool, small mark). If it reads
+as selection-of-an-object, it gets the ring. Both shown against baseline —
+this is the round-3 gate question.
 </p>
 <div class="panels" id="panels"></div>
 
-<h2>3 · Story-book nav — vertical nav → side line</h2>
+<h2>3 · Story-book nav — RULED: side line (cool sweep)</h2>
 <p class="hint">
-Round-1 ruled: side line ("a side line indicates selection like a bottom line
-does on the bigger nav"). Shown converged against baseline only.
+Round-2 confirmed: this is nav, option 2 — the side line. Small side mark →
+reduced spectrum per the intensity rule.
 </p>
 <div class="navs" id="navs"></div>
 
-<h2>4 · Object selection — where the ring lives</h2>
+<h2>4 · Object selection — RULED: the spectrum ring</h2>
 <p class="hint">
-Option cards (board pickers, setup choices) are a <em>chosen object</em>, not a
-location — and they still wear the dying accent today, so they need a selection
-family regardless. Card-scale radius also lets the conic ring show its full
-sweep (at tree-row radius it compressed to orange — the attention hue).
+Round-2: "the spectrum looks good here." Option cards are a <em>chosen
+object</em> — the ring's home (they still wear dying accent today, so this
+doubles as the reckoning's selection family for option cards). Large mark →
+full rainbow; card radius shows the whole sweep.
 </p>
 <div class="cardsets" id="cardsets"></div>
 
 <div class="rejected">
-  <b>Rejected in round 1:</b> T3 low-alpha spectrum wash (too timid to cure
-  "dry", even screen-blended at 16%) · T1 underline inside the tree (an
-  underline is off-axis in a vertical list; the line sits on the leading edge
-  there) · full ring on tree rows as nav (spends the object mark on a
-  location; small radius compresses the sweep to attention-orange).
+  <b>Rejected:</b> ring on view tabs — round 2: "selection is different than
+  nav; those are clearly separate concepts"; the ring is a selection mark and
+  never marks a location · T3 low-alpha spectrum wash (too timid to cure
+  "dry", even screen-blended at 16%) · underline inside the tree (off-axis in
+  a vertical list; the line sits on the leading edge there).
 </div>
 
 <div class="declog">
   <strong>Decision log</strong>
   <ul>
-    <li><b>Round 2 idiom under test:</b> the you-are-here line (static spectrum, on the nav axis's edge: bottom for horizontal nav, leading side for vertical) vs the static ring (chosen object, never a location). Hover stays the only animated light.</li>
-    <li>Round-1 rulings (Yona, 2026-08-30): tabs = T1-or-T4, lean T1 because underline already means current-nav-item; tree hinges on what selection IS (answered above: it's nav); story-nav = side line.</li>
+    <li><b>The grammar (round 3):</b> nav you-are-here = static spectrum LINE on the nav axis's edge; object selection = static spectrum RING; selection and nav are separate concepts and never share a mark. Intensity scales with size: full rainbow on large marks (tab underline, card ring), cool sweep on small side marks. Hover stays the only animated light.</li>
+    <li>Round-2 rulings (Yona, 2026-08-30): tabs = underline not ring ("selection is different than nav"); intensity = "full rainbow on large things, less on small things (like to-the-side nav indication)"; story-nav = nav, option 2 (side line); option cards = "the spectrum looks good here" (ring stays).</li>
+    <li><b>Open at round-3 gate:</b> the tree's focused row — nav (side line) or selection (ring)? Interpretation note: round-2 answers were read as per-SECTION; if they were per-gate-question, the tree flips to ring.</li>
+    <li>Round-1 rulings: tabs = T1-or-T4, lean T1 because underline already means current-nav-item; tree hinges on what selection IS; story-nav = side line.</li>
     <li>Baseline = PR #478 (full no-hue): neutral underline on tabs, neutral selection border + oklab dirty-mix fill in the tree.</li>
     <li>"Cool sweep" lever: the full spectrum contains amber/red/orange — the unsaved/error/attention hues that sit beside selection in a dirty tree. The Primary tri cannot collide.</li>
     <li>Status hues untouched; dirty derivation (color-mix into selection fill) preserved everywhere.</li>
@@ -403,8 +404,7 @@ const ICONS = {
 
 const TAB_T = [
   { id: "t0", tag: "T0 · neutral (#478)", mark: "" },
-  { id: "line", tag: "LINE · gradient underline", mark: "mk-underline" },
-  { id: "ring", tag: "RING · pinned static ring", mark: "" },
+  { id: "line", tag: "PICK · gradient underline", mark: "mk-underline" },
 ];
 function tabbar(t) {
   return `<div class="barrow" data-t="${t.id}">
@@ -427,8 +427,8 @@ function tabbar(t) {
 
 const TREE_T = [
   { id: "t0", name: "T0 · Baseline", note: "shipped neutral (#478)", mark: "" },
-  { id: "line", name: "LINE · side line", note: "nav ruling applied — leading edge", mark: "mk-sideline" },
-  { id: "ring", name: "RING · static ring", note: "if tree selection were an object", mark: "mk-ring" },
+  { id: "line", name: "IF NAV · side line", note: "cool, small mark", mark: "mk-sideline" },
+  { id: "ring", name: "IF SELECTION · ring", note: "focused row as chosen object", mark: "mk-ring" },
 ];
 function treePanel(t) {
   return `<div class="panel" data-t="${t.id}">
@@ -447,7 +447,7 @@ function treePanel(t) {
 
 const NAV_T = [
   { id: "t0", name: "T0 · Baseline", mark: "" },
-  { id: "line", name: "LINE · side line (round-1 ruling)", mark: "mk-sideline" },
+  { id: "line", name: "PICK · side line (cool)", mark: "mk-sideline" },
 ];
 function storyNav(t) {
   return `<div class="panel" data-t="${t.id}">
@@ -471,8 +471,8 @@ const CARDS = [
   { t: "Classic ESP32", s: "Xtensa · legacy support · CH340" },
 ];
 const CARD_T = [
-  { id: "t0", name: "NEUTRAL · selection family, no spectrum", cls: "neutral-sel", mark: "" },
-  { id: "ring", name: "RING · static spectrum ring (chosen object)", cls: "ring-sel", mark: "mk-ring" },
+  { id: "t0", name: "NEUTRAL · for reference", cls: "neutral-sel", mark: "" },
+  { id: "ring", name: "PICK · static spectrum ring (chosen object)", cls: "ring-sel", mark: "mk-ring" },
 ];
 function cardSet(t) {
   const cards = CARDS.map((c, i) =>
@@ -496,8 +496,14 @@ const btn = (id) => document.getElementById(id);
 function pick(group, active) {
   group.forEach((id) => btn(id).classList.toggle("on", id === active));
 }
-on("c-full", () => { document.body.classList.remove("cool"); pick(["c-full","c-cool"], "c-full"); });
-on("c-cool", () => { document.body.classList.add("cool"); pick(["c-full","c-cool"], "c-cool"); });
+function stops(mode) {
+  document.body.classList.toggle("allfull", mode === "c-full");
+  document.body.classList.toggle("allcool", mode === "c-cool");
+  pick(["c-mix","c-full","c-cool"], mode);
+}
+on("c-mix", () => stops("c-mix"));
+on("c-full", () => stops("c-full"));
+on("c-cool", () => stops("c-cool"));
 on("c-hover", () => {
   const b = btn("c-hover");
   const now = !b.classList.contains("on");
@@ -511,9 +517,10 @@ on("c-clean", () => { document.body.classList.remove("seldirty"); pick(["c-clean
 on("c-dirty", () => { document.body.classList.add("seldirty"); pick(["c-clean","c-dirty"], "c-dirty"); });
 
 /* URL-hash presets so headless captures can hit any control state,
-   e.g. index.html#cool+seldirty+nohover */
+   e.g. index.html#allcool+seldirty+nohover */
 const preset = location.hash.slice(1).split("+");
-if (preset.includes("cool")) btn("c-cool").click();
+if (preset.includes("allfull")) btn("c-full").click();
+if (preset.includes("allcool")) btn("c-cool").click();
 if (preset.includes("seldirty")) btn("c-dirty").click();
 if (preset.includes("nohover")) btn("c-hover").click();
 </script>
