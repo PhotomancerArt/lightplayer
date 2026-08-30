@@ -901,12 +901,22 @@ async function createCapturePage(cdp) {
       await settleFocus(cdp, sessionId, storyId);
       const box = await waitForCaptureBox(cdp, sessionId, storyId);
       const clip = captureClip(box);
+      // Chromium silently drops `backdrop-filter` from beyond-viewport
+      // captures — even when the clip is entirely on screen — so glass
+      // surfaces bake into baselines without their blur (see
+      // docs/defects/story-capture-drops-backdrop-filter.md). Ask for a
+      // beyond-viewport capture only when the clip actually overflows the
+      // viewport: `fitViewportToStory` restores the base height before the
+      // shot, so tall stories still need it (flipping unconditionally
+      // truncates them at the fold).
+      const clipFitsViewport =
+        clip.x + clip.width <= viewport.width && clip.y + clip.height <= viewport.height;
       const shoot = async () => {
         const { data } = await cdp.send(
           "Page.captureScreenshot",
           {
             format: "png",
-            captureBeyondViewport: true,
+            captureBeyondViewport: !clipFitsViewport,
             fromSurface: true,
             clip,
           },
