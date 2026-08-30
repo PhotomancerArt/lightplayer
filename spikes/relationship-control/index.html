@@ -865,9 +865,9 @@ function docPanel(rel, tab, layout) {
 }
 /* the changes popup: pending edits span BOTH stores — the library save AND
    what the device is running — which is why changes get their own segment. */
-function changesPop() {
+function changesPop(forceDirty) {
   const head = popHead('Changes');
-  if (!state.dirty) {
+  if (!state.dirty && !forceDirty) {
     return head + `<div class="statusline good" style="margin-top:0">✓ All saved — <b>v12</b> in your library · running on <b>Garage dome</b>.</div>
       <p class="note" style="margin-top:8px">Edits land here as you make them, already live on the board; Save banks them everywhere.</p>`;
   }
@@ -1015,6 +1015,11 @@ function faceCell(rel, kind) {
       <div class="pop" data-kind="runtime">${runtimePop()}</div>
       <p class="pnote">The other half of the D split: connection, board, running version, the session hint —
       and the declared landing zone for the desktop device panel's facts when it retires.</p></div>`
+    + `<div class="popwrap"><p class="pname">Changes — E's third segment, dirty (clean = one quiet "all saved" line)</p>
+      <div class="pop">${changesPop(true)}</div>
+      <p class="pnote">The edit list with per-entry revert (the ↺ sibling retires here), and the
+      save-it-everywhere receipt: already live on the device, Save banks the library + cloud. This is
+      the same list the project detail popup's Unsaved section holds today — one concept, one home.</p></div>`
     + `<div class="popwrap"><p class="pname">Left-rail treatment — Example (node-style vertical sections)</p>
       <div class="pop" data-static="example" data-tab="project" data-layout="rail">${docPanel('example','project','rail')}</div>
       <p class="pnote">The nodes' grammar: section labels down the left, hairline-divided rows. Same content as the stacked version — compare directly.</p></div>`
