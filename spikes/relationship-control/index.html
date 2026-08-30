@@ -213,6 +213,29 @@ p.sub b { color:var(--shell-mut); }
 .histrow .hwhat { flex:1; min-width:0; }
 .histrow .hwhat b { color:var(--tx-muted); font-weight:600; }
 .histrow .hwhen { flex:none; color:var(--tx-dim); font-size:9.5px; }
+/* round 4: changes segment + popup, and the node-style left-rail layout */
+.chg-clean { display:inline-flex; align-items:center; color:var(--tx-dim); font-size:11px; }
+.chg-dirty { display:inline-flex; align-items:center; gap:5px; color:var(--st-warn-tx); }
+.editrow { display:flex; align-items:center; gap:8px; padding:6px 2px;
+  font-size:11px; color:var(--tx-subtle); border-bottom:1px dashed var(--bd-muted); }
+.editrow:last-of-type { border-bottom:none; }
+.editrow .ew { min-width:0; flex:1; }
+.editrow .ew b { color:var(--tx-muted); font-weight:600; }
+.editrow .ek { flex:none; font-size:9px; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--tx-dim); font-weight:700; }
+.editrow .er { flex:none; background:none; border:1px solid transparent; border-radius:5px;
+  color:var(--st-warn-tx); cursor:pointer; font-size:12px; padding:1px 6px; }
+.editrow .er:hover { border-color:var(--st-warn-bd); background:var(--st-warn-bg); }
+.act-amber { flex:1; border:1px solid var(--st-warn-bd); background:var(--st-warn-bg);
+  color:var(--st-warn-tx); }
+.act-amber:hover { border-color:var(--st-warn-tx); }
+.lrrow { display:flex; gap:10px; border-top:1px solid var(--bd-muted); padding:10px 0 9px; }
+.lrrow:first-of-type { border-top:none; padding-top:2px; }
+.lrlab { width:52px; flex:none; font-size:9px; font-weight:700; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--tx-dim); padding-top:3px; }
+.lrbody { flex:1; min-width:0; }
+.lrbody > :first-child { margin-top:0; }
+.lrbody .actrow { border-top:none; padding-top:0; margin-top:0; }
 .rejected { border:1px dashed var(--shell-bd-strong); border-radius:10px;
   padding:10px 14px; font-size:11.5px; color:var(--shell-mut); line-height:1.6;
   max-width:880px; margin-bottom:18px; }
@@ -450,6 +473,45 @@ not actionable — though its instinct, the face riding inside the project box, 
     <div class="chead"><span class="name">D · Two boxes — runtime | document</span>
       <span class="thesis">gate ruling 2026-08-30: left = what's running (device/sim), right = the project — its name, standing, sharing. Each opens its OWN popover.</span></div>
 
+    <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">E · three segments — device | project | <b>changes</b> (round-4 instinct). Changes get their own segment because they span BOTH stores: already live on the device, banked to the library (and cloud) at Save — "save it everywhere". Toggle Dirty and click all three segments.</div>
+    <div class="bar-frame" style="max-width:880px;margin-bottom:14px">
+      <div class="topbar">
+        <div class="logo"></div>
+        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
+        <div class="cluster">
+          <span class="shell">
+            <span class="anchor">
+              <button class="segbtn runtime-btn" data-pop="e1r" title="This tab's session — Garage dome on the classic board">
+                <span class="glyph" style="color:var(--tx-subtle)">▣</span><span class="dot" style="width:7px;height:7px;border-radius:999px;background:var(--st-good-tx);box-shadow:0 0 5px rgba(123,224,178,.55)"></span><span class="name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Garage dome</span><span class="suffix" style="font-size:10.5px;color:var(--tx-dim)">· classic</span>
+              </button>
+              <div class="pop hiddenpop" data-popfor="e1r" data-kind="runtime"></div>
+            </span>
+            <span class="divider"></span>
+            <span class="anchor">
+              <button class="segbtn doc-btn" data-pop="e1d">
+                <span class="glyph rel-proj-glyph" style="color:var(--tx-subtle)">◈</span>
+                <span class="name rel-proj-name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Plasma Duo</span>
+                <span class="rel-face face-neutral"><span class="rel-glyph"></span><span class="word rel-word" style="font-size:9.5px;color:var(--tx-dim)">Example</span></span>
+              </button>
+              <div class="pop hiddenpop" data-popfor="e1d" data-kind="doc"></div>
+            </span>
+            <span class="divider"></span>
+            <span class="anchor">
+              <button class="segbtn changes-btn" data-pop="e1c" title="Changes — live on the device, saved everywhere on Save">
+                <span class="chg-clean">✓</span>
+                <span class="chg-dirty" style="display:none"><span style="font-size:11px">✎</span><span class="pill-count">3</span></span>
+              </button>
+              <div class="pop hiddenpop" data-popfor="e1c" data-kind="changes"></div>
+            </span>
+          </span>
+          <button class="btn-save rel-save" style="display:none">Save</button>
+        </div>
+        <div class="spacer"></div>
+        <span class="avatar">Y</span>
+      </div>
+      <div class="stage-body">Three questions, one bar: what's running · what document · what's in flight. The changes popup owns the edit list and revert (the ↺ sibling retires there); Save stays a sibling — the one direct act. Clean, the segment is a quiet ✓ that never moves.</div>
+    </div>
+
     <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">D1 · one shell, two independently-clickable segments</div>
     <div class="bar-frame" style="max-width:880px;margin-bottom:14px">
       <div class="topbar">
@@ -544,7 +606,9 @@ not actionable — though its instinct, the face riding inside the project box, 
       <div class="stage-body">The connective makes the bar read as a fact — "Garage dome <i>running</i> Plasma Duo". Costs the word's width; the board suffix moved into the runtime popover. Folds by dropping the word first. Probe only — if it doesn't land immediately, D1/D2 stand.</div>
     </div>
 
-    <p class="cnotes"><b>The split:</b> LEFT popover = runtime (connection, board, running version, "this tab is the
+    <p class="cnotes"><b>The split:</b> E adds the third question — CHANGES — because pending edits span both
+    stores (device is already running them; Save banks the library + cloud), so they belong to neither
+    the device box nor the document box alone. LEFT popover = runtime (connection, board, running version, "this tab is the
     session" — and the landing zone for the desktop device panel's facts when it retires). RIGHT popover = the document
     (name, standing, share/access, save state, provenance + history), i.e. §4's panels plus a dirty echo and a
     <b>Details →</b> seam where settings/stats demote. The left box says <b>Running v12</b> while the right says
@@ -577,8 +641,8 @@ binding/bus; green reads "good", blue reads "live" — any tint borrows a meanin
 <h2><span class="n">§4</span> The document popover — one skeleton, five states</h2>
 <p class="sub">
 Round-3 rebuild on the gate rulings: <b>clearly-defined deep concepts in fixed slots</b>.
-Every state renders header → tabs <b>[Project | History]</b> → <b>Where</b> (standing +
-provenance) → <b>Access</b> (link first, always in the same spot, then control/roster) →
+Every state renders header → tabs <b>[Project | History]</b> → <b>Where</b> (standing + provenance + <b>the link — the project&rsquo;s address</b>, gate ruling rd 4) →
+<b>Access</b> (purely who-can-do-what: control, roster, your standing) →
 <b>action row</b> with fixed slots: the fork-family verb (always present — hero-tinted only
 where it's <i>the</i> move), Copy link, ⋯ overflow (zip/json/details). History is a tab —
 click the tabs on any panel below.
@@ -712,36 +776,37 @@ function whereBlock(rel) {
     visitor: [G.eye, '<b>Someone else&rsquo;s</b> — you&rsquo;re viewing as a guest.',
       'The owner is unnamed — the service only tells members.'],
   }[rel];
+  // The link IS part of where: it is the project's address.
+  const address = {
+    example: urlHero('plasma-duo','','Copy link')
+      + `<p class="note">The canonical example link — opens for anyone, always.</p>`,
+    minelocal: urlHero('aurora-field','prj7g2k9m3qxw4tn0b') + ({
+        'not published': `<div class="statusline attn" style="margin-top:6px">◌ Not published yet — it publishes on your next save.</div>`,
+        'publishing…': `<div class="statusline" style="margin-top:6px">↻ Publishing…</div>`,
+        'retrying': `<div class="statusline warn" style="margin-top:6px">⚠ Publish retrying — last attempt couldn&rsquo;t reach the cloud.</div>`,
+        'restricted': `<div class="statusline" style="margin-top:6px">Published, restricted — only you can open the link.</div>`,
+      }[PUBSTATES[state.pub]]),
+    minepub: urlHero('aurora-field','prj7g2k9m3qxw4tn0b')
+      + `<p class="note">Same link as the address bar — copying either works.</p>`,
+    member: urlHero('halcyon-drift','prjc4w8n2ke5mrxa1z'),
+    visitor: urlHero('halcyon-drift','prjc4w8n2ke5mrxa1z','Copy link'),
+  }[rel];
   return `<div class="whereline">${W[0]}<span>${W[1]}</span></div>
-    <p class="wheresub">${W[2]}</p>`;
+    <p class="wheresub">${W[2]}</p>` + address;
 }
 function accessBlock(rel) {
   switch (rel) {
-    case 'example': return urlHero('plasma-duo','','Copy link')
-      + `<p class="note">The canonical example link — opens for anyone, always.</p>`;
-    case 'minelocal': {
-      const pub = PUBSTATES[state.pub];
-      const line = {
-        'not published': `<div class="statusline attn" style="margin-top:8px">◌ Not published yet — it publishes on your next save.</div>`,
-        'publishing…': `<div class="statusline" style="margin-top:8px">↻ Publishing…</div>`,
-        'retrying': `<div class="statusline warn" style="margin-top:8px">⚠ Publish retrying — last attempt couldn&rsquo;t reach the cloud.</div>`,
-        'restricted': `<div class="statusline" style="margin-top:8px">Published, restricted — only you can open the link.</div>`,
-      }[pub];
-      return urlHero('aurora-field','prj7g2k9m3qxw4tn0b') + line
-        + `<div class="segrow" style="margin-top:8px"><button class="on">Restricted</button><button>Anyone can view</button><button>Anyone can edit</button></div>
-           <p class="segdesc"><b>Only people added</b> can open the link. Everyone else sees nothing — not even that it exists.</p>`;
-    }
-    case 'minepub': return urlHero('aurora-field','prj7g2k9m3qxw4tn0b')
-      + `<div class="segrow" style="margin-top:8px"><button>Restricted</button><button class="on">Anyone can view</button><button>Anyone can edit</button></div>
+    case 'example': return `<p class="note" style="margin:0">Everyone can open this example — it&rsquo;s built in. Your copy gets its own access control once you save it.</p>`;
+    case 'minelocal': return `<div class="segrow"><button class="on">Restricted</button><button>Anyone can view</button><button>Anyone can edit</button></div>
+        <p class="segdesc"><b>Only people added</b> can open the link. Everyone else sees nothing — not even that it exists.</p>`;
+    case 'minepub': return `<div class="segrow"><button>Restricted</button><button class="on">Anyone can view</button><button>Anyone can edit</button></div>
          <p class="segdesc">Opens <b>running</b> for anyone with the link — no account needed. Only the people below can save changes.</p>
          <div class="person"><span class="av">YA</span><span class="who"><span class="em">hypher@gmail.com</span></span><span class="role">owner</span></div>
          <div class="person"><span class="av" style="border-color:var(--st-good-bd);background:var(--st-good-bg);color:var(--st-good-tx)">EK</span><span class="who"><span class="em">eshan@radiancecrew.org</span></span><span class="role">can edit</span></div>`;
-    case 'member': return urlHero('halcyon-drift','prjc4w8n2ke5mrxa1z')
-      + `<div class="statusline good" style="margin-top:8px">✓ You can edit — saves go to the shared project.</div>
+    case 'member': return `<div class="statusline good" style="margin-top:0">✓ You can edit — saves go to the shared project.</div>
          <div class="person" style="margin-top:6px"><span class="av" style="border-color:var(--st-good-bd);background:var(--st-good-bg);color:var(--st-good-tx)">EK</span><span class="who"><span class="em">eshan@radiancecrew.org</span></span><span class="role">owner</span></div>
          <div class="person"><span class="av">YA</span><span class="who"><span class="em">hypher@gmail.com</span></span><span class="role">can edit</span></div>`;
-    case 'visitor': return urlHero('halcyon-drift','prjc4w8n2ke5mrxa1z','Copy link')
-      + `<p class="note">You hold <b>view</b> access — the link is the key, no account needed. Nothing you touch changes their copy.</p>`;
+    case 'visitor': return `<p class="note" style="margin:0">You hold <b>view</b> access — the link is the key, no account needed. Nothing you touch changes their copy.</p>`;
   }
 }
 function actionRow(rel) {
@@ -778,20 +843,41 @@ function historyTab(rel) {
   }[rel];
   return rows + `<p class="note" style="margin-top:8px">Read-only for now — restore lands with the history effort.</p>`;
 }
-function docPanel(rel, tab) {
+function docPanel(rel, tab, layout) {
   const r = REL[rel];
   const nm = state.long ? r.longname : r.name;
   const on = t => tab === t ? ' on' : '';
   const dirtyLine = state.dirty
     ? `<div class="statusline warn" style="margin:0 0 10px">✎ 3 unsaved edits — Save banks <b>v13</b>.</div>` : '';
-  const body = tab === 'history' ? historyTab(rel)
-    : dirtyLine
-      + `<span class="grouphead" style="margin-top:0">Where</span>` + whereBlock(rel)
-      + `<span class="grouphead">Access</span>` + accessBlock(rel)
-      + actionRow(rel);
+  let body;
+  if (tab === 'history') body = historyTab(rel);
+  else if (layout === 'rail') body = dirtyLine
+    + `<div class="lrrow"><span class="lrlab">Where</span><div class="lrbody">${whereBlock(rel)}</div></div>`
+    + `<div class="lrrow"><span class="lrlab">Access</span><div class="lrbody">${accessBlock(rel)}</div></div>`
+    + `<div class="lrrow"><span class="lrlab"></span><div class="lrbody">${actionRow(rel)}</div></div>`;
+  else body = dirtyLine
+    + `<span class="grouphead" style="margin-top:0">Where</span>` + whereBlock(rel)
+    + `<span class="grouphead">Access</span>` + accessBlock(rel)
+    + actionRow(rel);
   return popHead(nm)
     + `<div class="ptabs"><button class="ptab${on('project')}" data-tab="project">Project</button><button class="ptab${on('history')}" data-tab="history">History</button></div>`
     + body;
+}
+/* the changes popup: pending edits span BOTH stores — the library save AND
+   what the device is running — which is why changes get their own segment. */
+function changesPop() {
+  const head = popHead('Changes');
+  if (!state.dirty) {
+    return head + `<div class="statusline good" style="margin-top:0">✓ All saved — <b>v12</b> in your library · running on <b>Garage dome</b>.</div>
+      <p class="note" style="margin-top:8px">Edits land here as you make them, already live on the board; Save banks them everywhere.</p>`;
+  }
+  const row = (what, kind) => `<div class="editrow"><span class="ew">${what}</span><span class="ek">${kind}</span><button class="er" title="Revert this edit">↺</button></div>`;
+  return head
+    + row('<b>Master Fade</b> · brightness', 'panel')
+    + row('<b>Plasma Core</b> · shader body', 'asset')
+    + row('<b>Dusk</b> · palette', 'panel')
+    + `<div class="statusline" style="margin-top:10px">⌁ Already <b>live on Garage dome</b> — Save banks <b>v13</b> to your library and the cloud copy.</div>
+    <div class="actrow"><button class="act act-amber">Save — v13, everywhere</button><button class="act act-side" title="Revert all three edits">↺ Revert all</button></div>`;
 }
 /* legacy alias — everything renders through the skeleton now */
 function popContent(rel) { return docPanel(rel, 'project'); }
@@ -850,13 +936,18 @@ function renderPlacements() {
     el.style.display = state.dirty ? '' : 'none');
   document.querySelectorAll('.rel-count').forEach(el =>
     el.style.display = state.dirty ? '' : 'none');
+  document.querySelectorAll('.chg-clean').forEach(el =>
+    el.style.display = state.dirty ? 'none' : '');
+  document.querySelectorAll('.chg-dirty').forEach(el =>
+    el.style.display = state.dirty ? '' : 'none');
   document.querySelectorAll('[data-popfor]').forEach(el => {
     if (!el.classList.contains('hiddenpop')) el.innerHTML = contentFor(el);
   });
 }
 function contentFor(pop) {
   return pop.dataset.kind === 'runtime' ? runtimePop()
-    : docPanel(pop.dataset.static || state.rel, pop.dataset.tab || 'project');
+    : pop.dataset.kind === 'changes' ? changesPop()
+    : docPanel(pop.dataset.static || state.rel, pop.dataset.tab || 'project', pop.dataset.layout);
 }
 /* tab clicks re-render their own panel, keeping its state (delegated so it
    works in live popovers, the §4 gallery, and §6 alike) */
@@ -869,12 +960,12 @@ document.addEventListener('click', e => {
   if (pop.id === 'fork-pop') { pop.innerHTML = docPanel(forked ? 'minelocal' : 'example', pop.dataset.tab); return; }
   pop.innerHTML = contentFor(pop);
 });
-document.querySelectorAll('.rel-control, .runtime-btn, .doc-btn').forEach(btn => {
+document.querySelectorAll('.rel-control, .runtime-btn, .doc-btn, .changes-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const pop = document.querySelector(`[data-popfor="${btn.dataset.pop}"]`);
     const wasHidden = pop.classList.contains('hiddenpop');
     document.querySelectorAll('[data-popfor]').forEach(p => p.classList.add('hiddenpop'));
-    document.querySelectorAll('.rel-control, .runtime-btn, .doc-btn').forEach(b => b.classList.remove('rel-open'));
+    document.querySelectorAll('.rel-control, .runtime-btn, .doc-btn, .changes-btn').forEach(b => b.classList.remove('rel-open'));
     if (wasHidden) {
       pop.innerHTML = contentFor(pop);
       pop.classList.remove('hiddenpop');
@@ -923,7 +1014,13 @@ function faceCell(rel, kind) {
     + `<div class="popwrap"><p class="pname">Runtime — D's LEFT box (state-independent)</p>
       <div class="pop" data-kind="runtime">${runtimePop()}</div>
       <p class="pnote">The other half of the D split: connection, board, running version, the session hint —
-      and the declared landing zone for the desktop device panel's facts when it retires.</p></div>`;
+      and the declared landing zone for the desktop device panel's facts when it retires.</p></div>`
+    + `<div class="popwrap"><p class="pname">Left-rail treatment — Example (node-style vertical sections)</p>
+      <div class="pop" data-static="example" data-tab="project" data-layout="rail">${docPanel('example','project','rail')}</div>
+      <p class="pnote">The nodes' grammar: section labels down the left, hairline-divided rows. Same content as the stacked version — compare directly.</p></div>`
+    + `<div class="popwrap"><p class="pname">Left-rail treatment — Mine · shared</p>
+      <div class="pop" data-static="minepub" data-tab="project" data-layout="rail">${docPanel('minepub','project','rail')}</div>
+      <p class="pnote">The densest state is where the rail earns or loses it: the label column costs 52px of content width against the people rows and segment.</p></div>`;
 })();
 
 /* ---------------- §6 fork moment ----------------------------------------- */
