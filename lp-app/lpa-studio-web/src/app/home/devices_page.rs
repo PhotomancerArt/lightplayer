@@ -63,23 +63,13 @@ pub fn DevicesPage(home: UiHomeView, on_action: EventHandler<UiAction>) -> Eleme
             section { class: "tw:grid tw:gap-3",
                 header { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
                     h2 { class: section_title_class(), "Devices" }
-                    if devices.transport_available {
-                        ActionButton {
-                            action: DevicesOp::action_for(DeviceAction::AddFromUsb),
-                            running: false,
-                            variant: ActionButtonVariant::Quiet,
-                            on_action,
-                        }
-                    }
                 }
 
                 if !devices.transport_available {
                     UnavailableNote {}
-                } else if devices.roster.devices.is_empty() && devices.roster.pending.is_empty() {
-                    EmptyRosterNote {}
                 }
 
-                if !devices.roster.pending.is_empty() || !devices.roster.devices.is_empty() {
+                if devices.transport_available {
                     div { class: device_grid_class(),
                         // Pending links come first: a board just plugged in is
                         // what the user is looking at.
@@ -97,12 +87,38 @@ pub fn DevicesPage(home: UiHomeView, on_action: EventHandler<UiAction>) -> Eleme
                                 on_action,
                             }
                         }
+                        // Adding lives IN the roster, at the insertion point
+                        // (the house rule: add buttons sit where the new
+                        // entry will appear, never in headers).
+                        AddDeviceCard { on_action }
                     }
                 }
 
                 if show_remembered {
                     RememberedList { names: remembered }
                 }
+            }
+        }
+    }
+}
+
+/// The roster's add slot: a card in the grid where the next device's card
+/// will appear. It doubles as the empty state — same slot, same copy, same
+/// layout whether it is the first board or the fifth (clear minimalism,
+/// G1 ruling) — so there is no separate empty-state block to jump around.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn AddDeviceCard(on_action: EventHandler<UiAction>) -> Element {
+    rsx! {
+        div { class: "tw:flex tw:min-h-40 tw:flex-col tw:items-center tw:justify-center tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-5 tw:py-6",
+            p { class: "tw:m-0 tw:max-w-56 tw:text-center tw:text-xs tw:leading-relaxed tw:text-muted-foreground",
+                "Plug in a LightPlayer board and pick its USB port."
+            }
+            ActionButton {
+                action: DevicesOp::action_for(DeviceAction::AddFromUsb),
+                running: false,
+                variant: ActionButtonVariant::Outline,
+                on_action,
             }
         }
     }
@@ -123,25 +139,6 @@ fn UnavailableNote() -> Element {
             p { class: "tw:m-0 tw:max-w-prose tw:text-xs tw:leading-relaxed tw:text-subtle-foreground",
                 "Studio reaches boards over Web Serial, which Chrome, Edge and \
                  other Chromium browsers support. The simulator works everywhere."
-            }
-        }
-    }
-}
-
-/// A working transport with nothing on it yet.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn EmptyRosterNote() -> Element {
-    rsx! {
-        div { class: note_class(),
-            p { class: "tw:m-0 tw:text-sm tw:font-semibold tw:text-strong-foreground",
-                "No devices yet"
-            }
-            p { class: "tw:m-0 tw:max-w-prose tw:text-xs tw:leading-relaxed tw:text-subtle-foreground",
-                "Plug a board in and choose Add a device to pick its port. \
-                 Studio only sees ports you have given it permission for — \
-                 and some browsers hand those permissions back when the page \
-                 reloads, so you may be asked again."
             }
         }
     }

@@ -54,12 +54,15 @@ impl ControllerOp for DevicesOp {
                 ActionPriority::Tertiary,
             )
             .destructive()
-            .with_confirmation(ActionConfirmation::new(
-                "Dismiss this port?",
-                "Studio hands the browser's permission for this port back. \
-                 You can pick it again from Add a device.",
-                "Dismiss",
-            )),
+            .with_confirmation(
+                ActionConfirmation::new(
+                    "Dismiss this port?",
+                    "Studio hands the browser's permission for this port back. \
+                     You can pick it again from Add a device.",
+                    "Dismiss",
+                )
+                .inline(),
+            ),
             Action::Connect { .. } => ActionMeta::new(
                 "Connect",
                 "Open the port and ask the board what it is.",
@@ -83,12 +86,15 @@ impl ControllerOp for DevicesOp {
                 ActionPriority::Tertiary,
             )
             .destructive()
-            .with_confirmation(ActionConfirmation::new(
-                "Forget this device?",
-                "Studio removes the device, its remembered name, and the \
-                 browser's permission for its port. Nothing on the board changes.",
-                "Forget",
-            )),
+            .with_confirmation(
+                ActionConfirmation::new(
+                    "Forget this device?",
+                    "Studio removes the device, its remembered name, and the \
+                     browser's permission for its port. Nothing on the board changes.",
+                    "Forget",
+                )
+                .inline(),
+            ),
             Action::CancelActivity { .. } => ActionMeta::new(
                 "Cancel",
                 "Stop what Studio is doing to this device.",
