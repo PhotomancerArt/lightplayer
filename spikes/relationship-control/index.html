@@ -287,8 +287,10 @@ p.sub b { color:var(--shell-mut); }
 .pop .urlhero .copy:hover { border-color:var(--tx-subtle); }
 .pop .note { margin:4px 0 0; padding:0 2px; font-size:10px; line-height:1.5;
   color:var(--tx-dim); }
-.pop .grouphead { display:block; margin:12px 0 5px; font-size:9.5px; font-weight:700;
-  letter-spacing:.08em; text-transform:uppercase; color:var(--tx-dim); }
+.pop .grouphead { display:flex; align-items:center; gap:8px; margin:14px 0 7px;
+  font-size:9.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--tx-subtle); }
+.pop .grouphead::after { content:""; flex:1; height:1px; background:var(--bd-muted); }
 .pop .segrow { display:flex; border:1px solid var(--bd-strong); border-radius:7px;
   overflow:hidden; }
 .pop .segrow button { flex:1; font:inherit; font-size:10.5px; font-weight:600;
@@ -466,8 +468,9 @@ the strip drives every state. Full per-state popovers are §4.
 off one visual box read as a trap) · B · detached relationship pill (a third control and a
 third shape in the row) · C · display-only word in the lockup (relationship inspectable but
 not actionable — though its instinct, the face riding inside the project box, survives in E).
-· D1/D2/D3 · two-segment variants (2026-08-30 round-4 gate: E's three segments win; D3's
-"running" connective stays available as a later layer on E).
+· D1/D2/D3 · two-segment variants (round-4 gate: E's three segments win; D3's
+"running" connective stays available as a later layer on E). · Vertical left-rail section labels
+(round-6 gate: horizontal headings with rule-lines are clearer; the node grammar stays on nodes).
 </div>
 <div class="rowgrid">
 
@@ -933,13 +936,7 @@ function faceCell(rel, kind) {
       <div class="pop">${changesPop(true)}</div>
       <p class="pnote">The edit list with per-entry revert (the ↺ sibling retires here), and the
       save-it-everywhere receipt: already live on the device, Save banks the library + cloud. This is
-      the same list the project detail popup's Unsaved section holds today — one concept, one home.</p></div>`
-    + `<div class="popwrap"><p class="pname">Left-rail treatment — Example (node-style vertical sections)</p>
-      <div class="pop" data-static="example" data-tab="project" data-layout="rail">${docPanel('example','project','rail')}</div>
-      <p class="pnote">The nodes' grammar, properly: VERTICAL labels in a slim gutter (like OUTPUT/PHASORS on the Clock node), hairline-divided rows. Same content as the stacked version — compare directly.</p></div>`
-    + `<div class="popwrap"><p class="pname">Left-rail treatment — Mine · shared</p>
-      <div class="pop" data-static="minepub" data-tab="project" data-layout="rail">${docPanel('minepub','project','rail')}</div>
-      <p class="pnote">The densest state is where the rail earns or loses it — the vertical gutter costs only ~26px now, and the label spans its whole section.</p></div>`;
+      the same list the project detail popup's Unsaved section holds today — one concept, one home.</p></div>`;
 })();
 
 /* ---------------- §6 fork moment ----------------------------------------- */
