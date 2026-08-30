@@ -40,6 +40,7 @@ use crate::app::home::card_sheet::{
 };
 use crate::app::home::device_card::{BoardPicker, card_op_activity, card_op_terminal};
 use crate::app::home::package_card::home_action;
+use crate::base::conic_spinner_class;
 
 /// Dispatch one wizard gesture through the normal action path.
 fn gesture(gesture: SetupGesture) -> UiAction {
@@ -843,7 +844,9 @@ fn working(title: &str, detail: &str, tail: &[UiLogEntry]) -> Element {
 fn spinner(title: &str, detail: &str) -> Element {
     rsx! {
         div { class: "tw:flex tw:items-center tw:gap-3 tw:py-4",
-            span { class: "ux-card-op-bar is-indeterminate tw:w-10", span {} }
+            // Conic spectrum heartbeat (Aurora R2): a wait with no quantity
+            // gets a spinner, not a bar that can never fill.
+            span { class: "{conic_spinner_class()}", aria_hidden: "true" }
             div { class: "tw:grid tw:gap-0.5",
                 span { class: "tw:text-xs tw:font-bold tw:text-strong-foreground", "{title}" }
                 span { class: "tw:text-[0.7rem] tw:text-dim-foreground", "{detail}" }

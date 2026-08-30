@@ -96,16 +96,48 @@ fn action_class(
     }
 }
 
+/// **G1 knob (Q3).** `true` = the ruled spike's spectrum-gradient primary;
+/// `false` = the quiet-primary fallback, i.e. today's flat accent fill with
+/// only the hover ring carrying the spectrum. The gate decides which one
+/// ships, and the decision is this one line — nothing else in the tree
+/// branches on it.
+const GRADIENT_PRIMARY: bool = true;
+
 fn solid_class(priority: ActionPriority) -> &'static str {
     match priority {
+        // The gradient fill lives in `.ux-primary-gradient` (style.css)
+        // rather than an arbitrary Tailwind value: it carries fill, edge
+        // and text together, and a class is the only place a hover
+        // `filter` can live without becoming an animated inline style.
+        ActionPriority::Primary if GRADIENT_PRIMARY => {
+            concat!(
+                "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:break-words tw:disabled:cursor-not-allowed tw:disabled:opacity-60",
+                " ux-primary-gradient ux-ir-ring ux-focus-ring ux-press-flare"
+            )
+        }
         ActionPriority::Primary => {
-            "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:border-accent-border tw:bg-accent tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:text-accent-foreground tw:break-words tw:hover:bg-accent-hover tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
+            concat!(
+                "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:break-words tw:disabled:cursor-not-allowed tw:disabled:opacity-60",
+                " tw:border-accent-border tw:bg-accent tw:text-accent-foreground tw:hover:bg-accent-hover",
+                " ux-ir-ring ux-focus-ring ux-press-flare"
+            )
         }
         ActionPriority::Secondary => {
-            "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-raised tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:text-soft-foreground tw:break-words tw:hover:bg-card-raised-strong tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
+            concat!(
+                "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:break-words tw:disabled:cursor-not-allowed tw:disabled:opacity-60",
+                " tw:border-border-strong tw:bg-card-raised tw:text-soft-foreground tw:hover:bg-card-raised-strong",
+                " ux-ir-ring ux-focus-ring ux-press-flare"
+            )
         }
+        // Tertiary is the quiet tier: focus ring and press flare, no ring —
+        // a transparent chip that grows a rainbow edge reads louder than
+        // the Secondary next to it.
         ActionPriority::Tertiary => {
-            "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:border-border-strong tw:bg-transparent tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:text-muted-foreground tw:break-words tw:hover:bg-card-muted tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
+            concat!(
+                "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:break-words tw:disabled:cursor-not-allowed tw:disabled:opacity-60",
+                " tw:border-border-strong tw:bg-transparent tw:text-muted-foreground tw:hover:bg-card-muted",
+                " ux-focus-ring ux-press-flare"
+            )
         }
     }
 }
@@ -116,9 +148,9 @@ fn solid_class(priority: ActionPriority) -> &'static str {
 /// label) via [`quiet_action_class`].
 fn quiet_class(destructive: bool) -> &'static str {
     if destructive {
-        "tw:inline-flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded tw:border tw:border-border tw:bg-transparent tw:px-2.5 tw:py-1 tw:text-xs tw:font-semibold tw:text-status-error-foreground tw:transition-colors tw:hover:border-status-error-border tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
+        "tw:inline-flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded tw:border tw:border-border tw:bg-transparent tw:px-2.5 tw:py-1 tw:text-xs tw:font-semibold tw:text-status-error-foreground tw:transition-colors tw:hover:border-status-error-border tw:disabled:cursor-not-allowed tw:disabled:opacity-60 ux-focus-ring"
     } else {
-        "tw:inline-flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded tw:border tw:border-border tw:bg-transparent tw:px-2.5 tw:py-1 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
+        "tw:inline-flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded tw:border tw:border-border tw:bg-transparent tw:px-2.5 tw:py-1 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed tw:disabled:opacity-60 ux-focus-ring"
     }
 }
 
@@ -128,9 +160,9 @@ fn quiet_class(destructive: bool) -> &'static str {
 /// border) itself — the rest is text plus a hover wash.
 fn menu_item_class(destructive: bool) -> &'static str {
     if destructive {
-        "tw:flex tw:w-full tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:rounded tw:border-none tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-sm tw:text-status-error-foreground tw:transition-colors tw:hover:bg-status-error-bg tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
+        "tw:flex tw:w-full tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:rounded tw:border-none tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-sm tw:text-status-error-foreground tw:transition-colors tw:hover:bg-status-error-bg tw:disabled:cursor-not-allowed tw:disabled:opacity-60 ux-focus-ring"
     } else {
-        "tw:flex tw:w-full tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:rounded tw:border-none tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-sm tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/5 tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
+        "tw:flex tw:w-full tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:rounded tw:border-none tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-sm tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/5 tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed tw:disabled:opacity-60 ux-focus-ring"
     }
 }
 
@@ -157,5 +189,82 @@ fn disabled_reason(enablement: &ActionEnablement) -> Option<&str> {
     match enablement {
         ActionEnablement::Enabled => None,
         ActionEnablement::Disabled { reason } => Some(reason.as_str()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PRIORITIES: [ActionPriority; 3] = [
+        ActionPriority::Primary,
+        ActionPriority::Secondary,
+        ActionPriority::Tertiary,
+    ];
+
+    #[test]
+    fn every_solid_tier_keeps_the_same_geometry() {
+        // The interaction light is pseudo-elements and outlines only: a
+        // tier swap (or the G1 gradient/quiet flip) must never resize a
+        // button, so the geometry tokens are identical across tiers.
+        for priority in PRIORITIES {
+            let class = solid_class(priority);
+            for token in [
+                "tw:min-h-9",
+                "tw:rounded-sm",
+                "tw:border",
+                "tw:px-3",
+                "tw:text-sm",
+            ] {
+                assert!(class.contains(token), "{token} missing: {class}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_ring_stops_at_the_quiet_tiers() {
+        // Loud tiers take the ring; transparent chips and menu rows keep
+        // their own wash (a rainbow edge on a menu row is noise, and the
+        // destructive rows must stay unmistakably red).
+        assert!(solid_class(ActionPriority::Primary).contains("ux-ir-ring"));
+        assert!(solid_class(ActionPriority::Secondary).contains("ux-ir-ring"));
+        for class in [
+            solid_class(ActionPriority::Tertiary),
+            quiet_class(false),
+            quiet_class(true),
+            menu_item_class(false),
+            menu_item_class(true),
+        ] {
+            assert!(!class.contains("ux-ir-ring"), "{class}");
+        }
+    }
+
+    #[test]
+    fn every_action_button_is_keyboard_visible() {
+        for class in PRIORITIES.map(solid_class) {
+            assert!(class.contains("ux-focus-ring"), "{class}");
+        }
+        for class in [
+            quiet_class(false),
+            quiet_class(true),
+            menu_item_class(false),
+            menu_item_class(true),
+        ] {
+            assert!(class.contains("ux-focus-ring"), "{class}");
+        }
+    }
+
+    #[test]
+    fn the_primary_fill_follows_the_gate_knob() {
+        // The G1 cull is one const: gradient primaries, or the flat accent
+        // fill with only the hover ring carrying the spectrum. Whichever
+        // way it lands, exactly one of the two fills is in the class.
+        let class = solid_class(ActionPriority::Primary);
+        assert_eq!(
+            class.contains("ux-primary-gradient"),
+            GRADIENT_PRIMARY,
+            "{class}"
+        );
+        assert_eq!(class.contains("tw:bg-accent"), !GRADIENT_PRIMARY, "{class}");
     }
 }

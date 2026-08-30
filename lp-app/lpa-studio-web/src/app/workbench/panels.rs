@@ -137,7 +137,11 @@ fn chip_text(cell: &UiPatchCell) -> String {
 }
 
 const CHIP: &str = "tw:whitespace-nowrap tw:rounded tw:border tw:border-border-strong tw:bg-card-muted tw:px-1 tw:font-mono tw:text-[9.5px] tw:text-subtle-foreground";
-const ROW_IDLE: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash";
+/// `ux-row-edge` is the dense-row interaction light (see
+/// [`row_edge_class`](crate::base::row_edge_class)): a spectrum left edge
+/// and bloom on hover, not the full ring the buttons wear. It rides the
+/// IDLE row only — the selected row keeps the neutral white outline.
+const ROW_IDLE: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash ux-row-edge";
 const ROW_SELECTED: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1";
 /// Indent per tree level as an inline style — arbitrary depth (nested
 /// modules, nested repeats) must never outrun a generated tailwind class.
@@ -998,7 +1002,7 @@ fn OutputBox(
     let header_class = if is_selected(&selection, &output_target) {
         "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1.5 tw:py-1"
     } else {
-        "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash"
+        "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash ux-row-edge"
     };
     rsx! {
         section { class: "tw:grid tw:content-start", style: indent_style(indent),
@@ -1094,7 +1098,7 @@ fn PortRow(
     let line_class = if is_selected(&selection, &target) {
         "tw:flex tw:cursor-pointer tw:items-baseline tw:gap-1.5 tw:rounded tw:border tw:border-selection-border tw:bg-selection-bg tw:px-1"
     } else {
-        "tw:flex tw:cursor-pointer tw:items-baseline tw:gap-1.5 tw:rounded tw:border tw:border-transparent tw:px-1 tw:hover:bg-background-wash"
+        "tw:flex tw:cursor-pointer tw:items-baseline tw:gap-1.5 tw:rounded tw:border tw:border-transparent tw:px-1 tw:hover:bg-background-wash ux-row-edge"
     };
     rsx! {
         div {
