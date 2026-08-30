@@ -48,4 +48,5 @@ pub use provider::provider::LinkProvider;
 pub use provider::session::LinkSession;
 pub use provider::session::LinkSessionId;
 pub use provider::session::LinkSessionStatus;
+pub use provider::usb_vendors::{ESP32_SERIAL_USB_VENDOR_IDS, is_esp32_serial_candidate};
 pub use providers::{LinkConnector, LinkProviderKind};

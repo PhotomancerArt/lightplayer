@@ -111,6 +111,12 @@ impl Bench {
                 Command::PersistRecord(record) => self.persisted.push(record),
                 Command::DeleteRecord(device) => self.deleted.push(device),
                 Command::RevokeGrant(info) => self.revoked.push(info),
+                // Coarse effects run in the app's effects layer, above this
+                // bench (studio_device_e2e drives them for real); nothing
+                // here spawns one.
+                Command::RunEffect { .. } => {
+                    panic!("this bench spawns no coarse effects")
+                }
             }
         }
     }

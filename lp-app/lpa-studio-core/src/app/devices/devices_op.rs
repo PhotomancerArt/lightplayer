@@ -105,6 +105,14 @@ impl ControllerOp for DevicesOp {
                 "Ask the board what it is, right now.",
                 ActionPriority::Secondary,
             ),
+            // No confirmation on purpose: the pick + the one primary verb IS
+            // the deliberate gesture (the card ruling), and the boards this
+            // face appears on have no LightPlayer install to lose.
+            Action::Flash { .. } => ActionMeta::new(
+                "Flash firmware",
+                "Write LightPlayer firmware for the picked board onto this chip.",
+                ActionPriority::Primary,
+            ),
             Action::SetName { .. } => ActionMeta::new(
                 "Rename",
                 "Change what Studio calls this device.",
@@ -165,6 +173,11 @@ mod tests {
             Action::Forget { device },
             Action::CancelActivity { device },
             Action::Identify { device },
+            Action::Flash {
+                device,
+                board_id: "seeed-xiao-esp32c6".to_string(),
+                build_id: "esp32c6-4mb".to_string(),
+            },
             Action::SetName {
                 device,
                 name: "Kitchen".to_string(),
