@@ -132,7 +132,7 @@ pub fn CloudAccountControl(
 /// border line like `LOGO_HOME_ACTIVE_WRAP` does for the logo at Home.
 /// The offset suits the slot's 28px controls. `pub(crate)` for the
 /// story that shows it against the header border.
-pub(crate) const ACCOUNT_HERE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[12px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-selection-border tw:after:content-['']";
+pub(crate) const ACCOUNT_HERE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[12px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-[linear-gradient(90deg,var(--studio-spectrum))] tw:after:content-['']";
 
 /// The boot shimmer: the slot at its signed-out size, holding its shape
 /// while `whoami` is in flight.

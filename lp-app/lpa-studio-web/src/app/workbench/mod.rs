@@ -728,7 +728,11 @@ fn WorkbenchBand(
     }
 }
 
-/// One view tab: the nav-tab grammar (selection underline = you are here).
+/// One view tab: the nav-tab grammar (you-are-here underline). The active
+/// underline is the full-rainbow static spectrum — the selection grammar's
+/// horizontal you-are-here line (`.ux-here-line-x` is the canonical mark;
+/// this site keeps its Tailwind `after:` utilities because the class
+/// predates them, and matches the primitive's geometry exactly).
 /// Deliberately the band's only PROMINENT text — bigger, mixed case, a
 /// 2px underline against the panel tabs' quiet small-caps — so the
 /// hierarchy reads view tabs > panel tabs at a glance (R4-1). Plain
@@ -738,7 +742,7 @@ fn WorkbenchBand(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ViewTab(label: &'static str, href: String, active: bool) -> Element {
     let class = if active {
-        "tw:relative tw:px-3.5 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2 tw:after:bottom-0 tw:after:h-[2.5px] tw:after:rounded-full tw:after:bg-selection-border tw:after:content-[''] tw:max-[1240px]:px-2.5 tw:max-[1240px]:text-[13px]"
+        "tw:relative tw:px-3.5 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2 tw:after:bottom-0 tw:after:h-[2.5px] tw:after:rounded-full tw:after:bg-[linear-gradient(90deg,var(--studio-spectrum))] tw:after:content-[''] tw:max-[1240px]:px-2.5 tw:max-[1240px]:text-[13px]"
     } else {
         "tw:px-3.5 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:text-strong-foreground tw:max-[1240px]:px-2.5 tw:max-[1240px]:text-[13px]"
     };

@@ -613,16 +613,20 @@ fn story_nav_story_list_class(expanded: bool) -> &'static str {
     }
 }
 
+/// The active entry wears the you-are-here side line (`ux-here-line-y`,
+/// cool sweep) — the selection grammar's vertical nav mark — over the
+/// selection-bg fade. The transparent `border-l-2` stays for layout so
+/// active and inactive entries share metrics.
 fn story_nav_link_class(overview: bool, active: bool) -> &'static str {
     match (overview, active) {
         (true, true) => {
-            "tw:block tw:min-w-0 tw:border-l-2 tw:border-selection-border tw:bg-[linear-gradient(90deg,var(--studio-color-selection-bg),transparent_90%)] tw:py-1 tw:pl-2.5 tw:text-sm tw:font-extrabold tw:leading-tight tw:text-strong-foreground tw:no-underline tw:break-words"
+            "tw:block tw:min-w-0 ux-here-line-y tw:border-l-2 tw:border-transparent tw:bg-[linear-gradient(90deg,var(--studio-color-selection-bg),transparent_90%)] tw:py-1 tw:pl-2.5 tw:text-sm tw:font-extrabold tw:leading-tight tw:text-strong-foreground tw:no-underline tw:break-words"
         }
         (true, false) => {
             "tw:block tw:min-w-0 tw:border-l-2 tw:border-transparent tw:py-1 tw:pl-2.5 tw:text-sm tw:font-extrabold tw:leading-tight tw:text-soft-foreground tw:no-underline tw:break-words tw:hover:text-strong-foreground"
         }
         (false, true) => {
-            "tw:block tw:min-w-0 tw:border-l-2 tw:border-selection-border tw:bg-[linear-gradient(90deg,var(--studio-color-selection-bg),transparent_90%)] tw:py-1 tw:pl-2.5 tw:text-sm tw:leading-tight tw:text-strong-foreground tw:no-underline tw:break-words"
+            "tw:block tw:min-w-0 ux-here-line-y tw:border-l-2 tw:border-transparent tw:bg-[linear-gradient(90deg,var(--studio-color-selection-bg),transparent_90%)] tw:py-1 tw:pl-2.5 tw:text-sm tw:leading-tight tw:text-strong-foreground tw:no-underline tw:break-words"
         }
         (false, false) => {
             "tw:block tw:min-w-0 tw:border-l-2 tw:border-transparent tw:py-1 tw:pl-2.5 tw:text-sm tw:leading-tight tw:text-muted-foreground tw:no-underline tw:break-words tw:hover:text-strong-foreground"

@@ -48,12 +48,14 @@ pub fn option_card_grid_class() -> &'static str {
     "tw:grid tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] tw:gap-1.5"
 }
 
-/// One card. Selected = selection border + selection wash + the check
-/// badge — three signals, because the old filled-grey treatment was ruled
-/// hard to read.
+/// One card. Selected = the static spectrum ring (`ux-sel-ring`, the
+/// selection grammar's chosen-object mark — a picked card IS a chosen
+/// object) + selection wash + the check badge — three signals, because
+/// the old filled-grey treatment was ruled hard to read. The ring is
+/// static on purpose: the ANIMATED ring stays hover territory.
 pub fn option_card_class(selected: bool) -> &'static str {
     if selected {
-        "tw:relative tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-selection-border tw:bg-selection-bg tw:p-1.5 tw:text-left tw:text-strong-foreground"
+        "ux-sel-ring tw:relative tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-transparent tw:bg-selection-bg tw:p-1.5 tw:text-left tw:text-strong-foreground"
     } else {
         "tw:relative tw:grid tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:gap-0.5 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:p-1.5 tw:text-left tw:text-muted-foreground tw:hover:border-border-strong tw:hover:text-strong-foreground"
     }
@@ -142,11 +144,14 @@ mod tests {
     #[test]
     fn the_selected_card_wears_the_selection_family_and_the_plain_one_does_not() {
         let picked = option_card_class(true);
-        assert!(picked.contains("tw:border-selection-border"));
+        // The chosen-object mark is the STATIC spectrum ring over the
+        // neutral selection wash (selection grammar, 2026-08-30). The
+        // spectrum is not a status hue; "accent" stays dead either way.
+        assert!(picked.contains("ux-sel-ring"));
         assert!(picked.contains("tw:bg-selection-bg"));
         assert!(!picked.contains("accent"));
         let plain = option_card_class(false);
-        assert!(!plain.contains("tw:border-selection-border"));
+        assert!(!plain.contains("ux-sel-ring"));
         assert!(!plain.contains("tw:bg-selection-bg"));
         assert!(plain.contains("tw:hover:border-border-strong"));
         // Both position the check badge, which is absolutely placed.

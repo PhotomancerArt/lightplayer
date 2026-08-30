@@ -71,6 +71,6 @@ pub use option_cards::{
     OPTION_CARD_CHECK_CLASS, OptionCard, OptionCards, option_card_class, option_card_grid_class,
 };
 pub use popover::{IconPopoverButton, PopoverButton, PopoverCloseHandle, PopoverPlacement};
-pub use reveal_on_focus::use_reveal_on_focus;
+pub use reveal_on_focus::{reveal_selected_pane, use_reveal_on_focus};
 pub use tabs::{TabItem, Tabs};
 pub use toast::{ToastHost, ToastMessage, ToastTone, Toasts, use_toast_provider};

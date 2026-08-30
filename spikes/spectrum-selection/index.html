@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Spectrum-in-selection — spike playground</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* =====================================================================
+   Studio palette, verbatim from lp-app/lpa-studio-web/src/style.css
+   :root (post-#478 no-hue state: accent tokens omitted on purpose —
+   they are deleted in the reckoning; nothing here may reach for them).
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --bg: #0d0d13;
+  --surface: #14141c;
+  --surface-subtle: #101017;
+  --surface-muted: #0f0f15;
+  --surface-raised: #1d1d28;
+  --panel-primary: #17171f;
+  --border: #343444;
+  --border-muted: #2b2b39;
+  --border-subtle: #30303d;
+  --border-strong: #4a4a5e;
+
+  --text: #f2f0e8;
+  --text-strong: #fffaf0;
+  --text-soft: #f9f6eb;
+  --text-muted: #c9c9d2;
+  --text-subtle: #9c9cab;
+  --heading: #e9e9ef;
+
+  --glow: rgba(140, 170, 255, 0.3);
+  --focus-ring: #a5b8ff;
+
+  --sel-bd: #d6dae0;
+  --sel-bg: rgba(214, 218, 224, 0.12);
+
+  --st-warn-bg: #292614;   --st-warn-bd: #796c33;   --st-warn-tx: #f0dc7a;
+  --st-error-bg: #301b1d;  --st-error-bd: #874b4b;  --st-error-tx: #ffc7c7;
+  --st-bound-bg: #241a33;  --st-bound-bd: #5f4a85;  --st-bound-tx: #c9b1f5;
+
+  /* Brand spectrum — same stops as the logo sweep / ux-iri-fill. */
+  --stops-full: #5fe08b, #53c6f2, #a58af7, #ff5d5d, #ffab4a, #f5e04e;
+  /* The gradient-Primary tri (ux-primary-gradient): green→blue→violet.
+     No amber/red/orange, so it cannot collide with the status hues that
+     sit beside selection in a dirty tree. */
+  --stops-cool: #5fe08b, #53c6f2, #a58af7;
+
+  /* shell chrome for the spike page itself (deliberately plain) */
+  --shell-bg: #0b0c0e; --shell-tx: #e8e6e1; --shell-mut: #9a978f;
+  --shell-dim: #6f6d66; --shell-bd: #262a31; --shell-bd-strong: #3a3f48;
+}
+
+/* Round-3 grammar defaults: full rainbow on LARGE marks (tab underline,
+   card ring), reduced (cool tri) on SMALL side marks — "full rainbow on
+   large things, and less on small things". Overrides let the mix be
+   compared against all-full / all-cool. */
+body {
+  --stops-tabs: var(--stops-full);
+  --stops-side: var(--stops-cool);
+  --stops-ring: var(--stops-full);
+}
+body.allfull { --stops-side: var(--stops-full); }
+body.allcool { --stops-tabs: var(--stops-cool); --stops-ring: var(--stops-cool); }
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 28px 32px 120px;
+  background: var(--shell-bg); color: var(--shell-tx);
+  font: 14px/1.45 var(--font);
+}
+h1 { font-size: 20px; margin: 0 0 6px; letter-spacing: -0.01em; }
+h2 { font-size: 15px; margin: 40px 0 4px; color: var(--shell-tx); }
+p.hint { margin: 0 0 10px; color: var(--shell-mut); font-size: 13px; max-width: 78ch; }
+p.hint em { color: var(--shell-tx); font-style: italic; }
+
+/* ---------- exploration controls strip ---------- */
+.controls {
+  display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
+  border: 1px dashed var(--shell-bd-strong); border-radius: 10px;
+  padding: 12px 16px; margin: 18px 0 8px; font-size: 13px;
+}
+.controls .grp { display: flex; gap: 6px; align-items: center; }
+.controls .lbl { color: var(--shell-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; margin-right: 2px; }
+.controls button {
+  font: 12px/1 var(--font); color: var(--shell-mut);
+  background: #14161a; border: 1px solid var(--shell-bd);
+  border-radius: 7px; padding: 6px 10px; cursor: pointer;
+}
+.controls button.on { color: #fff; border-color: #5a6270; background: #1c2027; }
+
+/* Reference chip: the ANIMATED hover ring, always on, so "kind of light"
+   comparisons (animated hover vs static selected) can be made live. */
+@property --ir-a { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+.ref-chip {
+  position: relative; border-radius: 8px;
+  background: var(--surface-raised); border: 1px solid var(--border);
+  color: var(--text-muted); font-size: 12px; padding: 7px 12px;
+  box-shadow: 0 2px 20px var(--glow);
+}
+.ref-chip::before {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(from var(--ir-a), var(--stops-full), #5fe08b);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  animation: irspin 3.2s linear infinite;
+  pointer-events: none;
+}
+@keyframes irspin { to { --ir-a: 360deg; } }
+@media (prefers-reduced-motion: reduce) { .ref-chip::before { animation: none; } }
+
+/* =====================================================================
+   The static you-are-here / chosen-object paints (shared by sections).
+   ===================================================================== */
+/* the line, horizontal axis (bottom edge) — large mark, full rainbow */
+.mk-underline::after {
+  content: ""; position: absolute; left: 8px; right: 8px; bottom: 0;
+  height: 2.5px; border-radius: 999px;
+  background: linear-gradient(90deg, var(--stops-tabs));
+}
+/* the line, vertical axis (leading edge) — small mark, reduced spectrum */
+.mk-sideline::after {
+  content: ""; position: absolute; left: 0; top: 3px; bottom: 3px;
+  width: 3px; border-radius: 999px;
+  background: linear-gradient(180deg, var(--stops-side));
+}
+/* the static ring (chosen object) */
+.mk-ring::before {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(from 210deg, var(--stops-ring), #5fe08b);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  pointer-events: none;
+}
+
+/* =====================================================================
+   Section 1 — view tabs (faithful to ViewTab in app/workbench/mod.rs
+   post-#478: active = bold heading text + 2.5px rounded underline).
+   ===================================================================== */
+.bars { display: grid; gap: 14px; margin-top: 12px; }
+.barrow { display: grid; grid-template-columns: 170px 1fr; gap: 12px; align-items: center; }
+.barrow .tag { font: 600 11px/1.4 var(--mono); color: var(--shell-dim); text-align: right; }
+.barrow .tag b { color: var(--shell-mut); }
+.topbar {
+  display: flex; align-items: center; gap: 4px;
+  background: var(--bg); border: 1px solid var(--border-muted);
+  border-radius: 10px; padding: 4px 14px; min-height: 46px;
+  font-family: var(--font);
+}
+.logo {
+  width: 20px; height: 20px; border-radius: 5px; flex: none; margin-right: 6px;
+  background: linear-gradient(135deg, #5fe08b, #53c6f2 55%, #a58af7);
+  position: relative;
+}
+.logo::after {
+  content: ""; position: absolute; inset: 4px;
+  background: var(--bg);
+  clip-path: polygon(50% 8%, 96% 88%, 4% 88%);
+}
+.projname { font-size: 13px; color: var(--text-subtle); margin-right: 14px; white-space: nowrap; }
+.projname b { color: var(--text-muted); font-weight: 600; }
+.tabs { display: flex; align-items: center; }
+.tab {
+  position: relative; padding: 12px 14px; font-size: 14px; font-weight: 700;
+  letter-spacing: -0.01em; color: var(--text-subtle); cursor: pointer;
+  background: none; border: 0; font-family: inherit;
+}
+.tab:hover { color: var(--text-strong); }
+.tab.active { color: var(--heading); }
+/* baseline neutral underline */
+[data-t="t0"] .tab.active::after {
+  content: ""; position: absolute; left: 8px; right: 8px; bottom: 0;
+  height: 2.5px; border-radius: 999px; background: var(--sel-bd);
+}
+[data-t="line"] .tab.active { /* mk-underline applied in markup */ }
+.topbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.pillbtn {
+  font: 600 12px/1 var(--font); color: var(--text-muted);
+  background: transparent; border: 1px solid var(--border-strong);
+  border-radius: 999px; padding: 6px 12px; cursor: pointer;
+}
+.avatar { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-raised); border: 1px solid var(--border); }
+
+/* =====================================================================
+   Section 2 — workbench tree (faithful to project_node_tree.rs:
+   selected = neutral border + color-mix(oklab, dirty 45%, selection-bg);
+   hover = card-muted fill + ux-row-edge blue inset + glow;
+   dirty unselected = card-subtle + left dirty gradient to 62%).
+   ===================================================================== */
+.panels { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
+.panel { width: 262px; flex: none; }
+.panel .ptitle { font: 600 11px/1.4 var(--mono); color: var(--shell-dim); margin: 0 0 6px 2px; }
+.panel .ptitle b { color: var(--shell-mut); }
+.tree {
+  background: var(--panel-primary); border: 1px solid var(--border-muted);
+  border-radius: 10px; padding: 8px; display: grid; gap: 4px;
+}
+.row {
+  display: grid; grid-template-columns: 18px minmax(0,1fr) auto;
+  align-items: center; gap: 8px;
+  border: 1px solid transparent; border-radius: 4px;
+  padding: 6px 8px; font-size: 13.5px; color: var(--text-soft);
+  cursor: pointer; position: relative; background: transparent;
+}
+.row .ic { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; color: var(--text-subtle); }
+.row .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .bdg { font: 600 10px/1 var(--mono); border-radius: 4px; padding: 3px 5px; }
+.bdg.warn { color: var(--st-warn-tx); background: var(--st-warn-bg); border: 1px solid var(--st-warn-bd); }
+.bdg.err  { color: var(--st-error-tx); background: var(--st-error-bg); border: 1px solid var(--st-error-bd); }
+.bdg.bound{ color: var(--st-bound-tx); background: var(--st-bound-bg); border: 1px solid var(--st-bound-bd); }
+
+/* hover light (ux-row-edge), pinned via .demo-hover for the playground */
+.row:hover, .row.demo-hover {
+  background-color: var(--surface-muted);
+  box-shadow: inset 2px 0 0 #53c6f2, 0 0 14px var(--glow);
+}
+
+/* dirty, unselected: node-header tint from the left */
+.row.is-dirty {
+  --row-dirty: var(--st-warn-bg);
+  background-color: var(--surface-subtle);
+  background-image: linear-gradient(90deg, var(--row-dirty), transparent 62%);
+}
+.row.is-dirty-err {
+  --row-dirty: var(--st-error-bg);
+  background-color: var(--surface-subtle);
+  background-image: linear-gradient(90deg, var(--row-dirty), transparent 62%);
+}
+.row.is-dirty:hover, .row.is-dirty-err:hover { background-color: var(--surface-muted); }
+
+/* selected (all tree variants keep the dirty-derived mix fill) */
+.row.is-selected {
+  background: color-mix(in oklab, var(--row-dirty, var(--sel-bg)) 45%, var(--sel-bg));
+}
+[data-t="t0"] .row.is-selected { border-color: var(--sel-bd); }
+body.seldirty .row.is-selected { --row-dirty: var(--st-warn-bg); }
+body.seldirty .row.is-selected .bdg { display: inline-block; }
+.row.is-selected .bdg { display: none; }
+
+/* =====================================================================
+   Section 3 — story-book nav (sketch, not a faithful reproduction).
+   ===================================================================== */
+.navs { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
+.snav {
+  width: 200px; flex: none;
+  background: var(--surface); border: 1px solid var(--border-muted);
+  border-radius: 10px; padding: 10px 8px;
+}
+.snav .grp {
+  font: 700 10px/1 var(--font); letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--text-subtle); padding: 6px 8px 4px;
+}
+.snav .ent {
+  position: relative; display: block; padding: 5px 8px; border-radius: 4px;
+  border: 1px solid transparent;
+  font-size: 12.5px; color: var(--text-muted); cursor: pointer;
+}
+.snav .ent:hover { background: var(--surface-muted); color: var(--text-soft); }
+.snav .ent.active { color: var(--text-strong); background: var(--sel-bg); }
+[data-t="t0"] .ent.active { border-color: var(--sel-bd); }
+
+/* =====================================================================
+   Section 4 — object selection: where the ring lives. Option cards
+   (board pickers, setup choices) are a CHOSEN OBJECT, not a location —
+   and today they still wear dying accent (reckoning follow-up).
+   ===================================================================== */
+.cardsets { display: flex; gap: 26px; flex-wrap: wrap; margin-top: 12px; }
+.cardset .ptitle { font: 600 11px/1.4 var(--mono); color: var(--shell-dim); margin: 0 0 8px 2px; }
+.cardset .ptitle b { color: var(--shell-mut); }
+.cards { display: flex; gap: 12px; }
+.ocard {
+  position: relative; width: 176px; border-radius: 10px;
+  background: var(--surface-raised); border: 1px solid var(--border);
+  padding: 12px 14px; cursor: pointer;
+}
+.ocard .ct { font-size: 13.5px; font-weight: 600; color: var(--text); margin: 0 0 3px; }
+.ocard .cs { font-size: 11.5px; color: var(--text-subtle); margin: 0; line-height: 1.4; }
+.ocard.neutral-sel { border-color: var(--sel-bd); background: color-mix(in oklab, var(--sel-bg) 100%, var(--surface-raised)); }
+.ocard.ring-sel { border-color: transparent; background: var(--surface-raised); }
+/* the ring wears mk-ring from markup */
+
+/* ---------- rejected strip ---------- */
+.rejected {
+  margin-top: 44px; border: 1px dashed var(--shell-bd); border-radius: 10px;
+  padding: 10px 16px; color: var(--shell-dim); font-size: 12.5px; max-width: 100ch;
+}
+.rejected b { color: var(--shell-mut); }
+
+/* ---------- decision log ---------- */
+.declog {
+  margin-top: 28px; border-top: 1px solid var(--shell-bd); padding-top: 14px;
+  color: var(--shell-mut); font-size: 12.5px; max-width: 86ch;
+}
+.declog li { margin: 4px 0; }
+.declog b { color: var(--shell-tx); }
+</style>
+</head>
+<body>
+
+<h1>Spectrum-in-selection — round 3: the grammar</h1>
+<p class="hint">
+Converged rules from rounds 1–2: <em>nav never wears the ring</em> — the
+you-are-here mark is a static spectrum LINE on the nav axis's edge (bottom for
+horizontal tabs, leading side for vertical lists). <em>The static ring marks a
+chosen object</em> (selection), never a location — selection and nav are
+separate concepts. Intensity scales with size: <em>full rainbow on large
+marks</em> (tab underline, card ring), <em>cool sweep on small side marks</em>.
+Hover/drag stays the only animated light. Round 3 closed the last call: a
+surface wears the language of the concept it IS — the tree's highlight is
+you-are-here (side line); the ring stays reserved for true object selection.
+</p>
+
+<div class="controls">
+  <div class="grp"><span class="lbl">Spectrum</span>
+    <button id="c-mix" class="on">Grammar mix</button>
+    <button id="c-full">All full</button>
+    <button id="c-cool">All cool</button>
+  </div>
+  <div class="grp"><span class="lbl">Adjacent hover</span>
+    <button id="c-hover" class="on">Pinned</button>
+  </div>
+  <div class="grp"><span class="lbl">Selected row</span>
+    <button id="c-clean" class="on">Clean</button>
+    <button id="c-dirty">Unsaved (amber)</button>
+  </div>
+  <div class="grp"><span class="lbl">Reference</span>
+    <span class="ref-chip">hover light (animated)</span>
+  </div>
+</div>
+
+<h2>1 · View tabs — RULED: gradient underline (full rainbow)</h2>
+<p class="hint">
+Round-2: not the ring — "selection is different than nav; those are clearly
+separate concepts." The underline already means current-nav-item; it goes
+spectrum. Large mark → full rainbow.
+</p>
+<div class="bars" id="bars"></div>
+
+<h2>2 · Workbench tree — RULED: side line (you-are-here)</h2>
+<p class="hint">
+The highlight tracks <em>which node you're looking at</em> — its editor is
+open in the center pane, the same job the Nodes-tab underline does. That is
+you-are-here → side line (cool, small mark). The ring never marks a location;
+it stays RESERVED for a true chosen-object state (e.g. a future multi-select
+for group/delete), which today's tree doesn't have.
+</p>
+<div class="panels" id="panels"></div>
+
+<h2>3 · Story-book nav — RULED: side line (cool sweep)</h2>
+<p class="hint">
+Round-2 confirmed: this is nav, option 2 — the side line. Small side mark →
+reduced spectrum per the intensity rule.
+</p>
+<div class="navs" id="navs"></div>
+
+<h2>4 · Object selection — RULED: the spectrum ring</h2>
+<p class="hint">
+Round-2: "the spectrum looks good here." Option cards are a <em>chosen
+object</em> — the ring's home (they still wear dying accent today, so this
+doubles as the reckoning's selection family for option cards). Large mark →
+full rainbow; card radius shows the whole sweep.
+</p>
+<div class="cardsets" id="cardsets"></div>
+
+<div class="rejected">
+  <b>Rejected:</b> ring on view tabs — round 2: "selection is different than
+  nav; those are clearly separate concepts"; the ring is a selection mark and
+  never marks a location · T3 low-alpha spectrum wash (too timid to cure
+  "dry", even screen-blended at 16%) · underline inside the tree (off-axis in
+  a vertical list; the line sits on the leading edge there).
+</div>
+
+<div class="declog">
+  <strong>Decision log</strong>
+  <ul>
+    <li><b>The grammar (round 3):</b> nav you-are-here = static spectrum LINE on the nav axis's edge; object selection = static spectrum RING; selection and nav are separate concepts and never share a mark. Intensity scales with size: full rainbow on large marks (tab underline, card ring), cool sweep on small side marks. Hover stays the only animated light.</li>
+    <li>Round-2 rulings (Yona, 2026-08-30): tabs = underline not ring ("selection is different than nav"); intensity = "full rainbow on large things, less on small things (like to-the-side nav indication)"; story-nav = nav, option 2 (side line); option cards = "the spectrum looks good here" (ring stays).</li>
+    <li><b>G1 ruling (Yona, 2026-08-30, supersedes round 3 for the tree):</b> "I thought we decided on the outline treatment for selection? in the tree" — the tree's focused row IS selection and wears the RING (cool at row radius), not the side line. The side line stays the vertical-nav mark (story-book nav). Also ruled at G1: the site chrome's main nav takes the spectrum underline, and the Map/Patch selection surfaces join the ring.</li>
+    <li><b>Round-3 ruling (Yona):</b> "if there's two ideas, nav and selection, we should show them separately and use the language as specified" — a surface wears the language of the concept it IS. The tree's highlight tracks which node you're looking at → you-are-here → side line. The ring stays reserved for a true chosen-object state (e.g. future tree multi-select), which today's tree doesn't have. GRAMMAR COMPLETE.</li>
+    <li>Round-1 rulings: tabs = T1-or-T4, lean T1 because underline already means current-nav-item; tree hinges on what selection IS; story-nav = side line.</li>
+    <li>Baseline = PR #478 (full no-hue): neutral underline on tabs, neutral selection border + oklab dirty-mix fill in the tree.</li>
+    <li>"Cool sweep" lever: the full spectrum contains amber/red/orange — the unsaved/error/attention hues that sit beside selection in a dirty tree. The Primary tri cannot collide.</li>
+    <li>Status hues untouched; dirty derivation (color-mix into selection fill) preserved everywhere.</li>
+    <li>Wanted alongside production work: a design-language page as the design library's main page — the visual twin of docs/style/ui.md Color &amp; Light (idioms: status families, kinds of light, selection grammar, glass). Goes in the yona-plan as a deliverable.</li>
+  </ul>
+</div>
+
+<script>
+const ICONS = {
+  scene: '<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><polygon points="7,2 12.5,12 1.5,12"/></svg>',
+  shader: '<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 9 C3 4, 5 4, 7 9 S 11 14, 13 9" transform="translate(0,-2)"/></svg>',
+  knob: '<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="5.2"/><line x1="7" y1="7" x2="7" y2="3.2"/></svg>',
+  palette: '<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="4" width="10" height="6" rx="1.5"/><line x1="5.3" y1="4" x2="5.3" y2="10"/><line x1="8.6" y1="4" x2="8.6" y2="10"/></svg>',
+  output: '<svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="2.5" width="9" height="9" rx="2"/><circle cx="7" cy="7" r="1.6"/></svg>',
+};
+
+const TAB_T = [
+  { id: "t0", tag: "T0 · neutral (#478)", mark: "" },
+  { id: "line", tag: "PICK · gradient underline", mark: "mk-underline" },
+];
+function tabbar(t) {
+  return `<div class="barrow" data-t="${t.id}">
+    <div class="tag"><b>${t.tag}</b></div>
+    <div class="topbar">
+      <div class="logo"></div>
+      <span class="projname"><b>aurora-drift</b> · lp2025</span>
+      <nav class="tabs">
+        <button class="tab active ${t.mark}">Nodes</button>
+        <button class="tab">Map</button>
+        <button class="tab">Patch</button>
+      </nav>
+      <div class="right">
+        <button class="pillbtn">Share</button>
+        <div class="avatar"></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+const TREE_T = [
+  { id: "t0", name: "T0 · Baseline", note: "shipped neutral (#478)", mark: "" },
+  { id: "line", name: "PICK · side line", note: "you-are-here, cool", mark: "mk-sideline" },
+  { id: "ring", name: "RESERVED · ring", note: "only for a future true object-selection state", mark: "mk-ring" },
+];
+function treePanel(t) {
+  return `<div class="panel" data-t="${t.id}">
+    <p class="ptitle"><b>${t.name}</b> — ${t.note}</p>
+    <div class="tree">
+      <div class="row"><span class="ic">${ICONS.scene}</span><span class="nm">Aurora Drift</span></div>
+      <div class="row demo-hover"><span class="ic">${ICONS.shader}</span><span class="nm">plasma.glsl</span></div>
+      <div class="row is-selected ${t.mark}"><span class="ic">${ICONS.scene}</span><span class="nm">Ocean Ripple</span><span class="bdg warn">EDIT</span></div>
+      <div class="row is-dirty"><span class="ic">${ICONS.knob}</span><span class="nm">speed</span><span class="bdg warn">EDIT</span></div>
+      <div class="row is-dirty-err"><span class="ic">${ICONS.output}</span><span class="nm">small-dome</span><span class="bdg err">ERR</span></div>
+      <div class="row"><span class="ic">${ICONS.palette}</span><span class="nm">dusk palette (bound to bus)</span><span class="bdg bound">BUS</span></div>
+      <div class="row"><span class="ic">${ICONS.output}</span><span class="nm">Radiance SW petal array (backup controller)</span></div>
+    </div>
+  </div>`;
+}
+
+const NAV_T = [
+  { id: "t0", name: "T0 · Baseline", mark: "" },
+  { id: "line", name: "PICK · side line (cool)", mark: "mk-sideline" },
+];
+function storyNav(t) {
+  return `<div class="panel" data-t="${t.id}">
+    <p class="ptitle"><b>${t.name}</b></p>
+    <div class="snav">
+      <div class="grp">base</div>
+      <span class="ent">inline_button</span>
+      <span class="ent">popover</span>
+      <span class="ent active ${t.mark}">gradient_strip</span>
+      <span class="ent">detail_popover</span>
+      <div class="grp">node</div>
+      <span class="ent">knob_field</span>
+      <span class="ent">node_pane</span>
+    </div>
+  </div>`;
+}
+
+const CARDS = [
+  { t: "ESP32-C6", s: "RISC-V · 2 RMT channels · USB-JTAG" },
+  { t: "ESP32-S3", s: "Xtensa · 4 RMT channels · dual core" },
+  { t: "Classic ESP32", s: "Xtensa · legacy support · CH340" },
+];
+const CARD_T = [
+  { id: "t0", name: "NEUTRAL · for reference", cls: "neutral-sel", mark: "" },
+  { id: "ring", name: "PICK · static spectrum ring (chosen object)", cls: "ring-sel", mark: "mk-ring" },
+];
+function cardSet(t) {
+  const cards = CARDS.map((c, i) =>
+    `<div class="ocard ${i === 1 ? t.cls + " " + t.mark : ""}">
+      <p class="ct">${c.t}</p><p class="cs">${c.s}</p>
+    </div>`).join("");
+  return `<div class="cardset" data-t="${t.id}">
+    <p class="ptitle"><b>${t.name}</b></p>
+    <div class="cards">${cards}</div>
+  </div>`;
+}
+
+document.getElementById("bars").innerHTML = TAB_T.map(tabbar).join("");
+document.getElementById("panels").innerHTML = TREE_T.map(treePanel).join("");
+document.getElementById("navs").innerHTML = NAV_T.map(storyNav).join("");
+document.getElementById("cardsets").innerHTML = CARD_T.map(cardSet).join("");
+
+/* controls */
+const on = (id, fn) => document.getElementById(id).addEventListener("click", fn);
+const btn = (id) => document.getElementById(id);
+function pick(group, active) {
+  group.forEach((id) => btn(id).classList.toggle("on", id === active));
+}
+function stops(mode) {
+  document.body.classList.toggle("allfull", mode === "c-full");
+  document.body.classList.toggle("allcool", mode === "c-cool");
+  pick(["c-mix","c-full","c-cool"], mode);
+}
+on("c-mix", () => stops("c-mix"));
+on("c-full", () => stops("c-full"));
+on("c-cool", () => stops("c-cool"));
+on("c-hover", () => {
+  const b = btn("c-hover");
+  const now = !b.classList.contains("on");
+  b.classList.toggle("on", now);
+  document.querySelectorAll(".row.demo-hover, .row.demo-hover-off").forEach((r) => {
+    r.classList.toggle("demo-hover", now);
+    r.classList.toggle("demo-hover-off", !now);
+  });
+});
+on("c-clean", () => { document.body.classList.remove("seldirty"); pick(["c-clean","c-dirty"], "c-clean"); });
+on("c-dirty", () => { document.body.classList.add("seldirty"); pick(["c-clean","c-dirty"], "c-dirty"); });
+
+/* URL-hash presets so headless captures can hit any control state,
+   e.g. index.html#allcool+seldirty+nohover */
+const preset = location.hash.slice(1).split("+");
+if (preset.includes("allfull")) btn("c-full").click();
+if (preset.includes("allcool")) btn("c-cool").click();
+if (preset.includes("seldirty")) btn("c-dirty").click();
+if (preset.includes("nohover")) btn("c-hover").click();
+</script>
+</body>
+</html>
