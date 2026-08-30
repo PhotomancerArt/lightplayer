@@ -5820,9 +5820,16 @@ label:has(> input:not(:disabled)) {
 }
 
 /* Small-radius hosts compress the full sweep to its warm stops (reads as
-   attention-orange); they take the cool sweep instead. */
+   attention-orange); they take the cool sweep instead. Composed with the
+   base class: `ux-sel-ring ux-sel-ring-cool`. */
 .ux-sel-ring-cool::before {
     background: conic-gradient(from 210deg, var(--studio-spectrum-cool), #5fe08b);
+}
+
+/* Clipping hosts (overflow:hidden cells, overlays inside clipped bars)
+   opt the ring inward — the ux-ir-ring-inset precedent. */
+.ux-sel-ring-inset {
+    --ux-sel-ring-inset: 0px;
 }
 
 /* --------------------------------------------------------------------------

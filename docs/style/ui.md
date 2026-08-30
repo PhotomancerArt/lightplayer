@@ -151,14 +151,15 @@ hues are load bearing, and test-enforced (see `inline_button.rs`'s
 a mark.
 
 - **Nav "you are here"** is a STATIC spectrum line on the nav axis's edge:
-  the full-rainbow underline on the view tabs (`ux-here-line-x`), the
-  cool-sweep side line on vertical navs — the workbench tree's focused row,
+  the full-rainbow underline on the view tabs and the site chrome's nav
+  (`ux-here-line-x` grammar), the cool-sweep side line on vertical navs —
   the story-book nav (`ux-here-line-y`, `--studio-spectrum-cool`).
 - **Object selection** is a STATIC spectrum ring around the chosen thing
-  (`ux-sel-ring`): option cards today; any future true chosen-object state
-  (e.g. tree multi-select) — which takes the cool variant
-  (`ux-sel-ring-cool`) at small radii, where the full sweep compresses to
-  its warm stops and reads as attention-orange.
+  (`ux-sel-ring`): option cards, the workbench tree's focused row, and the
+  Map/Patch fixtures tree, output headers, and port cells (one
+  `UiSelection`). Small radii take the cool variant (`ux-sel-ring-cool`) —
+  the full sweep compresses to its warm stops there and reads as
+  attention-orange; clipping hosts add `ux-sel-ring-inset`.
 - **Intensity scales with size**: large marks carry the full spectrum,
   small marks the cool sweep, so the warm stops never sit beside the
   amber/red status tints they resemble.

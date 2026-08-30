@@ -254,13 +254,15 @@ gate rounds) converged on a grammar rather than a single treatment:
 - **Selection and navigation are separate concepts and never share a
   mark** ("a surface wears the language of the concept it IS").
 - **Nav you-are-here = a STATIC spectrum line** on the nav axis's edge:
-  full-rainbow underline on the view tabs (`ux-here-line-x`); cool-sweep
-  side line (`ux-here-line-y`, `--studio-spectrum-cool`) on vertical navs
-  — the workbench tree's focused row and the story-book nav.
+  full-rainbow underline on the view tabs and the site chrome nav
+  (`ux-here-line-x` grammar); cool-sweep side line (`ux-here-line-y`,
+  `--studio-spectrum-cool`) on vertical navs — the story-book nav.
 - **Object selection = a STATIC spectrum ring** (`ux-sel-ring`): option
-  cards today; reserved for any future true chosen-object state (tree
-  multi-select), which takes the cool variant at small radii where the
-  full sweep compresses to its warm stops (reads attention-orange).
+  cards, the workbench tree's focused row (G1 ruled it selection, not
+  nav), and the Map/Patch selection surfaces (fixtures tree, output
+  headers, port cells). Small radii take the cool variant
+  (`ux-sel-ring-cool`) — the full sweep compresses to its warm stops
+  there and reads as attention-orange.
 - **Intensity scales with size**: full spectrum on large marks, cool
   sweep on small ones — the cool tri exists because the full run's
   amber/red/orange stops are the unsaved/error/attention hues and would

@@ -110,24 +110,31 @@ fn page() -> Element {
 
             Idiom {
                 title: "The selection grammar: you-are-here is a line",
-                rule: "Selection and navigation are separate concepts and never share a mark. Nav's mark is a STATIC spectrum line on the nav axis's edge — full rainbow on the large tab underline, cool sweep on small side lines — so a place never looks like a chosen thing, and static light never blurs with the moving hover light.",
+                rule: "Selection and navigation are separate concepts and never share a mark. Nav's mark is a STATIC spectrum line on the nav axis's edge — full rainbow on tab/nav underlines, cool sweep on small side lines like the story-book nav — so a place never looks like a chosen thing, and static light never blurs with the moving hover light.",
                 div { class: "tw:flex tw:items-center tw:rounded-md tw:border tw:border-border-muted tw:bg-background tw:px-2",
                     span { class: "{mini_tab} ux-here-line-x tw:text-heading", "Nodes" }
                     span { class: "{mini_tab} tw:text-subtle-foreground", "Map" }
                     span { class: "{mini_tab} tw:text-subtle-foreground", "Patch" }
                 }
                 div { class: "tw:grid tw:w-44 tw:gap-0.5 tw:rounded-md tw:border tw:border-border-muted tw:bg-card tw:p-1.5",
-                    span { class: "{mini_nav_row} tw:text-muted-foreground", "plasma.glsl" }
+                    span { class: "{mini_nav_row} tw:text-muted-foreground", "inline_button" }
                     span { class: "{mini_nav_row} ux-here-line-y tw:bg-[linear-gradient(90deg,var(--studio-color-selection-bg),transparent_90%)] tw:text-strong-foreground",
-                        "Ocean Ripple"
+                        "gradient_strip"
                     }
-                    span { class: "{mini_nav_row} tw:text-muted-foreground", "dusk palette" }
+                    span { class: "{mini_nav_row} tw:text-muted-foreground", "popover" }
                 }
             }
 
             Idiom {
                 title: "The selection grammar: a chosen object wears the ring",
-                rule: "Object selection — an option card, a future tree multi-select — is a STATIC spectrum ring over the neutral selection wash and check. Full spectrum at card radius; the cool variant at small radii, where the full sweep compresses to its warm stops and reads as attention-orange.",
+                rule: "Object selection — an option card, the tree's focused node, a patched port cell — is a STATIC spectrum ring over the neutral selection wash. Full spectrum at card radius; small radii (tree rows, cells) take the cool variant, where the full sweep would compress to its warm stops and read as attention-orange.",
+                div { class: "tw:grid tw:w-44 tw:gap-0.5 tw:rounded-md tw:border tw:border-border-muted tw:bg-card tw:p-1.5",
+                    span { class: "{mini_nav_row} tw:text-muted-foreground", "plasma.glsl" }
+                    span { class: "{mini_nav_row} ux-sel-ring ux-sel-ring-cool tw:bg-selection-bg tw:text-strong-foreground",
+                        "Ocean Ripple"
+                    }
+                    span { class: "{mini_nav_row} tw:text-muted-foreground", "dusk palette" }
+                }
                 div { class: "{option_card_grid_class()} tw:w-72",
                     span { class: option_card_class(true),
                         span { class: OPTION_CARD_CHECK_CLASS, "✓" }
