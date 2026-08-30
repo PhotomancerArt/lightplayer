@@ -57,7 +57,7 @@ use crate::app::patch::verb_ui::{
     resize_segment, segment_at_free_run, selection_stride, shift_segment, target_is_unmapped,
 };
 use crate::base::option_cards::{OptionCard, OptionCards};
-use crate::base::{StudioIcon, StudioIconName};
+use crate::base::{InlineButtonTone, StudioIcon, StudioIconName, inline_text_button_class};
 
 /// Stepped controls are squared blocks (the panel-language convention) —
 /// every transport button steps something discrete.
@@ -1072,7 +1072,7 @@ fn SectionHead(
             }
             if deselect {
                 button {
-                    class: "tw:ml-1 tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-1 tw:text-[11px] tw:leading-4 tw:text-dim-foreground tw:hover:text-strong-foreground",
+                    class: "{inline_text_button_class(InlineButtonTone::Neutral, false)} tw:ml-1",
                     title: "Deselect (esc)",
                     onclick: move |_| {
                         // Same rung as esc's clear: the size override

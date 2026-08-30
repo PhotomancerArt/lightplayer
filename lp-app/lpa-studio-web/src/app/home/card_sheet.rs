@@ -15,6 +15,8 @@
 
 use dioxus::prelude::*;
 
+use crate::core::{quiet_action_class, quiet_destructive_action_class};
+
 /// The dim-within-the-card overlay + centered panel. Content is the
 /// caller's; the sheet owns dimming, placement, and outside-click
 /// dismissal.
@@ -81,16 +83,16 @@ pub(crate) fn CardSheetButton(
     tone: SheetButtonTone,
     onclick: EventHandler<()>,
 ) -> Element {
+    // Quiet/Destructive fold into the shared quiet-chip family (P4); Primary
+    // stays local — a "good"-toned confirm has no existing canonical
+    // helper, and this is its only caller.
     let class = match tone {
-        SheetButtonTone::Quiet => {
-            "tw:cursor-pointer tw:rounded-md tw:border tw:border-border tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:hover:text-strong-foreground"
-        }
+        SheetButtonTone::Quiet => quiet_action_class().to_string(),
         SheetButtonTone::Primary => {
             "tw:cursor-pointer tw:rounded-md tw:border tw:border-[var(--studio-status-good-text)] tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-[var(--studio-status-good-text)]"
+                .to_string()
         }
-        SheetButtonTone::Destructive => {
-            "tw:cursor-pointer tw:rounded-md tw:border tw:border-[var(--studio-status-error-text)] tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-[var(--studio-status-error-text)]"
-        }
+        SheetButtonTone::Destructive => quiet_destructive_action_class().to_string(),
     };
     rsx! {
         button {

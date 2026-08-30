@@ -24,6 +24,7 @@ use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
 };
 use crate::base::{DetailPopover, DetailSection, DetailSectionTint, StudioIcon, StudioIconName};
+use crate::core::inline_link_row_class;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -133,7 +134,7 @@ pub(crate) fn NodeDetailPopover(
             if let Some(node) = copy_target {
                 DetailSection { title: "Share",
                     button {
-                        class: "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-0 tw:py-0.5 tw:text-left tw:text-xs tw:text-muted-foreground tw:transition-colors tw:hover:text-strong-foreground",
+                        class: inline_link_row_class(false),
                         r#type: "button",
                         title: "Copy this node and its assets to the clipboard.",
                         onclick: move |event| {

@@ -172,6 +172,13 @@ pub fn quiet_action_class() -> &'static str {
     quiet_class(false)
 }
 
+/// The quiet-chip classes' danger tone, for toolbar/sheet controls that
+/// cannot be `UiAction`s but must wear the refusal treatment (P4
+/// consolidation: `CardSheetButton`'s destructive tone).
+pub fn quiet_destructive_action_class() -> &'static str {
+    quiet_class(true)
+}
+
 /// The menu-row classes, for popup rows that cannot be `UiAction`s
 /// (web-side handlers like export) but must read identically.
 pub fn menu_item_action_class() -> &'static str {
@@ -183,6 +190,43 @@ pub fn menu_item_action_class() -> &'static str {
 /// codification: danger-zone rows without an action model).
 pub fn menu_item_destructive_action_class() -> &'static str {
     menu_item_class(true)
+}
+
+/// The solid-tier classes (Primary/Secondary/Tertiary), for standing CTA
+/// buttons that cannot be `UiAction`s but should wear the exact action-strip
+/// look — including the interaction light (P4 consolidation: banner/CTA
+/// buttons that used to hand-roll a close approximation of this tier).
+pub fn solid_action_class(priority: ActionPriority) -> &'static str {
+    solid_class(priority)
+}
+
+/// A quiet accent-outline CTA: transparent fill, accent border and text, a
+/// wash on hover — the "Connect"/"Save"/"Add" family that recurred as
+/// near-identical hand-rolled strings across the settings popover, account
+/// page, agent chat, and share panel (P4 consolidation). Smaller than the
+/// Solid tier's `min-h-9`, for compact rows and popovers that cannot carry
+/// a full action-strip button. `destructive` swaps to the refusal tone
+/// (e.g. "Stop").
+pub fn outline_action_class(destructive: bool) -> &'static str {
+    if destructive {
+        "tw:cursor-pointer tw:rounded-xs tw:border tw:border-status-error-border tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-status-error-foreground tw:transition-colors tw:hover:bg-status-error-bg tw:disabled:cursor-not-allowed tw:disabled:opacity-60 ux-focus-ring"
+    } else {
+        "tw:cursor-pointer tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-accent tw:transition tw:duration-300 tw:hover:bg-accent-wash tw:disabled:cursor-not-allowed tw:disabled:opacity-60 ux-focus-ring"
+    }
+}
+
+/// A borderless, full-width in-row link button: icon + label, no chip, a
+/// text-color shift on hover. The share/node-detail "Copy JSON" and
+/// project-share rows duplicated this string byte-for-byte (P4
+/// consolidation) — `disabled` swaps to the inert dim reading used where
+/// the row explains itself through its own title rather than the native
+/// attribute.
+pub fn inline_link_row_class(disabled: bool) -> &'static str {
+    if disabled {
+        "tw:flex tw:w-full tw:min-w-0 tw:cursor-not-allowed tw:items-center tw:gap-2 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-0 tw:py-0.5 tw:text-left tw:text-xs tw:text-subtle-foreground tw:opacity-60"
+    } else {
+        "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-0 tw:py-0.5 tw:text-left tw:text-xs tw:text-muted-foreground tw:transition-colors tw:hover:text-strong-foreground ux-focus-ring"
+    }
 }
 
 fn disabled_reason(enablement: &ActionEnablement) -> Option<&str> {

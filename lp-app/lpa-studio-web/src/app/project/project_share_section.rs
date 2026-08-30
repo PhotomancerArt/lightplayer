@@ -27,6 +27,7 @@ use dioxus::prelude::*;
 
 use crate::app::home::package_export::{ExportForm, ExportTarget, export_package_as};
 use crate::base::{StudioIcon, StudioIconName};
+use crate::core::inline_link_row_class;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -89,11 +90,7 @@ fn ShareRow(
     } else {
         hint
     };
-    let class = if disabled {
-        "tw:flex tw:w-full tw:min-w-0 tw:cursor-not-allowed tw:items-center tw:gap-2 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-0 tw:py-0.5 tw:text-left tw:text-xs tw:text-subtle-foreground tw:opacity-60"
-    } else {
-        "tw:flex tw:w-full tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-0 tw:py-0.5 tw:text-left tw:text-xs tw:text-muted-foreground tw:transition-colors tw:hover:text-strong-foreground"
-    };
+    let class = inline_link_row_class(disabled);
 
     rsx! {
         button {

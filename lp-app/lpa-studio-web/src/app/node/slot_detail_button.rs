@@ -12,6 +12,7 @@ use crate::app::node::{
 use crate::base::{
     DetailPopover, DetailSectionTint, IconMenuTone, InlineButton, InlineButtonTone,
     PopoverPlacement, StudioIcon, StudioIconName, detail_popover_section_class,
+    inline_text_button_class,
 };
 
 /// Revert/clear affordance rendered INSIDE the slot detail popup's edited
@@ -648,7 +649,7 @@ pub(crate) fn SlotDetailRow(
                 // Navigation affordance: the row's value is a clickable chip
                 // in the shared bound-site language (D11: no dead ends).
                 button {
-                    class: "tw:inline-flex tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:rounded-xs tw:border tw:border-status-bound-border tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:leading-none tw:text-status-bound-foreground tw:transition-colors tw:hover:border-status-bound-foreground",
+                    class: inline_text_button_class(InlineButtonTone::Bound, false),
                     r#type: "button",
                     title: "Click to focus",
                     onclick: move |event| {

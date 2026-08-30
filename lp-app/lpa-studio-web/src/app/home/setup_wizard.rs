@@ -40,7 +40,7 @@ use crate::app::home::card_sheet::{
 };
 use crate::app::home::device_card::{BoardPicker, card_op_activity, card_op_terminal};
 use crate::app::home::package_card::home_action;
-use crate::base::conic_spinner_class;
+use crate::base::{InlineButtonTone, conic_spinner_class, inline_icon_button_class};
 
 /// Dispatch one wizard gesture through the normal action path.
 fn gesture(gesture: SetupGesture) -> UiAction {
@@ -109,7 +109,7 @@ pub(crate) fn SetupWizardCard(wizard: UiSetupWizard, on_action: EventHandler<UiA
                 }
                 span { class: kind_chip, "{kind_label}" }
                 button {
-                    class: "tw:cursor-pointer tw:rounded tw:border-0 tw:bg-transparent tw:px-1.5 tw:text-sm tw:text-dim-foreground tw:hover:text-strong-foreground",
+                    class: inline_icon_button_class(InlineButtonTone::Neutral, false),
                     r#type: "button",
                     title: "Close",
                     aria_label: "Close setup",
@@ -207,7 +207,7 @@ fn steps_rail(wizard: &UiSetupWizard, close: Option<EventHandler<UiAction>>) -> 
             }
             if let Some(on_action) = close {
                 button {
-                    class: "tw:ml-auto tw:cursor-pointer tw:rounded tw:border-0 tw:bg-transparent tw:px-1.5 tw:text-sm tw:text-dim-foreground tw:hover:text-strong-foreground",
+                    class: "{inline_icon_button_class(InlineButtonTone::Neutral, false)} tw:ml-auto",
                     r#type: "button",
                     title: "Close",
                     aria_label: "Close setup",
