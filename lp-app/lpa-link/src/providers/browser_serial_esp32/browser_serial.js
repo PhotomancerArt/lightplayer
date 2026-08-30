@@ -117,8 +117,8 @@ export async function requestPort() {
   return sessionForPort(BrowserEsp32DeviceController, port, label);
 }
 
-export async function openPort(id, baudRate) {
-  return requireSession(id).openProtocol({ baudRate });
+export async function openPort(id, baudRate, reset = true) {
+  return requireSession(id).openProtocol({ baudRate, reset });
 }
 
 export async function writeLine(id, line) {

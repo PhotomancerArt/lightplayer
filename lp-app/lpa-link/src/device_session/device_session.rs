@@ -849,7 +849,7 @@ async fn open_device_link(
     #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
     if let LinkConnector::BrowserSerialEsp32(provider) = connector {
         if let Err(error) = provider
-            .open_protocol(session.id(), lpc_model::DEFAULT_SERIAL_BAUD_RATE)
+            .open_protocol(session.id(), lpc_model::DEFAULT_SERIAL_BAUD_RATE, true)
             .await
         {
             close_failed_session(connector, &session).await;

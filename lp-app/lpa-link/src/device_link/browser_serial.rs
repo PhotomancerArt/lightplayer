@@ -176,7 +176,10 @@ impl BrowserLinkInner {
             },
         };
         self.baud.set(baud);
-        match self.provider.open_protocol(&session, baud).await {
+        // No hard reset on the identify open: the model identifies
+        // mid-stream via a hello request, and a USB-Serial-JTAG chip
+        // would re-enumerate (and kill this very port) on the reset.
+        match self.provider.open_protocol(&session, baud, false).await {
             Ok(()) => {
                 self.open.set(true);
                 self.push(LinkEvent::Opened {
@@ -251,7 +254,7 @@ impl BrowserLinkInner {
             self.fail("release", &error);
         }
         self.open.set(false);
-        match self.provider.open_protocol(&session, baud).await {
+        match self.provider.open_protocol(&session, baud, true).await {
             Ok(()) => {
                 self.open.set(true);
                 self.push(LinkEvent::ResetOutcome { kind, ok: true });
