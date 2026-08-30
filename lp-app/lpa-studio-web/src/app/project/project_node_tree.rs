@@ -175,23 +175,29 @@ fn ProjectNodeTreeItemView(
 /// - an unfocused dirty row paints the node-header tint: the same
 ///   `linear-gradient(90deg, <status bg>, transparent 62%)` over the subtle
 ///   card surface as the P3 header-only treatment;
-/// - the focused row keeps its neutral selection border, and its highlight fill
-///   color-mixes the dirty color into the selection background so selection
-///   adapts to (never erases) the edited treatment; on a clean focused row
-///   the variable falls back to the selection color, mixing it with itself.
+/// - the focused row wears the you-are-here side line (`ux-here-line-y`,
+///   the selection grammar's vertical nav mark — the tree highlight IS
+///   navigation: it tracks which node's editor is open), and its highlight
+///   fill color-mixes the dirty color into the selection background so
+///   selection adapts to (never erases) the edited treatment; on a clean
+///   focused row the variable falls back to the selection color, mixing it
+///   with itself. A spectrum RING is reserved for a future true
+///   chosen-object state (multi-select); the focused row is a location,
+///   not a chosen object.
 fn tree_item_row_class(focused: bool, dirty: DirtySummary) -> String {
     const BASE: &str = "tw:grid tw:w-full tw:grid-cols-[18px_minmax(0,1fr)_auto] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:px-2 tw:py-1.5 tw:text-left";
     let dirty_var = tree_item_dirty_var_class(dirty);
     let focus = focus_ring_class();
     if focused {
         return format!(
-            "{BASE} {focus} {dirty_var} tw:border-selection-border tw:bg-[color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))_45%,var(--studio-color-selection-bg))]"
+            "{BASE} {focus} {dirty_var} ux-here-line-y tw:border-transparent tw:bg-[color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))_45%,var(--studio-color-selection-bg))]"
         );
     }
     // Unfocused rows take the dense-row interaction light: a spectrum left
     // edge plus the bloom, never a full ring (Aurora R2 — a ring per row
-    // reads as noise). The FOCUSED row is left alone on purpose: selection
-    // is the neutral white outline and the spectrum never speaks for it.
+    // reads as noise). The FOCUSED row doesn't take the hover edge: its
+    // side line is the static you-are-here mark, and layering the moving
+    // hover light's edge on the same edge would blur the two kinds.
     let edge = format!("{} {focus}", row_edge_class());
     if dirty.is_clean() {
         format!("{BASE} {edge} tw:border-transparent tw:bg-transparent tw:hover:bg-card-muted")
@@ -275,7 +281,10 @@ mod tests {
     #[test]
     fn focused_dirty_row_mixes_the_dirty_color_into_the_selection_highlight() {
         let class = tree_item_row_class(true, dirty(2, 0));
-        assert!(class.contains("tw:border-selection-border"));
+        // The you-are-here side line is the focused mark (selection
+        // grammar); the border stays transparent, not neutral.
+        assert!(class.contains("ux-here-line-y"));
+        assert!(class.contains("tw:border-transparent"));
         assert!(class.contains("--studio-tree-dirty-bg:var(--studio-status-warning-bg)"));
         assert!(class.contains(
             "color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))_45%,var(--studio-color-selection-bg))"
@@ -286,7 +295,7 @@ mod tests {
     #[test]
     fn focused_clean_row_falls_back_to_the_plain_selection_highlight() {
         let class = tree_item_row_class(true, DirtySummary::clean());
-        assert!(class.contains("tw:border-selection-border"));
+        assert!(class.contains("ux-here-line-y"));
         // No variable set: the color-mix falls back to the neutral selection color.
         assert!(!class.contains("--studio-tree-dirty-bg:var"));
         assert!(class.contains("var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))"));
