@@ -154,8 +154,25 @@ pub struct UiAddNodeMenuEntry {
     pub unavailable: Option<String>,
 }
 
-/// Build the picker for one attach site: every instantiable kind, in
-/// [`PICKER_KINDS`] order, with every entry enabled.
+/// Whether a kind belongs in `attach`'s picker at all. The project root
+/// hosts anything; a playlist's entries hold visual children — the playlist
+/// blends its entries' outputs into its own (`PlaylistState.output`) — so
+/// only kinds whose runtime publishes a visual product fit.
+///
+/// Site fit FILTERS where the device gate disables: an unavailable kind is
+/// part of the catalog and the row carries the "why not", but a kind that
+/// can never be a playlist entry is not part of the entry picker's catalog,
+/// and a permanent row of never-enabled kinds teaches nothing.
+fn kind_fits_attach(kind: NodeKind, attach: &UiAttachTarget) -> bool {
+    match attach {
+        UiAttachTarget::ProjectRoot => true,
+        UiAttachTarget::Playlist { .. } => kind.produces_visual(),
+    }
+}
+
+/// Build the picker for one attach site: every instantiable kind that fits
+/// the site ([`kind_fits_attach`]), in [`PICKER_KINDS`] order, with every
+/// entry enabled.
 ///
 /// The device gate is applied afterwards by [`gate_add_node_menu`], once,
 /// where the lens session is known — menus are built in several places and
@@ -170,6 +187,7 @@ pub fn add_node_menu(attach: &UiAttachTarget) -> UiAddNodeMenu {
         imports_empty: None,
         entries: PICKER_KINDS
             .iter()
+            .filter(|kind| kind_fits_attach(**kind, attach))
             .map(|kind| {
                 let label = node_kind_label(*kind);
                 UiAddNodeMenuEntry {
@@ -237,6 +255,29 @@ mod tests {
         assert_eq!(menu.entries[0].icon, "shader");
         // Rebuilding yields the identical menu (stable order, stable data).
         assert_eq!(menu, add_node_menu(&UiAttachTarget::ProjectRoot));
+    }
+
+    /// A playlist's picker offers only the kinds that can BE an entry —
+    /// visual producers — in the same stable order. Everything else never
+    /// enters this site's catalog (site fit filters; only the device gate
+    /// disables).
+    #[test]
+    fn a_playlist_menu_offers_only_visual_kinds() {
+        let menu = add_node_menu(&UiAttachTarget::Playlist {
+            node: crate::ProjectNodeAddress::parse("/demo.module/loop.playlist").unwrap(),
+        });
+
+        let kinds: Vec<NodeKind> = menu.entries.iter().map(|entry| entry.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                NodeKind::Shader,
+                NodeKind::Playlist,
+                NodeKind::Module,
+                NodeKind::Fluid,
+            ]
+        );
+        assert!(menu.entries.iter().all(|e| e.unavailable.is_none()));
     }
 
     #[test]
