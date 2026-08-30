@@ -575,13 +575,13 @@ fn ToolCard(
 }
 
 /// Current-destination treatment: heading color plus the selection underline.
-const NAV_TAB_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-heading tw:after:content-['']";
+const NAV_TAB_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-[linear-gradient(90deg,var(--studio-spectrum))] tw:after:content-['']";
 /// Idle treatment: subtle text that brightens on hover.
 const NAV_TAB_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
 /// Secondary-family active: the same current-destination grammar, one
 /// weight lighter — the family reads quieter even when it is where you
 /// are.
-const NAV_TAB_SECONDARY_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-heading tw:after:content-['']";
+const NAV_TAB_SECONDARY_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-[linear-gradient(90deg,var(--studio-spectrum))] tw:after:content-['']";
 /// Secondary-family idle: reduced weight and dimmed, full strength on
 /// hover.
 pub(crate) const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-subtle-foreground/70 tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
@@ -590,7 +590,7 @@ pub(crate) const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1
 /// brand — the logo IS Home's tab, so at Home it marks the place like
 /// one. The offset differs from the tabs' because the lockup's box is
 /// shorter; both land the bar on the header's border line.
-const LOGO_HOME_ACTIVE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[14px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-heading tw:after:content-['']";
+const LOGO_HOME_ACTIVE_WRAP: &str = "tw:relative tw:flex tw:flex-none tw:after:absolute tw:after:inset-x-0 tw:after:-bottom-[14px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-[linear-gradient(90deg,var(--studio-spectrum))] tw:after:content-['']";
 
 /// ⋯ menu section row, idle.
 pub(crate) const NAV_MENU_ITEM_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:transition-colors tw:hover:bg-card-raised tw:hover:text-strong-foreground";

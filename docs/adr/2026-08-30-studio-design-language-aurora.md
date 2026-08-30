@@ -242,3 +242,41 @@ passed the in-app feel gate with no per-surface exceptions.
 The escape hatch is per-surface exceptions argued at a review gate —
 never a blanket accent revival. Current guidance lives in
 `docs/style/ui.md` Color & Light.
+
+## Amendment — the selection grammar (2026-08-30)
+
+The reckoning's "selected/current is the neutral selection family" stance
+is refined, not reversed. After the full no-hue landed, the ruled feedback
+was "the ux feels a bit dry — I like the rainbow," and the
+spectrum-in-selection spike (`spikes/spectrum-selection`, PR #481, three
+gate rounds) converged on a grammar rather than a single treatment:
+
+- **Selection and navigation are separate concepts and never share a
+  mark** ("a surface wears the language of the concept it IS").
+- **Nav you-are-here = a STATIC spectrum line** on the nav axis's edge:
+  full-rainbow underline on the view tabs and the site chrome nav
+  (`ux-here-line-x` grammar); cool-sweep side line (`ux-here-line-y`,
+  `--studio-spectrum-cool`) on vertical navs — the story-book nav.
+- **Object selection = a STATIC spectrum ring** (`ux-sel-ring`): option
+  cards, the workbench tree's focused row (G1 ruled it selection, not
+  nav), and the Map/Patch selection surfaces (fixtures tree, output
+  headers, port cells). Small radii take the cool variant
+  (`ux-sel-ring-cool`) — the full sweep compresses to its warm stops
+  there and reads as attention-orange.
+- **Intensity scales with size**: full spectrum on large marks, cool
+  sweep on small ones — the cool tri exists because the full run's
+  amber/red/orange stops are the unsaved/error/attention hues and would
+  collide beside a dirty row.
+- On rows and cells the ring is the ONLY selection paint (no grey wash;
+  a selected row keeps its natural ground, dirty tint included). Option
+  cards keep the selection wash + neutral check under the ring. Every
+  mark is static — the pointer's light stays its own (hover ring, press
+  flare, drag chip on cards/buttons). Dense rows go QUIET: a plain white
+  outline on hover (every louder variant — blue edge, darkened fill +
+  bloom, whispered moving hairline — was gate-rejected as too much at
+  row density), flashing into the static spectrum hairline on press as
+  the preview of the selection ring the click lands.
+
+Status hues remain frozen; nothing here touches them. The design
+library's main page (the design-language story) documents the grammar
+with live examples.
