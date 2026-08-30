@@ -4,10 +4,11 @@
 //! pattern is cleaner): the face is the strip section only, and the
 //! currently active child's card renders BELOW the playlist card as a
 //! sibling, exactly the way extracted children render under any node
-//! ([`crate::app::node::NodeChildren`]). The playing entry's thumbnail is
-//! replaced by the "ACTIVE" placard (live-blue family — Yona Q5: "ACTIVE",
-//! matching `PlaylistState.active_entry` naming). Entries carry per-entry
-//! duration chips and a cue tag (⚑) when trigger-driven.
+//! ([`crate::app::node::NodeChildren`]). The playing entry keeps its
+//! thumbnail and wears an "ACTIVE" corner badge over it (live-blue family —
+//! Yona Q5: "ACTIVE", matching `PlaylistState.active_entry` naming); the
+//! badge fills the thumb slot only when no snapshot has landed. Entries
+//! carry per-entry duration chips and a cue tag (⚑) when trigger-driven.
 //!
 //! The strip's tail carries the add chip (authoring P5): an ADDITIVE product
 //! affordance, so it may live on the face per the faces ADR (destructive
@@ -103,10 +104,10 @@ fn PlaylistAddChip(menu: UiAddNodeMenu, on_action: EventHandler<UiAction>) -> El
     }
 }
 
-/// One strip entry: thumbnail (or the ACTIVE placard), name, cue tag, and
-/// duration chip. With an entry action and a dispatcher present the chip is
-/// a button — clicking selects/focuses the entry's child node (the reused
-/// node-select action; activation-by-click has no wire op today).
+/// One strip entry: thumbnail (badged ACTIVE when playing), name, cue tag,
+/// and duration chip. With an entry action and a dispatcher present the
+/// chip is a button — clicking selects/focuses the entry's child node (the
+/// reused node-select action; activation-by-click has no wire op today).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PlaylistEntryChip(
@@ -128,21 +129,27 @@ fn PlaylistEntryChip(
     let name = entry.name.clone();
 
     let body = rsx! {
-        if active {
-            // The playing entry's duplicate preview is replaced by the
-            // placard — its real output renders on the child card below
-            // the playlist card.
+        if let Some(thumb) = entry.thumb.clone() {
+            div { class: "tw:relative",
+                ProductPreview {
+                    kind: UiProductKind::Visual,
+                    preview: thumb,
+                    tracking: UiProductTrackingState::Tracking,
+                    frame: STRIP_THUMB_FRAME,
+                    focus_action: None,
+                    on_action: None,
+                }
+                if active {
+                    span { class: "tw:absolute tw:left-1 tw:top-1 tw:rounded-xs tw:border tw:border-status-live-border tw:bg-status-live-bg tw:px-1 tw:text-[9px] tw:font-bold tw:uppercase tw:tracking-[0.12em] tw:text-status-live-foreground",
+                        "ACTIVE"
+                    }
+                }
+            }
+        } else if active {
+            // No snapshot has landed yet — the placard keeps the playing
+            // slot legible until the preview probe catches up.
             div { class: "tw:grid tw:aspect-[9/5] tw:place-items-center tw:bg-status-live-bg tw:text-[10px] tw:font-bold tw:uppercase tw:tracking-[0.12em] tw:text-status-live-foreground",
                 "ACTIVE"
-            }
-        } else if let Some(thumb) = entry.thumb.clone() {
-            ProductPreview {
-                kind: UiProductKind::Visual,
-                preview: thumb,
-                tracking: UiProductTrackingState::Tracking,
-                frame: STRIP_THUMB_FRAME,
-                focus_action: None,
-                on_action: None,
             }
         } else {
             div { class: "tw:aspect-[9/5] tw:bg-page" }
