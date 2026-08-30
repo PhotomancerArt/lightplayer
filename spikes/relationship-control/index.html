@@ -231,8 +231,9 @@ p.sub b { color:var(--shell-mut); }
 .act-amber:hover { border-color:var(--st-warn-tx); }
 .lrrow { display:flex; gap:10px; border-top:1px solid var(--bd-muted); padding:10px 0 9px; }
 .lrrow:first-of-type { border-top:none; padding-top:2px; }
-.lrlab { width:52px; flex:none; font-size:9px; font-weight:700; letter-spacing:.08em;
-  text-transform:uppercase; color:var(--tx-dim); padding-top:3px; }
+.lrlab { width:16px; flex:none; font-size:8.5px; font-weight:700; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--tx-dim); writing-mode:vertical-rl;
+  transform:rotate(180deg); text-align:center; align-self:stretch; }
 .lrbody { flex:1; min-width:0; }
 .lrbody > :first-child { margin-top:0; }
 .lrbody .actrow { border-top:none; padding-top:0; margin-top:0; }
@@ -453,7 +454,7 @@ for fork/access. <span class="t">The accent pill also dies with #478.</span>
 </p>
 
 <!-- ================= §2 placement ================= -->
-<h2><span class="n">§2</span> Placement — D converged (two boxes: runtime | document)</h2>
+<h2><span class="n">§2</span> Placement — E converged: [ device | project | changes ]</h2>
 <p class="sub">
 Gate ruling 2026-08-30: the bar splits into a <b>runtime box</b> (device/sim — what's
 running) and a <b>document box</b> (the project — name, standing, sharing), each opening
@@ -464,14 +465,16 @@ the strip drives every state. Full per-state popovers are §4.
 <b>Rejected at the 2026-08-30 gate:</b> A · fused third relationship segment (two popovers
 off one visual box read as a trap) · B · detached relationship pill (a third control and a
 third shape in the row) · C · display-only word in the lockup (relationship inspectable but
-not actionable — though its instinct, the face riding inside the project box, survives in D).
+not actionable — though its instinct, the face riding inside the project box, survives in E).
+· D1/D2/D3 · two-segment variants (2026-08-30 round-4 gate: E's three segments win; D3's
+"running" connective stays available as a later layer on E).
 </div>
 <div class="rowgrid">
 
   
   <div class="concept">
-    <div class="chead"><span class="name">D · Two boxes — runtime | document</span>
-      <span class="thesis">gate ruling 2026-08-30: left = what's running (device/sim), right = the project — its name, standing, sharing. Each opens its OWN popover.</span></div>
+    <div class="chead"><span class="name">E · One bar, three segments — device | project | changes</span>
+      <span class="thesis">ruled 2026-08-30: what's running · what document · what's in flight — each segment opens its own popover; changes span both stores ("save it everywhere").</span></div>
 
     <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">E · three segments — device | project | <b>changes</b> (round-4 instinct). Changes get their own segment because they span BOTH stores: already live on the device, banked to the library (and cloud) at Save — "save it everywhere". Toggle Dirty and click all three segments.</div>
     <div class="bar-frame" style="max-width:880px;margin-bottom:14px">
@@ -510,100 +513,6 @@ not actionable — though its instinct, the face riding inside the project box, 
         <span class="avatar">Y</span>
       </div>
       <div class="stage-body">Three questions, one bar: what's running · what document · what's in flight. The changes popup owns the edit list and revert (the ↺ sibling retires there); Save stays a sibling — the one direct act. Clean, the segment is a quiet ✓ that never moves.</div>
-    </div>
-
-    <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">D1 · one shell, two independently-clickable segments</div>
-    <div class="bar-frame" style="max-width:880px;margin-bottom:14px">
-      <div class="topbar">
-        <div class="logo"></div>
-        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
-        <div class="cluster">
-          <span class="shell">
-            <span class="anchor">
-              <button class="segbtn runtime-btn" data-pop="d1r" title="This tab's session — Garage dome on the classic board">
-                <span class="glyph" style="color:var(--tx-subtle)">▣</span><span class="dot" style="width:7px;height:7px;border-radius:999px;background:var(--st-good-tx);box-shadow:0 0 5px rgba(123,224,178,.55)"></span><span class="name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Garage dome</span><span class="suffix" style="font-size:10.5px;color:var(--tx-dim)">· classic</span>
-              </button>
-              <div class="pop hiddenpop" data-popfor="d1r" data-kind="runtime"></div>
-            </span>
-            <span class="divider"></span>
-            <span class="anchor">
-              <button class="segbtn doc-btn" data-pop="d1d">
-                <span class="glyph rel-proj-glyph" style="color:var(--tx-subtle)">◈</span>
-                <span class="name rel-proj-name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Plasma Duo</span>
-                <span class="rel-face face-neutral"><span class="rel-glyph"></span><span class="word rel-word" style="font-size:9.5px;color:var(--tx-dim)">Example</span></span>
-                <span class="pill-count rel-count" style="display:none">3</span>
-              </button>
-              <div class="pop hiddenpop" data-popfor="d1d" data-kind="doc"></div>
-            </span>
-          </span>
-          <button class="btn-save rel-save" style="display:none">Save</button>
-          <button class="btn-revert rel-revert" style="display:none" title="Revert">↺</button>
-        </div>
-        <div class="spacer"></div>
-        <span class="avatar">Y</span>
-      </div>
-      <div class="stage-body">One bar, two questions. Hover lights each half separately — the #432 "same panel, same wash" rule inverts once the panels differ.</div>
-    </div>
-
-    <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">D2 · two separate boxes</div>
-    <div class="bar-frame" style="max-width:880px">
-      <div class="topbar">
-        <div class="logo"></div>
-        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
-        <div class="cluster">
-          <span class="anchor">
-            <button class="box2 runtime-btn" data-pop="d2r" title="This tab's session — Garage dome on the classic board">
-              <span class="glyph" style="color:var(--tx-subtle)">▣</span><span class="dot" style="width:7px;height:7px;border-radius:999px;background:var(--st-good-tx);box-shadow:0 0 5px rgba(123,224,178,.55)"></span><span class="name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Garage dome</span><span class="suffix" style="font-size:10.5px;color:var(--tx-dim)">· classic</span>
-            </button>
-            <div class="pop hiddenpop" data-popfor="d2r" data-kind="runtime"></div>
-          </span>
-          <span class="anchor">
-            <button class="box2 doc-btn" data-pop="d2d">
-              <span class="glyph rel-proj-glyph" style="color:var(--tx-subtle)">◈</span>
-              <span class="name rel-proj-name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Plasma Duo</span>
-              <span class="rel-face face-neutral"><span class="rel-glyph"></span><span class="word rel-word" style="font-size:9.5px;color:var(--tx-dim)">Example</span></span>
-              <span class="pill-count rel-count" style="display:none">3</span>
-            </button>
-            <div class="pop hiddenpop" data-popfor="d2d" data-kind="doc"></div>
-          </span>
-          <button class="btn-save rel-save" style="display:none">Save</button>
-          <button class="btn-revert rel-revert" style="display:none" title="Revert">↺</button>
-        </div>
-        <div class="spacer"></div>
-        <span class="avatar">Y</span>
-      </div>
-      <div class="stage-body">Most honest: two controls, two outlines, a breath of air. Costs ~10px width over D1 and reads slightly less like one bar.</div>
-    </div>
-
-    <div style="font-size:11px;color:var(--shell-mut);margin:14px 0 6px">D3 · the sentence bar — <span style="font-style:italic">device running project</span> (design-language probe, deliberately shallow)</div>
-    <div class="bar-frame" style="max-width:880px">
-      <div class="topbar">
-        <div class="logo"></div>
-        <div class="navtabs"><span class="navtab on">Projects</span><span class="navtab">Devices</span></div>
-        <div class="cluster">
-          <span class="anchor">
-            <button class="box2 runtime-btn" data-pop="d3r" title="This tab's session — Garage dome on the classic board">
-              <span class="glyph" style="color:var(--tx-subtle)">▣</span><span class="dot" style="width:7px;height:7px;border-radius:999px;background:var(--st-good-tx);box-shadow:0 0 5px rgba(123,224,178,.55)"></span><span class="name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Garage dome</span>
-            </button>
-            <div class="pop hiddenpop" data-popfor="d3r" data-kind="runtime"></div>
-          </span>
-          <span class="sentence-word">running</span>
-          <span class="anchor">
-            <button class="box2 doc-btn" data-pop="d3d">
-              <span class="glyph rel-proj-glyph" style="color:var(--tx-subtle)">◈</span>
-              <span class="name rel-proj-name" style="font-size:11px;font-weight:600;color:var(--tx-muted)">Plasma Duo</span>
-              <span class="rel-face face-neutral"><span class="rel-glyph"></span><span class="word rel-word" style="font-size:9.5px;color:var(--tx-dim)">Example</span></span>
-              <span class="pill-count rel-count" style="display:none">3</span>
-            </button>
-            <div class="pop hiddenpop" data-popfor="d3d" data-kind="doc"></div>
-          </span>
-          <button class="btn-save rel-save" style="display:none">Save</button>
-          <button class="btn-revert rel-revert" style="display:none" title="Revert">↺</button>
-        </div>
-        <div class="spacer"></div>
-        <span class="avatar">Y</span>
-      </div>
-      <div class="stage-body">The connective makes the bar read as a fact — "Garage dome <i>running</i> Plasma Duo". Costs the word's width; the board suffix moved into the runtime popover. Folds by dropping the word first. Probe only — if it doesn't land immediately, D1/D2 stand.</div>
     </div>
 
     <p class="cnotes"><b>The split:</b> E adds the third question — CHANGES — because pending edits span both
@@ -658,7 +567,7 @@ folds first; there is no third control to fold at all.
 </p>
 <div class="phones">
   <div class="phone">
-    <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">D1 · two segments, folded</div>
+    <div style="font-size:11px;color:var(--shell-mut);margin:0 0 6px">E · three segments, folded (dirty)</div>
     <div class="bar-frame">
       <div class="topbar" style="gap:8px;padding:8px 10px">
         <div class="logo"></div>
@@ -669,9 +578,12 @@ folds first; there is no third control to fold at all.
             </button>
             <span class="divider"></span>
             <button class="segbtn" style="padding:4px 7px">
-              <span class="name" style="font-size:11px;font-weight:600;color:var(--tx-muted);max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Plasma Duo</span>
+              <span class="name" style="font-size:11px;font-weight:600;color:var(--tx-muted);max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Plasma Duo</span>
               <span id="narrow-glyph-d" style="display:inline-flex;color:var(--tx-subtle)"></span>
-              <span class="pill-count">3</span>
+            </button>
+            <span class="divider"></span>
+            <button class="segbtn" style="padding:4px 7px">
+              <span style="display:inline-flex;align-items:center;gap:5px;color:var(--st-warn-tx)"><span style="font-size:11px">✎</span><span class="pill-count">3</span></span>
             </button>
           </span>
           <button class="btn-save" style="padding:3px 8px">Save</button>
@@ -679,7 +591,7 @@ folds first; there is no third control to fold at all.
         <div class="spacer"></div>
         <span class="avatar">Y</span>
       </div>
-      <div class="stage-body" style="font-size:10.5px">The word folds first, leaving the relationship glyph riding beside the name — the project glyph yields its slot. No third control to fold at all.</div>
+      <div class="stage-body" style="font-size:10.5px">The word folds first, leaving the relationship glyph beside the name; the changes segment folds to its count. Save keeps its word — the rarer, more urgent control.</div>
     </div>
   </div>
 </div>
@@ -708,6 +620,8 @@ required. Watch the face flip Example→Private, the URL heal, and the toast con
             </button>
             <div class="pop hiddenpop" id="fork-pop" style="position:absolute;top:calc(100% + 8px);left:0;z-index:30"></div>
           </span>
+          <span class="divider"></span>
+          <span class="segbtn" style="cursor:default"><span style="color:var(--tx-dim);font-size:11px">✓</span></span>
         </span>
       </div>
       <div class="spacer"></div>
@@ -1022,10 +936,10 @@ function faceCell(rel, kind) {
       the same list the project detail popup's Unsaved section holds today — one concept, one home.</p></div>`
     + `<div class="popwrap"><p class="pname">Left-rail treatment — Example (node-style vertical sections)</p>
       <div class="pop" data-static="example" data-tab="project" data-layout="rail">${docPanel('example','project','rail')}</div>
-      <p class="pnote">The nodes' grammar: section labels down the left, hairline-divided rows. Same content as the stacked version — compare directly.</p></div>`
+      <p class="pnote">The nodes' grammar, properly: VERTICAL labels in a slim gutter (like OUTPUT/PHASORS on the Clock node), hairline-divided rows. Same content as the stacked version — compare directly.</p></div>`
     + `<div class="popwrap"><p class="pname">Left-rail treatment — Mine · shared</p>
       <div class="pop" data-static="minepub" data-tab="project" data-layout="rail">${docPanel('minepub','project','rail')}</div>
-      <p class="pnote">The densest state is where the rail earns or loses it: the label column costs 52px of content width against the people rows and segment.</p></div>`;
+      <p class="pnote">The densest state is where the rail earns or loses it — the vertical gutter costs only ~26px now, and the label spans its whole section.</p></div>`;
 })();
 
 /* ---------------- §6 fork moment ----------------------------------------- */
