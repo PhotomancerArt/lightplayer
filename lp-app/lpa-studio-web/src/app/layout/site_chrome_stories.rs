@@ -117,6 +117,44 @@ pub(crate) fn overflow_menu_project_group() -> Element {
 }
 
 #[story(
+    description = "Viewing a transient example: the session·project control with the lavender-grey EXAMPLE provenance pill (accent reckoning D3) beside the project name — visible the whole time a transient view runs, gone at the explicit save that forks a copy. Clean and unsaved variants, because the pill must read beside the amber count without borrowing any status family."
+)]
+pub(crate) fn viewing_an_example() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:gap-2",
+            {example_row(1000, sim_control(Some("ESP32-C6")), Some(control_content(0, 0, UiStatus::good("Ready"))))}
+            {example_row(1000, sim_control(Some("ESP32-C6")), Some(control_content(3, 0, UiStatus::good("Ready"))))}
+        }
+    }
+}
+
+/// `control_row` with the example provenance marker on — the transient-view
+/// chrome the EXAMPLE pill story captures.
+fn example_row(
+    width: u32,
+    session: UiChromeSessionControl,
+    project: Option<ProjectDetailContent>,
+) -> Element {
+    rsx! {
+        div {
+            class: "tw:border tw:border-dashed tw:border-border-muted tw:px-4 tw:pt-3",
+            style: "max-width: {width}px;",
+            SiteChrome {
+                section: SiteSection::Session,
+                session_control: Some(ChromeSessionControl {
+                    session,
+                    project,
+                    on_action: EventHandler::new(|_| {}),
+                    initially_open: false,
+                    example: true,
+                }),
+                VersionChipPreview { chip: branch_chip() }
+            }
+        }
+    }
+}
+
+#[story(
     description = "The header session·project control (spike concept B) across every project state — saved / unsaved / failed / syncing — crossed with device kind: the sim naming its board, a boardless sim (bare \"Sim\", ruling Q6), and hardware (the device name IS the board, no suffix). Unsaved wears the amber wash with Save/↺ standing beside the lockup as SIBLING buttons (G1 round-2: inspect and act are different surfaces); failed here is the failed-ONLY edge (persisted=0, failed>0) — red wash, no count pill, no Save/↺, because the header only offers actions while persisted edits are pending (see docs/debt/failed-only-asset-edit-header-blindness.md); syncing shows the busy dot with nothing dirty."
 )]
 pub(crate) fn control_states() -> Element {
