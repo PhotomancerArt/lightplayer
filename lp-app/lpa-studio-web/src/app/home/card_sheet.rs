@@ -30,7 +30,7 @@ pub(crate) fn CardSheet(on_dismiss: EventHandler<()>, children: Element) -> Elem
                 on_dismiss.call(());
             },
             div {
-                class: "ux-card-sheet-panel",
+                class: "ux-card-sheet-panel ux-glass-panel",
                 onclick: move |event| event.stop_propagation(),
                 {children}
             }

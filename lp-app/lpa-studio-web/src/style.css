@@ -109,7 +109,7 @@
     --studio-glow: rgba(140, 170, 255, 0.3);
     /* Overlay glass material (R3: liquid + spectrum edge; blur is a var so
        G1 can tune it live). */
-    --studio-glass-bg: rgba(12, 12, 20, 0.65);
+    --studio-glass-bg: rgba(12, 12, 20, 0.55);
     --studio-glass-blur: 22px;
     --studio-glass-saturate: 1.5;
     --studio-glass-edge: rgba(255, 255, 255, 0.14);
@@ -388,10 +388,11 @@ label:has(> input:not(:disabled)) {
     width: 100%;
     max-width: 300px;
     padding: 14px;
-    background: var(--studio-color-surface);
-    border: 1px solid var(--studio-color-border);
     border-radius: 10px;
-    box-shadow: 0 12px 32px rgb(0 0 0 / 0.5);
+    /* Material (background, blur, border, edge light, shadow, spectrum
+       ring) comes from `ux-glass-panel` on the same element — the sheet
+       is an overlay, and overlays wear the glass (G1 feedback: flat
+       popup backgrounds read as unfinished). */
 }
 
 /* Per-device console (D42), the Console tab's read-only line list —
@@ -3075,82 +3076,82 @@ label:has(> input:not(:disabled)) {
 .ux-popover-chrome-quiet {
     --ux-popover-border-color: var(--studio-color-border-strong);
     --ux-popover-icon-color: var(--studio-color-text-strong);
-    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-color-terminal) 55%, transparent);
-    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-terminal) 45%, transparent);
-    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-color-terminal) 42%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-terminal) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-neutral {
     --ux-popover-border-color: var(--studio-color-border-strong);
     --ux-popover-icon-color: var(--studio-color-text-strong);
-    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-color-surface-raised-strong) 55%, transparent);
-    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
-    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-color-surface-raised-strong) 42%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-accent,
 .ux-popover-chrome-good {
     --ux-popover-border-color: var(--studio-color-accent-border);
     --ux-popover-icon-color: var(--studio-color-accent);
-    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-good-bg) 72%, transparent);
-    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
-    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-good-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-working {
     --ux-popover-border-color: var(--studio-status-working-border);
     --ux-popover-icon-color: var(--studio-status-working-text);
-    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-working-bg) 72%, transparent);
-    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
-    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-working-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-live {
     --ux-popover-border-color: var(--studio-status-live-border);
     --ux-popover-icon-color: var(--studio-status-live-text);
-    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-live-bg) 72%, transparent);
-    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
-    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-live-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-debug {
     --ux-popover-border-color: var(--studio-status-debug-border);
     --ux-popover-icon-color: var(--studio-status-debug-text);
-    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-debug-bg) 72%, transparent);
-    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
-    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-debug-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-bound {
     --ux-popover-border-color: var(--studio-status-bound-border);
     --ux-popover-icon-color: var(--studio-status-bound-text);
-    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-bound-bg) 72%, transparent);
-    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
-    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-bound-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-warning {
     --ux-popover-border-color: var(--studio-status-warning-border);
     --ux-popover-icon-color: var(--studio-status-warning-text);
-    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-warning-bg) 72%, transparent);
-    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
-    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-warning-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-attention {
     --ux-popover-border-color: var(--studio-status-attention-border);
     --ux-popover-icon-color: var(--studio-status-attention-text);
-    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-attention-bg) 72%, transparent);
-    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
-    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-attention-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 
 .ux-popover-chrome-error {
     --ux-popover-border-color: var(--studio-status-error-border);
     --ux-popover-icon-color: var(--studio-status-error-text);
-    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-error-bg) 72%, transparent);
-    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
-    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 45%, transparent);
+    --ux-popover-trigger-fill-top: color-mix(in srgb, var(--studio-status-error-bg) 58%, transparent);
+    --ux-popover-trigger-fill-bottom: color-mix(in srgb, var(--studio-color-surface-raised) 30%, transparent);
+    --ux-popover-panel-fill-away: color-mix(in srgb, var(--studio-color-surface-raised) 26%, transparent);
 }
 /* Contiguous popover chrome: one SVG path (see base/outline.rs) draws the
    merged trigger+panel fill, border, and shadow. The tone variables above
