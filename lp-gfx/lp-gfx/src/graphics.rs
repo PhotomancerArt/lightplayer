@@ -171,7 +171,19 @@ pub trait LpGraphics: Send + Sync {
     /// [`Self::blend_textures`] instead — see the crate README doctrine.
     fn read_back(&self, texture: &TextureHandle) -> Result<TextureData, GfxError>;
 
-    /// Whether [`Self::read_back`] can service requests on this backend.
+    /// Read a texture back into `out`, a caller-owned buffer of exactly
+    /// `width × height × bytes_per_pixel(format)` bytes — the same tightly
+    /// packed little-endian texels [`Self::read_back`] returns.
+    ///
+    /// The per-tick form of [`Self::read_back`]: a sink that reads back
+    /// every tick (fixture texture accumulation) holds one persistent
+    /// buffer and refills it here instead of materializing a fresh
+    /// allocation per tick. [`Self::read_back`] stays for one-shot
+    /// consumers — tests, probes, captures.
+    fn read_back_into(&self, texture: &TextureHandle, out: &mut [u8]) -> Result<(), GfxError>;
+
+    /// Whether [`Self::read_back`] / [`Self::read_back_into`] can service
+    /// requests on this backend.
     ///
     /// CPU backends keep textures host-resident and always answer `true`
     /// (the default). The browser GPU tier answers `false`: readback would

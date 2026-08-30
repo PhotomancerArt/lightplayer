@@ -105,6 +105,10 @@ impl LpGraphics for TimingGraphics {
         self.inner.read_back(texture)
     }
 
+    fn read_back_into(&self, texture: &TextureHandle, out: &mut [u8]) -> Result<(), GfxError> {
+        self.inner.read_back_into(texture, out)
+    }
+
     fn supports_read_back(&self) -> bool {
         self.inner.supports_read_back()
     }
