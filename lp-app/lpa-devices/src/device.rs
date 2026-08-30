@@ -53,6 +53,11 @@ pub struct Device {
     /// Routing bookkeeping: the generation of the single timer this device
     /// has armed, and when it is due.
     armed_timer: Option<(u64, Millis)>,
+    /// Consecutive silent identifies on the current link generation, for
+    /// the auto-retry cap. Reset by a fresh link, a verdict, or a user
+    /// gesture that asks again.
+    #[serde(default)]
+    identify_retries: u32,
 }
 
 impl Device {
@@ -65,6 +70,7 @@ impl Device {
             evidence: Evidence::default(),
             activity: None,
             armed_timer: None,
+            identify_retries: 0,
         }
     }
 
@@ -195,6 +201,10 @@ impl Device {
         event: &Event,
         ctx: &mut ModelCtx<'_>,
     ) -> Vec<Command> {
+        if matches!(event, Event::LinkAttached { .. }) {
+            // A fresh link generation gets a fresh auto-retry budget.
+            self.identify_retries = 0;
+        }
         let notes = self
             .evidence
             .fold(now, event, &mut self.identity, ctx.config);
@@ -245,6 +255,7 @@ impl Device {
         match action {
             Action::Connect { .. } => {
                 self.intent.connection = ConnectionIntent::Connected;
+                self.identify_retries = 0;
                 let mut commands = vec![Command::PersistRecord(self.record_snapshot())];
                 commands.extend(self.spawn_identify(now, ctx));
                 commands
@@ -263,7 +274,10 @@ impl Device {
                 commands
             }
             Action::CancelActivity { .. } => self.request_cancel(now, action, ctx),
-            Action::Identify { .. } => self.spawn_identify(now, ctx),
+            Action::Identify { .. } => {
+                self.identify_retries = 0;
+                self.spawn_identify(now, ctx)
+            }
             Action::SetName { name, .. } => {
                 self.intent.name = Some(name.clone());
                 vec![Command::PersistRecord(self.record_snapshot())]
@@ -276,12 +290,17 @@ impl Device {
             // remove the entry, and the link verbs address links.
             Action::Forget { .. }
             | Action::AddFromUsb
+            | Action::Reconnect { .. }
             | Action::AdoptLink { .. }
             | Action::DismissLink { .. } => Vec::new(),
         }
     }
 
     fn handle_event(&mut self, now: Millis, event: &Event, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
+        if matches!(event, Event::LinkAttached { .. }) {
+            // A fresh link generation gets a fresh auto-retry budget.
+            self.identify_retries = 0;
+        }
         let mut commands = Vec::new();
 
         // 1. Fold first, so the activity always reads fresh evidence.
@@ -407,6 +426,7 @@ impl Device {
                         outcome: outcome.clone(),
                     },
                 );
+                let failed = matches!(outcome, ActivityOutcome::Failed { .. });
                 self.raise_marker(
                     now,
                     ActivityMarker::Ended {
@@ -416,6 +436,23 @@ impl Device {
                     ctx,
                 );
                 commands.push(Command::PersistRecord(self.record_snapshot()));
+                // Silence is the one failure identify can end in, and one
+                // flaky boot window must not strand the card at "no
+                // response" while the intent is still Connected: re-ask on
+                // a fresh window, up to the configured cap. Any verdict —
+                // welcome or not — resets the budget.
+                if cell.kind == ActivityKind::Identify {
+                    if failed
+                        && self.intent.connection == ConnectionIntent::Connected
+                        && self.link().is_some()
+                        && self.identify_retries < ctx.config.identify_auto_retries
+                    {
+                        self.identify_retries += 1;
+                        commands.extend(self.spawn_identify(now, ctx));
+                    } else if !failed {
+                        self.identify_retries = 0;
+                    }
+                }
                 commands
             }
         }
@@ -670,6 +707,76 @@ mod tests {
             !harness.has_note(|note| matches!(note, JournalNote::ActivityEvicted { .. })),
             "a polite wind-down is not an eviction"
         );
+    }
+
+    /// G1 follow-up (2026-08-31): one flaky boot window left a card
+    /// stranded at "no response". A silent identify re-asks on its own up
+    /// to the configured cap, and the settled card then wears the Retry
+    /// escape so a human re-ask never needs a replug.
+    #[test]
+    fn a_silent_identify_retries_itself_then_settles_with_a_retry_escape() {
+        let mut harness = Harness::new();
+        let mut device = harness.attached_device();
+        let id = device.id;
+        harness.feed(
+            &mut device,
+            Millis(0),
+            Input::Action(Action::Connect { device: id }),
+        );
+        harness.feed(
+            &mut device,
+            Millis(10),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Opened {
+                    info: LinkInfo::default(),
+                },
+            ),
+        );
+
+        // Silence through every window: each deadline settles Failed and
+        // re-spawns, until the cap. now advances past each settle time.
+        let deadline = harness.config.identify_deadline_ms;
+        let mut now = Millis(10);
+        for round in 0..=harness.config.identify_auto_retries {
+            assert!(device.is_busy(), "identify round {round} should be running");
+            let armed = device.armed_timer.expect("a timer must be armed");
+            let timer = crate::time::TimerId {
+                scope: device.scope(),
+                seq: armed.0,
+            };
+            now = now.plus_ms(deadline + 1);
+            harness.feed(&mut device, now, Input::Event(Event::TimerFired { timer }));
+        }
+
+        assert!(!device.is_busy(), "the cap ends the auto-retry loop");
+        assert_eq!(
+            device.evidence.last_outcome,
+            Some(ActivityOutcome::Failed {
+                message: "no response from the device".to_string()
+            })
+        );
+        let view = crate::view::device_view(&device, now);
+        assert!(
+            view.escapes.contains(&crate::view::Escape::Retry),
+            "the settled-silent card offers the re-ask: {:?}",
+            view.escapes
+        );
+
+        // The human retry resets the budget and asks again.
+        let commands = harness.feed(
+            &mut device,
+            now.plus_ms(10),
+            Input::Action(Action::Identify { device: id }),
+        );
+        assert!(device.is_busy());
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            Command::Link {
+                command: LinkCommand::SendFrame(_),
+                ..
+            }
+        )));
     }
 
     #[test]

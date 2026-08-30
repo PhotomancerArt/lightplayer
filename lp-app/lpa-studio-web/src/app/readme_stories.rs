@@ -289,6 +289,7 @@ fn readme_home_view() -> UiHomeView {
             kind: "Module".to_string(),
             blurb: "A single strip, the smallest complete project".to_string(),
         }],
+        devices: Default::default(),
         remembered: Vec::new(),
         library_available: true,
         opening: None,

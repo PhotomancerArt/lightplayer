@@ -33,6 +33,13 @@ pub use app::agent::{
 pub use app::bus::{
     UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
 };
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+pub use app::devices::BrowserSerialTransport;
+pub use app::devices::{
+    DeviceEffects, DeviceRoster, DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture,
+    DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink, JournalLine,
+    device_escape_action, device_status_kind, pending_escape_action,
+};
 pub use app::docs_host::DocsSimHost;
 pub use app::home::{
     CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS, GenerateProjectError,
@@ -144,6 +151,19 @@ pub use core::{
     PASSIVE_REFRESH_DEADLINE, PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE,
     PROJECT_LOAD_DEADLINE, UiAction, UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView,
     UiProgress, UiStatus, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
+};
+/// The device model's own vocabulary, re-exported so the web crate renders
+/// and dispatches it without a second dependency edge. The model is the ONE
+/// device vocabulary — there is no `Ui*` mirror of it, on purpose.
+pub use lpa_devices::view::{
+    ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape, OutcomeView,
+    PendingLinkView, RosterView,
+};
+pub use lpa_devices::{
+    Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,
+    EndpointKey as DeviceEndpointKey, Event as DeviceEvent, Input as DeviceInput,
+    LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo, Millis as DeviceMillis,
+    RosterConfig as DeviceRosterConfig,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";

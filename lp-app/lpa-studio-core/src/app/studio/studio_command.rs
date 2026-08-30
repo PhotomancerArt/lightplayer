@@ -49,6 +49,17 @@ pub enum StudioCommand {
     /// synchronously by the actor in queue order, like `Console` — each
     /// message mutates the agent session mirror and marks the view dirty.
     Agent(AgentFeedback),
+    /// One input for the device model, from the effects layer: a link event, a
+    /// timer that fired, a port that appeared or left.
+    ///
+    /// This is how invariant I7 is kept: device IO happens in spawned futures
+    /// that end HERE, on the same ordered queue a click arrives on, and the
+    /// actor's fold of it is synchronous. Applied in queue order and never
+    /// coalesced — an event stream's order IS its meaning.
+    Device(lpa_devices::Input),
+    /// A `navigator.serial` hotplug edge. Not a model input: it makes the
+    /// effects layer go looking, and what it finds becomes `Device` commands.
+    DeviceHotplug(DeviceHotplug),
     /// The library changed under us (another tab's catalog transaction or
     /// save, via the host's BroadcastChannel). Coalescable like
     /// `RefreshTick`: the actor schedules one gallery re-hydration.
@@ -61,6 +72,21 @@ pub enum StudioCommand {
     /// shell has no shutdown today, but tests use it to end the loop
     /// deterministically.
     Shutdown,
+}
+
+/// Which `navigator.serial` edge fired.
+///
+/// Both are "go look again", not "here is a port": the browser's listeners are
+/// argument-free, so the effects layer answers each by sweeping.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeviceHotplug {
+    /// A granted port appeared. Sweep for grants not yet attached.
+    ///
+    /// ⚠️ Brave revokes grants on reload; Chrome persists them. An empty
+    /// sweep is an ordinary answer.
+    Connected,
+    /// A port left. Detach the links that stopped being open.
+    Disconnected,
 }
 
 impl StudioCommand {

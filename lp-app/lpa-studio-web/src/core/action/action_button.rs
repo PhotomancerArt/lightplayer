@@ -1,7 +1,13 @@
 use dioxus::prelude::*;
+use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::{ActionEnablement, ActionPriority, UiAction};
 
 use crate::base::{StudioIcon, action_icon_name};
+
+/// How long a two-click confirmation stays ARMED before it stands down on
+/// its own. Long enough to read the changed label, short enough that a
+/// forgotten armed button cannot ambush a later stray click.
+const ARMED_CONFIRM_WINDOW_MS: u32 = 4_000;
 
 /// How an action renders in its surrounding context. One action model
 /// (label / icon / priority / destructive / confirmation from
@@ -13,6 +19,10 @@ pub enum ActionButtonVariant {
     Solid,
     /// A compact bordered chip for section headers and toolbars.
     Quiet,
+    /// The neutral outline CTA (the "Connect/Save/Add" family): strong
+    /// border and text, the spectrum ring answering hover — for a card's
+    /// standing call-to-action where the Primary gradient reads too loud.
+    Outline,
     /// A full-width left-aligned row inside a menu popup.
     MenuItem,
 }
@@ -36,18 +46,71 @@ pub fn ActionButton(
     let summary = meta.summary;
     let icon_px = match variant {
         ActionButtonVariant::Solid => 15,
-        ActionButtonVariant::Quiet | ActionButtonVariant::MenuItem => 14,
+        ActionButtonVariant::Quiet
+        | ActionButtonVariant::Outline
+        | ActionButtonVariant::MenuItem => 14,
+    };
+
+    // The two-click confirmation: the first click ARMS the button (the
+    // button itself asks, wearing the confirm label), the second click
+    // dispatches. Arming stands down on blur or after a short window —
+    // the native dialog stays for confirmations not marked inline.
+    let inline_confirm = confirmation.as_ref().is_some_and(|c| c.inline);
+    let mut armed = use_signal(|| false);
+    let mut arm_generation = use_signal(|| 0u64);
+    let armed_label = confirmation
+        .as_ref()
+        .map(|c| format!("{}?", c.confirm_label))
+        .unwrap_or_default();
+    let armed_title = confirmation
+        .as_ref()
+        .map(|c| c.message.clone())
+        .unwrap_or_default();
+    let shown_label = if inline_confirm && armed() {
+        armed_label
+    } else {
+        label
+    };
+    let shown_title = if inline_confirm && armed() {
+        armed_title
+    } else {
+        summary
+    };
+    let shown_class = if inline_confirm && armed() {
+        format!("{class} tw:bg-status-error-bg tw:border-status-error-border")
+    } else {
+        class.to_string()
     };
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-1",
             button {
-                class,
+                class: shown_class,
                 r#type: "button",
                 disabled,
-                title: "{summary}",
+                title: "{shown_title}",
+                onblur: move |_| {
+                    if inline_confirm {
+                        armed.set(false);
+                    }
+                },
                 onclick: move |_| {
-                    if confirmation_confirmed(confirmation.as_ref()) {
+                    if inline_confirm {
+                        if armed() {
+                            armed.set(false);
+                            on_action.call(action_to_run.clone());
+                        } else {
+                            armed.set(true);
+                            let generation = arm_generation() + 1;
+                            arm_generation.set(generation);
+                            spawn(async move {
+                                TimeoutFuture::new(ARMED_CONFIRM_WINDOW_MS).await;
+                                if arm_generation() == generation {
+                                    armed.set(false);
+                                }
+                            });
+                        }
+                    } else if confirmation_confirmed(confirmation.as_ref()) {
                         on_action.call(action_to_run.clone());
                     }
                 },
@@ -59,7 +122,7 @@ pub fn ActionButton(
                         }
                     }
                 }
-                span { "{label}" }
+                span { "{shown_label}" }
             }
             if let Some(reason) = disabled_reason.as_ref() {
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-dim-foreground", "{reason}" }
@@ -92,6 +155,7 @@ fn action_class(
     match variant {
         ActionButtonVariant::Solid => solid_class(priority),
         ActionButtonVariant::Quiet => quiet_class(destructive),
+        ActionButtonVariant::Outline => outline_action_class(destructive),
         ActionButtonVariant::MenuItem => menu_item_class(destructive),
     }
 }

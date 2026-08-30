@@ -14,6 +14,10 @@ lpa-agent = { path = "../lpa-agent" }
 # embedded runtime manifests + board↔build join; drawing stays web-side.
 lpa-boards = { path = "../lpa-boards" }
 lpa-client = { path = "../lpa-client", default-features = false }
+# The device model the studio's effects layer drives (`app/devices`). Sans-IO
+# and serde-only, so every target pays the same nothing for it; the transport
+# that implements its `Link` contract is feature-gated below.
+lpa-devices = { path = "../lpa-devices" }
 # device-session everywhere (RuntimeAttachment::Device drives it); the host
 # transport wire arrives via feature unification when a host provider
 # feature is enabled (tests: fake-device below; wasm: the browser features).

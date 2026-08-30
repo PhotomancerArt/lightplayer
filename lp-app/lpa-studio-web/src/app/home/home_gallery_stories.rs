@@ -20,6 +20,10 @@ use lpa_studio_core::{
 };
 
 use lpa_studio_core::UiAction;
+use lpa_studio_core::{
+    DeviceActivityKind, DeviceActivityView, DeviceEscape, DeviceId, DeviceLinkId, DeviceRosterView,
+    DeviceStatus, DeviceView, OutcomeView, PendingLinkView, RosterView,
+};
 
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
@@ -94,6 +98,7 @@ fn first_run() -> Element {
         sim: None,
         projects: Vec::new(),
         examples: examples(),
+        devices: Default::default(),
         remembered: Vec::new(),
         library_available: true,
         opening: None,
@@ -149,6 +154,7 @@ fn project_format_states() -> Element {
         sim: None,
         projects,
         examples: examples(),
+        devices: Default::default(),
         remembered: Vec::new(),
         library_available: true,
         opening: None,
@@ -167,6 +173,7 @@ fn populated() -> Element {
         sim: Some(sim_card_fixture(true)),
         projects: packages(),
         examples: examples(),
+        devices: Default::default(),
         remembered: Vec::new(),
         library_available: true,
         opening: None,
@@ -189,6 +196,7 @@ fn project_open_in_another_tab() -> Element {
         sim: None,
         projects,
         examples: examples(),
+        devices: Default::default(),
         remembered: Vec::new(),
         library_available: true,
         opening: None,
@@ -207,6 +215,7 @@ fn opening_a_project() -> Element {
         sim: None,
         projects: packages(),
         examples: examples(),
+        devices: Default::default(),
         remembered: Vec::new(),
         library_available: true,
         opening: None,
@@ -436,6 +445,7 @@ fn sim_running_only() -> Element {
         sim: Some(sim_card_fixture(true)),
         projects,
         examples: examples(),
+        devices: Default::default(),
         remembered: Vec::new(),
         library_available: true,
         opening: None,
@@ -451,6 +461,7 @@ fn sim_with_nothing_loaded() -> Element {
         sim: Some(sim_card_fixture(false)),
         projects: packages(),
         examples: examples(),
+        devices: Default::default(),
         remembered: Vec::new(),
         library_available: true,
         opening: None,
@@ -459,14 +470,14 @@ fn sim_with_nothing_loaded() -> Element {
 }
 
 #[story(
-    description = "Device support being rebuilt (M2 of the device-model rebuild): with no sim session running, the Devices page is the honest stub alone — no roster, no creation cards, no dead buttons."
+    description = "No transport (a browser without Web Serial, or a build without the provider): the Devices page says so rather than showing an empty roster, which would read as \"you have no devices\". The registry rows Studio still remembers are listed underneath."
 )]
-fn devices_page_stub() -> Element {
+fn devices_page_without_a_transport() -> Element {
     gallery(UiHomeView {
         sim: None,
         projects: packages(),
         examples: examples(),
-        // the registry survived: the stub names what Studio still holds
+        devices: DeviceRosterView::default(),
         remembered: vec![
             "Workbench ESP32".to_string(),
             "Luna's porch sign".to_string(),
@@ -477,12 +488,110 @@ fn devices_page_stub() -> Element {
     })
 }
 
+#[story(
+    description = "M3 of the device-model rebuild — the roster rendered from the model\'s own projection. A fresh plug is a pending \"identifying…\" entry FIRST (no verdict yet); an identified LightPlayer reads Ready with its freshness line and Disconnect/Forget; a board mid-identify shows its activity with a working Cancel beside Forget; a blank chip shows its honest classification with Setup disabled and a note saying it is coming back."
+)]
+fn devices_page_roster() -> Element {
+    gallery(UiHomeView {
+        sim: None,
+        projects: packages(),
+        examples: examples(),
+        devices: roster_fixture(),
+        remembered: Vec::new(),
+        library_available: true,
+        opening: None,
+        issue: None,
+    })
+}
+
+/// A roster covering the four states this milestone can reach: a fresh plug
+/// still identifying, a settled LightPlayer, one mid-activity, and a blank
+/// chip whose only honest verb is round 2\'s.
+fn roster_fixture() -> DeviceRosterView {
+    DeviceRosterView {
+        transport_available: true,
+        roster: RosterView {
+            pending: vec![
+                PendingLinkView {
+                    link: DeviceLinkId(3),
+                    title: "Fake ESP32 (usb-3)".to_string(),
+                    state_label: "New device found — identifying…".to_string(),
+                    detail: Some("chip: esp32c6".to_string()),
+                    can_adopt: true,
+                    escapes: vec![DeviceEscape::Forget],
+                },
+                PendingLinkView {
+                    link: DeviceLinkId(4),
+                    title: "Fake ESP32 (usb-4)".to_string(),
+                    state_label: "New device found — Blank flash — needs firmware".to_string(),
+                    detail: Some("invalid header: 0xffffffff".to_string()),
+                    can_adopt: true,
+                    escapes: vec![DeviceEscape::Forget],
+                },
+            ],
+            devices: vec![
+                DeviceView {
+                    id: DeviceId(1),
+                    title: "Luna\'s porch sign".to_string(),
+                    status: DeviceStatus::Ready,
+                    state_label: "Ready".to_string(),
+                    detail: Some("LightPlayer · dig-uno".to_string()),
+                    freshness_label: Some("last heard 3 s ago".to_string()),
+                    identity_label: Some("dev000000daqf6dvvqz".to_string()),
+                    activity: None,
+                    last_outcome: None,
+                    escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+                },
+                DeviceView {
+                    id: DeviceId(2),
+                    title: "Workbench ESP32".to_string(),
+                    status: DeviceStatus::Busy,
+                    state_label: "Identifying…".to_string(),
+                    detail: Some("chip: esp32c6".to_string()),
+                    freshness_label: Some("last heard just now".to_string()),
+                    identity_label: Some("60:55:f9:0a:0b:0c".to_string()),
+                    activity: Some(DeviceActivityView {
+                        kind: DeviceActivityKind::Identify,
+                        label: "Identifying…".to_string(),
+                        percent: Some(40),
+                        cancellable: true,
+                        cancel_requested: false,
+                    }),
+                    last_outcome: None,
+                    // Cancel FIRST: a running activity\'s way out leads.
+                    escapes: vec![
+                        DeviceEscape::Cancel,
+                        DeviceEscape::Disconnect,
+                        DeviceEscape::Forget,
+                    ],
+                },
+                DeviceView {
+                    id: DeviceId(3),
+                    title: "Shelf light".to_string(),
+                    status: DeviceStatus::NeedsAttention,
+                    state_label: "Blank flash — needs firmware".to_string(),
+                    detail: Some("chip: esp32c6".to_string()),
+                    freshness_label: None,
+                    identity_label: Some("dev000000000shelf01".to_string()),
+                    activity: None,
+                    last_outcome: Some(OutcomeView {
+                        summary: "identification timed out".to_string(),
+                        ok: false,
+                    }),
+                    escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+                },
+            ],
+        },
+    }
+}
+
 #[story]
 fn store_unavailable_with_issue() -> Element {
     let home = UiHomeView {
         sim: None,
         projects: Vec::new(),
         examples: examples(),
+        devices: Default::default(),
         remembered: Vec::new(),
         library_available: false,
         opening: None,
