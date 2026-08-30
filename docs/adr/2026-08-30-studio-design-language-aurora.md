@@ -79,6 +79,13 @@ build included a boolean knob (`GRADIENT_PRIMARY` in
 ADR's implementation removes that knob — the gradient is the only path
 through `solid_class`'s `Primary` arm.
 
+> **Amended 2026-08-31** by
+> [2026-08-31-spectrum-outline-primary-voice.md](2026-08-31-spectrum-outline-primary-voice.md):
+> the gradient fill was later ruled against on pixels ("rainbow-bg and
+> black text just didn't work") and the Primary voice became the standing
+> spectrum OUTLINE (`ux-spectrum-cta`); that ADR also scopes the D1
+> amendment — one standing rainbow per surface.
+
 **G1-3 — all four "extras" KEEP.** The conic working spinner
 (`ux-conic-spinner`), the iridescent progress fill (`ux-iri-fill`), the
 drag-in-flight ring (pinned via `ux-ir-ring-on` plus `ux-drag-chip`'s

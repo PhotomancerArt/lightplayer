@@ -116,8 +116,12 @@ pub fn DevicesPage(home: UiHomeView, on_action: EventHandler<UiAction>) -> Eleme
 fn AddDeviceCard(on_action: EventHandler<UiAction>) -> Element {
     rsx! {
         div { class: "tw:flex tw:min-h-40 tw:flex-col tw:items-center tw:justify-center tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-5 tw:py-6",
+            // The invitation is transport-OPEN: connecting is the goal, and
+            // the USB specifics live on the verb below ("It's plugged in"),
+            // so a network path can join later as a sibling verb rather
+            // than a rewrite.
             p { class: "tw:m-0 tw:max-w-56 tw:text-center tw:text-xs tw:leading-relaxed tw:text-muted-foreground",
-                "Plug in a LightPlayer board and pick its USB port."
+                "Connect a LightPlayer board to control it."
             }
             ActionButton {
                 action: DevicesOp::action_for(DeviceAction::AddFromUsb),

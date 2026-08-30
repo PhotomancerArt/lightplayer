@@ -26,6 +26,7 @@ use lpa_studio_core::{
 };
 
 use crate::app::home::card_thumb::CardThumb;
+use crate::app::home::device_roster_card::DeviceRosterCard;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
 use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
 
@@ -502,6 +503,20 @@ fn devices_page_roster() -> Element {
         opening: None,
         issue: None,
     })
+}
+
+#[story(
+    description = "The armed destructive chip, idle beside armed (2K+, devices-treatments spike gate 2026-08-31): first click turns Forget into 'Confirm Forget' — the prefix column opens, red ramps in, and the card previews its own removal (body dimmed and desaturated behind a red inset ring via :has(); the footer keeps full contrast). Blur or the 4s window stands down. Captured with the story-only armed_preview hook; the knock and the quiet drain track are motion and do not capture."
+)]
+fn devices_page_armed_confirm() -> Element {
+    let idle = roster_fixture().roster.devices.remove(0);
+    let armed = idle.clone();
+    rsx! {
+        div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
+            DeviceRosterCard { card: idle, on_action: |_| {} }
+            DeviceRosterCard { card: armed, armed_preview: true, on_action: |_| {} }
+        }
+    }
 }
 
 /// A roster covering the four states this milestone can reach: a fresh plug

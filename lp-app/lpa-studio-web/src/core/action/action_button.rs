@@ -37,6 +37,11 @@ pub fn ActionButton(
     action: UiAction,
     running: bool,
     #[props(default)] variant: ActionButtonVariant,
+    /// Story-only: start with the two-click confirmation already ARMED, so
+    /// captures can show the armed dress (and the card's `:has()` marking)
+    /// deterministically. Real surfaces never set this.
+    #[props(default)]
+    armed_preview: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let action_to_run = action.clone();
@@ -65,7 +70,7 @@ pub fn ActionButton(
     // `.ux-armed-scope:has(.ux-armed)`, so no armed state leaves this
     // component.
     let inline_confirm = confirmation.as_ref().is_some_and(|c| c.inline);
-    let mut armed = use_signal(|| false);
+    let mut armed = use_signal(|| armed_preview);
     let mut arm_generation = use_signal(|| 0u64);
     let armed_verb = confirmation
         .as_ref()

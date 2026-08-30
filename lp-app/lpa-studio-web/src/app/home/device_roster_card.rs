@@ -20,8 +20,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceActivityView, DeviceStatus, DeviceView, PendingLinkView, UiAction, UiStatus,
-    device_escape_action, device_status_kind, pending_escape_action,
+    DeviceActivityView, DeviceEscape, DeviceStatus, DeviceView, PendingLinkView, UiAction,
+    UiStatus, device_escape_action, device_status_kind, pending_escape_action,
 };
 
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip};
@@ -33,7 +33,15 @@ const SETUP_COMING_BACK: &str =
 /// One device card.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn DeviceRosterCard(card: DeviceView, on_action: EventHandler<UiAction>) -> Element {
+pub(crate) fn DeviceRosterCard(
+    card: DeviceView,
+    /// Story-only: render the Forget escape already ARMED, so captures can
+    /// show the 2K+ armed dress and the card's `:has()` marking. Real
+    /// surfaces never set this.
+    #[props(default)]
+    armed_preview: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
     let device = card.id;
     let needs_setup = card.status == DeviceStatus::NeedsAttention;
     let status = UiStatus {
@@ -104,6 +112,7 @@ pub(crate) fn DeviceRosterCard(card: DeviceView, on_action: EventHandler<UiActio
                         action: device_escape_action(escape, device),
                         running: false,
                         variant: ActionButtonVariant::Quiet,
+                        armed_preview: armed_preview && escape == DeviceEscape::Forget,
                         on_action,
                     }
                 }
