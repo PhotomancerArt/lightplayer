@@ -222,6 +222,7 @@ fn run(args: &Args) -> Result<(), String> {
                 None,
                 graphics.clone(),
                 &hello,
+                lpa_server::handlers::EngineLinkState::default(),
                 request,
             )
         }

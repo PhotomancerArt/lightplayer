@@ -325,6 +325,17 @@ impl ProjectSync {
         self.output_frames.frame(node)
     }
 
+    /// The picture several outputs compose TOGETHER — see
+    /// [`OutputFrameCache::composed_frame`]. The module hero rides this: a
+    /// scope owning two outputs (the small dome's two boxes) heroes every
+    /// wire it owns, not whichever answered first.
+    pub fn composed_output_frame(
+        &self,
+        nodes: &[lpc_model::NodeId],
+    ) -> Option<UiControlProductPreview> {
+        self.output_frames.composed_frame(nodes)
+    }
+
     /// How one output's wire is cut — the runs behind the published frame,
     /// in the output's own planning order. The patch bay's data (D34a).
     pub fn output_placements(&self, node: lpc_model::NodeId) -> &[lpc_wire::WireOutputPlacement] {
@@ -457,12 +468,54 @@ impl ProjectSync {
         self.phase == ProjectSyncPhase::SyncingProject
     }
 
-    pub fn initial_project_read_request(
+    /// Stage 1 of the staged initial sync: the skeleton — every query except
+    /// per-node slot detail, and no probes. This shape is the one the
+    /// classic's empirics matrix proves always fits
+    /// (`docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`);
+    /// the monolithic everything-at-once initial read is the shape that
+    /// always reset the board, and is deliberately no longer constructible.
+    pub fn initial_skeleton_read_request(&mut self) -> ProjectReadRequest {
+        self.phase = ProjectSyncPhase::SyncingProject;
+        project_read_request(None, false, Vec::new())
+    }
+
+    /// Stage 2: per-node slot detail, paged by the node ids the skeleton
+    /// just delivered ([`INITIAL_SYNC_SLOT_PAGE_NODES`] per read).
+    ///
+    /// ⚠️ Every page sends `since: None`: the server's per-root gate
+    /// (`root_changed_since`) includes a root only when `since == 0` or the
+    /// root's revision is newer — and stage 1 already advanced this mirror's
+    /// revision past every root, so a stateful `since` here would exclude
+    /// EVERY root and the stage would "succeed" empty.
+    pub fn initial_slot_page_requests(&self) -> Vec<ProjectReadRequest> {
+        let ids: Vec<lpc_model::NodeId> = self.view.tree.nodes.keys().copied().collect();
+        ids.chunks(INITIAL_SYNC_SLOT_PAGE_NODES)
+            .map(|page| ProjectReadRequest {
+                since: None,
+                queries: vec![ProjectReadQuery::Nodes(NodeReadQuery {
+                    level: ReadLevel::Detail,
+                    nodes: NodeReadSelection::ByIds(page.to_vec()),
+                    include_slots: true,
+                })],
+                probes: Vec::new(),
+            })
+            .collect()
+    }
+
+    /// Stage 3: probes, one per read (each fits alone per the empirics
+    /// matrix; together they were the final straw of the monolith).
+    pub fn initial_probe_read_requests(
         &mut self,
         products: Vec<UiProductRef>,
-    ) -> ProjectReadRequest {
-        self.phase = ProjectSyncPhase::SyncingProject;
-        project_read_request(None, true, self.probe_requests(products))
+    ) -> Vec<ProjectReadRequest> {
+        self.probe_requests(products)
+            .into_iter()
+            .map(|probe| ProjectReadRequest {
+                since: None,
+                queries: Vec::new(),
+                probes: vec![probe],
+            })
+            .collect()
     }
 
     pub fn refresh_project_read_request(
@@ -906,6 +959,11 @@ fn overlay_edit_at<'a>(
         ArtifactOverlay::Asset { .. } => None,
     }
 }
+
+/// Node ids per stage-2 slot page of the staged initial sync. Sized so a
+/// page's slot forest stays well inside one frame-budget's worth of atoms on
+/// the classic; the G1 bench walk may tune it.
+pub const INITIAL_SYNC_SLOT_PAGE_NODES: usize = 16;
 
 pub fn project_read_request(
     since: Option<Revision>,
@@ -1365,16 +1423,96 @@ mod tests {
 
         sync.begin_initial_sync();
 
-        let request = sync.initial_project_read_request(Vec::new());
+        let requests = sync.initial_probe_read_requests(Vec::new());
         assert_eq!(
-            request.probes,
+            requests.len(),
+            1,
+            "one probe read per subscribed probe (one probe per request)"
+        );
+        assert!(
+            requests[0].queries.is_empty(),
+            "probe reads carry no queries"
+        );
+        assert_eq!(
+            requests[0].probes,
             vec![ProjectProbeRequest::BindingGraph(
                 BindingGraphProbeRequest {
                     include_values: true,
                 }
             )],
-            "binding-graph probe must ride the initial read after begin_initial_sync"
+            "binding-graph probe must ride the staged initial sync after begin_initial_sync"
         );
+    }
+
+    #[test]
+    fn slot_pages_send_since_none_and_bounded_by_ids() {
+        // The `since: None` trap (wire-evolution P4): the server's per-root
+        // gate includes a root only at `since == 0` or past its revision.
+        // Stage 1 advances the mirror's revision past every root, so a
+        // stateful `since` on stage 2 would exclude EVERY root and the sync
+        // would "succeed" empty. Also pins the page bound and query shape.
+        let mut sync = ProjectSync::new();
+        sync.view.revision = Revision::new(40);
+        let deltas: Vec<lpc_wire::WireTreeDelta> = (0..40u32)
+            .map(|i| lpc_wire::WireTreeDelta::Created {
+                id: lpc_model::NodeId::new(i),
+                path: lpc_model::TreePath::parse(&format!("/n{i}.show")).unwrap(),
+                parent: None,
+                child_kind: None,
+                children: Vec::new(),
+                status: lpc_wire::NodeRuntimeStatus::Created,
+                state: lpc_wire::WireEntryState::Pending,
+                created_frame: Revision::new(1),
+                change_frame: Revision::new(1),
+                children_ver: Revision::new(1),
+            })
+            .collect();
+        sync.apply_project_read_events(vec![
+            ProjectReadEvent::Begin {
+                revision: Revision::new(40),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: lpc_wire::ProjectReadQueryEvent::Nodes(
+                    lpc_wire::ProjectReadNodeEvent::Begin {
+                        level: ReadLevel::Detail,
+                    },
+                ),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: lpc_wire::ProjectReadQueryEvent::Nodes(
+                    lpc_wire::ProjectReadNodeEvent::TreeDeltas { deltas },
+                ),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: lpc_wire::ProjectReadQueryEvent::Nodes(lpc_wire::ProjectReadNodeEvent::End),
+            },
+            ProjectReadEvent::End {
+                revision: Revision::new(40),
+            },
+        ])
+        .expect("apply skeleton");
+
+        let pages = sync.initial_slot_page_requests();
+        assert_eq!(pages.len(), 40usize.div_ceil(INITIAL_SYNC_SLOT_PAGE_NODES));
+        let mut seen = 0usize;
+        for page in &pages {
+            assert_eq!(page.since, None, "every slot page must send since: None");
+            assert!(page.probes.is_empty());
+            let [ProjectReadQuery::Nodes(query)] = page.queries.as_slice() else {
+                panic!("one nodes query per page: {:?}", page.queries);
+            };
+            assert_eq!(query.level, ReadLevel::Detail);
+            assert!(query.include_slots);
+            let NodeReadSelection::ByIds(ids) = &query.nodes else {
+                panic!("pages select by id");
+            };
+            assert!(!ids.is_empty() && ids.len() <= INITIAL_SYNC_SLOT_PAGE_NODES);
+            seen += ids.len();
+        }
+        assert_eq!(seen, 40, "every skeleton node is paged exactly once");
     }
 
     #[test]
@@ -1384,9 +1522,19 @@ mod tests {
         let mut sync = ProjectSync::new();
         sync.view.revision = Revision::new(9);
 
-        let request = sync.initial_project_read_request(Vec::new());
+        let request = sync.initial_skeleton_read_request();
 
         assert_eq!(request.since, None);
+        assert!(
+            request.queries.iter().all(|query| !matches!(
+                query,
+                ProjectReadQuery::Nodes(NodeReadQuery {
+                    include_slots: true,
+                    ..
+                })
+            )),
+            "the skeleton never asks for slots"
+        );
     }
 
     #[test]

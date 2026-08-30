@@ -10,13 +10,13 @@
 use std::collections::BTreeSet;
 
 use lpc_mapping::{
-    Bounds2d, GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject, Map2dShape, PathAlign,
-    PathShape, PolygonShape, RepeatShape, ResolvedMap2d, RingDir, RingOrder, RingShape, Rotation2d,
-    bounds_of_points, resolve,
+    Bounds2d, FilledPolygonShape, GridCorner, GridRouting, GridShape, Map2dDoc, Map2dObject,
+    Map2dShape, PathAlign, PathShape, PolygonShape, RepeatShape, ResolvedMap2d, RingDir, RingOrder,
+    RingShape, Rotation2d, bounds_of_points, resolve,
 };
 
 use crate::editor_core::map_selection::MapSelection;
-use crate::editor_core::map_tool::MapTool;
+use crate::editor_core::map_tool::{MapTool, PolygonMode};
 use crate::editor_core::shape_path::{ShapePath, structural_child_count};
 
 const UNDO_CAP: usize = 100;
@@ -24,6 +24,16 @@ const UNDO_CAP: usize = 100;
 /// Default lamp pitch used by creation defaults and path-count derivation
 /// (doc-space units; the spike's value).
 pub const DEFAULT_PITCH: f32 = 26.0;
+
+/// Smallest lattice pitch sanitize will emit. A scrubbed pitch field must
+/// not be able to ask for an unbounded number of cells, and the floor is
+/// shared by every lattice shape so a grid and a shaped matrix agree on
+/// where "too fine" starts.
+const MIN_PITCH: f32 = 0.5;
+
+/// Vertices closer together than this in doc space are the same click — the
+/// draft filter both drawing tools read.
+const DRAFT_MERGE_DISTANCE: f32 = 4.0;
 
 /// Instances a freshly authored repeat starts with — enough to read as a
 /// wheel at a glance, and the dome's own sector count.
@@ -43,6 +53,16 @@ pub struct MapEditorSession {
     pub resolve_error: Option<String>,
     pub selection: MapSelection,
     pub tool: MapTool,
+    /// The population the polygon tool starts its NEXT activation in.
+    ///
+    /// A PREFERENCE, never authority: `polygon_finish` reads the active
+    /// tool's own `mode` and nothing else ([`MapTool`] deliberately keeps no
+    /// mode between activations). Every surface that names a population —
+    /// the tool's segmented control, the properties toggle — records it
+    /// here, so drawing three filled polygons in a row costs one mode
+    /// choice rather than three. Session-held because keyboard, toolbar and
+    /// properties all already share the session and must agree.
+    polygon_default: PolygonMode,
 }
 
 impl MapEditorSession {
@@ -59,6 +79,7 @@ impl MapEditorSession {
             resolve_error: None,
             selection: MapSelection::default(),
             tool: MapTool::Select,
+            polygon_default: PolygonMode::default(),
         }
     }
 
@@ -275,10 +296,14 @@ impl MapEditorSession {
         self.invalidate();
     }
 
-    /// Move one vertex of the single selected path (gesture-driven).
+    /// Move one outline vertex of the single selected shape (gesture-driven).
     ///
-    /// Through a repeat this edits the **inner** path — the handles sit on
-    /// instance 0, and every other instance is that same path turned, so they
+    /// Every shape with authored vertices answers here — path, polygon and
+    /// shaped matrix alike — through [`editable_vertices`]; a filled
+    /// polygon's lattice simply re-derives from the moved outline.
+    ///
+    /// Through a repeat this edits the **inner** shape — the handles sit on
+    /// instance 0, and every other instance is that same shape turned, so they
     /// follow live.
     pub fn move_vertex_from_gesture(&mut self, vertex: usize, position: [f32; 2]) {
         let Some(base) = self.gesture_doc() else {
@@ -288,10 +313,10 @@ impl MapEditorSession {
             return;
         };
         self.doc = base;
-        if let Some(path) = selected
+        if let Some(points) = selected
             .resolve_mut(&mut self.doc)
-            .and_then(editable_path_mut)
-            && let Some(point) = path.points.get_mut(vertex)
+            .and_then(editable_vertices_mut)
+            && let Some(point) = points.get_mut(vertex)
         {
             *point = position;
         }
@@ -300,26 +325,87 @@ impl MapEditorSession {
 
     // ---- structural edits ------------------------------------------------
 
-    /// Insert a vertex into the selected path so it becomes `points[at]`,
-    /// splitting the segment it lands in. Inert segments survive the split:
-    /// both halves of a split jumper stay inert, and gaps after the insertion
-    /// point shift up with their segments.
-    pub fn insert_path_vertex(&mut self, index: usize, at: usize, position: [f32; 2]) {
-        self.edit(|doc| {
-            if let Some(path) = doc
-                .objects
-                .get_mut(index)
-                .and_then(|object| editable_path_mut(&mut object.shape))
-                && at <= path.points.len()
-            {
-                path.gaps = gaps_after_vertex_insert(&path.gaps, at);
-                path.points.insert(at, position);
-            }
-        });
+    /// Insert a vertex into object `index`'s outline so it becomes
+    /// `points[at]`, splitting the segment it lands in.
+    pub fn insert_vertex(&mut self, index: usize, at: usize, position: [f32; 2]) -> bool {
+        self.insert_vertex_at(&ShapePath::root(index), at, position)
     }
 
-    /// Delete the selected vertex (path keeps ≥ 2 points) or, without a
-    /// vertex selection, the selected objects.
+    /// Insert a vertex into the outline at `path` so it becomes `points[at]`,
+    /// splitting the segment it lands in. Every vertexed shape answers — path,
+    /// polygon, shaped matrix — through [`editable_vertices_mut`], and through
+    /// a repeat this edits the authored inner shape.
+    ///
+    /// A closed outline's implicit last→first segment splits at `at ==
+    /// points.len()`: the new corner APPENDS, because that seam edge runs from
+    /// the last authored point, not to the first one.
+    ///
+    /// Inert segments survive the split: both halves of a split jumper stay
+    /// inert, and gaps after the insertion point shift up with their segments
+    /// (paths only — no other vertexed shape has jumpers).
+    ///
+    /// One undo step. Returns whether a vertex actually landed.
+    pub fn insert_vertex_at(&mut self, path: &ShapePath, at: usize, position: [f32; 2]) -> bool {
+        let mut inserted = false;
+        self.edit_shape_at(path, |shape| {
+            if editable_vertices(shape).is_none_or(|points| at > points.len()) {
+                return;
+            }
+            if let Some(path) = editable_path_mut(shape) {
+                path.gaps = gaps_after_vertex_insert(&path.gaps, at);
+            }
+            if let Some(points) = editable_vertices_mut(shape) {
+                points.insert(at, position);
+                inserted = true;
+            }
+        });
+        inserted
+    }
+
+    /// Remove one authored vertex from object `index`'s outline.
+    pub fn remove_vertex(&mut self, index: usize, vertex: usize) -> bool {
+        self.remove_vertex_at(&ShapePath::root(index), vertex)
+    }
+
+    /// Remove one authored vertex from the outline at `path`, down to the
+    /// shape's FLOOR: a path keeps two points, a closed outline three. At the
+    /// floor this refuses and returns `false` — the shape has no corner left
+    /// to spare, and the caller must not read that as "delete something else".
+    ///
+    /// A path's inert segments merge with the geometry: the segment left where
+    /// two met stays inert if either half was.
+    ///
+    /// One undo step. Returns whether a vertex actually went.
+    pub fn remove_vertex_at(&mut self, path: &ShapePath, vertex: usize) -> bool {
+        let mut removed = false;
+        self.edit_shape_at(path, |shape| {
+            let floor = vertex_floor(shape);
+            if editable_vertices(shape)
+                .is_none_or(|points| points.len() <= floor || vertex >= points.len())
+            {
+                return;
+            }
+            if let Some(path) = editable_path_mut(shape) {
+                let segments = path.points.len() - 1;
+                path.gaps = gaps_after_vertex_delete(&path.gaps, vertex, segments);
+                // A path's count is its lamp budget along the run: one corner
+                // fewer is one lamp fewer, floored at the two endpoints.
+                path.count = path.count.saturating_sub(1).max(2);
+            }
+            if let Some(points) = editable_vertices_mut(shape) {
+                points.remove(vertex);
+                removed = true;
+            }
+        });
+        removed
+    }
+
+    /// Delete the selected VERTEX when one is selected — down to the shape's
+    /// floor, where the key does nothing at all — else the selected objects.
+    ///
+    /// The vertex branch never falls through to the object branch: a selected
+    /// corner means Delete is about that corner, and a shape that has no corner
+    /// to spare must not lose the whole object instead.
     ///
     /// Deleting a DESCENDED path deletes its whole object: a repeat cannot
     /// exist without its inner shape, so delete-at-depth means "delete the
@@ -328,22 +414,10 @@ impl MapEditorSession {
         if let (Some(selected), Some(vertex)) =
             (self.selection.single().cloned(), self.selection.vertex)
         {
-            let mut deleted = false;
-            self.edit(|doc| {
-                if let Some(path) = selected.resolve_mut(doc).and_then(editable_path_mut)
-                    && path.points.len() > 2
-                    && vertex < path.points.len()
-                {
-                    path.gaps = gaps_after_vertex_delete(&path.gaps, vertex, path.points.len() - 1);
-                    path.points.remove(vertex);
-                    path.count = path.count.saturating_sub(1).max(2);
-                    deleted = true;
-                }
-            });
-            if deleted {
+            if self.remove_vertex_at(&selected, vertex) {
                 self.selection.vertex = None;
-                return;
             }
+            return;
         }
         let selected = self.selection.root_objects();
         if selected.is_empty() {
@@ -651,15 +725,7 @@ impl MapEditorSession {
         let MapTool::Path { draft } = std::mem::replace(&mut self.tool, MapTool::Select) else {
             return None;
         };
-        let mut points: Vec<[f32; 2]> = Vec::new();
-        for point in draft {
-            let near_previous = points
-                .last()
-                .is_some_and(|last| distance(*last, point) <= 4.0);
-            if !near_previous {
-                points.push(point);
-            }
-        }
+        let points = drafted_points(&draft);
         if points.len() < 2 {
             return None;
         }
@@ -680,6 +746,113 @@ impl MapEditorSession {
                 align: PathAlign::On,
             }),
         }))
+    }
+
+    // ---- polygon drafting ------------------------------------------------
+
+    /// Activate the polygon tool with an empty draft, in the population last
+    /// named by any surface ([`Self::polygon_default`]).
+    pub fn start_polygon_tool(&mut self) {
+        self.tool = MapTool::polygon(self.polygon_default);
+    }
+
+    /// The population the polygon tool starts its next activation in.
+    #[must_use]
+    pub fn polygon_default(&self) -> PolygonMode {
+        self.polygon_default
+    }
+
+    /// Re-aim the LIVE polygon draft at `mode` (and remember it): the
+    /// segmented control beside the tool. The draft's vertices are untouched
+    /// — the mode decides only what the closed outline becomes.
+    ///
+    /// A no-op when the polygon tool is not active, beyond remembering the
+    /// choice for the next activation.
+    pub fn set_polygon_draft_mode(&mut self, mode: PolygonMode) {
+        self.polygon_default = mode;
+        if let MapTool::Polygon { mode: current, .. } = &mut self.tool {
+            *current = mode;
+        }
+    }
+
+    /// Accumulate one outline vertex.
+    ///
+    /// Whether a click "closed the outline" is a view-space hit test against
+    /// the first vertex's screen position, so the view decides that and calls
+    /// [`Self::polygon_finish`]; the session only collects.
+    pub fn polygon_add_point(&mut self, point: [f32; 2]) {
+        if let MapTool::Polygon { draft, .. } = &mut self.tool {
+            draft.push(point);
+        }
+    }
+
+    /// Escape during polygon drawing: removes ONE vertex (never wholesale —
+    /// D6). Returns `false` when the draft was already empty.
+    pub fn polygon_backout(&mut self) -> bool {
+        if let MapTool::Polygon { draft, .. } = &mut self.tool {
+            draft.pop().is_some()
+        } else {
+            false
+        }
+    }
+
+    #[must_use]
+    pub fn polygon_draft(&self) -> &[[f32; 2]] {
+        match &self.tool {
+            MapTool::Polygon { draft, .. } => draft,
+            _ => &[],
+        }
+    }
+
+    /// The population the polygon tool would commit, `None` when the polygon
+    /// tool is not active.
+    #[must_use]
+    pub fn polygon_mode(&self) -> Option<PolygonMode> {
+        match &self.tool {
+            MapTool::Polygon { mode, .. } => Some(*mode),
+            _ => None,
+        }
+    }
+
+    /// Close the draft into an object — a [`PolygonShape`] in outline mode, a
+    /// [`FilledPolygonShape`] in filled mode — selecting it and returning the
+    /// tool to select.
+    ///
+    /// Needs ≥ 3 distinct vertices. Below that there is no outline, and the
+    /// draft **stays**: an accidental double-click two vertices in should be
+    /// an ignored gesture, not two thrown-away clicks. (Path drafting can
+    /// afford to clear on a short finish — a 1-point path is a mis-start, not
+    /// a half-drawn shape.)
+    pub fn polygon_finish(&mut self) -> Option<usize> {
+        let MapTool::Polygon { draft, mode } = &self.tool else {
+            return None;
+        };
+        let shape = polygon_draft_shape(draft, *mode)?;
+        Some(self.create_object(Map2dObject {
+            name: self.next_name("polygon"),
+            id: None,
+            stride: None,
+            shape,
+        }))
+    }
+
+    /// Switch a polygon object between outline and filled population, keeping
+    /// its outline, its slot in the wiring order, and its identity — name and
+    /// id ride the object, and only its shape node is replaced.
+    ///
+    /// One undo step; a no-op (and no undo step) when the object already has
+    /// the requested population. The count or pitch of the new population is
+    /// re-derived at the authored default density, because the two numbers do
+    /// not translate: a perimeter count says nothing about a lattice spacing.
+    pub fn set_polygon_population(&mut self, index: usize, mode: PolygonMode) {
+        self.set_polygon_population_at(&ShapePath::root(index), mode);
+    }
+
+    /// The same switch at any tree path. Through a repeat it converts the
+    /// authored inner polygon — write-through, so every instance follows.
+    pub fn set_polygon_population_at(&mut self, path: &ShapePath, mode: PolygonMode) {
+        self.polygon_default = mode;
+        self.edit_shape_at(path, |shape| convert_polygon_population(shape, mode));
     }
 
     // ---- derived info ----------------------------------------------------
@@ -730,11 +903,15 @@ impl MapEditorSession {
     }
 }
 
-/// The path a shape offers for vertex editing: its own, or — through any
-/// number of repeats — the inner path every instance is a turned copy of.
+/// The [`PathShape`] a shape offers: its own, or — through any number of
+/// repeats — the inner path every instance is a turned copy of.
 ///
 /// Editing instance 0 *is* editing the repeat: handles sit on the authored
 /// geometry and the other instances follow on the next resolve.
+///
+/// This is the PATH-ONLY seam, for the ops that need a path's own fields —
+/// `gaps` and `count` alongside the points. Ops that only move a vertex go
+/// through [`editable_vertices_mut`], which spans every vertexed shape.
 fn editable_path_mut(shape: &mut Map2dShape) -> Option<&mut PathShape> {
     match shape {
         Map2dShape::Path(path) => Some(path),
@@ -743,8 +920,9 @@ fn editable_path_mut(shape: &mut Map2dShape) -> Option<&mut PathShape> {
     }
 }
 
-/// The same path, read-only — what the canvas draws handles and jumper lines
-/// on.
+/// The same path, read-only — what the canvas draws jumper lines and the
+/// gaps UI on. Vertex handles read [`editable_vertices`] instead: they are
+/// the same points for a path, and a superset across shapes.
 #[must_use]
 pub fn editable_path(shape: &Map2dShape) -> Option<&PathShape> {
     match shape {
@@ -754,12 +932,60 @@ pub fn editable_path(shape: &Map2dShape) -> Option<&PathShape> {
     }
 }
 
+/// The draggable outline vertices of a shape, when it has any — a path's,
+/// a polygon's, a shaped matrix's, or, through any number of repeats, the
+/// authored inner shape's.
+///
+/// Grids and rings answer `None`: their lamps come from an origin, a radius
+/// and counts, so there is no authored vertex on them to grab.
+#[must_use]
+pub fn editable_vertices(shape: &Map2dShape) -> Option<&[[f32; 2]]> {
+    match shape {
+        Map2dShape::Path(path) => Some(&path.points),
+        Map2dShape::Polygon(polygon) => Some(&polygon.points),
+        Map2dShape::FilledPolygon(filled) => Some(&filled.points),
+        Map2dShape::Repeat(repeat) => editable_vertices(&repeat.shape),
+        Map2dShape::Grid(_) | Map2dShape::Ring(_) => None,
+    }
+}
+
+/// How few authored vertices a shape may be left with: two for an open run,
+/// three for a closed outline (two points enclose nothing). Shapes with no
+/// authored vertices answer [`usize::MAX`], so nothing is ever removable from
+/// them.
+fn vertex_floor(shape: &Map2dShape) -> usize {
+    match shape {
+        Map2dShape::Path(_) => 2,
+        Map2dShape::Polygon(_) | Map2dShape::FilledPolygon(_) => 3,
+        Map2dShape::Repeat(repeat) => vertex_floor(&repeat.shape),
+        Map2dShape::Grid(_) | Map2dShape::Ring(_) => usize::MAX,
+    }
+}
+
+/// [`editable_vertices`], mutable — the seam every vertex-move op writes
+/// through.
+fn editable_vertices_mut(shape: &mut Map2dShape) -> Option<&mut Vec<[f32; 2]>> {
+    match shape {
+        Map2dShape::Path(path) => Some(&mut path.points),
+        Map2dShape::Polygon(polygon) => Some(&mut polygon.points),
+        Map2dShape::FilledPolygon(filled) => Some(&mut filled.points),
+        Map2dShape::Repeat(repeat) => editable_vertices_mut(&mut repeat.shape),
+        Map2dShape::Grid(_) | Map2dShape::Ring(_) => None,
+    }
+}
+
 /// One instance of a shape under a repeat's turn, still parametric.
 ///
 /// `None` for a grid: it has no rotation of its own, so a turned grid is only
 /// representable as baked geometry. Everything else carries the turn in its
 /// own parameters — which is what keeps an expanded instance resolving to the
 /// lamps the repeat produced instead of a re-sampled approximation of them.
+///
+/// A filled polygon takes the baked route for now too. It *does* carry an
+/// `angle_deg`, but its lattice anchors to the bbox of the ROTATED outline, so
+/// turning it parametrically needs an argument about how that anchor moves —
+/// which belongs with the editor's filled-polygon work, not with the format
+/// phase. Baking preserves the lamps exactly meanwhile.
 fn rotate_shape(shape: &Map2dShape, rotation: Rotation2d, degrees: f32) -> Option<Map2dShape> {
     Some(match shape {
         Map2dShape::Path(path) => Map2dShape::Path(PathShape {
@@ -793,7 +1019,7 @@ fn rotate_shape(shape: &Map2dShape, rotation: Rotation2d, degrees: f32) -> Optio
             center: rotation.apply(repeat.center),
             count: repeat.count,
         }),
-        Map2dShape::Grid(_) => return None,
+        Map2dShape::Grid(_) | Map2dShape::FilledPolygon(_) => return None,
     })
 }
 
@@ -826,6 +1052,15 @@ fn translate_shape(shape: &mut Map2dShape, dx: f32, dy: f32) {
         }
         Map2dShape::Polygon(polygon) => {
             for point in &mut polygon.points {
+                point[0] += dx;
+                point[1] += dy;
+            }
+        }
+        // The outline carries the move; `origin` is a lattice-frame phase
+        // nudge, not a position, so it stays put and the cells travel with
+        // the shape.
+        Map2dShape::FilledPolygon(filled) => {
+            for point in &mut filled.points {
                 point[0] += dx;
                 point[1] += dy;
             }
@@ -867,6 +1102,16 @@ fn scale_shape(shape: &mut Map2dShape, anchor: [f32; 2], factor: f32) {
                 *point = scale_point(*point);
             }
         }
+        // The lattice scales with the outline, exactly like a grid's pitch:
+        // `pitch` and the `origin` phase nudge are both doc-space lengths.
+        Map2dShape::FilledPolygon(filled) => {
+            for point in &mut filled.points {
+                *point = scale_point(*point);
+            }
+            filled.pitch *= factor;
+            filled.origin[0] *= factor;
+            filled.origin[1] *= factor;
+        }
         // Same anchor for the inner shape and the center, so the wheel scales
         // rigidly — scaling the inner shape alone would slide every instance
         // off its rotation.
@@ -900,7 +1145,7 @@ fn sanitize_shape(shape: &mut Map2dShape) {
         Map2dShape::Grid(grid) => {
             grid.cols = grid.cols.max(1);
             grid.rows = grid.rows.max(1);
-            grid.pitch = grid.pitch.max(0.5);
+            grid.pitch = grid.pitch.max(MIN_PITCH);
         }
         Map2dShape::Ring(ring) => {
             ring.outer_count = ring.outer_count.max(1);
@@ -915,6 +1160,28 @@ fn sanitize_shape(shape: &mut Map2dShape) {
         // resolve-time error naming the object, same as a one-point path.
         Map2dShape::Polygon(polygon) => {
             polygon.count = polygon.count.max(1);
+        }
+        // A shaped matrix has no authored count to clamp — the lattice
+        // derives it. `pitch` gets the grid's floor so a scrubbed field
+        // cannot ask for an unbounded number of cells; an outline that
+        // admits none stays a resolve-time error naming the object.
+        //
+        // `angle_deg` and `origin` are lattice-FRAME parameters rather than
+        // authored geometry: a non-finite one poisons every derived cell
+        // center at once, and 0 is their unambiguous neutral, so they are
+        // scrubbed here. The outline `points` deliberately are not — there
+        // is nothing to invent for a vertex the author placed, so a
+        // non-finite one stays a resolve-time error naming the object, the
+        // same posture every other shape's positions get.
+        Map2dShape::FilledPolygon(filled) => {
+            // `max` returns the other operand for NaN, so this floors and
+            // scrubs in one move — the grid arm's trick.
+            filled.pitch = filled.pitch.max(MIN_PITCH);
+            filled.angle_deg = finite_or_zero(filled.angle_deg);
+            filled.origin = [
+                finite_or_zero(filled.origin[0]),
+                finite_or_zero(filled.origin[1]),
+            ];
         }
         // `count` is bounded at both ends: 0 instances resolve to nothing, and
         // an unbounded count multiplies the whole inner shape — a typo in a
@@ -1000,6 +1267,149 @@ fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
     let dx = b[0] - a[0];
     let dy = b[1] - a[1];
     (dx * dx + dy * dy).sqrt()
+}
+
+/// A draft's clicks as authored geometry: consecutive points within
+/// [`DRAFT_MERGE_DISTANCE`] are one click, not a zero-length segment.
+fn drafted_points(draft: &[[f32; 2]]) -> Vec<[f32; 2]> {
+    let mut points: Vec<[f32; 2]> = Vec::with_capacity(draft.len());
+    for point in draft {
+        let near_previous = points
+            .last()
+            .is_some_and(|last| distance(*last, *point) <= DRAFT_MERGE_DISTANCE);
+        if !near_previous {
+            points.push(*point);
+        }
+    }
+    points
+}
+
+/// [`drafted_points`] for a CLOSED outline: the closing edge is implicit, so
+/// a final click that landed back on the first vertex — how the view closes
+/// an outline — is that same first vertex, not a duplicate of it.
+fn closed_outline_points(draft: &[[f32; 2]]) -> Vec<[f32; 2]> {
+    let mut points = drafted_points(draft);
+    if points.len() >= 2 && distance(points[0], points[points.len() - 1]) <= DRAFT_MERGE_DISTANCE {
+        points.pop();
+    }
+    points
+}
+
+/// The shape [`MapEditorSession::polygon_finish`] would create from `draft`
+/// in `mode` — `None` below three distinct vertices, where there is no
+/// outline yet.
+///
+/// The live ghost preview resolves EXACTLY this, so what the canvas shows
+/// while drawing is what closing the outline creates: one derivation, no
+/// second density heuristic to drift out of step (parent decision D11's
+/// "the preview is the resolver, not a sketch of it").
+#[must_use]
+pub fn polygon_draft_shape(draft: &[[f32; 2]], mode: PolygonMode) -> Option<Map2dShape> {
+    let points = closed_outline_points(draft);
+    if points.len() < 3 {
+        return None;
+    }
+    Some(match mode {
+        PolygonMode::Outline => {
+            let count = outline_count_from_perimeter(&points);
+            Map2dShape::Polygon(PolygonShape {
+                points,
+                count,
+                align: PathAlign::On,
+            })
+        }
+        PolygonMode::Filled => Map2dShape::FilledPolygon(default_filled_polygon(points)),
+    })
+}
+
+/// Lamp count for a closed outline at the authored default density.
+///
+/// The same `length / DEFAULT_PITCH` heuristic `path_finish` reads, over the
+/// perimeter — the closing edge included, because a polygon has one. One
+/// authored-density convention, not two, so a drawn outline and a drawn path
+/// of the same length carry the same number of lamps.
+fn outline_count_from_perimeter(points: &[[f32; 2]]) -> u32 {
+    let perimeter = closed_perimeter(points);
+    ((perimeter / DEFAULT_PITCH).round() as u32).max(3)
+}
+
+fn closed_perimeter(points: &[[f32; 2]]) -> f32 {
+    if points.len() < 2 {
+        return 0.0;
+    }
+    let mut total = 0.0;
+    let mut previous = points[points.len() - 1];
+    for point in points {
+        total += distance(previous, *point);
+        previous = *point;
+    }
+    total
+}
+
+/// A shaped matrix over `points` at the authored default density.
+///
+/// Pitch starts at [`DEFAULT_PITCH`] — the same spacing constant the path and
+/// perimeter heuristics read, so the two populations of one outline imply a
+/// comparable density out of the box. An outline smaller than a single cell
+/// would admit no lattice cell at all and refuse to resolve, so a small
+/// outline gets half its shortest bbox side instead: two rows and two columns
+/// of candidate centers, which any outline with real interior populates. A
+/// fully degenerate outline (collinear vertices, no interior) has nothing to
+/// fill and stays a resolve-time error naming the object — the same answer a
+/// zero-perimeter polygon gets.
+fn default_filled_polygon(points: Vec<[f32; 2]>) -> FilledPolygonShape {
+    let shortest_side =
+        bounds_of_points(&points).map_or(0.0, |bounds| bounds.width.min(bounds.height));
+    let pitch = DEFAULT_PITCH.min(shortest_side / 2.0).max(MIN_PITCH);
+    FilledPolygonShape {
+        points,
+        pitch,
+        angle_deg: 0.0,
+        origin: [0.0, 0.0],
+        routing: GridRouting::Snake,
+        start_corner: GridCorner::Tl,
+    }
+}
+
+/// Convert a polygon node between populations in place, recursing through
+/// repeats to the authored inner shape (the one every instance copies).
+///
+/// The node is replaced, never the object, so the object's name and id — and
+/// therefore every patch entry addressing it — survive the switch. Anything
+/// that is not a polygon is left alone: this is a population switch, not a
+/// shape converter.
+fn convert_polygon_population(shape: &mut Map2dShape, mode: PolygonMode) {
+    if let Map2dShape::Repeat(repeat) = shape {
+        convert_polygon_population(&mut repeat.shape, mode);
+        return;
+    }
+    let converted = match (&mut *shape, mode) {
+        (Map2dShape::Polygon(polygon), PolygonMode::Filled) => Some(Map2dShape::FilledPolygon(
+            default_filled_polygon(std::mem::take(&mut polygon.points)),
+        )),
+        (Map2dShape::FilledPolygon(filled), PolygonMode::Outline) => {
+            let points = std::mem::take(&mut filled.points);
+            let count = outline_count_from_perimeter(&points);
+            Some(Map2dShape::Polygon(PolygonShape {
+                points,
+                count,
+                // A filled polygon has no stroke alignment to carry back —
+                // the field means nothing for a field of lamps — so the
+                // outline comes back centred, whatever it left as.
+                align: PathAlign::On,
+            }))
+        }
+        _ => None,
+    };
+    if let Some(converted) = converted {
+        *shape = converted;
+    }
+}
+
+/// A float field's value, or its neutral 0 when the author scrubbed it into
+/// NaN or an infinity.
+fn finite_or_zero(value: f32) -> f32 {
+    if value.is_finite() { value } else { 0.0 }
 }
 
 #[cfg(test)]
@@ -1455,13 +1865,15 @@ mod tests {
             }
         });
         // Split segment 1 (the jumper) at its midpoint: it becomes 1 and 2.
-        session.insert_path_vertex(0, 2, [10.0, 5.0]);
+        assert!(session.insert_vertex(0, 2, [10.0, 5.0]));
         assert_eq!(gaps_of(&session), vec![1, 2]);
         assert_eq!(points_of(&session).len(), 5);
 
         // A vertex inserted before every gap pushes them all up one.
-        session.insert_path_vertex(0, 0, [-10.0, 0.0]);
+        assert!(session.insert_vertex(0, 0, [-10.0, 0.0]));
         assert_eq!(gaps_of(&session), vec![2, 3]);
+        // Past the end there is no segment to split.
+        assert!(!session.insert_vertex(0, 99, [0.0, 0.0]));
     }
 
     /// Deleting a vertex merges the two segments it joined; a merged segment
@@ -1488,6 +1900,116 @@ mod tests {
         session.delete_selection();
         assert_eq!(points_of(&session).len(), 2);
         assert_eq!(gaps_of(&session), Vec::<u32>::new()); // clamped: 1 segment left, and it must light
+    }
+
+    /// Insert reaches every vertexed shape through the same seam the handles
+    /// do, repeat wrappers included — and a closed outline's SEAM edge (last →
+    /// first) takes its new corner at the END of the list, never at index 0,
+    /// which would land it on the wrong side of the shape.
+    #[test]
+    fn inserting_a_vertex_spans_every_vertexed_shape_and_the_closing_seam() {
+        // Outline polygon: split the seam edge from [0,100] back to [0,0].
+        let mut session = session_with_square_polygon();
+        assert!(session.insert_vertex(0, 4, [-10.0, 50.0]));
+        let points = points_of_polygon(&session);
+        assert_eq!(points.len(), 5);
+        assert_eq!(points[4], [-10.0, 50.0], "the seam corner appends");
+        assert_eq!(points[0], [0.0, 0.0], "and the first corner stays first");
+
+        // Shaped matrix: same seam, same seat — and the lattice re-derives.
+        let mut session = square_polygon_draft(PolygonMode::Filled);
+        session.polygon_finish().expect("filled polygon created");
+        assert!(session.insert_vertex(0, 2, [120.0, 50.0]));
+        assert_eq!(filled_of(&session).points.len(), 5);
+        assert_eq!(filled_of(&session).points[2], [120.0, 50.0]);
+
+        // Through a repeat the authored INNER shape takes the corner.
+        let mut session = session_with_repeat(3);
+        assert!(session.insert_vertex(0, 1, [100.0, 25.0]));
+        let Map2dShape::Repeat(repeat) = &session.doc().objects[0].shape else {
+            panic!("expected a repeat");
+        };
+        assert_eq!(
+            editable_vertices(&repeat.shape)
+                .expect("inner vertices")
+                .len(),
+            5
+        );
+
+        // Grids have no authored vertex to split.
+        let mut session = MapEditorSession::new(Map2dDoc::new());
+        session.create_default_grid([0.0, 0.0]);
+        assert!(!session.insert_vertex(0, 0, [0.0, 0.0]));
+    }
+
+    /// Remove stops at each shape's floor — two points for a run, three for a
+    /// closed outline — and a refused removal must leave the OBJECT alone: the
+    /// vertex branch of Delete never falls through to deleting the shape.
+    #[test]
+    fn removing_a_vertex_stops_at_the_shapes_floor() {
+        // A closed outline keeps three corners.
+        let mut session = session_with_square_polygon();
+        session.selection.select_only(0);
+        session.selection.vertex = Some(1);
+        session.delete_selection();
+        assert_eq!(points_of_polygon(&session).len(), 3);
+        assert_eq!(session.selection.vertex, None, "the corner is gone");
+        session.selection.vertex = Some(0);
+        session.delete_selection();
+        assert_eq!(points_of_polygon(&session).len(), 3, "at the floor");
+        assert_eq!(session.doc().objects.len(), 1, "the object survives");
+        assert_eq!(session.selection.vertex, Some(0), "and stays selected");
+
+        // A shaped matrix floors at three too.
+        let mut session = square_polygon_draft(PolygonMode::Filled);
+        session.polygon_finish().expect("filled polygon created");
+        assert!(session.remove_vertex(0, 3));
+        assert_eq!(filled_of(&session).points.len(), 3);
+        assert!(!session.remove_vertex(0, 0));
+        assert_eq!(session.doc().objects.len(), 1);
+
+        // A path floors at two, and a repeat's inner path floors the same way.
+        let mut session = session_with_repeat(3);
+        assert!(session.remove_vertex(0, 0));
+        assert!(session.remove_vertex(0, 0));
+        assert!(!session.remove_vertex(0, 0));
+        let Map2dShape::Repeat(repeat) = &session.doc().objects[0].shape else {
+            panic!("expected a repeat");
+        };
+        assert_eq!(
+            editable_vertices(&repeat.shape)
+                .expect("inner vertices")
+                .len(),
+            2
+        );
+
+        // With no vertex selected, Delete is still about the object.
+        let mut session = session_with_square_polygon();
+        session.selection.select_only(0);
+        session.delete_selection();
+        assert!(session.doc().objects.is_empty());
+    }
+
+    /// Each structural vertex edit is exactly ONE undo step, and a refused one
+    /// is no step at all.
+    #[test]
+    fn vertex_insert_and_remove_are_each_one_undo_step() {
+        let mut session = session_with_square_polygon();
+        let base = session.undo.len();
+        assert!(session.insert_vertex(0, 4, [-10.0, 50.0]));
+        assert_eq!(session.undo.len(), base + 1);
+        session.undo();
+        assert_eq!(points_of_polygon(&session).len(), 4);
+
+        assert!(session.remove_vertex(0, 2));
+        assert_eq!(session.undo.len(), base + 1);
+        session.undo();
+        assert_eq!(points_of_polygon(&session).len(), 4);
+
+        // A refused removal writes nothing to undo.
+        let steps = session.undo.len();
+        assert!(!session.remove_vertex(0, 9));
+        assert_eq!(session.undo.len(), steps);
     }
 
     // ---- rotational repeat ----------------------------------------------
@@ -1645,7 +2167,7 @@ mod tests {
     /// safe field repair.
     #[test]
     fn expanding_a_repeat_moves_no_lamp() {
-        // The mini-dome: one gapped sector strand, five instances.
+        // The small-dome: one gapped sector strand, five instances.
         let mut session = MapEditorSession::new(corpus::repeated_sector());
         let before: Vec<[f32; 2]> = session.resolved().lamps.iter().map(|l| l.pos).collect();
         let spans_before: Vec<(u32, u32)> = session
@@ -1885,6 +2407,405 @@ mod tests {
         assert_eq!(session.resolved().spans.len(), 4);
     }
 
+    // ---- the polygon tool (outline + filled populations) -----------------
+
+    /// The draft grammar is the path tool's: vertices accumulate, Escape
+    /// takes back exactly one, and a finish below three vertices is an
+    /// IGNORED gesture — the draft and the tool both survive it, because a
+    /// mis-aimed close should not cost the author their clicks.
+    #[test]
+    fn polygon_draft_backs_out_one_vertex_and_ignores_a_short_finish() {
+        let mut session = MapEditorSession::new(Map2dDoc::new());
+        session.tool = MapTool::polygon(PolygonMode::Outline);
+        assert_eq!(session.polygon_mode(), Some(PolygonMode::Outline));
+        session.polygon_add_point([0.0, 0.0]);
+        session.polygon_add_point([100.0, 0.0]);
+        session.polygon_add_point([100.0, 100.0]);
+        assert!(session.polygon_backout());
+        assert_eq!(session.polygon_draft().len(), 2);
+
+        assert!(
+            session.polygon_finish().is_none(),
+            "two vertices is no outline"
+        );
+        assert_eq!(session.polygon_draft().len(), 2, "the draft survives");
+        assert!(!session.tool.is_select(), "and so does the tool");
+        assert!(session.doc().objects.is_empty());
+
+        session.polygon_add_point([0.0, 100.0]);
+        assert!(session.polygon_finish().is_some());
+        assert!(session.tool.is_select(), "creation tools go home");
+        assert!(
+            !session.polygon_backout(),
+            "the draft ops are inert once the tool is gone"
+        );
+    }
+
+    /// Outline mode commits a [`PolygonShape`] whose count comes off the
+    /// perimeter at the authored default density — the same
+    /// `length / DEFAULT_PITCH` heuristic a drawn path gets, with the closing
+    /// edge counted.
+    #[test]
+    fn outline_finish_derives_the_count_from_the_perimeter() {
+        let mut session = square_polygon_draft(PolygonMode::Outline);
+        let index = session.polygon_finish().expect("polygon created");
+
+        let Map2dShape::Polygon(polygon) = &session.doc().objects[index].shape else {
+            panic!("expected a polygon");
+        };
+        assert_eq!(polygon.points.len(), 4);
+        // 400 units of perimeter / 26 pitch ≈ 15.
+        assert_eq!(polygon.count, 15);
+        assert_eq!(polygon.align, PathAlign::On);
+        assert_eq!(session.selection.single_root(), Some(index));
+        assert!(session.tool.is_select(), "creation tools go home");
+        assert_eq!(session.lamp_count(), 15);
+        assert!(session.resolve_error.is_none());
+        assert_eq!(session.doc().format, 3, "a polygon is a format-3 construct");
+    }
+
+    /// Filled mode commits a [`FilledPolygonShape`] at the same spacing
+    /// constant, so the two populations of one outline start at a comparable
+    /// density.
+    #[test]
+    fn filled_finish_defaults_the_pitch_from_the_same_spacing_constant() {
+        let mut session = square_polygon_draft(PolygonMode::Filled);
+        let index = session.polygon_finish().expect("filled polygon created");
+
+        let filled = filled_of(&session);
+        assert_eq!(filled.points.len(), 4);
+        assert_eq!(filled.pitch, DEFAULT_PITCH);
+        assert_eq!(filled.angle_deg, 0.0);
+        assert_eq!(filled.origin, [0.0, 0.0]);
+        assert_eq!(session.selection.single_root(), Some(index));
+        assert!(session.tool.is_select());
+        // A 100×100 outline at pitch 26 admits a 4×4 lattice.
+        assert_eq!(session.lamp_count(), 16);
+        assert!(session.resolve_error.is_none());
+        assert_eq!(
+            session.doc().format,
+            5,
+            "a shaped matrix is a format-5 construct"
+        );
+    }
+
+    /// The view closes an outline by clicking its first vertex, so the final
+    /// click lands back on `points[0]` — the closing edge is implicit and
+    /// that click must not become a duplicate vertex.
+    #[test]
+    fn closing_on_the_first_vertex_does_not_duplicate_it() {
+        let mut session = MapEditorSession::new(Map2dDoc::new());
+        session.tool = MapTool::polygon(PolygonMode::Outline);
+        for point in [[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]] {
+            session.polygon_add_point(point);
+        }
+        session.polygon_add_point([1.0, 1.0]); // the closing click
+        let index = session.polygon_finish().expect("polygon created");
+        let Map2dShape::Polygon(polygon) = &session.doc().objects[index].shape else {
+            panic!("expected a polygon");
+        };
+        assert_eq!(
+            polygon.points,
+            vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]]
+        );
+    }
+
+    /// An outline too small for a default-pitch cell still resolves: the
+    /// pitch shrinks to half the shortest bbox side rather than committing an
+    /// object with nothing in it.
+    #[test]
+    fn a_small_filled_outline_shrinks_its_pitch_until_it_resolves() {
+        let mut session = MapEditorSession::new(Map2dDoc::new());
+        session.tool = MapTool::polygon(PolygonMode::Filled);
+        for point in [[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]] {
+            session.polygon_add_point(point);
+        }
+        session.polygon_finish().expect("filled polygon created");
+        assert_eq!(filled_of(&session).pitch, 5.0);
+        assert!(session.lamp_count() >= 1, "the object resolves");
+        assert!(session.resolve_error.is_none());
+    }
+
+    /// Creating a polygon is ONE undo step, and undo puts the document back
+    /// exactly as it was — the same contract every other creation op has.
+    #[test]
+    fn creating_a_polygon_is_one_undo_step() {
+        let mut session = MapEditorSession::new(Map2dDoc::new());
+        let before = session.doc().to_json();
+        session.tool = MapTool::polygon(PolygonMode::Filled);
+        for point in [[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]] {
+            session.polygon_add_point(point);
+        }
+        session.polygon_finish().expect("filled polygon created");
+        assert!(session.can_undo());
+        session.undo();
+        assert_eq!(session.doc().to_json(), before);
+        assert!(!session.can_undo(), "exactly one step");
+    }
+
+    /// The live ghost preview and the finished object come off ONE
+    /// derivation: whatever [`polygon_draft_shape`] says the draft is, that
+    /// is byte-for-byte what closing it commits. A second density heuristic
+    /// for the preview is exactly the drift this pins shut.
+    #[test]
+    fn the_draft_preview_shape_is_what_finish_commits() {
+        for mode in [PolygonMode::Outline, PolygonMode::Filled] {
+            let mut session = square_polygon_draft(mode);
+            let previewed = polygon_draft_shape(session.polygon_draft(), mode)
+                .expect("the draft is an outline");
+            let index = session.polygon_finish().expect("polygon created");
+            assert_eq!(
+                session.doc().objects[index].shape,
+                previewed,
+                "{mode:?} preview must be the committed shape"
+            );
+        }
+        // Below three vertices there is no shape to preview, which is the
+        // same answer `polygon_finish` gives.
+        assert!(polygon_draft_shape(&[[0.0, 0.0], [10.0, 0.0]], PolygonMode::Filled).is_none());
+    }
+
+    /// The population a surface names is remembered for the tool's NEXT
+    /// activation, so drawing a run of filled polygons costs one choice —
+    /// while the ACTIVE tool's own mode stays the only thing finish reads.
+    #[test]
+    fn the_polygon_tool_reopens_in_the_last_named_population() {
+        let mut session = MapEditorSession::new(Map2dDoc::new());
+        assert_eq!(session.polygon_default(), PolygonMode::Outline);
+
+        session.start_polygon_tool();
+        session.set_polygon_draft_mode(PolygonMode::Filled);
+        assert_eq!(session.polygon_mode(), Some(PolygonMode::Filled));
+        for point in square_points() {
+            session.polygon_add_point(point);
+        }
+        session.polygon_finish().expect("filled polygon created");
+
+        session.start_polygon_tool();
+        assert_eq!(
+            session.polygon_mode(),
+            Some(PolygonMode::Filled),
+            "the tool reopens where it left off"
+        );
+        assert!(session.polygon_draft().is_empty(), "with a fresh draft");
+
+        // The properties toggle names a population too.
+        session.set_polygon_population(0, PolygonMode::Outline);
+        session.start_polygon_tool();
+        assert_eq!(session.polygon_mode(), Some(PolygonMode::Outline));
+    }
+
+    /// The population switch keeps the outline and the object's identity —
+    /// name and id ride the object, which never moves — and re-derives the
+    /// number the new population needs. It is one undo step each way.
+    #[test]
+    fn switching_population_preserves_the_outline_and_the_identity() {
+        let mut session = session_with_square_polygon();
+        session.ensure_object_ids();
+        let id = session.doc().objects[0]
+            .id
+            .as_ref()
+            .unwrap()
+            .as_str()
+            .to_string();
+        let name = session.doc().objects[0].name.clone();
+        let points = square_points();
+
+        session.set_polygon_population(0, PolygonMode::Filled);
+        let filled = filled_of(&session);
+        assert_eq!(filled.points, points);
+        assert_eq!(filled.pitch, DEFAULT_PITCH);
+        assert_eq!(session.doc().objects[0].name, name);
+        assert_eq!(session.doc().objects[0].id.as_ref().unwrap().as_str(), id);
+        assert_eq!(session.lamp_count(), 16);
+
+        session.set_polygon_population(0, PolygonMode::Outline);
+        let Map2dShape::Polygon(polygon) = &session.doc().objects[0].shape else {
+            panic!("expected a polygon again");
+        };
+        assert_eq!(polygon.points, points);
+        assert_eq!(polygon.count, 15, "re-derived from the perimeter");
+        assert_eq!(session.doc().objects[0].name, name);
+        assert_eq!(session.doc().objects[0].id.as_ref().unwrap().as_str(), id);
+
+        // One step back is the filled population, not the original outline.
+        session.undo();
+        assert!(matches!(
+            session.doc().objects[0].shape,
+            Map2dShape::FilledPolygon(_)
+        ));
+    }
+
+    /// Asking for the population an object already has changes nothing — and
+    /// therefore pushes no undo step, so a toolbar toggle cannot bury the
+    /// author's real edits under no-ops.
+    #[test]
+    fn switching_to_the_same_population_is_a_no_op() {
+        let mut session = session_with_square_polygon();
+        let before = session.doc().to_json();
+        session.set_polygon_population(0, PolygonMode::Outline);
+        assert_eq!(session.doc().to_json(), before);
+        // Nothing was pushed: one step back is still the creation itself.
+        session.undo();
+        assert!(session.doc().objects.is_empty());
+    }
+
+    /// Through a repeat the switch converts the AUTHORED inner polygon, so
+    /// every instance follows — the same write-through every other
+    /// descend-able edit has.
+    #[test]
+    fn switching_population_reaches_through_a_repeat() {
+        let mut session = session_with_square_polygon();
+        session.repeat_object(0, 3);
+        session.set_polygon_population(0, PolygonMode::Filled);
+
+        let repeat = repeat_of(&session);
+        assert_eq!(repeat.count, 3);
+        assert!(matches!(
+            repeat.shape.as_ref(),
+            Map2dShape::FilledPolygon(_)
+        ));
+        assert_eq!(session.lamp_count(), 16 * 3);
+        assert_eq!(session.resolved().spans.len(), 3, "still three strands");
+    }
+
+    /// The vertex seam spans every shape with authored vertices, through any
+    /// number of repeats — which is what lights up vertex dragging on
+    /// polygons and shaped matrices.
+    #[test]
+    fn editable_vertices_spans_every_vertexed_shape_wrapped_or_not() {
+        let square = square_points();
+        let cases: Vec<(&str, Map2dShape)> = vec![
+            (
+                "path",
+                Map2dShape::Path(PathShape {
+                    points: square.clone(),
+                    count: 4,
+                    reversed: false,
+                    gaps: Vec::new(),
+                    align: PathAlign::On,
+                }),
+            ),
+            (
+                "polygon",
+                Map2dShape::Polygon(PolygonShape {
+                    points: square.clone(),
+                    count: 15,
+                    align: PathAlign::On,
+                }),
+            ),
+            (
+                "filled polygon",
+                Map2dShape::FilledPolygon(default_filled_polygon(square.clone())),
+            ),
+        ];
+        for (label, shape) in cases {
+            assert_eq!(
+                editable_vertices(&shape),
+                Some(square.as_slice()),
+                "{label} offers its vertices"
+            );
+            let wrapped = Map2dShape::Repeat(RepeatShape {
+                shape: Box::new(shape),
+                center: [0.0, 0.0],
+                count: 3,
+            });
+            assert_eq!(
+                editable_vertices(&wrapped),
+                Some(square.as_slice()),
+                "a repeated {label} offers the authored inner vertices"
+            );
+        }
+
+        // A grid and a ring have no authored vertex to grab.
+        assert!(
+            editable_vertices(&Map2dShape::Grid(GridShape {
+                origin: [0.0, 0.0],
+                cols: 2,
+                rows: 2,
+                pitch: 10.0,
+                routing: GridRouting::Snake,
+                start_corner: GridCorner::Tl,
+            }))
+            .is_none()
+        );
+        assert!(editable_vertices(&session_with_ring().doc().objects[0].shape).is_none());
+    }
+
+    /// The side effect of generalizing the seam (vision D11's discovery
+    /// ruling): polygons that were already in documents gain vertex dragging,
+    /// with no change to how they are authored.
+    #[test]
+    fn an_existing_polygon_gains_vertex_dragging() {
+        let mut session = session_with_square_polygon();
+        session.selection.select_only(0);
+        session.begin_gesture();
+        session.move_vertex_from_gesture(2, [140.0, 120.0]);
+        session.commit_gesture();
+
+        let Map2dShape::Polygon(polygon) = &session.doc().objects[0].shape else {
+            panic!("expected a polygon");
+        };
+        assert_eq!(polygon.points[2], [140.0, 120.0]);
+        assert_eq!(
+            polygon.points[0],
+            [0.0, 0.0],
+            "only the grabbed vertex moved"
+        );
+        assert!(session.can_undo());
+        session.undo();
+        assert_eq!(points_of_polygon(&session)[2], [100.0, 100.0]);
+    }
+
+    /// Dragging a shaped matrix's outline re-derives its lattice: the count
+    /// is not authored, so there is nothing to keep in sync.
+    #[test]
+    fn dragging_a_filled_outline_re_derives_the_lattice() {
+        let mut session = session_with_square_polygon();
+        session.set_polygon_population(0, PolygonMode::Filled);
+        assert_eq!(session.lamp_count(), 16);
+        session.selection.select_only(0);
+        // Halve the square — one drag per vertex, since a gesture re-derives
+        // from its own snapshot — and the lattice loses its right-hand
+        // columns without anyone editing a count.
+        for (vertex, position) in [(1usize, [50.0, 0.0]), (2, [50.0, 100.0])] {
+            session.begin_gesture();
+            session.move_vertex_from_gesture(vertex, position);
+            session.commit_gesture();
+        }
+        assert_eq!(session.lamp_count(), 4 * 2);
+        assert!(session.resolve_error.is_none());
+    }
+
+    /// Sanitize's contract on a shaped matrix: the pitch floor a grid gets,
+    /// plus a scrub of the lattice-frame floats a scrubbed number field can
+    /// turn non-finite. Every emitted document still resolves.
+    #[test]
+    fn sanitize_floors_the_lattice_pitch_and_scrubs_its_frame() {
+        let mut session = session_with_square_polygon();
+        session.set_polygon_population(0, PolygonMode::Filled);
+
+        for bad_pitch in [0.0, -12.0, f32::NAN] {
+            session.edit_object_shape(0, |shape| {
+                if let Map2dShape::FilledPolygon(filled) = shape {
+                    filled.pitch = bad_pitch;
+                }
+            });
+            assert_eq!(filled_of(&session).pitch, 0.5, "pitch {bad_pitch} floored");
+        }
+
+        session.edit_object_shape(0, |shape| {
+            if let Map2dShape::FilledPolygon(filled) = shape {
+                filled.angle_deg = f32::NAN;
+                filled.origin = [f32::INFINITY, f32::NEG_INFINITY];
+            }
+        });
+        let filled = filled_of(&session);
+        assert_eq!(filled.angle_deg, 0.0);
+        assert_eq!(filled.origin, [0.0, 0.0]);
+        assert!(session.resolve_error.is_none());
+    }
+
     #[test]
     fn dirty_tracks_saved_snapshot() {
         let mut session = session_with_ring();
@@ -1965,6 +2886,42 @@ mod tests {
 
     fn points_of(session: &MapEditorSession) -> Vec<[f32; 2]> {
         path_of(session).points.clone()
+    }
+
+    /// A 100×100 square: 400 units of perimeter (count 15 at the default
+    /// density) and a 4×4 default-pitch lattice (16 cells).
+    fn square_points() -> Vec<[f32; 2]> {
+        vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]]
+    }
+
+    fn square_polygon_draft(mode: PolygonMode) -> MapEditorSession {
+        let mut session = MapEditorSession::new(Map2dDoc::new());
+        session.tool = MapTool::polygon(mode);
+        for point in square_points() {
+            session.polygon_add_point(point);
+        }
+        session
+    }
+
+    /// One committed outline polygon over [`square_points`].
+    fn session_with_square_polygon() -> MapEditorSession {
+        let mut session = square_polygon_draft(PolygonMode::Outline);
+        session.polygon_finish().expect("polygon created");
+        session
+    }
+
+    fn filled_of(session: &MapEditorSession) -> &FilledPolygonShape {
+        let Map2dShape::FilledPolygon(filled) = &session.doc().objects[0].shape else {
+            panic!("expected a filled polygon");
+        };
+        filled
+    }
+
+    fn points_of_polygon(session: &MapEditorSession) -> Vec<[f32; 2]> {
+        let Map2dShape::Polygon(polygon) = &session.doc().objects[0].shape else {
+            panic!("expected a polygon");
+        };
+        polygon.points.clone()
     }
 
     fn ring_center(session: &mut MapEditorSession) -> [f32; 2] {

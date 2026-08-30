@@ -1,7 +1,7 @@
 //! The header **session·project control** and its panel — the one piece of
 //! session UI the chrome carries under the single-session web policy.
 //!
-//! `❖ Sim · ESP32-C6 │ ✎ mini dome ②   [Save] [↺]` — one segmented lockup
+//! `❖ Sim · ESP32-C6 │ ✎ small dome ②   [Save] [↺]` — one segmented lockup
 //! (spike `spikes/studio-chrome/` concept **B**, ruled round 7) with the
 //! save moment materializing BESIDE it the instant persisted edits exist
 //! (G1 round-2, 2026-08-19: inspect and act are different surfaces — the
@@ -62,6 +62,11 @@ pub struct ChromeSessionControl {
     pub session: UiChromeSessionControl,
     /// The open project's detail content; `None` with no project open.
     pub project: Option<ProjectDetailContent>,
+    /// The open session is a TRANSIENT example view (examples vision D2):
+    /// nothing is in the library yet, and the explicit save is what forks
+    /// it. The project segment wears an "example" pill while true — the
+    /// pill vanishing at save IS the top-bar half of the fork moment.
+    pub example: bool,
     /// Dispatch for the panel's rows and the lockup's Save/↺ segments.
     pub on_action: EventHandler<UiAction>,
     /// Open the panel immediately (stories only).
@@ -85,6 +90,7 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
         project,
         on_action,
         initially_open,
+        example,
     } = control;
     let affordance = project.as_ref().map(ProjectDetailContent::affordance);
     let style = affordance.map(affordance_trigger_style);
@@ -140,6 +146,16 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
                 }
                 span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-[11px] tw:font-semibold tw:text-muted-foreground",
                     "{project.project_name()}"
+                }
+                if example {
+                    // The example-vs-owned marker (G1 ruling): visible the
+                    // whole time a transient view runs, gone the moment an
+                    // explicit save forks the copy.
+                    span {
+                        class: EXAMPLE_PILL_CLASS,
+                        title: "Viewing an example — save to make your own copy",
+                        "example"
+                    }
                 }
                 if project.unsaved_count() > 0 {
                     span { class: COUNT_PILL_CLASS, "{project.unsaved_count()}" }
@@ -451,6 +467,10 @@ const SAVE_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer t
 // revert/discard-edit action InlineButton's Warning tone is scoped to.
 /// The unsaved count, the header chip's pill verbatim (D8): mono, amber,
 /// pill-shaped — the same badge the pane's own affordances wear.
+/// The transient-example marker: accent-tinted, quiet, always present
+/// while viewing (unlike the amber count, which only appears dirty).
+const EXAMPLE_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border-accent-border tw:bg-accent-wash tw:px-1.5 tw:text-[9.5px] tw:font-semibold tw:text-accent";
+
 const COUNT_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:font-mono tw:text-[9.5px] tw:font-semibold tw:text-status-warning-foreground";
 
 #[cfg(test)]

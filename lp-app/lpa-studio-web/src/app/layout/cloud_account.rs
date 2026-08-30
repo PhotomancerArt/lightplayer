@@ -60,7 +60,9 @@ pub fn CloudAccountControl(
     // whole chrome, and the remembered list only moves when the session
     // does (the provider writes it on entering `SignedIn`).
     let remembered = use_memo(move || match session() {
-        CloudSession::SignedIn { me, .. } => other_accounts(&account_memory::load(), &me.email),
+        CloudSession::SignedIn { me, .. } if !me.anonymous => {
+            other_accounts(&account_memory::load(), &me.email)
+        }
         _ => Vec::new(),
     });
     // Recomputed per render: the chrome re-renders on every route change,
@@ -70,6 +72,20 @@ pub fn CloudAccountControl(
         CloudSession::Pending => Some(rsx! {
             PendingPill {}
         }),
+        // A GUEST session (examples vision D8) is real to the sync engine
+        // but must not read as an account: the chrome keeps the signed-out
+        // affordance — signing in is still the door this slot offers.
+        CloudSession::SignedIn { me, options } if me.anonymous => {
+            options.and_then(|options| match sign_in_affordance(&options, &next) {
+                SignInAffordance::Direct(href) => Some(rsx! {
+                    SignInLink { href }
+                }),
+                SignInAffordance::Chooser => Some(rsx! {
+                    SignInMenu { options, next }
+                }),
+                SignInAffordance::Nothing => None,
+            })
+        }
         CloudSession::Anonymous { options } => {
             // Options that never landed: an affordance pointing nowhere
             // is worse than none (P4's `Anonymous { options: None }`).

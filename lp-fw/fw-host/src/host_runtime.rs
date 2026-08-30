@@ -17,6 +17,11 @@ use tokio::sync::Mutex;
 use crate::host_runtime_error::HostRuntimeError;
 use crate::server_loop::run_server_loop_async;
 
+/// Frame budget for links with no meaningful transport limit: 1 MiB. Big
+/// enough that no real payload ever notices, small enough that the bounded
+/// batching path runs everywhere (see the comment at the call site).
+const HOST_LINK_FRAME_BUDGET_BYTES: usize = 1024 * 1024;
+
 pub struct HostRuntime {
     server_handle: Option<JoinHandle<()>>,
     client_transport: Arc<Mutex<Box<dyn ClientTransport>>>,
@@ -151,7 +156,12 @@ fn create_memory_server() -> LpServer {
     // any scale. `create_memory_server_with` deliberately keeps the serial
     // default — `FakeEsp32Device` builds on it to EMULATE a serial device,
     // and its budgets must stay honest.
-    server.set_project_read_frame_budget(None);
+    //
+    // A generous EXPLICIT bound (not `None`): behaviorally identical for
+    // real payloads (display layouts derive a huge budget from it), but the
+    // host then exercises the same batching/refusal code path the device
+    // runs, so budget regressions surface in host CI instead of on silicon.
+    server.set_project_read_frame_budget(Some(HOST_LINK_FRAME_BUDGET_BYTES));
     server
 }
 

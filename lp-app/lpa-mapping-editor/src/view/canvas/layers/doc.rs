@@ -28,7 +28,13 @@ pub(crate) struct DocLayersInput<'a> {
     pub arrows: Option<&'a MapArrowOverlay>,
     pub ghost_outlines: &'a [Vec<[f32; 2]>],
     pub gap_segments: &'a [[[f32; 2]; 2]],
-    pub path_objects: &'a [(usize, Vec<[f32; 2]>)],
+    /// Each vertexed object's authored chain as DRAWN (closed shapes carry
+    /// their seam edge) — the wide invisible hit lines that make skinny
+    /// geometry clickable.
+    pub hit_outlines: &'a [(usize, Vec<[f32; 2]>)],
+    /// The authored silhouettes of the shaped matrices: the outline their
+    /// lattice fills, which no other layer draws.
+    pub filled_outlines: &'a [(usize, Vec<[f32; 2]>)],
     /// Each object instance's BODY — the aligned outline and lamp cells the
     /// Arrange view draws, derived from THIS document so the properties
     /// panel's `align` control repaints as it is edited.
@@ -240,9 +246,31 @@ pub(crate) fn doc_layers(input: &DocLayersInput<'_>) -> Element {
                 stroke_width: "{(1.6 / eff).max(radius * 0.22)}",
             }
         }
-        // Wide invisible hit lines make skinny paths clickable.
+        // A shaped matrix's AUTHORED OUTLINE. Its body draws NO band (G1: one
+        // swept along the serpentine snakes through the lattice), so this line
+        // and the lamp cells are the whole picture — and without it the
+        // silhouette the author drew would be invisible, with vertex drags
+        // moving a boundary nothing on screen shows. Thin, dashed and never a
+        // pointer target (the hit line under it owns clicks); selection
+        // promotes it to a solid accent line.
+        for (index, (object_index, points)) in input.filled_outlines.iter().enumerate() {
+            {
+                let selected = input.selection.object_selected(*object_index);
+                let color = object_color(*object_index);
+                rsx! {
+                    polyline {
+                        key: "silhouette{index}",
+                        class: if selected { "lpme-shape-outline lpme-shape-outline-on" } else { "lpme-shape-outline" },
+                        points: points.iter().map(|p| format!("{},{}", p[0], p[1])).collect::<Vec<_>>().join(" "),
+                        stroke_width: if selected { "{1.6 / eff}" } else { "{1.1 / eff}" },
+                        style: "--lpme-obj-c: {color};",
+                    }
+                }
+            }
+        }
+        // Wide invisible hit lines make skinny geometry clickable.
         if tool_is_select {
-            for (object_index, points) in input.path_objects.iter() {
+            for (object_index, points) in input.hit_outlines.iter() {
                 {
                     let object_index = *object_index;
                     rsx! {
@@ -250,7 +278,7 @@ pub(crate) fn doc_layers(input: &DocLayersInput<'_>) -> Element {
                             key: "hit{object_index}",
                             class: "lpme-hitline",
                             points: points.iter().map(|p| format!("{},{}", p[0], p[1])).collect::<Vec<_>>().join(" "),
-                            stroke_width: "{14.0 / eff}",
+                            stroke_width: "{crate::view::canvas::HIT_LINE_PX / eff}",
                             onpointerdown: move |evt| {
                                 if pan_takes_press(&interact, &evt) {
                                     return;

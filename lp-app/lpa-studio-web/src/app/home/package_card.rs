@@ -20,7 +20,9 @@ use crate::app::home::card_footer::{
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::gallery_preview::{ThumbMode, card_hover_handlers};
 use crate::app::home::package_export::export_package_to_download;
-use crate::base::{DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName};
+use crate::base::{
+    DetailPopover, DetailSection, PopoverPlacement, StudioIcon, StudioIconName, Toasts,
+};
 use crate::core::{ActionButton, ActionButtonVariant, menu_item_action_class, quiet_action_class};
 
 /// One package card: thumbnail, name, meta, and the card menu. Clicking the
@@ -277,6 +279,12 @@ pub(crate) fn PackageCardMenu(
     let mut rename_value = use_signal(|| card.slug.clone());
     let rename_uid = card.uid.clone();
     let export_card = card.clone();
+    // Copy link (G1 finding, 2026-08-29): the canonical `/p/<slug>-<uid>`
+    // address, from the card's own identity. Cards carry the library slug
+    // (dated); the cosmetic half heals on open, the uid is what matters.
+    let link_name = card.slug.clone();
+    let link_uid = card.uid.clone();
+    let link_toasts = try_consume_context::<Toasts>();
     // Rename and duplicate both round-trip the manifest through the strict
     // reader, so on a package this Studio cannot read they would fail with
     // a parser complaint. A blocked card offers only what works on raw
@@ -504,6 +512,26 @@ pub(crate) fn PackageCardMenu(
                             variant: ActionButtonVariant::MenuItem,
                             on_action,
                         }
+                    }
+                    button {
+                        class: menu_item_action_class(),
+                        r#type: "button",
+                        title: "Copy this project's link — the same address the editor shows.",
+                        onclick: move |_| {
+                            crate::clipboard::write_text(
+                                &crate::app::share::share_url::project_link_absolute(
+                                    &link_name,
+                                    &link_uid,
+                                ),
+                            );
+                            if let Some(mut toasts) = link_toasts {
+                                toasts.say("Link copied");
+                            }
+                        },
+                        span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                            StudioIcon { name: StudioIconName::ExternalLink, size: 14 }
+                        }
+                        span { "Copy link" }
                     }
                     button {
                         class: menu_item_action_class(),

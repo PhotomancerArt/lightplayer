@@ -38,6 +38,7 @@ pub mod outline;
 pub mod popover;
 #[cfg(feature = "stories")]
 pub(crate) mod popover_stories;
+pub mod reveal_on_focus;
 pub mod tabs;
 pub mod toast;
 
@@ -70,5 +71,6 @@ pub use option_cards::{
     OPTION_CARD_CHECK_CLASS, OptionCard, OptionCards, option_card_class, option_card_grid_class,
 };
 pub use popover::{IconPopoverButton, PopoverButton, PopoverCloseHandle, PopoverPlacement};
+pub use reveal_on_focus::use_reveal_on_focus;
 pub use tabs::{TabItem, Tabs};
 pub use toast::{ToastHost, ToastMessage, ToastTone, Toasts, use_toast_provider};

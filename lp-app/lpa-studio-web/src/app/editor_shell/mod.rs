@@ -34,7 +34,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use base64::Engine as _;
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
-    DocOpen, EditorKeyOutcome, EditorViewOptions, Map2dDoc, MapTool, handle_editor_key,
+    DocOpen, EditorKeyOutcome, EditorViewOptions, Map2dDoc, MapTool, PolygonMode, handle_editor_key,
 };
 use lpa_studio_core::{
     ArtifactLocation, AssetEditOp, EditorMetaOp, EditorMetaVerb, NodeId, ProjectController,
@@ -331,6 +331,16 @@ pub fn EditorShellCenter(
             "tool.grid" => dive_session.write().tool = MapTool::Grid,
             "tool.ring" => dive_session.write().tool = MapTool::Ring,
             "tool.path" => dive_session.write().tool = MapTool::path(),
+            "tool.polygon" => dive_session.write().start_polygon_tool(),
+            // Re-aiming a live draft, not restarting it: the vertices
+            // placed so far survive the switch, and the ghost preview
+            // repopulates on the next render.
+            "polygon.outline" => dive_session
+                .write()
+                .set_polygon_draft_mode(PolygonMode::Outline),
+            "polygon.filled" => dive_session
+                .write()
+                .set_polygon_draft_mode(PolygonMode::Filled),
             "view.numbers" => {
                 let current = view_opts.peek().numbers;
                 let mut view_opts = view_opts;
@@ -745,7 +755,24 @@ fn dive_toolbar(
                     active: matches!(tool, MapTool::Path { .. }),
                     enabled: editable,
                 },
-            ],
+                ToolbarItem::Button {
+                    id: "tool.polygon",
+                    icon: Some(ToolbarIcon::Polygon),
+                    label: None,
+                    title:
+                        "polygon tool (O): click the outline's corners, click the first to close"
+                            .to_string(),
+                    active: matches!(tool, MapTool::Polygon { .. }),
+                    enabled: editable,
+                },
+            ]
+            .into_iter()
+            // ONE tool, two populations (vision D11): the mode is the
+            // polygon tool's OPTION, so it appears beside the tool while
+            // the tool is up and takes no room otherwise — never a second
+            // tool button.
+            .chain(polygon_mode_items(tool, editable))
+            .collect(),
         },
         ToolbarGroup {
             id: "views",
@@ -789,6 +816,34 @@ fn dive_toolbar(
             id: "save",
             trailing: true,
             items: save_items,
+        },
+    ]
+}
+
+/// The polygon tool's OPTIONS: the population its next closed outline
+/// commits, as a two-button segment beside the tool. Empty unless the
+/// polygon tool is up — tool options belong to their tool, and the strip
+/// stays the one row it is (D1).
+fn polygon_mode_items(tool: &MapTool, editable: bool) -> Vec<ToolbarItem> {
+    let MapTool::Polygon { mode, .. } = tool else {
+        return Vec::new();
+    };
+    vec![
+        ToolbarItem::Button {
+            id: "polygon.outline",
+            icon: None,
+            label: Some("outline".to_string()),
+            title: "lamps ride the outline's perimeter".to_string(),
+            active: matches!(mode, PolygonMode::Outline),
+            enabled: editable,
+        },
+        ToolbarItem::Button {
+            id: "polygon.filled",
+            icon: None,
+            label: Some("filled".to_string()),
+            title: "lamps fill a lattice inside the outline — the shaped matrix".to_string(),
+            active: matches!(mode, PolygonMode::Filled),
+            enabled: editable,
         },
     ]
 }

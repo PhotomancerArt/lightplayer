@@ -9,8 +9,24 @@ use crate::app::home::gallery_preview::{ThumbMode, card_hover_handlers};
 use crate::app::home::package_card::home_action;
 use crate::app::home::project_opening_frame::OpeningProgressLine;
 
-/// One example. Click → running simulator, zero choices; the copy becomes
-/// yours in the library (seed-once) and forks on first divergent save.
+/// The compiled-in examples as cards — the same projection the home view
+/// builder makes. Shared by Explore's no-gallery-slice mounts and the
+/// landing grid.
+pub(crate) fn embedded_example_cards() -> Vec<UiExampleCard> {
+    lpa_studio_core::app::home::embedded_examples()
+        .iter()
+        .map(|example| UiExampleCard {
+            id: example.id.to_string(),
+            name: example.name.to_string(),
+            kind: example.kind.to_string(),
+            blurb: example.blurb.to_string(),
+        })
+        .collect()
+}
+
+/// One example. Click → running simulator, zero choices, NOTHING
+/// installed (a transient view session, examples vision D2); an explicit
+/// save is what forks your copy into the library.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn ExampleCard(

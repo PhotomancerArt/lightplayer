@@ -1,12 +1,15 @@
-//! Node-centric project read query/result.
+//! Node-centric project read query.
 
 use super::ReadLevel;
-use crate::slot::WireSlotRootsSnapshot;
-use crate::tree::WireTreeDelta;
 use alloc::vec::Vec;
 use lpc_model::NodeId;
 
 /// Which nodes should be included in a node read.
+///
+/// `ByIds` yields a *partial view* by definition: tree deltas and slot roots
+/// are emitted only for the named nodes, and unknown ids are skipped (a
+/// partial pager racing deletions is normal). Membership/pruning semantics
+/// are only authoritative on `All` reads.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
@@ -41,14 +44,4 @@ impl NodeReadQuery {
             include_slots: true,
         }
     }
-}
-
-/// Node read result.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct NodeReadResult {
-    pub level: ReadLevel,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tree_deltas: Vec<WireTreeDelta>,
-    pub slots: Option<WireSlotRootsSnapshot>,
 }

@@ -2439,7 +2439,7 @@ mod tests {
     /// A fixture driving TWO boxes decodes each run against the wire that
     /// run landed on. `UiFixturePatch::frame` carries only the FIRST
     /// output's — enough for the bay's own face, and a lie on a panel
-    /// showing the object the user just selected (the mini dome, whose
+    /// showing the object the user just selected (the small dome, whose
     /// sectors are split across both of its boxes, reads wrong without
     /// this).
     #[test]

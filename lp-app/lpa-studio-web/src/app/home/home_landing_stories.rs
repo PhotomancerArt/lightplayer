@@ -18,7 +18,7 @@ use crate::app::home::HomePage;
 use crate::app::home::brand_hero::BrandHero;
 
 #[story(
-    description = "The landing page: brand hero (the mark's triangle as a window onto a live shader — here the fallback identity gradient with its Spill bloom, since stories run no engine), wordmark, tagline, and the three dive-in cards. The shared-`/p/` line renders nothing without context."
+    description = "The landing page: brand hero (the mark's triangle as a window onto a live shader — here the fallback identity gradient with its Spill bloom, since stories run no engine), wordmark, tagline, the \"Edit the logo\" pill (inert here — a story has no dispatcher), the three dive-in cards, and the example row with its Explore-all link (cards render their poster/seeded thumbs — stories lease no previews). The shared-`/p/` line renders nothing without context."
 )]
 fn landing() -> Element {
     rsx! {
@@ -29,7 +29,7 @@ fn landing() -> Element {
 }
 
 #[story(
-    description = "The hero alone, on the dark stage the brand assets use: triangle silhouette at the hero fillet ratio (0.10, tighter than the mark's 0.16), the Spill bloom escaping past its edges, the 40px rainbow wordmark, and the quiet edit affordance — inert here because a story has no dispatcher."
+    description = "The hero alone, on the dark stage the brand assets use: triangle silhouette at the hero fillet ratio (0.10, tighter than the mark's 0.16), the Spill bloom escaping past its edges, and the 40px rainbow wordmark. The hero alone carries no controls — the way into the editor is the pill under the tagline on the landing page."
 )]
 fn brand_hero() -> Element {
     rsx! {

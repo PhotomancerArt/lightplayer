@@ -1,6 +1,7 @@
 ---
-status: open
+status: fixed
 found: 2026-08-26
+fixed: 2026-08-29
 area: lpa-server ProjectRead assembly vs classic ESP32 heap; surfaced by PR #448's transport fix
 related:
   - ../debt/shared-uart-io-task-starvation.md
@@ -56,3 +57,41 @@ this project until (1) or (2) lands.
 **Regression probe** — the full-initial-read shape should join
 `starvation-bench.py` as an advisory check once a fix direction is
 chosen (today it would only document the reset).
+
+**Progress (2026-08-28, wire-evolution round 1 — PR #457 + #458):**
+both defects have fixes on the branch; status stays `open` until the
+bench walk (G1) delivers the on-device verdict.
+
+1. *lpa-server half*: every whole-project materialization in the read
+   path is now per-item streaming — slot roots (#457), the shapes
+   registry (which was deep-cloned TWICE per read; the breadcrumb's
+   `SlotShape::clone` faulted here), tree deltas (now bounded
+   `TreeDeltas` batches), and the sink's per-flush batch clone. A
+   host-side allocator probe (`lp-core/lpc-engine/tests/
+   project_read_peak_memory.rs`) pins the shape: the Studio-shaped read
+   held 130 KB materialized vs 13.9 KB streamed on mini-dome, and fails
+   on regression to materialize-first. Unservable reads now REFUSE with
+   a terminal error (largest-free-block gate,
+   `PROJECT_READ_MIN_HEADROOM_BYTES`) instead of abort-resetting, and
+   each read limb stamps an OOM breadcrumb.
+2. *Sync architecture half*: Studio's monolithic initial read is no
+   longer constructible — the initial sync is staged (skeleton →
+   `ByIds` slot pages of 16, `since: None` → one probe per read), each
+   stage a PASS-row shape from the matrix above.
+
+**On-device verdict (2026-08-29 G1 bench walk, dig2go classic):**
+FIXED. The full monolithic read (detail + slots + both probes) that
+previously always reset the board now **completes 5/5** against a
+loaded project with headroom (small-dome, 64 KB largest block: 4–6
+frames, 78–120 events, ~1 s, zero resets) and is **refused 5/5** in
+0.8 s with the structured remedy-naming error against a genuinely
+starved board (zook-dome, ~19 KB largest — a heap so tight its own
+shader JIT OOMs). Deliberately lowering the gate to 16 KiB re-admitted
+the monolith and reproduced the OOM reset — with the new breadcrumb
+naming the limb (`alloc 480 bytes failed in "project read: shapes"`) —
+so the shipped 32 KiB floor is silicon-calibrated, not guessed. Studio
+end-to-end staged sync completed against the live classic (first
+successful classic sync ever), surfacing per-node engine statuses.
+Residuals tracked separately: probe results still materialize-then-
+chunk (ladder #9/#10), and flash writes wedge under multi-wire playback
+(`2026-08-29-flash-write-wedges-under-zook-playback.md`).

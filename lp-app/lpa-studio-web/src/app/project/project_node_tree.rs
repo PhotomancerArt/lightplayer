@@ -18,7 +18,8 @@ use lpa_studio_core::{
 use crate::app::affordance::{affordance_indicator_class, affordance_trigger_style};
 use crate::app::node::AddNodePicker;
 use crate::base::{
-    PopoverPlacement, StudioIcon, StudioIconName, focus_ring_class, node_kind_icon, row_edge_class,
+    PopoverPlacement, StudioIcon, StudioIconName, focus_ring_class, node_kind_icon,
+    row_edge_class, use_reveal_on_focus,
 };
 
 #[component]
@@ -105,6 +106,9 @@ fn ProjectNodeTreeItemView(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let focused = item.focused;
+    // Card→sidebar: focusing a card (clicking it in the workspace) reveals
+    // this row if the tree has scrolled it out of view.
+    let reveal = use_reveal_on_focus(focused);
     let action = item.action.clone();
     let affordance = item.affordance();
     let children = item.children;
@@ -127,6 +131,7 @@ fn ProjectNodeTreeItemView(
                 style: "padding-left: {indent}px;",
                 title: "{title}",
                 onclick: move |_| on_action.call(action.clone()),
+                onmounted: reveal,
                 span { class: "tw:inline-flex tw:h-4 tw:w-4 tw:items-center tw:justify-center tw:text-subtle-foreground",
                     StudioIcon {
                         name: kind_icon,

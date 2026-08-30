@@ -665,7 +665,7 @@ pub(crate) fn instances_from_map2d(text: &str) -> Vec<UiPatchInstance> {
 mod tests {
     use super::*;
 
-    /// The mini-dome's doors document, in miniature: instances address by
+    /// The small-dome's doors document, in miniature: instances address by
     /// path, and the stride is the ADDRESSED node's (the polygon's side,
     /// not the repeat's inner count).
     #[test]
