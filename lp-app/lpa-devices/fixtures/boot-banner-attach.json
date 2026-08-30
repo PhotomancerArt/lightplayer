@@ -1,0 +1,47 @@
+{
+  "name": "boot-banner attach: a blank board identified by its boot loop",
+  "steps": [
+    {
+      "at_ms": 0,
+      "do": { "attach": { "link": 2, "endpoint": "usb-2", "label": "/dev/cu.usbserial-2120" } }
+    },
+    {
+      "at_ms": 30,
+      "do": { "opened": { "link": 2 } }
+    },
+    {
+      "at_ms": 120,
+      "do": { "line": { "link": 2, "text": "ESP-ROM:esp32c6-20220919" } }
+    },
+    {
+      "at_ms": 140,
+      "do": { "line": { "link": 2, "text": "invalid header: 0xffffffff" } },
+      "expect": {
+        "pending": 1,
+        "devices": 0,
+        "pending_state": "New device found — identifying…"
+      }
+    },
+    {
+      "at_ms": 6000,
+      "do": "advance",
+      "expect": {
+        "pending": 1,
+        "devices": 0,
+        "pending_state": "New device found — Blank flash — needs firmware",
+        "pending_can_adopt": true,
+        "pending_escapes": ["Forget"],
+        "journal_notes": ["ActivityEnded"]
+      }
+    },
+    {
+      "at_ms": 7000,
+      "do": { "adopt": { "link": 2 } },
+      "expect": {
+        "devices": 1,
+        "pending": 0,
+        "journal_notes": ["DeviceCreated", "LinkRouted"]
+      }
+    }
+  ]
+}
