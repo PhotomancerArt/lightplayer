@@ -196,7 +196,11 @@ impl LpGraphics for NullGraphics {
         Err(unsupported("write sample outputs"))
     }
 
-    fn read_sample_out(&self, _out: &SampleOutHandle) -> Result<Vec<u16>, GfxError> {
+    fn read_sample_out_into(
+        &self,
+        _out: &SampleOutHandle,
+        _dst: &mut [u16],
+    ) -> Result<(), GfxError> {
         Err(unsupported("read sample outputs back"))
     }
 
@@ -293,6 +297,7 @@ mod tests {
         assert!(graphics.read_sample_points(&points).is_err());
         assert!(graphics.write_sample_out(&mut out, &[0; 4]).is_err());
         assert!(graphics.read_sample_out(&out).is_err());
+        assert!(graphics.read_sample_out_into(&out, &mut [0; 4]).is_err());
         assert!(graphics.clear_sample_out(&mut out).is_err());
 
         let other = TextureHandle::from_backend_parts(
