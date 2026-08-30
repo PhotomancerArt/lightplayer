@@ -75,6 +75,10 @@ pub struct OutcomeView {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum Escape {
     Cancel,
+    /// Re-grant the port through the chooser — offered on an offline card
+    /// that is WORTH reconnecting (known identity), because some bridges'
+    /// grants cannot survive a replug.
+    Reconnect,
     /// Re-run identification — offered when the link is up but the last
     /// identify settled in silence, so "try again" needs no replug.
     Retry,
@@ -147,6 +151,8 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
     }
     if device.link().is_some() {
         escapes.push(Escape::Disconnect);
+    } else if !device.identity.is_anonymous() {
+        escapes.push(Escape::Reconnect);
     }
     // Defined at the model level, therefore never conditioned away.
     escapes.push(Escape::Forget);
@@ -277,6 +283,24 @@ mod tests {
         assert_eq!(view.escapes, vec![Escape::Forget]);
         assert_eq!(view.state_label, "Offline");
         assert_eq!(view.title, "New device");
+    }
+
+    /// V3/CH340 (G1 2026-08-31): a bridge with no USB serial number loses
+    /// its grant on replug and the page CANNOT see the board again — the
+    /// known-but-offline card must offer the way back itself.
+    #[test]
+    fn a_known_offline_device_offers_reconnect() {
+        let device = Device::new(
+            DeviceId(3),
+            IdentityChain {
+                uid: Some(crate::identity::DeviceUid("dev_abc".to_string())),
+                ..Default::default()
+            },
+        );
+
+        let view = device_view(&device, Millis(0));
+
+        assert_eq!(view.escapes, vec![Escape::Reconnect, Escape::Forget]);
     }
 
     #[test]

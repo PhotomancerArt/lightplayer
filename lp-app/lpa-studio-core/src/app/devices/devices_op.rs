@@ -65,6 +65,12 @@ impl ControllerOp for DevicesOp {
                 "Open the port and ask the board what it is.",
                 ActionPriority::Primary,
             ),
+            Action::Reconnect { .. } => ActionMeta::new(
+                "Reconnect…",
+                "Pick this board's port again. Some boards can't be \
+                 re-recognized after a replug, so the browser asks once more.",
+                ActionPriority::Primary,
+            ),
             Action::Disconnect { .. } => ActionMeta::new(
                 "Disconnect",
                 "Close the port. The board keeps running; Studio stops watching it.",

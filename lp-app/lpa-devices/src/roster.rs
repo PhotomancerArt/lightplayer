@@ -229,6 +229,16 @@ impl Roster {
                 self.dismiss_pending(now, *link)
             }
             Action::Forget { device } => self.forget(now, *device, input),
+            // Roster-level like AddFromUsb — the chooser is the only way
+            // back to a board whose grant did not survive (a
+            // serial-number-less bridge loses it on replug); the picked
+            // port folds back into this device through the identity merge.
+            Action::Reconnect { device } => {
+                self.state
+                    .journal
+                    .record_input(now, Scope::Device(*device), input);
+                vec![Command::RequestUsbGrant]
+            }
             _ => {
                 // Device-targeted gestures reach pending links too: their
                 // provisional entry is a real fold with a real activity, so
@@ -821,6 +831,13 @@ impl RosterState {
 /// takes the fresher entry's bindings, name, live evidence and activity.
 fn absorb(into: &mut Device, from: Device) {
     into.identity.absorb(&from.identity);
+    // The endpoint is a transport ADDRESS, not an identity: the entry that
+    // carries the live link knows the current one (a re-granted port mints
+    // a fresh endpoint — V3/CH340 replug, G1 2026-08-31), and a stale
+    // binding would send the next arrival through another pending round.
+    if from.link().is_some() && from.identity.endpoint.is_some() {
+        into.identity.endpoint = from.identity.endpoint.clone();
+    }
     if into.intent.name.is_none() {
         into.intent.name = from.intent.name.clone();
     }
@@ -920,6 +937,52 @@ mod tests {
                 .journal()
                 .notes()
                 .any(|(_, note)| matches!(note, JournalNote::LinkRouted { .. }))
+        );
+    }
+
+    /// G1 bench, the V3/CH340 case (2026-08-31): a serial-number-less
+    /// bridge loses its Web Serial grant on replug (Chrome cannot re-match
+    /// the device), so recovery is re-granting through "Add a device" —
+    /// which arrives as a link on a BRAND NEW endpoint. The hello identity
+    /// must merge that into the known device: forget-then-re-add is never
+    /// required.
+    #[test]
+    fn a_regranted_port_on_a_new_endpoint_merges_into_the_known_device() {
+        let mut roster = Roster::new(RosterConfig::default());
+        roster.load_records(vec![DeviceRecord::new(
+            DeviceId(4),
+            IdentityChain {
+                endpoint: Some(EndpointKey("usb-1".to_string())),
+                uid: Some(DeviceUid("dev_abc".to_string())),
+                ..Default::default()
+            },
+        )]);
+
+        // The re-grant mints a new session, so a new endpoint key.
+        roster.handle(Millis(0), attach(LinkId(7), "usb-2"));
+        assert_eq!(roster.pending().len(), 1, "unknown endpoint identifies");
+
+        roster.handle(Millis(10), opened(LinkId(7), "usb-2"));
+        roster.handle(
+            Millis(20),
+            hello(LinkId(7), &roster_proto(&roster), "dev_abc"),
+        );
+
+        assert!(roster.pending().is_empty(), "the hello identity settles it");
+        assert_eq!(roster.devices().len(), 1, "merged, never duplicated");
+        let device = &roster.devices()[0];
+        assert_eq!(device.id, DeviceId(4), "the KNOWN entry survives");
+        assert_eq!(device.link(), Some(LinkId(7)));
+        assert_eq!(
+            device.identity.endpoint,
+            Some(EndpointKey("usb-2".to_string())),
+            "the endpoint binding follows the new grant"
+        );
+        assert!(
+            roster
+                .journal()
+                .notes()
+                .any(|(_, note)| matches!(note, JournalNote::DevicesMerged { .. }))
         );
     }
 

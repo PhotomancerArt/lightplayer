@@ -60,6 +60,13 @@ pub enum Action {
     Connect {
         device: DeviceId,
     },
+    /// "Reconnect…" on an offline card: re-ask the platform for a grant,
+    /// because this board's old grant may be unrecoverable (a bridge chip
+    /// with no serial number loses it on replug). The new port folds back
+    /// into the device through the identity merge, never a duplicate.
+    Reconnect {
+        device: DeviceId,
+    },
     Disconnect {
         device: DeviceId,
     },
@@ -97,7 +104,10 @@ impl Action {
             | Self::Identify { device }
             | Self::SetName { device, .. }
             | Self::SetAutoconnect { device, .. } => Some(*device),
-            Self::AddFromUsb | Self::AdoptLink { .. } | Self::DismissLink { .. } => None,
+            Self::AddFromUsb
+            | Self::Reconnect { .. }
+            | Self::AdoptLink { .. }
+            | Self::DismissLink { .. } => None,
         }
     }
 }

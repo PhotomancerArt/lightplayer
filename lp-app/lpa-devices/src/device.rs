@@ -290,6 +290,7 @@ impl Device {
             // remove the entry, and the link verbs address links.
             Action::Forget { .. }
             | Action::AddFromUsb
+            | Action::Reconnect { .. }
             | Action::AdoptLink { .. }
             | Action::DismissLink { .. } => Vec::new(),
         }
