@@ -30,6 +30,9 @@ to avoid dependencies — the interaction is equivalent.
 python3 spikes/serial-lab/server.py   # http://localhost:29188
 ```
 
+(`SERIAL_LAB_PORT=29189` overrides the port — useful when another
+session's lab server already holds 29188.)
+
 Human: open `http://localhost:29188/` in a real browser, click
 **Grant port**. Agent: everything below.
 
@@ -92,6 +95,14 @@ redeploying.
   2026-08-25-classic-uart-io-task-executor-isolation): current firmware
   lands ≥4 KB frames and answers requests under dome-scale load.
   `scripts/starvation-bench.py` verifies either way.
+- **Never arm global `setLogLevel Debug` through the lab page.** At
+  21 fps it floods hundreds of per-tick engine/provider lines per second
+  — this wedged the Brave tab three times during the 2026-08-29 classic
+  bring-up (each crash costs a human Grant re-click, see Browser
+  gotchas). The page now survives the rate, but the flood still evicts
+  your evidence window within seconds. If a device reconnects still at
+  Debug, send `{"setLogLevel":{"level":"Info"}}` **first**, before
+  anything else.
 - The boot hello arrives ~2–3 s after reset. A running server heartbeats
   every 5 s — connecting mid-stream means heartbeat-before-hello (this
   broke the wizard's gate; see the defect entry).
@@ -116,3 +127,21 @@ redeploying.
   not a protocol analyzer.
 - Timing measured in-page is subject to browser throttling of hidden
   tabs; keep the tab visible for timing-sensitive captures.
+- **Bounded log, by design** (hardened 2026-08-29 after Debug-flood tab
+  crashes): the DOM shows only the last **600** entries, appended in
+  batches (~20 flushes/sec max) instead of per line; the in-memory
+  buffer keeps the last **8000**. Older entries are dropped oldest-first
+  and the loss is visible: a header chip counts `dropped: view N ·
+  buf M`, and `buffer`/`capture` responses carry two additive fields —
+  `evicted` (entries newer than your `since` that were already pushed
+  out of the buffer, including by `clear`) and `truncated` (matched but
+  beyond `max`). **Scripts must treat `evicted > 0` or `truncated > 0`
+  as "I missed data"** instead of trusting `count` alone. The
+  pre-existing `{ok, count, entries}` shape is unchanged.
+- Consecutive binary lines (boot splats at the wrong baud) collapse
+  into one `bin` entry — `[binary xN, B bytes] <hex of first>` — which
+  is re-issued with a fresh `seq` each time it grows, so pollers using
+  `since` see the updated entry again.
+- Verified flood-proof with no hardware: ~2k synthetic lines/sec
+  sustained via `eval` (`lab.classify(...)` / `lab.ingest(bytes)` feed
+  the real RX path) keeps command round-trips under ~50 ms.
