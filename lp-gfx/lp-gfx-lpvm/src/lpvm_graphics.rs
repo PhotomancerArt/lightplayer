@@ -241,6 +241,19 @@ where
         ))
     }
 
+    fn read_back_into(&self, texture: &TextureHandle, out: &mut [u8]) -> Result<(), GfxError> {
+        let src = texture_buf(texture)?.data();
+        if out.len() != src.len() {
+            return Err(len_mismatch(
+                "texture read back bytes",
+                src.len(),
+                out.len(),
+            ));
+        }
+        out.copy_from_slice(src);
+        Ok(())
+    }
+
     fn create_sample_points(&self, count: u32) -> Result<SamplePointsHandle, GfxError> {
         let buffer = self
             .shared
