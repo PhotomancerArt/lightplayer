@@ -416,12 +416,37 @@ pub fn PopoverButton(
                                 stop { offset: "0", style: "stop-color: {grad_stop_near};" }
                                 stop { offset: "1", style: "stop-color: {grad_stop_far};" }
                             }
+                            // Diagonal spectrum for the decorative edge stroke
+                            // (G1-4). Same three stops as the glass panels'
+                            // masked ring, so both popover systems share one
+                            // edge language.
+                            linearGradient {
+                                id: "{gradient_id}-spectrum",
+                                x1: "0",
+                                y1: "0",
+                                x2: "1",
+                                y2: "1",
+                                stop { offset: "0", style: "stop-color: rgba(95, 224, 139, 0.4);" }
+                                stop { offset: "0.45", style: "stop-color: rgba(83, 198, 242, 0.35);" }
+                                stop { offset: "1", style: "stop-color: rgba(165, 138, 247, 0.4);" }
+                            }
                         }
                         path {
                             class: "ux-popover-outline-path",
                             d: "{outline}",
                             fill: "url(#{gradient_id})",
                             fill_rule: "evenodd",
+                        }
+                        // Spectrum edge (G1-4): a second stroke over the SAME
+                        // path, gradient-colored, visible only where the
+                        // chrome variant opts in (quiet/neutral) — a
+                        // status-toned popover keeps its pure semantic stroke
+                        // (semantics beat decoration).
+                        path {
+                            class: "ux-popover-outline-spectrum",
+                            d: "{outline}",
+                            fill: "none",
+                            stroke: "url(#{gradient_id}-spectrum)",
                         }
                     }
                     div {

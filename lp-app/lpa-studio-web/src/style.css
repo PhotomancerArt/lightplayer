@@ -3172,6 +3172,21 @@ label:has(> input:not(:disabled)) {
     filter: drop-shadow(0 16px 40px rgba(0, 0, 0, 0.34));
 }
 
+/* Decorative spectrum edge over the merged outline (G1-4 ruling
+   2026-08-30: "a little bland" without it). Rides ON TOP of the tone
+   stroke, but only where the chrome variant opts in — quiet/neutral
+   below; a status-toned popover keeps its pure semantic border. */
+.ux-popover-outline-spectrum {
+    stroke-width: 1;
+    opacity: var(--ux-popover-spectrum-edge, 0);
+    pointer-events: none;
+}
+
+.ux-popover-chrome-quiet,
+.ux-popover-chrome-neutral {
+    --ux-popover-spectrum-edge: 0.85;
+}
+
 /* The in-flow trigger while its visual is re-parented into the top layer:
    the button keeps its open-state classes, content, and size (so its
    baseline — and the line box around it — cannot shift and reflow the page)
