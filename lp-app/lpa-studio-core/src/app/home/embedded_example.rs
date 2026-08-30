@@ -685,7 +685,6 @@ static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
         id: "examples/logo-sign",
         name: "Logo Sign",
         kind: "Module",
-        blurb: "The LightPlayer logo as real LED art: a shaped matrix and a letter string",
         files: LOGO_SIGN_FILES,
     },
     EmbeddedExample {
