@@ -12,8 +12,8 @@ use crate::base::{InlineButton, InlineButtonTone, StudioIconName};
 fn tones() -> Element {
     let tones = [
         (
-            "Accent (default)",
-            InlineButtonTone::Accent,
+            "Action (default)",
+            InlineButtonTone::Action,
             StudioIconName::Add,
         ),
         ("Neutral", InlineButtonTone::Neutral, StudioIconName::Cancel),

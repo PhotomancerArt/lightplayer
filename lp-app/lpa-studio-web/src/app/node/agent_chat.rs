@@ -208,7 +208,7 @@ pub fn AgentChatPane(
             // handle) — the gate-feedback "cramped box" fix.
             div { class: "tw:flex tw:min-w-0 tw:items-end tw:gap-2 tw:border-t tw:border-border-muted tw:bg-card tw:px-3 tw:py-2",
                 textarea {
-                    class: "tw:field-sizing-content tw:min-h-20 tw:max-h-40 tw:min-w-0 tw:flex-1 tw:resize-y tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card-subtle tw:px-2.5 tw:py-2 tw:font-sans tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent-border",
+                    class: "tw:field-sizing-content tw:min-h-20 tw:max-h-40 tw:min-w-0 tw:flex-1 tw:resize-y tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card-subtle tw:px-2.5 tw:py-2 tw:font-sans tw:text-sm tw:text-strong-foreground tw:outline-none",
                     rows: 3,
                     placeholder: if source_resolved { "Ask for a change… (Enter sends, Shift+Enter for a new line)" } else { "Loading shader source…" },
                     value: "{draft}",

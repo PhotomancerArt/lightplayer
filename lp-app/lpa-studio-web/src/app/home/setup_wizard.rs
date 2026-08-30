@@ -661,7 +661,7 @@ fn provision_step(
                     "Device name"
                 }
                 input {
-                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:text-sm tw:text-strong-foreground tw:outline-none",
                     value: "{name}",
                     disabled: working,
                     oninput: move |event| {

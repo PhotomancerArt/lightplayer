@@ -398,7 +398,7 @@ fn SetupForm(
                     "Name your device"
                 }
                 input {
-                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-sm tw:text-strong-foreground tw:outline-none",
                     value: "{name_value}",
                     oninput: move |event| typed_name.set(Some(event.value())),
                 }
@@ -1832,7 +1832,7 @@ fn NameForm(
                     "Name your device"
                 }
                 input {
-                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    class: "tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-sm tw:text-strong-foreground tw:outline-none",
                     value: "{name_value}",
                     oninput: move |event| typed_name.set(Some(event.value())),
                 }
@@ -1878,7 +1878,7 @@ fn NameDeviceSheet(card_key: String, on_action: EventHandler<UiAction>) -> Eleme
                     }
                 },
                 input {
-                    class: "tw:mb-3 tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:text-sm tw:text-strong-foreground tw:outline-none tw:focus:border-accent",
+                    class: "tw:mb-3 tw:w-full tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:text-sm tw:text-strong-foreground tw:outline-none",
                     autofocus: true,
                     placeholder: "e.g. Porch sign",
                     value: "{name}",
