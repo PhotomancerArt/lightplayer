@@ -29,7 +29,6 @@ fn examples() -> Vec<UiExampleCard> {
         id: "examples/basic".to_string(),
         name: "Basic".to_string(),
         kind: "Module".to_string(),
-        blurb: "A single strip, the smallest complete project".to_string(),
     }]
 }
 

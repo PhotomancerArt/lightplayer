@@ -19,7 +19,6 @@ pub(crate) fn embedded_example_cards() -> Vec<UiExampleCard> {
             id: example.id.to_string(),
             name: example.name.to_string(),
             kind: example.kind.to_string(),
-            blurb: example.blurb.to_string(),
         })
         .collect()
 }
@@ -74,17 +73,15 @@ pub(crate) fn ExampleCard(
                 mode: ThumbMode::PosterFirst,
             }
             // The face is the art; the words are one shallow glass bar
-            // (card-overlay redesign). Title ONLY at rest — no menu, no
-            // glyphs, and no "Example" label: the shelf's own section
-            // header already says it, and repeating it on every card
-            // read as noise at the G1 gate (2026-08-26). Hover slides
-            // the bar up over the example's fixture blurb, in step with
-            // the live preview the same hover starts.
+            // (card-overlay redesign). Title ONLY — no menu, no glyphs,
+            // no "Example" label (the shelf's section header already
+            // says it), and no authored blurb: examples are just shared
+            // projects, and their cards wear the same quiet title-only
+            // bar a project card does (landing round 2026-08-29). Any
+            // per-example words will come from project DATA when the
+            // content system lands, not a compiled-in table.
             CardGlassFooter {
                 title: card.name.clone(),
-                reveal: (!opening && !card.blurb.is_empty()).then(|| rsx! {
-                    p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "{card.blurb}" }
-                }),
                 if opening {
                     // The live pipeline, not a static "Opening…": an example
                     // open never routes to the full opening frame, so on a
