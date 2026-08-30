@@ -84,7 +84,20 @@ impl ResolvedMap2d {
 
 /// Resolve a document into its ordered lamp list.
 pub fn resolve(doc: &Map2dDoc) -> Result<ResolvedMap2d, Map2dError> {
-    let mut lamps = Vec::new();
+    // The doc declares its lamp counts up front, so the lamp list is ONE
+    // exact-size allocation. Growing it push-by-push doubles capacity past
+    // the real need — at dome scale that is a device-killing contiguous ask
+    // (5,950 lamps: the 2048→4096-entry doubling asks 64 KiB mid-load, see
+    // docs/defects/2026-08-29-load-project-resets-instead-of-refusing.md).
+    // `shape_lamp_count` mirrors the resolver exactly (pinned by
+    // `shape_lamp_count_matches_the_resolver_for_every_kind`); for filled
+    // polygons it re-runs the lattice walk, which is editor-scale work.
+    let total_lamps: usize = doc
+        .objects
+        .iter()
+        .map(|object| shape_lamp_count(&object.shape) as usize)
+        .sum();
+    let mut lamps = Vec::with_capacity(total_lamps);
     let mut spans = Vec::new();
     for (object_index, object) in doc.objects.iter().enumerate() {
         let object_index = object_index as u32;
@@ -115,6 +128,11 @@ pub fn resolve(doc: &Map2dDoc) -> Result<ResolvedMap2d, Map2dError> {
             strand_start += count;
         }
     }
+    debug_assert_eq!(
+        lamps.len(),
+        total_lamps,
+        "shape_lamp_count drifted from the resolver — the exact-size reserve is broken"
+    );
     Ok(ResolvedMap2d { lamps, spans })
 }
 
@@ -282,7 +300,8 @@ fn resolve_ring(
         RingDir::Cw => 1.0f32,
         RingDir::Ccw => -1.0f32,
     };
-    let mut positions = Vec::new();
+    let total: u32 = rings_outer_first.iter().map(|(_, count)| *count).sum();
+    let mut positions = Vec::with_capacity(total as usize);
     for (radius, count) in rings_outer_first {
         let step = 360.0 / count as f32;
         for lamp in 0..count {
