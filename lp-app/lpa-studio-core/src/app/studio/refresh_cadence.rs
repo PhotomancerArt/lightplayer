@@ -5,10 +5,8 @@
 //! `LinkProviderKind` match in the web crate (the retired
 //! `ProjectRefreshCadence` enum + `project_refresh_interval_ms` functions);
 //! P4 moved it into core, and the runtime pool's P2 made it **per session**:
-//! cadence derives from each [`RuntimeSession`](crate::RuntimeSession)'s
-//! KIND ([`RefreshCadence::for_kind`]), the lens session drives the
-//! project-refresh tick, non-lens device sessions get the slow
-//! [`DEVICE_HEARTBEAT_INTERVAL`] status heartbeat, and the actor's
+//! the lens session drives the project-refresh tick, non-lens sessions get
+//! the slow [`DEVICE_HEARTBEAT_INTERVAL`] status heartbeat, and the actor's
 //! published delay is the minimum over sessions
 //! (`StudioController::next_refresh_interval`).
 //!
@@ -28,8 +26,6 @@
 //! polls calmly.
 
 use core::time::Duration;
-
-use crate::RuntimeKind;
 
 /// Fast completion-gap for the self-ticking browser simulator: the UI re-reads
 /// preview state at up to ~30 Hz so self-ticked previews stay visibly fresh.
@@ -110,7 +106,7 @@ pub const DEVICE_CARD_FEED_INTERVAL: Duration = Duration::from_millis(150);
 /// flickers the treatment, and short enough that a board which actually
 /// stopped publishing says so before anyone trusts a frozen picture.
 /// Consumed by the ▶ tab renderer (P3) against
-/// [`UiDeviceCard::frame_age_secs`](crate::UiDeviceCard::frame_age_secs).
+/// [`UiSimCard::frame_age_secs`](crate::UiSimCard::frame_age_secs).
 pub const FRAME_STALE_AFTER_SECS: f64 = 5.0;
 
 /// The default passive-refresh backoff base: start at 3 s (the retired flat
@@ -138,12 +134,12 @@ pub const VERDICT_CHASE_TICKS: u8 = 3;
 /// timer waits between enqueuing refresh ticks while the editor lens is on
 /// that session.
 ///
-/// This is data, not behaviour: [`Self::for_kind`] derives it from the
-/// session's [`RuntimeKind`] in core, and the UI timer just reads the delay
-/// the actor publishes. There is no `LinkProviderKind` match left in the
-/// view layer, and no shared flow-state singleton left in core (the retired
-/// `for_flow_state` read the one connect flow — a single-session
-/// assumption the runtime pool removed).
+/// This is data, not behaviour: core picks the cadence and the UI timer
+/// just reads the delay the actor publishes. There is no
+/// `LinkProviderKind` match left in the view layer, and no shared
+/// flow-state singleton left in core (the retired `for_flow_state` read
+/// the one connect flow — a single-session assumption the runtime pool
+/// removed).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RefreshCadence {
     interval: Duration,
@@ -164,15 +160,6 @@ impl RefreshCadence {
         }
     }
 
-    /// Derive the cadence from a session's runtime kind. The browser-worker
-    /// simulator gets the fast interval; hardware gets the device interval.
-    pub fn for_kind(kind: RuntimeKind) -> Self {
-        match kind {
-            RuntimeKind::Sim => Self::simulator(),
-            RuntimeKind::Device => Self::device(),
-        }
-    }
-
     /// The interval the UI timer waits between refresh ticks.
     pub fn interval(self) -> Duration {
         self.interval
@@ -190,17 +177,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sim_sessions_use_the_simulator_cadence() {
-        let cadence = RefreshCadence::for_kind(RuntimeKind::Sim);
-
-        assert_eq!(cadence.interval(), SIMULATOR_REFRESH_INTERVAL);
-    }
-
-    #[test]
-    fn device_sessions_use_the_device_cadence() {
-        let cadence = RefreshCadence::for_kind(RuntimeKind::Device);
-
-        assert_eq!(cadence.interval(), DEVICE_REFRESH_INTERVAL);
+    fn the_simulator_cadence_is_the_fast_one() {
+        assert_eq!(
+            RefreshCadence::simulator().interval(),
+            SIMULATOR_REFRESH_INTERVAL
+        );
+        assert_eq!(RefreshCadence::device().interval(), DEVICE_REFRESH_INTERVAL);
     }
 
     #[test]

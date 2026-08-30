@@ -11,12 +11,12 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, ProjectController, ProjectEditorOp, ProjectEditorView, ProjectInventorySummary,
     ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,
-    ProjectRuntimeSummary, ProjectState, ProjectSyncPhase, ProjectSyncSummary, RosterCardState,
-    UiAction, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConsoleView, UiDeviceCard,
-    UiDeviceProjectChip, UiIssue, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiMetric,
-    UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPaneView, UiProducedProduct,
-    UiProducedValue, UiSlotAsset, UiSlotSourceState, UiSlotValue, UiStatus, UiStudioView,
-    UiViewContent,
+    ProjectRuntimeSummary, ProjectState, ProjectSyncPhase, ProjectSyncSummary, SimCardState,
+    UiAction, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConsoleView, UiIssue,
+    UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiMetric, UiNodeChild, UiNodeHeader,
+    UiNodeSection, UiNodeTab, UiNodeView, UiPaneView, UiProducedProduct, UiProducedValue,
+    UiSimCard, UiSimProjectChip, UiSlotAsset, UiSlotSourceState, UiSlotValue, UiStatus,
+    UiStudioView, UiViewContent,
 };
 
 /// Timestamp shared by every story log fixture, so stories stay
@@ -33,38 +33,28 @@ fn story_view(panes: Vec<UiPaneView>, logs: Vec<UiLogEntry>) -> UiStudioView {
     UiStudioView::new(panes, console).with_lens_card(Some(simulator_lens_card()))
 }
 
-/// The editor's device surface (D43): a running simulator as the LENS
+/// The editor's runtime surface (D43): a running simulator as the LENS
 /// card. Every pane-layout story carries one — the shell renders no other
-/// device surface since the step-stack pane retired, and core pins
+/// runtime surface since the step-stack pane retired, and core pins
 /// "panes non-empty ⇒ lens card".
-pub(crate) fn simulator_lens_card() -> UiDeviceCard {
-    UiDeviceCard {
-        frame_preview: None,
-        frame_age_secs: None,
-        frame_fps: None,
-        port_label: None,
-        session_key: None,
-        uid: None,
-        name: "Simulator".to_string(),
-        transport: String::new(),
-        state: RosterCardState::RunningUpToDate,
-        project: Some(UiDeviceProjectChip {
+pub(crate) fn simulator_lens_card() -> UiSimCard {
+    UiSimCard {
+        state: SimCardState::Running,
+        project: Some(UiSimProjectChip {
             uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
             name: "demo-project".to_string(),
         }),
-        fw: None,
-        hardware: None,
-        safe_clamp: None,
-        sim: true,
+        board_id: None,
         console_tail: vec![UiLogEntry::new(
             STORY_LOG_TIMESTAMP,
             UiLogLevel::Info,
             UiLogSource::with_detail(UiLogOrigin::Device, "fw-browser"),
             "engine: project loaded",
         )],
+        frame_preview: None,
+        frame_age_secs: None,
+        frame_fps: None,
         ui: Default::default(),
-        detected_chip: None,
-        board_id: None,
     }
 }
 

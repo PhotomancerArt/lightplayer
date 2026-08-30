@@ -72,8 +72,6 @@ pub fn StudioShell(
         // the chrome renders the header session·project control (web_app
         // builds it from the editor pane's own view and this field)
         open_project_name: _,
-        // the lens card renders the sync facts (D43)
-        device_sync: _,
         lens_card,
         // the header session·project control's session, for the chrome
         session: _,
@@ -96,7 +94,7 @@ pub fn StudioShell(
         return match gallery {
             ShellGallery::Devices => rsx! {
                 div { class: "tw:grid tw:gap-7",
-                    DevicesPage { home: *home, now_secs, on_action }
+                    DevicesPage { home: *home, on_action }
                 }
             },
             ShellGallery::Projects => rsx! {
@@ -178,17 +176,14 @@ pub fn StudioShell(
                 if let Some(card) = lens_card {
                     // D43: the LENS session's card, grown — the same
                     // control panel the gallery shows, docked as the
-                    // editor's ONLY device surface. It is present
+                    // editor's ONLY runtime surface. It is present
                     // whenever panes render (pinned in core by
-                    // `panes_never_render_without_a_lens_card`), and
-                    // an unplugged device fades it rather than
-                    // removing it. The retired step-stack device pane
-                    // that used to backstop this branch is gone.
-                    crate::app::home::device_card::DeviceCard {
-                        sim: card.sim,
+                    // `panes_never_render_without_a_lens_card`). The
+                    // retired step-stack device pane that used to
+                    // backstop this branch is gone.
+                    crate::app::home::sim_card::SimCard {
                         pane: true,
                         card: *card,
-                        now_secs,
                         on_action,
                     }
                 }

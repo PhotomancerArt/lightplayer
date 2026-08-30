@@ -382,28 +382,18 @@ fn control_row(
 /// "Sim" when the project names no board (ruling Q6).
 fn sim_control(board: Option<&str>) -> UiChromeSessionControl {
     UiChromeSessionControl {
-        key: "sim".to_string(),
-        sim: true,
+        key: "runtime-sim".to_string(),
         name: "Sim".to_string(),
         board: board.map(str::to_string),
         status: UiChromeSessionStatus::Run,
-        busy: None,
         stat_line: board.map(|_| "60 fps · 217 lamps".to_string()),
     }
 }
 
-/// A connected, running hardware session — the device's own name IS the
-/// board, so it never wears a suffix (only the sim does, ruling 8.1).
+/// The hardware-session rows went with M2 of the device-model rebuild;
+/// what stands in is a boardless sim (the same lockup with no suffix).
 fn hardware_control() -> UiChromeSessionControl {
-    UiChromeSessionControl {
-        key: "dev_c6f0".to_string(),
-        sim: false,
-        name: "Garage dome".to_string(),
-        board: None,
-        status: UiChromeSessionStatus::Run,
-        busy: None,
-        stat_line: Some("USB · 217 lamps".to_string()),
-    }
+    sim_control(None)
 }
 
 /// A connected hardware session with nothing loaded — the honest-empty
