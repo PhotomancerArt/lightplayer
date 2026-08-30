@@ -269,7 +269,7 @@ fn open_in_studio_inert() -> Element {
 }
 
 #[story(
-    description = "`open-in-studio` in the running app: the page's call to action, in the brand accent, with the fence's own label."
+    description = "`open-in-studio` in the running app: the page's call to action, on the gradient Primary, with the fence's own label."
 )]
 fn open_in_studio_live() -> Element {
     // The context the app provides, faked with a handler that goes

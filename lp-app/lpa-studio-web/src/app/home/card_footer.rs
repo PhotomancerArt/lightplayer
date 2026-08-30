@@ -32,6 +32,9 @@ pub(crate) struct CardStatusGlyph {
 /// blue `status-working` = live/working, amber = needs attention).
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum GlyphTone {
+    /// Green went with the connected-device glyph (M2 of the device-model
+    /// rebuild — its only wearer); the rebuilt device model re-adds it.
+    #[allow(dead_code, reason = "the rebuilt device model re-wears green")]
     Good,
     Live,
     Attention,

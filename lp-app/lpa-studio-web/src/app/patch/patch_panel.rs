@@ -65,8 +65,8 @@ const STEP: &str = "tw:cursor-pointer tw:rounded-sm tw:border tw:border-border-s
 /// The same block, refusing: a verb with nothing to act on.
 const STEP_OFF: &str = "tw:rounded-sm tw:border tw:border-border-muted tw:bg-card-muted tw:px-2 tw:py-0.5 tw:font-mono tw:text-[10.5px] tw:leading-4 tw:text-dim-foreground tw:opacity-60";
 /// The invitation's own block — the one action a walk-up user is meant to
-/// find, so it wears the accent.
-const STEP_ARM: &str = "tw:cursor-pointer tw:rounded-sm tw:border tw:border-accent-border tw:bg-card-raised tw:px-2 tw:py-0.5 tw:font-mono tw:text-[10.5px] tw:leading-4 tw:text-accent tw:hover:text-strong-foreground";
+/// find, so it wears the bright Action treatment.
+const STEP_ARM: &str = "tw:cursor-pointer tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-raised tw:px-2 tw:py-0.5 tw:font-mono tw:text-[10.5px] tw:leading-4 tw:text-strong-foreground tw:hover:border-selection-border";
 /// Armed: the same block, wearing the selection language the armed strip
 /// and the pulsing lamps wear.
 const STEP_ARMED: &str = "tw:cursor-pointer tw:rounded-sm tw:border tw:border-selection-border tw:bg-selection-bg tw:px-2 tw:py-0.5 tw:font-mono tw:text-[10.5px] tw:leading-4 tw:text-selection-border";

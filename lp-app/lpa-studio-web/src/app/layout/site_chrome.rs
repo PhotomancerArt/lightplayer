@@ -488,7 +488,7 @@ pub fn PlayToggle(href: String, playing: bool) -> Element {
     }
 }
 
-/// One nav tab. Active: heading color + accent underline; inactive: subtle
+/// One nav tab. Active: heading color + selection underline; inactive: subtle
 /// text that brightens on hover. `secondary` is the lighter family
 /// treatment (reduced weight, dimmer at rest, full strength on
 /// hover/active — the spike's `.secondary`).
@@ -574,7 +574,7 @@ fn ToolCard(
     }
 }
 
-/// Current-destination treatment: heading color plus the accent underline.
+/// Current-destination treatment: heading color plus the selection underline.
 const NAV_TAB_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2.5 tw:after:-bottom-[11px] tw:after:h-0.5 tw:after:rounded-full tw:after:bg-heading tw:after:content-['']";
 /// Idle treatment: subtle text that brightens on hover.
 const NAV_TAB_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
@@ -586,7 +586,7 @@ const NAV_TAB_SECONDARY_ACTIVE: &str = "tw:relative tw:rounded-sm tw:px-2.5 tw:p
 /// hover.
 pub(crate) const NAV_TAB_SECONDARY_IDLE: &str = "tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:font-medium tw:text-subtle-foreground/70 tw:no-underline tw:transition-colors tw:hover:bg-background-wash tw:hover:text-strong-foreground";
 
-/// The lockup's wrapper at Home: the tabs' accent underline under the
+/// The lockup's wrapper at Home: the tabs' selection underline under the
 /// brand — the logo IS Home's tab, so at Home it marks the place like
 /// one. The offset differs from the tabs' because the lockup's box is
 /// shorter; both land the bar on the header's border line.

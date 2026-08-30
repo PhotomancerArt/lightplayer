@@ -1,6 +1,16 @@
 # Device identity anchored in silicon
 
-Status: as-built 2026-08-04 (ADR: 2026-08-04-device-identity-anchored-in-silicon)
+Status: PARTLY DELETED 2026-08-25 (M2 of the device-model rebuild); as-built
+2026-08-04 (ADR: 2026-08-04-device-identity-anchored-in-silicon)
+
+> ⚠️ **The connect-time RESOLUTION described here is deleted.** M2 of the
+> device-model rebuild removed `identity_resolution.rs`,
+> `places/device_identity.rs` and every flow that stamped or promoted a
+> uid. What SURVIVES is the durable half — `HardwareId` (the canonical
+> origin format) and `DeviceRegistry` (the record store and its on-disk
+> format), untouched and still the store the rebuilt model reads. The
+> rebuilt model's identity chain (endpoint → MAC → uid → name, with
+> promotion and merge as journaled operations) supersedes §3-§6 here.
 
 ## §1 · Problem (the pre-2026-08-04 scheme)
 

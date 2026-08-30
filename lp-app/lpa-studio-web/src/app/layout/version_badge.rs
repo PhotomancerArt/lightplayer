@@ -297,7 +297,7 @@ fn VersionFooter(repo: String) -> Element {
             // link switches the app into the full-screen design library.
             if cfg!(feature = "stories") {
                 a {
-                    class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-accent",
+                    class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-strong-foreground",
                     href: "/stories",
                     onclick: move |event| {
                         // App() only checks the story-book hash at mount, so
@@ -314,7 +314,7 @@ fn VersionFooter(repo: String) -> Element {
                 }
             }
             a {
-                class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-accent",
+                class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-strong-foreground",
                 href: "{repo_url(&repo)}",
                 target: "_blank",
                 rel: "noopener noreferrer",
@@ -324,7 +324,7 @@ fn VersionFooter(repo: String) -> Element {
             span { class: "tw:text-[0.68rem] tw:text-subtle-foreground",
                 "© {COPYRIGHT_YEAR} {AUTHOR} · "
                 a {
-                    class: "tw:text-subtle-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:text-accent",
+                    class: "tw:text-subtle-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:text-strong-foreground",
                     href: "{AUTHOR_URL}",
                     target: "_blank",
                     rel: "noopener noreferrer",
@@ -351,7 +351,7 @@ fn RecentUpdates(changelog: Vec<ChangelogEntry>, repo: String) -> Element {
                             }
                             if let Some(pr) = entry.pr {
                                 a {
-                                    class: "tw:ml-auto tw:inline-flex tw:shrink-0 tw:items-center tw:gap-1 tw:self-center tw:font-mono tw:text-[0.68rem] tw:text-subtle-foreground tw:hover:text-accent",
+                                    class: "tw:ml-auto tw:inline-flex tw:shrink-0 tw:items-center tw:gap-1 tw:self-center tw:font-mono tw:text-[0.68rem] tw:text-subtle-foreground tw:hover:text-strong-foreground",
                                     href: "{pr_url(&repo, pr)}",
                                     target: "_blank",
                                     rel: "noopener noreferrer",
@@ -380,7 +380,7 @@ fn VersionDetailRow(label: &'static str, value: String, href: Option<String>) ->
                 match href {
                     Some(href) => rsx! {
                         a {
-                            class: "tw:text-muted-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:text-accent",
+                            class: "tw:text-muted-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:text-strong-foreground",
                             href: "{href}",
                             target: "_blank",
                             rel: "noopener noreferrer",

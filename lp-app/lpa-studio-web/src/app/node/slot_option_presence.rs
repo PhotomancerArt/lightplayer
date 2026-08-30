@@ -348,11 +348,11 @@ fn presence_checkbox_button_class(disabled: bool) -> &'static str {
 }
 
 /// The square itself: fixed `h-4 w-4` in both states so presence flips never
-/// resize the indicator; the set state fills with the accent family plus the
+/// resize the indicator; the set state fills with the selection family plus the
 /// check glyph.
 fn presence_checkbox_square_class(included: bool) -> &'static str {
     if included {
-        "tw:inline-flex tw:h-4 tw:w-4 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-accent-border tw:bg-accent-wash tw:text-accent"
+        "tw:inline-flex tw:h-4 tw:w-4 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-selection-border tw:bg-selection-bg tw:text-strong-foreground"
     } else {
         "tw:inline-flex tw:h-4 tw:w-4 tw:flex-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-strong tw:bg-page"
     }

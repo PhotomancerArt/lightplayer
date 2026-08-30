@@ -16,13 +16,14 @@
 //!
 //! Every action here is inert (no-op): the stories explore presentation,
 //! not flows. Sections follow the design note's device table; the Health
-//! section's content comes from the real [`RosterCardState`] derivation so
-//! the exploration can't drift from the card vocabulary.
+//! section's content is the spike's own fixed copy (the device card
+//! vocabulary it mirrored went with M2 of the device-model rebuild; the
+//! exploration is an ERA RECORD, not a live surface).
 
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
-use lpa_studio_core::{RosterCardState, UiStatus};
+use lpa_studio_core::UiStatus;
 
 use crate::app::home::card_thumb::thumb_swatch_style;
 use crate::app::layout::{PaneChip, PaneChrome, PaneTone, StudioPane};
@@ -57,8 +58,11 @@ enum StatusCircleShape {
     Pulsing,
 }
 
-/// The retired circle's tone families, spike-local (see era note).
+/// The retired circle's tone families, spike-local (see era note): the
+/// whole grammar is kept even though the spike's fixed content only ever
+/// paints two of them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code, reason = "the retired grammar, kept whole")]
 enum StatusCircleTone {
     Neutral,
     Working,
@@ -106,25 +110,6 @@ fn StatusCircle(shape: StatusCircleShape, tone: StatusCircleTone) -> Element {
     rsx! {
         span { class: "{base} {paint}{motion}" }
     }
-}
-
-/// The retired core-spec → circle mapping, spike-local (see era note).
-fn circle_props(spec: lpa_studio_core::RosterStateSpec) -> (StatusCircleShape, StatusCircleTone) {
-    use lpa_studio_core::{RosterTreatment, UiStatusKind};
-    let shape = match spec.treatment {
-        RosterTreatment::Filled => StatusCircleShape::Solid,
-        RosterTreatment::Remembered => StatusCircleShape::Hollow,
-        RosterTreatment::Working => StatusCircleShape::Pulsing,
-    };
-    let tone = match spec.tone {
-        UiStatusKind::Neutral => StatusCircleTone::Neutral,
-        UiStatusKind::Working => StatusCircleTone::Working,
-        UiStatusKind::Good => StatusCircleTone::Good,
-        UiStatusKind::Warning => StatusCircleTone::Warning,
-        UiStatusKind::Attention => StatusCircleTone::Attention,
-        UiStatusKind::Error => StatusCircleTone::Error,
-    };
-    (shape, tone)
 }
 
 #[story(
@@ -205,7 +190,7 @@ fn pane_header() -> Element {
                     kind: "USB".to_string(),
                     chrome: PaneChrome {
                         tone: PaneTone::Warning,
-                        accent: false,
+                        selected: false,
                         chips: vec![PaneChip {
                             tone: PaneTone::Warning,
                             text: "Running v3 — behind".to_string(),
@@ -220,7 +205,7 @@ fn pane_header() -> Element {
                         // The node select control, copied from NodeSelectButton
                         // (unfocused) so node_pane stays untouched.
                         button {
-                            class: "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:border-accent-border tw:hover:text-accent",
+                            class: "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:border-border-strong tw:hover:text-strong-foreground",
                             r#type: "button",
                             aria_label: "Select this node so probes follow it",
                             title: "Select this node so probes follow it",
@@ -231,7 +216,7 @@ fn pane_header() -> Element {
                     kind: "Shader".to_string(),
                     chrome: PaneChrome {
                         tone: PaneTone::Warning,
-                        accent: false,
+                        selected: false,
                         chips: vec![PaneChip {
                             tone: PaneTone::Warning,
                             text: "2 unsaved".to_string(),
@@ -411,12 +396,11 @@ fn RichObjectCard(
     #[props(default = true)] affordance_button: bool,
     #[props(default = false)] initially_open: bool,
 ) -> Element {
-    let state = RosterCardState::RunningBehind {
-        observed_version: Some(3),
-        head_version: Some(5),
-    };
-    let (shape, tone) = circle_props(state.spec());
-    let status_line = state.status_line(0.0);
+    // The spike's own fixed copy for the Running-behind centerpiece (era
+    // record — the live vocabulary it used to read is being rebuilt).
+    let shape = StatusCircleShape::Solid;
+    let tone = StatusCircleTone::Attention;
+    let status_line = "Running an older version";
     let swatch = thumb_swatch_style("prj3fKq8Zr21bTxYw0A", false);
 
     rsx! {
@@ -638,9 +622,8 @@ fn danger_zone(treatment: DangerTreatment) -> Element {
 // Fake device data (realistic, fixed — never live)
 // ---------------------------------------------------------------------------
 
-/// The Health section for the centerpiece's Running-behind device. Its
-/// status line comes from the REAL card derivation ([`RosterCardState`]) —
-/// the Health section IS today's card state, per the design note.
+/// The Health section for the centerpiece's Running-behind device — the
+/// spike's own fixed copy (era record).
 fn health_running_behind() -> RichSectionSpec {
     RichSectionSpec {
         title: "Health",

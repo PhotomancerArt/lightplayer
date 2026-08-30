@@ -142,7 +142,7 @@ fn ProbeFindingCard(finding: ProbeFinding, on_settings: EventHandler<SettingsCom
                     for model in finding.models.iter().take(MAX_LISTED_MODELS) {
                         button {
                             key: "{model}",
-                            class: inline_text_button_class(InlineButtonTone::Accent, false),
+                            class: inline_text_button_class(InlineButtonTone::Action, false),
                             r#type: "button",
                             title: "Use this server and model",
                             onclick: {
@@ -266,7 +266,7 @@ pub fn AgentSettingsSection(
                     for (label , url) in agent.guidance.links {
                         a {
                             key: "{url}",
-                            class: "tw:text-[11px] tw:text-accent tw:underline",
+                            class: "tw:text-[11px] tw:text-muted-foreground tw:underline tw:transition-colors tw:hover:text-strong-foreground",
                             href: "{url}",
                             target: "_blank",
                             rel: "noopener noreferrer",

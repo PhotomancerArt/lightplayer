@@ -149,7 +149,7 @@ fn scrubbed() -> Element {
 }
 
 #[story(
-    description = "Running ×8: the zoom is FIXED (Q5 reversed at the live build — the speed-linked variant is banked for the input-recorder reel), so the ruler keeps its 1 s/5 s scale and ×8 shows as the strip streaming 8× faster. In a still capture only the fader tells: thumb at the top of the log track, readout seated on the ×8 detent in accent."
+    description = "Running ×8: the zoom is FIXED (Q5 reversed at the live build — the speed-linked variant is banked for the input-recorder reel), so the ruler keeps its 1 s/5 s scale and ×8 shows as the strip streaming 8× faster. In a still capture only the fader tells: thumb at the top of the log track, readout seated on the ×8 detent, bright."
 )]
 fn fast() -> Element {
     rsx! {

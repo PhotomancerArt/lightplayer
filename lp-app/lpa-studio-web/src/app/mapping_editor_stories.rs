@@ -385,7 +385,7 @@ fn polygon_populations_doc() -> Map2dDoc {
 }
 
 #[story(
-    description = "One authored outline, two populations (the polygon tool's whole point): the shaped matrix on the left is SELECTED — its authored silhouette promotes to a solid accent line and vertex handles sit on its corners, while its lamps stay a FIELD inside the neutral band its wiring sweeps — beside the same chevron populated along its perimeter, where the lamp band IS the shape."
+    description = "One authored outline, two populations (the polygon tool's whole point): the shaped matrix on the left is SELECTED — its authored silhouette promotes to a solid selection line and vertex handles sit on its corners, while its lamps stay a FIELD inside the neutral band its wiring sweeps — beside the same chevron populated along its perimeter, where the lamp band IS the shape."
 )]
 pub(crate) fn editor_filled_polygon_selected() -> Element {
     rsx! {

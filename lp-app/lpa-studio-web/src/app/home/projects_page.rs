@@ -5,7 +5,7 @@
 
 use dioxus::html::HasFileData;
 use dioxus::prelude::*;
-use lpa_studio_core::{HomeOp, RosterCardState, UiAction, UiHomeView, ZipBytes};
+use lpa_studio_core::{HomeOp, UiAction, UiHomeView, ZipBytes};
 
 use crate::app::home::gallery_paste::{install_paste_listener, paste_from_clipboard};
 use crate::app::home::gallery_preview::HoveredCard;
@@ -17,9 +17,11 @@ use crate::base::{StudioIcon, StudioIconName};
 use crate::core::quiet_action_class;
 
 /// The project library. "New" keeps the open-in-sim behavior (this is
-/// the library page, not the device flow); connected-EMPTY devices still
-/// grow "Put on <name>" buttons on every card (state-flow §1-A — the
-/// library IS the chooser for a freshly set-up board).
+/// the library page, not the device flow).
+///
+/// ⚠️ The "Put on \<name\>" rows a connected-EMPTY board grew on every
+/// card (state-flow §1-A — the library IS the chooser for a freshly
+/// set-up board) went with M2 of the device-model rebuild.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProjectsPage(
@@ -39,14 +41,6 @@ pub fn ProjectsPage(
     // (see `gallery_paste`).
     let _paste_listener = use_hook(move || install_paste_listener(on_action));
     let busy = home.opening.is_some();
-    // (key, name): with two empty boards attached the NAME no longer
-    // identifies the target (M4) — the key is what the push addresses.
-    let empty_devices: Vec<(String, String)> = home
-        .devices
-        .iter()
-        .filter(|card| !card.sim && matches!(card.state, RosterCardState::ConnectedEmpty))
-        .map(|card| (card.identity_key().to_string(), card.name.clone()))
-        .collect();
     let import_dropped = import_handler(on_action);
     let import_picked = import_dropped.clone();
 
@@ -134,7 +128,6 @@ pub fn ProjectsPage(
                                     busy,
                                     card,
                                     now_secs,
-                                    empty_devices: empty_devices.clone(),
                                     on_action,
                                 }
                             }
@@ -153,7 +146,7 @@ pub fn ProjectsPage(
             ArchivedProjectsSection {}
 
             if drag_active() > 0 {
-                div { class: "tw:pointer-events-none tw:absolute tw:inset-0 tw:z-10 tw:grid tw:place-items-center tw:rounded-md tw:border-2 tw:border-dashed tw:border-accent tw:bg-background/80",
+                div { class: "tw:pointer-events-none tw:absolute tw:inset-0 tw:z-10 tw:grid tw:place-items-center tw:rounded-md tw:border-2 tw:border-dashed tw:border-selection-border tw:bg-background/80",
                     p { class: "tw:m-0 tw:text-base tw:font-semibold tw:text-strong-foreground",
                         "Drop a project zip, or paste a project JSON envelope"
                     }

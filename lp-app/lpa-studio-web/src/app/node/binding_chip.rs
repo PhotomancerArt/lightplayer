@@ -14,7 +14,7 @@ pub enum BindingChipDirection {
     Publishes,
 }
 
-/// Small accent chip naming the bound endpoint inline on a row.
+/// Small violet chip naming the bound endpoint inline on a row.
 ///
 /// The full endpoint (with the `bus:` prefix) lives in the tooltip and the
 /// detail popover; the chip shows the compact channel name so bound rows

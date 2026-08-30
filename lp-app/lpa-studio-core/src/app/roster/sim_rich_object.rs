@@ -7,7 +7,7 @@
 //!
 //! | Section | tone source | weight | present when |
 //! |---|---|---|---|
-//! | Health | the card state's circle tone | Actionable | always |
+//! | Health | the card state's tone | Actionable | always |
 //! | Project | Neutral (the sim runs the pushed head — no drift) | Actionable | a project is loaded |
 //! | Danger zone | Neutral (never colors rollup) | Danger | always — Stop simulator |
 //!
@@ -25,10 +25,10 @@ use crate::app::rich_object::{RichLine, RichObjectView, RichSection, RichWeight}
 use crate::app::roster::board_display_name;
 use crate::core::status::UiStatusKind;
 
-use super::roster_card_state::RosterCardState;
+use super::sim_card_state::SimCardState;
 
 /// A sim section's affordance identity. Wiring to the concrete action is
-/// the renderer's job (matching [`super::DeviceDetailAffordance`]).
+/// the renderer's job.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SimDetailAffordance {
     /// Health, project loaded: the visible editor CTA (2026-07-26 walk —
@@ -43,15 +43,13 @@ pub enum SimDetailAffordance {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SimRichInput<'a> {
     /// The derived sim card state.
-    pub state: &'a RosterCardState,
+    pub state: SimCardState,
     /// The loaded project's display name, when one is loaded.
     pub project_name: Option<&'a str>,
     /// The board the sim claims to be (`vendor/product`), when it has one
     /// — vision D4. `None` (no board known) is the ordinary default and
     /// simply omits the line.
     pub board_id: Option<&'a str>,
-    /// f64 epoch seconds for status-line copy.
-    pub now_secs: f64,
 }
 
 /// Build the sim's rich-object view. Pure; the section table on the module
@@ -67,10 +65,7 @@ pub fn sim_rich_object(input: &SimRichInput<'_>) -> RichObjectView<SimDetailAffo
 /// everywhere (the popover can never disagree with the circle). With a
 /// project loaded it carries the visible editor CTA (the grow ⇲ stays).
 fn health_section(input: &SimRichInput<'_>) -> RichSection<SimDetailAffordance> {
-    let mut lines = vec![RichLine::new(
-        "status",
-        input.state.status_line(input.now_secs),
-    )];
+    let mut lines = vec![RichLine::new("status", input.state.status_line())];
     // D4: "as ESP32-S3 DevKitC-1" — the board this session pretends to be.
     // Omitted entirely when no board is known (the default), so an
     // untargeted sim card reads exactly as it did before.
@@ -84,7 +79,7 @@ fn health_section(input: &SimRichInput<'_>) -> RichSection<SimDetailAffordance> 
     }
     RichSection {
         title: "Health".to_string(),
-        tone: input.state.spec().tone,
+        tone: input.state.tone(),
         lines,
         chip: None,
         // No editor CTA (G1b ruling 5): the ▶ tab's Editor button and the
@@ -127,15 +122,12 @@ fn danger_section() -> RichSection<SimDetailAffordance> {
 mod tests {
     use super::*;
 
-    const NOW: f64 = 1_800_000_000.0;
-
     #[test]
     fn running_sim_carries_health_project_and_the_stop_danger_zone() {
         let view = sim_rich_object(&SimRichInput {
-            state: &RosterCardState::RunningUpToDate,
+            state: SimCardState::Running,
             project_name: Some("2026-07-02-0930-porch-sign"),
             board_id: None,
-            now_secs: NOW,
         });
         assert_eq!(titles(&view), vec!["Health", "Project", "Danger zone"]);
 
@@ -155,10 +147,9 @@ mod tests {
     #[test]
     fn empty_sim_omits_the_project_section_but_keeps_the_stop() {
         let view = sim_rich_object(&SimRichInput {
-            state: &RosterCardState::ConnectedEmpty,
+            state: SimCardState::Empty,
             project_name: None,
             board_id: None,
-            now_secs: NOW,
         });
         assert_eq!(titles(&view), vec!["Health", "Danger zone"]);
         assert_eq!(view.rollup().tone, UiStatusKind::Good);
@@ -178,10 +169,9 @@ mod tests {
         // D4: the sim inherits its board from the project it runs, and the
         // card's fact line names it with the CATALOG's display name.
         let view = sim_rich_object(&SimRichInput {
-            state: &RosterCardState::RunningUpToDate,
+            state: SimCardState::Running,
             project_name: Some("2026-07-02-0930-porch-sign"),
             board_id: Some("seeed/xiao-esp32-c6"),
-            now_secs: NOW,
         });
         let health = &view.sections[0];
         assert_eq!(health.lines[1].label, "board");
@@ -201,10 +191,9 @@ mod tests {
         // Advisory metadata may name a board this build doesn't carry —
         // the line degrades to the raw id rather than vanishing.
         let view = sim_rich_object(&SimRichInput {
-            state: &RosterCardState::ConnectedEmpty,
+            state: SimCardState::Empty,
             project_name: None,
             board_id: Some("acme/not-a-real-board"),
-            now_secs: NOW,
         });
         assert_eq!(view.sections[0].lines[1].value, "as acme/not-a-real-board");
     }

@@ -1,47 +1,26 @@
-//! The roster card-state vocabulary (device-UX direction, "Card grammar").
+//! The roster card vocabulary — what survives the device teardown.
 //!
-//! One honest, transport-independent state per roster card — device or
-//! live sim runtime — replacing the laundered booleans the gallery used
-//! to render. The vocabulary is a first-class concept: the same states may
-//! later drive on-device LEDs or richer displays, so [`RosterCardState`]
-//! stays free of web/UI types. See
-//! `docs/adr/2026-07-16-device-card-state-vocabulary.md`.
+//! The device half of this module (the 19-state `RosterCardState`, its
+//! evidence derivation, the device rich object, the firmware-update chip,
+//! the affordance set and the status-circle spec) was deleted in M2 of the
+//! device-model rebuild; the rebuilt model projects card state from its own
+//! DTOs. What remains is the LIVE SIMULATOR's card, which shared the
+//! vocabulary by accident rather than by need:
 //!
-//! Concept map:
-//! - [`roster_card_state`]: the state enum + its status-line copy (grows
-//!   as new states earn a place in the vocabulary — count it, don't quote
-//!   it here).
-//! - [`roster_state_spec`]: the status-circle spec (shape × status family).
-//! - [`roster_affordance`]: the one affordance each state carries (identity
-//!   only in M2 — wiring lands with the flows that make each state real).
-//! - [`roster_evidence`]: evidence inputs + the pure derivation function
-//!   (the normative state mapping lives on its module doc).
-//! - [`firmware_update`]: the standing "firmware update available" chip
-//!   comparison (+ the bundled-image evidence struct).
-//! - [`device_rich_object`]: the device as a rich object — the fixed
-//!   section schema behind the card's detail trigger, built on
-//!   [`crate::app::rich_object`].
-//! - [`sim_rich_object`]: the live simulator session as a rich object
-//!   (D36) — the same schema, only the honestly-applicable sections.
+//! - [`sim_card_state`]: the sim's two-row status vocabulary.
+//! - [`sim_rich_object`]: the live sim session as a rich object (D36) —
+//!   Health, Project, Danger zone.
 //! - [`card_tabs`]: sections → the card's icon tabs (M7′ — the card as
-//!   control panel; the popover renderers retire, the model survives).
+//!   control panel). Generic over the affordance type; the sim card's tab
+//!   row is built here.
 
 pub mod card_tabs;
-pub mod device_rich_object;
-pub mod firmware_update;
-pub mod roster_affordance;
-pub mod roster_card_state;
-pub mod roster_evidence;
-pub mod roster_state_spec;
+pub mod sim_card_state;
 pub mod sim_rich_object;
 
-pub use card_tabs::{CardTabView, DeviceCardTab, device_card_tabs};
-pub use device_rich_object::{DeviceDetailAffordance, DeviceRichInput, device_rich_object};
-pub use firmware_update::{BundledFirmware, firmware_update_available};
-pub use roster_affordance::RosterAffordance;
-pub use roster_card_state::{ConnectPhase, DegradedReason, DeviceFormatStanding, RosterCardState};
-pub use roster_evidence::{ConnectEvidence, RosterEvidence, derive_roster_card_state};
-pub use roster_state_spec::{RosterStateSpec, RosterTreatment};
+pub use card_tabs::{CardTab, CardTabView, card_tabs};
+pub use sim_card_state::SimCardState;
+pub use sim_rich_object::{SimDetailAffordance, SimRichInput, sim_rich_object};
 
 /// A board id's human name for card lines: the catalog's `display_name`
 /// when the id is a known board, else the raw id verbatim — advisory
@@ -53,4 +32,3 @@ pub fn board_display_name(board_id: &str) -> String {
         .map(|board| board.display_name.clone())
         .unwrap_or_else(|| board_id.to_string())
 }
-pub use sim_rich_object::{SimDetailAffordance, SimRichInput, sim_rich_object};

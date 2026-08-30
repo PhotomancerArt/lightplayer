@@ -132,7 +132,7 @@ pub(crate) fn format_rate(rate: f32) -> String {
 }
 
 /// Whether the rate is seated exactly on an octave detent (the readout
-/// wears the accent when it is).
+/// brightens to the strong neutral when it is).
 pub(crate) fn on_detent(rate: f32) -> bool {
     RATE_DETENTS.contains(&rate)
 }
@@ -359,21 +359,21 @@ pub fn TapeTransport(
     let rate_changed = transport.rate_override.is_some();
     // `button { font: inherit }` in the base sheet beats layered tw
     // utilities — the font is set explicitly here (wiring-UI lesson).
-    // Changed-tint outranks the run-state accent: an overridden control
+    // Changed-tint outranks the run-state tone: an overridden control
     // announces the override first (the glyph still says which state).
     let run_class = if play_state_changed {
         "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-status-attention-border tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-status-attention-foreground tw:disabled:cursor-default"
     } else if playing {
-        "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-border-strong tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-accent tw:disabled:cursor-default"
+        "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-border-strong tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-status-good-foreground tw:disabled:cursor-default"
     } else {
         "tw:inline-flex tw:h-7 tw:min-w-[34px] tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-[7px] tw:border tw:border-border-strong tw:bg-card-raised tw:px-2.5 tw:font-sans tw:text-xs tw:font-semibold tw:text-muted-foreground tw:hover:text-strong-foreground tw:disabled:cursor-default"
     };
     let readout_value_class = if rate_changed {
         "tw:font-semibold tw:text-status-attention-foreground"
     } else if on_detent(shown_rate) {
-        "tw:font-semibold tw:text-accent"
-    } else {
         "tw:font-semibold tw:text-strong-foreground"
+    } else {
+        "tw:font-semibold tw:text-muted-foreground"
     };
     // The shared fader reads editability off a field state (its own
     // wiring gate); the DTO encodes it as address presence.

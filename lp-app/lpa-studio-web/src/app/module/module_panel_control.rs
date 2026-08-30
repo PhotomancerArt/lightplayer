@@ -12,7 +12,7 @@
 //!
 //! | state | widget + label + value | reset glyph |
 //! |---|---|---|
-//! | Read, at default | accent arc at the authored default, subtle label | absent |
+//! | Read, at default | neutral arc at the authored default, subtle label | absent |
 //! | Read, following | **violet** arc at the LIVE value, violet label | absent |
 //! | Engaged (Latch) | **gold** arc + body ring at the HELD value, gold label | present |
 //!

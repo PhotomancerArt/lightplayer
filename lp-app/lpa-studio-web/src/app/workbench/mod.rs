@@ -44,7 +44,7 @@ pub(crate) mod workbench_stories;
 use dioxus::prelude::*;
 use lpa_mapping_editor::MapEditorSession;
 use lpa_studio_core::{
-    NodeId, ProjectEditorView, UiAction, UiDeviceCard, UiPaneView, UiPatchSurface, UiSelection,
+    NodeId, ProjectEditorView, UiAction, UiPaneView, UiPatchSurface, UiSelection, UiSimCard,
     UiViewContent,
 };
 
@@ -326,7 +326,7 @@ pub fn WorkbenchFrame(
     /// The lens session's device card — the Device panel's body. Pinned
     /// present by the core whenever panes render; an unplugged device
     /// fades rather than vanishes.
-    lens_card: Option<UiDeviceCard>,
+    lens_card: Option<UiSimCard>,
     running: bool,
     #[props(default)] now_secs: Option<f64>,
     /// The view tabs' targets, one slot per [`VIEWS`] row.
@@ -728,7 +728,7 @@ fn WorkbenchBand(
     }
 }
 
-/// One view tab: the nav-tab grammar (accent underline = you are here).
+/// One view tab: the nav-tab grammar (selection underline = you are here).
 /// Deliberately the band's only PROMINENT text — bigger, mixed case, a
 /// 2px underline against the panel tabs' quiet small-caps — so the
 /// hierarchy reads view tabs > panel tabs at a glance (R4-1). Plain
@@ -738,7 +738,7 @@ fn WorkbenchBand(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ViewTab(label: &'static str, href: String, active: bool) -> Element {
     let class = if active {
-        "tw:relative tw:px-3.5 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2 tw:after:bottom-0 tw:after:h-[2.5px] tw:after:rounded-full tw:after:bg-accent tw:after:content-[''] tw:max-[1240px]:px-2.5 tw:max-[1240px]:text-[13px]"
+        "tw:relative tw:px-3.5 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight tw:text-heading tw:no-underline tw:after:absolute tw:after:inset-x-2 tw:after:bottom-0 tw:after:h-[2.5px] tw:after:rounded-full tw:after:bg-selection-border tw:after:content-[''] tw:max-[1240px]:px-2.5 tw:max-[1240px]:text-[13px]"
     } else {
         "tw:px-3.5 tw:py-2 tw:text-sm tw:font-bold tw:tracking-tight tw:text-subtle-foreground tw:no-underline tw:transition-colors tw:hover:text-strong-foreground tw:max-[1240px]:px-2.5 tw:max-[1240px]:text-[13px]"
     };
@@ -794,7 +794,7 @@ fn PanelDock(
     panel: PanelId,
     view: WorkbenchView,
     panes: Vec<UiPaneView>,
-    lens_card: Option<UiDeviceCard>,
+    lens_card: Option<UiSimCard>,
     surface: Option<UiPatchSurface>,
     patch_selection: UiSelection,
     dive_focused: Option<NodeId>,
@@ -890,7 +890,7 @@ fn PanelBody(
     panel: PanelId,
     view: WorkbenchView,
     panes: Vec<UiPaneView>,
-    lens_card: Option<UiDeviceCard>,
+    lens_card: Option<UiSimCard>,
     surface: Option<UiPatchSurface>,
     patch_selection: UiSelection,
     dive_focused: Option<NodeId>,
@@ -980,11 +980,9 @@ fn PanelBody(
         },
         (PanelId::Device, _) => rsx! {
             if let Some(card) = lens_card {
-                crate::app::home::device_card::DeviceCard {
-                    sim: card.sim,
+                crate::app::home::sim_card::SimCard {
                     pane: true,
                     card,
-                    now_secs,
                     on_action,
                 }
             }

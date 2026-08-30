@@ -67,7 +67,9 @@ pub enum DeviceEventKind {
     /// A `DeviceState` transition. `from` is `None` only for the initial
     /// entry into `booting` at connect.
     State { from: Option<String>, to: String },
-    /// A `ConnectFlowState` transition in the device controller.
+    /// A connect-flow transition. Producer-less since M2 of the
+    /// device-model rebuild deleted the old connect flow; the kind stays
+    /// because the JSONL contract is append-only (extend, never rename).
     Flow { from: String, to: String },
     /// A runtime-pool lifecycle action (`install`, `remove`, `clear-slot`).
     Pool { action: String, detail: String },

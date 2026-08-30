@@ -1,13 +1,20 @@
 # Device setup flow
 
-Status: implemented as a pure reducer (P11, 2026-08-05). Graduated from the
-gallery-product-vision plan's `flow-spec.md` after its G1 ruling.
+Status: DELETED 2026-08-25 (M2 of the device-model rebuild). Implemented as
+a pure reducer (P11, 2026-08-05); graduated from the gallery-product-vision
+plan's `flow-spec.md` after its G1 ruling.
 
-**This document and `lp-app/lpa-studio-core/src/app/setup_flow/` are one
-artifact.** The §2 transition table below is the contract the reducer's
-match arms implement and the transition tests enforce. A change to either
-lands in the SAME commit as the change to the other — a doc that describes a
-machine the code does not implement is worse than no doc.
+> ⚠️ **Superseded — the machinery this document describes is deleted.**
+> M2 of the device-model rebuild (2026-08-25) tore the old device system
+> out of Studio down to an honest stub; the event-fold `Roster`/`Device`/
+> `Link`/`Activity` model in `lp-app/lpa-devices/` replaces it. Read this
+> as an ERA RECORD of what the pre-rebuild flow did and why — not as a
+> description of code that exists.
+
+The reducer this document was one artifact with
+(`lp-app/lpa-studio-core/src/app/setup_flow/`) is gone. Wizard v2 is round
+2 of the rebuild; whatever it becomes gets its own document, and the §2
+transition table below is the record of what the first one decided.
 
 The steps are **Connect → Flash → Provision → Device home**, with
 board-state detection inside Flash, naming derived at Provision, and full

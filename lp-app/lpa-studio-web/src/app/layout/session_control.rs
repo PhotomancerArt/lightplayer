@@ -98,7 +98,7 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
     // states worth announcing); a session with no project keeps the quiet
     // treatment rather than borrowing a status it does not have.
     let tone = style.map_or(IconMenuTone::Quiet, |style| style.tone);
-    let icon = style.map_or(kind_icon(session.sim), |style| style.icon);
+    let icon = style.map_or(kind_icon(), |style| style.icon);
     let label = control_label(&session, project.as_ref());
     // The save moment: the controller publishes Save/Revert on the editor's
     // `header_actions` exactly while persisted edits are pending, so their
@@ -109,17 +109,13 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
         .unwrap_or_default();
     let board = board_suffix(&session);
     let name = session.name.clone();
-    let kind_title = if session.sim {
-        "This tab's session — the simulator"
-    } else {
-        "This tab's session — the connected device"
-    };
+    let kind_title = "This tab's session — the simulator";
 
     let trigger = rsx! {
         // Device segment: kind glyph, D16 status dot, name, board suffix.
         span { class: SEGMENT_CLASS, title: "{kind_title}",
-            span { class: kind_glyph_class(session.sim),
-                StudioIcon { name: kind_icon(session.sim), size: 12 }
+            span { class: kind_glyph_class(),
+                StudioIcon { name: kind_icon(), size: 12 }
             }
             span { class: dot_class(session.status) }
             // The md fold: below the 900px cut the glyph and the dot carry
@@ -238,21 +234,19 @@ pub fn SessionPanel(
 ) -> Element {
     let run = run_word(&session);
     let stat_line = device_stat_line(&session);
-    let hint = session_hint(session.sim);
+    let hint = session_hint();
     rsx! {
         // Device zone: the muted band, so the panel's first read is "what
         // is running", not "what is edited".
         section { class: "tw:grid tw:gap-0.5 tw:bg-card-muted tw:px-3 tw:py-2",
             div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
-                span { class: kind_glyph_class(session.sim),
-                    StudioIcon { name: kind_icon(session.sim), size: 13 }
+                span { class: kind_glyph_class(),
+                    StudioIcon { name: kind_icon(), size: 13 }
                 }
                 strong { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-sm tw:text-strong-foreground",
                     "{session.name}"
                 }
-                // The run word — or, while an operation is in flight, its
-                // label: that is also what the nav guard refuses on, so the
-                // panel and the refusal toast name the same work.
+                // The run word.
                 span { class: "tw:ml-auto tw:flex-none tw:text-xs {run.class}", "{run.text}" }
             }
             if let Some(stat_line) = stat_line.as_ref() {
@@ -273,29 +267,23 @@ pub fn SessionPanel(
 }
 
 /// The session's kind glyph: the violet sim mark (the bound-family
-/// convention the sim card wears), the transport icon for hardware — USB
-/// today; the slot grows network/BT glyphs with those transports.
-fn kind_icon(sim: bool) -> StudioIconName {
-    if sim {
-        StudioIconName::Simulator
-    } else {
-        StudioIconName::Usb
-    }
+/// convention the sim card wears). The transport icons for hardware
+/// return with the rebuilt device model.
+fn kind_icon() -> StudioIconName {
+    StudioIconName::Simulator
 }
 
-fn kind_glyph_class(sim: bool) -> &'static str {
-    if sim {
-        "tw:flex tw:flex-none tw:items-center tw:text-status-bound-foreground"
-    } else {
-        "tw:flex tw:flex-none tw:items-center tw:text-subtle-foreground"
-    }
+fn kind_glyph_class() -> &'static str {
+    "tw:flex tw:flex-none tw:items-center tw:text-status-bound-foreground"
 }
 
 /// The D16 status dot, the same three-value vocabulary the strip collapses
-/// to: accent run / amber attention / hollow connected-empty.
+/// to: good-green run / amber attention / hollow connected-empty.
 fn dot_class(status: UiChromeSessionStatus) -> &'static str {
     match status {
-        UiChromeSessionStatus::Run => "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-accent",
+        UiChromeSessionStatus::Run => {
+            "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-good-foreground"
+        }
         UiChromeSessionStatus::Attention => {
             "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-attention-foreground"
         }
@@ -337,14 +325,10 @@ fn state_glyph_class(affordance: Option<UiAffordance>) -> &'static str {
 }
 
 /// The sim's board suffix (`· ESP32-C6`, ruling 8.1: the sim names the board
-/// it simulates). Hardware never wears one — a board's own name IS the
+/// it simulates). Hardware never wore one — a board's own name IS the
 /// device name, and repeating it would read as two devices.
 fn board_suffix(session: &UiChromeSessionControl) -> Option<String> {
-    session
-        .sim
-        .then(|| session.board.clone())
-        .flatten()
-        .filter(|board| !board.is_empty())
+    session.board.clone().filter(|board| !board.is_empty())
 }
 
 /// Save and Revert, picked out of the editor's `header_actions` by their
@@ -361,8 +345,8 @@ fn save_and_revert(actions: &[UiPaneAction]) -> (Option<UiAction>, Option<UiActi
     (pick("save"), pick("revert"))
 }
 
-/// The device zone's mono stat line: what the sim is simulating (8.1) ahead
-/// of core's own stat line ("60 fps · USB"). `None` when the session has
+/// The runtime zone's mono stat line: what the sim is simulating (8.1)
+/// ahead of core's own stat line ("60 fps"). `None` when the session has
 /// published nothing honest to say.
 fn device_stat_line(session: &UiChromeSessionControl) -> Option<String> {
     let simulating = board_suffix(session).map(|board| format!("simulating {board}"));
@@ -379,15 +363,12 @@ struct RunWord {
     class: &'static str,
 }
 
-/// An operation in flight OUTRANKS the run state: it is the thing that will
-/// refuse a nav-away, so the panel names it where the eye lands first.
+/// The run state, as the panel's right-aligned word.
+///
+/// ⚠️ The in-flight OPERATION label used to outrank it (a flash/deploy is
+/// what a nav-away is refused for); it went with M2 of the device-model
+/// rebuild along with the ops that set it.
 fn run_word(session: &UiChromeSessionControl) -> RunWord {
-    if let Some(busy) = session.busy.as_ref() {
-        return RunWord {
-            text: busy.clone(),
-            class: "tw:text-status-working-foreground",
-        };
-    }
     match session.status {
         UiChromeSessionStatus::Run => RunWord {
             text: "running".to_string(),
@@ -407,12 +388,8 @@ fn run_word(session: &UiChromeSessionControl) -> RunWord {
 /// The panel's footer line: the single-session policy said plainly, because
 /// the consequence of navigating away is otherwise invisible. The document
 /// is durable (the draft overlay persists) — the SESSION is what ends.
-fn session_hint(sim: bool) -> &'static str {
-    if sim {
-        "This tab is the session — close it or navigate away to stop the simulator."
-    } else {
-        "This tab is the session — close it or navigate away to stop and disconnect."
-    }
+fn session_hint() -> &'static str {
+    "This tab is the session — close it or navigate away to stop the simulator."
 }
 
 /// The trigger's accessible name and tooltip: both halves of what the
@@ -467,9 +444,10 @@ const SAVE_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer t
 // revert/discard-edit action InlineButton's Warning tone is scoped to.
 /// The unsaved count, the header chip's pill verbatim (D8): mono, amber,
 /// pill-shaped — the same badge the pane's own affordances wear.
-/// The transient-example marker: accent-tinted, quiet, always present
-/// while viewing (unlike the amber count, which only appears dirty).
-const EXAMPLE_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border-accent-border tw:bg-accent-wash tw:px-1.5 tw:text-[9.5px] tw:font-semibold tw:text-accent";
+/// The transient-example marker: the lavender-grey EXAMPLE provenance
+/// family (accent reckoning D3) — quiet, always present while viewing
+/// (unlike the amber count, which only appears dirty).
+const EXAMPLE_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border-status-example-border tw:bg-status-example-bg tw:px-1.5 tw:text-[9.5px] tw:font-semibold tw:text-status-example-foreground";
 
 const COUNT_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:font-mono tw:text-[9.5px] tw:font-semibold tw:text-status-warning-foreground";
 
@@ -479,14 +457,12 @@ mod tests {
 
     use super::*;
 
-    fn session(sim: bool, board: Option<&str>) -> UiChromeSessionControl {
+    fn session(board: Option<&str>) -> UiChromeSessionControl {
         UiChromeSessionControl {
-            key: "runtime-1".to_string(),
-            sim,
-            name: if sim { "Sim" } else { "Garage dome" }.to_string(),
+            key: "runtime-sim".to_string(),
+            name: "Sim".to_string(),
             board: board.map(str::to_string),
             status: UiChromeSessionStatus::Run,
-            busy: None,
             stat_line: None,
         }
     }
@@ -521,66 +497,50 @@ mod tests {
         assert_eq!(save_and_revert(&[]), (None, None));
     }
 
-    /// Ruling 8.1: the sim names the board it simulates. Hardware does not —
-    /// the device name already IS the board.
+    /// Ruling 8.1: the sim names the board it simulates.
     #[test]
-    fn only_the_sim_wears_a_board_suffix() {
+    fn the_sim_wears_the_board_it_simulates() {
         assert_eq!(
-            board_suffix(&session(true, Some("ESP32-C6"))),
+            board_suffix(&session(Some("ESP32-C6"))),
             Some("ESP32-C6".to_string())
         );
-        assert_eq!(board_suffix(&session(true, None)), None);
-        assert_eq!(board_suffix(&session(false, Some("ESP32-C6"))), None);
+        assert_eq!(board_suffix(&session(None)), None);
+        assert_eq!(board_suffix(&session(Some(""))), None);
     }
 
     #[test]
     fn the_stat_line_leads_with_what_the_sim_simulates() {
-        let mut sim = session(true, Some("ESP32-C6"));
-        sim.stat_line = Some("60 fps · 217 lamps".to_string());
+        let mut sim = session(Some("ESP32-C6"));
+        sim.stat_line = Some("60 fps".to_string());
         assert_eq!(
             device_stat_line(&sim),
-            Some("simulating ESP32-C6 · 60 fps · 217 lamps".to_string())
-        );
-
-        let mut hardware = session(false, None);
-        hardware.stat_line = Some("USB · 217 lamps".to_string());
-        assert_eq!(
-            device_stat_line(&hardware),
-            Some("USB · 217 lamps".to_string())
+            Some("simulating ESP32-C6 · 60 fps".to_string())
         );
 
         // Nothing published, nothing said — no empty mono line.
-        assert_eq!(device_stat_line(&session(false, None)), None);
+        assert_eq!(device_stat_line(&session(None)), None);
     }
 
-    /// The in-flight label outranks the run state: it is what a nav-away
-    /// would be refused for, so it is what the panel says.
     #[test]
-    fn the_busy_label_wins_over_the_run_state() {
-        let mut busy = session(true, None);
-        busy.busy = Some("Deploying…".to_string());
-        assert_eq!(run_word(&busy).text, "Deploying…");
+    fn the_run_word_follows_the_status_dot() {
+        assert_eq!(run_word(&session(None)).text, "running");
 
-        assert_eq!(run_word(&session(true, None)).text, "running");
-
-        let mut empty = session(false, None);
+        let mut empty = session(None);
         empty.status = UiChromeSessionStatus::Empty;
         assert_eq!(run_word(&empty).text, "idle");
     }
 
-    /// Leaving costs a stop for the sim and a stop PLUS a disconnect for
-    /// hardware; the hint has to say which.
+    /// Leaving costs a stop; the hint has to say so.
     #[test]
     fn the_hint_names_what_leaving_actually_ends() {
-        assert!(session_hint(true).ends_with("stop the simulator."));
-        assert!(session_hint(false).ends_with("stop and disconnect."));
+        assert!(session_hint().ends_with("stop the simulator."));
     }
 
     /// The trigger is one button, so its accessible name carries both
     /// halves — including the honest-empty state.
     #[test]
     fn the_trigger_label_carries_both_halves() {
-        let label = control_label(&session(true, Some("ESP32-C6")), None);
+        let label = control_label(&session(Some("ESP32-C6")), None);
         assert_eq!(label, "Sim · ESP32-C6 — no project open");
     }
 }

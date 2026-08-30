@@ -16,7 +16,7 @@ browser, and the built-in simulator means you don't need any hardware to start p
 
 ![LightPlayer Studio — editing a show with live node previews, shader knobs, and the built-in simulator](https://raw.githubusercontent.com/PhotomancerArt/lightplayer-stories/latest/images/studio__readme__studio-hero__lg.png)
 
-![Studio home — the simulator and devices running projects, your library, and examples](https://raw.githubusercontent.com/PhotomancerArt/lightplayer-stories/latest/images/studio__readme__home-gallery__lg.png)
+![Studio home — the simulator running a project, your library, and examples](https://raw.githubusercontent.com/PhotomancerArt/lightplayer-stories/latest/images/studio__readme__home-gallery__lg.png)
 
 **What makes it different:**
 
