@@ -27,7 +27,7 @@ use crate::app::story_fixtures::project_editor_fixture;
 use crate::base::{LogoLockup, LogoMark};
 
 #[story(
-    description = "Wide bar, one row per section: primary family (Devices, Projects) full weight by the brand; secondary family (Explore, Boards, Docs) lighter on the right; Home lights no tab — the logo is its affordance."
+    description = "Wide bar, one row per section: primary family (Devices, Projects) full weight by the brand; secondary family (Boards, Docs) lighter on the right; Home lights no tab — the logo is its affordance."
 )]
 pub(crate) fn sections_active() -> Element {
     rsx! {
@@ -35,7 +35,6 @@ pub(crate) fn sections_active() -> Element {
             for section in [
                 SiteSection::Devices,
                 SiteSection::Projects,
-                SiteSection::Explore,
                 SiteSection::Boards,
                 SiteSection::Docs,
                 SiteSection::Home,
@@ -194,7 +193,7 @@ pub(crate) fn control_fold_sm() -> Element {
 
 #[story(
     label = "Studio mode — Docs/Boards \u{2197}",
-    description = "A lens route fronted (single-session policy): Boards and Docs carry the \u{2197} new-tab mark in the secondary family, because from here they open a NEW tab rather than ending the session (ruling R8-3, amended 8.1) — Explore stays a plain link, a real exit."
+    description = "A lens route fronted (single-session policy): Boards and Docs carry the \u{2197} new-tab mark in the secondary family, because from here they open a NEW tab rather than ending the session (ruling R8-3, amended 8.1)."
 )]
 pub(crate) fn studio_mode_bar() -> Element {
     control_row(

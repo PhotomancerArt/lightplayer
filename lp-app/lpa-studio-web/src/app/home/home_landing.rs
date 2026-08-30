@@ -1,5 +1,5 @@
 //! The Home landing page (`/`, vision D14 / spike §5): the brand hero, a
-//! one-line tagline, three dive-in cards. Still no marketing depth — but
+//! one-line tagline, two dive-in cards. Still no marketing depth — but
 //! the stub's static lockup is gone: [`BrandHero`] makes the mark's
 //! triangle a window onto a live engine shader, so the landing demonstrates
 //! the product instead of describing it. Reached through the logo only —
@@ -19,7 +19,7 @@ use crate::app::home::package_card::home_action;
 use crate::base::{StudioIcon, StudioIconName};
 use crate::cloud::SharedOpenState;
 
-/// The landing stub: the brand, what this is, three ways in, and the
+/// The landing stub: the brand, what this is, two ways in, and the
 /// example grid.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -70,16 +70,25 @@ pub fn HomePage(
                 }
                 EditShaderPencil { on_action }
             }
-            nav { class: "tw:grid tw:w-[min(680px,100%)] tw:grid-cols-3 tw:gap-3 tw:max-[640px]:grid-cols-1",
+            // Two ways in, and both ARE the setup flow (landing round
+            // 2026-08-29): "Devices" used to land on a bare roster page,
+            // so both cards now ride the sim card's pattern — land on
+            // Devices WITH the wizard already walking the right flow
+            // (same op as the Devices page's own entry cards). Explore's
+            // card is gone with the page's nav presence: it only showed
+            // the examples this very page lists in full.
+            nav { class: "tw:grid tw:w-[min(480px,100%)] tw:grid-cols-2 tw:gap-3 tw:max-[640px]:grid-cols-1",
                 DiveInCard {
                     icon: StudioIconName::Usb,
-                    title: "Devices",
-                    detail: "Your boards and the simulator — set up, connect, play.",
+                    title: "Connect a device",
+                    detail: "Plug a board in over USB and set it up.",
                     href: "/devices",
+                    on_press: on_action.map(|on_action| {
+                        EventHandler::new(move |()| {
+                            on_action.call(home_action(HomeOp::StartSetup { sim: false }));
+                        })
+                    }),
                 }
-                // The sim path: land on Devices WITH the wizard already
-                // walking the simulate-a-device flow (same op as the
-                // Devices page's entry card).
                 DiveInCard {
                     icon: StudioIconName::Simulator,
                     title: "Try the simulator",
@@ -91,12 +100,6 @@ pub fn HomePage(
                         })
                     }),
                 }
-                DiveInCard {
-                    icon: StudioIconName::Play,
-                    title: "Explore",
-                    detail: "Example projects to open, run, and make yours.",
-                    href: "/explore",
-                }
             }
             // The example grid (D5, widened at G1 to ALL examples): real,
             // running content one click deep — viewing is stateless (D2),
@@ -104,15 +107,18 @@ pub fn HomePage(
             // literally the model now. Rendered dispatcher-less too
             // (stories, host mounts): the cards are compiled-in content
             // and clicks just no-op there.
-            section { class: "tw:grid tw:w-[min(1080px,100%)] tw:gap-3 tw:text-left",
-                header { class: "tw:flex tw:items-baseline tw:justify-between",
+            // Landing round 2026-08-29: the section holds the page's
+            // column (its 1080px read as a different page bolted on),
+            // ALL the examples are already here so the "Explore all"
+            // door is gone, and the header earns one line of what these
+            // cards actually are.
+            section { class: "tw:mt-2 tw:grid tw:w-[min(760px,100%)] tw:gap-4 tw:text-left",
+                header { class: "tw:grid tw:gap-1",
                     h2 { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
                         "Examples"
                     }
-                    a {
-                        class: "tw:text-xs tw:font-semibold tw:text-accent tw:no-underline tw:hover:underline",
-                        href: "/explore",
-                        "Explore all →"
+                    p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-muted-foreground",
+                        "Real projects, running live — open one to play with it. Saving makes a copy that's yours."
                     }
                 }
                 div { class: crate::app::home::card_grid_class(),

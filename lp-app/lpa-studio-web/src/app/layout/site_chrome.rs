@@ -1,14 +1,17 @@
 //! [`SiteChrome`]: the one top bar shared by every section of the app.
 //!
-//! Home, Devices, Projects, Explore, Boards, and Docs are sections of a
+//! Home, Devices, Projects, Boards, and Docs are sections of a
 //! single cohesive app; this bar is their common navigation — "chrome C"
 //! (vision D1/D11, gate-judged spike `spikes/gallery-rework/index.html`;
 //! the original three-tab bar was spike PR #269, `spikes/top-bar/`):
 //!
 //! - **Split weights.** The primary family (Devices, Projects — your
 //!   things) sits by the brand at full weight; the secondary family
-//!   (Explore, Boards, Docs — the world's things) rides the right
-//!   cluster, lighter, with no divider between the families.
+//!   (Boards, Docs — the world's things) rides the right cluster,
+//!   lighter, with no divider between the families. (Explore was a
+//!   secondary tab too, hidden with the landing round 2026-08-29: until
+//!   a real content system exists it only repeated the landing's
+//!   example grid. `/explore` still renders for typed URLs.)
 //! - **The brand lockup is the way to Home.** The logo links to `/` —
 //!   Home is the root landing (Yona 2026-08-06) — and there is
 //!   deliberately no Home tab, and no Studio tab either (the sections
@@ -17,7 +20,7 @@
 //!   menus read as clutter — merge them ALL). The single ⋯ at the bar's
 //!   end always holds the tools, and grows the secondary sections at
 //!   narrow widths when the inline tabs collapse (the bar is a
-//!   container; the cut is where three secondary tabs stop fitting, not
+//!   container; the cut is where the secondary tabs stop fitting, not
 //!   a viewport magic number). The brand word yields at narrow too — the
 //!   mark stays.
 //! - **The narrow ladder is conditional on load.** A bar carrying the
@@ -45,9 +48,7 @@
 //!   lens route, going anywhere else ENDS the tab's session. Docs and
 //!   Boards are the exception, and they earn it by not going anywhere —
 //!   in studio mode they open a NEW tab, so reference material never
-//!   costs you the thing you were building. Explore is a plain exit: it
-//!   is a gallery of live projects, a real section of the app (ruling
-//!   R8-3, amended 8.1).
+//!   costs you the thing you were building (ruling R8-3, amended 8.1).
 //! - **The editors are tools, not sections.** The mapping editor and
 //!   board editor stay outside the tab row, in the ⋯ menu's Tools group.
 //!
@@ -152,9 +153,7 @@ pub fn SiteChrome(
     // session (single-session policy — leaving ends it). Docs and Boards
     // are reference material you read WHILE building, so from here they
     // open a new tab and the session behind them keeps running (ruling
-    // R8-3, amended 8.1). Explore deliberately does not: it is a gallery
-    // of live projects — a real section of the app, and going there is
-    // going somewhere.
+    // R8-3, amended 8.1).
     let studio_mode = section == SiteSection::Session;
     // The narrow ladder's rungs. "The cut is where things stop fitting"
     // (module docs) — and a bar carrying the session control plus its
@@ -246,12 +245,6 @@ pub fn SiteChrome(
                 // when they don't.
                 nav { class: "{secondary_nav}",
                     NavTab {
-                        label: "Explore",
-                        href: "/explore",
-                        active: section == SiteSection::Explore,
-                        secondary: true,
-                    }
-                    NavTab {
                         label: "Boards",
                         href: "/boards",
                         active: section == SiteSection::Boards,
@@ -332,7 +325,6 @@ fn ChromeOverflowMenu(
                         NavMenuItem { label: "Devices", href: "/devices", active: section == SiteSection::Devices }
                         NavMenuItem { label: "Projects", href: "/projects", active: section == SiteSection::Projects }
                     }
-                    NavMenuItem { label: "Explore", href: "/explore", active: section == SiteSection::Explore }
                     NavMenuItem {
                         label: "Boards",
                         href: "/boards",
