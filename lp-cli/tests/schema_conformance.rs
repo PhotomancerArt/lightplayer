@@ -8,10 +8,11 @@
 //! - [`ARTIFACT_ROOTS`] hold authored projects: `project.json` container
 //!   manifests validate against `schemas/project.schema.json`, `module.json`
 //!   root modules validate against `schemas/module.schema.json`,
-//!   `*.map2d.json` files are fixture mapping documents and `*.patch.json`
-//!   files are fixture patch documents — both validate by parsing with the
-//!   real `lpc-mapping` parser (which owns those formats) — and every other
-//!   `*.json` is a node artifact and validates against
+//!   `*.map2d.json` files are fixture mapping documents, `*.patch.json`
+//!   files are fixture patch documents, and a project-level `editor.json`
+//!   is the editor-metadata document — all three validate by parsing with
+//!   the real `lpc-mapping` parser (which owns those formats) — and every
+//!   other `*.json` is a node artifact and validates against
 //!   `schemas/node.schema.json`. Non-JSON
 //!   files (`.glsl`, `.svg`, ...) are not artifacts and are ignored by
 //!   extension.
@@ -63,6 +64,7 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
         let mut nodes = 0usize;
         let mut mappings = 0usize;
         let mut patches = 0usize;
+        let mut editor_docs = 0usize;
         for file in &files {
             let rel = relative(&workspace, file);
             if SKIP_JSON.contains(&rel.as_str()) {
@@ -78,6 +80,11 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
                 validate_patch_file(file, &rel, &mut failures)?;
                 continue;
             }
+            if file.file_name().is_some_and(|name| name == "editor.json") {
+                editor_docs += 1;
+                validate_editor_meta_file(file, &rel, &mut failures)?;
+                continue;
+            }
             let validator = if file.file_name().is_some_and(|name| name == "project.json") {
                 projects += 1;
                 &project_validator
@@ -91,7 +98,7 @@ fn authored_artifacts_conform_to_checked_in_schemas() -> Result<()> {
             validate_file(validator, file, &rel, &mut failures)?;
         }
         println!(
-            "{root}: validated {projects} container manifests + {modules} module roots + {nodes} node artifacts + {mappings} mapping documents + {patches} patch documents"
+            "{root}: validated {projects} container manifests + {modules} module roots + {nodes} node artifacts + {mappings} mapping documents + {patches} patch documents + {editor_docs} editor documents"
         );
     }
 
@@ -236,6 +243,24 @@ fn validate_map2d_file(file: &Path, rel: &str, failures: &mut Vec<String>) -> Re
 fn validate_patch_file(file: &Path, rel: &str, failures: &mut Vec<String>) -> Result<()> {
     let text = std::fs::read_to_string(file).with_context(|| format!("reading {rel}"))?;
     if let Err(error) = lpc_mapping::PatchDoc::from_json(&text) {
+        failures.push(format!("{rel}: {error}"));
+    }
+    Ok(())
+}
+
+/// The project-level `editor.json` validates by PARSING with the real
+/// `lpc-mapping` parser, which owns that format — the same rule mapping and
+/// patch documents follow, and for the same reason: the parser is the
+/// format's definition, not a generated schema.
+///
+/// It is NOT a node artifact: it carries per-node editor presentation state
+/// (Arrange placements) and is deliberately absent from the node schema, so
+/// the node validator refuses it. An example may ship one — `examples/small-dome`
+/// arranges its dome and door in one plan — which is what surfaced this
+/// classification gap.
+fn validate_editor_meta_file(file: &Path, rel: &str, failures: &mut Vec<String>) -> Result<()> {
+    let text = std::fs::read_to_string(file).with_context(|| format!("reading {rel}"))?;
+    if let Err(error) = lpc_mapping::EditorMetaDoc::from_json(&text) {
         failures.push(format!("{rel}: {error}"));
     }
     Ok(())

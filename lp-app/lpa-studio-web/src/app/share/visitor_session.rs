@@ -1,6 +1,17 @@
 //! The live half of the P6 visitor surface: one coordinator per tab that
-//! knows who is looking at the open `/p/` project and keeps the tracking
+//! knows who is looking at the open `/p/` project and keeps its local
 //! copy honest.
+//!
+//! Since the examples-vision P5 split there are TWO local shapes under
+//! this coordinator. A **View** link opens as a TRANSIENT session (memory
+//! stores, nothing installed — D1/D2): the mode fetch and the door/banner
+//! work unchanged, the pull loop and store-mounting flows quietly no-op
+//! (`mount` finds no OPFS project), and **fork = the explicit save**
+//! ([`VisitorSession::fork`] dispatches `SaveOverlay`; the core's
+//! fork-at-save mints the fresh identity). A **member's own project or an
+//! Edit link** keeps the persistent tracking copy below — push-to-cloud
+//! collaboration wants one — and pre-P5 tracking copies of View links
+//! (Q4 leave-alone) still behave exactly as documented here.
 //!
 //! Owns, for the project the route addresses:
 //!
@@ -58,6 +69,12 @@ pub const REFUSED_PUSH_LINE: &str =
 pub const UPDATED_LINE: &str = "Updated to the latest version";
 /// The fork confirmation.
 pub const FORKED_LINE: &str = "Forked — this one's yours.";
+
+/// The fork-at-explicit-save confirmation (examples vision D7): the first
+/// save of a transient view session installed it into the library. Raised
+/// by the web shell's view loop on the transient→owned transition.
+/// Copy ruled at G1 (2026-08-29): name the mechanism, not the feeling.
+pub const FORKED_COPY_LINE: &str = "Forked — now editing your copy.";
 /// The discard confirmation.
 pub const DISCARDED_LINE: &str = "Changes discarded — you're back on the shared version.";
 
@@ -162,6 +179,21 @@ impl VisitorSession {
     /// the open-another-project gate uses (the fork's open replaces the
     /// loaded project, and this dispatch bypasses `on_action`'s gate).
     pub fn fork(&self) {
+        // A TRANSIENT view session (P5): the explicit save IS the fork —
+        // dispatching it keeps the unsaved edits (they ride the save into
+        // the fork), so no discard confirm applies.
+        if let Some(uid) = self.uid()
+            && self.is_open(uid)
+            && self.view.peek().open_project_transient
+        {
+            self.tx.send(lpa_studio_core::StudioCommand::Action(
+                lpa_studio_core::UiAction::from_op(
+                    lpa_studio_core::ControllerId::new(lpa_studio_core::ProjectController::NODE_ID),
+                    lpa_studio_core::ProjectOp::SaveOverlay,
+                ),
+            ));
+            return;
+        }
         if self.overlay_dirty()
             && !crate::unsaved_gate::confirm_discarding_unsaved(
                 "This project has unsaved changes — they won't be in the fork.\n\nSave first to keep them. Fork without them?",

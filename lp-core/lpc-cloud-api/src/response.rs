@@ -340,6 +340,7 @@ mod tests {
             picture_url: None,
             provider_label: "Google".to_string(),
             created_at: 1.0,
+            anonymous: false,
         });
         let json = serde_json::to_string(&resp).unwrap();
         let back: CloudResponse = serde_json::from_str(&json).unwrap();

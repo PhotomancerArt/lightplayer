@@ -427,10 +427,12 @@ mod tests {
         let first = sample_user(user_uid(1), "a@example.com");
         let second = CloudUser {
             created_at: 2.0,
+            anonymous: false,
             ..sample_user(user_uid(2), "b@example.com")
         };
         let third = CloudUser {
             created_at: 3.0,
+            anonymous: false,
             ..sample_user(user_uid(3), "c@example.com")
         };
         // Inserted out of order to prove the store sorts rather than
@@ -464,6 +466,7 @@ mod tests {
             picture_url: None,
             provider: "google".to_string(),
             created_at: 1.0,
+            anonymous: false,
         }
     }
 

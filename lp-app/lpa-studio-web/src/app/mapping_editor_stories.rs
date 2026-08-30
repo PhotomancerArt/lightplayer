@@ -6,9 +6,9 @@
 
 use dioxus::prelude::*;
 use lpa_mapping_editor::{
-    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FitReconcile, FixtureBody, FixtureSprite,
-    HelpFloat, Map2dDoc, MapEditorSession, MapTool, Placement, ReferenceImage, ShapePath,
-    ZoomFloat, display_inset_padding, doc_fit_bounds, tool_hint,
+    Camera, CanvasDrag, EditorCanvas, EditorViewOptions, FitReconcile, FitStale, FixtureBody,
+    FixtureSprite, HelpFloat, Map2dDoc, MapEditorSession, MapTool, Placement, ReferenceImage,
+    ShapePath, ZoomFloat, display_inset_padding, doc_fit_bounds, tool_hint,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -69,11 +69,14 @@ fn ComposedEditorStory(
         let bounds_key =
             bounds.map(|bounds| [bounds.min_x, bounds.min_y, bounds.width, bounds.height]);
         let viewport_now = *viewport.read();
+        // A bare canvas story frames its document unconditionally — there
+        // is no dive here to decline, and captures want determinism.
         if let Some([width, height]) = viewport_now
             && (*fit_pending.read()
                 || fit_done
                     .read()
-                    .stale([width, height], &camera.peek(), bounds_key))
+                    .staleness([width, height], &camera.peek(), bounds_key)
+                    != FitStale::Settled)
         {
             let mut camera = camera;
             if let Some(bounds) = bounds {

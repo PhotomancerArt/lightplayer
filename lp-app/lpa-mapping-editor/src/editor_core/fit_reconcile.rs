@@ -20,8 +20,33 @@
 //! of view. The same rule extends to bounds — while the camera is still
 //! the fitted value, materially moved content re-runs the fit; once the
 //! user touches the camera, it is theirs.
+//!
+//! The two halves are NOT interchangeable, which is why [`staleness`]
+//! names which one moved. A viewport change must always re-fit (that is
+//! the determinism above). A content change is a weaker signal: the host
+//! decides, and the workbench declines to re-frame content the user can
+//! already see — diving into a fixture that is on screen at a workable
+//! size should not yank the camera (`Camera::frames_well`).
+//!
+//! [`staleness`]: FitReconcile::staleness
 
 use crate::Camera;
+
+/// Why a fit is out of date — the two halves reconcile differently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FitStale {
+    /// The fit still matches its measurements, or the camera is the
+    /// user's and reconciliation has stopped.
+    Settled,
+    /// The VIEWPORT moved. The fit must track it unconditionally: a fit
+    /// that keeps whatever size the container had at first measurement is
+    /// the baseline churner this module exists to kill.
+    Viewport,
+    /// Only the CONTENT moved. Hosts may decline to re-frame content the
+    /// user can already see (`Camera::frames_well`) — an arriving body
+    /// still gets framed, a fixture already on screen is left alone.
+    Bounds,
+}
 
 /// One recorded fit: what it consumed and what it produced.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -54,17 +79,35 @@ fn bounds_close(a: Option<[f32; 4]>, b: Option<[f32; 4]>) -> bool {
 }
 
 impl FitReconcile {
-    /// Must the fit re-run for `viewport` + `bounds`? True when either
-    /// measurement moved while `camera` still equals the fitted value —
-    /// the camera is untouched, so it should track the settled layout and
-    /// the settled CONTENT, not first arrivals. False once the user has
-    /// panned or zoomed (the camera is theirs) and false while no fit has
-    /// run (that is the armed `fit_pending` path's job).
+    /// Which measurement moved out from under the fit, if either. A
+    /// measurement only counts while `camera` still equals the fitted
+    /// value: once the user has panned or zoomed the camera is theirs and
+    /// reconciliation stops ([`FitStale::Settled`]), as it does while no
+    /// fit has run at all (that is the armed `fit_pending` path's job).
+    ///
+    /// The viewport half outranks the content half — a fit that consumed
+    /// an unsettled container size must be redone whatever the content is
+    /// doing.
     #[must_use]
-    pub fn stale(&self, viewport: [f32; 2], camera: &Camera, bounds: Option<[f32; 4]>) -> bool {
-        matches!(self.0, Some(fitted)
-            if fitted.camera == *camera
-                && (fitted.viewport != viewport || !bounds_close(fitted.bounds, bounds)))
+    pub fn staleness(
+        &self,
+        viewport: [f32; 2],
+        camera: &Camera,
+        bounds: Option<[f32; 4]>,
+    ) -> FitStale {
+        let Some(fitted) = self.0 else {
+            return FitStale::Settled;
+        };
+        if fitted.camera != *camera {
+            return FitStale::Settled;
+        }
+        if fitted.viewport != viewport {
+            return FitStale::Viewport;
+        }
+        if bounds_close(fitted.bounds, bounds) {
+            return FitStale::Settled;
+        }
+        FitStale::Bounds
     }
 
     /// Record a completed reconciliation of `camera` against `viewport`
@@ -124,7 +167,7 @@ mod tests {
     #[test]
     fn never_stale_before_the_first_fit() {
         let fit = FitReconcile::default();
-        assert!(!fit.stale(VP1, &cam(1.0), B1));
+        assert_eq!(fit.staleness(VP1, &cam(1.0), B1), FitStale::Settled);
         assert_eq!(fit.guard_attr(), "");
     }
 
@@ -132,9 +175,14 @@ mod tests {
     fn viewport_change_with_untouched_camera_is_stale() {
         let mut fit = FitReconcile::default();
         fit.record(VP1, cam(2.0), B1);
-        assert!(!fit.stale(VP1, &cam(2.0), B1), "same measurements: settled");
-        assert!(
-            fit.stale(VP2, &cam(2.0), B1),
+        assert_eq!(
+            fit.staleness(VP1, &cam(2.0), B1),
+            FitStale::Settled,
+            "same measurements: settled"
+        );
+        assert_eq!(
+            fit.staleness(VP2, &cam(2.0), B1),
+            FitStale::Viewport,
             "moved viewport, untouched camera"
         );
     }
@@ -146,15 +194,30 @@ mod tests {
     fn bounds_change_with_untouched_camera_is_stale() {
         let mut fit = FitReconcile::default();
         fit.record(VP1, cam(2.0), B1);
-        assert!(fit.stale(VP1, &cam(2.0), B2), "content moved under the fit");
-        assert!(
-            !fit.stale(VP1, &cam(2.0), Some([0.5, 0.0, 100.0, 100.4])),
+        assert_eq!(
+            fit.staleness(VP1, &cam(2.0), B2),
+            FitStale::Bounds,
+            "content moved under the fit"
+        );
+        assert_eq!(
+            fit.staleness(VP1, &cam(2.0), Some([0.5, 0.0, 100.0, 100.4])),
+            FitStale::Settled,
             "sub-percent creep is not churn"
         );
-        assert!(
-            fit.stale(VP1, &cam(2.0), None),
+        assert_eq!(
+            fit.staleness(VP1, &cam(2.0), None),
+            FitStale::Bounds,
             "content vanished — reconcile the empty canvas too"
         );
+    }
+
+    /// A viewport change outranks a simultaneous content change: the host
+    /// may decline a content-only re-frame, never a viewport one.
+    #[test]
+    fn a_moved_viewport_outranks_moved_content() {
+        let mut fit = FitReconcile::default();
+        fit.record(VP1, cam(2.0), B1);
+        assert_eq!(fit.staleness(VP2, &cam(2.0), B2), FitStale::Viewport);
     }
 
     #[test]
@@ -162,7 +225,7 @@ mod tests {
         let mut fit = FitReconcile::default();
         fit.record(VP1, cam(2.0), B1);
         // The user zoomed: the camera no longer equals the fitted value.
-        assert!(!fit.stale(VP2, &cam(3.0), B2));
+        assert_eq!(fit.staleness(VP2, &cam(3.0), B2), FitStale::Settled);
     }
 
     #[test]

@@ -6,9 +6,9 @@
 use dioxus::prelude::*;
 
 use crate::base::HelpLink;
-use lpa_studio_core::{UiAction, UiExampleCard, UiHomeView};
+use lpa_studio_core::{UiAction, UiHomeView};
 
-use crate::app::home::example_card::ExampleCard;
+use crate::app::home::example_card::{ExampleCard, embedded_example_cards};
 use crate::app::home::gallery_preview::HoveredCard;
 use crate::app::home::project_opening_frame::OpenFailureNotice;
 use crate::app::home::{card_grid_class, section_title_class};
@@ -81,18 +81,4 @@ pub fn ExplorePage(
             }
         }
     }
-}
-
-/// The compiled-in examples as cards — the same projection the home view
-/// builder makes, for the no-gallery-slice mounts.
-fn embedded_example_cards() -> Vec<UiExampleCard> {
-    lpa_studio_core::app::home::embedded_examples()
-        .iter()
-        .map(|example| UiExampleCard {
-            id: example.id.to_string(),
-            name: example.name.to_string(),
-            kind: example.kind.to_string(),
-            blurb: example.blurb.to_string(),
-        })
-        .collect()
 }

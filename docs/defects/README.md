@@ -282,6 +282,8 @@ values; statistical diffs are for the arithmetic in between.
 | newest-only-inflight-memory | 2026-08-13 | [stale-echo-reseeded-dive-session](2026-08-13-stale-echo-reseeded-dive-session.md) | fixed | lpa-studio-web editor_shell (mapping_session pipeline) |
 | config-masked-defect | 2026-08-05 | [generated-palette-header-dies-on-naga](2026-08-05-generated-palette-header-dies-on-naga.md) | fixed | lps-frontend (parse.rs) + lpc-model shader_header_gen |
 | config-masked-defect | 2026-08-21 | [hello-gate-assumes-fresh-boot](2026-08-21-hello-gate-assumes-fresh-boot.md) | **open** | lpa-link device_session (readiness) + fw server_loop heartbeat |
+| config-masked-defect | 2026-08-29 | [lamp-views-latch-one-output](2026-08-29-lamp-views-latch-one-output.md) | fixed | lpa-studio-core lamp compositors (card feed, preview feed, module hero) |
+| state-conflation | 2026-08-28 | [wire-load-skips-link-engine-state](2026-08-28-wire-load-skips-link-engine-state.md) | fixed | lpa-server (wire load handler) + lpc-engine (display-layout budget) |
 | assumed-context | 2026-08-24 | [power-gate-black-scan-counts-alpha](2026-08-24-power-gate-black-scan-counts-alpha.md) | **open** | fw-esp32-common output/power_gate (is_all_black) |
 | unenforced-test-precondition | 2026-08-05 | [cross-core-panic-races-the-isr-thread](2026-08-05-cross-core-panic-races-the-isr-thread.md) | fixed | lp-fw/lp-ws281x tests (cross_core) |
 | reclaim-ordered-behind-its-own-rebuild | 2026-08-04 | [compile-window-drops-rebuilt-before-compile](2026-08-04-compile-window-drops-rebuilt-before-compile.md) | fixed | lpc-engine nodes (fixture + output pressure handlers) |

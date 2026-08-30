@@ -2908,14 +2908,15 @@ label:has(> input:not(:disabled)) {
 }
 
 /* ---- the transient confirmation line (base/toast.rs) -------------------
-   One sentence, bottom centre, replaced rather than stacked. It fades
+   One sentence, top centre (G1 ruling 2026-08-29 — it used to sit at the
+   bottom and read as easy to miss), replaced rather than stacked. It fades
    itself out with the keyframe below instead of a timer — see the module
    docs — and ends `visibility: hidden` so a spent line cannot swallow a
    click on whatever is under it. */
 .ux-toast {
     position: fixed;
     left: 50%;
-    bottom: 34px;
+    top: 62px;
     /* Also on the base rule, not only in the keyframes: story capture
        disables animations, and a line centred only by its animation would
        land half a page to the right. */
@@ -2946,7 +2947,7 @@ label:has(> input:not(:disabled)) {
 @keyframes ux-toast-life {
     0% {
         opacity: 0;
-        transform: translateX(-50%) translateY(10px);
+        transform: translateX(-50%) translateY(-10px);
     }
 
     7%,
@@ -2958,7 +2959,7 @@ label:has(> input:not(:disabled)) {
     100% {
         opacity: 0;
         visibility: hidden;
-        transform: translateX(-50%) translateY(6px);
+        transform: translateX(-50%) translateY(-6px);
     }
 }
 

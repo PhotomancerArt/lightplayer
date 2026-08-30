@@ -417,7 +417,10 @@ impl Engine {
 
     /// The declared transport display-layout budget (see
     /// [`Self::set_display_layout_budget`]).
-    pub(crate) fn display_layout_budget(&self) -> Option<usize> {
+    /// The declared display-layout byte budget (`None` = unbounded). Public
+    /// so embedders and tests can assert the link state actually landed on
+    /// an engine — the wire-load path once forgot to.
+    pub fn display_layout_budget(&self) -> Option<usize> {
         self.display_layout_budget
     }
 

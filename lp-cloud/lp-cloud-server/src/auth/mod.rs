@@ -14,4 +14,5 @@
 
 pub mod dev_auth;
 pub mod google_auth;
+pub mod guest_auth;
 pub mod session_cookie;

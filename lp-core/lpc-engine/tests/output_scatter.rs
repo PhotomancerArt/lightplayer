@@ -4,7 +4,7 @@
 //! first fragments-consuming output in attach order; a producer with zero
 //! runs on an output is NOT a gap there; rotation is real in rendering.
 //!
-//! The topology under test is the mini-dome's shape in miniature: TWO
+//! The topology under test is the small-dome's shape in miniature: TWO
 //! producers (`dome`, 6 lamps · `doors`, 4 lamps) scattered across TWO
 //! outputs (`output`, unnamed = the default · `output2`, named "Box 2")
 //! with interleaved anchors — many-to-many, the case the peach
