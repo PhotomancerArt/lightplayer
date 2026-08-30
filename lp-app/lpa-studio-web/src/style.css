@@ -207,6 +207,15 @@
     --studio-status-export-bg: rgba(148, 184, 170, 0.1);
     --studio-status-export-border: #567a6d;
     --studio-status-export-text: #94b8aa;
+    /* EXAMPLE (lavender-grey): "you are viewing a read-only example" — the
+       provenance family (accent reckoning D3, 2026-08-30). Like EXPORT, a
+       quiet structural property, not a status you clear. Deliberately far
+       greyer than bound-violet (that is bus linkage), NOT good-green
+       (nothing here is "valid"), and NOT a revival of the retired mint
+       accent — provenance earns identity, chrome does not. */
+    --studio-status-example-bg: rgba(168, 163, 196, 0.09);
+    --studio-status-example-border: #565177;
+    --studio-status-example-text: #a8a3c4;
 
     --studio-step-marker-bg: #151a1f;
     --studio-step-active-bg: #2a2916;
@@ -457,15 +466,20 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-status-error-text);
 }
 
-/* The Failed phase's ONE exit (model §2 I4). */
+/* The Failed phase's ONE exit (model §2 I4) — the neutral outline CTA
+   language (accent reckoning D1: chrome holds no hue). */
 .ux-card-op-exit {
     padding: 5px 12px;
     font-size: 12.5px;
-    color: var(--studio-color-accent);
+    color: var(--studio-color-text-strong);
     cursor: pointer;
     background: #1d232b;
-    border: 1px solid color-mix(in srgb, var(--studio-color-accent) 45%, var(--studio-color-border));
+    border: 1px solid var(--studio-color-border-strong);
     border-radius: 6px;
+}
+
+.ux-card-op-exit:hover {
+    border-color: var(--studio-color-selection-border);
 }
 
 .ux-card-op-bar {
@@ -482,7 +496,11 @@ label:has(> input:not(:disabled)) {
     inset: 0 auto 0 0;
     display: block;
     height: 100%;
-    background: var(--studio-color-accent);
+    /* The iridescent progress paint (`.ux-iri-fill-static`'s recipe) —
+       progress bars are spectrum vocabulary, ADR G1-3. The indeterminate
+       variant animates left/width itself, so the static paint is right. */
+    background: linear-gradient(90deg, var(--studio-spectrum), #5fe08b);
+    background-size: 300% 100%;
     border-radius: 3px;
     transition: width 200ms ease;
 }
@@ -767,7 +785,9 @@ label:has(> input:not(:disabled)) {
     width: 110px;
     min-width: 60px;
     margin: 0;
-    accent-color: var(--studio-color-accent);
+    /* Bright neutral, matching the knob/fader authored-value stroke
+       (accent reckoning D4). */
+    accent-color: var(--studio-color-text-strong);
     cursor: pointer;
 }
 
@@ -2566,7 +2586,7 @@ label:has(> input:not(:disabled)) {
 }
 
 .ux-produced-product-overlay-button:hover {
-    color: var(--studio-color-accent);
+    color: var(--studio-color-text-strong);
     background:
         linear-gradient(180deg, rgba(8, 12, 14, 0.48), rgba(8, 12, 14, 0.66)),
         rgba(8, 12, 14, 0.46);
