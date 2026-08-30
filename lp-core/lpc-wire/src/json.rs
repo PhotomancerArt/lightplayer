@@ -192,6 +192,22 @@ mod ser_write_json_tests {
     }
 
     #[test]
+    fn pre_link_counters_heartbeat_still_decodes() {
+        // Bytes from firmware built before `link` / the MemoryStats
+        // fragmentation fields existed: the additive fields must decode as
+        // absent (the additive-FIELD rule the wire posture depends on).
+        let old = r#"{"id":0,"msg":{"heartbeat":{"fps":{"avg":60.0,"sdev":1.0,"min":58.0,"max":62.0},"frame_count":7,"loaded_projects":[],"uptime_ms":5000,"memory":{"freeBytes":1,"usedBytes":2,"totalBytes":3}}}}"#;
+        let msg: ServerMessage = from_str(old).expect("old heartbeat decodes");
+        let ServerMsgBody::Heartbeat { memory, link, .. } = msg.msg else {
+            panic!("expected heartbeat");
+        };
+        assert!(link.is_none(), "link absent on old frames");
+        let memory = memory.expect("memory present");
+        assert!(memory.largest_free_block.is_none());
+        assert!(memory.oom_retry_saves.is_none());
+    }
+
+    #[test]
     fn ser_write_json_heartbeat_round_trips() {
         let msg = ServerMessage::new(
             0,
@@ -212,6 +228,8 @@ mod ser_write_json_tests {
                     free_bytes: 100000,
                     used_bytes: 200000,
                     total_bytes: 300000,
+                    largest_free_block: Some(40000),
+                    oom_retry_saves: Some(2),
                 }),
                 recovery: Some(crate::server::RecoveryStatus {
                     level: crate::server::RecoveryLevelWire::Yellow,
@@ -241,6 +259,12 @@ mod ser_write_json_tests {
                     mux: 99,
                     queue_wait_max_us: 9_800,
                 }]),
+                link: Some(crate::server::LinkCounters {
+                    parse_failures: 3,
+                    rx_errors: 1,
+                    queue_full_drops: 0,
+                    stale_partial_flushes: 2,
+                }),
             },
         );
 

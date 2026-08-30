@@ -5,7 +5,17 @@ use dioxus::prelude::*;
 use lpc_mapping::Bounds2d;
 
 use crate::view::canvas::canvas_anchor::capture_pointer;
-use crate::view::canvas::{CanvasDrag, CanvasInteract, event_doc_point, secondary_button};
+use crate::view::canvas::{CanvasDrag, CanvasInteract, event_doc_point, pan_takes_press};
+
+/// Screen-pixel radius of a vertex handle's HIT target — what a click must
+/// land in to grab a vertex, and (on a polygon draft's first point) to close
+/// an outline. Screen-space by design: the target is a constant size at
+/// every zoom, so aim never depends on the camera.
+pub(crate) const VERTEX_HIT_PX: f32 = 9.0;
+
+/// Half-size of the DRAWN vertex handle, in screen pixels. Smaller than the
+/// hit ring: the mark is precise, the target is forgiving.
+const VERTEX_HANDLE_HALF_PX: f32 = 4.5;
 
 pub(crate) struct SelectionLayerInput<'a> {
     pub interact: CanvasInteract,
@@ -74,7 +84,7 @@ pub(crate) fn selection_layer(input: &SelectionLayerInput<'_>) -> Element {
                     height: "{2.0 * handle_half}",
                     stroke_width: "{1.4 / eff}",
                     onpointerdown: move |evt| {
-                        if secondary_button(&evt) {
+                        if pan_takes_press(&interact, &evt) {
                             return;
                         }
                         evt.stop_propagation();
@@ -130,7 +140,7 @@ pub(crate) fn selection_layer(input: &SelectionLayerInput<'_>) -> Element {
         for (vertex_index, point) in input.vertex_points.iter().enumerate() {
             {
                 let hot = input.selected_vertex == Some(vertex_index);
-                let half = 4.5 / eff;
+                let half = VERTEX_HANDLE_HALF_PX / eff;
                 rsx! {
                     rect {
                         key: "v{vertex_index}",
@@ -141,7 +151,7 @@ pub(crate) fn selection_layer(input: &SelectionLayerInput<'_>) -> Element {
                         height: "{2.0 * half}",
                         stroke_width: "{1.4 / eff}",
                         onpointerdown: move |evt| {
-                            if secondary_button(&evt) {
+                            if pan_takes_press(&interact, &evt) {
                                 return;
                             }
                             evt.stop_propagation();

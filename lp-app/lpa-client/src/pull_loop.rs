@@ -84,6 +84,13 @@ where
         self.budget
     }
 
+    /// Decompose into `(budget, make_timer)` so a caller can arm several
+    /// sequential deadlines from one configured deadline (a staged sync runs
+    /// one bounded read per stage; `&mut MakeTimer` is itself a `MakeTimer`).
+    pub fn into_parts(self) -> (Duration, MakeTimer) {
+        (self.budget, self.make_timer)
+    }
+
     /// A fresh timer future for the current budget. Called once per frame wait,
     /// so awaiting the result is the reset-on-progress behaviour.
     fn fresh_timer(&mut self) -> Timer {
@@ -275,6 +282,11 @@ where
 
     let mut stream = ProjectReadStream::new(request_id);
     let mut observed = Vec::new();
+    // Progress accounting so a stalled or failed pull says how far it got —
+    // the difference between "device never answered" and "died at frame 40"
+    // used to be invisible (the 2026-08-26 sync-hang debugging).
+    let mut frames: usize = 0;
+    let mut streamed_events: usize = 0;
 
     loop {
         // Cancellation is observed at the frame boundary, before we commit to
@@ -289,20 +301,38 @@ where
 
         let timer = deadline.fresh_timer();
         match receive_before_deadline(io, timer).await {
-            ReceiveOutcome::Received(Ok(message)) => match stream.accept(protocol, message) {
-                Ok(ProjectReadStreamStep::Continue) => {}
-                Ok(ProjectReadStreamStep::Event(event)) => observed.push(event),
-                Ok(ProjectReadStreamStep::Complete(events)) => {
-                    return PullOutcome::Completed { events, observed };
+            ReceiveOutcome::Received(Ok(message)) => {
+                frames += 1;
+                match stream.accept(protocol, message) {
+                    Ok(ProjectReadStreamStep::Continue) => {}
+                    Ok(ProjectReadStreamStep::Event(event)) => observed.push(event),
+                    Ok(ProjectReadStreamStep::Complete(events)) => {
+                        streamed_events += events.len();
+                        log::debug!(
+                            "project read id={request_id}: complete ({frames} frames, {streamed_events} events)"
+                        );
+                        return PullOutcome::Completed { events, observed };
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "project read id={request_id}: stream error after {frames} frames: {error:?}"
+                        );
+                        return PullOutcome::Failed(stream_error(error));
+                    }
                 }
-                Err(error) => return PullOutcome::Failed(stream_error(error)),
-            },
+            }
             ReceiveOutcome::Received(Err(error)) => {
+                log::warn!(
+                    "project read id={request_id}: transport error after {frames} frames: {error}"
+                );
                 return PullOutcome::Failed(ClientError::from(error));
             }
             ReceiveOutcome::DeadlineElapsed => {
                 // Same contract as cancellation: the request is abandoned and
                 // its frames may still trickle in late.
+                log::warn!(
+                    "project read id={request_id}: quiet-gap deadline elapsed after {frames} frames                      — the device stopped streaming (a device reset mid-read looks exactly like this;                      check the device console for a [RECOVERY] line)"
+                );
                 protocol.abandon_request(request_id);
                 return PullOutcome::TimedOut;
             }

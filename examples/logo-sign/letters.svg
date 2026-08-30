@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 571 130">
+  <!-- The LightPlayer wordmark as eleven single stroke LED skeletons, one
+       group per letter, in the corpus mapping SVG subset: straight segments
+       only, one path like element per group, one "path,count" label.
+
+       Frame: em = 100 units, baseline y = 100, x height top y = 48, cap and
+       ascender top y = 27, descender bottom y = 120. Groups run left to right,
+       which is wiring order: each letter is its own strand and the jumper
+       between two letters is the object boundary.
+
+       Letters are drawn as ONE pen stroke wherever a pen stroke can reach
+       (the h retraces its ascender). Where it cannot, the polyline carries the
+       jumper as a segment and the generator marks that segment inert: the dot
+       of the i, the crossbar of the t, the left arm of the y.
+
+       Generated lamp positions live in sign.map2d.json; the generator is
+       app/home/logo_sign_gen.rs in lpa-studio-web. Edit this file, then
+       regenerate. -->
+  <g id="letter-1-L">
+    <polyline points="8 27 8 100 50 100"/>
+    <text>path:1,count:8</text>
+  </g>
+  <g id="letter-2-i">
+    <polyline points="75 27 75 29 75 48 75 100"/>
+    <text>path:2,count:6</text>
+  </g>
+  <g id="letter-3-g">
+    <polyline points="110 116 128 119 142 108 142 56 128 47 110 50 100 63 101 83 114 97 132 94 142 80"/>
+    <text>path:3,count:15</text>
+  </g>
+  <g id="letter-4-h">
+    <polyline points="160 100 160 27 160 56 170 47 186 45 198 53 200 66 200 100"/>
+    <text>path:4,count:13</text>
+  </g>
+  <g id="letter-5-t">
+    <polyline points="218 52 248 52 232 30 232 92 244 100 252 95"/>
+    <text>path:5,count:8</text>
+  </g>
+  <g id="letter-6-P">
+    <polyline points="264 100 264 27 292 27 308 37 308 54 292 64 264 64"/>
+    <text>path:6,count:13</text>
+  </g>
+  <g id="letter-7-l">
+    <polyline points="336 27 336 100"/>
+    <text>path:7,count:6</text>
+  </g>
+  <g id="letter-8-a">
+    <polyline points="395 100 395 46 379 45 363 53 359 70 365 90 381 97 395 84"/>
+    <text>path:8,count:12</text>
+  </g>
+  <g id="letter-9-y">
+    <polyline points="417 48 438 88 457 48 423 120"/>
+    <text>path:9,count:9</text>
+  </g>
+  <g id="letter-10-e">
+    <polyline points="517 88 505 97 489 94 478 80 477 64 487 49 503 46 515 57 517 70 477 70"/>
+    <text>path:10,count:12</text>
+  </g>
+  <g id="letter-11-r">
+    <polyline points="535 100 535 48 547 45 559 50 563 58"/>
+    <text>path:11,count:7</text>
+  </g>
+</svg>

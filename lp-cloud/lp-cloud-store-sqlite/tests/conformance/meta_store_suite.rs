@@ -167,10 +167,12 @@ pub fn users_are_ordered_oldest_first_and_capped_at_the_limit(store: &mut dyn Me
     let first = sample_user(user_uid(1), "a@example.com");
     let second = CloudUser {
         created_at: 2.0,
+        anonymous: false,
         ..sample_user(user_uid(2), "b@example.com")
     };
     let third = CloudUser {
         created_at: 3.0,
+        anonymous: false,
         ..sample_user(user_uid(3), "c@example.com")
     };
     // Stored out of `created_at` order, to prove the store sorts rather

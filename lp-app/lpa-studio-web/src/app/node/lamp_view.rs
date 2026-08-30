@@ -158,7 +158,7 @@ pub(crate) fn LampView(
 ///
 /// Each run decodes against ITS OWN output's published frame
 /// ([`cell_frame`]), never against one frame for the whole fixture: a
-/// fixture can drive two boxes (the mini dome drives both), and wire lamp
+/// fixture can drive two boxes (the small dome drives both), and wire lamp
 /// 39 of one output is a different strand from wire lamp 39 of the other.
 /// Reading them all through one wire made two objects wear one object's
 /// light — the selected sector chased on its own sprite AND on whichever
@@ -882,7 +882,7 @@ mod tests {
         assert_eq!(colors[1], GREEN);
     }
 
-    /// THE two-box defect (G1 round 3, the mini dome): a fixture driving two
+    /// THE two-box defect (G1 round 3, the small dome): a fixture driving two
     /// outputs must read every run from ITS OWN wire.
     ///
     /// The dome's sectors sit at the SAME wire lamps on two different boxes —
@@ -893,7 +893,7 @@ mod tests {
     #[test]
     fn each_run_reads_the_frame_of_the_output_it_landed_on() {
         // Sector A on "1", sector B on "Box 2" — same wire lamps, different
-        // boxes, exactly as the mini-dome's walk-up patch lands them.
+        // boxes, exactly as the small-dome's walk-up patch lands them.
         let a = run(0, 3, 0, false);
         let b = run(3, 3, 0, false);
         let dark = UiControlProductPreview {

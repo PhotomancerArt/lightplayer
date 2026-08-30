@@ -2390,7 +2390,10 @@ pub(crate) fn project_action(op: ProjectOp) -> StudioCommand {
     ))
 }
 
-fn set_value_action(address: crate::ProjectSlotAddress, value: LpValue) -> StudioCommand {
+pub(crate) fn set_value_action(
+    address: crate::ProjectSlotAddress,
+    value: LpValue,
+) -> StudioCommand {
     StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         SlotEditOp::SetValue { address, value },

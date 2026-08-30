@@ -57,7 +57,7 @@ use crate::app::patch::verb_ui::{
     resize_segment, segment_at_free_run, selection_stride, shift_segment, target_is_unmapped,
 };
 use crate::base::option_cards::{OptionCard, OptionCards};
-use crate::base::{StudioIcon, StudioIconName};
+use crate::base::{InlineButtonTone, StudioIcon, StudioIconName, inline_text_button_class};
 
 /// Stepped controls are squared blocks (the panel-language convention) —
 /// every transport button steps something discrete.
@@ -912,7 +912,9 @@ pub(crate) fn parse_port_key(value: &str) -> Option<(NodeId, u32)> {
 fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
     on_action.call(UiAction::from_op(
         lpa_studio_core::ProjectEditorTarget::NodeTree.node_id(),
-        ProjectEditorOp::PatchSelect { target },
+        ProjectEditorOp::PatchSelect {
+            selection: lpa_studio_core::UiSelection::from_option(target),
+        },
     ));
 }
 
@@ -922,13 +924,31 @@ fn select(on_action: &EventHandler<UiAction>, target: Option<UiPatchTarget>) {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn PatchPanel(
     surface: UiPatchSurface,
-    selection: Option<UiPatchTarget>,
+    selection: lpa_studio_core::UiSelection,
     /// The frame's armed verb, read in the center and passed down so the
     /// panel stays plain data (and stories can pose an armed state).
     #[props(default)]
     armed: Option<ArmedVerb>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    // A MULTI selection is counts, not a subject (unified-selection P2):
+    // the verbs and the arm are single-subject by ruling, so the panel
+    // states the set and invites narrowing — no transport, not armable.
+    if selection.len() > 1 {
+        let count = selection.len();
+        let word = match selection.primary() {
+            Some(UiPatchTarget::Fixture { .. }) => "fixtures",
+            _ => "objects",
+        };
+        return rsx! {
+            div { class: "tw:flex tw:max-h-[45%] tw:flex-none tw:flex-col tw:overflow-y-auto tw:border-t tw:border-border-subtle tw:bg-card-subtle",
+                div { class: "tw:flex-none tw:px-2.5 tw:py-2 tw:text-[11.5px] tw:text-muted-foreground",
+                    "{count} {word} selected — their mapped lamps breathe on the wire. Select one to patch it."
+                }
+            }
+        };
+    }
+    let selection = selection.single().cloned();
     let object = object_view(&surface, selection.as_ref());
     let card = fixture_card(&surface, selection.as_ref());
     let output = output_view(&surface, selection.as_ref());
@@ -1052,7 +1072,7 @@ fn SectionHead(
             }
             if deselect {
                 button {
-                    class: "tw:ml-1 tw:flex-none tw:cursor-pointer tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-1 tw:text-[11px] tw:leading-4 tw:text-dim-foreground tw:hover:text-strong-foreground",
+                    class: "{inline_text_button_class(InlineButtonTone::Neutral, false)} tw:ml-1",
                     title: "Deselect (esc)",
                     onclick: move |_| {
                         // Same rung as esc's clear: the size override
@@ -2419,7 +2439,7 @@ mod tests {
     /// A fixture driving TWO boxes decodes each run against the wire that
     /// run landed on. `UiFixturePatch::frame` carries only the FIRST
     /// output's — enough for the bay's own face, and a lie on a panel
-    /// showing the object the user just selected (the mini dome, whose
+    /// showing the object the user just selected (the small dome, whose
     /// sectors are split across both of its boxes, reads wrong without
     /// this).
     #[test]

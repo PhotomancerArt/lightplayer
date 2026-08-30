@@ -741,14 +741,15 @@ fn structural_target_uid(op: &CatalogOp) -> Option<&str> {
         CatalogOp::Create { .. }
         | CatalogOp::ImportZip { .. }
         | CatalogOp::ImportJson { .. }
-        | CatalogOp::EnsureExampleSeeded { .. }
         | CatalogOp::GenerateForBoard { .. }
         // Registry-only: the device rows live beside the packages, not
         // inside one, so no project lock is involved.
         | CatalogOp::UpsertRegisteredDevice(_)
         | CatalogOp::ForgetRegisteredDevice { .. }
-        // Creation-shaped: the synced install refuses a uid the library
-        // already holds, so there is no existing project to lock.
+        // Creation-shaped: the transient fork mints a fresh uid, and the
+        // synced install refuses a uid the library already holds, so
+        // neither has an existing project to lock.
+        | CatalogOp::ForkTransientCopy { .. }
         | CatalogOp::InstallSyncedProject { .. } => None,
     }
 }

@@ -242,6 +242,12 @@ where
             let tx = tx.clone();
             move |input| tx.send(StudioCommand::Device(input))
         });
+        // The initial project sync's progress deadline runs on the same
+        // platform timer (see StudioController::set_sync_timer): without it a
+        // device reset mid-read hangs "Syncing project" forever.
+        let mut sync_timer = make_timer.clone();
+        controller
+            .set_sync_timer(move |delay| Box::pin(sync_timer(delay)) as crate::AgentTimerFuture);
         // Seed the shared delay from the controller's initial per-session
         // policy so the UI timer has a sane first interval before the
         // first batch runs.

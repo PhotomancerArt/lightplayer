@@ -2,8 +2,8 @@
 //!
 //! Responsibilities are the S3's:
 //! - Drain the outgoing log/message queue and write it (prefixed lines).
-//! - Drain accountable server write requests, serialize to JSON, write, and
-//!   report the outcome back to the transport.
+//! - Drain accountable server write requests (already-serialized framed
+//!   bytes), write them, and report the outcome back to the transport.
 //! - Read available bytes, split on newlines, push `M!` lines to the incoming
 //!   queue.
 //!
@@ -19,34 +19,34 @@
 //! counterpart here; the write timeout below survives only as a backstop
 //! against a wedged peripheral.
 //!
-//! **2. RX is drained *between* TX chunks** ([`UartLink::write_chunked`]).
-//! On USB-Serial-JTAG a 16 KiB `ProjectRead` frame leaves in a few
-//! milliseconds; at 115200 baud it takes ~1.4 s, and UART0's RX FIFO is 128
-//! bytes — about 11 ms of line time. Draining RX only at the top of the loop
-//! would overflow the FIFO and silently lose whatever the host sent during a
-//! long write. Hence [`WRITE_CHUNK_SIZE`] is sized in *line time*, not in
-//! syscall overhead.
+//! **2. RX is drained *between* TX chunks.** On USB-Serial-JTAG a 16 KiB
+//! `ProjectRead` frame leaves in a few milliseconds; at UART line rate it
+//! takes real wall time, and UART0's RX FIFO is 128 bytes — ~1.4 ms of line
+//! time at 921600 baud. Draining RX only at the top of the loop would
+//! overflow the FIFO and silently lose whatever the host sent during a long
+//! write. Hence every write goes through a [`ChunkedWriter`] whose `on_chunk`
+//! hook drains RX ([`poll_rx_into`]) and whose chunk size
+//! ([`WritePolicy::UART_921600`]) is sized in *line time*, not syscall
+//! overhead — exactly the seam `chunked_write`'s docs promise this crate.
 //!
-//! ## Known duplication
-//!
-//! The JSON-serialization half below (`StackJsonWriter`,
-//! `timed_write_server_msg`, `server_message_detail`) is a third copy of code
-//! that is already duplicated between fw-esp32c6 and fw-esp32s3. It is
-//! chip-agnostic and belongs in `fw-esp32-common`; lifting it would change
-//! two shipping firmwares, which is not this phase's job. Kept diffable
-//! against the S3's copy on purpose.
+//! Serialization happens on the THREAD side (the transport, via the shared
+//! `fw_esp32_common::serial::server_msg`), never here: this task polls in
+//! interrupt context on a borrowed stack, so its per-poll footprint must stay
+//! at "chunked byte shuttling" scale. Same split as fw-esp32c6/fw-esp32s3.
 
 extern crate alloc;
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use embassy_time::{Duration, Timer};
-use embedded_io_async::Write;
-use esp_hal::Async;
+use embassy_sync::signal::Signal;
+use embassy_time::{Duration, Instant};
+use esp_hal::interrupt::{InterruptHandler, Priority};
+use esp_hal::timer::{AnyTimer, PeriodicTimer};
 use esp_hal::uart::{Uart, UartRx, UartTx};
+use esp_hal::{Async, Blocking};
 use fw_core::message_router::MessageRouter;
-use ser_write_json::SerWrite;
+use fw_esp32_common::serial::chunked_write::{ChunkedWriter, WritePolicy};
 
 /// Static message channels for MessageRouter
 static INCOMING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
@@ -61,11 +61,7 @@ static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 /// Each request carries a wrapping `u32` generation token that `io_task` echoes
 /// back on the result channel, so `transport.send()` can discard a result
 /// orphaned by a cancelled send instead of trusting arrival order.
-static SERVER_WRITE_REQUEST: Channel<
-    CriticalSectionRawMutex,
-    (u32, lpc_wire::WireServerMessage),
-    1,
-> = Channel::new();
+static SERVER_WRITE_REQUEST: Channel<CriticalSectionRawMutex, (u32, usize), 1> = Channel::new();
 
 static SERVER_WRITE_RESULT: Channel<
     CriticalSectionRawMutex,
@@ -73,25 +69,98 @@ static SERVER_WRITE_RESULT: Channel<
     1,
 > = Channel::new();
 
-/// Write timeout per chunk. A UART TX FIFO drains at line rate unconditionally,
-/// so this is not a host-liveness signal the way the S3's is — it is a
-/// backstop against a wedged peripheral, sized to be far above the ~5.6 ms a
-/// full chunk costs at 921600 baud.
-const WRITE_TIMEOUT: Duration = Duration::from_millis(250);
-
-/// Chunk size for large writes, in *line time* rather than syscall overhead:
-/// the invariant is "drain RX at least twice per RX-FIFO fill time". At
-/// 921600 baud (the link rate `board::esp32v3::init` programs) UART0's
-/// 128-byte RX FIFO holds ~1.4 ms of incoming line, and a 64-byte chunk
-/// costs ~0.7 ms to clock out — the same 2x overflow margin the original
-/// 115200 sizing had, it just drains 8x as often in wall time. The chunk
-/// deliberately does NOT grow with the baud: line time is what protects the
-/// FIFO, not bytes.
-const WRITE_CHUNK_SIZE: usize = 64;
-
 /// RX drain buffer. One FIFO's worth, so a single `read_buffered` empties a
 /// full FIFO.
 const READ_CHUNK_SIZE: usize = 128;
+
+/// The io pacer tick period. Sized like the old `Timer::after(1 ms)` loop
+/// pacing was: the 128 B RX FIFO holds ~1.4 ms of line at 921600 baud, so a
+/// 1 ms poll cadence drains it with margin.
+const IO_TICK_PERIOD: esp_hal::time::Duration = esp_hal::time::Duration::from_millis(1);
+
+/// ⚠️ io_task must NEVER await embassy-time (`Timer::after`, `Delay`).
+///
+/// It runs on an esp-rtos interrupt executor, and esp-rtos 0.3.0 never
+/// delivers embassy-time wakes to tasks on interrupt executors: the task
+/// parks at its first timed await forever, and processing its entry in the
+/// shared timer queue while the engine runs has crashed the chip on the bench
+/// (`InstrError`, PC in DRAM — 2026-08-25 dig2go). Every wake io_task relies
+/// on must be a *direct* waker wake: channel/signal sends, and this pacer —
+/// a hardware timer (TIMG0's second timer, which esp-rtos does not use)
+/// whose ISR signals [`IO_TICK`] every millisecond. See
+/// `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`.
+static IO_TICK: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
+/// The pacer timer, parked in a static so [`io_pacer_isr`] can clear its
+/// interrupt. Written once by [`start_io_pacer`] before the interrupt is
+/// enabled; only the ISR touches it afterwards.
+static mut IO_PACER: Option<PeriodicTimer<'static, Blocking>> = None;
+
+/// Start the 1 ms io pacer on `timer` (TIMG0's timer1 — see `start_runtime`).
+///
+/// Must be called before [`io_task`] is spawned would be ideal, but any order
+/// works: ticks signalled before io_task waits simply collapse into one.
+/// Priority1 is deliberate — the classic's single level-2 CPU interrupt slot
+/// is already claimed by the swi2 executor, and a P1 tick still wakes the P2
+/// executor (the wake path is signal → pender → swi2 raise, and a pending
+/// swi fires as soon as the level allows).
+pub fn start_io_pacer(timer: AnyTimer<'static>) {
+    // SAFETY: the one and only mutable reference taken outside the ISR, and
+    // the ISR cannot run yet — `listen` below is what enables it.
+    let slot = unsafe { &mut *core::ptr::addr_of_mut!(IO_PACER) };
+    let pacer = slot.insert(PeriodicTimer::new(timer));
+    pacer.set_interrupt_handler(InterruptHandler::new(io_pacer_isr, Priority::Priority1));
+    if let Err(error) = pacer.start(IO_TICK_PERIOD) {
+        // A dead pacer means a mute io_task; say so loudly while esp_println
+        // still reaches the wire directly.
+        esp_println::println!(
+            "[ERROR] io pacer failed to start ({error:?}); host link will be mute"
+        );
+        return;
+    }
+    pacer.listen();
+}
+
+extern "C" fn io_pacer_isr() {
+    // SAFETY: sole accessor once the interrupt is live (see `start_io_pacer`).
+    if let Some(pacer) = unsafe { (*core::ptr::addr_of_mut!(IO_PACER)).as_mut() } {
+        pacer.clear_interrupt();
+    }
+    IO_TICK.signal(());
+}
+
+/// Wait for `n` pacer ticks (≈ `n` milliseconds).
+///
+/// Ticks that arrive while io_task is busy collapse (a `Signal` latches one),
+/// so this is a lower bound in wall time — exactly what loop pacing and
+/// timeouts want, and never a scheduling dependency on embassy-time.
+async fn wait_ticks(n: u32) {
+    for _ in 0..n {
+        IO_TICK.wait().await;
+    }
+}
+
+/// The io task's delay source for [`ChunkedWriter`]: pacer ticks, not
+/// embassy-time (see [`IO_TICK`] for why that distinction is load-bearing).
+struct TickDelay;
+
+impl embedded_hal_async::delay::DelayNs for TickDelay {
+    async fn delay_ns(&mut self, ns: u32) {
+        // Round up to whole ticks; a delay is a minimum, and 1 ms resolution
+        // is the pacer's grain.
+        wait_ticks(ns.div_ceil(1_000_000).max(1)).await;
+    }
+}
+
+/// How long a non-empty partial line may sit with no further RX bytes before
+/// it is declared a dead session's remnant and discarded. Real frames stream
+/// at line rate (a full 16 KiB frame takes ~175 ms at 921600), so a one-second
+/// intra-frame silence is not a live client — it is a host that died or
+/// disconnected mid-frame, whose half-frame would otherwise prefix-corrupt
+/// the next session's first line (the hello, typically; observed on the
+/// 2026-08-21 dig2go bench, see
+/// `docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`).
+const STALE_PARTIAL_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// The split UART plus the partial-line buffer, held together because writing
 /// and reading interleave (see the module docs).
@@ -99,6 +168,8 @@ struct UartLink {
     rx: UartRx<'static, Async>,
     tx: UartTx<'static, Async>,
     read_buffer: Vec<u8>,
+    /// When RX bytes last arrived, for [`Self::flush_stale_partial`].
+    last_rx: Instant,
 }
 
 impl UartLink {
@@ -108,116 +179,126 @@ impl UartLink {
             rx,
             tx,
             read_buffer: Vec::new(),
+            last_rx: Instant::now(),
         }
     }
 
-    /// Move whatever the RX FIFO already holds into the line buffer and push
-    /// any complete `M!` lines to the incoming queue.
-    ///
-    /// Non-blocking by construction: `read_buffered` returns what is there and
-    /// never waits, which is the read semantic the C6 and S3 adapters also
-    /// present. It is deliberately not the async `read()` — that one is
-    /// cancellation-safe but parks on an RX-timeout interrupt that the classic
-    /// ESP32 cannot clear while the FIFO is non-empty (esp-hal notes the
-    /// erratum in `read_exact_async`), and polling sidesteps the question
-    /// entirely at 1 ms granularity.
+    /// [`poll_rx_into`] over this link's RX half and line buffer.
     fn poll_rx(&mut self, router: &MessageRouter) {
-        let mut temp = [0u8; READ_CHUNK_SIZE];
-        loop {
-            match self.rx.read_buffered(&mut temp) {
-                Ok(0) => break,
-                Ok(n) => {
-                    self.read_buffer.extend_from_slice(&temp[..n]);
-                    // A short read means the FIFO is empty; anything else and
-                    // there may be more waiting.
-                    if n < temp.len() {
-                        break;
-                    }
-                }
-                Err(error) => {
-                    // Overflow/parity/framing. The FIFO is reset by esp-hal on
-                    // overflow; drop the partial line rather than splice two
-                    // halves of different messages together.
-                    log::warn!("[io_task] UART RX error: {error:?}; dropping partial line");
-                    self.read_buffer.clear();
-                    break;
-                }
-            }
+        poll_rx_into(
+            &mut self.rx,
+            &mut self.read_buffer,
+            &mut self.last_rx,
+            router,
+        );
+    }
+
+    /// Discard a partial line that stopped growing: a dead session's remnant.
+    ///
+    /// Without this, a host that vanished mid-frame leaves its half-line in
+    /// `read_buffer`, and the next session's first frame is glued onto it —
+    /// one corrupt line whose parse failure eats the new session's hello.
+    /// See [`STALE_PARTIAL_TIMEOUT`] for the threshold rationale.
+    fn flush_stale_partial(&mut self) {
+        if !self.read_buffer.is_empty() && self.last_rx.elapsed() >= STALE_PARTIAL_TIMEOUT {
+            log::warn!(
+                "[io_task] discarding {} B partial line (no RX for {} ms) — dead session remnant",
+                self.read_buffer.len(),
+                self.last_rx.elapsed().as_millis()
+            );
+            fw_esp32_common::serial::link_counters::bump_stale_partial_flush();
+            self.read_buffer.clear();
         }
-        process_read_buffer(&mut self.read_buffer, router);
+    }
+
+    /// A [`ChunkedWriter`] over this link's TX half whose per-chunk hook
+    /// drains RX — the "drain RX at least twice per FIFO fill time" invariant
+    /// the UART write policy sizes its chunks for.
+    ///
+    /// Borrows the link field-by-field: the hook needs the RX half and the
+    /// line buffer while the writer holds TX, which `&mut self` methods can't
+    /// express.
+    fn writer<'a>(
+        &'a mut self,
+        router: &'a MessageRouter,
+    ) -> ChunkedWriter<'a, UartTx<'static, Async>, impl FnMut() + 'a, TickDelay> {
+        let Self {
+            rx,
+            tx,
+            read_buffer,
+            last_rx,
+        } = self;
+        ChunkedWriter::new(
+            tx,
+            WritePolicy::UART_921600,
+            || poll_rx_into(rx, read_buffer, last_rx, router),
+            TickDelay,
+        )
     }
 
     /// Write everything in `data`, draining RX between chunks.
     ///
-    /// Returns false on a per-chunk timeout, which for a UART means the
-    /// peripheral is wedged rather than that a host went away.
+    /// Returns false on a per-chunk timeout or error, with the failure's
+    /// chunk/elapsed detail logged: a wedged peripheral crawls through every
+    /// chunk (elapsed ≈ chunk × timeout), a starved task sails through its
+    /// chunks and then stalls once (elapsed ≈ one timeout) — see
+    /// `docs/debt/shared-uart-io-task-starvation.md`.
     async fn write_chunked(&mut self, data: &[u8], router: &MessageRouter) -> bool {
-        use embassy_futures::select::{Either, select};
-        let mut offset = 0;
-        while offset < data.len() {
-            let chunk_end = (offset + WRITE_CHUNK_SIZE).min(data.len());
-            match select(
-                Timer::after(WRITE_TIMEOUT),
-                self.tx.write_all(&data[offset..chunk_end]),
-            )
-            .await
-            {
-                Either::First(_) => {
-                    log::warn!(
-                        "[io_task] UART TX timed out after {offset} of {} B",
-                        data.len()
-                    );
-                    return false;
-                }
-                Either::Second(Err(error)) => {
-                    log::warn!("[io_task] UART TX error: {error:?}");
-                    return false;
-                }
-                Either::Second(Ok(())) => {}
+        match self.writer(router).try_write_all(data).await {
+            Ok(()) => true,
+            Err(failure) => {
+                log::warn!("[io_task] UART TX write {failure}");
+                false
             }
-            offset = chunk_end;
-            self.poll_rx(router);
         }
-        true
     }
 }
 
-struct StackJsonWriter<'a> {
-    buf: &'a mut [u8],
-    len: usize,
-}
-
-#[derive(Debug)]
-struct StackJsonError;
-
-impl core::fmt::Display for StackJsonError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("stack JSON buffer full")
-    }
-}
-
-impl<'a> StackJsonWriter<'a> {
-    fn new(buf: &'a mut [u8]) -> Self {
-        Self { buf, len: 0 }
-    }
-
-    fn bytes(&self) -> &[u8] {
-        &self.buf[..self.len]
-    }
-}
-
-impl ser_write_json::SerWrite for StackJsonWriter<'_> {
-    type Error = StackJsonError;
-
-    fn write(&mut self, buf: &[u8]) -> Result<(), StackJsonError> {
-        let end = self.len.checked_add(buf.len()).ok_or(StackJsonError)?;
-        if end > self.buf.len() {
-            return Err(StackJsonError);
+/// Move whatever the RX FIFO already holds into the line buffer and push
+/// any complete `M!` lines to the incoming queue.
+///
+/// Non-blocking by construction: `read_buffered` returns what is there and
+/// never waits, which is the read semantic the C6 and S3 adapters also
+/// present. It is deliberately not the async `read()` — that one is
+/// cancellation-safe but parks on an RX-timeout interrupt that the classic
+/// ESP32 cannot clear while the FIFO is non-empty (esp-hal notes the
+/// erratum in `read_exact_async`), and polling sidesteps the question
+/// entirely at 1 ms granularity.
+///
+/// A free function over the link's parts rather than a method so the
+/// [`ChunkedWriter`] `on_chunk` hook can borrow the RX half and line buffer
+/// while the writer holds TX.
+fn poll_rx_into(
+    rx: &mut UartRx<'static, Async>,
+    read_buffer: &mut Vec<u8>,
+    last_rx: &mut Instant,
+    router: &MessageRouter,
+) {
+    let mut temp = [0u8; READ_CHUNK_SIZE];
+    loop {
+        match rx.read_buffered(&mut temp) {
+            Ok(0) => break,
+            Ok(n) => {
+                *last_rx = Instant::now();
+                read_buffer.extend_from_slice(&temp[..n]);
+                // A short read means the FIFO is empty; anything else and
+                // there may be more waiting.
+                if n < temp.len() {
+                    break;
+                }
+            }
+            Err(error) => {
+                // Overflow/parity/framing. The FIFO is reset by esp-hal on
+                // overflow; drop the partial line rather than splice two
+                // halves of different messages together.
+                log::warn!("[io_task] UART RX error: {error:?}; dropping partial line");
+                fw_esp32_common::serial::link_counters::bump_rx_error();
+                read_buffer.clear();
+                break;
+            }
         }
-        self.buf[self.len..end].copy_from_slice(buf);
-        self.len = end;
-        Ok(())
     }
+    process_read_buffer(read_buffer, router);
 }
 
 /// I/O task for the UART0 host link.
@@ -225,23 +306,65 @@ impl ser_write_json::SerWrite for StackJsonWriter<'_> {
 /// Runs independently of the server loop and converts between UART bytes and
 /// `M!`-prefixed JSON lines.
 ///
+/// `main.rs` spawns this on an `esp_rtos` interrupt executor (swi2,
+/// Priority2), NOT the thread executor the server loop runs on: the 1 ms
+/// poll cadence below must hold while a ~41 ms engine tick monopolizes the
+/// thread executor, or the 128 B RX FIFO (~1.4 ms at 921600) overflows and
+/// TX chunks time out unpolled (`docs/debt/shared-uart-io-task-starvation.md`).
+/// Two consequences to preserve: the future must stay `Send` (it is spawned
+/// through a `SendSpawner`), and everything it shares with the rest of the
+/// firmware must remain these static channels — cross-executor communication
+/// is the design, not an accident.
+///
 /// # Arguments
 ///
-/// * `uart` - UART0, already configured at 115200 8N1 by `init_board` (which
+/// * `uart` - UART0, already configured at 921600 8N1 by `init_board` (which
 ///   is also where the baud divisor `esp-println` piggybacks on gets set).
-#[embassy_executor::task]
-pub async fn io_task(uart: Uart<'static, esp_hal::Blocking>) {
-    let router = MessageRouter::new(&INCOMING_MSG, &OUTGOING_MSG);
-    let mut link = UartLink::new(uart.into_async());
+/// A `Uart<Async>` that may cross the `SendSpawner` boundary.
+///
+/// `Uart<Async>` is `!Send` (driver state is core-local). Moving it into
+/// io_task is sound HERE: `into_async()` runs on the PRO core in thread
+/// context, and io_task's executor (swi2) is bound to that same core — the
+/// driver never changes cores and the value moves exactly once.
+///
+/// Pre-converting is REQUIRED, not a convenience: `into_async()` registers
+/// and enables the UART interrupt, and doing that from inside the executor's
+/// handler's own poll does not survive the handler's exit (the interrupt
+/// epilogue restores the interrupt-enable state it entered with). The bench
+/// signature was async TX writes pending forever unless the bytes happened
+/// to fit the idle FIFO synchronously — one lucky boot flowed, the rest sat
+/// mute with io_task wedged inside its first `write_all` (2026-08-25).
+pub struct SendUart(pub Uart<'static, Async>);
+unsafe impl Send for SendUart {}
 
-    Timer::after(Duration::from_millis(100)).await;
+#[embassy_executor::task]
+pub async fn io_task(uart: SendUart) {
+    // ⚠️ No `esp_println!` anywhere in this task — it polls in interrupt
+    // context (the swi2 executor), and printing from there corrupted the
+    // system on the bench: a deterministic `InstrError` (PC in DRAM) fired
+    // seconds later in thread context whenever a diagnostic print ran in
+    // this task's entry poll (2026-08-25 dig2go; esp-sync's locks are
+    // priority-limited, per esp-rtos's own timer-priority comment, so an
+    // interrupt-context print can re-enter a lock the thread believes it
+    // holds). Liveness evidence belongs on the wire instead: the first
+    // heartbeat frame proves this task breathes.
+    let router = MessageRouter::new(&INCOMING_MSG, &OUTGOING_MSG);
+    let mut link = UartLink::new(uart.0);
+
+    // The old 100 ms boot settle, in ticks.
+    wait_ticks(100).await;
+    // Through the router (drained by this task itself): self-proving — the
+    // line reaches the host only if the pacer wakes actually arrive.
+    log::info!("[io_task] live: pacer ticks flowing (swi2 executor)");
 
     loop {
         drain_server_write_request(&mut link, &router).await;
         drain_outgoing_messages(&router, &mut link).await;
         link.poll_rx(&router);
+        link.flush_stale_partial();
 
-        Timer::after(Duration::from_millis(1)).await;
+        // Pace on the hardware tick, never on embassy-time (see `IO_TICK`).
+        IO_TICK.wait().await;
     }
 }
 
@@ -260,132 +383,24 @@ async fn drain_outgoing_messages(router: &MessageRouter, link: &mut UartLink) {
 }
 
 /// Drain accountable server write requests.
+///
+/// The request already carries the framed wire bytes — serialization happened
+/// thread-side in the transport, so this task's interrupt-context stack cost
+/// is one chunked byte write (see the module docs).
 async fn drain_server_write_request(link: &mut UartLink, router: &MessageRouter) {
     let receiver = SERVER_WRITE_REQUEST.receiver();
-    let Ok((generation, msg)) = receiver.try_receive() else {
+    let Ok((generation, len)) = receiver.try_receive() else {
         return;
     };
 
-    let result = timed_write_server_msg(link, msg, router).await;
+    let bytes = fw_esp32_common::serial::server_msg::frame_bytes(len);
+    let result = link.writer(router).write_framed(bytes).await;
     // Echo the request generation so `transport.send()` can discard any stale
     // result left over from a cancelled send.
     SERVER_WRITE_RESULT
         .sender()
         .send((generation, result))
         .await;
-}
-
-async fn timed_write_server_msg(
-    link: &mut UartLink,
-    msg: lpc_wire::WireServerMessage,
-    router: &MessageRouter,
-) -> Result<(), lpc_wire::TransportError> {
-    let result = timed_write_full_server_msg(link, msg, router).await;
-    if result.is_err() {
-        // If a write failed part-way through a JSON frame, separate the next
-        // frame so host parsers can recover instead of concatenating two `M!`
-        // messages.
-        let _ = link.write_chunked(b"\n", router).await;
-    }
-    result
-}
-
-async fn timed_write_full_server_msg(
-    link: &mut UartLink,
-    msg: lpc_wire::WireServerMessage,
-    router: &MessageRouter,
-) -> Result<(), lpc_wire::TransportError> {
-    // Same ~16.7 KiB stack buffer as fw-esp32s3, and the same TODO: it lives
-    // as async-fn state and is paid even for tiny acks. On this chip that is a
-    // materially larger share of a 192 KB DRAM budget than it is on the S3's
-    // ~342 KB, so it is the first place to look if `.bss` needs to shrink.
-    const SERVER_MSG_FRAMING_BYTES: usize = 16;
-    const SERVER_MSG_JSON_BUFFER_SIZE: usize =
-        lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES + SERVER_MSG_FRAMING_BYTES;
-    let mut buf = [0u8; SERVER_MSG_JSON_BUFFER_SIZE];
-    let mut writer = StackJsonWriter::new(&mut buf);
-    if writer.write(b"\nM!").is_err() {
-        log::warn!("[io_task] server message prefix exceeded JSON buffer");
-        return Err(lpc_wire::TransportError::Serialization(
-            "server message prefix exceeded JSON buffer".into(),
-        ));
-    }
-    // Erased writer: shares one serializer instantiation per wire type with the
-    // frame-budget measurement path (lpc_wire::ser_write_json_len), instead of
-    // emitting a second copy of every type's serializer for this sink.
-    if lpc_wire::ser_write_json_to(&mut writer, &msg).is_err() {
-        let detail = server_message_detail(&msg);
-        log::warn!(
-            "[io_task] server message id={} {} exceeded JSON buffer size={} frame_budget={}; write failed",
-            msg.id,
-            detail,
-            SERVER_MSG_JSON_BUFFER_SIZE,
-            lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
-        );
-        return Err(lpc_wire::TransportError::Serialization(format!(
-            "server message id={} {} exceeded JSON buffer",
-            msg.id, detail
-        )));
-    }
-    if writer.write(b"\n").is_err() {
-        let detail = server_message_detail(&msg);
-        log::warn!(
-            "[io_task] server message id={} {} suffix exceeded JSON buffer size={}; write failed",
-            msg.id,
-            detail,
-            SERVER_MSG_JSON_BUFFER_SIZE
-        );
-        return Err(lpc_wire::TransportError::Serialization(format!(
-            "server message id={} {} suffix exceeded JSON buffer",
-            msg.id, detail
-        )));
-    }
-    let id = msg.id;
-    if link.write_chunked(writer.bytes(), router).await {
-        Ok(())
-    } else {
-        Err(lpc_wire::TransportError::Other(format!(
-            "server message id={id} UART write timed out or failed"
-        )))
-    }
-}
-
-fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
-    match &msg.msg {
-        lpc_wire::server::ServerMsgBody::Hello(hello) => {
-            format!("Hello proto={}", hello.proto)
-        }
-        lpc_wire::server::ServerMsgBody::Filesystem(_) => "Filesystem".into(),
-        lpc_wire::server::ServerMsgBody::LoadProject { .. } => "LoadProject".into(),
-        lpc_wire::server::ServerMsgBody::UnloadProject => "UnloadProject".into(),
-        lpc_wire::server::ServerMsgBody::ProjectRead { events } => format!(
-            "ProjectRead seq={} fin={} events={}",
-            msg.seq,
-            msg.fin,
-            events.len()
-        ),
-        lpc_wire::server::ServerMsgBody::ProjectCommand { .. } => "ProjectCommand".into(),
-        lpc_wire::server::ServerMsgBody::ListAvailableProjects { projects } => {
-            format!("ListAvailableProjects projects={}", projects.len())
-        }
-        lpc_wire::server::ServerMsgBody::ListLoadedProjects { projects } => {
-            format!("ListLoadedProjects projects={}", projects.len())
-        }
-        lpc_wire::server::ServerMsgBody::StopAllProjects => "StopAllProjects".into(),
-        lpc_wire::server::ServerMsgBody::SetLogLevel => "SetLogLevel".into(),
-        lpc_wire::server::ServerMsgBody::Log { level, .. } => {
-            format!("Log level={level:?}")
-        }
-        lpc_wire::server::ServerMsgBody::Heartbeat {
-            frame_count,
-            loaded_projects,
-            ..
-        } => format!(
-            "Heartbeat frame_count={frame_count} loaded_projects={}",
-            loaded_projects.len()
-        ),
-        lpc_wire::server::ServerMsgBody::Error { .. } => "Error".into(),
-    }
 }
 
 /// Process the read buffer and extract complete lines.
@@ -400,6 +415,13 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
         if let Ok(line_str) = core::str::from_utf8(&line_bytes[..line_bytes.len() - 1])
             && line_str.starts_with("M!")
         {
+            // An inbound hello is the firmware's only "new client attached"
+            // signal (a UART has no cable event), so it doubles as the
+            // session boundary: whatever is still queued outbound was
+            // addressed to a session that no longer exists.
+            if line_str.contains("\"msg\":\"hello\"") {
+                drain_stale_outgoing(router);
+            }
             use alloc::string::ToString;
             if router
                 .incoming()
@@ -408,8 +430,35 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
                 .is_err()
             {
                 log::warn!("[io_task] incoming queue full, dropping M! message");
+                fw_esp32_common::serial::link_counters::bump_queue_full_drop();
             }
         }
+    }
+}
+
+/// Drop every queued fire-and-forget outbound line at a session boundary.
+///
+/// These are log/telemetry lines a previous session never drained (they only
+/// accumulate when io_task itself was blocked, e.g. across a flash window) —
+/// flushing them keeps a new session's first exchange from being preceded by
+/// a dead session's backlog. Accountable server writes
+/// (`SERVER_WRITE_REQUEST`) are deliberately NOT touched: dropping one
+/// without posting its result would leave the server task awaiting forever.
+///
+/// The `"msg":"hello"` substring test is sound because both wire clients
+/// (lp-app and serial-lab) emit compact JSON, and inside a JSON string value
+/// those quotes would be escaped — the raw byte sequence only occurs as the
+/// envelope's own field.
+fn drain_stale_outgoing(router: &MessageRouter) {
+    let receiver = router.outgoing().receiver();
+    let mut dropped = 0usize;
+    while receiver.try_receive().is_ok() {
+        dropped += 1;
+    }
+    if dropped > 0 {
+        log::info!(
+            "[io_task] hello: dropped {dropped} outbound lines queued for a previous session"
+        );
     }
 }
 
@@ -425,7 +474,7 @@ pub fn get_message_channels() -> (
 
 /// Get the accountable server write channels for StreamingMessageRouterTransport.
 pub fn get_server_write_channels() -> (
-    &'static Channel<CriticalSectionRawMutex, (u32, lpc_wire::WireServerMessage), 1>,
+    &'static Channel<CriticalSectionRawMutex, (u32, usize), 1>,
     &'static Channel<CriticalSectionRawMutex, (u32, Result<(), lpc_wire::TransportError>), 1>,
 ) {
     (&SERVER_WRITE_REQUEST, &SERVER_WRITE_RESULT)

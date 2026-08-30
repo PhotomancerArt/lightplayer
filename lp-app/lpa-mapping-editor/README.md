@@ -7,7 +7,10 @@ segments, neutral lamp fill) used by both the canvas and Studio's
 fixture renderers.
 
 ADRs: `docs/adr/2026-07-28-standalone-editor-module.md` (the carve-out),
-`docs/adr/2026-08-13-one-project-canvas.md` (the merged canvas).
+`docs/adr/2026-08-13-one-project-canvas.md` (the merged canvas),
+`docs/adr/2026-08-27-one-selection-one-tree.md` (the one selection: the
+dive as derived scope, the fixture-grain multi-select grammar, and the
+view-parameterized pick grain).
 
 ## Boundary
 
@@ -19,10 +22,15 @@ Studio server:
 
 - Fixtures enter as plain `FixtureSprite` props (label, color,
   placement, own-space bounds, one of three honest bodies, selection
-  flags) and fixture intent leaves as `FixtureEvent`s (tap = select,
-  press-drag = move with one committed placement per gesture,
-  double-click = dive / neighbour dive-switch). The host owns the
-  override lifecycle, packing, persistence, and journal stamping.
+  flags) and fixture intent leaves as `FixtureEvent`s (tap =
+  `Select { pick, toggle }` with shift as the sibling toggle, background
+  band = `Marquee`, press-drag = `Move { moves }` carrying the WHOLE
+  selected set with one committed gesture — the shared selection box's
+  corner handles scale the set uniformly when the host asks for
+  `transform_handles` — and double-click = `Dive` carrying the clicked
+  pick). Right/middle-drag and space+drag pan. The host owns the
+  override lifecycle, packing, persistence, journal stamping, and WHAT a
+  pick selects (fixture grain or object grain is view policy).
 - The DIVE is layer state on the same canvas: the host passes the
   focused sprite's key, the live `MapEditorSession`, and the fixture's
   `Placement`; the doc layers render inside one nested camera ∘
@@ -43,7 +51,8 @@ Studio server:
     re-derive from the gesture snapshot (no drift; one gesture = one
     undo step); edits sanitize so every produced document resolves.
   - `map_selection.rs` / `map_tool.rs` — tree-path selection and the
-    tool enum (select / grid / ring / path-with-draft).
+    tool enum (select / grid / ring / path-with-draft /
+    polygon-with-draft-and-population).
   - `camera.rs` — pan/zoom/fit math; the clamp bounds EFFECTIVE zoom
     (camera × placement scale).
   - `placement.rs` — translate ∘ rotate ∘ uniform-scale with forward /
@@ -63,10 +72,17 @@ Studio server:
 
 ## Interaction grammar
 
-Tools V/G/R/P (select / grid / ring / path). Creation drops a default
-object and opens its properties; the path tool previews resolved lamps
-and the chain link live, Enter/double-click finishes, Escape backs out
-one vertex. Selection is **tree-path based** (`ShapePath` +
+Tools V/G/R/P/O (select / grid / ring / path / polygon). Creation drops
+a default object and opens its properties; the path tool previews
+resolved lamps and the chain link live, Enter/double-click finishes,
+Escape backs out one vertex. The polygon tool draws a closed OUTLINE and
+carries a population mode — **outline** (lamps ride the perimeter,
+`Polygon`) or **filled** (a lamp lattice inside it, `FilledPolygon` —
+the shaped matrix). Its ghosts come from the real resolver, so the
+preview is cell-for-cell what closing commits; click the first corner or
+Enter closes. The mode is switchable after the fact from the properties
+pane: the outline is the authored thing, the population is how light
+fills it. Selection is **tree-path based** (`ShapePath` +
 `MapSelection`): double-click descends into a group, edits through a
 descended path write through to the authored shape (every repeat
 instance follows) — rationale:
@@ -75,9 +91,11 @@ properties pane renders the selected path as a STACK of editable cards,
 deepest first (the B′ ruling amending that ADR) — the host shell
 composes its own placement card and context strip around it. Click,
 shift-click, marquee, ⌘A select; corner handles resize uniformly;
-single-path vertices drag; Delete removes. The esc ladder: path backout
-→ drop vertex → ascend group → clear selection → reset tool → exit the
-dive. ⌘Z/⇧⌘Z undo/redo; 0 fits. View toggles N/A/L/F: wiring numbers,
+outline vertices drag (path, polygon, filled polygon); double-clicking
+an edge inserts a corner and Delete removes the selected one, down to
+each shape's floor (a run keeps 2, an outline 3) — with no vertex
+selected, Delete removes the object. The esc ladder: draft backout →
+drop vertex → ascend group → reset tool → exit the dive. ⌘Z/⇧⌘Z undo/redo; 0 fits. View toggles N/A/L/F: wiring numbers,
 direction arrows, live output colors, texture-frame fit preview.
 
 At the fixture grain (not dived): tap selects, press-drag moves

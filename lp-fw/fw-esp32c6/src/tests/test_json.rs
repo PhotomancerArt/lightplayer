@@ -62,17 +62,25 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
                         free_bytes: esp_alloc::HEAP.free() as u32,
                         used_bytes: esp_alloc::HEAP.used() as u32,
                         total_bytes: (esp_alloc::HEAP.free() + esp_alloc::HEAP.used()) as u32,
+                        largest_free_block: None,
+                        oom_retry_saves: None,
                     }),
                     // The harness boots without a recovery region installed,
                     // so there is no crash-recovery state to report — and no
                     // per-wire output attribution either.
                     recovery: None,
                     outputs: None,
+                    link: None,
                 },
             );
 
             let (server_write_request, server_write_result) = io_task::get_server_write_channels();
-            server_write_request.sender().send((0, msg)).await;
+            // The channel carries the static frame buffer's length;
+            // serialization is the thread side's job (see
+            // fw_esp32_common::serial::server_msg).
+            let len = fw_esp32_common::serial::server_msg::serialize_server_msg(&msg)
+                .expect("harness heartbeat serializes");
+            server_write_request.sender().send((0, len)).await;
             let _ = server_write_result.receiver().receive().await;
 
             frame_count += 1;

@@ -25,6 +25,7 @@ pub(crate) mod icon_menu_stories;
 pub mod inline_button;
 #[cfg(feature = "stories")]
 pub(crate) mod inline_button_stories;
+pub mod interaction_light;
 pub mod keyboard;
 pub mod logo_mark;
 #[cfg(feature = "stories")]
@@ -37,6 +38,7 @@ pub mod outline;
 pub mod popover;
 #[cfg(feature = "stories")]
 pub(crate) mod popover_stories;
+pub mod reveal_on_focus;
 pub mod tabs;
 pub mod toast;
 
@@ -58,6 +60,10 @@ pub use inline_button::{
     INLINE_ICON_SIZE, INLINE_TEXT_ICON_SIZE, InlineButton, InlineButtonTone,
     inline_icon_button_class, inline_text_button_class,
 };
+pub use interaction_light::{
+    conic_spinner_class, focus_ring_class, ir_ring_class, iridescent_fill_class,
+    iridescent_fill_static_class, row_edge_class,
+};
 pub use keyboard::Platform;
 pub use logo_mark::{LogoLockup, LogoMark, LogoStacked};
 pub use markdown_text::{MarkdownDocs, MarkdownText};
@@ -65,5 +71,6 @@ pub use option_cards::{
     OPTION_CARD_CHECK_CLASS, OptionCard, OptionCards, option_card_class, option_card_grid_class,
 };
 pub use popover::{IconPopoverButton, PopoverButton, PopoverCloseHandle, PopoverPlacement};
+pub use reveal_on_focus::use_reveal_on_focus;
 pub use tabs::{TabItem, Tabs};
 pub use toast::{ToastHost, ToastMessage, ToastTone, Toasts, use_toast_provider};

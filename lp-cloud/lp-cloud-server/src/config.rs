@@ -31,6 +31,13 @@ use lp_cloud_domain::{DevPickerConnection, LoginProviders, OidcConnection};
 /// "forever".
 pub const SESSION_TTL_SECONDS: f64 = 30.0 * 24.0 * 60.0 * 60.0;
 
+/// How long a GUEST session lasts: one year. Guest ownership is
+/// browser-held (examples vision D8) — the cookie IS the identity and
+/// there is no login to come back through — so expiry means losing the
+/// projects, and the ttl errs long. Guest-owned rows are DB-marked for
+/// pruning, which is the real lever against build-up.
+pub const GUEST_SESSION_TTL_SECONDS: f64 = 365.0 * 24.0 * 60.0 * 60.0;
+
 /// The whole of the process's configuration.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -66,6 +73,9 @@ pub struct ServerConfig {
     pub google: GoogleSettings,
     /// How long a minted session lasts, in seconds.
     pub session_ttl_seconds: f64,
+    /// How long a minted GUEST session lasts, in seconds (much longer —
+    /// see [`GUEST_SESSION_TTL_SECONDS`]).
+    pub guest_session_ttl_seconds: f64,
 }
 
 impl ServerConfig {
@@ -138,6 +148,7 @@ impl ServerConfig {
                 },
             },
             session_ttl_seconds: SESSION_TTL_SECONDS,
+            guest_session_ttl_seconds: GUEST_SESSION_TTL_SECONDS,
         })
     }
 

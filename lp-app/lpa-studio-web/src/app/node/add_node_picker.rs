@@ -24,7 +24,7 @@ use lpa_studio_core::{
 
 use crate::base::{
     DetailPopover, DetailSection, PopoverCloseHandle, PopoverPlacement, StudioIcon, StudioIconName,
-    node_kind_icon,
+    focus_ring_class, node_kind_icon, row_edge_class,
 };
 use crate::core::menu_item_action_class;
 
@@ -180,7 +180,14 @@ pub fn WorkspaceAddNodeButton(
     initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    const REST: &str = "tw:inline-flex tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:justify-self-start tw:rounded-md tw:border tw:border-dashed tw:border-border-subtle tw:bg-transparent tw:px-3 tw:py-2 tw:text-sm tw:text-subtle-foreground tw:hover:bg-card-muted tw:hover:text-soft-foreground";
+    const BASE: &str = "tw:inline-flex tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:justify-self-start tw:rounded-md tw:border tw:border-dashed tw:border-border-subtle tw:bg-transparent tw:px-3 tw:py-2 tw:text-sm tw:text-subtle-foreground tw:hover:bg-card-muted tw:hover:text-soft-foreground";
+    // Parity with the node tree's own "Add node…" row (P4): both dashed
+    // add-affordances now carry the same row-edge + focus-ring interaction
+    // light, matching what this component's own doc comment already
+    // claimed ("mirroring the node tree's row").
+    let light = format!("{} {}", row_edge_class(), focus_ring_class());
+    let rest = format!("{BASE} {light}");
+    let open = format!("{BASE} {light} tw:bg-card-muted tw:text-soft-foreground");
 
     rsx! {
         AddNodePicker {
@@ -189,8 +196,8 @@ pub fn WorkspaceAddNodeButton(
                 StudioIcon { name: StudioIconName::Add, size: 15 }
                 span { "Add node" }
             },
-            trigger_class: REST.to_string(),
-            trigger_open_class: format!("{REST} tw:bg-card-muted tw:text-soft-foreground"),
+            trigger_class: rest,
+            trigger_open_class: open,
             label: "Add a node to this project".to_string(),
             placement: PopoverPlacement::BottomStart,
             initially_open,

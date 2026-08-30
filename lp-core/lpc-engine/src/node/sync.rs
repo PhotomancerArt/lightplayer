@@ -20,87 +20,81 @@ use crate::node::{RuntimeNodeEntry, RuntimeNodeTree};
 ///
 /// `Created` deltas are emitted in parent-before-child order (depth-first pre-order).
 pub fn tree_deltas_since<N>(tree: &RuntimeNodeTree<N>, since: Revision) -> Vec<WireTreeDelta> {
-    let mut deltas = Vec::new();
-
-    // First pass: collect all live entries
-    let entries: Vec<&RuntimeNodeEntry<N>> = tree.entries().collect();
-
-    // Pass 1: Created entries
-    // If since == 0, return all entries. Otherwise, return entries with created_frame > since.
-    // Emit in parent-before-child order by iterating from root.
-    collect_created_deltas(tree, tree.root(), since, &mut deltas);
-
-    // Collect created ids for exclusion from other delta types
-    let created_ids: lp_collection::VecSet<lpc_model::NodeId> = deltas
-        .iter()
-        .filter_map(|d| {
-            if let WireTreeDelta::Created { id, .. } = d {
-                Some(*id)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // Pass 2: ChildrenChanged (children_ver > since, but not newly created)
-    for entry in &entries {
-        if entry.children_changed_at().0 > since.0 && !created_ids.contains(&entry.id) {
-            deltas.push(WireTreeDelta::ChildrenChanged {
-                id: entry.id,
-                children: entry.children.value().clone(),
-                children_ver: entry.children_changed_at(),
-            });
-        }
-    }
-
-    // Pass 3: EntryChanged (change_frame > since, but not newly created)
-    for entry in &entries {
-        if entry.changed_at().0 > since.0 && !created_ids.contains(&entry.id) {
-            deltas.push(WireTreeDelta::EntryChanged {
-                id: entry.id,
-                status: entry.status.value().clone(),
-                state: entry.state.value().into(),
-                change_frame: entry.changed_at(),
-            });
-        }
-    }
-
-    deltas
+    tree_deltas_since_iter(tree, since).collect()
 }
 
-/// Recursively collect Created deltas in parent-before-child order.
+/// Lazy form of [`tree_deltas_since`]: one delta materialized per step, in the
+/// same order (Created pre-order, then ChildrenChanged, then EntryChanged).
 ///
-/// If `since == 0`, all entries are included (bulk sync).
-/// Otherwise, only entries with `created_frame > since` are included.
-fn collect_created_deltas<N>(
-    tree: &RuntimeNodeTree<N>,
-    id: lpc_model::NodeId,
+/// The stream layer drives this directly so the whole-tree delta `Vec` never
+/// materializes on a bulk (`since == 0`) read — peak memory is one delta
+/// (the classic's project-read OOM class,
+/// `docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
+pub fn tree_deltas_since_iter<'a, N>(
+    tree: &'a RuntimeNodeTree<N>,
     since: Revision,
-    deltas: &mut Vec<WireTreeDelta>,
-) {
-    if let Some(entry) = tree.get(id) {
-        let include = since.0 == 0 || entry.created_at.0 > since.0;
-        if include {
-            deltas.push(WireTreeDelta::Created {
+) -> impl Iterator<Item = WireTreeDelta> + 'a {
+    // "Created" membership is a pure predicate of the entry, so the later
+    // passes can re-evaluate it instead of holding a set of emitted ids. (An
+    // entry unreachable from the root is never *emitted* as Created either
+    // way; a live tree has no such entries.)
+    let is_created =
+        move |entry: &RuntimeNodeEntry<N>| since.0 == 0 || entry.created_at.0 > since.0;
+
+    // Pass 1: Created entries, depth-first pre-order from the root (parents
+    // before children). If since == 0, all entries are included (bulk sync).
+    // The walk descends through non-included entries — a child can be newer
+    // than its parent.
+    let mut stack: Vec<lpc_model::NodeId> = alloc::vec![tree.root()];
+    let created = core::iter::from_fn(move || {
+        loop {
+            let id = stack.pop()?;
+            let Some(entry) = tree.get(id) else { continue };
+            // Push children reversed so the first child is popped next.
+            for child_id in entry.children.value().iter().rev() {
+                stack.push(*child_id);
+            }
+            if is_created(entry) {
+                return Some(WireTreeDelta::Created {
+                    id: entry.id,
+                    path: entry.path.clone(),
+                    parent: entry.parent,
+                    child_kind: entry.child_kind.clone(),
+                    children: entry.children.value().clone(),
+                    status: entry.status.value().clone(),
+                    state: entry.state.value().into(),
+                    created_frame: entry.created_at,
+                    change_frame: entry.changed_at(),
+                    children_ver: entry.children_changed_at(),
+                });
+            }
+        }
+    });
+
+    // Pass 2: ChildrenChanged (children_ver > since, but not newly created)
+    let children_changed = tree.entries().filter_map(move |entry| {
+        (entry.children_changed_at().0 > since.0 && !is_created(entry)).then(|| {
+            WireTreeDelta::ChildrenChanged {
                 id: entry.id,
-                path: entry.path.clone(),
-                parent: entry.parent,
-                child_kind: entry.child_kind.clone(),
                 children: entry.children.value().clone(),
+                children_ver: entry.children_changed_at(),
+            }
+        })
+    });
+
+    // Pass 3: EntryChanged (change_frame > since, but not newly created)
+    let entry_changed = tree.entries().filter_map(move |entry| {
+        (entry.changed_at().0 > since.0 && !is_created(entry)).then(|| {
+            WireTreeDelta::EntryChanged {
+                id: entry.id,
                 status: entry.status.value().clone(),
                 state: entry.state.value().into(),
-                created_frame: entry.created_at,
                 change_frame: entry.changed_at(),
-                children_ver: entry.children_changed_at(),
-            });
-        }
+            }
+        })
+    });
 
-        // Recurse to children (depth-first pre-order)
-        let children: Vec<lpc_model::NodeId> = entry.children.value().clone();
-        for child_id in children {
-            collect_created_deltas(tree, child_id, since, deltas);
-        }
-    }
+    created.chain(children_changed).chain(entry_changed)
 }
 
 #[cfg(test)]

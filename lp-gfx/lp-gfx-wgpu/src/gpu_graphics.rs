@@ -357,6 +357,23 @@ impl LpGraphics for GpuGraphics {
         )
     }
 
+    /// The GPU→CPU copy inherently stages through fresh mapped/quantized
+    /// buffers, so this saves no allocation here — it exists to honor the
+    /// caller-owned-buffer contract on a backend that only runs on hosts.
+    fn read_back_into(&self, texture: &TextureHandle, out: &mut [u8]) -> Result<(), GfxError> {
+        let data = self.read_back(texture)?;
+        let src = data.bytes();
+        if out.len() != src.len() {
+            return Err(len_mismatch(
+                "texture read back bytes",
+                src.len(),
+                out.len(),
+            ));
+        }
+        out.copy_from_slice(src);
+        Ok(())
+    }
+
     /// Native wgpu can block on a buffer map; the browser tier cannot, so
     /// render products stay GPU-resident there (fidelity-tiers ADR — the
     /// probe edge surfaces the residency instead of an error string).
@@ -414,8 +431,13 @@ impl LpGraphics for GpuGraphics {
         Ok(())
     }
 
-    fn read_sample_out(&self, out: &SampleOutHandle) -> Result<Vec<u16>, GfxError> {
-        Ok(sample_out(out)?.0.clone())
+    fn read_sample_out_into(&self, out: &SampleOutHandle, dst: &mut [u16]) -> Result<(), GfxError> {
+        let src = &sample_out(out)?.0;
+        if dst.len() != src.len() {
+            return Err(len_mismatch("sample out channels", src.len(), dst.len()));
+        }
+        dst.copy_from_slice(src);
+        Ok(())
     }
 
     fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {

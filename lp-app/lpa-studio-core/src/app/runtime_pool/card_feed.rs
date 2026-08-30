@@ -11,39 +11,38 @@
 //! - **Revision-only change detection.** A new frame is a frame whose
 //!   `revision` moved — the buffer's `changed_at`, which advances only when
 //!   the device publishes. Arrival time never counts: a pull that answers
-//!   with the same revision (the device is idle, or paused) leaves the
+//!   with the same revisions (the device is idle, or paused) leaves the
 //!   frame, its bytes `Rc`, and its age stamp exactly as they were, so the
 //!   card ages honestly toward the stale threshold instead of pretending a
 //!   re-read is a new picture.
 //! - **The LampView `Rc` contract.** The renderer repaints on `Rc` POINTER
 //!   identity, so every genuinely new frame gets a FRESH `bytes` `Rc` and
 //!   the display layout keeps a STABLE one across frames whose geometry did
-//!   not move. That is why the layout lives on the feed rather than inside
-//!   each preview: the per-frame preview clones the one `Rc` the feed holds.
-//! - **One output node.** A project can drive several outputs; the card
-//!   shows one. The first entry that has actually published is latched
-//!   ([`CardFeedState::node`]) and every later pull filters by it, so a
-//!   second output appearing mid-session cannot swap the picture.
+//!   not move. The per-output folding and the composed picture both live in
+//!   [`OutputFrameCache`], which keeps those identities.
+//! - **Every output joins the picture.** A project can drive several
+//!   outputs, and the card composes ALL of them
+//!   ([`OutputFrameCache::composed_frame`]) — one buffer, every wire's
+//!   lamps at their own offsets. The feed used to latch the FIRST output
+//!   that published, which is how the small dome's second box (2,975
+//!   lamps) never appeared on the sim card.
 //! - **Last-known survives the session going dark.** Nothing here is
 //!   cleared on disconnect (Q4: offline shows the last in-session frame,
 //!   dimmed). Only the wire-scoped facts — the project handle and the
-//!   geometry — are invalidated, because those are claims about a
-//!   connection.
+//!   per-output geometry claims — are invalidated, because those are claims
+//!   about a connection.
+//!
+//! [`OutputFrameProbeRequest`]: lpc_wire::OutputFrameProbeRequest
 
-use std::rc::Rc;
+use lpc_wire::{ControlDisplayLayoutRead, OutputFrameEntry};
 
-use lpc_model::{ControlDisplayLayout, ControlExtent, NodeId, Revision};
-use lpc_wire::{
-    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, OutputFrameEntry,
-    WireChannelSampleFormat,
-};
+use crate::UiControlProductPreview;
+use crate::app::project::output_frame_cache::OutputFrameCache;
 
-use crate::{UiControlProductPreview, UiControlSampleFormat};
-
-/// What applying a pulled entry did, for the caller's follow-up work.
+/// What applying a pulled answer did, for the caller's follow-up work.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CardFeedApply {
-    /// The revision moved: a genuinely new frame landed.
+    /// A revision moved: a genuinely new frame landed.
     pub new_frame: bool,
 }
 
@@ -52,29 +51,12 @@ pub struct CardFeedApply {
 pub struct CardFeedState {
     /// The device's loaded-project handle, acquired once per connection.
     handle_id: Option<u32>,
-    /// The output node this card follows, latched at the first frame.
-    node: Option<NodeId>,
-    /// The geometry every preview shares — one `Rc`, replaced only when the
-    /// device sends a different layout.
-    ///
-    /// The layout is stated in the OUTPUT's numbering: this feed's frames
-    /// are an output's published buffer, so the renderer reads each lamp's
-    /// colour at that lamp's `sample_start` in those bytes. A producer's
-    /// own numbering stops being the wire's the moment a second producer
-    /// joins or a patch moves a run — which is why only the engine (whose
-    /// fragment merge knows the placements) ever supplies this, and a
-    /// refusal leaves the card honestly layout-less rather than drawing
-    /// every lamp from another lamp's bytes.
-    layout: Option<Rc<ControlDisplayLayout>>,
-    /// The engine-side revision of `layout`, for `IfChanged` gating.
-    layout_revision: Option<Revision>,
-    /// The device answered `Unsupported` for this connection's geometry —
-    /// a PERMANENT answer (genuinely over the link's budget). The feed
-    /// stops asking: the engine builds and measures the whole layout to
-    /// refuse it — real work at dome scale, every pull — until the handle
-    /// is invalidated.
-    layout_refused: bool,
-    /// The newest frame, as the renderer consumes it.
+    /// The per-output half: every output's newest frame and geometry, plus
+    /// the read gate — all connection-scoped claims, reset on invalidate.
+    outputs: OutputFrameCache,
+    /// The newest COMPOSED picture, as the renderer consumes it. Held
+    /// outside [`Self::outputs`] so it survives `invalidate_connection`
+    /// (the offline card's last picture) while the claims behind it reset.
     frame: Option<UiControlProductPreview>,
     /// When the newest frame's revision was first observed (injected-clock
     /// epoch seconds) — the age the card's meta row reads.
@@ -102,19 +84,17 @@ impl CardFeedState {
         self.handle_id = Some(handle_id);
     }
 
-    /// Drop everything that was a claim about the CONNECTION: the handle,
-    /// the followed output, and the geometry (which a reload may have
-    /// changed under us). The last frame and its age stay — an offline card
-    /// shows the last thing the board actually did.
+    /// Drop everything that was a claim about the CONNECTION: the handle
+    /// and the per-output state (which a reload may have changed under us —
+    /// nodes, geometry, refusals alike). The last composed frame and its
+    /// age stay — an offline card shows the last thing the board actually
+    /// did.
     pub fn invalidate_connection(&mut self) {
         self.handle_id = None;
-        self.node = None;
-        self.layout = None;
-        self.layout_revision = None;
-        self.layout_refused = false;
+        self.outputs = OutputFrameCache::default();
     }
 
-    /// The newest frame, if this session has ever carried one.
+    /// The newest composed frame, if this session has ever carried one.
     pub fn frame(&self) -> Option<&UiControlProductPreview> {
         self.frame.as_ref()
     }
@@ -150,79 +130,35 @@ impl CardFeedState {
         self.last_pull_completed_at
     }
 
-    /// The output node this card follows, once latched.
-    pub fn node(&self) -> Option<NodeId> {
-        self.node
-    }
-
-    /// What the next pull should ask for.
-    ///
-    /// `Always` until geometry is known, `IfChanged` while the device's own
-    /// layout stands, and `None` once the device refused it — a refusal
-    /// costs the engine a full layout build plus a serialized-length
-    /// measurement, so re-asking every 150 ms would tax exactly the
-    /// dome-scale board that can least afford it.
+    /// What the next pull should ask for — the shared multi-output gate
+    /// ([`OutputFrameCache::display_layout_read`]): `Always` while any
+    /// output still lacks geometry, `IfChanged` while every layout stands,
+    /// and `None` once every output that could answer has refused — a
+    /// refusal costs the engine a full layout build plus a
+    /// serialized-length measurement, so re-asking every 150 ms would tax
+    /// exactly the dome-scale board that can least afford it.
     pub fn display_layout_read(&self) -> ControlDisplayLayoutRead {
-        if self.layout_refused {
-            return ControlDisplayLayoutRead::None;
-        }
-        match self.layout_revision {
-            Some(revision) => ControlDisplayLayoutRead::IfChanged {
-                known_revision: Some(revision),
-            },
-            None => ControlDisplayLayoutRead::Always,
-        }
+        self.outputs.display_layout_read()
     }
 
-    /// Pick this card's entry out of a pulled result: the latched output
-    /// node when there is one, else the first output that has actually
-    /// published (`channels > 0`) — an output with no frame yet is "no
-    /// frame yet", never a fault, and never worth latching onto.
-    pub fn pick_entry<'a>(&self, outputs: &'a [OutputFrameEntry]) -> Option<&'a OutputFrameEntry> {
-        match self.node {
-            Some(node) => outputs.iter().find(|entry| entry.node == node),
-            None => outputs
-                .iter()
-                .find(|entry| entry.channels > 0 && !entry.bytes.is_empty()),
-        }
-    }
-
-    /// Fold one pulled entry into the feed.
+    /// Fold one pulled answer — every output entry it carried — into the
+    /// feed, and recompose the picture.
     ///
-    /// `now` only ever stamps a frame whose revision MOVED. Everything else
-    /// — a repeated revision, an unreadable sample format — leaves the
-    /// stored frame and its age untouched.
-    pub fn apply_entry(&mut self, entry: &OutputFrameEntry, now: f64) -> CardFeedApply {
-        self.node = Some(entry.node);
-        self.apply_display_layout(&entry.display_layout);
-
-        let unchanged = self
-            .frame
-            .as_ref()
-            .is_some_and(|frame| frame.revision == entry.revision.0);
-        // U16 is the only format Studio can read today; a U8 device would
-        // otherwise be shown as garbage. Keep the last good frame instead.
-        let readable = entry.sample_format == WireChannelSampleFormat::U16
-            && entry.channels > 0
-            && !entry.bytes.is_empty();
-        if unchanged || !readable {
-            return CardFeedApply { new_frame: false };
+    /// `now` only ever stamps an answer that carried a MOVED revision.
+    /// Everything else — repeated revisions, unreadable sample formats —
+    /// leaves the stored frame and its age untouched.
+    pub fn apply(&mut self, entries: &[OutputFrameEntry], now: f64) -> CardFeedApply {
+        let before = self.outputs.frames_seen();
+        self.outputs.apply(entries);
+        let new_frame = self.outputs.frames_seen() != before;
+        let nodes: Vec<lpc_model::NodeId> = self.outputs.outputs().collect();
+        if let Some(composed) = self.outputs.composed_frame(&nodes) {
+            self.frame = Some(composed);
         }
-
-        self.frame = Some(UiControlProductPreview {
-            revision: entry.revision.0,
-            // The published buffer is one row of RGB samples: three u16
-            // channels per lamp, which is what `bytes.len()` reports.
-            extent: ControlExtent::new(1, entry.channels.saturating_mul(3)),
-            sample_format: UiControlSampleFormat::U16,
-            sample_layout: entry.sample_layout.clone(),
-            // The ONE geometry Rc, cloned — pointer-stable across frames.
-            display_layout: self.layout.clone(),
-            // A fresh Rc per frame: the renderer's repaint key.
-            bytes: Rc::from(entry.bytes.as_slice()),
-        });
-        self.last_frame_at = Some(now);
-        CardFeedApply { new_frame: true }
+        if new_frame {
+            self.last_frame_at = Some(now);
+        }
+        CardFeedApply { new_frame }
     }
 
     /// Whether a feed pull is due at `now` under the completion `gap`. A
@@ -249,32 +185,17 @@ impl CardFeedState {
     pub fn mark_pull_complete(&mut self, now: f64) {
         self.last_pull_completed_at = Some(now);
     }
-
-    /// Absorb the geometry half of a pulled entry.
-    fn apply_display_layout(&mut self, result: &ControlDisplayLayoutProbeResult) {
-        match result {
-            ControlDisplayLayoutProbeResult::Layout(layout) => {
-                self.layout_revision = Some(layout.revision());
-                self.layout_refused = false;
-                self.layout = Some(Rc::new(layout.clone()));
-            }
-            // Both mean "what you have still stands" — keep the Rc, which
-            // is the whole point of asking `IfChanged`.
-            ControlDisplayLayoutProbeResult::Unchanged { .. }
-            | ControlDisplayLayoutProbeResult::Omitted => {}
-            ControlDisplayLayoutProbeResult::Unsupported { .. } => {
-                self.layout_refused = true;
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use lpc_model::{
-        ColorOrder, ControlLamp2d, ControlLayout2d, ControlSampleEncoding, ControlSampleLayout,
-        ControlSampleSpan,
+        ColorOrder, ControlDisplayLayout, ControlLamp2d, ControlLayout2d, ControlSampleEncoding,
+        ControlSampleLayout, ControlSampleSpan, NodeId, Revision,
     };
+    use lpc_wire::{ControlDisplayLayoutProbeResult, WireChannelSampleFormat};
 
     use super::*;
 
@@ -284,9 +205,9 @@ mod tests {
     fn a_moved_revision_is_a_new_frame_with_fresh_bytes() {
         let mut feed = CardFeedState::default();
 
-        feed.apply_entry(&entry(4, 1, vec![1, 0, 2, 0, 3, 0]), NOW);
+        feed.apply(&[entry(4, 1, vec![1, 0, 2, 0, 3, 0])], NOW);
         let first = Rc::clone(&feed.frame().expect("first frame").bytes);
-        let applied = feed.apply_entry(&entry(4, 2, vec![9, 0, 8, 0, 7, 0]), NOW + 0.2);
+        let applied = feed.apply(&[entry(4, 2, vec![9, 0, 8, 0, 7, 0])], NOW + 0.2);
 
         assert!(applied.new_frame);
         assert_eq!(feed.frame().expect("second frame").revision, 2);
@@ -300,12 +221,12 @@ mod tests {
     #[test]
     fn a_repeated_revision_is_not_a_new_frame_and_does_not_refresh_the_age() {
         let mut feed = CardFeedState::default();
-        feed.apply_entry(&entry(4, 7, vec![1, 0, 2, 0, 3, 0]), NOW);
+        feed.apply(&[entry(4, 7, vec![1, 0, 2, 0, 3, 0])], NOW);
         let bytes = Rc::clone(&feed.frame().expect("frame").bytes);
 
         // Same revision, different bytes: the device did not publish, so
         // this is the same picture however late it arrived.
-        let applied = feed.apply_entry(&entry(4, 7, vec![4, 0, 5, 0, 6, 0]), NOW + 3.0);
+        let applied = feed.apply(&[entry(4, 7, vec![4, 0, 5, 0, 6, 0])], NOW + 3.0);
 
         assert!(!applied.new_frame);
         assert!(Rc::ptr_eq(&bytes, &feed.frame().expect("frame").bytes));
@@ -319,7 +240,7 @@ mod tests {
         let mut first = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
         first.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
 
-        feed.apply_entry(&first, NOW);
+        feed.apply(&[first], NOW);
         let geometry = Rc::clone(
             feed.frame()
                 .expect("frame")
@@ -332,7 +253,7 @@ mod tests {
         second.display_layout = ControlDisplayLayoutProbeResult::Unchanged {
             revision: Revision::new(11),
         };
-        feed.apply_entry(&second, NOW + 0.2);
+        feed.apply(&[second], NOW + 0.2);
 
         assert!(
             Rc::ptr_eq(
@@ -354,7 +275,7 @@ mod tests {
 
         let mut first = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
         first.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
-        feed.apply_entry(&first, NOW);
+        feed.apply(&[first], NOW);
 
         assert_eq!(
             feed.display_layout_read(),
@@ -375,15 +296,43 @@ mod tests {
             reason: "over the wire budget".to_string(),
         };
 
-        feed.apply_entry(&refused, NOW);
+        feed.apply(&[refused], NOW);
 
         assert_eq!(feed.display_layout_read(), ControlDisplayLayoutRead::None);
         assert!(feed.frame().expect("frame").display_layout.is_none());
     }
 
+    /// The small-dome regression (2026-08-29): a project driving TWO
+    /// outputs shows BOTH on the card. The feed used to latch the first
+    /// entry that published, and the second box's 2,975 lamps never
+    /// appeared anywhere.
     #[test]
-    fn an_output_with_no_published_frame_is_not_latched() {
-        let feed = CardFeedState::default();
+    fn every_published_output_joins_the_composed_picture() {
+        let mut feed = CardFeedState::default();
+        let mut box_1 = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
+        box_1.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
+        let mut box_2 = entry(5, 1, vec![9, 0, 8, 0, 7, 0]);
+        box_2.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(12));
+
+        feed.apply(&[box_1, box_2], NOW);
+
+        let frame = feed.frame().expect("composed frame");
+        assert_eq!(
+            frame.bytes.as_ref(),
+            [1, 0, 2, 0, 3, 0, 9, 0, 8, 0, 7, 0],
+            "both outputs' bytes ride the one picture"
+        );
+        let ControlDisplayLayout::Layout2d(layout) =
+            frame.display_layout.as_deref().expect("geometry");
+        let starts: Vec<u32> = layout.lamps.iter().map(|lamp| lamp.sample_start).collect();
+        assert_eq!(starts, vec![0, 3], "each output's lamps read its stretch");
+    }
+
+    /// An output with no published frame contributes nothing yet — the
+    /// composed picture is the outputs that HAVE published.
+    #[test]
+    fn an_unpublished_output_is_not_part_of_the_picture() {
+        let mut feed = CardFeedState::default();
         let empty = OutputFrameEntry {
             channels: 0,
             bytes: Vec::new(),
@@ -391,25 +340,11 @@ mod tests {
         };
         let live = entry(5, 1, vec![1, 0, 2, 0, 3, 0]);
 
-        let outputs = [empty, live];
-        let picked = feed.pick_entry(&outputs).expect("a published output");
-
-        assert_eq!(picked.node, NodeId::new(5));
-    }
-
-    #[test]
-    fn the_latched_output_keeps_the_card_on_one_node() {
-        let mut feed = CardFeedState::default();
-        feed.apply_entry(&entry(5, 1, vec![1, 0, 2, 0, 3, 0]), NOW);
-
-        let outputs = vec![
-            entry(2, 4, vec![7, 0, 7, 0, 7, 0]),
-            entry(5, 4, vec![1, 0, 2, 0, 3, 0]),
-        ];
+        feed.apply(&[empty, live], NOW);
 
         assert_eq!(
-            feed.pick_entry(&outputs).expect("latched output").node,
-            NodeId::new(5)
+            feed.frame().expect("frame").bytes.as_ref(),
+            [1, 0, 2, 0, 3, 0]
         );
     }
 
@@ -419,12 +354,11 @@ mod tests {
         feed.set_handle_id(3);
         let mut first = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
         first.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
-        feed.apply_entry(&first, NOW);
+        feed.apply(&[first], NOW);
 
         feed.invalidate_connection();
 
         assert_eq!(feed.handle_id(), None);
-        assert_eq!(feed.node(), None);
         assert_eq!(feed.display_layout_read(), ControlDisplayLayoutRead::Always);
         assert_eq!(feed.frame().expect("last frame").revision, 1);
         assert_eq!(feed.frame_age_secs(NOW + 9.0), Some(9.0));

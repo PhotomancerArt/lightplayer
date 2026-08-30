@@ -6,7 +6,7 @@
 
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
-    CircleDashed, Download, Grid3x3, Hash, MousePointer, Route, Scan, Spline, Upload,
+    CircleDashed, Download, Grid3x3, Hash, MousePointer, Pentagon, Route, Scan, Spline, Upload,
 };
 
 use crate::base::icon::{StudioIcon, StudioIconName};
@@ -19,6 +19,7 @@ pub(crate) enum ToolbarIcon {
     Grid,
     Ring,
     Path,
+    Polygon,
     Numbers,
     Arrows,
     FitPreview,
@@ -42,6 +43,9 @@ impl ToolbarIcon {
             },
             Self::Path => rsx! {
                 Spline { size: 13 }
+            },
+            Self::Polygon => rsx! {
+                Pentagon { size: 13 }
             },
             Self::Numbers => rsx! {
                 Hash { size: 13 }
@@ -79,12 +83,6 @@ pub(crate) enum ToolbarItem {
         title: String,
         active: bool,
         enabled: bool,
-    },
-    /// Breadcrumb-style link: accent text, no button chrome.
-    Link {
-        id: &'static str,
-        label: String,
-        title: String,
     },
     /// Inert text: activity labels, counts, save state.
     Status { text: String, kind: StatusKind },
@@ -165,18 +163,6 @@ fn render_item(
                     if let Some(label) = label {
                         "{label}"
                     }
-                }
-            }
-        }
-        ToolbarItem::Link { id, label, title } => {
-            let id = *id;
-            rsx! {
-                button {
-                    key: "{group_id}-{index}",
-                    class: "tw:cursor-pointer tw:border-none tw:bg-transparent tw:p-0 tw:text-xs tw:text-selection-border",
-                    title: "{title}",
-                    onclick: move |_| on_item.call(id),
-                    "{label}"
                 }
             }
         }

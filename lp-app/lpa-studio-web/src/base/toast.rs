@@ -1,5 +1,5 @@
 //! The transient confirmation line (spike `project-share`'s `.toast`): one
-//! sentence at the bottom of the page, **replaced** rather than stacked.
+//! sentence at the top of the page (under the chrome), **replaced** rather than stacked.
 //!
 //! Sharing is full of acts with no visible consequence — a link lands on the
 //! clipboard, an access level flips on a server, a project leaves the
@@ -78,7 +78,7 @@ pub fn use_toast_provider() -> Toasts {
     use_context_provider(|| Toasts { slot })
 }
 
-/// The line itself, painted at the bottom of the page. Renders nothing
+/// The line itself, painted at the top of the page. Renders nothing
 /// without the context (stories) and nothing before the first message.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]

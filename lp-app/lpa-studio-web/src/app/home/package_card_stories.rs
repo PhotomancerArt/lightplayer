@@ -52,6 +52,19 @@ fn pattern_card(exports: Vec<String>) -> UiPackageCard {
     }
 }
 
+#[story(
+    description = "The card-overlay redesign's depth surface on a BLOCKED card: the slim face carries only the amber headline (plus the attention glyph), and the remedy — the sentence telling you what to do about it — moves into the ⋯ popup's status section, above the two actions that work on raw files. The face stays a picture; the words that need room get room."
+)]
+pub(crate) fn blocked_card_menu() -> Element {
+    let mut blocked = pattern_card(Vec::new());
+    blocked.project_kind = "General".to_string();
+    blocked.health = PackageHealth::Blocked {
+        headline: "Format 3 — too old for this Studio".to_string(),
+        remedy: "Export a copy or delete it.".to_string(),
+    };
+    card(blocked)
+}
+
 /// One card on enough canvas for its menu to open downward in place.
 fn card(card: UiPackageCard) -> Element {
     rsx! {

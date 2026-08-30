@@ -350,7 +350,7 @@ mod tests {
     use super::*;
     use lpc_mapping::Map2dObjectId;
 
-    /// Five 30-lamp sectors — the mini-dome's dome, in miniature.
+    /// Five 30-lamp sectors — the small-dome's dome, in miniature.
     fn spans() -> Vec<ObjectInstanceSpan> {
         (0..5)
             .map(|instance| ObjectInstanceSpan {

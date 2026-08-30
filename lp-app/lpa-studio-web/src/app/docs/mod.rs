@@ -97,7 +97,7 @@ pub const PAGES: &[DocPage] = &[
         markdown: include_str!("../../../../../docs/user-guide/patching-the-dome.md"),
         sims: &[DocsSimSpec {
             name: "main",
-            example_id: "examples/mini-dome",
+            example_id: "examples/small-dome",
         }],
     },
     DocPage {

@@ -359,6 +359,30 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 ///
 /// The probe is ~17 first-fit walks, once per heartbeat (5 s) — invisible next
 /// to a frame.
+/// Largest-free-block probe for the server's ProjectRead headroom gate
+/// (refusal-not-reset): on this 110 KB arena, fragmentation decides what is
+/// actually allocatable, not total free.
+/// Heartbeat memory report: free/used plus the fragmentation evidence
+/// (largest allocatable block, retry-allocator saves) that previously
+/// reached only the printed `[MEM]` line.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
+    let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
+    let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
+    Some(lpc_wire::server::MemoryStats {
+        free_bytes: free,
+        used_bytes: used,
+        total_bytes: used.saturating_add(free),
+        largest_free_block: read_headroom_probe(),
+        oom_retry_saves: Some(OOM_RETRY_SAVES.load(core::sync::atomic::Ordering::Relaxed)),
+    })
+}
+
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+fn read_headroom_probe() -> Option<u32> {
+    Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
+}
+
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     let free = esp_alloc::HEAP.free();
@@ -445,7 +469,7 @@ struct FirmwareApp {
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 #[inline(never)]
-fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
+fn boot_firmware() -> FirmwareApp {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
     // twice panics. This is the app path's ONLY call to `esp_hal::init`.
     let (sw_int, timg0, uart0, flash, rmt_peripheral, cpu_ctrl) = init_board();
@@ -467,13 +491,53 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     let boot_assessment = recovery::boot_report::init_and_report();
     let boot_guard = lp_recovery::enter(lp_recovery::FrameKind::Boot, "boot").ok();
 
-    start_runtime(timg0, sw_int);
+    let (sw_int1, io_pacer_timer) = start_runtime(timg0, sw_int);
     esp_println::println!("[INIT] runtime started");
 
     match uart0 {
         Ok(uart) => {
-            spawner.spawn(io_task(uart).unwrap());
-            esp_println::println!("[INIT] I/O task spawned (uart0 921600 8N1)");
+            // io_task runs on its own interrupt executor (swi2, Priority2 —
+            // NOT swi1, which is the APP core wire-pusher's frame doorbell;
+            // see start_runtime's docs for the collision this avoids)
+            // rather than as a cooperative peer of the server loop on the
+            // thread executor: a ~41 ms engine tick used to be a ~41 ms hole
+            // in UART servicing — the 128 B RX FIFO (~1.4 ms of line time at
+            // 921600) overflowed, and TX chunks hit their 250 ms timeout
+            // without the wire being the problem. See
+            // docs/debt/shared-uart-io-task-starvation.md.
+            //
+            // Priority2 is deliberate: strictly below the RMT ISR's
+            // Priority3, which binds on THIS core in the single-core
+            // fallback (`output::rmt::shared_driver::install_isr`). Two
+            // accepted pauses remain: esp-sync critical sections mask the
+            // SWI for their (µs-scale) duration, and esp-storage masks
+            // interrupts around each ROM flash call, so flash writes still
+            // pause io_task per-op — bounded, unlike per-frame starvation.
+            //
+            // The pacer is io_task's ONLY time source: esp-rtos 0.3.0 never
+            // delivers embassy-time wakes to interrupt-executor tasks (and
+            // processing such a queue entry under engine load crashed the
+            // chip on the bench) — see serial::io_task::IO_TICK and the ADR
+            // 2026-08-25-classic-uart-io-task-executor-isolation.
+            //
+            // SAFETY: the one and only reference ever taken to the executor
+            // static — `boot_firmware` runs once, and the executor it starts
+            // runs forever (the APP_CORE_STACK pattern).
+            static mut IO_EXECUTOR: Option<esp_rtos::embassy::InterruptExecutor<2>> = None;
+            let executor: &'static mut Option<esp_rtos::embassy::InterruptExecutor<2>> =
+                unsafe { &mut *core::ptr::addr_of_mut!(IO_EXECUTOR) };
+            let io_spawner = executor
+                .insert(esp_rtos::embassy::InterruptExecutor::new(sw_int1))
+                .start(esp_hal::interrupt::Priority::Priority2);
+            serial::io_task::start_io_pacer(io_pacer_timer);
+            // `into_async` HERE, in thread context: it registers and enables
+            // the UART interrupt, which does not survive being done inside
+            // the executor handler's poll (see `SendUart`'s docs).
+            let uart = serial::io_task::SendUart(uart.into_async());
+            io_spawner.spawn(io_task(uart).unwrap());
+            esp_println::println!(
+                "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)"
+            );
         }
         Err(error) => {
             // The board keeps booting: `esp_println` writes UART0's FIFO
@@ -654,6 +718,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // polls. Both are this embedder's to provide: only it holds the manifest
     // and the pusher's mailboxes.
     server.set_total_led_budget(total_led_budget);
+    server.set_read_headroom_probe(Some(read_headroom_probe));
     fw_esp32_common::output::wire_stats_source::install(collect_wire_stats);
 
     // Auto-load a project at boot — unless repeated incomplete boots put us in
@@ -720,8 +785,10 @@ fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 #[esp_rtos::main]
-async fn main(spawner: embassy_executor::Spawner) {
-    let app = boot_firmware(spawner);
+// The thread executor's spawner goes unused: the server loop runs as this
+// main task itself, and io_task lives on the swi2 interrupt executor.
+async fn main(_spawner: embassy_executor::Spawner) {
+    let app = boot_firmware();
 
     // ⚠️ The substring "fw-esp32 initialized, starting server loop" is matched
     // literally by `lpa_link::device_session::device_readiness` (and by lp-cli
@@ -740,7 +807,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         app.server,
         app.transport,
         app.time_provider,
-        esp32_memory_stats,
+        heartbeat_memory_stats,
         |_now_ms| {},
     )
     .await;
@@ -753,7 +820,14 @@ async fn main(spawner: embassy_executor::Spawner) {
 /// each: the clock, and legibility. Everything else the app boots (filesystem,
 /// server, RMT, recovery ledger) is dead weight to a harness that executes FP
 /// instructions and prints, and is gated off.
-#[cfg(fw_harness)]
+#[cfg(all(fw_harness, feature = "test_interrupt_executor"))]
+#[esp_rtos::main]
+async fn main(spawner: embassy_executor::Spawner) {
+    tests::interrupt_executor::init();
+    tests::interrupt_executor::run(spawner).await
+}
+
+#[cfg(all(fw_harness, not(feature = "test_interrupt_executor")))]
 #[esp_hal::main]
 fn main() -> ! {
     let peripherals =

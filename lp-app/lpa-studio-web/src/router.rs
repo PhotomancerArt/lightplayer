@@ -30,6 +30,16 @@
 //!                       chat history. A bare `/p/prj<uid>` resolves too.
 //! /p/<link>/play        the SAME session, rendered as play mode (panel.md
 //!                       P12: the root module's panel, nothing else).
+//! /p/<slug>             an EMBEDDED EXAMPLE's canonical address (examples
+//!                       vision D4): a bare segment with no uid tail that
+//!                       matches an embedded example slug (`fyeah-sign`).
+//!                       Resolves client-side — offline, dev, no network —
+//!                       and opens a TRANSIENT view session (D2: viewing
+//!                       creates nothing; the URL never heals until an
+//!                       explicit save forks the project and navigates to
+//!                       its fresh `/p/<slug>-<uid>`). View suffixes ride
+//!                       it like any lens route. An unknown bare segment
+//!                       stays the landing, never a guess.
 //! /device/<dev-uid>     the editor as a lens on that device's session;
 //!                       the project comes from the device. Devices keep
 //!                       their own `dev…` identity (vision D13).
@@ -189,6 +199,21 @@ pub(crate) enum StudioRoute {
         /// Which surface the route renders — the `/play`, `/patch`, and
         /// `/mapping` suffixes. Same-session zooms/views, never a
         /// different document (`same_session` ignores it).
+        view: ProjectView,
+    },
+    /// An embedded example's canonical address (`/p/<slug>`, examples
+    /// vision D4): a bare `/p/` segment with no uid tail, resolved against
+    /// the compiled-in example table at parse time — so an `Example` route
+    /// always names a real example, and an unknown bare segment reads as
+    /// `Home`. Opens a TRANSIENT view session (D2): nothing is installed,
+    /// and the address never heals — an explicit save forks the project
+    /// and navigates to the fork's own `Project` route.
+    Example {
+        /// The example's bare slug — the id tail
+        /// (`examples/fyeah-sign` → `fyeah-sign`).
+        slug: String,
+        /// Same view suffixes as [`StudioRoute::Project`] — one session,
+        /// mutually exclusive zooms.
         view: ProjectView,
     },
     /// The story book; `None` selects the book's default story.
@@ -365,6 +390,15 @@ impl StudioRoute {
                     ProjectView::Mapping => format!("{path}/mapping"),
                 }
             }
+            StudioRoute::Example { slug, view } => {
+                let path = format!("/p/{slug}");
+                match view {
+                    ProjectView::Workspace => path,
+                    ProjectView::Play => format!("{path}/play"),
+                    ProjectView::Patch => format!("{path}/patch"),
+                    ProjectView::Mapping => format!("{path}/mapping"),
+                }
+            }
             StudioRoute::Stories { story_id: None } => "/stories".to_string(),
             StudioRoute::Stories { story_id: Some(id) } => format!("/stories/{id}"),
             StudioRoute::Boards { board: None } => "/boards".to_string(),
@@ -395,6 +429,14 @@ impl StudioRoute {
             StudioRoute::Project { uid, .. } => {
                 view.open_project_uid.as_deref() == Some(uid.to_string().as_str())
             }
+            // An example route is showing when the open session is the
+            // TRANSIENT view of that example — the ephemeral uid is
+            // deliberately not the comparison (it never appears in a URL).
+            StudioRoute::Example { slug, .. } => view
+                .open_transient_example
+                .as_deref()
+                .and_then(lpa_studio_core::app::home::embedded_example)
+                .is_some_and(|example| example.slug() == slug),
             _ => false,
         }
     }
@@ -411,6 +453,7 @@ impl StudioRoute {
     pub(crate) fn same_session(&self, other: &StudioRoute) -> bool {
         match (self, other) {
             (StudioRoute::Project { uid: a, .. }, StudioRoute::Project { uid: b, .. }) => a == b,
+            (StudioRoute::Example { slug: a, .. }, StudioRoute::Example { slug: b, .. }) => a == b,
             _ => self == other,
         }
     }
@@ -425,6 +468,10 @@ impl StudioRoute {
                 slug: slug.clone(),
                 view,
             },
+            StudioRoute::Example { slug, .. } => StudioRoute::Example {
+                slug: slug.clone(),
+                view,
+            },
             other => other.clone(),
         }
     }
@@ -435,7 +482,7 @@ impl StudioRoute {
         match self {
             // Entering or leaving play exits every other view — they are
             // exclusive zooms on one session.
-            StudioRoute::Project { .. } => self.with_view(if play {
+            StudioRoute::Project { .. } | StudioRoute::Example { .. } => self.with_view(if play {
                 ProjectView::Play
             } else {
                 ProjectView::Workspace
@@ -451,6 +498,9 @@ impl StudioRoute {
             StudioRoute::Project {
                 view: ProjectView::Play,
                 ..
+            } | StudioRoute::Example {
+                view: ProjectView::Play,
+                ..
             }
         )
     }
@@ -459,7 +509,7 @@ impl StudioRoute {
     /// the workspace (they have no view suffix to speak of).
     pub(crate) fn project_view(&self) -> ProjectView {
         match self {
-            StudioRoute::Project { view, .. } => *view,
+            StudioRoute::Project { view, .. } | StudioRoute::Example { view, .. } => *view,
             _ => ProjectView::Workspace,
         }
     }
@@ -467,13 +517,20 @@ impl StudioRoute {
     /// Whether this route is a lens on a runtime session (the routes that
     /// have a play variant at all).
     pub(crate) fn is_lens(&self) -> bool {
-        matches!(self, StudioRoute::Project { .. })
+        matches!(
+            self,
+            StudioRoute::Project { .. } | StudioRoute::Example { .. }
+        )
     }
 }
 
 /// One `/p/` link segment as a route: the shared grammar's `(slug, uid)`
-/// split, with an empty slug read as no slug at all. A segment that names
-/// no project is the landing — never a guess.
+/// split, with an empty slug read as no slug at all. A segment with no
+/// well-formed uid tail gets one more chance as an embedded example's
+/// bare slug (examples vision D4 — the grammar `split_segment` refuses is
+/// exactly the free real estate; the split rule itself is untouched, one
+/// copy, pre-#384 lesson). A segment that names neither is the landing —
+/// never a guess.
 #[cfg_attr(
     not(target_arch = "wasm32"),
     allow(
@@ -488,7 +545,13 @@ fn project_route(link: &str, view: ProjectView) -> StudioRoute {
             slug: (!slug.is_empty()).then_some(slug),
             view,
         },
-        None => StudioRoute::Home,
+        None => match lpa_studio_core::app::home::embedded_example_by_slug(link) {
+            Some(example) => StudioRoute::Example {
+                slug: example.slug().to_string(),
+                view,
+            },
+            None => StudioRoute::Home,
+        },
     }
 }
 
@@ -599,6 +662,20 @@ pub(crate) fn install_legacy_hash_shim() {}
 pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
     match view.lens.as_ref()? {
         UiLensRuntime::Sim { project_uid } => {
+            // A TRANSIENT view session binds its example's bare address
+            // (examples vision D2/D4) — checked BEFORE the loaded-project
+            // uid, which for a transient session is the ephemeral RAM uid
+            // and must never reach the URL.
+            if let Some(example) = view
+                .open_transient_example
+                .as_deref()
+                .and_then(lpa_studio_core::app::home::embedded_example)
+            {
+                return Some(StudioRoute::Example {
+                    slug: example.slug().to_string(),
+                    view: ProjectView::Workspace,
+                });
+            }
             let uid: PrefixedUid = project_uid.as_deref()?.parse().ok()?;
             Some(StudioRoute::Project {
                 uid,
@@ -1012,6 +1089,14 @@ mod tests {
                 slug: None,
                 view: ProjectView::Workspace,
             },
+            StudioRoute::Example {
+                slug: "fyeah-sign".to_string(),
+                view: ProjectView::Workspace,
+            },
+            StudioRoute::Example {
+                slug: "fyeah-sign".to_string(),
+                view: ProjectView::Play,
+            },
             StudioRoute::Stories { story_id: None },
             StudioRoute::Stories {
                 story_id: Some("base/detail-popover/open-sections".to_string()),
@@ -1260,6 +1345,103 @@ mod tests {
     }
 
     // -----------------------------------------------------------------
+    // `/p/<slug>` — embedded example addresses (examples vision D4)
+    // -----------------------------------------------------------------
+
+    /// A bare segment matching an embedded example slug is that example's
+    /// canonical address; an unknown bare segment stays the landing —
+    /// never a guess — and uid-bearing segments are untouched grammar.
+    #[test]
+    fn bare_example_slugs_parse_and_unknown_ones_stay_home() {
+        assert_eq!(
+            StudioRoute::parse("/p/fyeah-sign"),
+            StudioRoute::Example {
+                slug: "fyeah-sign".to_string(),
+                view: ProjectView::Workspace,
+            }
+        );
+        assert_eq!(
+            StudioRoute::parse("/p/fyeah-sign/play"),
+            StudioRoute::Example {
+                slug: "fyeah-sign".to_string(),
+                view: ProjectView::Play,
+            }
+        );
+        assert_eq!(
+            StudioRoute::parse("/p/fyeah-sign/mapping").project_view(),
+            ProjectView::Mapping
+        );
+        // unknown bare slug → the landing, exactly as before this grammar
+        assert_eq!(StudioRoute::parse("/p/no-such-example"), StudioRoute::Home);
+        // junk decoration around a real uid keeps reading as that project
+        assert_eq!(
+            StudioRoute::parse(&format!("/p/fyeah-sign-{SHARE_UID}")),
+            StudioRoute::Project {
+                uid: share_uid(),
+                slug: Some("fyeah-sign".to_string()),
+                view: ProjectView::Workspace,
+            }
+        );
+        // depth junk under a slug is an unknown path, not a guess
+        assert_eq!(
+            StudioRoute::parse("/p/fyeah-sign/play/extra"),
+            StudioRoute::Home
+        );
+    }
+
+    /// Example routes are lens routes: play/view zooms are same-session,
+    /// and two different examples are different sessions.
+    #[test]
+    fn example_routes_are_same_session_across_views() {
+        let route = StudioRoute::parse("/p/fyeah-sign");
+        assert!(route.is_lens());
+        assert!(route.same_session(&route.with_play(true)));
+        assert!(route.with_play(true).is_play());
+        assert!(!route.same_session(&StudioRoute::parse("/p/plasma")));
+    }
+
+    /// The transient marker — not the (ephemeral) open uid — is what says
+    /// an example route is showing; an ordinary project view never
+    /// matches an example route.
+    #[test]
+    fn example_route_matches_only_the_transient_view() {
+        let route = StudioRoute::parse("/p/fyeah-sign");
+        let mut view = UiStudioView::new(Vec::new(), UiConsoleView::empty())
+            .with_open_project(Some(SHARE_UID.to_string()), Some("Fyeah Sign".to_string()));
+        assert!(!route.project_matches_view(&view));
+        view.open_transient_example = Some("examples/fyeah-sign".to_string());
+        assert!(route.project_matches_view(&view));
+    }
+
+    /// A transient session's lens binds the BARE example address — the
+    /// ephemeral uid the session runs under must never reach the URL.
+    #[test]
+    fn a_transient_lens_binds_the_bare_example_address() {
+        let mut view = editor_view(Some(UiLensRuntime::Sim {
+            project_uid: Some(SHARE_UID.to_string()),
+        }))
+        .with_open_project(Some(SHARE_UID.to_string()), Some("Fyeah Sign".to_string()));
+        assert_eq!(
+            lens_route(&view),
+            Some(StudioRoute::Project {
+                uid: share_uid(),
+                slug: Some("Fyeah Sign".to_string()),
+                view: ProjectView::Workspace,
+            }),
+            "an ordinary library session binds its project address"
+        );
+        view.open_transient_example = Some("examples/fyeah-sign".to_string());
+        assert_eq!(
+            lens_route(&view),
+            Some(StudioRoute::Example {
+                slug: "fyeah-sign".to_string(),
+                view: ProjectView::Workspace,
+            }),
+            "the transient marker wins over the loaded-project uid"
+        );
+    }
+
+    // -----------------------------------------------------------------
     // `/p/` — THE project route (identity vision D1/D9/D10)
     // -----------------------------------------------------------------
 
@@ -1325,7 +1507,10 @@ mod tests {
         for path in [
             "/p",
             "/p/",
-            "/p/zook-dome",
+            // NB not an embedded example slug — a bare segment matching one
+            // parses as that example's address now (examples vision D4;
+            // `bare_example_slugs_parse_and_unknown_ones_stay_home`)
+            "/p/zook-dome-renamed",
             "/p/prjtooshort",
             "/p/prjh7kq9xy2mq4tb8wzextra",
             "/p/prjh7kq9xy2mq4tb8w-",

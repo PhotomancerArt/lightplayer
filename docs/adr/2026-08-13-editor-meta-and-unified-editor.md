@@ -92,3 +92,35 @@ pulse, and show-visual).
 - Viewport rotation / "snap viewport to fixture" / isolation mode are
   registered future affordances (editing through the arrange transform is
   accepted for now).
+
+## Amendment (2026-08-28): node keys are PROJECT-RELATIVE addresses
+
+The decision above says "Keys are authored address paths (runtime
+`NodeId`s never persist)". True as far as it goes, and the
+implementation took it literally: it stored the whole runtime address,
+root segment included. That segment names **the host's mount, not the
+project** — the same project is `/preview.show/…` while previewed from
+the gallery, `/<uid>.show/…` once saved to the library, and something
+else again under a test harness. So a placement silently stopped
+applying the moment a project was copied, saved, or opened from a
+different surface, and an arrangement could never be *authored into* an
+example: nothing a generator writes can guess the reader's mount.
+
+Found by shipping one. `examples/small-dome` needs its door fixture
+overlaid on the dome's plan rather than tiled beside it, which means the
+example ships an `editor.json` — and the first one matched nothing at
+runtime (the map read "0 arranged" against a document naming both
+fixtures).
+
+**Keys are the address with its root segment stripped**
+(`/dome.module/dome.fixture`), which is exactly the part that identifies
+a node *within* the project and survives every copy. `editor_meta_node_key`
+normalizes on write, `editor_meta_surface` reads it and falls back to a
+legacy ROOTED key with the same tail, so documents written before this
+rule keep working and true up on their next write. The rest of the
+decision is unchanged: still per-node, per-surface, still never a
+sampling input, still refuse-don't-rewrite on an unreadable document.
+
+Consequence worth naming: a generated example may now ship authored
+placements, which is what makes structure-faithful multi-fixture
+examples (a dome and its door in one plan) possible at all.

@@ -145,6 +145,7 @@ pub fn build_home_view(
                 id: example.id.to_string(),
                 name: example.name.to_string(),
                 kind: example.kind.to_string(),
+                blurb: example.blurb.to_string(),
             })
             .collect(),
         |card| card.id.clone(),

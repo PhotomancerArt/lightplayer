@@ -38,6 +38,85 @@ pub fn editor_meta_artifact() -> ArtifactLocation {
     ArtifactLocation::file(EDITOR_META_PATH)
 }
 
+/// The `editor.json` node key for a runtime node address: the address with
+/// its ROOT segment stripped — `/preview.show/dome.module/dome.fixture` →
+/// `/dome.module/dome.fixture`.
+///
+/// The root segment names the HOST's mount, not the project: the same
+/// project is `/preview.show/…` while previewed from the gallery,
+/// `/<uid>.show/…` once saved to the library, and the test harness mounts
+/// it under yet another name. A rooted key would break on every copy and
+/// could never ship inside an example, so the document stores the
+/// project-relative tail. Reads fall back to a rooted legacy key whose
+/// tail matches (documents written before this rule).
+#[must_use]
+pub fn editor_meta_node_key(address: &str) -> &str {
+    let tail = address.strip_prefix('/').unwrap_or(address);
+    match tail.find('/') {
+        Some(index) => &tail[index..],
+        // A one-segment address is the root itself; nothing to strip.
+        None => address,
+    }
+}
+
+/// Look up `address`'s surface in `doc`: the project-relative key first,
+/// then any legacy ROOTED key with the same tail.
+#[must_use]
+pub fn editor_meta_surface<'doc>(
+    doc: &'doc lpc_mapping::EditorMetaDoc,
+    address: &str,
+) -> Option<&'doc lpc_mapping::EditorSurfaceMeta> {
+    let key = editor_meta_node_key(address);
+    doc.mapping_surface(key).or_else(|| {
+        doc.nodes
+            .iter()
+            .find(|(stored, _)| stored.as_str() != key && editor_meta_node_key(stored) == key)
+            .and_then(|(_, node)| node.mapping.as_ref())
+    })
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+
+    #[test]
+    fn node_keys_are_project_relative() {
+        assert_eq!(
+            editor_meta_node_key("/preview.show/dome.module/dome.fixture"),
+            "/dome.module/dome.fixture"
+        );
+        assert_eq!(
+            editor_meta_node_key("/examples_small_dome.show/doors.module/doors.fixture"),
+            "/doors.module/doors.fixture"
+        );
+        assert_eq!(editor_meta_node_key("/root.show"), "/root.show");
+    }
+
+    #[test]
+    fn lookup_falls_back_to_legacy_rooted_keys() {
+        let mut doc = lpc_mapping::EditorMetaDoc::new();
+        doc.mapping_surface_mut("/old_root.show/dome.module/dome.fixture")
+            .transform = lpc_mapping::EditorTransform {
+            t: [1.0, 2.0],
+            r: 0.0,
+            s: 1.0,
+        };
+        let hit = editor_meta_surface(&doc, "/new_root.show/dome.module/dome.fixture")
+            .expect("legacy rooted key resolves by tail");
+        assert_eq!(hit.transform.t, [1.0, 2.0]);
+        // A relative key wins over a legacy one when both exist.
+        doc.mapping_surface_mut("/dome.module/dome.fixture")
+            .transform = lpc_mapping::EditorTransform {
+            t: [9.0, 9.0],
+            r: 0.0,
+            s: 1.0,
+        };
+        let hit = editor_meta_surface(&doc, "/new_root.show/dome.module/dome.fixture")
+            .expect("relative key resolves");
+        assert_eq!(hit.transform.t, [9.0, 9.0]);
+    }
+}
+
 /// One fixture's footprint-refresh facts, as the surface DTO knows them:
 /// enough for the controller to recompute the cached footprint when the
 /// fixture's map2d body is locally cached.
@@ -50,6 +129,16 @@ pub struct EditorMetaFixture {
     pub mapping_artifact: Option<ArtifactLocation>,
 }
 
+/// One fixture's transform write inside a (possibly multi-fixture)
+/// arrange gesture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EditorMetaSet {
+    pub node_key: String,
+    /// The subject node's runtime id, for the undo stamp.
+    pub node: Option<lpc_model::NodeId>,
+    pub transform: UiArrangeTransform,
+}
+
 /// What the gesture asks for.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EditorMetaVerb {
@@ -60,6 +149,13 @@ pub enum EditorMetaVerb {
         /// The subject node's runtime id, for the undo stamp.
         node: Option<lpc_model::NodeId>,
         transform: UiArrangeTransform,
+    },
+    /// Set SEVERAL fixtures' transforms as ONE write and ONE undo step —
+    /// the multi-selection's move/scale gesture (unified-selection P3).
+    /// One document round-trip, one byte-stack snapshot: ⌘Z restores the
+    /// whole set.
+    SetMany {
+        entries: Vec<EditorMetaSet>,
     },
     /// Undo / redo the arrange byte stack (mode-scoped ⌘Z).
     Undo,

@@ -275,6 +275,7 @@ fn lens_frame(width: u32, menu_open: bool) -> Element {
                     project: Some(control_content(1, 0, UiStatus::good("Ready"))),
                     on_action: EventHandler::new(|_| {}),
                     initially_open: false,
+                    example: false,
                 }),
                 play_toggle: Some(ChromeModeToggle { href: "#play".to_string(), active: false }),
                 project_menu: Some(ChromeProjectMenu {
@@ -331,6 +332,7 @@ fn control_row(
                     project,
                     on_action: EventHandler::new(|_| {}),
                     initially_open,
+                    example: false,
                 }),
                 VersionChipPreview { chip: branch_chip() }
             }

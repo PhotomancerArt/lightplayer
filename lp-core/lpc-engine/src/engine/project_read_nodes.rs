@@ -2,46 +2,28 @@
 
 use alloc::format;
 use alloc::string::String;
-use alloc::vec::Vec;
 
 use lpc_model::{NodeId, Revision, SlotAccess};
 use lpc_registry::ProjectRegistry;
-use lpc_wire::{
-    NodeReadQuery, NodeReadResult, ReadLevel, WireSlotRootSnapshot, WireSlotRootsSnapshot,
-    wire_slot_data_from_slot_access,
-};
+use lpc_wire::{NodeReadSelection, WireSlotRootSnapshot, wire_slot_data_from_slot_access};
 
-use crate::node::{NodeEntryState, tree_deltas_since};
+use crate::node::NodeEntryState;
 
 use super::Engine;
 
-impl Engine {
-    pub(super) fn read_project_nodes(
-        &self,
-        registry: &ProjectRegistry,
-        since: Option<lpc_model::Revision>,
-        query: NodeReadQuery,
-    ) -> NodeReadResult {
-        let since = since.unwrap_or_default();
-        let tree_deltas = match query.level {
-            ReadLevel::Ids | ReadLevel::Summary | ReadLevel::Detail => {
-                tree_deltas_since(self.tree(), since)
-            }
-        };
-        let slots = if query.include_slots && query.level == ReadLevel::Detail {
-            Some(self.snapshot_node_slots(registry, since))
-        } else {
-            None
-        };
-
-        NodeReadResult {
-            level: query.level,
-            tree_deltas,
-            slots,
-        }
+/// Does `selection` include this node? `All` keeps full-read behavior;
+/// `ByIds` is a partial view over exactly the named nodes (unknown ids are
+/// simply absent — a pager racing deletions is normal).
+pub(super) fn selection_includes(selection: &NodeReadSelection, id: NodeId) -> bool {
+    match selection {
+        NodeReadSelection::All => true,
+        NodeReadSelection::ByIds(ids) => ids.contains(&id),
     }
+}
 
-    /// Snapshot slot roots, gated per-root by revision (M5 G6a).
+impl Engine {
+    /// Lazily snapshot slot roots, one root at a time, gated per-root by
+    /// revision (M5 G6a) and filtered by the query's node `selection`.
     ///
     /// A root is included only when its owning revision is newer than `since`:
     /// `.def` roots gate on the node-def entry revision
@@ -49,47 +31,57 @@ impl Engine {
     /// runtime entry `changed_at`. The whole [`WireSlotRootSnapshot`] is sent
     /// when the gate passes (no sub-root patching — that is M6). The `since == 0`
     /// bulk-sync guard includes every live root so a fresh read is complete.
-    fn snapshot_node_slots(
-        &self,
-        registry: &ProjectRegistry,
+    ///
+    /// Each call to `next()` materializes at most one entry's roots; the
+    /// caller is expected to send and drop each snapshot before pulling the
+    /// next, keeping peak memory at one root's deep copy.
+    pub(super) fn iter_node_slot_roots<'a>(
+        &'a self,
+        registry: &'a ProjectRegistry,
         since: Revision,
-    ) -> WireSlotRootsSnapshot {
-        let mut roots = Vec::new();
+        selection: &'a NodeReadSelection,
+    ) -> impl Iterator<Item = WireSlotRootSnapshot> + 'a {
+        self.tree()
+            .entries()
+            .filter(move |entry| selection_includes(selection, entry.id))
+            .flat_map(move |entry| {
+                let def_root = if let Some(location) = entry.def_location.as_ref()
+                    && let Some(def_entry) = registry.def(location)
+                    && root_changed_since(since, def_entry.revision)
+                    && let lpc_model::NodeDefState::Loaded(def) = &def_entry.state
+                {
+                    Some(WireSlotRootSnapshot {
+                        name: node_def_root_name(entry.id),
+                        shape: def.shape_id(),
+                        data: wire_slot_data_from_slot_access(
+                            self.slot_shapes(),
+                            def.shape_id(),
+                            def.data(),
+                        ),
+                    })
+                } else {
+                    None
+                };
 
-        for entry in self.tree().entries() {
-            if let Some(location) = entry.def_location.as_ref()
-                && let Some(def_entry) = registry.def(location)
-                && root_changed_since(since, def_entry.revision)
-                && let lpc_model::NodeDefState::Loaded(def) = &def_entry.state
-            {
-                roots.push(WireSlotRootSnapshot {
-                    name: node_def_root_name(entry.id),
-                    shape: def.shape_id(),
-                    data: wire_slot_data_from_slot_access(
-                        self.slot_shapes(),
-                        def.shape_id(),
-                        def.data(),
-                    ),
-                });
-            }
+                let state_root = if root_changed_since(since, entry.changed_at())
+                    && let NodeEntryState::Alive(node) = entry.state.value()
+                    && let Some(state) = node.runtime_state_slots()
+                {
+                    Some(WireSlotRootSnapshot {
+                        name: node_state_root_name(entry.id),
+                        shape: state.shape_id(),
+                        data: wire_slot_data_from_slot_access(
+                            self.slot_shapes(),
+                            state.shape_id(),
+                            state.data(),
+                        ),
+                    })
+                } else {
+                    None
+                };
 
-            if root_changed_since(since, entry.changed_at())
-                && let NodeEntryState::Alive(node) = entry.state.value()
-                && let Some(state) = node.runtime_state_slots()
-            {
-                roots.push(WireSlotRootSnapshot {
-                    name: node_state_root_name(entry.id),
-                    shape: state.shape_id(),
-                    data: wire_slot_data_from_slot_access(
-                        self.slot_shapes(),
-                        state.shape_id(),
-                        state.data(),
-                    ),
-                });
-            }
-        }
-
-        WireSlotRootsSnapshot { roots }
+                def_root.into_iter().chain(state_root)
+            })
     }
 }
 

@@ -47,6 +47,10 @@ mod studio_node_crud_e2e_tests;
 #[cfg(test)]
 mod studio_open_supersede_e2e_tests;
 pub mod studio_snapshot;
+/// End-to-end transient-open tests (examples vision D2): an embedded
+/// example runs as a memory-backed view session; the library sees nothing.
+#[cfg(test)]
+mod studio_transient_open_e2e_tests;
 pub mod studio_view_channel;
 pub mod ui_console_view;
 pub mod ui_studio_view;

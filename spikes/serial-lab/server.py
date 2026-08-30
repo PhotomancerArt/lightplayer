@@ -21,13 +21,14 @@ Endpoints:
 """
 
 import json
+import os
 import threading
 import time
 import queue
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-PORT = 29188
+PORT = int(os.environ.get("SERIAL_LAB_PORT", "29188"))
 HERE = Path(__file__).parent
 
 _lock = threading.Lock()

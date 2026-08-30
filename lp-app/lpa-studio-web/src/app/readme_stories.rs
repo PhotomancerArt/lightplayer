@@ -287,6 +287,7 @@ fn readme_home_view() -> UiHomeView {
             id: "examples/basic".to_string(),
             name: "Basic".to_string(),
             kind: "Module".to_string(),
+            blurb: "A single strip, the smallest complete project".to_string(),
         }],
         devices: Default::default(),
         remembered: Vec::new(),
