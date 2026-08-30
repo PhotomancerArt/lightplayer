@@ -127,21 +127,23 @@ const PILL_OPEN_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:
 /// background/border/shadow.
 const POPUP_CLASS: &str =
     "tw:grid tw:w-[300px] tw:min-w-0 tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
-/// The one filled verb a visitor owns.
-const FORK_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:justify-self-start tw:gap-1.5 tw:rounded-sm tw:border tw:px-2.5 tw:py-1.5 tw:transition-colors ux-primary-gradient ux-focus-ring";
+/// The one Primary-voiced verb a visitor owns — the standing spectrum
+/// outline (devices-treatments gate 2026-08-31 succeeded the gradient fill).
+const FORK_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:justify-self-start tw:gap-1.5 tw:rounded-sm tw:border tw:px-2.5 tw:py-1.5 tw:transition-colors ux-spectrum-cta ux-focus-ring";
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// No preflight (crate README): every button names its own background.
-    /// `.ux-primary-gradient` carries fill, edge, and text together
-    /// (style.css) — it names a background the way `tw:bg-*` does.
+    /// `.ux-spectrum-cta` carries ring, text, and an explicit transparent
+    /// background together (style.css) — it names a background the way
+    /// `tw:bg-*` does.
     #[test]
     fn every_visitor_button_names_a_background() {
         for class in [PILL_CLASS, PILL_OPEN_CLASS, FORK_CLASS] {
             assert!(
-                class.contains("tw:bg-") || class.contains("ux-primary-gradient"),
+                class.contains("tw:bg-") || class.contains("ux-spectrum-cta"),
                 "no background in `{class}`"
             );
         }

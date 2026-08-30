@@ -5754,19 +5754,61 @@ select:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
-   Gradient primary — G1-2 RULED KEEP (2026-08-30, "gradient is good"): the
-   spectrum-gradient fill IS the Primary tier now, not a gated alternative
-   to a flat mint fill. See `solid_class` in
-   src/core/action/action_button.rs.
+   Spectrum-outline primary — the devices-treatments spike gate (2026-08-31,
+   "1F for the primary for now") retired the gradient FILL: rainbow-bg with
+   dark text didn't work. The Primary voice is now a STANDING spectrum ring —
+   same masked-conic mechanics as `.ux-ir-ring`, dimmed at rest, bright and
+   spinning on hover — with the text staying strong white. Self-contained on
+   purpose: it owns its `::before`, so it must never be composed with
+   `.ux-ir-ring` (they would fight over the pseudo). Amends Aurora D1: the
+   ring marks THE standing action, exactly the slot the gradient fill held.
+   Design record: spikes/devices-page-treatments/index.html (1F/1G).
    -------------------------------------------------------------------------- */
-.ux-primary-gradient {
-    background: linear-gradient(105deg, #5fe08b, #53c6f2 55%, #a58af7);
-    border-color: rgba(255, 255, 255, 0.25);
-    color: #071010;
+.ux-spectrum-cta {
+    position: relative;
+    border-color: transparent;
+    background: transparent;
+    color: var(--studio-color-text-strong);
 }
 
-.ux-primary-gradient:hover:not(:disabled) {
-    filter: brightness(1.08);
+.ux-spectrum-cta::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: 3;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(from var(--ux-ir-angle), var(--studio-spectrum), #5fe08b);
+    mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    opacity: 0.62;
+    pointer-events: none;
+    transition: opacity 0.3s;
+}
+
+.ux-spectrum-cta:hover:not(:disabled)::before {
+    opacity: 1;
+    animation: ux-ir-spin 3.2s linear infinite;
+}
+
+/* The ruled glow bump: the standard bloom plus a wider soft halo, so the
+   chosen Primary answers the pointer a step louder than the ring family. */
+.ux-spectrum-cta:hover:not(:disabled) {
+    box-shadow:
+        0 2px 24px var(--studio-glow),
+        0 0 46px rgba(140, 170, 255, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-spectrum-cta:hover:not(:disabled)::before {
+        animation: none;
+    }
 }
 
 /* --------------------------------------------------------------------------

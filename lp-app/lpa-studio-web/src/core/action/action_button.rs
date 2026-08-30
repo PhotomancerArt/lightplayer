@@ -162,16 +162,16 @@ fn action_class(
 
 fn solid_class(priority: ActionPriority) -> &'static str {
     match priority {
-        // G1-2: KEEP ("gradient is good") — the gradient is simply the
-        // Primary fill now, not a gated alternative. The fill lives in
-        // `.ux-primary-gradient` (style.css) rather than an arbitrary
-        // Tailwind value: it carries fill, edge and text together, and a
-        // class is the only place a hover `filter` can live without
-        // becoming an animated inline style.
+        // Devices-treatments spike gate (2026-08-31, "1F for the primary
+        // for now"): the gradient FILL stands down — rainbow-bg with dark
+        // text didn't work — and Primary is the standing spectrum OUTLINE.
+        // `.ux-spectrum-cta` (style.css) carries ring, text and hover glow
+        // together, and owns its own ring pseudo — so no `ux-ir-ring` here:
+        // composing the two would fight over `::before`.
         ActionPriority::Primary => {
             concat!(
                 "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:break-words tw:disabled:cursor-not-allowed tw:disabled:opacity-60",
-                " ux-primary-gradient ux-ir-ring ux-focus-ring ux-press-flare"
+                " ux-spectrum-cta ux-focus-ring ux-press-flare"
             )
         }
         ActionPriority::Secondary => {
@@ -321,10 +321,13 @@ mod tests {
 
     #[test]
     fn the_ring_stops_at_the_quiet_tiers() {
-        // Loud tiers take the ring; transparent chips and menu rows keep
-        // their own wash (a rainbow edge on a menu row is noise, and the
-        // destructive rows must stay unmistakably red).
-        assert!(solid_class(ActionPriority::Primary).contains("ux-ir-ring"));
+        // Secondary takes the hover ring; Primary owns a STANDING ring of
+        // its own (`ux-spectrum-cta` — self-contained, so composing
+        // `ux-ir-ring` on top would fight over `::before`). Transparent
+        // chips and menu rows keep their own wash (a rainbow edge on a
+        // menu row is noise, and the destructive rows must stay
+        // unmistakably red).
+        assert!(!solid_class(ActionPriority::Primary).contains("ux-ir-ring"));
         assert!(solid_class(ActionPriority::Secondary).contains("ux-ir-ring"));
         for class in [
             solid_class(ActionPriority::Tertiary),
@@ -353,11 +356,14 @@ mod tests {
     }
 
     #[test]
-    fn the_primary_fill_is_the_spectrum_gradient() {
-        // G1-2 ruling (2026-08-30, "gradient is good"): the gradient is
-        // the Primary fill, not a gated alternative to a flat accent fill.
+    fn the_primary_voice_is_the_spectrum_outline() {
+        // Devices-treatments spike gate (2026-08-31, "1F for the primary
+        // for now"): the standing spectrum ring succeeded the gradient
+        // fill, and the class is self-contained — never composed with the
+        // hover ring, never an accent fill.
         let class = solid_class(ActionPriority::Primary);
-        assert!(class.contains("ux-primary-gradient"), "{class}");
+        assert!(class.contains("ux-spectrum-cta"), "{class}");
+        assert!(!class.contains("ux-primary-gradient"), "{class}");
         assert!(!class.contains("accent"), "{class}");
     }
 

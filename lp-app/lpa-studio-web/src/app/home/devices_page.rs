@@ -25,7 +25,7 @@ use lpa_studio_core::{DeviceAction, DeviceRosterView, DevicesOp, UiAction, UiHom
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::sim_card::SimCard;
 use crate::app::home::{device_grid_class, section_title_class};
-use crate::core::{ActionButton, ActionButtonVariant};
+use crate::core::ActionButton;
 
 /// The runtime roster page (roadmap M4's gallery top, re-homed).
 #[component]
@@ -106,6 +106,11 @@ pub fn DevicesPage(home: UiHomeView, on_action: EventHandler<UiAction>) -> Eleme
 /// will appear. It doubles as the empty state — same slot, same copy, same
 /// layout whether it is the first board or the fifth (clear minimalism,
 /// G1 ruling) — so there is no separate empty-state block to jump around.
+///
+/// The CTA wears the default Solid/Primary tier: the Outline override was
+/// the round-1 dodge for the too-bold gradient fill, and the spike gate
+/// (2026-08-31, "1F for the primary") made Primary the spectrum outline
+/// the slot wanted all along.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn AddDeviceCard(on_action: EventHandler<UiAction>) -> Element {
@@ -117,7 +122,6 @@ fn AddDeviceCard(on_action: EventHandler<UiAction>) -> Element {
             ActionButton {
                 action: DevicesOp::action_for(DeviceAction::AddFromUsb),
                 running: false,
-                variant: ActionButtonVariant::Outline,
                 on_action,
             }
         }
