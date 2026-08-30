@@ -112,7 +112,10 @@ pub fn HomePage(
                         "Examples"
                     }
                     a {
-                        class: "tw:text-xs tw:font-semibold tw:text-accent tw:no-underline tw:hover:underline",
+                        // Neutral at rest (Aurora: no resting mint text) —
+                        // the accent-as-link role goes to the accent
+                        // reckoning follow-up.
+                        class: "tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:hover:text-strong-foreground tw:hover:underline ux-focus-ring",
                         href: "/explore",
                         "Explore all →"
                     }
