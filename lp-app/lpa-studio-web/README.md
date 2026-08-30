@@ -353,6 +353,66 @@ that looked correct in markup and wrong on screen:
   element) inside the control instead; see `cloud_account.rs`'s trigger
   labels and `account_page.rs`'s field-row key spans for the pattern.
 
+Studio's design language is Aurora — violet-tinted graphite surfaces, the
+spectrum reserved for interaction feedback, liquid glass on overlays
+(`docs/adr/2026-08-30-studio-design-language-aurora.md`; rules in
+`docs/style/ui.md`'s "Color & Light"). New token groups added for it:
+
+- `--studio-glass-*` (`bg`/`blur`/`saturate`/`edge`/`border`) — the glass
+  recipe, centralized so one edit tunes every glass surface. Apply it with
+  the `ux-glass-panel` class (overlays only — popovers, sheets, card bars,
+  never resting chrome; `backdrop-filter` promotes a compositing layer, and
+  glass under glass reads as mud).
+- `--studio-spectrum` / `--studio-glow` — the interaction-light stops and
+  hover bloom color, consumed by `src/base/interaction_light.rs`'s class
+  helpers (`ir_ring_class`, `row_edge_class`, `focus_ring_class`, …) rather
+  than written ad hoc per component.
+- `--studio-color-focus-ring` — the one keyboard-focus token; every
+  interactive control should carry `ux-focus-ring` (or fall under the
+  bare-element `:focus-visible` rule that already covers text inputs).
+
+**The glass recipe + masked-ring technique**, for adding a new glass
+surface: `background: var(--studio-glass-bg)` plus
+`backdrop-filter: blur(var(--studio-glass-blur)) saturate(var(--studio-glass-saturate))`
+(and the `-webkit-` prefix — Safari still needs it), an inset top edge
+light for the "liquid" read, and a deep drop shadow. The optional spectrum
+ring around a glass panel is a *masked overlay*, not a border:
+
+- ⚠️ **`border-image` ignores `border-radius`** — it paints a square frame
+  no matter how rounded the box is (this bit the spike's round-1 build).
+  Don't reach for it on anything with rounded corners.
+- Instead: an `::after` pseudo-element at `inset: 0` (glass panels are
+  `overflow: hidden`, so `-1px` would clip), `padding: 1px`, a gradient
+  `background`, and two solid `mask` layers combined with
+  `mask-composite: exclude` / `-webkit-mask-composite: xor`. Only the 1px
+  padding band survives, clipped to `border-radius: inherit`. The
+  two-background padding-box/border-box trick some references suggest does
+  **not** work over a translucent glass fill — see `.ux-glass-panel::after`
+  in `style.css` for the working version.
+- The merged-outline popover (`src/base/popover.rs`,
+  `docs/adr/2026-07-15-popover-svg-merged-outline.md`) needed its own
+  version since it isn't a normal DOM box: a fixed, full-viewport
+  `.ux-popover-glass` div sits under the outline SVG in DOM order, clipped
+  with `clip-path: path(evenodd, '<same path string the outline draws>')`
+  so the blurred silhouette matches the outline exactly. A `DetailPopover`
+  hosted AS that popover's panel carries both `.ux-svg-popover-panel` and
+  `.ux-glass-panel` on the same element — the latter's own
+  `backdrop-filter`/ring stand down (see the CSS rule of that name) so a
+  nested blur doesn't double the compositing cost.
+
+**Unlayered CSS beats layered Tailwind utilities — animation gotcha.**
+Tailwind utilities live inside `@layer`, which loses the cascade against
+any plain (unlayered) selector of equal-or-lower specificity — including
+new ones this refresh added. `ux-iri-fill` (the iridescent progress sweep)
+is split into two classes for exactly this reason: a single class carrying
+both the paint and the `animation` would silently outrank the
+`[animation:…]` utility that timeout/indeterminate progress bars set for
+their own motion, and those bars would stop moving. `ux-iri-fill-static`
+carries the paint alone for fills that already animate themselves;
+`ux-iri-fill` adds the sweep for fills that don't. When adding a new
+unlayered animated class, check whether any consumer sets
+`tw:animate-*`/`[animation:…]` on the same element first.
+
 Reusable Dioxus surfaces live under `src/base`, `src/core`, and `src/app`:
 
 - `ActionButton` and `ActionStrip` render `UiAction` controls.

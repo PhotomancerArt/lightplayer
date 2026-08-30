@@ -40,6 +40,7 @@ use crate::app::home::card_sheet::{
 };
 use crate::app::home::device_card::{BoardPicker, card_op_activity, card_op_terminal};
 use crate::app::home::package_card::home_action;
+use crate::base::{InlineButtonTone, conic_spinner_class, inline_icon_button_class};
 
 /// Dispatch one wizard gesture through the normal action path.
 fn gesture(gesture: SetupGesture) -> UiAction {
@@ -108,7 +109,7 @@ pub(crate) fn SetupWizardCard(wizard: UiSetupWizard, on_action: EventHandler<UiA
                 }
                 span { class: kind_chip, "{kind_label}" }
                 button {
-                    class: "tw:cursor-pointer tw:rounded tw:border-0 tw:bg-transparent tw:px-1.5 tw:text-sm tw:text-dim-foreground tw:hover:text-strong-foreground",
+                    class: inline_icon_button_class(InlineButtonTone::Neutral, false),
                     r#type: "button",
                     title: "Close",
                     aria_label: "Close setup",
@@ -206,7 +207,7 @@ fn steps_rail(wizard: &UiSetupWizard, close: Option<EventHandler<UiAction>>) -> 
             }
             if let Some(on_action) = close {
                 button {
-                    class: "tw:ml-auto tw:cursor-pointer tw:rounded tw:border-0 tw:bg-transparent tw:px-1.5 tw:text-sm tw:text-dim-foreground tw:hover:text-strong-foreground",
+                    class: "{inline_icon_button_class(InlineButtonTone::Neutral, false)} tw:ml-auto",
                     r#type: "button",
                     title: "Close",
                     aria_label: "Close setup",
@@ -718,7 +719,11 @@ fn device_home(wizard: &UiSetupWizard, adopted: bool) -> Element {
     };
     rsx! {
         p { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground", "{headline}" }
-        div { class: "tw:h-6 tw:rounded-md tw:border tw:border-border-muted tw:bg-[linear-gradient(90deg,#14323f,#1d5c50,#7be0b2,#1d5c50,#14323f)]" }
+        // Quiet spectrum sweep (Aurora token flip): a hero moment (just
+        // adopted, "it's glowing"), so the brand spectrum is the right
+        // family — dimmed via opacity rather than per-stop alpha, since
+        // `--studio-spectrum` is a plain comma-separated stop list.
+        div { class: "tw:h-6 tw:rounded-md tw:border tw:border-border-muted tw:opacity-45 tw:bg-[linear-gradient(90deg,var(--studio-spectrum))]" }
         p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "Taking you to it…" }
     }
 }
@@ -839,7 +844,9 @@ fn working(title: &str, detail: &str, tail: &[UiLogEntry]) -> Element {
 fn spinner(title: &str, detail: &str) -> Element {
     rsx! {
         div { class: "tw:flex tw:items-center tw:gap-3 tw:py-4",
-            span { class: "ux-card-op-bar is-indeterminate tw:w-10", span {} }
+            // Conic spectrum heartbeat (Aurora R2): a wait with no quantity
+            // gets a spinner, not a bar that can never fill.
+            span { class: "{conic_spinner_class()}", aria_hidden: "true" }
             div { class: "tw:grid tw:gap-0.5",
                 span { class: "tw:text-xs tw:font-bold tw:text-strong-foreground", "{title}" }
                 span { class: "tw:text-[0.7rem] tw:text-dim-foreground", "{detail}" }

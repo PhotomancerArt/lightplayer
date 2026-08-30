@@ -45,6 +45,7 @@ use crate::cloud::sync::sync_status::{
     self, ProjectSyncStatus, SyncOutcomeKind, SyncStatusSnapshot,
 };
 use crate::cloud::{CloudSession, CloudSessionRefresh, FetchCloudPort, account_memory};
+use crate::core::outline_action_class;
 
 /// The page at `/account`.
 ///
@@ -357,7 +358,7 @@ pub fn AccountPageBody(
                                 && let Some(on_save) = on_save
                             {
                                 button {
-                                    class: SAVE_BUTTON_CLASS,
+                                    class: outline_action_class(false),
                                     r#type: "button",
                                     disabled: saving,
                                     onclick: move |_| on_save.call(update.clone()),
@@ -863,8 +864,6 @@ const VALUE_DIM_CLASS: &str =
 const ACTION_CLASS: &str = "tw:flex tw:flex-none tw:items-center";
 /// A name box.
 const INPUT_CLASS: &str = "tw:h-7 tw:w-full tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:px-2 tw:text-strong-foreground tw:disabled:text-dim-foreground";
-/// The accent Save button (the settings popover's Connect treatment).
-const SAVE_BUTTON_CLASS: &str = "tw:cursor-pointer tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:px-3 tw:py-1 tw:text-accent tw:transition tw:duration-300 tw:hover:bg-accent-wash tw:disabled:cursor-default tw:disabled:text-dim-foreground";
 /// A quiet in-row action.
 const LINK_BUTTON_CLASS: &str = "tw:cursor-pointer tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1.5 tw:py-1 tw:text-subtle-foreground tw:transition-colors tw:hover:bg-background-wash tw:hover:text-accent";
 /// The same, in the refusal tone.

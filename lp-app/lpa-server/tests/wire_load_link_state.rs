@@ -81,6 +81,7 @@ fn wire_load(
             None,
             None,
             None,
+            None,
             graphics,
             (*server_ptr).hello(),
             link_state,

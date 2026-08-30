@@ -43,7 +43,10 @@ use lpa_studio_core::{
 use crate::app::affordance::affordance_trigger_style;
 use crate::app::project::project_pane::trigger_label;
 use crate::app::project::{ProjectDetailContent, ProjectDetailSections};
-use crate::base::{DetailPopover, IconMenuTone, PopoverPlacement, StudioIcon, StudioIconName};
+use crate::base::{
+    DetailPopover, IconMenuTone, InlineButtonTone, PopoverPlacement, StudioIcon, StudioIconName,
+    inline_icon_button_class,
+};
 
 /// Everything the header control renders: THE session (core's control
 /// projection) and the open project's detail content, if a project is open
@@ -204,13 +207,11 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
                 // reverts — the destructive half of the pair is the one
                 // to lose first.
                 button {
-                    class: "{REVERT_BUTTON_CLASS} tw:hidden tw:@min-[680px]:inline-flex",
+                    class: "{inline_icon_button_class(InlineButtonTone::Warning, false)} tw:hidden tw:@min-[680px]:inline-flex",
                     r#type: "button",
                     title: "{revert.meta().summary}",
                     onclick: move |_| on_action.call(revert.clone()),
-                    span { class: "tw:inline-flex tw:items-center tw:text-dim-foreground",
-                        StudioIcon { name: StudioIconName::Revert, size: 13 }
-                    }
+                    StudioIcon { name: StudioIconName::Revert, size: 13 }
                 }
             }
         }
@@ -461,8 +462,9 @@ const DIVIDER_CLASS: &str = "tw:w-px tw:flex-none tw:self-stretch tw:bg-border-s
 /// the inspect surface and the act surface are different things). No
 /// preflight, so border and background are named explicitly.
 const SAVE_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:rounded-md tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2.5 tw:py-[3px] tw:transition-colors tw:hover:border-status-warning-foreground tw:@max-[560px]:px-2";
-/// The quiet ↺ button beside it: revert never competes with save.
-const REVERT_BUTTON_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:items-center tw:rounded-md tw:border tw:border-border-subtle tw:bg-transparent tw:px-2 tw:py-[3px] tw:transition-colors tw:hover:border-border-strong tw:hover:bg-background-wash";
+// The quiet ↺ button beside it now renders through
+// `inline_icon_button_class(InlineButtonTone::Warning, …)` (P4): it is the
+// revert/discard-edit action InlineButton's Warning tone is scoped to.
 /// The unsaved count, the header chip's pill verbatim (D8): mono, amber,
 /// pill-shaped — the same badge the pane's own affordances wear.
 /// The transient-example marker: accent-tinted, quiet, always present

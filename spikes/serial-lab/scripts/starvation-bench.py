@@ -81,7 +81,14 @@ class Lab:
         return self.cmd("status").get("seq", 0)
 
     def entries_since(self, since, max_entries=2000):
-        return self.cmd("buffer", since=since, max=max_entries).get("entries", [])
+        resp = self.cmd("buffer", since=since, max=max_entries)
+        missed = resp.get("evicted", 0) + resp.get("truncated", 0)
+        if missed:
+            print(f"  ⚠ buffer window lossy: missed {missed} entries "
+                  f"(evicted={resp.get('evicted', 0)} "
+                  f"truncated={resp.get('truncated', 0)}) — counts below "
+                  f"under-report", file=sys.stderr)
+        return resp.get("entries", [])
 
     def send_frame(self, msg, frame_id=None):
         if frame_id is None:

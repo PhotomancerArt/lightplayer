@@ -30,6 +30,7 @@ use lpa_studio_core::{
 
 use crate::app::node::ProductPreviewCanvas;
 use crate::base::MarkdownText;
+use crate::core::outline_action_class;
 
 /// Scroll slack under which the transcript stays glued to its bottom.
 const CHAT_STICKY_THRESHOLD_PX: f64 = 48.0;
@@ -223,7 +224,7 @@ pub fn AgentChatPane(
                 }
                 if busy {
                     button {
-                        class: "tw:flex-none tw:cursor-pointer tw:rounded-xs tw:border tw:border-status-error-border tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-status-error-foreground tw:hover:bg-status-error-bg",
+                        class: outline_action_class(true),
                         r#type: "button",
                         title: "Stop the running turn",
                         onclick: on_stop,
@@ -635,7 +636,7 @@ fn NeedsKeyState(
             }
             if let Some(on_connect) = on_connect {
                 button {
-                    class: "tw:mt-2 tw:flex-none tw:cursor-pointer tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:px-3 tw:py-1.5 tw:text-xs tw:font-bold tw:text-accent tw:transition tw:duration-300 tw:hover:bg-accent-wash",
+                    class: "{outline_action_class(false)} tw:mt-2",
                     r#type: "button",
                     title: "Sign in on openrouter.ai and come right back — no key to paste",
                     onclick: move |_| on_connect.call(()),

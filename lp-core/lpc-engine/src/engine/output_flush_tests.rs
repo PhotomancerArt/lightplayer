@@ -149,6 +149,10 @@ impl LpGraphics for CountingGraphics {
         self.inner.read_back(texture)
     }
 
+    fn read_back_into(&self, texture: &TextureHandle, out: &mut [u8]) -> Result<(), GfxError> {
+        self.inner.read_back_into(texture, out)
+    }
+
     fn create_sample_points(&self, count: u32) -> Result<SamplePointsHandle, GfxError> {
         self.inner.create_sample_points(count)
     }
@@ -173,8 +177,8 @@ impl LpGraphics for CountingGraphics {
         self.inner.write_sample_out(out, rgba16)
     }
 
-    fn read_sample_out(&self, out: &SampleOutHandle) -> Result<Vec<u16>, GfxError> {
-        self.inner.read_sample_out(out)
+    fn read_sample_out_into(&self, out: &SampleOutHandle, dst: &mut [u16]) -> Result<(), GfxError> {
+        self.inner.read_sample_out_into(out, dst)
     }
 
     fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {

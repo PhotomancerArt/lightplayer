@@ -38,6 +38,11 @@
     --color-accent-foreground: var(--studio-color-accent-text-on-fill);
     --color-accent-wash: var(--studio-color-accent-wash);
 
+    --color-focus-ring: var(--studio-color-focus-ring);
+    --color-glass-bg: var(--studio-glass-bg);
+    --color-glass-edge: var(--studio-glass-edge);
+    --color-glass-border: var(--studio-glass-border);
+
     --color-selection-border: var(--studio-color-selection-border);
     --color-selection-bg: var(--studio-color-selection-bg);
 

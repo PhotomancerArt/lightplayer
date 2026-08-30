@@ -86,10 +86,13 @@ pub(crate) fn PackageCard(
     // still entering the card. Touch devices never send these, so a tap
     // still just follows the link.
     let (hover_enter, hover_leave) = card_hover_handlers(source.as_ref());
+    // Drag-in-flight state is local chrome, not app state: it exists only
+    // to light the source card while the ghost is out (Aurora R2 extra).
+    let mut dragging = use_signal(|| false);
 
     rsx! {
         article {
-            class: package_card_class(opening, busy, blocked.is_some()),
+            class: package_card_class(opening, busy, blocked.is_some(), dragging()),
             onmouseenter: hover_enter,
             onmouseleave: hover_leave,
             // drag a project onto a device card = the push-confirm sheet
@@ -100,9 +103,11 @@ pub(crate) fn PackageCard(
                 move |_| {
                     if draggable {
                         set_dragged_project(uid.clone());
+                        dragging.set(true);
                     }
                 }
             },
+            ondragend: move |_| dragging.set(false),
             // Opening a card is NAVIGATION, so it is a real <a> to the
             // project route (D37: the URL points at a runtime — a project
             // always opens on the sim, never a device takeover): plain
@@ -656,8 +661,16 @@ const CARD_MENU_TRIGGER_CLASS: &str = "tw:grid tw:h-5 tw:w-5 tw:flex-none tw:cur
 /// The card's treatment while an open runs. `busy` is a DIMMING, not a
 /// disabling: the card still acts (it supersedes), so it keeps its
 /// pointer cursor.
-fn package_card_class(opening: bool, busy: bool, blocked: bool) -> &'static str {
+fn package_card_class(opening: bool, busy: bool, blocked: bool, dragging: bool) -> &'static str {
     // tw:relative anchors the stretched open link (see the card markup)
+    if dragging {
+        // Drag in flight: the pointer has left the card, so the ring is
+        // pinned on rather than hover-gated, and the shadow says "lifted
+        // off the page". The HTML5 drag image is a snapshot taken at
+        // dragstart, so this styles the SOURCE — which is the card the eye
+        // is tracking anyway while the ghost follows the cursor.
+        return "tw:group tw:relative tw:cursor-grabbing tw:overflow-hidden tw:rounded-md tw:border tw:border-transparent tw:bg-card ux-ir-ring ux-ir-ring-inset ux-ir-ring-on ux-drag-chip";
+    }
     if blocked {
         // amber edge, default cursor: the card is a statement, not a door
         "tw:group tw:relative tw:overflow-hidden tw:rounded-md tw:border tw:border-status-attention-border tw:bg-card"
@@ -666,7 +679,13 @@ fn package_card_class(opening: bool, busy: bool, blocked: bool) -> &'static str 
     } else if busy {
         "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:opacity-60 tw:transition-opacity"
     } else {
-        "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-border-strong"
+        // Inset ring: the card clips its own overflow, so an outset ring
+        // would be clipped away entirely (same trap .ux-glass-panel::after
+        // documents). It paints at z-3, above the glass footer (z-2) and
+        // the stretched open link (z-1), and takes no pointer events. The
+        // resting border goes transparent on hover so the ring IS the edge
+        // rather than a second line inside a grey one.
+        "tw:group tw:relative tw:cursor-pointer tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:transition-colors tw:hover:border-transparent ux-ir-ring ux-ir-ring-inset ux-card-lift"
     }
 }
 
@@ -823,7 +842,7 @@ mod tests {
             blocked.health.blocked().map(|(headline, _)| headline),
             Some("Format 3 — too old for this Studio")
         );
-        assert!(package_card_class(false, false, true).contains("status-attention-border"));
+        assert!(package_card_class(false, false, true, false).contains("status-attention-border"));
     }
 
     #[test]
@@ -832,7 +851,27 @@ mod tests {
         upgradable.health = PackageHealth::UpgradesOnOpen { found: 4 };
         assert!(upgradable.health.is_openable());
         assert_eq!(upgradable.health.blocked(), None);
-        assert!(!package_card_class(false, false, false).contains("status-attention-border"));
+        assert!(
+            !package_card_class(false, false, false, false).contains("status-attention-border")
+        );
+    }
+
+    #[test]
+    fn a_card_in_flight_pins_the_ring_and_a_resting_one_does_not() {
+        // The drag ghost is a snapshot taken at dragstart, so the SOURCE
+        // card carries the in-flight light — and the pointer has left it,
+        // so the ring cannot be hover-gated there.
+        let dragging = package_card_class(false, false, false, true);
+        assert!(dragging.contains("ux-ir-ring-on"), "{dragging}");
+        assert!(dragging.contains("ux-drag-chip"), "{dragging}");
+        for resting in [
+            package_card_class(false, false, false, false),
+            package_card_class(true, false, false, false),
+            package_card_class(false, true, false, false),
+            package_card_class(false, false, true, false),
+        ] {
+            assert!(!resting.contains("ux-ir-ring-on"), "{resting}");
+        }
     }
 
     #[test]

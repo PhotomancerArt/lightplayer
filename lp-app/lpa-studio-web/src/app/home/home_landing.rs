@@ -112,7 +112,10 @@ pub fn HomePage(
                         "Examples"
                     }
                     a {
-                        class: "tw:text-xs tw:font-semibold tw:text-accent tw:no-underline tw:hover:underline",
+                        // Neutral at rest (Aurora: no resting mint text) —
+                        // the accent-as-link role goes to the accent
+                        // reckoning follow-up.
+                        class: "tw:text-xs tw:font-semibold tw:text-muted-foreground tw:no-underline tw:hover:text-strong-foreground tw:hover:underline ux-focus-ring",
                         href: "/explore",
                         "Explore all →"
                     }
@@ -213,7 +216,7 @@ fn DiveInCard(
                     on_press.call(());
                 }
             },
-            span { class: "tw:flex tw:h-9 tw:w-9 tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-border tw:bg-card-muted tw:text-accent",
+            span { class: "tw:flex tw:h-9 tw:w-9 tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-border tw:bg-card-muted tw:text-heading",
                 StudioIcon { name: icon, size: 18 }
             }
             span { class: "tw:text-sm tw:font-bold tw:text-strong-foreground", "{title}" }
@@ -222,7 +225,7 @@ fn DiveInCard(
     }
 }
 
-const DIVE_IN_CARD_CLASS: &str = "tw:grid tw:justify-items-center tw:gap-2 tw:rounded-md tw:border tw:border-border tw:bg-card tw:px-4 tw:py-5 tw:no-underline tw:transition-colors tw:hover:border-accent-border tw:hover:bg-card-raised";
+const DIVE_IN_CARD_CLASS: &str = "tw:grid tw:justify-items-center tw:gap-2 tw:rounded-md tw:border tw:border-border tw:bg-card tw:px-4 tw:py-5 tw:no-underline tw:transition-colors tw:hover:bg-card-raised ux-ir-ring ux-card-lift ux-focus-ring";
 
 /// The one quiet line for a `/p/` link's fate (tone classes appended).
 const SHARED_LINE_CLASS: &str =
