@@ -5812,6 +5812,131 @@ select:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
+   Armed destructive chip (2K+) — devices-treatments spike gate 2026-08-31.
+   Two-click keeps its machine (action_button.rs); this is the armed
+   READING: the label grows a "Confirm " prefix (an inline-grid span
+   animating 0fr→1fr — a content swap can't drive a width transition, so
+   the prefix is always in the DOM and only its column opens), red ramps
+   in over 160ms with a small knock, and the stand-down window shows as a
+   QUIET drain: border-tone, hairline, 55% — ruled "quieter" at the final
+   spike gate; never the bright error text.
+   -------------------------------------------------------------------------- */
+.ux-armed-chip {
+    /* Must match ARMED_CONFIRM_WINDOW_MS in action_button.rs — constants
+       can't cross the Rust/CSS boundary, so these two comments pin them. */
+    --ux-armed-win: 4000ms;
+    position: relative;
+    white-space: nowrap;
+    /* Standing down relaxes slowly — an exhale, not a snap. Arming's
+       faster ramp is on .ux-armed below (later, so it wins while armed). */
+    transition:
+        background-color 0.5s ease-out,
+        border-color 0.5s ease-out;
+}
+
+.ux-armed-chip .ux-armed-prefix {
+    display: inline-grid;
+    grid-template-columns: 0fr;
+    overflow: hidden;
+    transition: grid-template-columns 0.22s ease;
+}
+
+.ux-armed-chip .ux-armed-prefix > span {
+    min-width: 0;
+    overflow: hidden;
+}
+
+@keyframes ux-armed-knock {
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    35% {
+        transform: scale(1.07);
+    }
+}
+
+.ux-armed {
+    background: var(--studio-status-error-bg);
+    border-color: var(--studio-status-error-border);
+    transition:
+        background-color 0.16s ease-in,
+        border-color 0.16s ease-in;
+    animation: ux-armed-knock 0.22s ease-out;
+}
+
+.ux-armed .ux-armed-prefix {
+    grid-template-columns: 1fr;
+}
+
+/* The quiet drain track. */
+.ux-armed-chip::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    bottom: 1px;
+    height: 1.5px;
+    border-radius: 2px;
+    background: var(--studio-status-error-border);
+    transform-origin: left;
+    transform: scaleX(0);
+    opacity: 0;
+}
+
+@keyframes ux-armed-drain {
+    from {
+        transform: scaleX(1);
+    }
+
+    to {
+        transform: scaleX(0);
+    }
+}
+
+.ux-armed::after {
+    opacity: 0.55;
+    animation: ux-armed-drain var(--ux-armed-win) linear forwards;
+}
+
+/* The card previews its own removal: `:has()` marks the owning scope, so
+   the renderer stays decision-free — no armed state ever reaches Rust.
+   Only the `.ux-armed-dim` body dims; the footer (the chip and its
+   neighbors) keeps full contrast. */
+.ux-armed-scope:has(.ux-armed) {
+    border-color: var(--studio-status-error-border);
+    box-shadow: inset 0 0 0 1px var(--studio-status-error-border);
+}
+
+.ux-armed-dim {
+    transition:
+        opacity 0.25s,
+        filter 0.25s;
+}
+
+.ux-armed-scope:has(.ux-armed) .ux-armed-dim {
+    opacity: 0.4;
+    filter: saturate(0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-armed {
+        animation: none;
+    }
+
+    /* The window is still SHOWN, just not animated. */
+    .ux-armed::after {
+        animation: none;
+        transform: scaleX(1);
+    }
+
+    .ux-armed-chip .ux-armed-prefix {
+        transition: none;
+    }
+}
+
+/* --------------------------------------------------------------------------
    Working / progress spectrum (extras — G1-3 RULED KEEP ALL FOUR: spinner,
    iridescent progress, drag ring, press flare)
    -------------------------------------------------------------------------- */

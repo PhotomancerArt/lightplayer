@@ -7,6 +7,10 @@ use crate::base::{StudioIcon, action_icon_name};
 /// How long a two-click confirmation stays ARMED before it stands down on
 /// its own. Long enough to read the changed label, short enough that a
 /// forgotten armed button cannot ambush a later stray click.
+///
+/// Must match `--ux-armed-win` on `.ux-armed-chip` (style.css) — the drain
+/// track animates over that var, and constants can't cross the Rust/CSS
+/// boundary, so these two comments pin them together.
 const ARMED_CONFIRM_WINDOW_MS: u32 = 4_000;
 
 /// How an action renders in its surrounding context. One action model
@@ -52,22 +56,27 @@ pub fn ActionButton(
     };
 
     // The two-click confirmation: the first click ARMS the button (the
-    // button itself asks, wearing the confirm label), the second click
-    // dispatches. Arming stands down on blur or after a short window —
-    // the native dialog stays for confirmations not marked inline.
+    // button itself asks, wearing "Confirm ⟨verb⟩" — the 2K+ reading from
+    // the devices-treatments spike gate), the second click dispatches.
+    // Arming stands down on blur or after a short window — the native
+    // dialog stays for confirmations not marked inline. The armed dress
+    // (prefix reveal, ramp, knock, quiet drain) lives in `.ux-armed-chip`/
+    // `.ux-armed` (style.css); the owning card marks itself via
+    // `.ux-armed-scope:has(.ux-armed)`, so no armed state leaves this
+    // component.
     let inline_confirm = confirmation.as_ref().is_some_and(|c| c.inline);
     let mut armed = use_signal(|| false);
     let mut arm_generation = use_signal(|| 0u64);
-    let armed_label = confirmation
+    let armed_verb = confirmation
         .as_ref()
-        .map(|c| format!("{}?", c.confirm_label))
+        .map(|c| c.confirm_label.clone())
         .unwrap_or_default();
     let armed_title = confirmation
         .as_ref()
         .map(|c| c.message.clone())
         .unwrap_or_default();
     let shown_label = if inline_confirm && armed() {
-        armed_label
+        armed_verb
     } else {
         label
     };
@@ -76,8 +85,8 @@ pub fn ActionButton(
     } else {
         summary
     };
-    let shown_class = if inline_confirm && armed() {
-        format!("{class} tw:bg-status-error-bg tw:border-status-error-border")
+    let shown_class = if inline_confirm {
+        confirm_chip_class(class, armed())
     } else {
         class.to_string()
     };
@@ -122,12 +131,33 @@ pub fn ActionButton(
                         }
                     }
                 }
+                // The "Confirm " prefix is always in the DOM (a content
+                // swap cannot drive a width transition); arming opens its
+                // grid column. Hidden from AT — the armed `title` carries
+                // the confirmation message.
+                if inline_confirm {
+                    span { class: "ux-armed-prefix", aria_hidden: "true",
+                        span { "Confirm\u{a0}" }
+                    }
+                }
                 span { "{shown_label}" }
             }
             if let Some(reason) = disabled_reason.as_ref() {
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-dim-foreground", "{reason}" }
             }
         }
+    }
+}
+
+/// The inline-confirm chip's classes for its current armed state. The base
+/// chip always wears `ux-armed-chip` (prefix mechanics + quiet drain host);
+/// arming adds `ux-armed` (error tint, knock, drain running). Kept as a
+/// plain function so the composition is testable without mounting.
+fn confirm_chip_class(base: &'static str, armed: bool) -> String {
+    if armed {
+        format!("{base} ux-armed-chip ux-armed")
+    } else {
+        format!("{base} ux-armed-chip")
     }
 }
 
@@ -352,6 +382,24 @@ mod tests {
             menu_item_class(true),
         ] {
             assert!(class.contains("ux-focus-ring"), "{class}");
+        }
+    }
+
+    #[test]
+    fn the_armed_chip_composes_the_armed_dress_over_its_base() {
+        // 2K+ (devices-treatments gate): the inline-confirm chip always
+        // hosts the prefix/drain mechanics; arming adds the tint/knock
+        // class. The spectrum ring never reaches a destructive chip.
+        let idle = confirm_chip_class(quiet_class(true), false);
+        assert!(idle.contains("ux-armed-chip"), "{idle}");
+        assert!(!idle.contains("ux-armed "), "{idle}");
+        assert!(!idle.ends_with("ux-armed"), "{idle}");
+        let armed = confirm_chip_class(quiet_class(true), true);
+        assert!(armed.contains("ux-armed-chip"), "{armed}");
+        assert!(armed.ends_with("ux-armed"), "{armed}");
+        for class in [&idle, &armed] {
+            assert!(!class.contains("ux-ir-ring"), "{class}");
+            assert!(!class.contains("ux-spectrum-cta"), "{class}");
         }
     }
 
