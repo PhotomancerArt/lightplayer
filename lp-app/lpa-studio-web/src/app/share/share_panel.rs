@@ -435,9 +435,7 @@ fn segment_button_class(access: Access, pressed: bool) -> String {
         (Access::Edit, true) => {
             "tw:bg-status-warning-bg tw:text-status-warning-foreground tw:hover:text-status-warning-foreground"
         }
-        (_, true) => {
-            "tw:bg-selection-bg tw:text-strong-foreground tw:hover:text-strong-foreground"
-        }
+        (_, true) => "tw:bg-selection-bg tw:text-strong-foreground tw:hover:text-strong-foreground",
         (Access::Edit, false) => {
             "tw:bg-transparent tw:text-subtle-foreground tw:hover:bg-background-wash tw:hover:text-status-warning-foreground"
         }

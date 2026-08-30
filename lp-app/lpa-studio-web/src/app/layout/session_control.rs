@@ -295,7 +295,9 @@ fn kind_glyph_class(sim: bool) -> &'static str {
 /// to: good-green run / amber attention / hollow connected-empty.
 fn dot_class(status: UiChromeSessionStatus) -> &'static str {
     match status {
-        UiChromeSessionStatus::Run => "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-good-foreground",
+        UiChromeSessionStatus::Run => {
+            "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-good-foreground"
+        }
         UiChromeSessionStatus::Attention => {
             "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-attention-foreground"
         }
