@@ -111,9 +111,18 @@ Vision and rulings: `2026-08-24-1720-brand-example-masked-grid/`
   format-refusal test that used `format: 5` as its refused-newer case
   moves to 6.
 - Canvas surfaces treat a filled polygon as a **field**, like a grid or
-  ring — dots, no ribbon body. Giving it the closed-outline treatment its
-  outline suggests would draw the serpentine chain through the lattice
-  rather than the shape. An authored-outline body is future work.
+  ring — never a swept ribbon along the chain. Giving it the
+  closed-outline treatment its outline suggests would draw the serpentine
+  path through the lattice rather than the shape.
+  *(Amended at the G1 gate, 2026-08-27, after seeing it on the canvas:
+  the band was drawn once and read exactly as predicted — snaking through
+  the lattice and overlapping itself — so it is gone. Two things replace
+  it. The lamps wear voronoi **cells**, seeded from the field and computed
+  by the same `point_cells` the node view's output preview calls, so the
+  editor and the preview draw one geometry. And the authored outline is
+  drawn as an always-on **silhouette** rather than left to future work:
+  it is the board, and a shaped matrix whose shape is invisible until
+  selected is a poor teacher. Only the swept body was rejected.)*
 - A filled polygon under a repeat expands to baked geometry for now. It
   carries an `angle_deg`, but its lattice anchors to the bbox of the
   rotated outline, so turning it parametrically needs an argument about
