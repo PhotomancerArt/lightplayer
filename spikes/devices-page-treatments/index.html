@@ -296,10 +296,13 @@ body.drift .cta-spectrum::before { animation: ir-spin 14s linear infinite; }
   animation: knock .22s ease-out; }
 .v-ck:not(.armed) { transition: width .22s ease, background-color .5s ease-out,
   border-color .5s ease-out; }
+/* Converged nit: the timeout drain, QUIETER — border-tone instead of the
+   bright error text, hairline height, low opacity. The window stays
+   legible without ticking at you. */
 .v-ck::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 1px;
-  height: 2px; border-radius: 2px; background: var(--st-error-tx);
+  height: 1.5px; border-radius: 2px; background: var(--st-error-bd);
   transform-origin: left; transform: scaleX(0); opacity: 0; }
-.v-ck.armed::after { opacity: .85; animation: drain var(--win) linear forwards; }
+.v-ck.armed::after { opacity: .55; animation: drain var(--win) linear forwards; }
 .no-motion .v-ck.armed { animation: none; }
 .no-motion .v-ck.armed::after { animation: none; transform: scaleX(1); }
 
@@ -359,7 +362,13 @@ body.drift .cta-spectrum::before { animation: ir-spin 14s linear infinite; }
 </head>
 <body data-mode="populated">
 
-<h1>Devices page — add-card CTA &amp; armed confirm · round 3</h1>
+<h1>Devices page — add-card CTA &amp; armed confirm · CONVERGED</h1>
+<p class="hint" style="color:#7be0b2">
+  Converged 2026-08-31: <b>1F spectrum outline = Primary voice</b> (outline family
+  stays neutral 1A — one standing rainbow per surface); <b>2K+ = the armed
+  pattern</b> ("Confirm Forget" + card marked, drain quieted to a border-tone
+  hairline). Production plan follows from this record.
+</p>
 <p class="hint">
   Converging. <b>Section 1</b>: the spectrum outline (1F) is <b>chosen as the
   Primary voice for now</b> — gradient fill stands down; hover glow bumped per the
