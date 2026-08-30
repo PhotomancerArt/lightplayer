@@ -306,10 +306,18 @@ littlefs-rust = { version = "0.1.0", default-features = false, features = ["allo
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
 
-# ⚠️ Two of eight node gates, the same pair fw-esp32s3 lists. `node-fixture` is
-# not optional alongside `node-shader`: `OutputNode::consume` requires a
-# *control* product, `ShaderNode` produces a *visual* one, and `FixtureNode` is
-# the only runtime that converts between them.
+# ⚠️ Six of eight node gates (2026-08-29 bring-up decision; fw-esp32s3 still
+# lists the original two). `node-fixture` is not optional alongside
+# `node-shader`: `OutputNode::consume` requires a *control* product,
+# `ShaderNode` produces a *visual* one, and `FixtureNode` is the only runtime
+# that converts between them. clock/playlist/texture/button were added once
+# real projects (small-dome, zook-dome) authored Clock nodes that loaded as
+# placeholders; measured flash cost of the four is ~22 KB against ~800 KB of
+# headroom, static RAM ~zero. `node-button` anticipates GPIO button wiring on
+# dig2go-class boards — no button service is wired yet, so Button nodes load
+# but read nothing. node-radio stays out (no radio service on this chip's
+# build either) and node-fluid stays out (a heavy sim for an LX6 already at
+# 23 fps under zook-dome).
 #
 # This list used to also carry a note about deliberately omitting
 # `panic-recovery`. That feature no longer exists anywhere: every firmware is
@@ -328,6 +336,10 @@ lpc-model = { path = "../../lp-core/lpc-model", default-features = false, option
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
     "node-shader",
     "node-fixture",
+    "node-clock",
+    "node-playlist",
+    "node-texture",
+    "node-button",
 ], optional = true }
 
 # The graphics backend. `lp-gfx-lpvm` selects the LPVM engine by
