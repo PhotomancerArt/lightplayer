@@ -5692,13 +5692,13 @@ label:has(> input:not(:disabled)) {
 }
 
 /* Dense rows (tree rows, panel list rows) take the LIGHT variant of the
-   same light: a spectrum edge plus the bloom, never a full ring — a ring
-   on every row of a tree is noise, not affordance (spike `.s-row`). No
-   animation here, so nothing for the motion guard to switch off. */
+   same light: the bloom alone — never a full ring (a ring on every row of
+   a tree is noise, not affordance; spike `.s-row`), and since the
+   selection grammar no edge either (G1 rd 3: the old blue inset edge read
+   as a competing selection-ish mark beside the still ring). No animation
+   here, so nothing for the motion guard to switch off. */
 .ux-row-edge:hover {
-    box-shadow:
-        inset 2px 0 0 #53c6f2,
-        0 0 14px var(--studio-glow);
+    box-shadow: 0 0 14px var(--studio-glow);
 }
 
 /* Press flare: the bloom answers the finger, not just the pointer. Ordered

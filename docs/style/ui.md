@@ -163,9 +163,12 @@ a mark.
 - **Intensity scales with size**: large marks carry the full spectrum,
   small marks the cool sweep, so the warm stops never sit beside the
   amber/red status tints they resemble.
-- The neutral selection family (`--studio-color-selection-*`) remains the
-  FILL and check-badge language under these marks; the low-alpha selection
-  background and its dirty-derived color-mix are unchanged.
+- On rows and cells the ring is the ONLY selection paint — no grey wash
+  (G1: "the rainbow highlight does well enough on its own"), so a selected
+  row keeps its natural ground: transparent when clean, its dirty tint
+  when edited. Option cards keep the low-alpha selection wash and the
+  neutral check badge under their ring; the neutral selection family
+  (`--studio-color-selection-*`) survives there and in span markers.
 
 Every selection mark is static because motion stays the pointer's: the
 iridescent ring (`ux-ir-ring`) on hover, the press flare (`ux-press-flare`)

@@ -142,7 +142,7 @@ const CHIP: &str = "tw:whitespace-nowrap tw:rounded tw:border tw:border-border-s
 /// and bloom on hover, not the full ring the buttons wear. It rides the
 /// IDLE row only — the selected row wears the chosen-object ring (cool).
 const ROW_IDLE: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash ux-row-edge";
-const ROW_SELECTED: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md ux-sel-ring ux-sel-ring-cool tw:border tw:border-transparent tw:bg-selection-bg tw:px-1.5 tw:py-1";
+const ROW_SELECTED: &str = "tw:flex tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-md ux-sel-ring ux-sel-ring-cool tw:border tw:border-transparent tw:px-1.5 tw:py-1";
 /// Indent per tree level as an inline style — arbitrary depth (nested
 /// modules, nested repeats) must never outrun a generated tailwind class.
 fn indent_style(level: usize) -> String {
@@ -1000,7 +1000,7 @@ fn OutputBox(
     let chevron = if expanded { "▾" } else { "▸" };
     let output_target = UiPatchTarget::Output { node: output.node };
     let header_class = if is_selected(&selection, &output_target) {
-        "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md ux-sel-ring ux-sel-ring-cool tw:border tw:border-transparent tw:bg-selection-bg tw:px-1.5 tw:py-1"
+        "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md ux-sel-ring ux-sel-ring-cool tw:border tw:border-transparent tw:px-1.5 tw:py-1"
     } else {
         "tw:flex tw:cursor-pointer tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-transparent tw:px-1.5 tw:py-1 tw:hover:bg-background-wash ux-row-edge"
     };
@@ -1096,7 +1096,7 @@ fn PortRow(
         format!("left: {left}%; width: {width}%;")
     };
     let line_class = if is_selected(&selection, &target) {
-        "tw:flex tw:cursor-pointer tw:items-baseline tw:gap-1.5 tw:rounded ux-sel-ring ux-sel-ring-cool tw:border tw:border-transparent tw:bg-selection-bg tw:px-1"
+        "tw:flex tw:cursor-pointer tw:items-baseline tw:gap-1.5 tw:rounded ux-sel-ring ux-sel-ring-cool tw:border tw:border-transparent tw:px-1"
     } else {
         "tw:flex tw:cursor-pointer tw:items-baseline tw:gap-1.5 tw:rounded tw:border tw:border-transparent tw:px-1 tw:hover:bg-background-wash ux-row-edge"
     };
@@ -1189,7 +1189,7 @@ fn PortCell(
     let class = if cell.contested {
         "tw:absolute tw:top-0 tw:flex tw:h-full tw:cursor-pointer tw:items-center tw:justify-center tw:overflow-hidden tw:rounded-[3px] tw:border tw:border-status-error-border tw:bg-status-error-bg"
     } else if is_selected(&selection, &target) {
-        "tw:absolute tw:top-0 tw:flex tw:h-full tw:cursor-pointer tw:items-center tw:justify-center tw:overflow-hidden tw:rounded-[3px] ux-sel-ring ux-sel-ring-cool ux-sel-ring-inset tw:border tw:border-transparent tw:bg-selection-bg"
+        "tw:absolute tw:top-0 tw:flex tw:h-full tw:cursor-pointer tw:items-center tw:justify-center tw:overflow-hidden tw:rounded-[3px] ux-sel-ring ux-sel-ring-cool ux-sel-ring-inset tw:border tw:border-transparent tw:bg-card-raised"
     } else {
         "tw:absolute tw:top-0 tw:flex tw:h-full tw:cursor-pointer tw:items-center tw:justify-center tw:overflow-hidden tw:rounded-[3px] tw:border tw:border-border-strong tw:bg-card-raised tw:hover:border-dim-foreground"
     };

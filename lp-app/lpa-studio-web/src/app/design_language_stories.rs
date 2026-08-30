@@ -98,7 +98,7 @@ fn page() -> Element {
 
             Idiom {
                 title: "Moving light belongs to the pointer",
-                rule: "The iridescent ring answers hover, the flare answers press, the pinned ring plus a lifted shadow rides a drag. Dense rows take the light variant: a blue edge plus bloom, never a ring per row. Motion is EXCLUSIVELY transient pointer state — nothing at rest may animate.",
+                rule: "The iridescent ring answers hover, the flare answers press, the pinned ring plus a lifted shadow rides a drag. Dense rows take the light variant: the bloom alone, never a ring per row. Motion is EXCLUSIVELY transient pointer state — nothing at rest may animate.",
                 button { class: "{demo_chip} {ir_ring_class()} ux-press-flare tw:cursor-pointer", "hover / press me" }
                 div { class: "tw:grid tw:w-44 tw:gap-1",
                     div { class: "{row_edge_class()} tw:cursor-default tw:rounded-sm tw:px-2.5 tw:py-1.5 tw:text-xs tw:text-soft-foreground tw:hover:bg-card-muted",
@@ -127,10 +127,10 @@ fn page() -> Element {
 
             Idiom {
                 title: "The selection grammar: a chosen object wears the ring",
-                rule: "Object selection — an option card, the tree's focused node, a patched port cell — is a STATIC spectrum ring over the neutral selection wash. Full spectrum at card radius; small radii (tree rows, cells) take the cool variant, where the full sweep would compress to its warm stops and read as attention-orange.",
+                rule: "Object selection — an option card, the tree's focused node, a patched port cell — is a STATIC spectrum ring. On rows the ring is the ONLY selection paint (the row keeps its natural ground, dirty tint included); option cards keep the selection wash and check under theirs. Small radii take the cool variant, where the full sweep would compress to its warm stops and read as attention-orange.",
                 div { class: "tw:grid tw:w-44 tw:gap-0.5 tw:rounded-md tw:border tw:border-border-muted tw:bg-card tw:p-1.5",
                     span { class: "{mini_nav_row} tw:text-muted-foreground", "plasma.glsl" }
-                    span { class: "{mini_nav_row} ux-sel-ring ux-sel-ring-cool tw:bg-selection-bg tw:text-strong-foreground",
+                    span { class: "{mini_nav_row} ux-sel-ring ux-sel-ring-cool tw:text-strong-foreground",
                         "Ocean Ripple"
                     }
                     span { class: "{mini_nav_row} tw:text-muted-foreground", "dusk palette" }

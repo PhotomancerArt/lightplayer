@@ -267,10 +267,13 @@ gate rounds) converged on a grammar rather than a single treatment:
   sweep on small ones — the cool tri exists because the full run's
   amber/red/orange stops are the unsaved/error/attention hues and would
   collide beside a dirty row.
-- The neutral selection family survives as the fill/check language under
-  the marks; every mark is static — motion remains exclusively
-  hover/press/drag light, so selected and hovered stay different kinds
-  of light.
+- On rows and cells the ring is the ONLY selection paint (no grey wash;
+  a selected row keeps its natural ground, dirty tint included). Option
+  cards keep the selection wash + neutral check under the ring. Every
+  mark is static — motion remains exclusively hover/press/drag light
+  (the dense-row hover is the bloom alone; its old blue inset edge read
+  as a competing mark beside the ring), so selected and hovered stay
+  different kinds of light.
 
 Status hues remain frozen; nothing here touches them. The design
 library's main page (the design-language story) documents the grammar
