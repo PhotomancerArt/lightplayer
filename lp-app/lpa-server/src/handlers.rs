@@ -221,13 +221,22 @@ fn handle_fs_request(fs: &mut dyn LpFs, request: FsRequest) -> Result<FsResponse
                 error: Some(format!("{e}")),
             }),
         },
-        FsRequest::Write { path, data } => match fs.write_file(path.as_path(), &data) {
-            Ok(()) => Ok(FsResponse::Write { path, error: None }),
-            Err(e) => Ok(FsResponse::Write {
-                path,
-                error: Some(format!("{e}")),
-            }),
-        },
+        FsRequest::Write { path, data } => {
+            // Dispatch marker for the flash-write-wedge diagnosis: pairs
+            // with fw-esp32v3's [FLASH] traces to split "request never
+            // dispatched" from "storage op wedged" from "response lost".
+            // docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.md
+            log::debug!("fs write dispatch: {} ({} B)", path.as_str(), data.len());
+            let result = fs.write_file(path.as_path(), &data);
+            log::debug!("fs write handled: {} ok={}", path.as_str(), result.is_ok());
+            match result {
+                Ok(()) => Ok(FsResponse::Write { path, error: None }),
+                Err(e) => Ok(FsResponse::Write {
+                    path,
+                    error: Some(format!("{e}")),
+                }),
+            }
+        }
         FsRequest::DeleteFile { path } => match fs.delete_file(path.as_path()) {
             Ok(()) => Ok(FsResponse::DeleteFile { path, error: None }),
             Err(e) => Ok(FsResponse::DeleteFile {

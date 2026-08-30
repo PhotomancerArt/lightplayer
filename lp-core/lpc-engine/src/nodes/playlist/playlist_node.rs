@@ -1,7 +1,6 @@
 //! Runtime playlist node: selects and blends owned visual child entries.
 
 use alloc::format;
-use alloc::vec;
 use alloc::vec::Vec;
 use lp_collection::VecMap;
 
@@ -15,7 +14,7 @@ use lps_shared::TextureStorageFormat;
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
-    RenderContext, RenderNode, RuntimeStateShape, TickContext, err_ctx,
+    RenderContext, RenderNode, RuntimeStateShape, TickContext, ensure_scratch_len, err_ctx,
 };
 use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualSampleBufferRequest, VisualSampleTarget,
@@ -51,6 +50,19 @@ pub struct PlaylistNode {
     /// slot's domain — command switches reset the entry clock exactly like
     /// trigger switches, even when the playlist clock is scrubbed or rated.
     pending_activate: Option<u32>,
+    /// Reused destinations for the crossfade sample reads and blend, so a
+    /// running transition adds no per-tick heap churn (the tick-alloc rule
+    /// from defect 2026-08-29-flash-write-wedges-under-zook-playback).
+    crossfade_scratch: CrossfadeScratch,
+}
+
+/// The crossfade sample path's persistent buffers (each `4 × point count`
+/// `u16`s while a transition runs).
+#[derive(Default)]
+struct CrossfadeScratch {
+    previous: Vec<u16>,
+    active: Vec<u16>,
+    blended: Vec<u16>,
 }
 
 impl PlaylistNode {
@@ -79,6 +91,7 @@ impl PlaylistNode {
             transition_duration: 0.0,
             last_seen_triggers: VecMap::new(),
             pending_activate: None,
+            crossfade_scratch: CrossfadeScratch::default(),
         }
     }
 
@@ -439,16 +452,33 @@ impl RenderNode for PlaylistNode {
         let graphics = ctx
             .graphics()
             .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
-        let previous_channels = graphics
-            .read_sample_out(&previous_samples)
-            .map_err(err_ctx("playlist previous sample read"))?;
-        let active_channels = graphics
-            .read_sample_out(&active_samples)
-            .map_err(err_ctx("playlist active sample read"))?;
-        let mut blended = vec![0u16; previous_channels.len()];
-        blend_rgba16_samples(&previous_channels, &active_channels, alpha, &mut blended)?;
+        let channel_len = point_count as usize * 4;
+        let scratch = &mut self.crossfade_scratch;
+        ensure_scratch_len(
+            &mut scratch.previous,
+            channel_len,
+            "playlist previous samples",
+        )?;
+        ensure_scratch_len(&mut scratch.active, channel_len, "playlist active samples")?;
+        ensure_scratch_len(
+            &mut scratch.blended,
+            channel_len,
+            "playlist blended samples",
+        )?;
         graphics
-            .write_sample_out(target.samples, &blended)
+            .read_sample_out_into(&previous_samples, &mut scratch.previous)
+            .map_err(err_ctx("playlist previous sample read"))?;
+        graphics
+            .read_sample_out_into(&active_samples, &mut scratch.active)
+            .map_err(err_ctx("playlist active sample read"))?;
+        blend_rgba16_samples(
+            &scratch.previous,
+            &scratch.active,
+            alpha,
+            &mut scratch.blended,
+        )?;
+        graphics
+            .write_sample_out(target.samples, &scratch.blended)
             .map_err(err_ctx("playlist crossfade sample write"))
     }
 }

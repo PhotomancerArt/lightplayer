@@ -312,8 +312,13 @@ where
         Ok(())
     }
 
-    fn read_sample_out(&self, out: &SampleOutHandle) -> Result<Vec<u16>, GfxError> {
-        Ok(sample_out_buf(out)?.data().to_vec())
+    fn read_sample_out_into(&self, out: &SampleOutHandle, dst: &mut [u16]) -> Result<(), GfxError> {
+        let src = sample_out_buf(out)?.data();
+        if dst.len() != src.len() {
+            return Err(len_mismatch("sample out channels", src.len(), dst.len()));
+        }
+        dst.copy_from_slice(src);
+        Ok(())
     }
 
     fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {

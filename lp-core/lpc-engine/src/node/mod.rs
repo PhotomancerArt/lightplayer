@@ -14,6 +14,14 @@ pub mod node_tree;
 mod render_node;
 mod runtime_state_shape;
 pub mod scope;
+// Every current caller is a feature-gated node runtime, so the helper is
+// gated on their union to keep minimal builds warning-clean.
+#[cfg(any(
+    feature = "node-fixture",
+    feature = "node-playlist",
+    feature = "node-shader"
+))]
+mod scratch;
 pub mod sync;
 pub mod tree_error;
 
@@ -33,32 +41,14 @@ pub use node_tree::RuntimeNodeTree;
 pub use render_node::RenderNode;
 pub use runtime_state_shape::RuntimeStateShape;
 pub use scope::ScopeRef;
+#[cfg(any(
+    feature = "node-fixture",
+    feature = "node-playlist",
+    feature = "node-shader"
+))]
+pub(crate) use scratch::ensure_scratch_len;
 pub use sync::{tree_deltas_since, tree_deltas_since_iter};
 pub use tree_error::TreeError;
-
-/// Size a node's persistent scratch buffer, failing softly on OOM.
-///
-/// Per-tick read-back sinks hold one reusable buffer and resize it here
-/// instead of materializing a fresh `Vec` every tick (the per-tick clone
-/// was enough to reset a playing classic — see the flash-write-wedge
-/// defect's memory findings). Growth goes through `try_reserve_exact`, so
-/// on a memory-starved device the tick fails with a [`NodeError`] instead
-/// of aborting inside the allocator.
-pub fn ensure_scratch_len<T: Clone + Default>(
-    scratch: &mut alloc::vec::Vec<T>,
-    len: usize,
-) -> Result<(), NodeError> {
-    let additional = len.saturating_sub(scratch.len());
-    if additional > 0 {
-        scratch.try_reserve_exact(additional).map_err(|_| {
-            NodeError::msg(alloc::format!(
-                "scratch buffer allocation failed ({len} elements)"
-            ))
-        })?;
-    }
-    scratch.resize(len, T::default());
-    Ok(())
-}
 
 #[cfg(test)]
 pub(crate) fn test_placeholder_spine() -> lpc_model::NodeInvocation {
