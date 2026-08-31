@@ -66,9 +66,19 @@ pub struct DeviceView {
     /// proto-compatible LightPlayer, on a link, with nothing else running.
     /// The empty face's primary verb is drawn only when this is true.
     pub can_receive_project: bool,
+    /// Whether "Remove project" is a real verb right now: the board has
+    /// REPORTED something loaded, the port is open, and nothing else is
+    /// running. Never offered on [`LoadedProject::Unknown`] — a board that
+    /// has not said what it holds must not be offered a delete.
+    pub can_remove_project: bool,
     pub activity: Option<ActivityView>,
     /// Survives disconnect; cleared when a new activity supersedes it.
     pub last_outcome: Option<OutcomeView>,
+    /// The card's terminal panel: what the board said and what Studio did
+    /// to it, oldest first. Serial lines and activity narration interleaved,
+    /// because that is the order they happened in — a flash's progress used
+    /// to be visible only in the browser console (G1 bench, 2026-08-31).
+    pub terminal_lines: Vec<String>,
     /// Never empty (invariant I3).
     pub escapes: Vec<Escape>,
 }
@@ -169,6 +179,7 @@ pub fn roster_view(roster: &Roster, now: Millis) -> RosterView {
 /// reads no clocks.
 pub fn device_view(device: &Device, now: Millis) -> DeviceView {
     let status = device.status();
+    let loaded = loaded_project(device);
     let activity = device.activity.as_ref().map(|cell| ActivityView {
         kind: cell.kind,
         label: format!("{}…", cell.kind.label()),
@@ -218,7 +229,12 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             .hello()
             .and_then(|hello| hello.board_id.clone()),
         needs_firmware: needs_firmware(&device.evidence.classification),
-        loaded_project: loaded_project(device),
+        // The mirror of the push condition, over the OTHER answer: a board
+        // that reported something running, on an open port, idle.
+        can_remove_project: matches!(loaded, LoadedProject::Running { .. })
+            && device.evidence.presence.is_open()
+            && device.activity.is_none(),
+        loaded_project: loaded,
         // An OPEN port, not merely an attached one: the push conversation
         // talks over this port, and a verb that could only fail is worse
         // than no verb. (The fold already implies it — closing a port
@@ -229,6 +245,11 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             && device.activity.is_none(),
         activity,
         last_outcome: device.evidence.last_outcome.as_ref().map(outcome_view),
+        terminal_lines: device
+            .evidence
+            .recent_output()
+            .map(str::to_string)
+            .collect(),
         escapes,
     }
 }
@@ -315,7 +336,10 @@ fn state_label(device: &Device, status: DeviceStatus) -> String {
             .map(|kind| format!("{}…", kind.label()))
             .unwrap_or_else(|| "Working…".to_string()),
         DeviceStatus::Offline => "Offline".to_string(),
-        DeviceStatus::Attached => "Attached — port closed".to_string(),
+        // "port closed" was true and useless: it named an implementation
+        // detail for a board that is plugged in and simply not being
+        // listened to. On the bench it read as a fault (G1, 2026-08-31).
+        DeviceStatus::Attached => "Attached — not listening".to_string(),
         DeviceStatus::Ready => "Ready".to_string(),
         DeviceStatus::NotResponding => "Not responding".to_string(),
         DeviceStatus::NeedsAttention => classification_label(&device.evidence.classification),

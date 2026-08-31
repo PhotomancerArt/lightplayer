@@ -28,6 +28,7 @@ use crate::activity::erase::EraseActivity;
 use crate::activity::flash::FlashActivity;
 use crate::activity::identify::IdentifyActivity;
 use crate::activity::push::PushActivity;
+use crate::activity::remove_project::RemoveProjectActivity;
 use crate::activity::{
     ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityProgress, ActivityStep,
 };
@@ -154,6 +155,7 @@ impl Device {
         let Some(cell) = self.activity.take() else {
             return Vec::new();
         };
+        let mut abandoned = self.abandon_commands(&cell);
         ctx.journal.note(
             now,
             self.scope(),
@@ -185,7 +187,29 @@ impl Device {
             },
             ctx,
         );
-        self.recovery_commands(reason, ctx)
+        // The abandon goes FIRST: the recovery it precedes reopens the port,
+        // and a pump still paused behind an orphaned borrow would eat every
+        // line the reopened port carries.
+        abandoned.extend(self.recovery_commands(reason, ctx));
+        abandoned
+    }
+
+    /// Let go of the coarse effect a cell that is coming down still owns.
+    ///
+    /// The effect itself cannot be stopped — it runs in a spawned future the
+    /// model has no handle on — but its exclusive wire borrow can be given
+    /// back, and it must be: an orphaned borrow held the fold deaf for the
+    /// rest of the effect's own budget (G1 bench, 2026-08-31). Late markers
+    /// are already dropped by the generation stamp.
+    fn abandon_commands(&self, cell: &ActivityCell) -> Vec<Command> {
+        let (Some(effect_id), Some(link)) = (cell.current_effect, self.link()) else {
+            return Vec::new();
+        };
+        vec![Command::AbandonEffect {
+            device: self.id,
+            link,
+            effect_id,
+        }]
     }
 
     /// Persist-worthy snapshot of identity + preferences.
@@ -308,6 +332,40 @@ impl Device {
         commands
     }
 
+    /// Spawn the Remove-project activity, unless the device is already busy
+    /// (I5) or has no link to talk over. WHICH project is removed is the
+    /// board's own report, read inside the conversation — see
+    /// [`Action::RemoveProject`](crate::Action::RemoveProject).
+    pub(crate) fn spawn_remove_project(
+        &mut self,
+        now: Millis,
+        ctx: &mut ModelCtx<'_>,
+    ) -> Vec<Command> {
+        if self.activity.is_some() || self.link().is_none() {
+            return Vec::new();
+        }
+        let effect_id = self.mint_effect_id();
+        let reducer = RemoveProjectActivity::new(self.id);
+        let commands = {
+            let activity_ctx = ActivityCtx {
+                link: self.evidence.link(),
+                evidence: &self.evidence,
+                config: ctx.config,
+                effect_id,
+            };
+            reducer.spawn_commands(&activity_ctx)
+        };
+        // The same conversation shape as a push, over the same wire: its
+        // backstop is the same one.
+        let cell = ActivityCell::new(
+            now,
+            now.plus_ms(ctx.config.push_deadline_ms),
+            Reducer::RemoveProject(reducer),
+        );
+        self.install_activity(now, cell, effect_id, &commands, ctx);
+        commands
+    }
+
     /// Spawn the Push activity, unless the device is already busy (I5) or
     /// has no link to push over. The payload was staged with the effects
     /// layer before this gesture was folded — see
@@ -417,6 +475,12 @@ impl Device {
                 // A wipe implies staying connected to re-flash afterwards.
                 self.intent.connection = ConnectionIntent::Connected;
                 self.spawn_erase(now, ctx)
+            }
+            Action::RemoveProject { .. } => {
+                // Clearing a board implies staying connected to put
+                // something else on it — the empty face is the next stop.
+                self.intent.connection = ConnectionIntent::Connected;
+                self.spawn_remove_project(now, ctx)
             }
             Action::SetName { name, .. } => {
                 self.intent.name = Some(name.clone());
@@ -588,6 +652,11 @@ impl Device {
                 let Some(cell) = self.activity.take() else {
                     return commands;
                 };
+                // A reducer can settle while its effect is still running —
+                // the stamp's own deadline is exactly that case. Give the
+                // wire back rather than leaving the pump paused behind an
+                // effect nothing is listening to any more.
+                commands.extend(self.abandon_commands(&cell));
                 ctx.journal.note(
                     now,
                     self.scope(),
@@ -692,11 +761,10 @@ impl Device {
         if let Some(cell) = &self.activity {
             soonest = Some(cell.next_deadline(cell.kind.cancel_grace_ms(ctx.config)));
         }
-        if let Some(quiet_at) = self
-            .evidence
-            .freshness
-            .quiet_deadline(ctx.config.quiet_after_ms)
-        {
+        // `Evidence`'s own answer, not the raw freshness one: a borrowed
+        // wire has no silence to time, so a flash does not keep re-arming a
+        // quiet timer that could only fire a lie.
+        if let Some(quiet_at) = self.evidence.quiet_deadline(ctx.config.quiet_after_ms) {
             soonest = Some(match soonest {
                 Some(existing) => existing.min(quiet_at),
                 None => quiet_at,

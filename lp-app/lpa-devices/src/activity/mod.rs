@@ -11,17 +11,20 @@
 //! controller state — and what makes every flow testable by event script.
 //!
 //! Shipped activities: [`identify::IdentifyActivity`] (round 1),
-//! [`flash::FlashActivity`] (round 2's coarse-effect centerpiece) and
-//! [`push::PushActivity`] (its second consumer). Pull is the remaining
-//! round-2 variant of [`ActivityKind`] and `Reducer` (M4); the old
-//! Setup/Provision orchestrators dissolved into the card ruling — Flash and
-//! Push ARE the flows.
+//! [`flash::FlashActivity`] (round 2's coarse-effect centerpiece),
+//! [`push::PushActivity`] (its second consumer), and the two always-actions
+//! [`erase::EraseActivity`] (Factory reset) and
+//! [`remove_project::RemoveProjectActivity`]. Pull is the remaining round-2
+//! variant of [`ActivityKind`] and `Reducer` (M4); the old Setup/Provision
+//! orchestrators dissolved into the card ruling — Flash and Push ARE the
+//! flows.
 
 pub(crate) mod activity_cell;
 pub mod erase;
 pub mod flash;
 pub mod identify;
 pub mod push;
+pub mod remove_project;
 
 pub use activity_cell::{
     ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityProgress, ActivityReducer,
@@ -31,3 +34,4 @@ pub use erase::EraseActivity;
 pub use flash::FlashActivity;
 pub use identify::IdentifyActivity;
 pub use push::PushActivity;
+pub use remove_project::RemoveProjectActivity;

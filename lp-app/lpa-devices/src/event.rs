@@ -116,6 +116,18 @@ pub enum Action {
     Erase {
         device: DeviceId,
     },
+    /// Take the loaded project off this board: stop it, then delete the
+    /// storage dir the board says it runs from. The firmware stays, so the
+    /// board comes back on the EMPTY face rather than needing a re-flash —
+    /// which is the escape a board arriving with somebody else's project on
+    /// it had none of (G1 bench, 2026-08-31).
+    ///
+    /// It carries no project, for the same reason [`Self::Push`] does not:
+    /// which dir to remove is the board's own report, read over the wire by
+    /// the effect. The library copy is untouched.
+    RemoveProject {
+        device: DeviceId,
+    },
     SetName {
         device: DeviceId,
         name: String,
@@ -138,6 +150,7 @@ impl Action {
             | Self::Push { device }
             | Self::Flash { device, .. }
             | Self::Erase { device }
+            | Self::RemoveProject { device }
             | Self::SetName { device, .. }
             | Self::SetAutoconnect { device, .. } => Some(*device),
             Self::AddFromUsb
@@ -165,6 +178,20 @@ pub enum Event {
     /// A transport vanished (unplug, or the platform revoked it).
     LinkDetached {
         link: LinkId,
+    },
+    /// A coarse effect took the wire, or gave it back.
+    ///
+    /// The effects layer borrows a link exclusively for the length of an
+    /// effect: the pump stops draining, so NOTHING can be heard from the
+    /// board while the borrow holds. That is a fact about the world, so it
+    /// enters as an event (I6) rather than as a flag some second store keeps
+    /// — and the fold uses it for one thing: freshness does not evaluate
+    /// against a wire nobody is listening to. Without it a two-minute flash
+    /// ends with "quiet — last heard 2 m ago" on a board that was talking
+    /// the whole time (G1 bench, 2026-08-31).
+    LinkBorrow {
+        link: LinkId,
+        held: bool,
     },
     TimerFired {
         timer: TimerId,
@@ -252,6 +279,23 @@ pub enum Command {
         effect_id: EffectId,
         effect: EffectRequest,
     },
+    /// Let go of a coarse effect that is still running: its activity has
+    /// ended (settled, cancelled, evicted, forgotten) and nothing will read
+    /// what it eventually says.
+    ///
+    /// A coarse effect runs in a spawned future the model cannot cancel, so
+    /// this does not stop the work — it releases the effect's **exclusive
+    /// wire borrow** so the link pump resumes immediately. Without it an
+    /// orphaned effect held the fold deaf for the rest of its own budget:
+    /// forty seconds of a card that had stopped saying anything, which on
+    /// the bench read as a dead board and got the device unplugged (G1,
+    /// 2026-08-31). The effect's own late markers are already dropped by the
+    /// generation stamp.
+    AbandonEffect {
+        device: DeviceId,
+        link: LinkId,
+        effect_id: EffectId,
+    },
 }
 
 /// One coarse effect's generation stamp, unique per device for the life of
@@ -284,6 +328,13 @@ pub enum EffectRequest {
     /// completion is verified in the platform layer (the completion line
     /// outranks the benign flash-id warning — C6 rev 2 lore).
     Erase,
+    /// Run the `lpa-client` remove conversation over the borrowed wire: ask
+    /// the board what it runs from, stop it, and delete that dir.
+    ///
+    /// A unit variant like [`Self::Push`], and for a stronger reason: WHICH
+    /// dir gets deleted is not the model's to name. The board's own report
+    /// is the only honest answer, and it is read inside the conversation.
+    RemoveProject,
 }
 
 #[cfg(test)]

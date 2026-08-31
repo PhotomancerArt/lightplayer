@@ -1,29 +1,29 @@
-//! The Push activity: put a project on this board.
+//! The Remove-project activity: take what is on this board off it.
 //!
-//! Shaped exactly like [`FlashActivity`](super::flash::FlashActivity), and
-//! for the same reason: the work is a **coarse effect**. The reducer emits
-//! one [`Command::RunEffect`] and then absorbs markers — it never touches the
-//! wire while the effect owns it, and it never awaits (I7).
+//! The smallest of the coarse-effect activities, and shaped like
+//! [`EraseActivity`](super::erase::EraseActivity): one
+//! [`Command::RunEffect`], then an observation window that waits for the fold
+//! to AGREE the board is empty before the card says so.
 //!
-//! What the effect does below the model is the `lpa-client` conversation the
-//! studio already trusts (`project_deploy.rs`'s stop → write → load order,
-//! `file_sync_ops.rs`'s chunking, then the package-hash verification
-//! `open_library_project` performs). The reducer deliberately knows none of
-//! it. It knows three things:
+//! It exists because of a dead end the bench walked into (G1, 2026-08-31): a
+//! reflash preserves littlefs, so a board comes back auto-loading a project
+//! from some previous life. The running face has no verbs for that, and
+//! "factory reset" — the only escape that existed — throws the firmware away
+//! too. Removing the project keeps the firmware and lands the card back on
+//! the empty face, where the picker is.
 //!
-//! 1. The effect is running (or was never able to start, which arrives as an
-//!    immediate failure marker — a project the app could not prepare and a
-//!    device that refused the write land on the SAME honest face).
-//! 2. When the effect ends well, ask the board what it is running now, so
-//!    the running face is drawn from EVIDENCE rather than from our own
-//!    optimism (I6). The ask is best-effort: the push already succeeded, and
-//!    a board that has not answered yet is not a failed push.
-//! 3. A cancel during the write window is HELD. The conversation clears the
-//!    device's project dir before it writes the replacement, so tearing out
-//!    mid-write leaves half a project on the board. The card says
-//!    "cancelling", the conversation finishes, and the wind-down happens
-//!    instead of the observation. Supervision's push grace bounds the hold
-//!    (I1/I2), and eviction is still the backstop.
+//! Three things the reducer knows, and nothing more:
+//!
+//! 1. The effect is running. WHICH dir it deletes is the board's own report,
+//!    read inside the conversation — the model never names a path.
+//! 2. When the effect ends well, ask the board what it has loaded now, so
+//!    the empty face is drawn from EVIDENCE and not from our own optimism
+//!    (I6). An `Empty` report settles it; silence still settles, honestly,
+//!    because the delete itself was verified below the seam.
+//! 3. A cancel during the conversation is HELD. The project is stopped and
+//!    its dir is part-deleted by then; tearing out mid-delete would leave a
+//!    board loading half a project. The push grace bounds the hold (I1/I2),
+//!    and eviction is still the backstop.
 //!
 //! [`Command::RunEffect`]: crate::event::Command::RunEffect
 
@@ -39,34 +39,35 @@ use super::activity_cell::{
     ActivityCtx, ActivityKind, ActivityOutcome, ActivityReducer, ActivityStep,
 };
 
-/// Where the push currently is.
+/// Where the removal currently is.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-enum PushPhase {
+enum RemovePhase {
     /// The coarse effect owns the wire; we absorb markers.
-    Sending,
+    Removing,
     /// The conversation is done. We asked the board what it has loaded, and
     /// give it this long to say — then settle anyway.
     Observing { deadline: Millis, summary: String },
 }
 
-/// The Push reducer's own state. Everything it learns lives in the fold.
+/// The Remove-project reducer's own state. Everything it learns lives in the
+/// fold.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct PushActivity {
+pub struct RemoveProjectActivity {
     device: DeviceId,
-    phase: PushPhase,
-    /// Cancel arrived during the write window: the device's project dir is
-    /// already cleared, so the wind-down waits for the effect to end.
+    phase: RemovePhase,
+    /// Cancel arrived while the dir was being deleted: the wind-down waits
+    /// for the effect to end rather than leaving half a project behind.
     cancel_after_effect: bool,
     /// Cancel wind-down in progress: the port was asked to close.
     winding_down: bool,
     next_request_id: u32,
 }
 
-impl PushActivity {
+impl RemoveProjectActivity {
     pub fn new(device: DeviceId) -> Self {
         Self {
             device,
-            phase: PushPhase::Sending,
+            phase: RemovePhase::Removing,
             cancel_after_effect: false,
             winding_down: false,
             next_request_id: 1,
@@ -74,7 +75,8 @@ impl PushActivity {
     }
 
     /// The command that starts the coarse effect. Emitted by
-    /// [`Device::spawn_push`](crate::Device::spawn_push) at spawn.
+    /// [`Device::spawn_remove_project`](crate::Device::spawn_remove_project)
+    /// at spawn.
     pub(crate) fn spawn_commands(&self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
         let Some(link) = ctx.link else {
             return Vec::new();
@@ -83,7 +85,7 @@ impl PushActivity {
             device: self.device,
             link,
             effect_id: ctx.effect_id,
-            effect: EffectRequest::Push,
+            effect: EffectRequest::RemoveProject,
         }]
     }
 
@@ -99,13 +101,13 @@ impl PushActivity {
         }
     }
 
-    /// Ask the board what it is running now, so the fold re-observes rather
-    /// than the reducer assuming.
+    /// Ask the board what it is running now, so the fold re-observes the
+    /// empty face rather than the reducer asserting it.
     ///
-    /// Asked rather than waited for: the loaded-project fact also rides
-    /// heartbeats, but a heartbeat period is five seconds on real firmware,
-    /// and a card that says nothing for five seconds after a successful push
-    /// reads as a failure.
+    /// Asked rather than waited for, exactly like the push's: the
+    /// loaded-project fact also rides heartbeats, but a heartbeat period is
+    /// five seconds on real firmware, and a card that says nothing for five
+    /// seconds after a successful removal reads as a failure.
     fn ask_loaded(&mut self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
         let Some(link) = ctx.link else {
             return Vec::new();
@@ -118,20 +120,21 @@ impl PushActivity {
         }]
     }
 
-    /// The board reported a loaded project: the push is provably on it.
+    /// Whether the board has now REPORTED an empty loaded list. `None` means
+    /// it has not said — which is not "still running", and not "empty".
+    fn reported_empty(ctx: &ActivityCtx<'_>) -> bool {
+        ctx.evidence.loaded_projects().is_some_and(<[_]>::is_empty)
+    }
+
     fn settled_summary(&self, summary: &str, ctx: &ActivityCtx<'_>) -> ActivityOutcome {
-        match ctx
-            .evidence
-            .loaded_projects()
-            .and_then(|loaded| loaded.first())
-        {
-            Some(project) => ActivityOutcome::Succeeded {
-                summary: format!("{summary} — the board is running {}", project.label()),
+        match Self::reported_empty(ctx) {
+            true => ActivityOutcome::Succeeded {
+                summary: format!("{summary} — the board has nothing loaded"),
             },
-            // Honest under-claim: the write and the hash check both passed,
-            // and the board simply has not reported yet. Saying it is
-            // running would be a claim no evidence supports.
-            None => ActivityOutcome::Succeeded {
+            // Honest under-claim: the delete was verified over the wire and
+            // the board simply has not reported since. Claiming the board is
+            // empty is a claim no evidence supports yet.
+            false => ActivityOutcome::Succeeded {
                 summary: summary.to_string(),
             },
         }
@@ -149,13 +152,13 @@ impl PushActivity {
             return ActivityStep::nothing();
         };
         match &self.phase {
-            PushPhase::Sending => {
+            RemovePhase::Removing => {
                 if self.cancel_after_effect {
                     return self.wind_down(ctx);
                 }
                 match outcome {
                     ActivityOutcome::Succeeded { summary } => {
-                        self.phase = PushPhase::Observing {
+                        self.phase = RemovePhase::Observing {
                             deadline: now.plus_ms(ctx.config.push_observe_ms),
                             summary: summary.clone(),
                         };
@@ -167,7 +170,7 @@ impl PushActivity {
                 }
             }
             // The conversation is over; a late marker changes nothing.
-            PushPhase::Observing { .. } => ActivityStep::nothing(),
+            RemovePhase::Observing { .. } => ActivityStep::nothing(),
         }
     }
 
@@ -177,18 +180,9 @@ impl PushActivity {
         }
         match self.phase.clone() {
             // The effect drives; supervision's deadline bounds it (I1).
-            PushPhase::Sending => ActivityStep::nothing(),
-            PushPhase::Observing { deadline, summary } => {
-                // A NON-EMPTY report, or the deadline. An empty one is
-                // usually the board's last word from before the push — the
-                // observation window is not reset by a push, because the
-                // port never closed — so treating it as an answer would
-                // settle on stale evidence.
-                let reported = ctx
-                    .evidence
-                    .loaded_projects()
-                    .is_some_and(|loaded| !loaded.is_empty());
-                if reported || now >= deadline {
+            RemovePhase::Removing => ActivityStep::nothing(),
+            RemovePhase::Observing { deadline, summary } => {
+                if Self::reported_empty(ctx) || now >= deadline {
                     return ActivityStep::done(self.settled_summary(&summary, ctx));
                 }
                 ActivityStep::nothing()
@@ -223,9 +217,9 @@ impl PushActivity {
     }
 }
 
-impl ActivityReducer for PushActivity {
+impl ActivityReducer for RemoveProjectActivity {
     fn kind(&self) -> ActivityKind {
-        ActivityKind::Push
+        ActivityKind::RemoveProject
     }
 
     fn handle(&mut self, now: Millis, input: &Input, ctx: &mut ActivityCtx<'_>) -> ActivityStep {
@@ -235,16 +229,15 @@ impl ActivityReducer for PushActivity {
                     return ActivityStep::nothing();
                 }
                 match self.phase {
-                    // The project dir on the device is already cleared:
-                    // stopping now would leave half a project there. Hold
-                    // the cancel; the push grace bounds the hold.
-                    PushPhase::Sending => {
+                    // The dir is already part-deleted: stopping now would
+                    // leave a board loading half a project. Hold the cancel;
+                    // the push grace bounds the hold.
+                    RemovePhase::Removing => {
                         self.cancel_after_effect = true;
                         ActivityStep::nothing()
                     }
-                    // The bytes are down and verified; the observation can
-                    // stop politely right now.
-                    PushPhase::Observing { .. } => self.wind_down(ctx),
+                    // The dir is gone; the observation can stop politely.
+                    RemovePhase::Observing { .. } => self.wind_down(ctx),
                 }
             }
             Input::Action(_) => ActivityStep::nothing(),
@@ -255,8 +248,6 @@ impl ActivityReducer for PushActivity {
                 Event::IdentityObserved { .. }
                 | Event::LinkAttached { .. }
                 | Event::LinkDetached { .. }
-                // The borrow this push's own effect holds: fold business
-                // (it pauses freshness), never the reducer's.
                 | Event::LinkBorrow { .. } => ActivityStep::nothing(),
             },
         }
@@ -267,8 +258,8 @@ impl ActivityReducer for PushActivity {
             return None;
         }
         match &self.phase {
-            PushPhase::Sending => None,
-            PushPhase::Observing { deadline, .. } => Some(*deadline),
+            RemovePhase::Removing => None,
+            RemovePhase::Observing { deadline, .. } => Some(*deadline),
         }
     }
 }
@@ -283,8 +274,8 @@ mod tests {
     use crate::roster::RosterConfig;
     use crate::wire::{HelloFacts, LoadedProjectFacts, ServerFrame};
 
-    fn push() -> PushActivity {
-        PushActivity::new(DeviceId(1))
+    fn removal() -> RemoveProjectActivity {
+        RemoveProjectActivity::new(DeviceId(1))
     }
 
     fn ended(outcome: ActivityOutcome) -> Input {
@@ -292,7 +283,7 @@ mod tests {
             device: DeviceId(1),
             effect: Some(EffectId(1)),
             marker: ActivityMarker::Ended {
-                kind: ActivityKind::Push,
+                kind: ActivityKind::RemoveProject,
                 outcome,
             },
         })
@@ -326,7 +317,9 @@ mod tests {
         evidence.fold(now, &event, &mut identity, config);
     }
 
-    fn opened(evidence: &mut Evidence, config: &RosterConfig) {
+    /// A board that has said hello and reported one loaded project — the
+    /// state the Remove verb is offered from.
+    fn running(evidence: &mut Evidence, config: &RosterConfig) {
         fold(
             evidence,
             Millis(0),
@@ -353,9 +346,15 @@ mod tests {
             },
             config,
         );
+        reports(
+            evidence,
+            Millis(2),
+            config,
+            vec![LoadedProjectFacts::new("/projects/zook-dome")],
+        );
     }
 
-    fn heartbeat_reports(
+    fn reports(
         evidence: &mut Evidence,
         now: Millis,
         config: &RosterConfig,
@@ -376,8 +375,8 @@ mod tests {
     fn spawn_emits_the_coarse_effect_stamped_with_the_steps_generation() {
         let config = RosterConfig::default();
         let mut evidence = Evidence::default();
-        opened(&mut evidence, &config);
-        let activity = push();
+        running(&mut evidence, &config);
+        let activity = removal();
 
         let commands = with_ctx(&evidence, &config, |ctx| activity.spawn_commands(ctx));
 
@@ -385,7 +384,7 @@ mod tests {
             matches!(
                 commands.as_slice(),
                 [Command::RunEffect {
-                    effect: EffectRequest::Push,
+                    effect: EffectRequest::RemoveProject,
                     effect_id: EffectId(1),
                     ..
                 }]
@@ -395,18 +394,20 @@ mod tests {
         assert_eq!(activity.next_deadline(), None, "the effect drives");
     }
 
+    /// The walk: the conversation succeeds, the board is asked, and the
+    /// activity settles on the EMPTY report — never on its own optimism.
     #[test]
-    fn a_successful_push_asks_the_board_and_settles_on_what_it_reports() {
+    fn a_successful_removal_asks_the_board_and_settles_on_the_empty_report() {
         let config = RosterConfig::default();
         let mut evidence = Evidence::default();
-        opened(&mut evidence, &config);
-        let mut activity = push();
+        running(&mut evidence, &config);
+        let mut activity = removal();
 
         let step = with_ctx(&evidence, &config, |ctx| {
             activity.handle(
                 Millis(1_000),
                 &ended(ActivityOutcome::Succeeded {
-                    summary: "sent porch-sign".to_string(),
+                    summary: "removed zook-dome".to_string(),
                 }),
                 ctx,
             )
@@ -420,12 +421,7 @@ mod tests {
             "{step:?}"
         );
 
-        heartbeat_reports(
-            &mut evidence,
-            Millis(1_100),
-            &config,
-            vec![LoadedProjectFacts::new("/projects/demo")],
-        );
+        reports(&mut evidence, Millis(1_100), &config, Vec::new());
         let step = with_ctx(&evidence, &config, |ctx| {
             activity.handle(Millis(1_100), &timer(), ctx)
         });
@@ -436,26 +432,26 @@ mod tests {
                 ActivityStep::Done {
                     outcome: ActivityOutcome::Succeeded { ref summary },
                     ..
-                } if summary.contains("sent porch-sign") && summary.contains("demo")
+                } if summary.contains("zook-dome") && summary.contains("nothing loaded")
             ),
             "{step:?}"
         );
     }
 
-    /// The board never reports back. The push still SUCCEEDED — the write
-    /// and the hash check both passed — so the outcome says exactly that
-    /// and claims nothing about what is running.
+    /// The board never reports back. The removal still SUCCEEDED — the
+    /// delete was verified over the wire — so the outcome says exactly that
+    /// and claims nothing about what the board holds now.
     #[test]
-    fn a_silent_board_still_leaves_the_push_honestly_successful() {
+    fn a_silent_board_still_leaves_the_removal_honestly_successful() {
         let config = RosterConfig::default();
         let mut evidence = Evidence::default();
-        opened(&mut evidence, &config);
-        let mut activity = push();
+        running(&mut evidence, &config);
+        let mut activity = removal();
         with_ctx(&evidence, &config, |ctx| {
             activity.handle(
                 Millis(0),
                 &ended(ActivityOutcome::Succeeded {
-                    summary: "sent porch-sign".to_string(),
+                    summary: "removed zook-dome".to_string(),
                 }),
                 ctx,
             )
@@ -470,26 +466,24 @@ mod tests {
                 ActivityStep::Done {
                     outcome: ActivityOutcome::Succeeded { ref summary },
                     ..
-                } if summary == "sent porch-sign"
+                } if summary == "removed zook-dome"
             ),
             "{step:?}"
         );
     }
 
-    /// A project the app could not prepare and a device that refused the
-    /// write arrive the same way, and both land on the problem face.
     #[test]
-    fn a_failed_effect_ends_the_activity_with_the_effects_message() {
+    fn a_failed_conversation_ends_the_activity_with_the_effects_message() {
         let config = RosterConfig::default();
         let mut evidence = Evidence::default();
-        opened(&mut evidence, &config);
-        let mut activity = push();
+        running(&mut evidence, &config);
+        let mut activity = removal();
 
         let step = with_ctx(&evidence, &config, |ctx| {
             activity.handle(
                 Millis(500),
                 &ended(ActivityOutcome::Failed {
-                    message: "pushed project hash mismatch".to_string(),
+                    message: "the board refused to delete /projects/zook-dome".to_string(),
                 }),
                 ctx,
             )
@@ -501,18 +495,18 @@ mod tests {
                 ActivityStep::Done {
                     outcome: ActivityOutcome::Failed { ref message },
                     ..
-                } if message.contains("hash mismatch")
+                } if message.contains("refused to delete")
             ),
             "{step:?}"
         );
     }
 
     #[test]
-    fn cancel_during_the_write_is_held_then_honoured_when_the_effect_ends() {
+    fn cancel_during_the_delete_is_held_then_honoured_when_the_effect_ends() {
         let config = RosterConfig::default();
         let mut evidence = Evidence::default();
-        opened(&mut evidence, &config);
-        let mut activity = push();
+        running(&mut evidence, &config);
+        let mut activity = removal();
 
         let step = with_ctx(&evidence, &config, |ctx| {
             activity.handle(
@@ -526,14 +520,14 @@ mod tests {
         assert_eq!(
             step,
             ActivityStep::nothing(),
-            "the device's project dir is already cleared"
+            "the dir is already part-deleted"
         );
 
         let step = with_ctx(&evidence, &config, |ctx| {
             activity.handle(
                 Millis(5_000),
                 &ended(ActivityOutcome::Succeeded {
-                    summary: "sent".to_string(),
+                    summary: "removed".to_string(),
                 }),
                 ctx,
             )

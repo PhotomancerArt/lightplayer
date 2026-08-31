@@ -194,6 +194,20 @@ fn assert_device(device: &DeviceView, case: &str) {
         !(device.can_receive_project && device.activity.is_some()),
         "[{case}] a push offered on a busy device"
     );
+    // Same rule for the other always-action verb, and one more: a board
+    // that has not SAID what it holds must never be offered a delete.
+    assert!(
+        !(device.can_remove_project && device.activity.is_some()),
+        "[{case}] a removal offered on a busy device"
+    );
+    assert!(
+        !(device.can_remove_project
+            && !matches!(
+                device.loaded_project,
+                lpa_devices::view::LoadedProject::Running { .. }
+            )),
+        "[{case}] a removal offered for a project the board never reported"
+    );
     if let lpa_devices::view::LoadedProject::Running { label } = &device.loaded_project {
         assert!(
             !label.is_empty(),
@@ -450,6 +464,50 @@ fn gestures() -> Vec<(&'static str, Vec<Step>)> {
         (
             "push then cancel",
             vec![Step::Push { device: 1 }, Step::Cancel { device: 1 }],
+        ),
+        ("remove project", vec![Step::RemoveProject { device: 1 }]),
+        (
+            "remove project then the effect succeeds",
+            vec![
+                Step::RemoveProject { device: 1 },
+                Step::EffectEnded {
+                    device: 1,
+                    ok: true,
+                    message: Some("removed zook-dome".to_string()),
+                    effect: None,
+                    kind: Some(ActivityKind::RemoveProject),
+                },
+            ],
+        ),
+        (
+            "remove project then cancel",
+            vec![
+                Step::RemoveProject { device: 1 },
+                Step::Cancel { device: 1 },
+            ],
+        ),
+        // A borrow that is never given back: the enumeration's instants run
+        // far past the quiet window, so this is where "a borrowed wire never
+        // goes quiet" has to keep the projection honest rather than stuck.
+        (
+            "the wire is borrowed and never released",
+            vec![Step::Borrow {
+                link: 1,
+                held: true,
+            }],
+        ),
+        (
+            "the wire is borrowed then released",
+            vec![
+                Step::Borrow {
+                    link: 1,
+                    held: true,
+                },
+                Step::Borrow {
+                    link: 1,
+                    held: false,
+                },
+            ],
         ),
         (
             "adopt then forget",

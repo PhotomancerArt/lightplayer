@@ -16,6 +16,7 @@ use super::erase::EraseActivity;
 use super::flash::FlashActivity;
 use super::identify::IdentifyActivity;
 use super::push::PushActivity;
+use super::remove_project::RemoveProjectActivity;
 
 /// Which flow an activity is running. One per device at a time (invariant
 /// I5): a gesture on a busy device gets a visible "busy with X — cancel it?",
@@ -26,6 +27,7 @@ pub enum ActivityKind {
     Flash,
     Push,
     Erase,
+    RemoveProject,
 }
 
 impl ActivityKind {
@@ -36,6 +38,7 @@ impl ActivityKind {
             Self::Flash => "Flashing firmware",
             Self::Push => "Sending the project",
             Self::Erase => "Erasing the flash",
+            Self::RemoveProject => "Removing the project",
         }
     }
 
@@ -57,6 +60,10 @@ impl ActivityKind {
             // An erase cannot be aborted mid-wipe either; the flash grace
             // is the same physics.
             Self::Erase => config.flash_cancel_grace_ms,
+            // Removing shares the push's physics from the other direction:
+            // the dir is being deleted, and stopping halfway would leave a
+            // board loading half a project.
+            Self::RemoveProject => config.push_cancel_grace_ms,
         }
     }
 }
@@ -256,6 +263,7 @@ pub(crate) enum Reducer {
     Flash(FlashActivity),
     Push(PushActivity),
     Erase(EraseActivity),
+    RemoveProject(RemoveProjectActivity),
 }
 
 impl ActivityReducer for Reducer {
@@ -265,6 +273,7 @@ impl ActivityReducer for Reducer {
             Self::Flash(reducer) => reducer.kind(),
             Self::Push(reducer) => reducer.kind(),
             Self::Erase(reducer) => reducer.kind(),
+            Self::RemoveProject(reducer) => reducer.kind(),
         }
     }
 
@@ -274,6 +283,7 @@ impl ActivityReducer for Reducer {
             Self::Flash(reducer) => reducer.handle(now, input, ctx),
             Self::Push(reducer) => reducer.handle(now, input, ctx),
             Self::Erase(reducer) => reducer.handle(now, input, ctx),
+            Self::RemoveProject(reducer) => reducer.handle(now, input, ctx),
         }
     }
 
@@ -283,6 +293,7 @@ impl ActivityReducer for Reducer {
             Self::Flash(reducer) => reducer.next_deadline(),
             Self::Push(reducer) => reducer.next_deadline(),
             Self::Erase(reducer) => reducer.next_deadline(),
+            Self::RemoveProject(reducer) => reducer.next_deadline(),
         }
     }
 }

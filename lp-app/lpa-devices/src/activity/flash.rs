@@ -188,8 +188,13 @@ impl FlashActivity {
                  the compiled-in default pin map stands",
             ));
         };
+        // The stamp's OWN budget, not a ladder rung: the write goes to a
+        // board that may still be formatting its littlefs, and the seam
+        // below waits for it to answer a cheap request before writing at
+        // all. Reusing the 8 s rung gave up ~30 s before the classic was
+        // ever going to be ready (G1 bench, 2026-08-31).
         self.phase = FlashPhase::Stamping {
-            deadline: now.plus_ms(ctx.config.flash_rung_ms),
+            deadline: now.plus_ms(ctx.config.stamp_deadline_ms),
         };
         ActivityStep::Continue(vec![Command::RunEffect {
             device: self.device,
@@ -424,10 +429,12 @@ impl ActivityReducer for FlashActivity {
                 Event::TimerFired { .. } => self.handle_timer(now, ctx),
                 Event::Link { event, .. } => self.handle_link_event(now, event, ctx),
                 // Identity learned by the preflight is fold business; link
-                // loss is supervision's (it evicts and recovers).
+                // loss is supervision's (it evicts and recovers); the wire
+                // borrow is the fold's too (it pauses freshness).
                 Event::IdentityObserved { .. }
                 | Event::LinkAttached { .. }
-                | Event::LinkDetached { .. } => ActivityStep::nothing(),
+                | Event::LinkDetached { .. }
+                | Event::LinkBorrow { .. } => ActivityStep::nothing(),
             },
         }
     }
@@ -756,6 +763,68 @@ mod tests {
                 } if summary.contains("default pin map")
             ),
             "the flash stands: {step:?}"
+        );
+    }
+
+    /// C1 (G1 bench, 2026-08-31): the stamp used to inherit the ladder's 8 s
+    /// rung, which gave up ~30 s before a freshly flashed classic — still
+    /// formatting its littlefs — was ever going to answer. It gets its own
+    /// budget now, and the budget is the one that has to hold.
+    #[test]
+    fn the_stamp_waits_on_its_own_deadline_not_a_ladder_rung() {
+        let config = RosterConfig::default();
+        assert!(
+            config.stamp_deadline_ms > config.flash_rung_ms,
+            "a stamp that inherits a rung is the defect this closes"
+        );
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = flash();
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(0),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "written".to_string(),
+                }),
+                ctx,
+            )
+        });
+        hello(&mut evidence, Millis(1_000), &config);
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(Millis(1_000), &timer(), ctx)
+        });
+
+        // A rung past the hello, the stamp is still waiting — the board is
+        // allowed to be slow.
+        let a_rung_later = Millis(1_000 + config.flash_rung_ms + 1);
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(a_rung_later, &timer(), ctx)
+        });
+        assert_eq!(
+            step,
+            ActivityStep::nothing(),
+            "the ladder's rung is not the stamp's deadline"
+        );
+        assert_eq!(
+            activity.next_deadline(),
+            Some(Millis(1_000 + config.stamp_deadline_ms)),
+            "the stamp is timed by its own budget"
+        );
+
+        // Its OWN deadline still bounds it (I1), and the flash still stands.
+        let past_the_stamp = Millis(1_000 + config.stamp_deadline_ms + 1);
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(past_the_stamp, &timer(), ctx)
+        });
+        assert!(
+            matches!(
+                step,
+                ActivityStep::Done {
+                    outcome: ActivityOutcome::Succeeded { ref summary },
+                    ..
+                } if summary.contains("default pin map")
+            ),
+            "{step:?}"
         );
     }
 

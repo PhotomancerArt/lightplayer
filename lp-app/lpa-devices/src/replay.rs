@@ -185,6 +185,17 @@ pub enum Step {
     Erase {
         device: u64,
     },
+    /// The Remove-project gesture (the always-actions row's second verb).
+    RemoveProject {
+        device: u64,
+    },
+    /// A coarse effect took the wire, or gave it back. Scripted so a fixture
+    /// can prove that a long borrow never turns into a "went quiet" verdict
+    /// about a board nobody was listening to.
+    Borrow {
+        link: u64,
+        held: bool,
+    },
     /// A coarse effect's progress marker, as the effects layer sinks it.
     ///
     /// `effect` is the generation stamp the effects layer puts on every
@@ -415,6 +426,13 @@ impl Step {
             }),
             Self::Erase { device } => Input::Action(Action::Erase {
                 device: DeviceId(device),
+            }),
+            Self::RemoveProject { device } => Input::Action(Action::RemoveProject {
+                device: DeviceId(device),
+            }),
+            Self::Borrow { link, held } => Input::Event(Event::LinkBorrow {
+                link: LinkId(link),
+                held,
             }),
             Self::EffectProgress {
                 device,

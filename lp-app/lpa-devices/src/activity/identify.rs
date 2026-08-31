@@ -220,10 +220,11 @@ impl IdentifyActivity {
                 ActivityStep::nothing()
             }
             // Link loss is supervision's business (it evicts and recovers),
-            // not a verdict this reducer should invent; identity news is the
-            // fold's.
+            // not a verdict this reducer should invent; identity news and
+            // the wire borrow are the fold's.
             Event::LinkAttached { .. }
             | Event::LinkDetached { .. }
+            | Event::LinkBorrow { .. }
             | Event::ActivityMarker { .. }
             | Event::IdentityObserved { .. } => ActivityStep::nothing(),
         }
