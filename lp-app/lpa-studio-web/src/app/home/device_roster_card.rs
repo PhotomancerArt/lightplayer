@@ -6,7 +6,25 @@
 //! activity. So this renderer makes no decisions about devices — it lays out
 //! what the fold concluded, and every affordance it draws comes from the DTO.
 //!
-//! Two rules it does have to keep:
+//! # Four zones, in this order, always (Yona's ruling, G1 2026-08-31)
+//!
+//! ```text
+//!   header      title + status chip + identity
+//!   ────────────
+//!   state       what it is, what is happening, and the state's ONE verb
+//!   ────────────
+//!   terminal    what the board actually said, and what Studio did to it
+//!   ────────────
+//!   actions     every escape, plus the always-actions
+//! ```
+//!
+//! The zones are **stable**: on a linked card all four are present in every
+//! state, separators and all. That is the point of them. Faces and labels
+//! appearing and vanishing made the card jump around the gallery while a
+//! flash ran, and a fixed-height terminal panel is what absorbs that churn —
+//! a box that is always the same size cannot resize the card.
+//!
+//! Two rules it also has to keep:
 //!
 //! 1. **Every escape the DTO carries is rendered, in every state.** Invariant
 //!    I3 lives in the model, but a renderer that dropped an escape would
@@ -57,9 +75,16 @@ pub(crate) fn DeviceRosterCard(
         DeviceLoadedProject::Running { label } => Some(label.clone()),
         DeviceLoadedProject::Empty | DeviceLoadedProject::Unknown => None,
     };
+    // "Linked" in projection terms: Disconnect is offered exactly when the
+    // model has a link for this device. It gates the terminal zone (an
+    // offline card has no wire to show) and the always-actions that need a
+    // port, which is the same condition the model's own spawns check.
+    let linked = card.escapes.contains(&DeviceEscape::Disconnect);
+    let idle = card.activity.is_none();
 
     rsx! {
         article { class: card_class(),
+            // ── zone 1: header ──────────────────────────────────────────
             header { class: "tw:grid tw:gap-1.5",
                 div { class: "tw:flex tw:items-start tw:justify-between tw:gap-3",
                     h3 { class: "tw:m-0 tw:min-w-0 tw:truncate tw:text-sm tw:font-bold tw:text-strong-foreground",
@@ -72,50 +97,63 @@ pub(crate) fn DeviceRosterCard(
                 }
             }
 
-            div { class: "tw:grid tw:gap-1",
-                // The running face's headline: what the board says it is
-                // running, above the firmware detail.
-                if let Some(running) = running.clone() {
-                    p { class: detail_class(), "Running {running}" }
-                }
-                if let Some(detail) = card.detail.clone() {
-                    p { class: detail_class(), "{detail}" }
-                }
-                // Honest staleness instead of a spinner that means nothing.
-                if let Some(freshness) = card.freshness_label.clone() {
-                    p { class: quiet_line_class(), "{freshness}" }
-                }
-                if let Some(outcome) = card.last_outcome.clone() {
-                    p {
-                        class: if outcome.ok { detail_class() } else { failure_line_class() },
-                        "{outcome.summary}"
+            // ── zone 2: state — what it is, what is happening, one verb ──
+            section { class: zone_class(),
+                div { class: "tw:grid tw:gap-1",
+                    // The running face's headline: what the board says it is
+                    // running, above the firmware detail.
+                    if let Some(running) = running.clone() {
+                        p { class: detail_class(), "Running {running}" }
+                    }
+                    if let Some(detail) = card.detail.clone() {
+                        p { class: detail_class(), "{detail}" }
+                    }
+                    // Honest staleness instead of a spinner that means nothing.
+                    if let Some(freshness) = card.freshness_label.clone() {
+                        p { class: quiet_line_class(), "{freshness}" }
+                    }
+                    if let Some(outcome) = card.last_outcome.clone() {
+                        p {
+                            class: if outcome.ok { detail_class() } else { failure_line_class() },
+                            "{outcome.summary}"
+                        }
                     }
                 }
-            }
 
-            if let Some(activity) = card.activity.clone() {
-                ActivityRow { activity }
-            }
+                // The bar and its label stay HERE, with the state they
+                // describe; the terminal below carries the narration.
+                if let Some(activity) = card.activity.clone() {
+                    ActivityRow { activity }
+                }
 
-            if offer_flash {
-                FlashFace {
-                    device,
-                    detected_chip: card.detected_chip.clone(),
-                    on_action,
+                if offer_flash {
+                    FlashFace {
+                        device,
+                        detected_chip: card.detected_chip.clone(),
+                        on_action,
+                    }
+                }
+
+                if offer_push {
+                    EmptyFace { card: card.clone(), projects, examples, on_action }
                 }
             }
 
-            if offer_push {
-                EmptyFace { card: card.clone(), projects, examples, on_action }
+            // ── zone 3: terminal ────────────────────────────────────────
+            // Always present on a linked card, empty or not: a panel that
+            // comes and goes is a panel that resizes the card, which is the
+            // churn the four zones exist to stop.
+            if linked {
+                TerminalPanel { lines: card.terminal_lines.clone() }
             }
 
+            // ── zone 4: actions ─────────────────────────────────────────
             // Every escape the projection carries, in every state — including
             // Forget mid-activity, which the shipped system could not do.
-            // Factory reset joins the always-row when the board is linked
-            // and idle (the same condition the model's spawn checks —
-            // Disconnect in the escapes IS "linked" in projection terms);
-            // its armed inline confirm rides the action meta.
-            footer { class: "tw:mt-auto tw:flex tw:flex-wrap tw:gap-2",
+            // The always-actions join when the board is linked and idle (the
+            // same condition the model's spawns check); their armed inline
+            // confirms ride the action meta.
+            footer { class: actions_zone_class(),
                 for escape in card.escapes.iter().copied() {
                     ActionButton {
                         key: "{escape:?}",
@@ -125,13 +163,56 @@ pub(crate) fn DeviceRosterCard(
                         on_action,
                     }
                 }
-                if card.activity.is_none() && card.escapes.contains(&DeviceEscape::Disconnect) {
+                // Only when the board has SAID it is running something: a
+                // delete offered over a board that never reported one would
+                // be a verb aimed at a guess.
+                if card.can_remove_project {
+                    ActionButton {
+                        key: "{\"remove-project\"}",
+                        action: DevicesOp::action_for(DeviceAction::RemoveProject { device }),
+                        running: false,
+                        variant: ActionButtonVariant::Quiet,
+                        on_action,
+                    }
+                }
+                if idle && linked {
                     ActionButton {
                         key: "{\"factory-reset\"}",
                         action: DevicesOp::action_for(DeviceAction::Erase { device }),
                         running: false,
                         variant: ActionButtonVariant::Quiet,
                         on_action,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The terminal zone: what the board said and what Studio did to it.
+///
+/// Deliberately dumb and deliberately FIXED-HEIGHT. It renders the fold's
+/// own tail verbatim, and its height never depends on how much there is —
+/// an empty board and a mid-flash board occupy exactly the same space,
+/// which is what keeps the card still while an activity runs.
+///
+/// The lines are rendered NEWEST FIRST into a `column-reverse` box, which
+/// paints them oldest-top / newest-bottom and pins the scroll to the bottom
+/// on its own. That is the whole reason for the reversal: a live log that
+/// showed its first ten lines forever would answer the wrong question, and
+/// scrolling it from here would mean owning scroll state the card has no
+/// business keeping.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn TerminalPanel(lines: Vec<String>) -> Element {
+    rsx! {
+        section { class: zone_class(),
+            div { class: terminal_class(),
+                if lines.is_empty() {
+                    p { class: "tw:m-0 tw:opacity-60", "Nothing from this board yet." }
+                } else {
+                    for (index , line) in lines.iter().enumerate().rev() {
+                        p { key: "{index}", class: "tw:m-0 tw:whitespace-pre-wrap tw:break-all", "{line}" }
                     }
                 }
             }
@@ -441,6 +522,27 @@ fn ActivityRow(activity: DeviceActivityView) -> Element {
 
 fn card_class() -> &'static str {
     "tw:grid tw:content-start tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-panel tw:p-4"
+}
+
+/// One zone below the header: a rule above it, and room to breathe. The
+/// separators are what make the four zones legible as four zones.
+fn zone_class() -> &'static str {
+    "tw:grid tw:gap-2 tw:border-t tw:border-border tw:pt-3"
+}
+
+/// The actions zone: the same separator, but the buttons wrap in a row
+/// rather than stacking, and it is pushed to the bottom so cards of
+/// different heights still line their action rows up.
+fn actions_zone_class() -> &'static str {
+    "tw:mt-auto tw:flex tw:flex-wrap tw:gap-2 tw:border-t tw:border-border tw:pt-3"
+}
+
+/// The terminal panel itself: ten lines tall, always. A fixed height with
+/// `overflow-y-auto` is what makes the box immune to its own contents, and
+/// `flex-col-reverse` is what keeps it showing the newest line — see
+/// [`TerminalPanel`] for why the rows are fed in reverse.
+fn terminal_class() -> &'static str {
+    "tw:flex tw:h-40 tw:flex-col-reverse tw:overflow-y-auto tw:overflow-x-hidden tw:rounded-md tw:border tw:border-border tw:bg-subtle-bg tw:px-2 tw:py-1.5 tw:font-mono tw:text-[0.68rem] tw:leading-[1.35] tw:text-subtle-foreground"
 }
 
 fn detail_class() -> &'static str {

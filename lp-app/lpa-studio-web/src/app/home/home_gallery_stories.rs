@@ -556,8 +556,16 @@ fn roster_fixture() -> DeviceRosterView {
                         label: "2026-07-09-1421-porch-sign".to_string(),
                     },
                     can_receive_project: true,
+                    // Running, open, idle: the always-actions row offers to
+                    // take the project off.
+                    can_remove_project: true,
                     activity: None,
                     last_outcome: None,
+                    terminal_lines: vec![
+                        "ESP-ROM:esp32c6-20220919".to_string(),
+                        "[INIT] fw-esp32 initialized, starting server loop".to_string(),
+                        "[INIT] loaded /projects/2026-07-09-1421-porch-sign".to_string(),
+                    ],
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
                 DeviceView {
@@ -574,6 +582,7 @@ fn roster_fixture() -> DeviceRosterView {
                     loaded_project: DeviceLoadedProject::Unknown,
                     // Busy: one activity per device, so no second verb.
                     can_receive_project: false,
+                    can_remove_project: false,
                     activity: Some(DeviceActivityView {
                         kind: DeviceActivityKind::Identify,
                         label: "Identifying…".to_string(),
@@ -582,6 +591,15 @@ fn roster_fixture() -> DeviceRosterView {
                         cancel_requested: false,
                     }),
                     last_outcome: None,
+                    // Mid-activity: the bar is in the state zone above and
+                    // the narration is here, which is the whole point of the
+                    // terminal panel.
+                    terminal_lines: vec![
+                        "— Identifying —".to_string(),
+                        "ESP-ROM:esp32c6-20220919".to_string(),
+                        "SPIWP:0xee".to_string(),
+                        "mode:DIO, clock div:2".to_string(),
+                    ],
                     // Cancel FIRST: a running activity\'s way out leads.
                     escapes: vec![
                         DeviceEscape::Cancel,
@@ -602,11 +620,19 @@ fn roster_fixture() -> DeviceRosterView {
                     needs_firmware: true,
                     loaded_project: DeviceLoadedProject::Unknown,
                     can_receive_project: false,
+                    can_remove_project: false,
                     activity: None,
                     last_outcome: Some(OutcomeView {
                         summary: "identification timed out".to_string(),
                         ok: false,
                     }),
+                    // The blank-flash boot loop, which is what "needs
+                    // firmware" is actually made of.
+                    terminal_lines: vec![
+                        "ESP-ROM:esp32c6-20220919".to_string(),
+                        "invalid header: 0xffffffff".to_string(),
+                        "invalid header: 0xffffffff".to_string(),
+                    ],
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
                 // The EMPTY face (M3): a LightPlayer that has SAID it has
@@ -624,11 +650,26 @@ fn roster_fixture() -> DeviceRosterView {
                     needs_firmware: false,
                     loaded_project: DeviceLoadedProject::Empty,
                     can_receive_project: true,
+                    // Nothing on it to remove — the empty face's picker is
+                    // the verb here.
+                    can_remove_project: false,
                     activity: None,
                     last_outcome: Some(OutcomeView {
                         summary: "firmware installed — seeed-xiao-esp32c6".to_string(),
                         ok: true,
                     }),
+                    // A flash's narration, kept across the reconnect
+                    // ladder's reopen — the log the bench had to read in the
+                    // browser console.
+                    terminal_lines: vec![
+                        "— Flashing firmware —".to_string(),
+                        "Connecting to the chip".to_string(),
+                        "Writing firmware".to_string(),
+                        "Waiting for the board to come back (1/5)".to_string(),
+                        "ESP-ROM:esp32c6-20220919".to_string(),
+                        "[INIT] fw-esp32 initialized, starting server loop".to_string(),
+                        "firmware installed — seeed-xiao-esp32c6".to_string(),
+                    ],
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
             ],
