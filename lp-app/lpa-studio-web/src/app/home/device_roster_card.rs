@@ -255,6 +255,14 @@ fn FlashFace(
                 selected: effective.clone(),
                 on_pick: move |id: String| picked.set(Some(id)),
             }
+            if detected_chip.is_none() {
+                // Mid-stream attach: no boot output ever named the chip, so
+                // the pick is unfiltered — say what keeps that safe.
+                p { class: "tw:m-0 tw:text-xs tw:opacity-70",
+                    "Studio hasn't seen this board name its chip — your pick is checked \
+                     against the actual chip before anything is written."
+                }
+            }
             if let Some(choice) = choice {
                 ActionButton {
                     action: DevicesOp::action_for(DeviceAction::Flash {

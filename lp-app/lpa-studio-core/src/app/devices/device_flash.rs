@@ -9,8 +9,18 @@
 //!
 //! - **Chip necessary, board refinement, no fallback build.** Candidates are
 //!   the boards whose family matches the DETECTED chip and that resolve to a
-//!   served build (`lpa_boards::provisioning_build_id`). No chip → no
-//!   candidates, said honestly. "Either it matches, or it's a fail case."
+//!   served build (`lpa_boards::provisioning_build_id`). "Either it
+//!   matches, or it's a fail case."
+//! - **An unknown chip widens the pick, it does not remove the verb** (G1
+//!   finding 2026-08-30: a mid-stream attach sees no boot banner, so an
+//!   incompatible-proto board had no path forward — and the replug that
+//!   would name the chip is exactly what a C6 re-enum walk bans and what
+//!   kills a CH340's grant). With no chip we offer every board that
+//!   resolves to a served build, never preselect, and say plainly that the
+//!   pick is checked against the silicon before anything is written — the
+//!   flash preflight's chip guard (`assertChipMatchesManifest`, between
+//!   SYNC and write) is and always was the safety; the chip filter is
+//!   convenience.
 //! - **Preselect when exactly one candidate** — the primary verb is then one
 //!   click.
 //! - **Skip ALL naming**: the derived name is `"<board display_name> ·
@@ -42,26 +52,23 @@ pub struct FlashOffer {
     pub unavailable: Option<String>,
 }
 
-/// The board pick for a detected chip (normalized, e.g. "esp32c6").
+/// The board pick for a detected chip (normalized, e.g. "esp32c6"), or —
+/// when no boot output ever named the chip — the full served catalog, with
+/// the flash preflight's chip guard as the stated safety.
 pub fn flash_offer(detected_chip: Option<&str>) -> FlashOffer {
-    let Some(chip) = detected_chip else {
-        return FlashOffer {
-            candidates: Vec::new(),
-            preselect: None,
-            unavailable: Some(
-                "Studio can't tell what chip this is yet — its boot output names the chip, \
-                 so unplugging and replugging the board usually answers it."
-                    .to_string(),
-            ),
-        };
-    };
     let candidates: Vec<FlashBoardChoice> = lpa_boards::all_boards()
         .iter()
-        .filter(|board| board.family == chip)
+        .filter(|board| match detected_chip {
+            Some(chip) => board.family == chip,
+            // Unknown chip: every board is a candidate; the preflight
+            // verifies the pick against the silicon before writing.
+            None => true,
+        })
         .filter_map(|board| {
-            // Chip matches; the join checks flash fit and the served list.
-            // No fallback: a board that resolves no build is not offered.
-            let build_id = lpa_boards::provisioning_build_id(Some(board), Some(chip))?;
+            // The join checks flash fit and the served list. No fallback:
+            // a board that resolves no build is not offered.
+            let build_id =
+                lpa_boards::provisioning_build_id(Some(board), Some(board.family.as_str()))?;
             Some(FlashBoardChoice {
                 board_id: board.board_id.clone(),
                 title: board.display_name.clone(),
@@ -70,15 +77,20 @@ pub fn flash_offer(detected_chip: Option<&str>) -> FlashOffer {
             })
         })
         .collect();
-    let preselect = match candidates.as_slice() {
-        [only] => Some(only.board_id.clone()),
+    // A wrong preselect is the one risk the widened pick adds, so only a
+    // DETECTED chip with exactly one fit earns the one-click path.
+    let preselect = match (detected_chip, candidates.as_slice()) {
+        (Some(_), [only]) => Some(only.board_id.clone()),
         _ => None,
     };
-    let unavailable = candidates.is_empty().then(|| {
-        format!(
+    let unavailable = candidates.is_empty().then(|| match detected_chip {
+        Some(chip) => format!(
             "This build of Studio ships no firmware for a {chip} board — \
              the chip was detected, but no served image runs on it."
-        )
+        ),
+        None => {
+            "This build of Studio ships no firmware at all — no board can be offered.".to_string()
+        }
     });
     FlashOffer {
         candidates,
@@ -143,17 +155,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_unknown_chip_offers_nothing_and_says_why() {
+    fn an_unknown_chip_widens_the_pick_instead_of_removing_the_verb() {
+        // G1 finding 2026-08-30: a mid-stream attach never sees the boot
+        // banner, so an incompatible-proto board must still be flashable —
+        // the preflight chip guard, not the filter, is the safety.
         let offer = flash_offer(None);
 
-        assert!(offer.candidates.is_empty());
-        assert!(offer.preselect.is_none());
         assert!(
-            offer
-                .unavailable
-                .as_deref()
-                .is_some_and(|copy| copy.contains("can't tell")),
-            "{offer:?}"
+            !offer.candidates.is_empty(),
+            "every served board is a candidate when no chip was detected: {offer:?}"
+        );
+        assert!(
+            offer.preselect.is_none(),
+            "an undetected chip never earns a one-click preselect"
+        );
+        assert!(offer.unavailable.is_none());
+        let families: std::collections::BTreeSet<_> = offer
+            .candidates
+            .iter()
+            .map(|candidate| {
+                lpa_boards::board_by_id(&candidate.board_id)
+                    .expect("a real board")
+                    .family
+                    .clone()
+            })
+            .collect();
+        assert!(
+            families.len() > 1,
+            "the widened offer spans chip families: {families:?}"
         );
     }
 
