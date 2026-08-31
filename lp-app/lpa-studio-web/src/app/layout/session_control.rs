@@ -1,10 +1,11 @@
-//! The header **session·project control**: one shell, three segments, three
-//! popovers — `[ device | project | changes ]`.
+//! The header **session·project control**: one shell, three segments, ONE
+//! panel — `[ device | project | changes ]`, segments as tabs.
 //!
 //! `❖ Sim · ESP32-C6 │ ◈ small dome · 🔒 Private │ ✎ ② [Save]` — one bordered
-//! shell with internal hairlines, each segment an independently-clickable
-//! [`DetailPopover`] trigger, and Save standing beside the shell as the one
-//! direct act (relationship-control D7/D8, spike §2-E).
+//! shell with internal hairlines, each segment a tab into the shared panel
+//! anchored on the whole shell, and Save standing beside the shell as the
+//! one direct act (relationship-control D7/D8 as amended by D15, spike
+//! §2-E).
 //!
 //! **Three questions, one bar.** What is running · what document is open ·
 //! what is in flight. Changes earn their own segment because pending edits
@@ -12,38 +13,38 @@
 //! them to the library — so they belong to neither the device box nor the
 //! document box alone.
 //!
-//! **Why per-segment hover now (the #432 rationale, inverted).** The fused
-//! lockup washed on hover as ONE object, and deliberately: device and
-//! project did the same thing — open the same panel — so lighting them
-//! separately would have promised a distinction that did not exist. That
-//! argument runs the other way here. Each segment opens a DIFFERENT panel,
-//! so the hover wash rides the segment under the cursor and the shell stays
-//! quiet: the wash is now the honest promise it once would have faked. The
-//! shell keeps the outer border and radius, and drawn hairlines mark the
-//! seams — still one control, with three doors.
+//! **One panel, segments as tabs (D15, amending D7/D9).** Round 1 gave
+//! each segment its own popover, and moving between them meant a full
+//! close-reopen animation for what reads as switching tabs on one control.
+//! Now the segments drive a LIFTED open-state: clicking a segment opens
+//! the shared panel at its section, clicking another segment while open
+//! switches the content IN PLACE (the popover's retarget guard and panel
+//! ResizeObserver absorb the resize), and clicking the open segment closes
+//! it. The merged outline anchors on the SHELL, so the panel visibly hangs
+//! off the whole bar — the bar IS the tab row, and no inner tab row is
+//! needed anywhere in the panel.
 //!
-//! **Trigger subtrees stay stateless.** While a popover is open its trigger
-//! renders TWICE (the in-flow placeholder holding layout and focus, plus the
-//! top-layer copy above the merged outline), so nothing stateful and nothing
-//! interactive may live inside a segment. Save is a sibling button outside
-//! every trigger subtree and renders once; revert-all and the per-entry
-//! reverts live in the changes POPUP, which is panel content, not trigger
-//! content.
+//! **Segments are plain buttons now.** They are not popover triggers: the
+//! popover's own trigger is a hidden button (the segments own opening),
+//! and while the panel is open the segments' interactive copies render in
+//! the top layer as the popover's ANCHOR VISUAL — anchored-mode visuals
+//! host real controls, so the tab clicks keep working above the merged
+//! outline. Save stays a sibling outside the shell and renders once.
 //!
 //! **One ungated mount** (Q10 lesson, #426): the control is never wrapped in
 //! a `tw:@min-*` container. A top-layer popover cannot answer a container
-//! query, and mounting a trigger twice gives the header two popovers that
-//! disagree about which one is open. The FOLDS ride the pieces instead — the
+//! query. The FOLDS ride the pieces instead — the
 //! device name and the relationship WORD hide below the 900px cut (their
 //! glyphs stay), the changes segment goes count-only and the padding tightens
 //! below 560px.
 //!
-//! **Three popovers, three concepts.** The device segment states what is
-//! running; the changes segment lists what is in flight; the project
-//! segment opens [`ProjectRelationshipPanel`] — the fixed skeleton (Where /
-//! Access / action row, with History as a tab) rendered for all five
-//! [`ProjectRelationship`] states. The detail sections that used to hang
-//! here are not homeless: they sit behind that panel's ⋯ menu.
+//! **Three sections, three concepts.** The device section states what is
+//! running; the changes section lists what is in flight AND carries the
+//! document's banked history below it (D14 — changes and history are one
+//! temporal axis); the project section is [`ProjectRelationshipPanel`] —
+//! the identity skeleton (Where / Access / action row) rendered for all
+//! five [`ProjectRelationship`] states. The detail sections that used to
+//! hang here are not homeless: they sit behind that panel's ⋯ menu.
 //!
 //! The control is presentational: everything it renders comes from
 //! [`UiChromeSessionControl`] (core's projection of THE session), the open
@@ -52,6 +53,8 @@
 //! the derived [`ProjectRelationship`] the caller computes, and
 //! [`ProjectPopoverInputs`] (the address, roster, publish ledger, and
 //! dispatches only the web shell can gather).
+
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -66,7 +69,7 @@ use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,
 };
 use crate::app::project::project_pane::{ProjectDetailRow, state_label};
-use crate::app::project::{ProjectChanges, ProjectDetailContent};
+use crate::app::project::{HistoryList, ProjectChanges, ProjectDetailContent};
 use crate::app::share::{
     ProjectRelationship, ProjectRelationshipPanel, PublishStatus, RosterFacts, ShareUrl,
     relationship_face,
@@ -76,15 +79,18 @@ use crate::base::{
     PopoverPlacement, StudioIcon, StudioIconName,
 };
 
-/// Which segment's popover a story wants open on mount. The three popovers
-/// are independent, so "open" is a choice, not a flag.
+static NEXT_SESSION_CONTROL_ID: AtomicUsize = AtomicUsize::new(1);
+
+/// One section of the shared panel — and therefore one segment of the
+/// shell, since the segments ARE the panel's tabs (D15). Stories name a
+/// section here to mount with the panel open on it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ControlSegment {
     /// The device segment — what is running.
     Device,
     /// The project segment — what document is open.
     Project,
-    /// The changes segment — what is in flight.
+    /// The changes segment — what is in flight, over the banked history.
     Changes,
 }
 
@@ -112,7 +118,7 @@ pub struct ChromeSessionControl {
     pub project_popover: ProjectPopoverInputs,
     /// Dispatch for the popovers' rows and the Save sibling.
     pub on_action: EventHandler<UiAction>,
-    /// Open one segment's popover immediately (stories only).
+    /// Mount with the shared panel open on this section (stories only).
     pub initially_open: Option<ControlSegment>,
 }
 
@@ -149,12 +155,14 @@ pub struct ProjectPopoverInputs {
 /// The E bar: the three-segment shell with Save standing beside it while the
 /// project is dirty.
 ///
-/// **Trigger shape.** Each segment is its own [`DetailPopover`] trigger,
-/// styled through `trigger_class` / `trigger_open_class` with
-/// `layer_keeps_layout` on (the segments hold icon PLUS label, so the
-/// top-layer copy must keep the trigger's own box). The shell around them is
-/// a plain `div` carrying the border and radius — never a button, so no
-/// button ever nests inside another.
+/// **Segment shape (D15).** Each segment is a plain button driving the
+/// LIFTED open-state; the shared panel is ONE [`DetailPopover`] whose
+/// hidden trigger cedes opening to the segments, whose merged outline
+/// anchors on the shell (`anchor_id`), and whose top-layer anchor visual
+/// re-renders the same segments interactively so the tabs keep working
+/// while the panel is open. The shell around them is a plain `div`
+/// carrying the border and radius — never a button, so no button ever
+/// nests inside another.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
@@ -166,6 +174,20 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
         on_action,
         initially_open,
     } = control;
+    // The D15 lifted state: which section the shared panel shows, and
+    // whether it is open. The segments write both; the popover reads and
+    // writes the open half through its controlled `open_signal` (the
+    // backdrop closes it, the segments toggle it).
+    let section = use_signal(|| initially_open.unwrap_or(ControlSegment::Device));
+    let panel_open = use_signal(|| initially_open.is_some());
+    // The anchor id: the merged outline welds the panel to the WHOLE
+    // shell — the bar is the tab row (D15), so the panel hangs off the
+    // bar, not off one segment.
+    let shell_id = use_hook(|| {
+        let id = NEXT_SESSION_CONTROL_ID.fetch_add(1, Ordering::Relaxed);
+        format!("ux-session-control-shell-{id}")
+    });
+
     let affordance = project.as_ref().map(ProjectDetailContent::affordance);
     let style = affordance.map(affordance_trigger_style);
     // The save moment: the controller publishes Save/Revert on the editor's
@@ -179,191 +201,123 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
     let changes = project.as_ref().map(ProjectDetailContent::changes);
     let dirty = changes.as_ref().map(|changes| changes.dirty);
 
-    let board = board_suffix(&session);
-    let name = session.name.clone();
-    // Sim-only while the legacy device system is torn down (device-model
-    // M2 on main); hardware wording returns with the rebuilt device model.
-    let device_title = "This tab's session — the simulator";
-    let device_label = device_label(&session);
+    // The segments render TWICE while the panel is open: once in flow
+    // (under the outline fill) and once as the popover's top-layer anchor
+    // visual. Same builder, same signals, so both copies show the same
+    // selected tab and both sets of clicks drive the same state.
+    let segments = segments_rsx(
+        &session,
+        project.as_ref(),
+        relationship,
+        dirty,
+        section,
+        panel_open,
+    );
+    let visual_segments = segments_rsx(
+        &session,
+        project.as_ref(),
+        relationship,
+        dirty,
+        section,
+        panel_open,
+    );
+
+    // The panel chrome (tone stroke) follows the OPEN section, so the one
+    // panel still speaks each section's status language.
+    let tone = match section() {
+        ControlSegment::Device => IconMenuTone::Quiet,
+        ControlSegment::Project => style.map_or(IconMenuTone::Quiet, |style| style.tone),
+        ControlSegment::Changes => dirty.map(changes_tone).unwrap_or(IconMenuTone::Quiet),
+    };
     let device_panel_session = session.clone();
-
-    // The device segment: kind glyph, D16 status dot, name, board suffix.
-    let device_trigger = rsx! {
-        span { class: kind_glyph_class(),
-            StudioIcon { name: kind_icon(), size: 12 }
-        }
-        span { class: dot_class(session.status) }
-        // The md fold: below the 900px cut the glyph and the dot carry kind
-        // and health alone — the two facts that survive a squeeze.
-        span { class: "tw:hidden tw:min-w-0 tw:items-baseline tw:gap-1 tw:@min-[900px]:flex",
-            // The unlayered `font: inherit` reset beats tw:font-* on the
-            // button itself, so every text utility rides a span.
-            span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-[11px] tw:font-semibold tw:text-muted-foreground",
-                "{name}"
-            }
-            if let Some(board) = board.as_ref() {
-                span { class: "tw:flex-none tw:text-[10.5px] tw:text-dim-foreground", "· {board}" }
-            }
-        }
-    };
-
-    // The project segment: state glyph, name, relationship face. NEUTRAL —
-    // the dirty wash belongs to the changes segment now, so the only color
-    // here is the state glyph's own.
-    let face = relationship_face(relationship);
-    let project_name = project
-        .as_ref()
-        .map(|project| project.project_name().to_string());
-    let project_trigger = rsx! {
-        if let (Some(project_name), Some(style)) = (project_name.as_ref(), style) {
-            span { class: state_glyph_class(affordance),
-                StudioIcon { name: style.icon, size: 13 }
-            }
-            span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-[11px] tw:font-semibold tw:text-muted-foreground",
-                "{project_name}"
-            }
-            span { class: FACE_CLASS,
-                span { class: "tw:flex tw:flex-none tw:items-center tw:text-dim-foreground",
-                    StudioIcon { name: face.glyph, size: 11 }
-                }
-                // The word folds with the device name at the same 900px cut;
-                // the glyph is the narrow form (spike §3 vocabulary V3).
-                span { class: "tw:hidden tw:flex-none tw:text-[9.5px] tw:font-semibold tw:text-dim-foreground tw:@min-[900px]:inline",
-                    "{face.word}"
-                }
-            }
-        } else {
-            // Connected with nothing loaded (spike §5): honest-empty, no
-            // fake name and no state glyph to read a state off.
-            span { class: "tw:text-[11px] tw:italic tw:text-dim-foreground", "no project" }
-        }
-    };
-
-    // The changes segment: quiet ✓ clean, ✎ plus the amber count dirty.
-    let changes_trigger = rsx! {
-        if let Some(dirty) = dirty {
-            if dirty.persisted == 0 && dirty.failed == 0 {
-                span { class: "tw:flex tw:flex-none tw:items-center tw:text-dim-foreground",
-                    StudioIcon { name: StudioIconName::StepComplete, size: 12 }
-                }
-            } else {
-                // The glyph is what the 560px fold spends — a count with no
-                // glyph still counts; a glyph with no count says nothing.
-                span { class: "{changes_glyph_class(dirty)} tw:hidden tw:@min-[560px]:flex",
-                    StudioIcon { name: changes_glyph(dirty), size: 12 }
-                }
-                if dirty.persisted > 0 {
-                    span { class: COUNT_PILL_CLASS, "{dirty.persisted}" }
-                }
-                if dirty.failed > 0 {
-                    span { class: FAILED_PILL_CLASS, "{dirty.failed}" }
-                }
-            }
-        }
-    };
-
-    let project_label = project_label(project_name.as_deref(), relationship);
-    // With nothing open there is no standing to state, so the segment's
-    // tooltip says the honest thing rather than a face's sentence.
-    let project_title = if project_name.is_some() {
-        face.title
-    } else {
-        "No project open on this session"
-    };
-    let changes_label = changes_label(dirty.unwrap_or_default());
-    let changes_tint = dirty.map(changes_tint).unwrap_or(SegmentTint::None);
-    // The project segment is the last one only while no project is open —
-    // with one open, changes closes the shell.
-    let project_edge = if changes.is_some() {
-        SegmentEdge::Middle
-    } else {
-        SegmentEdge::Last
-    };
+    let panel_relationship = relationship;
+    let panel_changes = changes.clone();
+    let panel_project = project.clone();
 
     rsx! {
         // The shell and Save are SIBLINGS (G1 round-2 ruling, 2026-08-19,
         // upheld): a box that half-inspects and half-acts reads as odd, so
         // every segment inspects and the one direct act stands apart.
         div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
-            div { class: SHELL_CLASS,
+            div { id: "{shell_id}", class: SHELL_CLASS,
+                {segments}
+                // The ONE panel (D15). Its own trigger is hidden — the
+                // segments above own opening — and it contributes no
+                // width to the shell. The top layer escapes the shell's
+                // overflow clip, so hosting it inside the shell is safe.
                 DetailPopover {
-                    icon: kind_icon(),
-                    label: device_label,
-                    title: device_title.to_string(),
-                    tone: IconMenuTone::Quiet,
+                    icon: StudioIconName::Info,
+                    label: "Session and project details".to_string(),
+                    title: "Session and project details".to_string(),
+                    tone,
                     placement: PopoverPlacement::BottomStart,
-                    trigger: device_trigger,
-                    trigger_class: segment_class(SegmentEdge::First, SegmentTint::None, false),
-                    trigger_open_class: segment_class(SegmentEdge::First, SegmentTint::None, true),
-                    layer_keeps_layout: true,
-                    initially_open: initially_open == Some(ControlSegment::Device),
-                    SessionDevicePanel { session: device_panel_session }
-                }
-                span { class: DIVIDER_CLASS }
-                DetailPopover {
-                    icon: style.map_or(StudioIconName::Info, |style| style.icon),
-                    label: project_label,
-                    title: project_title.to_string(),
-                    tone: style.map_or(IconMenuTone::Quiet, |style| style.tone),
-                    placement: PopoverPlacement::BottomStart,
-                    trigger: project_trigger,
-                    trigger_class: segment_class(project_edge, SegmentTint::None, false),
-                    trigger_open_class: segment_class(project_edge, SegmentTint::None, true),
-                    layer_keeps_layout: true,
-                    initially_open: initially_open == Some(ControlSegment::Project),
-                    // THE relationship skeleton (D9): Where / Access /
-                    // action row, one shape for all five states. The
-                    // settings/identity/stats sections it replaced are not
-                    // homeless — they live behind its ⋯ menu's Details row.
-                    if let Some(project) = project.clone() {
-                        ProjectRelationshipPanel {
-                            name: project.project_name().to_string(),
-                            relationship,
-                            url: project_popover.url.clone(),
-                            roster: project_popover.roster.clone(),
-                            publish: project_popover.publish.clone(),
-                            export: project.library_identity().map(|(uid, slug)| ExportTarget {
-                                uid: uid.clone(),
-                                slug: slug.clone(),
-                            }),
-                            unsaved: project.unsaved_count(),
-                            // The History tab's rows (D10): core's capped
-                            // projection of the open handle's own events,
-                            // riding the same gather as everything else
-                            // here — no fetch, no second source of truth.
-                            history: project.history().clone(),
-                            created: project.created().map(str::to_string),
-                            fork_generation: project_popover.fork_generation,
-                            details: Some(project.clone()),
-                            on_fork: project_popover.on_fork,
-                            fork_blocked: project_popover.fork_blocked.clone(),
-                            on_copy: project_popover.on_copy,
-                            on_access: project_popover.on_access,
-                            on_add: project_popover.on_add,
-                            on_remove: project_popover.on_remove,
-                        }
-                    } else {
-                        DetailSection {
-                            p { class: "tw:m-0 tw:text-xs tw:italic tw:leading-snug tw:text-dim-foreground",
-                                "No project open on this session."
+                    trigger: rsx! {},
+                    trigger_class: HIDDEN_TRIGGER_CLASS.to_string(),
+                    trigger_open_class: HIDDEN_TRIGGER_CLASS.to_string(),
+                    open_signal: Some(panel_open),
+                    initially_open: initially_open.is_some(),
+                    anchor_id: Some(shell_id.clone()),
+                    anchor_visual: rsx! {
+                        // The interactive top-layer copy of the shell's
+                        // interior: no border and no background — the
+                        // merged outline owns the chrome while open.
+                        div { class: ANCHOR_VISUAL_CLASS, {visual_segments} }
+                    },
+                    match section() {
+                        ControlSegment::Device => rsx! {
+                            SessionDevicePanel { session: device_panel_session.clone() }
+                        },
+                        ControlSegment::Project => rsx! {
+                            // THE relationship skeleton (D9, amended by D14:
+                            // identity axis only — history lives with
+                            // changes now). The settings/identity/stats
+                            // sections it replaced are not homeless — they
+                            // live behind its ⋯ menu's Details row.
+                            if let Some(project) = panel_project.clone() {
+                                ProjectRelationshipPanel {
+                                    name: project.project_name().to_string(),
+                                    relationship: panel_relationship,
+                                    url: project_popover.url.clone(),
+                                    roster: project_popover.roster.clone(),
+                                    publish: project_popover.publish.clone(),
+                                    export: project.library_identity().map(|(uid, slug)| ExportTarget {
+                                        uid: uid.clone(),
+                                        slug: slug.clone(),
+                                    }),
+                                    unsaved: project.unsaved_count(),
+                                    created: project.created().map(str::to_string),
+                                    fork_generation: project_popover.fork_generation,
+                                    details: Some(project.clone()),
+                                    on_fork: project_popover.on_fork,
+                                    fork_blocked: project_popover.fork_blocked.clone(),
+                                    on_copy: project_popover.on_copy,
+                                    on_access: project_popover.on_access,
+                                    on_add: project_popover.on_add,
+                                    on_remove: project_popover.on_remove,
+                                }
+                            } else {
+                                DetailSection {
+                                    p { class: "tw:m-0 tw:text-xs tw:italic tw:leading-snug tw:text-dim-foreground",
+                                        "No project open on this session."
+                                    }
+                                }
                             }
-                        }
-                    }
-                }
-                if let Some(changes) = changes {
-                    span { class: DIVIDER_CLASS }
-                    DetailPopover {
-                        icon: changes_glyph(changes.dirty),
-                        label: changes_label,
-                        title: CHANGES_TITLE.to_string(),
-                        tone: changes_tone(changes.dirty),
-                        placement: PopoverPlacement::BottomStart,
-                        trigger: changes_trigger,
-                        trigger_class: segment_class(SegmentEdge::Last, changes_tint, false),
-                        trigger_open_class: segment_class(SegmentEdge::Last, changes_tint, true),
-                        layer_keeps_layout: true,
-                        initially_open: initially_open == Some(ControlSegment::Changes),
-                        SessionChangesPanel { changes, on_action }
+                        },
+                        ControlSegment::Changes => rsx! {
+                            if let Some(changes) = panel_changes.clone() {
+                                SessionChangesPanel {
+                                    changes,
+                                    relationship: panel_relationship,
+                                    on_action,
+                                }
+                            } else {
+                                DetailSection {
+                                    p { class: "tw:m-0 tw:text-xs tw:italic tw:leading-snug tw:text-dim-foreground",
+                                        "No project open on this session."
+                                    }
+                                }
+                            }
+                        },
                     }
                 }
             }
@@ -383,6 +337,177 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
                 }
             }
         }
+    }
+}
+
+/// The three segment buttons with their dividers — the shell's interior,
+/// built once for the in-flow shell and once for the popover's top-layer
+/// anchor visual. Plain buttons: each click runs [`next_panel_state`]
+/// over the lifted signals, which is the whole tab protocol.
+fn segments_rsx(
+    session: &UiChromeSessionControl,
+    project: Option<&ProjectDetailContent>,
+    relationship: ProjectRelationship,
+    dirty: Option<DirtySummary>,
+    mut section: Signal<ControlSegment>,
+    mut panel_open: Signal<bool>,
+) -> Element {
+    let mut press = move |segment: ControlSegment| {
+        let (open, next) = next_panel_state(panel_open(), section(), segment);
+        // Section first: when the open flip lands, the panel content is
+        // already the clicked section — no one-frame flash of the old tab.
+        section.set(next);
+        panel_open.set(open);
+    };
+    let segment_open = |segment: ControlSegment| panel_open() && section() == segment;
+
+    let affordance = project.map(ProjectDetailContent::affordance);
+    let style = affordance.map(affordance_trigger_style);
+    let board = board_suffix(session);
+    let name = session.name.clone();
+    // Sim-only while the legacy device system is torn down (device-model
+    // M2 on main); hardware wording returns with the rebuilt device model.
+    let device_title = "This tab's session — the simulator";
+    let device_label = device_label(session);
+    let status = session.status;
+
+    let face = relationship_face(relationship);
+    let project_name = project.map(|project| project.project_name().to_string());
+    let project_label = project_label(project_name.as_deref(), relationship);
+    // With nothing open there is no standing to state, so the segment's
+    // tooltip says the honest thing rather than a face's sentence.
+    let project_title = if project_name.is_some() {
+        face.title
+    } else {
+        "No project open on this session"
+    };
+    let changes_label = changes_label(dirty.unwrap_or_default());
+    let changes_tint = dirty.map(changes_tint).unwrap_or(SegmentTint::None);
+    let has_changes = dirty.is_some();
+    // The project segment is the last one only while no project is open —
+    // with one open, changes closes the shell.
+    let project_edge = if has_changes {
+        SegmentEdge::Middle
+    } else {
+        SegmentEdge::Last
+    };
+
+    rsx! {
+        // The device segment: kind glyph, D16 status dot, name, board suffix.
+        button {
+            class: segment_class(SegmentEdge::First, SegmentTint::None, segment_open(ControlSegment::Device)),
+            r#type: "button",
+            aria_label: "{device_label}",
+            aria_expanded: "{segment_open(ControlSegment::Device)}",
+            aria_haspopup: "dialog",
+            title: "{device_title}",
+            onclick: move |event| {
+                event.stop_propagation();
+                press(ControlSegment::Device);
+            },
+            span { class: kind_glyph_class(),
+                StudioIcon { name: kind_icon(), size: 12 }
+            }
+            span { class: dot_class(status) }
+            // The md fold: below the 900px cut the glyph and the dot carry kind
+            // and health alone — the two facts that survive a squeeze.
+            span { class: "tw:hidden tw:min-w-0 tw:items-baseline tw:gap-1 tw:@min-[900px]:flex",
+                // The unlayered `font: inherit` reset beats tw:font-* on the
+                // button itself, so every text utility rides a span.
+                span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-[11px] tw:font-semibold tw:text-muted-foreground",
+                    "{name}"
+                }
+                if let Some(board) = board.as_ref() {
+                    span { class: "tw:flex-none tw:text-[10.5px] tw:text-dim-foreground", "· {board}" }
+                }
+            }
+        }
+        span { class: DIVIDER_CLASS }
+        // The project segment: state glyph, name, relationship face. NEUTRAL —
+        // the dirty wash belongs to the changes segment now, so the only color
+        // here is the state glyph's own.
+        button {
+            class: segment_class(project_edge, SegmentTint::None, segment_open(ControlSegment::Project)),
+            r#type: "button",
+            aria_label: "{project_label}",
+            aria_expanded: "{segment_open(ControlSegment::Project)}",
+            aria_haspopup: "dialog",
+            title: "{project_title}",
+            onclick: move |event| {
+                event.stop_propagation();
+                press(ControlSegment::Project);
+            },
+            if let (Some(project_name), Some(style)) = (project_name.as_ref(), style) {
+                span { class: state_glyph_class(affordance),
+                    StudioIcon { name: style.icon, size: 13 }
+                }
+                span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-[11px] tw:font-semibold tw:text-muted-foreground",
+                    "{project_name}"
+                }
+                span { class: FACE_CLASS,
+                    span { class: "tw:flex tw:flex-none tw:items-center tw:text-dim-foreground",
+                        StudioIcon { name: face.glyph, size: 11 }
+                    }
+                    // The word folds with the device name at the same 900px cut;
+                    // the glyph is the narrow form (spike §3 vocabulary V3).
+                    span { class: "tw:hidden tw:flex-none tw:text-[9.5px] tw:font-semibold tw:text-dim-foreground tw:@min-[900px]:inline",
+                        "{face.word}"
+                    }
+                }
+            } else {
+                // Connected with nothing loaded (spike §5): honest-empty, no
+                // fake name and no state glyph to read a state off.
+                span { class: "tw:text-[11px] tw:italic tw:text-dim-foreground", "no project" }
+            }
+        }
+        // The changes segment: quiet ✓ clean, ✎ plus the amber count dirty.
+        if let Some(dirty) = dirty {
+            span { class: DIVIDER_CLASS }
+            button {
+                class: segment_class(SegmentEdge::Last, changes_tint, segment_open(ControlSegment::Changes)),
+                r#type: "button",
+                aria_label: "{changes_label}",
+                aria_expanded: "{segment_open(ControlSegment::Changes)}",
+                aria_haspopup: "dialog",
+                title: CHANGES_TITLE,
+                onclick: move |event| {
+                    event.stop_propagation();
+                    press(ControlSegment::Changes);
+                },
+                if dirty.persisted == 0 && dirty.failed == 0 {
+                    span { class: "tw:flex tw:flex-none tw:items-center tw:text-dim-foreground",
+                        StudioIcon { name: StudioIconName::StepComplete, size: 12 }
+                    }
+                } else {
+                    // The glyph is what the 560px fold spends — a count with no
+                    // glyph still counts; a glyph with no count says nothing.
+                    span { class: "{changes_glyph_class(dirty)} tw:hidden tw:@min-[560px]:flex",
+                        StudioIcon { name: changes_glyph(dirty), size: 12 }
+                    }
+                    if dirty.persisted > 0 {
+                        span { class: COUNT_PILL_CLASS, "{dirty.persisted}" }
+                    }
+                    if dirty.failed > 0 {
+                        span { class: FAILED_PILL_CLASS, "{dirty.failed}" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The tab protocol (D15), pure: clicking the OPEN section closes the
+/// panel; clicking anything else opens it there — switching sections while
+/// open is therefore an in-place content swap, never a close-reopen.
+fn next_panel_state(
+    open: bool,
+    section: ControlSegment,
+    clicked: ControlSegment,
+) -> (bool, ControlSegment) {
+    if open && section == clicked {
+        (false, section)
+    } else {
+        (true, clicked)
     }
 }
 
@@ -427,19 +552,38 @@ pub fn SessionDevicePanel(session: UiChromeSessionControl) -> Element {
     }
 }
 
-/// The CHANGES segment's popover: what is in flight, and the verbs that end
-/// it.
+/// The CHANGES section: what is in flight, the verbs that end it, and the
+/// banked history below it (D14).
 ///
 /// Dirty: the labeled pending edits with their per-entry reverts (the SAME
 /// [`PendingEditList`] the detail sections used to host — re-homed, not
 /// re-spelled), the failed bucket, the pending facts, an honest receipt of
-/// what Save actually does, and the controller's own Save / Revert-all pair.
+/// what Save actually does — naming the version it will bank when the
+/// projection knows it — and the controller's own Save / Revert-all pair.
 /// Clean: one quiet line. The popup never claims cloud state it cannot see —
 /// it says the edits are live on THIS session and that Save banks them to
 /// the library, which is exactly what it knows.
+///
+/// **The banked timeline rides underneath** (D14, amending D10): changes
+/// and history are one temporal axis — the receipt's "Save banks v13" and
+/// the timeline's "v12 saved" are the same ledger read from opposite ends
+/// — so the pending block sits on top and the document's history sits
+/// below it, in one panel, with no tab between them. No synthetic
+/// "editing" row in the timeline: the pending block IS the in-flight
+/// statement.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAction>) -> Element {
+pub fn SessionChangesPanel(
+    changes: ProjectChanges,
+    /// Selects the history empty-line honesty rule (an Example's seeded
+    /// rows are bookkeeping, not the person's history).
+    relationship: ProjectRelationship,
+    /// Fixed clock for the history rows in stories; `None` uses the
+    /// platform clock.
+    #[props(default)]
+    now_secs: Option<f64>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
     let ProjectChanges {
         affordance,
         dirty,
@@ -447,14 +591,21 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
         edits_in_flight,
         pending_edits,
         header_actions,
+        history,
     } = changes;
     let unsaved_entries = entries_in(&pending_edits, PendingEditBucket::Persisted);
     let failed_entries = entries_in(&pending_edits, PendingEditBucket::Failed);
     let (save, revert) = save_and_revert(&header_actions);
+    let receipt = save_receipt_line(history.next_version);
     let anything_pending = dirty.persisted > 0
         || dirty.failed > 0
         || !unsaved_entries.is_empty()
         || !failed_entries.is_empty();
+    let timeline = rsx! {
+        DetailSection { title: "History",
+            HistoryList { relationship, history: history.clone(), now_secs }
+        }
+    };
 
     if !anything_pending {
         return rsx! {
@@ -463,6 +614,7 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
                     "All saved \u{2014} nothing pending."
                 }
             }
+            {timeline}
         };
     }
 
@@ -493,7 +645,7 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
         if save.is_some() || revert.is_some() {
             DetailSection { tint: DetailSectionTint::Warning,
                 p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
-                    "Already live in this session \u{2014} Save banks everything to your library."
+                    "{receipt}"
                 }
                 div { class: "tw:flex tw:items-center tw:gap-2 tw:pt-1.5",
                     if let Some(save) = save.clone() {
@@ -521,6 +673,21 @@ pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAc
                 }
             }
         }
+        {timeline}
+    }
+}
+
+/// The receipt's one sentence: what Save actually does, naming the version
+/// it will bank when the projection knows the next one — the same number
+/// the timeline's newest row will wear after the save, which is the D14
+/// point: two ends of one ledger.
+fn save_receipt_line(next_version: Option<u64>) -> String {
+    match next_version {
+        Some(next) => {
+            format!("Already live in this session \u{2014} Save banks v{next} to your library.")
+        }
+        None => "Already live in this session \u{2014} Save banks everything to your library."
+            .to_string(),
     }
 }
 
@@ -758,6 +925,14 @@ fn segment_class(edge: SegmentEdge, tint: SegmentTint, open: bool) -> String {
     format!("{SEGMENT_CLASS}{radius}{background}")
 }
 
+/// The shared panel's OWN trigger button, hidden: the segments own opening
+/// (D15), so the popover's mandatory trigger contributes nothing — no box,
+/// no focus stop, no accessible name of its own.
+const HIDDEN_TRIGGER_CLASS: &str = "tw:hidden";
+/// The top-layer copy of the shell's interior (the popover's anchor
+/// visual): the same segment row, interactive, with NO border and NO
+/// background of its own — the merged outline owns the chrome while open.
+const ANCHOR_VISUAL_CLASS: &str = "tw:inline-flex tw:h-full tw:w-full tw:min-w-0 tw:items-stretch tw:overflow-hidden tw:rounded-[7px] tw:text-left";
 /// The shell at rest: ONE rounded bordered container with internal
 /// hairlines, not a row of chips. A plain `div` — the segments inside it are
 /// the buttons — and `p-0` because the segments own the padding.
@@ -931,6 +1106,38 @@ mod tests {
         ]
         .map(|relationship| relationship_face(relationship).word);
         assert_eq!(words, ["Example", "Private", "Shared", "Member", "Viewing"]);
+    }
+
+    /// The tab protocol (D15): clicking the open section closes; clicking
+    /// any other section opens there — including while already open, which
+    /// is the in-place switch (open stays true, only the section moves).
+    #[test]
+    fn segments_act_as_tabs() {
+        use ControlSegment::{Changes, Device, Project};
+
+        // Closed: any click opens its own section.
+        assert_eq!(next_panel_state(false, Device, Project), (true, Project));
+        assert_eq!(next_panel_state(false, Device, Device), (true, Device));
+        // Open, same section: closes (the section is irrelevant after).
+        assert_eq!(next_panel_state(true, Project, Project), (false, Project));
+        // Open, different section: switches IN PLACE — never a close.
+        assert_eq!(next_panel_state(true, Project, Changes), (true, Changes));
+        assert_eq!(next_panel_state(true, Changes, Device), (true, Device));
+    }
+
+    /// The receipt names the version Save will bank when the projection
+    /// knows it (D14: the same number the timeline's newest row will wear),
+    /// and stays honest when it does not.
+    #[test]
+    fn the_receipt_names_the_version_save_banks() {
+        assert_eq!(
+            save_receipt_line(Some(13)),
+            "Already live in this session \u{2014} Save banks v13 to your library."
+        );
+        assert_eq!(
+            save_receipt_line(None),
+            "Already live in this session \u{2014} Save banks everything to your library."
+        );
     }
 
     /// The first segment rounds the shell's left corners and the last its

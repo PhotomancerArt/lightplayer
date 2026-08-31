@@ -66,9 +66,9 @@ pub struct ProjectDetailContent {
     manifest: Option<lpa_studio_core::UiProjectManifest>,
     library_identity: Option<(String, String)>,
     /// The open project's document history, newest first and capped — the
-    /// relationship panel's History tab (D10). It rides this value for the
-    /// same reason everything else here does: one gather, so no two homes
-    /// can disagree about a project.
+    /// changes popup's banked timeline (D10, re-homed by D14). It rides
+    /// this value for the same reason everything else here does: one
+    /// gather, so no two homes can disagree about a project.
     history: lpa_studio_core::UiProjectHistory,
     /// The controller's contextual Save / Revert-to-saved pair (present
     /// only while persisted edits are pending). The SECTIONS do not render
@@ -99,6 +99,11 @@ pub struct ProjectChanges {
     /// The controller's own Save / Revert-to-saved pair — the popup
     /// dispatches THESE, never a second save verb minted locally.
     pub header_actions: Vec<UiPaneAction>,
+    /// The document's banked history, newest first and capped. It rides the
+    /// changes value because changes and history are ONE temporal axis
+    /// (relationship-control D14): the receipt "Save banks v13" and the
+    /// timeline's "v12 saved" are the same ledger read from opposite ends.
+    pub history: lpa_studio_core::UiProjectHistory,
 }
 
 impl ProjectDetailContent {
@@ -126,8 +131,8 @@ impl ProjectDetailContent {
         self.library_identity.as_ref()
     }
 
-    /// The open project's document history — the relationship panel's
-    /// History tab reads it, read-only (no restore: vision D6 is parked).
+    /// The open project's document history — the changes popup's banked
+    /// timeline reads it, read-only (no restore: vision D6 is parked).
     pub fn history(&self) -> &lpa_studio_core::UiProjectHistory {
         &self.history
     }
@@ -162,6 +167,7 @@ impl ProjectDetailContent {
             edits_in_flight: self.edits_in_flight,
             pending_edits: self.pending_edits.clone(),
             header_actions: self.header_actions.clone(),
+            history: self.history.clone(),
         }
     }
 
@@ -403,8 +409,9 @@ pub fn ProjectDetailSections(content: ProjectDetailContent) -> Element {
         edits_in_flight: _,
         pending_edits: _,
         header_actions: _,
-        // Likewise the history half: the relationship panel's History tab
-        // renders it, and these sections are its neighbours, not its home.
+        // Likewise the history half: the changes popup's banked timeline
+        // renders it (D14), and these sections are its neighbours, not its
+        // home.
         history: _,
     } = content;
     let status_class = node_status_label_class(status.kind);

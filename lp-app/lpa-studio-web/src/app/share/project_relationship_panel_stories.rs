@@ -7,20 +7,20 @@
 //! `access_controls_stories` mounts the controls it composes.
 //!
 //! **Read them as a column.** The point of the phase is that the five
-//! states do NOT each invent a shape: header → tabs → Where → Access →
-//! action row, in that order, every time. What changes between the
-//! captures is the standing sentence, whether Access has controls or a
-//! sentence, and which verb sits in slot 1 — never the skeleton.
+//! states do NOT each invent a shape: identity → Where → Access → action
+//! row, in that order, every time. What changes between the captures is
+//! the standing sentence, whether Access has controls or a sentence, and
+//! which verb sits in slot 1 — never the skeleton. (History is not here:
+//! it moved to the changes popup at D14 — see the site-chrome stories.)
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiHistoryKind, UiProjectHistory, UiProjectHistoryEntry};
 use lpa_studio_web_story_macros::story;
 use lpc_cloud_api::{Access, MemberRole};
 use lpc_history::{PrefixedUid, UidPrefix};
 
 use crate::app::home::package_export::ExportTarget;
 use crate::app::share::project_relationship_panel::{
-    PanelTab, ProjectRelationshipPanel, PublishStatus, RosterFacts,
+    ProjectRelationshipPanel, PublishStatus, RosterFacts,
 };
 use crate::app::share::relationship::ProjectRelationship;
 use crate::app::share::share_person::SharePerson;
@@ -153,90 +153,6 @@ pub(crate) fn project_popover_overflow_open() -> Element {
             menu_open: true,
         }
     })
-}
-
-#[story(
-    label = "Project popover — history tab",
-    description = "The History tab (D10): the document's own events, newest first, read-only — version, kind, what, when. The top row is NOT an event: three unsaved edits are work in flight, so it wears the warning family and its own box above the hairline stack. A push names its device by uid, not by name — resolving names needs the device registry, which the synchronous view build cannot read — and the footer says plainly that restore has not landed yet."
-)]
-pub(crate) fn project_popover_history() -> Element {
-    panel(rsx! {
-        ProjectRelationshipPanel {
-            name: "Aurora Field".to_string(),
-            relationship: ProjectRelationship::MinePublished,
-            url: project_url(),
-            export: export(),
-            unsaved: 3,
-            history: history(),
-            now_secs: STORY_NOW,
-            initial_tab: PanelTab::History,
-            on_fork: EventHandler::new(|()| {}),
-            on_copy: EventHandler::new(|()| {}),
-        }
-    })
-}
-
-#[story(
-    label = "Project popover — history, example",
-    description = "The same tab on a built-in example. A transient session DOES carry history — the open seeds a provenance origin plus an initial save of the bytes it opened — but that is bookkeeping, not something the person did, so the tab says the true thing instead of listing it. It is also the sentence that stays true after Save a copy: the real rows begin at the first save."
-)]
-pub(crate) fn project_popover_history_example() -> Element {
-    panel(rsx! {
-        ProjectRelationshipPanel {
-            name: "Small Dome".to_string(),
-            relationship: ProjectRelationship::Example,
-            url: example_url(),
-            history: history(),
-            now_secs: STORY_NOW,
-            initial_tab: PanelTab::History,
-            on_fork: EventHandler::new(|()| {}),
-            on_copy: EventHandler::new(|()| {}),
-        }
-    })
-}
-
-/// A fixed clock, so the relative times below never drift between
-/// captures.
-const STORY_NOW: f64 = 1_800_000_000.0;
-
-/// A representative log: a fork origin, saves, a push, and a join —
-/// every row kind the projection emits, newest first the way core hands
-/// it over.
-fn history() -> UiProjectHistory {
-    UiProjectHistory {
-        entries: vec![
-            entry(Some(12), UiHistoryKind::Saved, "", STORY_NOW - 20.0 * 60.0),
-            entry(
-                Some(12),
-                UiHistoryKind::Pushed,
-                "\u{2192} dev7g2k\u{2026}",
-                STORY_NOW - 18.0 * 60.0,
-            ),
-            entry(Some(11), UiHistoryKind::Saved, "", STORY_NOW - 2.0 * 3600.0),
-            entry(
-                Some(10),
-                UiHistoryKind::Joined,
-                "kept this version \u{2014} the other was set aside",
-                STORY_NOW - 5.0 * 3600.0,
-            ),
-            entry(
-                Some(1),
-                UiHistoryKind::Origin,
-                "forked from prj4m1x\u{2026}",
-                STORY_NOW - 3.0 * 86_400.0,
-            ),
-        ],
-        next_version: Some(13),
-    }
-}
-
-fn entry(version: Option<u64>, kind: UiHistoryKind, label: &str, at: f64) -> UiProjectHistoryEntry {
-    UiProjectHistoryEntry {
-        version,
-        kind,
-        label: label.to_string(),
-        at,
-    }
 }
 
 /// The popover's own box, at the detail card's shipped width — the panel

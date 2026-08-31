@@ -62,7 +62,7 @@ pub use archived_projects::{
     ArchivedProject, ArchivedProjectsList, ArchivedProjectsSection, archive_project,
 };
 pub use project_relationship_panel::{
-    ForkVerb, PanelTab, ProjectRelationshipPanel, PublishStatus, RosterFacts, fork_verb,
+    ForkVerb, ProjectRelationshipPanel, PublishStatus, RosterFacts, fork_verb,
 };
 pub use project_roster::{ProjectRoster, RosterState, use_project_roster, viewer_actor};
 pub use relationship::{
