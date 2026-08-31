@@ -50,6 +50,15 @@ pub enum DeviceEffectCall {
     /// the completion line outranking the benign flash-id warning (C6 rev 2
     /// lore) — lives below this seam in the shipped JS.
     EraseFlash,
+    /// Run the `lpa-client` remove conversation over the borrowed port: ask
+    /// the board what storage dir it runs from, stop it, and delete that
+    /// dir. The firmware stays; only the project goes.
+    RemoveProject {
+        /// Where to delete when the board reports nothing loaded — the race
+        /// between the card offering the verb and the effect running. An
+        /// absent dir is a no-op, never an error.
+        fallback_storage_id: String,
+    },
     /// Write the board runtime manifest to `/hardware.json` over the app
     /// protocol (board-selection D4; effective next boot).
     WriteHardwareManifest { manifest_json: String },

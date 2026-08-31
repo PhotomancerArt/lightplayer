@@ -88,6 +88,19 @@ struct ScriptedTransport {
     /// REAL `LpServer`, so a green push here means the stop/write/load order
     /// and the hash verification both worked over real framing.
     push_plan: Rc<Cell<PushPlan>>,
+    /// What a remove effect does. `Real` runs the real conversation too.
+    remove_plan: Rc<Cell<RemovePlan>>,
+}
+
+/// The scripted outcomes a remove effect can play out. Same three shapes the
+/// push has, and the same reason: a real conversation, a refusal, and a hang
+/// that only eviction bounds.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum RemovePlan {
+    #[default]
+    Real,
+    Fail,
+    Hang,
 }
 
 /// The scripted outcomes a push effect can play out.
@@ -213,6 +226,49 @@ impl DeviceTransport for ScriptedTransport {
                         summary: "flash erased".to_string(),
                         ..Default::default()
                     })
+                })
+            }
+            DeviceEffectCall::RemoveProject {
+                fallback_storage_id,
+            } => {
+                let plan = self.remove_plan.get();
+                let device = self.device.clone();
+                Box::pin(async move {
+                    match plan {
+                        RemovePlan::Fail => {
+                            Err("the board refused the delete (scripted)".to_string())
+                        }
+                        RemovePlan::Hang => {
+                            core::future::pending::<()>().await;
+                            unreachable!("a hung effect never completes")
+                        }
+                        // Like the push, `Real` is not scripted at all: the
+                        // actual ask → stop → delete conversation runs over
+                        // the fake's own `M!` wire into a real `LpServer`.
+                        RemovePlan::Real => {
+                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device));
+                            let mut report = |label: String, percent: Option<u8>| {
+                                progress(label, percent);
+                            };
+                            let report = lpa_client::remove_project(
+                                &mut client,
+                                &fallback_storage_id,
+                                &mut report,
+                            )
+                            .await
+                            .map_err(|error| error.to_string())?;
+                            Ok(DeviceEffectFacts {
+                                summary: match report.was_loaded {
+                                    true => format!("removed {}", report.storage_id),
+                                    false => format!(
+                                        "the board reported nothing loaded; cleared {}",
+                                        report.storage_id
+                                    ),
+                                },
+                                ..Default::default()
+                            })
+                        }
+                    }
                 })
             }
             DeviceEffectCall::WriteHardwareManifest { manifest_json } => {
@@ -451,6 +507,7 @@ struct DeviceBench {
     flash_plan: Rc<Cell<FlashPlan>>,
     manifest_writes: Rc<RefCell<Vec<String>>>,
     push_plan: Rc<Cell<PushPlan>>,
+    remove_plan: Rc<Cell<RemovePlan>>,
     started: std::time::Instant,
 }
 
@@ -529,6 +586,7 @@ impl DeviceBench {
         let flash_plan: Rc<Cell<FlashPlan>> = Rc::new(Cell::new(FlashPlan::default()));
         let manifest_writes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let push_plan: Rc<Cell<PushPlan>> = Rc::new(Cell::new(PushPlan::default()));
+        let remove_plan: Rc<Cell<RemovePlan>> = Rc::new(Cell::new(RemovePlan::default()));
         controller.set_device_transport(Rc::new(ScriptedTransport {
             device: device.clone(),
             endpoint: endpoint.to_string(),
@@ -538,6 +596,7 @@ impl DeviceBench {
             flash_plan: Rc::clone(&flash_plan),
             manifest_writes: Rc::clone(&manifest_writes),
             push_plan: Rc::clone(&push_plan),
+            remove_plan: Rc::clone(&remove_plan),
         }));
 
         let bench = Self {
@@ -551,6 +610,7 @@ impl DeviceBench {
             flash_plan,
             manifest_writes,
             push_plan,
+            remove_plan,
             started: std::time::Instant::now(),
         };
         (bench, tasks)
@@ -1449,5 +1509,346 @@ fn factory_reset_wipes_the_board_and_the_card_comes_back_blank() {
         bench.registry().len(),
         1,
         "identity lives in the efuse — the registry row survives an erase"
+    );
+}
+
+/// The bench's dead end and its way out (G1, 2026-08-31): a board arrives
+/// running a project from a previous life and the running face has no verbs
+/// on it — "how do I push?" with no answer short of throwing the firmware
+/// away. Remove project is the answer, and this is the whole loop through
+/// the REAL conversation: push an example, remove it, and the empty face
+/// comes back with the picker on it.
+///
+/// The two things it must NOT do are asserted too: the library copy and the
+/// registry row are untouched. The project on the board is a copy; deleting
+/// the copy is not deleting the project.
+#[test]
+fn removing_the_project_clears_the_board_and_leaves_the_library_alone() {
+    let device = empty_light_player("dev000000daqf6dvvr3");
+    let (mut bench, tasks) = identified(&device, "usb-remove-1");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+
+    // Put something on it, the ordinary way.
+    bench.push_gesture(device_id, bundled_example());
+    bench.run_until(&tasks, "the board to be running it", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+    let library_before = bench.library();
+    assert_eq!(library_before.len(), 1, "{library_before:?}");
+    let card = bench.view().devices[0].clone();
+    assert!(
+        card.can_remove_project,
+        "the running face offers the removal: {card:?}"
+    );
+
+    // Take it off — through the ordinary action path, like the UI.
+    bench.gesture(DeviceAction::RemoveProject { device: device_id });
+    bench.run_until(&tasks, "the removal to settle", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.can_receive_project)
+    });
+
+    let card = bench.view().devices[0].clone();
+    let outcome = card.last_outcome.as_ref().expect("an outcome");
+    assert!(outcome.ok, "{outcome:?}");
+    assert_eq!(
+        card.loaded_project,
+        lpa_devices::view::LoadedProject::Empty,
+        "the board's OWN report is what turns the face over: {card:?}"
+    );
+    assert!(
+        card.can_receive_project,
+        "the picker is back — the whole point: {card:?}"
+    );
+    assert!(!card.can_remove_project, "nothing left to remove");
+    assert!(!card.escapes.is_empty(), "always a way out");
+
+    // The board lost a copy. The library did not lose a project.
+    let library_after = bench.library();
+    assert_eq!(
+        library_after.len(),
+        1,
+        "the library copy stays: {library_after:?}"
+    );
+    assert_eq!(library_after[0].uid, library_before[0].uid);
+    assert_eq!(
+        bench.registry().len(),
+        1,
+        "the device row survives a removal"
+    );
+}
+
+/// A removal the board refuses lands on the problem face with the reason,
+/// and the running face is still there — nothing was half-claimed.
+#[test]
+fn a_refused_removal_leaves_the_running_face_and_says_why() {
+    let device = empty_light_player("dev000000daqf6dvvr4");
+    let (mut bench, tasks) = identified(&device, "usb-remove-2");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+    bench.push_gesture(device_id, bundled_example());
+    bench.run_until(&tasks, "the board to be running it", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+
+    bench.remove_plan.set(RemovePlan::Fail);
+    bench.gesture(DeviceAction::RemoveProject { device: device_id });
+    bench.run_until(&tasks, "the failure to settle", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none())
+    });
+
+    let card = bench.view().devices[0].clone();
+    let outcome = card.last_outcome.as_ref().expect("an outcome");
+    assert!(!outcome.ok, "{outcome:?}");
+    assert!(
+        outcome.summary.contains("refused the delete"),
+        "{outcome:?}"
+    );
+    assert!(
+        matches!(
+            card.loaded_project,
+            lpa_devices::view::LoadedProject::Running { .. }
+        ),
+        "the board is still running it, and the card says so: {card:?}"
+    );
+    assert!(!card.escapes.is_empty(), "always a way out");
+}
+
+/// C2 (G1 bench, 2026-08-31): an effect that outlives its activity must give
+/// the wire back. The bench proves the consequence rather than the flag —
+/// after the eviction, the board is HEARD FROM again, which can only happen
+/// if the link pump resumed.
+///
+/// The failure this replaces: an orphaned stamp held the borrow for its own
+/// remaining budget (~40 s), the fold heard nothing at all in that window,
+/// and the silent card read as a dead board.
+#[test]
+fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes() {
+    let device = empty_light_player("dev000000daqf6dvvr5");
+    let (mut bench, tasks) = identified(&device, "usb-borrow-1");
+    bench.push_plan.set(PushPlan::Hang);
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+
+    // A push that never completes: it takes the wire and keeps it.
+    bench.push_gesture(device_id, bundled_example());
+    bench.run_until(&tasks, "the push to be visibly running", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_some())
+    });
+
+    // Cancel is held through the write window; the grace evicts. The
+    // effect's future is STILL pending at this point — nothing can stop it.
+    bench.gesture(DeviceAction::CancelActivity { device: device_id });
+    bench.run_until(&tasks, "the cancel grace to bound the hold", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none())
+    });
+
+    for _ in 0..400 {
+        bench.step(&tasks);
+    }
+
+    // The discriminating proof, and the reason it has to be this and not
+    // "ask the board again": the eviction's recovery CYCLES the port
+    // (close, reopen), and a reopen begins a fresh evidence window. Only a
+    // reading pump can deliver those two events, so a card still wearing
+    // the pre-eviction verdict is a card sitting behind a dead pump —
+    // exactly the forty seconds of frozen truth the bench saw. A stale
+    // window would also let the re-identify below settle instantly on a
+    // hello nobody heard, which is why that is the second assertion and
+    // never the first.
+    let card = bench.view().devices[0].clone();
+    assert_eq!(
+        card.status,
+        lpa_devices::device::DeviceStatus::NotResponding,
+        "the fold saw the port cycle its recovery performed: {card:?}"
+    );
+    assert_eq!(
+        card.loaded_project,
+        lpa_devices::view::LoadedProject::Unknown,
+        "a fresh window claims nothing it has not been told again: {card:?}"
+    );
+
+    // And the wire genuinely works: a re-ask reaches the board and comes
+    // back, over the pump that was handed the port back.
+    bench.gesture(DeviceAction::Identify { device: device_id });
+    bench.run_until(&tasks, "the re-identify to settle", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none())
+    });
+
+    let card = bench.view().devices[0].clone();
+    assert_eq!(
+        card.state_label, "Ready",
+        "the board answers again over the returned wire: {card:?}"
+    );
+}
+
+/// D (G1 bench, 2026-08-31): a board unplugged while its port was merely
+/// GRANTED used to be invisible. The departure sweep only noticed ports that
+/// died while open, so the card sat at "Attached", no detach was raised —
+/// and because no detach was raised, the replug raised no attach either. The
+/// board could only be recovered by pressing Identify by hand.
+///
+/// The whole cycle, through the real effects layer: disconnect the port,
+/// unplug, replug, and the board comes back on its own card, identified.
+#[test]
+fn a_board_unplugged_with_its_port_closed_departs_and_a_replug_brings_it_back() {
+    use crate::app::studio::studio_command::DeviceHotplug;
+
+    let device = light_player("dev_replug");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-replug-1");
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    let device_id = bench.view().devices[0].id;
+
+    // The user closes the port. The board is still plugged in.
+    bench.gesture(DeviceAction::Disconnect { device: device_id });
+    bench.run_until(&tasks, "the port to close", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label.starts_with("Attached"))
+    });
+    assert_eq!(
+        bench.view().devices[0].state_label,
+        "Attached — not listening",
+        "the honest copy for a plugged-in board nobody is listening to"
+    );
+
+    // Now it is unplugged. The browser drops the grant and fires disconnect.
+    bench.granted.set(false);
+    bench
+        .controller
+        .note_device_hotplug(DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the departure to reach the card", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Offline")
+    });
+    assert_eq!(
+        bench.view().devices.len(),
+        1,
+        "the entry survives: a board that left is still a board we know"
+    );
+
+    // And back in. The connect edge sweeps grants; the endpoint routes it
+    // straight to the device it belongs to, which re-identifies.
+    bench.granted.set(true);
+    bench
+        .controller
+        .note_device_hotplug(DeviceHotplug::Connected);
+    bench.run_until(&tasks, "the replug to identify itself", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+
+    let cards = bench.view().devices;
+    assert_eq!(cards.len(), 1, "one board, one card — never a duplicate");
+    assert!(cards[0].escapes.contains(&Escape::Forget));
+    assert!(
+        bench.view().pending.is_empty(),
+        "a known endpoint is not a new discovery"
+    );
+}
+
+/// The other half of D's fix: a disconnect edge for SOMEBODY ELSE's device
+/// must not tear down a port we still hold. The old open-flag check
+/// detached every link that was not open, so unplugging an unrelated dongle
+/// took out a board that was simply idle.
+#[test]
+fn an_unrelated_disconnect_leaves_a_still_granted_port_alone() {
+    use crate::app::studio::studio_command::DeviceHotplug;
+
+    let device = light_player("dev_bystander");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-bystander-1");
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    let device_id = bench.view().devices[0].id;
+    bench.gesture(DeviceAction::Disconnect { device: device_id });
+    bench.run_until(&tasks, "the port to close", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label.starts_with("Attached"))
+    });
+
+    // Something else was unplugged: our grant is still there.
+    bench
+        .controller
+        .note_device_hotplug(DeviceHotplug::Disconnected);
+    for _ in 0..400 {
+        bench.step(&tasks);
+    }
+
+    assert_eq!(
+        bench.view().devices[0].state_label,
+        "Attached — not listening",
+        "a port the browser still grants us has not departed"
     );
 }

@@ -152,6 +152,31 @@ impl DeviceTransport for BrowserSerialTransport {
                         ..Default::default()
                     })
                 }
+                DeviceEffectCall::RemoveProject {
+                    fallback_storage_id,
+                } => {
+                    // Same borrow discipline as the push, and the same
+                    // `lpa-client` framing under it. WHICH dir goes is read
+                    // from the board inside the conversation — the model
+                    // never names a path.
+                    let report = provider
+                        .remove_device_project(&endpoint, &fallback_storage_id, events)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: match report.was_loaded {
+                            true => format!("removed {}", report.storage_id),
+                            // Under-claim: the board had already stopped
+                            // reporting it, so "removed" would be a claim
+                            // about something we never saw.
+                            false => format!(
+                                "the board reported nothing loaded; cleared {}",
+                                report.storage_id
+                            ),
+                        },
+                        ..Default::default()
+                    })
+                }
                 DeviceEffectCall::WriteHardwareManifest { manifest_json } => {
                     provider
                         .write_device_file(

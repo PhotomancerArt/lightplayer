@@ -261,8 +261,10 @@ mod tests {
             needs_firmware: false,
             loaded_project: LoadedProject::Empty,
             can_receive_project: true,
+            can_remove_project: false,
             activity: None,
             last_outcome: None,
+            terminal_lines: Vec::new(),
             escapes: vec![lpa_devices::view::Escape::Forget],
         }
     }

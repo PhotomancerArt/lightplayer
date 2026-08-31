@@ -137,6 +137,25 @@ impl ControllerOp for DevicesOp {
                 )
                 .inline(),
             ),
+            // Destructive on the BOARD and nowhere else, which is exactly
+            // what the confirm has to say: the library copy is a different
+            // object and this does not touch it.
+            Action::RemoveProject { .. } => ActionMeta::new(
+                "Remove project",
+                "Stop what this board is running and delete it from the board.",
+                ActionPriority::Tertiary,
+            )
+            .destructive()
+            .with_confirmation(
+                ActionConfirmation::new(
+                    "Remove the project from this board?",
+                    "The board stops running it and the project is deleted from the \
+                     board's storage. The firmware stays, and your copy in the \
+                     library is untouched.",
+                    "Remove project",
+                )
+                .inline(),
+            ),
             Action::SetName { .. } => ActionMeta::new(
                 "Rename",
                 "Change what Studio calls this device.",

@@ -38,7 +38,7 @@ use std::rc::{Rc, Weak};
 use lpa_devices::activity::{ActivityKind, ActivityOutcome};
 use lpa_devices::event::{ActivityMarker, Command, EffectId, EffectRequest, Event, Input};
 use lpa_devices::identity::{DeviceId, EndpointKey, MacAddress, PeerIdentity};
-use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkId, LinkInfo};
+use lpa_devices::link::{Link, LinkCommand, LinkId, LinkInfo};
 use lpa_devices::record::DeviceRecord;
 use lpa_devices::time::TimerId;
 
@@ -61,22 +61,32 @@ const LINK_POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// How long after a `navigator.serial` disconnect the sweep looks for links
 /// that died.
 ///
-/// The event fires when the OS drops the device; the JS read pump learns of it
-/// a beat later, when its pending read rejects. Checking immediately would see
-/// a port that still looks open, so the check waits out that beat.
+/// The event fires when the OS drops the device; the browser's own port list
+/// catches up a beat later. Asking immediately would still see the departed
+/// port, so the check waits out that beat.
 ///
-/// ⚠️ This is a settle, not a fix. `install_serial_events` hands its callbacks
-/// no port, so "which port left?" is answered by "which of ours stopped being
-/// open?". A per-port disconnect signal means widening the transport JS, which
-/// is the bench slice's call, not this one's.
+/// ⚠️ Still a settle, not a per-port signal: `install_serial_events` hands
+/// its callbacks no port, so "which port left?" is answered by asking the
+/// browser which grants remain. That question is now the RIGHT one — see
+/// [`DeviceEffects::sweep_departed_ports`].
 const HOTPLUG_SETTLE: Duration = Duration::from_millis(250);
 
-/// Links attached per granted-port sweep.
+/// Links attached (or detached) per granted-port sweep.
 ///
 /// Ids are minted before the sweep awaits (a spawned future cannot hold
 /// `&mut self`), so the budget is stated rather than unbounded. A tab with
-/// more boards than this attaches the rest on the next sweep.
+/// more boards than this attaches the rest on the next sweep, and the
+/// departure sweep uses the same ceiling for the same reason.
 const MAX_SWEEP_LINKS: usize = 8;
+
+/// The exclusive-wire-borrow token a link carries.
+///
+/// The EFFECT'S OWN id, not a bare `bool`. An abandoned effect (its activity
+/// ended while it was still running) has its borrow released early, and its
+/// future still completes later — with a plain flag that late completion
+/// would release a borrow belonging to whatever effect had started since.
+/// Naming the holder makes every release a no-op unless it is the holder's.
+type BorrowToken = Rc<Cell<Option<EffectId>>>;
 
 /// Records the effects layer was asked to write, drained by the roster
 /// sub-controller — which owns the library host and can await it.
@@ -140,14 +150,10 @@ pub struct PushPayload {
 struct LinkSlot {
     info: LinkInfo,
     link: Rc<RefCell<Box<dyn Link>>>,
-    /// Whether the port is open for traffic, folded from the events the pump
-    /// carries. Not a second state machine: it is used for exactly one
-    /// question — "did this port die?" — on a hotplug disconnect.
-    open: Rc<Cell<bool>>,
     /// A coarse effect holds the wire: the pump stops draining until the
     /// borrow ends, so the effect's own conversation is the only reader.
     /// This is the executor's half of the exclusive-borrow discipline.
-    borrowed: Rc<Cell<bool>>,
+    borrowed: BorrowToken,
 }
 
 /// A link that arrived from a spawned future, waiting to join the routing map.
@@ -155,8 +161,7 @@ struct Arrival {
     link: LinkId,
     info: LinkInfo,
     handle: Rc<RefCell<Box<dyn Link>>>,
-    open: Rc<Cell<bool>>,
-    borrowed: Rc<Cell<bool>>,
+    borrowed: BorrowToken,
 }
 
 /// Owns the links, the platform seams, and the spawning.
@@ -264,7 +269,6 @@ impl DeviceEffects {
                 LinkSlot {
                     info: arrival.info,
                     link: arrival.handle,
-                    open: arrival.open,
                     borrowed: arrival.borrowed,
                 },
             );
@@ -296,6 +300,33 @@ impl DeviceEffects {
                 effect_id,
                 effect,
             } => self.run_effect(device, link, effect_id, effect),
+            // The device is named on the command for the journal's sake;
+            // the release is addressed by link and guarded by effect id.
+            Command::AbandonEffect {
+                link, effect_id, ..
+            } => self.abandon_effect(link, effect_id),
+        }
+    }
+
+    /// Give a still-running effect's wire back.
+    ///
+    /// The effect itself cannot be stopped — it is a spawned future with no
+    /// handle — but the pump can start reading again the moment the model
+    /// says nothing is listening to it any more. The release is GUARDED by
+    /// the effect id: an abandon for an effect that already finished (the
+    /// ordinary settle, where the end marker is what ended the activity) is
+    /// a no-op, and so is one that arrives after a newer effect has taken
+    /// the same wire.
+    fn abandon_effect(&mut self, link: LinkId, effect_id: EffectId) {
+        let Some(slot) = self.links.get(&link) else {
+            return;
+        };
+        if !release_borrow(&slot.borrowed, effect_id) {
+            return;
+        }
+        log::debug!("abandoned effect {effect_id:?} on {link:?}; the pump resumes");
+        if let Some(sink) = &self.sink {
+            sink(Input::Event(Event::LinkBorrow { link, held: false }));
         }
     }
 
@@ -375,14 +406,21 @@ impl DeviceEffects {
                 }));
             })
         };
-        borrowed.set(true);
+        borrowed.set(Some(effect_id));
+        // The borrow is a fact about the world, so the fold hears about it
+        // (I6): while it holds, nothing is reading the port, and freshness
+        // must not read that silence as the board going quiet.
+        sink(Input::Event(Event::LinkBorrow { link, held: true }));
         let writes = Rc::clone(&self.completed_pushes);
         spawn(Box::pin(async move {
             let result = transport.run_effect(info, call, progress).await;
             // Give the wire back BEFORE the end marker folds: the reducer's
             // very next command may be the ladder's reopen, and a pump still
-            // paused would eat the boot hello.
-            borrowed.set(false);
+            // paused would eat the boot hello. Guarded, because this effect
+            // may have been ABANDONED and the wire handed to a newer one.
+            if release_borrow(&borrowed, effect_id) {
+                sink(Input::Event(Event::LinkBorrow { link, held: false }));
+            }
             match result {
                 Ok(facts) => {
                     // A verified push is the library's to bank. Recorded
@@ -545,32 +583,67 @@ impl DeviceEffects {
         }));
     }
 
-    /// React to a `navigator.serial` disconnect: after a settle, tell the
-    /// model about every link whose port stopped being open.
+    /// React to a `navigator.serial` disconnect: after a settle, ask the
+    /// browser which grants remain and detach every link whose endpoint is
+    /// no longer among them.
     ///
-    /// See [`HOTPLUG_SETTLE`] for why this is a sweep rather than a targeted
-    /// detach.
+    /// The diff is the whole point. This used to detach every link that was
+    /// not OPEN, which got both answers wrong: a board unplugged while its
+    /// port was merely granted was **invisible** — the card sat at
+    /// "Attached", no detach was ever raised, and so the replug raised no
+    /// attach either and the board could only be recovered by hand (G1
+    /// bench, 2026-08-31) — while a board that was simply never opened got
+    /// detached because somebody unplugged a different device. An unplugged
+    /// port disappears from `getPorts()` whatever its open state, so asking
+    /// the browser answers both.
+    ///
+    /// See [`HOTPLUG_SETTLE`] for why the ask waits a beat, and
+    /// [`MAX_SWEEP_LINKS`] for the bound. Re-attachment needs nothing new:
+    /// the connect edge sweeps grants, and the model's endpoint supersede +
+    /// identity merge put the board back on its own card.
     pub fn sweep_departed_ports(&mut self) {
-        let (Some(spawn), Some(make_timer), Some(sink)) =
-            (self.spawn.clone(), self.timer.clone(), self.sink.clone())
-        else {
+        let (Some(transport), Some(spawn), Some(make_timer), Some(sink)) = (
+            self.transport.clone(),
+            self.spawn.clone(),
+            self.timer.clone(),
+            self.sink.clone(),
+        ) else {
             return;
         };
-        let candidates: Vec<(LinkId, Rc<Cell<bool>>)> = self
+        let held: Vec<(LinkId, EndpointKey)> = self
             .links
             .iter()
-            .map(|(link, slot)| (*link, Rc::clone(&slot.open)))
+            .map(|(link, slot)| (*link, slot.info.endpoint.clone()))
             .collect();
-        if candidates.is_empty() {
+        if held.is_empty() {
             return;
         }
         let sleep = (make_timer.borrow_mut())(HOTPLUG_SETTLE);
         spawn(Box::pin(async move {
             sleep.await;
-            for (link, open) in candidates {
-                if open.get() {
+            let remaining: Vec<EndpointKey> = match transport.discover_granted().await {
+                Ok(granted) => granted
+                    .into_iter()
+                    .map(|grant| grant.info.endpoint)
+                    .collect(),
+                Err(error) => {
+                    // A discovery that FAILED says nothing about which board
+                    // left. Detaching on it would tear down every card over
+                    // a transient browser error.
+                    log::warn!("departure sweep could not list grants: {error}");
+                    return;
+                }
+            };
+            let mut budget = MAX_SWEEP_LINKS;
+            for (link, endpoint) in held {
+                if remaining.contains(&endpoint) {
                     continue;
                 }
+                if budget == 0 {
+                    log::warn!("more departed ports than one sweep detaches; the rest wait");
+                    return;
+                }
+                budget -= 1;
                 sink(Input::Event(Event::LinkDetached { link }));
             }
         }));
@@ -600,13 +673,11 @@ impl DeviceEffects {
         move |link, granted, sink| {
             let info = granted.info.clone();
             let handle = Rc::new(RefCell::new(granted.link));
-            let open = Rc::new(Cell::new(false));
-            let borrowed = Rc::new(Cell::new(false));
+            let borrowed: BorrowToken = Rc::new(Cell::new(None));
             arrivals.borrow_mut().push(Arrival {
                 link,
                 info: info.clone(),
                 handle: Rc::clone(&handle),
-                open: Rc::clone(&open),
                 borrowed: Rc::clone(&borrowed),
             });
             if let (Some(spawn), Some(timer)) = (spawn.clone(), timer.clone()) {
@@ -615,7 +686,6 @@ impl DeviceEffects {
                     &timer,
                     link,
                     Rc::downgrade(&handle),
-                    open,
                     borrowed,
                     Rc::clone(&sink),
                 );
@@ -641,8 +711,7 @@ fn spawn_pump(
     timer: &Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>,
     link: LinkId,
     handle: Weak<RefCell<Box<dyn Link>>>,
-    open: Rc<Cell<bool>>,
-    borrowed: Rc<Cell<bool>>,
+    borrowed: BorrowToken,
     sink: Rc<dyn Fn(Input)>,
 ) {
     let timer = Rc::clone(timer);
@@ -652,14 +721,9 @@ fn spawn_pump(
                 return;
             };
             // Drain synchronously: `poll_event` never blocks, by contract.
-            while !borrowed.get() {
+            while borrowed.get().is_none() {
                 let next = strong.borrow_mut().poll_event();
                 let Some(event) = next else { break };
-                match &event {
-                    LinkEvent::Opened { .. } => open.set(true),
-                    LinkEvent::Closed { .. } => open.set(false),
-                    _ => {}
-                }
                 sink(Input::link(link, event));
             }
             drop(strong);
@@ -667,6 +731,21 @@ fn spawn_pump(
             sleep.await;
         }
     }));
+}
+
+/// Release a wire borrow, but only if `effect_id` is the one holding it.
+///
+/// Returns whether anything was actually released — which is what the
+/// caller announces to the fold. Both release paths go through here: the
+/// effect completing, and the model abandoning it. An unguarded release
+/// would let a straggler hand away the borrow of whatever effect took the
+/// wire after it.
+fn release_borrow(borrowed: &BorrowToken, effect_id: EffectId) -> bool {
+    if borrowed.get() != Some(effect_id) {
+        return false;
+    }
+    borrowed.set(None);
+    true
 }
 
 /// The Ended marker a coarse effect reports through the sink, stamped with
@@ -693,6 +772,7 @@ fn effect_kind(effect: &EffectRequest) -> ActivityKind {
         }
         EffectRequest::Push => ActivityKind::Push,
         EffectRequest::Erase => ActivityKind::Erase,
+        EffectRequest::RemoveProject => ActivityKind::RemoveProject,
     }
 }
 
@@ -729,6 +809,14 @@ fn resolve_effect_call(
             None => Err("nothing was prepared to send to this board".to_string()),
         },
         EffectRequest::Erase => Ok(DeviceEffectCall::EraseFlash),
+        // Nothing is staged for a removal and nothing needs to be: the dir
+        // that goes is the board's own report, read inside the
+        // conversation. The fallback is only for the race where the board
+        // has stopped reporting one by the time the effect runs.
+        EffectRequest::RemoveProject => Ok(DeviceEffectCall::RemoveProject {
+            fallback_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
+                .to_string(),
+        }),
     }
 }
 
