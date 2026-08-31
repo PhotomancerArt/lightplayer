@@ -1,25 +1,52 @@
 {
-  "name": "boot-banner attach: a blank board identified by its boot loop",
+  "name": "boot-banner attach: a blank board settles the instant its boot loop speaks",
   "steps": [
     {
       "at_ms": 0,
-      "do": { "attach": { "link": 2, "endpoint": "usb-2", "label": "/dev/cu.usbserial-2120" } }
+      "do": {
+        "attach": {
+          "link": 2,
+          "endpoint": "usb-2",
+          "label": "/dev/cu.usbserial-2120"
+        }
+      }
     },
     {
       "at_ms": 30,
-      "do": { "opened": { "link": 2 } }
+      "do": {
+        "opened": {
+          "link": 2
+        }
+      }
     },
     {
       "at_ms": 120,
-      "do": { "line": { "link": 2, "text": "ESP-ROM:esp32c6-20220919" } }
+      "do": {
+        "line": {
+          "link": 2,
+          "text": "ESP-ROM:esp32c6-20220919"
+        }
+      }
     },
     {
       "at_ms": 140,
-      "do": { "line": { "link": 2, "text": "invalid header: 0xffffffff" } },
+      "do": {
+        "line": {
+          "link": 2,
+          "text": "invalid header: 0xffffffff"
+        }
+      },
       "expect": {
         "pending": 1,
         "devices": 0,
-        "pending_state": "New device found — identifying…"
+        "pending_state": "New device found \u2014 Blank flash \u2014 needs firmware",
+        "pending_can_adopt": true,
+        "pending_escapes": [
+          "Forget"
+        ],
+        "journal_notes": [
+          "ActivityEnded"
+        ]
       }
     },
     {
@@ -28,19 +55,27 @@
       "expect": {
         "pending": 1,
         "devices": 0,
-        "pending_state": "New device found — Blank flash — needs firmware",
+        "pending_state": "New device found \u2014 Blank flash \u2014 needs firmware",
         "pending_can_adopt": true,
-        "pending_escapes": ["Forget"],
-        "journal_notes": ["ActivityEnded"]
+        "pending_escapes": [
+          "Forget"
+        ]
       }
     },
     {
       "at_ms": 7000,
-      "do": { "adopt": { "link": 2 } },
+      "do": {
+        "adopt": {
+          "link": 2
+        }
+      },
       "expect": {
         "devices": 1,
         "pending": 0,
-        "journal_notes": ["DeviceCreated", "LinkRouted"]
+        "journal_notes": [
+          "DeviceCreated",
+          "LinkRouted"
+        ]
       }
     }
   ]
