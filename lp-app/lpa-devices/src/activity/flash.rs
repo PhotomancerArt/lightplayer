@@ -55,6 +55,9 @@ use super::activity_cell::{
     ActivityCtx, ActivityKind, ActivityOutcome, ActivityReducer, ActivityStep,
 };
 
+/// How long a parked port gets to re-enumerate before esptool takes it.
+const PARK_SETTLE_MS: u64 = 2_500;
+
 /// The honest failure copy when every rung of the ladder stayed quiet.
 const LADDER_EXHAUSTED: &str = "firmware was written, but the board never answered. If it is \
      on a CH340/V3 bridge, unplug it, plug it back in, and use Reconnect — a replug loses the \
@@ -70,7 +73,16 @@ enum FlashPhase {
     /// mid-SYNC losses on the C6). Best effort: the reset outcome OR the
     /// deadline starts the effect either way — parking is an odds-improver,
     /// never a gate.
-    Parking { deadline: Millis },
+    Parking {
+        deadline: Millis,
+        /// Set once the downloader dance answered: entering the downloader
+        /// RE-ENUMERATES a native-USB port, and the OS needs a beat to
+        /// enumerate the replacement — handing esptool the wire before
+        /// that finishes gives it the dead generation (bench, G1
+        /// 2026-08-31: a parked flash still died at setSignals in 5.8s).
+        /// The effect starts when this settle instant passes.
+        settle_at: Option<Millis>,
+    },
     /// The coarse effect owns the wire; we absorb markers.
     Writing,
     /// The effect succeeded; the ladder is bringing the board back.
@@ -134,6 +146,7 @@ impl FlashActivity {
         if self.park_first {
             self.phase = FlashPhase::Parking {
                 deadline: now.plus_ms(ctx.config.flash_rung_ms),
+                settle_at: None,
             };
             return vec![Command::Link {
                 link,
@@ -307,8 +320,17 @@ impl FlashActivity {
             return ActivityStep::nothing();
         }
         match self.phase.clone() {
-            FlashPhase::Parking { deadline } => {
-                if now >= deadline {
+            FlashPhase::Parking {
+                deadline,
+                settle_at,
+            } => {
+                if let Some(settle_at) = settle_at {
+                    if now >= settle_at {
+                        // Parked AND enumerated: esptool gets a still,
+                        // live port.
+                        return ActivityStep::Continue(self.start_effect(ctx));
+                    }
+                } else if now >= deadline {
                     // Parking is an odds-improver, never a gate: if the
                     // downloader dance went quiet, hand esptool the wire
                     // and let it fight its own fight.
@@ -431,8 +453,16 @@ impl FlashActivity {
                 if matches!(self.phase, FlashPhase::Parking { .. }) && !self.winding_down =>
             {
                 // Parked (or the dance failed — either way the answer is
-                // in): the flasher takes the wire now.
-                ActivityStep::Continue(self.start_effect(ctx))
+                // in). Not the wire yet: the dance re-enumerated the port,
+                // so wait out the OS's enumeration before the flasher
+                // takes it.
+                if let FlashPhase::Parking { deadline, .. } = self.phase {
+                    self.phase = FlashPhase::Parking {
+                        deadline,
+                        settle_at: Some(now.plus_ms(PARK_SETTLE_MS)),
+                    };
+                }
+                ActivityStep::nothing()
             }
             LinkEvent::Opened { .. }
             | LinkEvent::Line(_)
@@ -492,7 +522,10 @@ impl ActivityReducer for FlashActivity {
             return None;
         }
         match &self.phase {
-            FlashPhase::Parking { deadline } => Some(*deadline),
+            FlashPhase::Parking {
+                deadline,
+                settle_at,
+            } => Some(settle_at.map_or(*deadline, |settle| settle.min(*deadline))),
             // The effect drives; the supervision backstop bounds it (I1).
             FlashPhase::Writing => None,
             FlashPhase::Reconnecting {
@@ -547,7 +580,9 @@ mod tests {
             "the effect waits for the downloader"
         );
 
-        // The dance answers (either way) — the flasher takes the wire.
+        // The dance answers — but the port just re-enumerated, so the
+        // flasher waits out the settle rather than grabbing a dead
+        // generation.
         let step = with_ctx(&evidence, &config, |ctx| {
             activity.handle(
                 Millis(100),
@@ -561,14 +596,40 @@ mod tests {
                 ctx,
             )
         });
+        assert!(
+            matches!(step, ActivityStep::Continue(ref commands) if commands.is_empty())
+                || matches!(step, ActivityStep::Continue(_)) == false,
+            "the effect does NOT start at the outcome: {step:?}"
+        );
+        assert!(
+            activity
+                .next_deadline()
+                .is_some_and(|at| at <= Millis(2_600)),
+            "the settle instant is armed: {:?}",
+            activity.next_deadline()
+        );
+
+        // The settle passes — NOW esptool takes the wire.
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(2_700),
+                &Input::Event(Event::TimerFired {
+                    timer: crate::time::TimerId {
+                        scope: crate::journal::Scope::Device(DeviceId(1)),
+                        seq: 1,
+                    },
+                }),
+                ctx,
+            )
+        });
         let ActivityStep::Continue(commands) = step else {
-            panic!("parking continues into the write: {step:?}");
+            panic!("the settle hands over the wire: {step:?}");
         };
         assert!(
             commands
                 .iter()
                 .any(|command| matches!(command, Command::RunEffect { .. })),
-            "the effect starts once parked: {commands:?}"
+            "the effect starts once parked AND enumerated: {commands:?}"
         );
     }
 
