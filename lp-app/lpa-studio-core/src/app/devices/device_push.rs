@@ -108,7 +108,9 @@ pub fn push_offer(
         choices.push(PushSourceChoice {
             key: format!("example:{}", example.id),
             title: example.name.clone(),
-            blurb: example.blurb.clone(),
+            // Examples lost their blurbs in the card-overlay slim (#470);
+            // the kind chip label is what identifies one now.
+            blurb: example.kind.clone(),
             group: PushSourceGroup::Example,
             source: PushSource::Example {
                 example_id: example.id.clone(),
@@ -270,7 +272,6 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             kind: "Module".to_string(),
-            blurb: "a blurb".to_string(),
         }
     }
 
