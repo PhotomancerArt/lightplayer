@@ -114,6 +114,12 @@ pub struct FlashActivity {
     board_id: String,
     build_id: String,
     park_first: bool,
+    /// Dead-port retries left. Enumeration jitter after the park has more
+    /// faces than one settle constant covers (bench: esptool died at
+    /// setSignals ~8s AFTER a clean park) — one in-activity retry
+    /// re-settles and hands the wire over again; the chip is already
+    /// parked, so the retry costs seconds and no dance.
+    open_retries_left: u8,
     phase: FlashPhase,
     /// Cancel arrived during the write window: esptool cannot stop cleanly,
     /// so the wind-down happens when the effect ends instead of the ladder.
@@ -130,6 +136,7 @@ impl FlashActivity {
             board_id,
             build_id,
             park_first,
+            open_retries_left: 1,
             phase: FlashPhase::Writing,
             cancel_after_effect: false,
             winding_down: false,
@@ -286,6 +293,21 @@ impl FlashActivity {
                     return self.wind_down(ctx);
                 }
                 match outcome {
+                    ActivityOutcome::Failed { message }
+                        if self.open_retries_left > 0
+                            && (message.contains("Failed to open serial port")
+                                || message.contains("port is closed")) =>
+                    {
+                        // The dead-port signature: esptool grabbed a stale
+                        // generation. The chip is parked (or parking is
+                        // moot); re-settle and hand the wire over again.
+                        self.open_retries_left -= 1;
+                        self.phase = FlashPhase::Parking {
+                            deadline: now.plus_ms(ctx.config.flash_rung_ms),
+                            settle_at: Some(now.plus_ms(PARK_SETTLE_MS)),
+                        };
+                        ActivityStep::nothing()
+                    }
                     ActivityOutcome::Succeeded { .. } => {
                         // The flasher's closing hard reset just rebooted the
                         // board (and on a C6, re-enumerated its port). Climb.

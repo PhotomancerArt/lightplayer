@@ -255,9 +255,15 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
 }
 
 /// Whether a classification is one Flash fixes: blank or erased flash, a
-/// board parked in the ROM downloader, somebody else's firmware, or a
-/// LightPlayer this build cannot speak to. All four get the board pick +
-/// "Flash firmware" face.
+/// board parked in the ROM downloader, somebody else's firmware, a
+/// LightPlayer this build cannot speak to — or a board that answers
+/// NOTHING. The settled-quiet arm is the old wizard's Unresponsive
+/// verdict, which offered flash after its bootloader escalation; our
+/// parking IS that escalation now, and without this arm a silent chip
+/// (parked in the downloader by a failed flash, say) had no verb at all
+/// (it bit three times at G1, 2026-08-31). The widened pick's copy says
+/// the pick is checked against the silicon before anything is written —
+/// the chip guard is the safety, here as everywhere.
 fn needs_firmware(classification: &Classification) -> bool {
     matches!(
         classification,
@@ -265,6 +271,7 @@ fn needs_firmware(classification: &Classification) -> bool {
             | Classification::Bootloader
             | Classification::Foreign { .. }
             | Classification::Incompatible { .. }
+            | Classification::Quiet { .. }
     )
 }
 
