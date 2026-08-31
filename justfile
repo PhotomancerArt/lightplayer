@@ -1989,8 +1989,13 @@ hardware-list *args:
 # honored without MDM. On an unmanaged Mac that means a configuration
 # profile installed by hand.
 #
-# So this recipe generates target/serial-grant.mobileconfig (an MCX
-# custom-settings profile forcing the policy for Brave) and opens it.
+# So this recipe generates ~/.photomancer/serial-grant.mobileconfig (an MCX
+# custom-settings profile forcing the policy for Brave) and opens it. NOT
+# target/ — a cargo-cache prune wiped the profile there before it could be
+# installed (2026-08-31); ~/.photomancer survives pruning, reboots, and
+# worktree deletion, and the recipe works identically from any worktree.
+# Once the profile is INSTALLED the file itself is disposable — macOS keeps
+# the profile; rerun this recipe any time to regenerate.
 # Finish the install yourself: System Settings → General → Device
 # Management → double-click the downloaded profile → Install (admin
 # password). Then restart Brave and verify at brave://policy that
@@ -2012,8 +2017,8 @@ serial-grant:
     # Stale user-domain defaults from the refuted approach only muddy
     # diagnosis; clear them if present.
     defaults delete com.brave.Browser SerialAllowAllPortsForUrls 2>/dev/null || true
-    mkdir -p target
-    cat > target/serial-grant.mobileconfig <<'EOF'
+    mkdir -p "$HOME/.photomancer"
+    cat > "$HOME/.photomancer/serial-grant.mobileconfig" <<'EOF'
     <?xml version="1.0" encoding="UTF-8"?>
     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
     <plist version="1.0">
@@ -2071,7 +2076,7 @@ serial-grant:
     </dict>
     </plist>
     EOF
-    open target/serial-grant.mobileconfig
+    open "$HOME/.photomancer/serial-grant.mobileconfig"
     echo "profile generated and handed to macOS."
     echo "finish: System Settings → General → Device Management → install it (admin password)"
     echo "then:   restart Brave and check brave://policy (SerialAllowAllPortsForUrls, level Mandatory)"
