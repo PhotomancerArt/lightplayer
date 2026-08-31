@@ -1,7 +1,7 @@
-//! The header **session·project control**: one shell, three segments, ONE
-//! panel — `[ device | project | changes ]`, segments as tabs.
+//! The header **session·project control**: one shell, four segments, ONE
+//! panel — `[ device | project | changes | history ]`, segments as tabs.
 //!
-//! `❖ Sim · ESP32-C6 │ ◈ small dome · 🔒 Private │ ✎ ② [Save]` — one bordered
+//! `❖ Sim · ESP32-C6 │ ◈ small dome · 🔒 Private │ ✎ ② │ ⟲ [Save]` — one bordered
 //! shell with internal hairlines, each segment a tab into the shared panel
 //! anchored on the whole shell, and Save standing beside the shell as the
 //! one direct act (relationship-control D7/D8 as amended by D15, spike
@@ -38,13 +38,17 @@
 //! glyphs stay), the changes segment goes count-only and the padding tightens
 //! below 560px.
 //!
-//! **Three sections, three concepts.** The device section states what is
-//! running; the changes section lists what is in flight AND carries the
-//! document's banked history below it (D14 — changes and history are one
-//! temporal axis); the project section is [`ProjectRelationshipPanel`] —
-//! the identity skeleton (Where / Access / action row) rendered for all
-//! five [`ProjectRelationship`] states. The detail sections that used to
-//! hang here are not homeless: they sit behind that panel's ⋯ menu.
+//! **Four sections, four concepts.** The device section states what is
+//! running; the changes section lists what is in flight; the history
+//! section is the document's banked timeline (D14 as re-ruled at G1
+//! round 2: its own tab — one box with changes was too much, and an
+//! inner tab row would have made two tab layers; the changes receipt
+//! still names the version Save will bank, so the two segments read one
+//! ledger from opposite ends); the project section is
+//! [`ProjectRelationshipPanel`] — the identity skeleton (Where / Access /
+//! action row) rendered for all five [`ProjectRelationship`] states. The
+//! detail sections that used to hang here are not homeless: they sit
+//! behind that panel's ⋯ menu.
 //!
 //! The control is presentational: everything it renders comes from
 //! [`UiChromeSessionControl`] (core's projection of THE session), the open
@@ -90,8 +94,12 @@ pub enum ControlSegment {
     Device,
     /// The project segment — what document is open.
     Project,
-    /// The changes segment — what is in flight, over the banked history.
+    /// The changes segment — what is in flight.
     Changes,
+    /// The history segment — the document's banked timeline (D14 as
+    /// re-ruled at G1 round 2: its own tab, not a lower half of changes —
+    /// one box for both was too much, and two tab layers were worse).
+    History,
 }
 
 /// Everything the header control renders: THE session (core's control
@@ -225,7 +233,7 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
     // The panel chrome (tone stroke) follows the OPEN section, so the one
     // panel still speaks each section's status language.
     let tone = match section() {
-        ControlSegment::Device => IconMenuTone::Quiet,
+        ControlSegment::Device | ControlSegment::History => IconMenuTone::Quiet,
         ControlSegment::Project => style.map_or(IconMenuTone::Quiet, |style| style.tone),
         ControlSegment::Changes => dirty.map(changes_tone).unwrap_or(IconMenuTone::Quiet),
     };
@@ -305,10 +313,20 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
                         },
                         ControlSegment::Changes => rsx! {
                             if let Some(changes) = panel_changes.clone() {
-                                SessionChangesPanel {
-                                    changes,
+                                SessionChangesPanel { changes, on_action }
+                            } else {
+                                DetailSection {
+                                    p { class: "tw:m-0 tw:text-xs tw:italic tw:leading-snug tw:text-dim-foreground",
+                                        "No project open on this session."
+                                    }
+                                }
+                            }
+                        },
+                        ControlSegment::History => rsx! {
+                            if let Some(project) = panel_project.clone() {
+                                SessionHistoryPanel {
                                     relationship: panel_relationship,
-                                    on_action,
+                                    history: project.history().clone(),
                                 }
                             } else {
                                 DetailSection {
@@ -385,7 +403,8 @@ fn segments_rsx(
     let changes_tint = dirty.map(changes_tint).unwrap_or(SegmentTint::None);
     let has_changes = dirty.is_some();
     // The project segment is the last one only while no project is open —
-    // with one open, changes closes the shell.
+    // with one open, changes and history follow it and history closes the
+    // shell.
     let project_edge = if has_changes {
         SegmentEdge::Middle
     } else {
@@ -464,7 +483,7 @@ fn segments_rsx(
         if let Some(dirty) = dirty {
             span { class: DIVIDER_CLASS }
             button {
-                class: segment_class(SegmentEdge::Last, changes_tint, segment_open(ControlSegment::Changes)),
+                class: segment_class(SegmentEdge::Middle, changes_tint, segment_open(ControlSegment::Changes)),
                 r#type: "button",
                 aria_label: "{changes_label}",
                 aria_expanded: "{segment_open(ControlSegment::Changes)}",
@@ -490,6 +509,26 @@ fn segments_rsx(
                     if dirty.failed > 0 {
                         span { class: FAILED_PILL_CLASS, "{dirty.failed}" }
                     }
+                }
+            }
+            // The history segment: the banked timeline's own tab (D14 as
+            // re-ruled) — a lone quiet glyph, present exactly while a
+            // document is open, like changes. Rides no fold: a glyph is
+            // already the narrow form.
+            span { class: DIVIDER_CLASS }
+            button {
+                class: segment_class(SegmentEdge::Last, SegmentTint::None, segment_open(ControlSegment::History)),
+                r#type: "button",
+                aria_label: "History",
+                aria_expanded: "{segment_open(ControlSegment::History)}",
+                aria_haspopup: "dialog",
+                title: HISTORY_TITLE,
+                onclick: move |event| {
+                    event.stop_propagation();
+                    press(ControlSegment::History);
+                },
+                span { class: "tw:flex tw:flex-none tw:items-center tw:text-dim-foreground",
+                    StudioIcon { name: StudioIconName::History, size: 12 }
                 }
             }
         }
@@ -552,8 +591,7 @@ pub fn SessionDevicePanel(session: UiChromeSessionControl) -> Element {
     }
 }
 
-/// The CHANGES section: what is in flight, the verbs that end it, and the
-/// banked history below it (D14).
+/// The CHANGES section: what is in flight, and the verbs that end it.
 ///
 /// Dirty: the labeled pending edits with their per-entry reverts (the SAME
 /// [`PendingEditList`] the detail sections used to host — re-homed, not
@@ -564,26 +602,13 @@ pub fn SessionDevicePanel(session: UiChromeSessionControl) -> Element {
 /// it says the edits are live on THIS session and that Save banks them to
 /// the library, which is exactly what it knows.
 ///
-/// **The banked timeline rides underneath** (D14, amending D10): changes
-/// and history are one temporal axis — the receipt's "Save banks v13" and
-/// the timeline's "v12 saved" are the same ledger read from opposite ends
-/// — so the pending block sits on top and the document's history sits
-/// below it, in one panel, with no tab between them. No synthetic
-/// "editing" row in the timeline: the pending block IS the in-flight
-/// statement.
+/// The banked timeline is the HISTORY segment next door (D14 as re-ruled
+/// at G1 round 2: one box for both was too much) — but the receipt still
+/// names the version Save will bank, which is the timeline's next row:
+/// the two segments read one ledger from opposite ends.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn SessionChangesPanel(
-    changes: ProjectChanges,
-    /// Selects the history empty-line honesty rule (an Example's seeded
-    /// rows are bookkeeping, not the person's history).
-    relationship: ProjectRelationship,
-    /// Fixed clock for the history rows in stories; `None` uses the
-    /// platform clock.
-    #[props(default)]
-    now_secs: Option<f64>,
-    on_action: EventHandler<UiAction>,
-) -> Element {
+pub fn SessionChangesPanel(changes: ProjectChanges, on_action: EventHandler<UiAction>) -> Element {
     let ProjectChanges {
         affordance,
         dirty,
@@ -601,11 +626,6 @@ pub fn SessionChangesPanel(
         || dirty.failed > 0
         || !unsaved_entries.is_empty()
         || !failed_entries.is_empty();
-    let timeline = rsx! {
-        DetailSection { title: "History",
-            HistoryList { relationship, history: history.clone(), now_secs }
-        }
-    };
 
     if !anything_pending {
         return rsx! {
@@ -614,7 +634,6 @@ pub fn SessionChangesPanel(
                     "All saved \u{2014} nothing pending."
                 }
             }
-            {timeline}
         };
     }
 
@@ -673,7 +692,26 @@ pub fn SessionChangesPanel(
                 }
             }
         }
-        {timeline}
+    }
+}
+
+/// The HISTORY section: the document's banked timeline, read-only — its
+/// own tab of the shared panel (D14 as re-ruled at G1 round 2: Yona,
+/// "a 4th tab is fine now"). The rows are [`HistoryList`]; the Example
+/// empty-line honesty rule rides the relationship.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn SessionHistoryPanel(
+    relationship: ProjectRelationship,
+    history: lpa_studio_core::UiProjectHistory,
+    /// Fixed clock for stories; `None` uses the platform clock.
+    #[props(default)]
+    now_secs: Option<f64>,
+) -> Element {
+    rsx! {
+        DetailSection { title: "History",
+            HistoryList { relationship, history, now_secs }
+        }
     }
 }
 
@@ -966,6 +1004,8 @@ const COUNT_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border
 const FAILED_PILL_CLASS: &str = "tw:flex-none tw:rounded-full tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-1.5 tw:font-mono tw:text-[9.5px] tw:font-semibold tw:text-status-error-foreground";
 /// The changes segment's tooltip: what the popup is about, in one line.
 const CHANGES_TITLE: &str = "Changes — live on this session, banked to your library on Save";
+/// The history segment's tooltip.
+const HISTORY_TITLE: &str = "History — this document's saved versions, read-only";
 
 #[cfg(test)]
 mod tests {

@@ -85,10 +85,11 @@ The face is **neutral** (no accent, post-`#478`; no status-blue for
 "Shared"): a face states who this document is to you, which is identity,
 not health.
 
-### 2. The bar is three segments — tabs into ONE shared panel
+### 2. The bar is four segments — tabs into ONE shared panel
 
-`[ device | project | changes ]` — one bordered shell with internal
-hairlines, and Save standing beside the shell as the one direct act.
+`[ device | project | changes | history ]` — one bordered shell with
+internal hairlines, and Save standing beside the shell as the one direct
+act. (History joined as the fourth segment at the round-2 gate — see §5.)
 
 Round 1 shipped this as three independent `DetailPopover` triggers; the
 G1 round-2 ruling (D15) replaced them with **one panel, segments as
@@ -123,8 +124,8 @@ what makes the sibling necessary, and it is unchanged).
 
 Three questions was also the answer to *where the old detail popup goes*:
 the device section states what is running, the changes section lists what
-is in flight over the banked history, and the project section is the
-document's own panel, with the surviving settings/identity/stats sections
+is in flight, the history section is the banked timeline, and the project
+section is the document's own panel, with the surviving settings/identity/stats sections
 behind its ⋯ menu's Details row.
 
 ### 3. Changes are their own concept, and Save stays a sibling
@@ -180,23 +181,25 @@ rejected rounds looked like.
   edge. The node-style vertical rail was built and **rejected** at spike
   round 6.
 
-### 5. History is the changes panel's banked timeline (D14)
+### 5. History is its own segment — the fourth tab (D14, as re-ruled)
 
 `ProjectHistory::events()` gets its first UI consumer as the read-only
-**banked timeline under the changes section's pending block**: version,
-kind, what, when — newest first, from core's capped projection of the
-OPEN handle's own events. Round 1 put it behind a History tab of the
-document popover; the G1 round-2 ruling moved it: **changes and history
-are one temporal axis** — the receipt "Save banks v13" and the timeline's
-"v12 saved" are the same ledger read from opposite ends — so the pending
-block sits on top and the banked rows below, in one panel, with no tab
-between them. The project popover keeps the identity axis alone. The
-receipt now names the version Save will bank when the projection knows
-it, and the timeline carries no synthetic "editing" row (the pending
-block above IS the in-flight statement). No server fetch, so the timeline
-never claims completeness it does not have, and a transient example gets
-the honest empty state ("history begins at your first save") rather than
-a list of the open's own bookkeeping.
+**banked timeline behind the bar's fourth segment** (a lone history
+glyph): version, kind, what, when — newest first, from core's capped
+projection of the OPEN handle's own events. This landed in three steps.
+Round 1 put history behind a tab of the document popover; the round-2
+ruling (D14) moved it out — the project popover keeps the identity axis
+alone. The first round-2 build stacked it UNDER the changes section's
+pending block (one temporal axis, one box); at the round-2 gate that read
+as too much for one box, and an inner tab row inside changes was rejected
+as a second tab layer — so the timeline is its own segment, next door to
+changes. The ledger adjacency survives in words: the changes receipt
+names the version Save will bank ("Save banks v13"), which is exactly the
+row the History segment will grow next. The timeline carries no synthetic
+"editing" row (the changes section IS the in-flight statement). No server
+fetch, so it never claims completeness it does not have, and a transient
+example gets the honest empty state ("history begins at your first save")
+rather than a list of the open's own bookkeeping.
 
 **Restore stays parked.** `SnapshotStore::materialize` and
 `LocalProject::checkout` exist; putting a verb on these rows is its own
@@ -284,9 +287,12 @@ destination now is what keeps the next person from inventing a third home.
   not a property of the document's identity, they span the device and the
   library, and burying them under "what is this project" is the wart the
   old detail popup already had.
-- **History as its own door / in-panel navigation.** Rejected round 1 in
-  favor of a tab; the tab itself was then rejected at G1 round 2 (D14) in
-  favor of riding the changes panel — same ledger, one panel.
+- **History under the changes panel's pending block** (the first round-2
+  build — one temporal axis, one box). Rejected at the round-2 gate: too
+  much in one box for a feature with no richness yet.
+- **An inner [Changes | History] tab row inside the changes section.**
+  Rejected at the round-2 gate: two tab layers (bar segments outside, a
+  tab row inside) is worse than a fourth segment.
 - **Three independent per-segment popovers** (round 1 as shipped).
   Rejected at G1 round 2 (D15): section-switching read as tabs but cost a
   close-reopen animation each time; the lifted-state single panel switches

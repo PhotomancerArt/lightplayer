@@ -2,9 +2,9 @@ use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Activity, ArrowUpRight, Asterisk, Bot, Boxes, ChartLine, Check, ChevronDown, ChevronRight,
     CircleAlert, CircleDot, CircleMinus, CircleQuestionMark, Clock, Copy, Cpu, Download, Droplet,
-    Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash, Image, Info, Lightbulb, Link,
-    Link2, Link2Off, ListMusic, Locate, LocateFixed, Lock, Maximize2, Minimize2, MonitorPlay,
-    MousePointerClick, Pencil, Play, Plus, Radio, Route, Save, Settings, Sparkles,
+    Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash, History, Image, Info,
+    Lightbulb, Link, Link2, Link2Off, ListMusic, Locate, LocateFixed, Lock, Maximize2, Minimize2,
+    MonitorPlay, MousePointerClick, Pencil, Play, Plus, Radio, Route, Save, Settings, Sparkles,
     SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Users, Waypoints,
     X, Zap,
 };
@@ -30,6 +30,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::NodeTreeItem => rsx! { Boxes { size } },
         StudioIconName::Edited => rsx! { Pencil { size } },
         StudioIconName::Info => rsx! { Info { size } },
+        StudioIconName::History => rsx! { History { size } },
         StudioIconName::Help => rsx! { CircleQuestionMark { size } },
         StudioIconName::InfoBare => rsx! {
             span {
@@ -132,6 +133,8 @@ pub enum StudioIconName {
     NodeTreeItem,
     Edited,
     Info,
+    /// Clock with a counter-clockwise arrow: the document's history.
+    History,
     /// The "?" help affordance (docs deep links).
     Help,
     InfoBare,

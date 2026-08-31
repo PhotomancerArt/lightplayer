@@ -19,6 +19,7 @@ use lpa_studio_web_story_macros::story;
 
 use crate::app::layout::session_control::{
     ChromeSessionControl, ControlSegment, ProjectPopoverInputs, SessionChangesPanel,
+    SessionHistoryPanel,
 };
 use crate::app::layout::site_chrome::{
     ChromeModeToggle, ChromeProjectMenu, SiteChrome, SiteSection,
@@ -184,7 +185,7 @@ pub(crate) fn control_device_popover_open() -> Element {
 
 #[story(
     label = "Project popover open — the document",
-    description = "The PROJECT section of the shared panel in the real chrome: the identity skeleton (Where \u{2192} Access \u{2192} action row; history moved to the changes section at D14) hanging off the Example face, with the merged outline anchored on the WHOLE shell \u{2014} the bar is the tab row (D15), and the open segment wears the selected treatment. Mounted with empty popover inputs \u{2014} no address, no roster, no ledger \u{2014} which is the honest cold-start shape; the panel's own stories cover the five states with their data."
+    description = "The PROJECT section of the shared panel in the real chrome: the identity skeleton (Where \u{2192} Access \u{2192} action row; history is its own segment now, D14 as re-ruled) hanging off the Example face, with the merged outline anchored on the WHOLE shell \u{2014} the bar is the tab row (D15), and the open segment wears the selected treatment. Mounted with empty popover inputs \u{2014} no address, no roster, no ledger \u{2014} which is the honest cold-start shape; the panel's own stories cover the five states with their data."
 )]
 pub(crate) fn control_project_popover_open() -> Element {
     rsx! {
@@ -196,7 +197,7 @@ pub(crate) fn control_project_popover_open() -> Element {
 
 #[story(
     label = "Changes popup open — dirty (hardware)",
-    description = "The CHANGES section on a dirty hardware session — the third question, in its own home: the labeled pending edits with per-entry revert, the pending facts, an honest receipt (\"already live in this session\" — it never claims cloud state it cannot see), the controller's own Save plus the Revert-all that retired the \u{21ba} sibling, and the banked History underneath (D14 — one temporal axis; this never-saved fixture shows the honest empty line). The counts here are the same ones the closed segment shows."
+    description = "The CHANGES section on a dirty hardware session — the third question, in its own home: the labeled pending edits with per-entry revert, the pending facts, an honest receipt (\"already live in this session\" — it never claims cloud state it cannot see), and the controller's own Save plus the Revert-all that retired the \u{21ba} sibling. The banked timeline is the HISTORY segment next door (D14 as re-ruled: a 4th tab, not a lower half of this box). The counts here are the same ones the closed segment shows."
 )]
 pub(crate) fn control_changes_popup_open() -> Element {
     rsx! {
@@ -208,7 +209,7 @@ pub(crate) fn control_changes_popup_open() -> Element {
 
 #[story(
     label = "Changes popup open — clean",
-    description = "The clean half of the changes popup: one plain line over the banked History (empty here, honestly). The segment is always present (a quiet \u{2713}), so \"nothing pending\" is a state you can click into and confirm rather than an absence you have to infer."
+    description = "The clean half of the changes popup: one plain line. The segment is always present (a quiet \u{2713}), so \"nothing pending\" is a state you can click into and confirm rather than an absence you have to infer."
 )]
 pub(crate) fn control_changes_popup_clean() -> Element {
     rsx! {
@@ -219,46 +220,54 @@ pub(crate) fn control_changes_popup_clean() -> Element {
 }
 
 #[story(
-    label = "Changes panel — pending over banked history",
-    description = "The merged changes panel (D14), mounted directly with a fixed clock: the pending block on top (two unsaved edits, the receipt naming the version Save will bank — v13, the same number the timeline's newest row will wear after the save), and the document's banked history underneath — version, kind, what, when; a push names its device by uid (resolving names needs the async device registry). One panel, no tab between the two ends of the ledger."
+    label = "History popover open — the fourth tab",
+    description = "The HISTORY segment's section in the real chrome (D14 as re-ruled at G1 round 2: the banked timeline is its own tab — one box with changes was too much, and an inner tab row would have made two tab layers). A lone quiet clock-arrow glyph closes the shell; the section is the read-only timeline. This never-saved fixture shows the honest empty line."
 )]
-pub(crate) fn control_changes_panel_history() -> Element {
+pub(crate) fn control_history_popover_open() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[300px]",
+            {control_row(700, sim_control(Some("ESP32-C6")), Some(control_content(0, 0, UiStatus::good("Ready"))), Some(ControlSegment::History))}
+        }
+    }
+}
+
+#[story(
+    label = "Changes panel — the receipt names vNEXT",
+    description = "The changes panel, mounted directly, on a project whose projection knows its next version: the receipt says \"Save banks v13\" — the same number the History segment's newest row will wear after the save. The two segments read one ledger from opposite ends, which is why they sit next door to each other."
+)]
+pub(crate) fn control_changes_panel_dirty() -> Element {
     changes_panel_frame(rsx! {
         SessionChangesPanel {
             changes: dirty_content_with_history().changes(),
-            relationship: ProjectRelationship::MinePublished,
-            now_secs: STORY_NOW,
             on_action: EventHandler::new(|_| {}),
         }
     })
 }
 
 #[story(
-    label = "Changes panel — clean, with history",
-    description = "The same merged panel with nothing pending: the quiet all-saved line, then the banked timeline. Clean is not empty — the document still has a past, and this is where it reads."
+    label = "History panel — the banked timeline",
+    description = "The HISTORY section mounted directly with a fixed clock: version, kind, what, when — newest first, read-only; a push names its device by uid (resolving names needs the async device registry), and the footer says restore has not landed."
 )]
-pub(crate) fn control_changes_panel_clean_history() -> Element {
+pub(crate) fn control_history_panel() -> Element {
     changes_panel_frame(rsx! {
-        SessionChangesPanel {
-            changes: content_with_history(0, 0, UiStatus::good("Ready")).changes(),
+        SessionHistoryPanel {
             relationship: ProjectRelationship::MinePublished,
+            history: history(),
             now_secs: STORY_NOW,
-            on_action: EventHandler::new(|_| {}),
         }
     })
 }
 
 #[story(
-    label = "Changes panel — example keeps the empty line",
+    label = "History panel — example keeps the empty line",
     description = "A built-in example's session DOES carry history rows — the transient open seeds a provenance origin plus an initial save — but that is bookkeeping, not something the person did, so the timeline says \"no history yet\" even with rows on hand. It is the same sentence that stays true after Save a copy: the real rows begin at the first save."
 )]
-pub(crate) fn control_changes_panel_example() -> Element {
+pub(crate) fn control_history_panel_example() -> Element {
     changes_panel_frame(rsx! {
-        SessionChangesPanel {
-            changes: content_with_history(0, 0, UiStatus::good("Ready")).changes(),
+        SessionHistoryPanel {
             relationship: ProjectRelationship::Example,
+            history: history(),
             now_secs: STORY_NOW,
-            on_action: EventHandler::new(|_| {}),
         }
     })
 }
@@ -538,15 +547,6 @@ fn dirty_content_with_history() -> ProjectDetailContent {
     ];
     editor.history = history();
     ProjectDetailContent::new(&editor, UiStatus::good("Ready"))
-}
-
-/// The shared control content with the history fixture stamped on.
-fn content_with_history(persisted: usize, failed: usize, status: UiStatus) -> ProjectDetailContent {
-    let mut editor = project_editor_fixture(ProjectSyncPhase::Ready);
-    editor.dirty = DirtySummary { persisted, failed };
-    editor.header_actions = save_revert_actions(persisted);
-    editor.history = history();
-    ProjectDetailContent::new(&editor, status)
 }
 
 /// A representative log: a fork origin, saves, a push, and a join —
