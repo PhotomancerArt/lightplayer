@@ -1969,6 +1969,137 @@ watch-pr *args:
 hardware-list *args:
     cargo run -q -p lp-cli -- hardware list {{ args }}
 
+# Remove the WebSerial chooser dialog for local dev servers by granting Brave
+# standing serial access via the Chromium enterprise policy
+# SerialAllowAllPortsForUrls. Why: the chooser is a NATIVE dialog no agent
+# tooling can click, and per-device grants are fragile anyway — Brave drops
+# them on reload, and CH340 boards carry no USB serial number so a grant
+# also dies on replug.
+#
+# ⚠️ A plain `defaults write com.brave.Browser ...` DOES NOT WORK for this
+# policy — empirically refuted 2026-08-30 (fresh Brave relaunch, getPorts()
+# probe returned zero grants). Mechanism, from Chromium source: the macOS
+# policy loader treats non-forced preferences as POLICY_LEVEL_RECOMMENDED
+# (policy_loader_mac.mm), and SerialAllowAllPortsForUrls is mandatory-only
+# (no can_be_recommended in its template), so the value is silently
+# dropped. Generic blog examples of `defaults write` policies work because
+# most of those policies accept the recommended level; this family doesn't.
+# The policy is NOT in GetSensitivePolicies(), so it is not subject to the
+# unmanaged-machine sensitive filter — a FORCED (managed) preference is
+# honored without MDM. On an unmanaged Mac that means a configuration
+# profile installed by hand.
+#
+# So this recipe generates ~/.photomancer/serial-grant.mobileconfig (an MCX
+# custom-settings profile forcing the policy for Brave) and opens it. NOT
+# target/ — a cargo-cache prune wiped the profile there before it could be
+# installed (2026-08-31); ~/.photomancer survives pruning, reboots, and
+# worktree deletion, and the recipe works identically from any worktree.
+# Once the profile is INSTALLED the file itself is disposable — macOS keeps
+# the profile; rerun this recipe any time to regenerate.
+# Finish the install yourself: System Settings → General → Device
+# Management → double-click the downloaded profile → Install (admin
+# password). Then restart Brave and verify at brave://policy that
+# SerialAllowAllPortsForUrls shows level "Mandatory" with no error badge;
+# the real proof is navigator.serial.getPorts() returning ports with no
+# gesture on a dev page.
+#
+# The URL patterns are PORT-LESS on purpose: the enterprise URL-pattern
+# format treats a missing port as "any port", and dev-port.sh hashes each
+# worktree's server into 20000-40000, so enumerating ports is a losing
+# game. Scope stays loopback-only — no external origin gains serial access.
+#
+# Note the dialog did TWO jobs — permission grant AND port selection. This
+# grant replaces only the permission half; picking WHICH port belongs to
+# the app (navigator.serial.getPorts() + VID filtering in the device flow).
+serial-grant:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Stale user-domain defaults from the refuted approach only muddy
+    # diagnosis; clear them if present.
+    defaults delete com.brave.Browser SerialAllowAllPortsForUrls 2>/dev/null || true
+    mkdir -p "$HOME/.photomancer"
+    cat > "$HOME/.photomancer/serial-grant.mobileconfig" <<'EOF'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+      <key>PayloadContent</key>
+      <array>
+        <dict>
+          <key>PayloadContent</key>
+          <dict>
+            <key>com.brave.Browser</key>
+            <dict>
+              <key>Forced</key>
+              <array>
+                <dict>
+                  <key>mcx_preference_settings</key>
+                  <dict>
+                    <key>SerialAllowAllPortsForUrls</key>
+                    <array>
+                      <string>http://localhost</string>
+                      <string>http://127.0.0.1</string>
+                    </array>
+                  </dict>
+                </dict>
+              </array>
+            </dict>
+          </dict>
+          <key>PayloadEnabled</key>
+          <true/>
+          <key>PayloadDisplayName</key>
+          <string>Brave WebSerial localhost grant</string>
+          <key>PayloadIdentifier</key>
+          <string>art.photomancer.serial-grant.brave</string>
+          <key>PayloadType</key>
+          <string>com.apple.ManagedClient.preferences</string>
+          <key>PayloadUUID</key>
+          <string>FB16DE69-D966-44B2-B6A5-D14DA8A59EEC</string>
+          <key>PayloadVersion</key>
+          <integer>1</integer>
+        </dict>
+      </array>
+      <key>PayloadDisplayName</key>
+      <string>LightPlayer dev — Brave WebSerial grant (loopback only)</string>
+      <key>PayloadIdentifier</key>
+      <string>art.photomancer.serial-grant</string>
+      <key>PayloadRemovalDisallowed</key>
+      <false/>
+      <key>PayloadScope</key>
+      <string>System</string>
+      <key>PayloadType</key>
+      <string>Configuration</string>
+      <key>PayloadUUID</key>
+      <string>99F61D66-9FD2-45C9-BC37-21CD65901EE0</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+    </dict>
+    </plist>
+    EOF
+    open "$HOME/.photomancer/serial-grant.mobileconfig"
+    echo "profile generated and handed to macOS."
+    echo "finish: System Settings → General → Device Management → install it (admin password)"
+    echo "then:   restart Brave and check brave://policy (SerialAllowAllPortsForUrls, level Mandatory)"
+
+# Best-effort check of the standing grant: managed preferences appear under
+# /Library/Managed Preferences once the profile is installed. brave://policy
+# is the authoritative view.
+serial-grant-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if defaults read "/Library/Managed Preferences/com.brave.Browser" SerialAllowAllPortsForUrls 2>/dev/null; then
+      echo "managed grant present (verify level Mandatory at brave://policy)"
+    else
+      echo "no managed grant found — run \`just serial-grant\` and install the profile"
+      exit 1
+    fi
+
+# Remove the standing grant. Configuration profiles cannot be removed from
+# the CLI on modern macOS; do it in System Settings.
+serial-ungrant:
+    @echo 'System Settings → General → Device Management → "LightPlayer dev — Brave WebSerial grant" → Remove'
+    @defaults delete com.brave.Browser SerialAllowAllPortsForUrls 2>/dev/null || true
+
 # Build and flash a FIXTURE firmware — a CURRENT build that misreports its
 # hello, so a current Studio classifies it Incompatible on purpose.
 #
