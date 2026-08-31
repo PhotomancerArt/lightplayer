@@ -30,6 +30,11 @@ pub fn DetailPopover(
     #[props(default = PopoverPlacement::BottomEnd)] placement: PopoverPlacement,
     #[props(default = false)] active: bool,
     #[props(default = false)] initially_open: bool,
+    /// Controlled-open pass-through (see `PopoverButton`): the caller owns
+    /// the open state, so sibling controls can drive one panel. Custom
+    /// `trigger` mode only.
+    #[props(default = None)]
+    open_signal: Option<Signal<bool>>,
     /// Custom trigger content replacing the icon trigger (the panel
     /// control's label-as-trigger). Presentational only — the popover base
     /// still owns the button.
@@ -67,6 +72,7 @@ pub fn DetailPopover(
                 chrome_class: icon_menu_chrome_class(tone).to_string(),
                 placement,
                 initially_open,
+                open_signal,
                 anchor_id,
                 anchor_visual,
                 layer_keeps_layout,
