@@ -552,6 +552,23 @@ impl BrowserSerialEsp32Provider {
         .await
     }
 
+    /// Take the loaded project off the device over the app protocol (the
+    /// card's "Remove project"): ask what it runs from, stop it, delete that
+    /// dir. The firmware is untouched, so the board comes back on the empty
+    /// face rather than needing a re-flash.
+    ///
+    /// ⚠️ Same exclusive-borrow rule as [`Self::write_device_file`]: the
+    /// model's link pump for this endpoint must be paused while this runs.
+    pub async fn remove_device_project(
+        &self,
+        endpoint_id: &LinkEndpointId,
+        fallback_storage_id: &str,
+        events: LinkManagementEventSink,
+    ) -> Result<lpa_client::RemoveReport, LinkError> {
+        let port_id = self.endpoint_port_id(endpoint_id)?;
+        super::port_client_io::remove_device_project(port_id, fallback_storage_id, events).await
+    }
+
     /// Session-scoped [`Self::probe_target`], for the connector's
     /// mode-detection escalation. Releases the app-protocol port first: the
     /// SYNC handshake needs the wire to itself and reboots the device.

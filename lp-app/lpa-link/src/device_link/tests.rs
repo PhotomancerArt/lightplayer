@@ -113,8 +113,9 @@ impl Bench {
                 Command::RevokeGrant(info) => self.revoked.push(info),
                 // Coarse effects run in the app's effects layer, above this
                 // bench (studio_device_e2e drives them for real); nothing
-                // here spawns one.
-                Command::RunEffect { .. } => {
+                // here spawns one, so nothing here can be asked to let one
+                // go either.
+                Command::RunEffect { .. } | Command::AbandonEffect { .. } => {
                     panic!("this bench spawns no coarse effects")
                 }
             }

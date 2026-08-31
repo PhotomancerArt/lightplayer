@@ -82,8 +82,9 @@ pub async fn push_project<Io: ClientIo>(
 
 /// The storage dir name inside a reported project path (`/projects/demo` →
 /// `demo`). `None` for a path that is not under `/projects/`, which is not a
-/// dir a push may replace.
-fn storage_id_of(path: &str) -> Option<String> {
+/// dir a push may replace — nor one a removal may delete, which is why the
+/// remove conversation reads the board's report through this same function.
+pub(crate) fn storage_id_of(path: &str) -> Option<String> {
     let rest = path
         .trim_start_matches('/')
         .strip_prefix("projects/")?

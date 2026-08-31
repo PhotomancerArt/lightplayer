@@ -42,6 +42,13 @@ const RESPONSE_BUDGET_MS: u32 = 5_000;
 /// Round 2's first consumer is the flash activity's board-manifest stamp
 /// (`/hardware.json`, board-selection D4). M3's push conversation reuses
 /// this seam's shape.
+///
+/// ⚠️ The write **waits for the board to answer something cheap first**. A
+/// just-flashed device formats its littlefs on the first boot and simply
+/// does not answer fs writes while it does; going straight in burned ~40 s
+/// of retried writes and then reported failure at a board that was fine
+/// (G1 bench, 2026-08-31). [`lpa_client::wait_until_ready`] is that wait,
+/// and the caller's activity deadline (`stamp_deadline_ms`) bounds it.
 pub async fn write_device_file(
     port_id: u32,
     path: &str,
@@ -49,15 +56,22 @@ pub async fn write_device_file(
     events: LinkManagementEventSink,
 ) -> Result<(), LinkError> {
     use lpc_model::AsLpPath;
-    events.emit(LinkManagementEvent::progress(LinkManagementProgress::new(
-        format!("Writing {path}"),
-    )));
     let io = PortLineIo {
         port_id,
         pending: Vec::new(),
         events: events.clone(),
     };
     let mut client = LpClient::new(io);
+    let mut progress = progress_reporter(&events);
+    lpa_client::wait_until_ready(&mut client, lpa_client::READY_ATTEMPTS, &mut progress)
+        .await
+        .map_err(|error| {
+            LinkError::other(format!("the board never became ready to write to: {error}"))
+        })?;
+
+    events.emit(LinkManagementEvent::progress(LinkManagementProgress::new(
+        format!("Writing {path}"),
+    )));
     let outcome = client
         .fs_write(path.as_path(), bytes.to_vec())
         .await
@@ -66,6 +80,41 @@ pub async fn write_device_file(
         events.emit(LinkManagementEvent::log(format!("{event:?}")));
     }
     Ok(())
+}
+
+/// Take the loaded project off the device over the app protocol: ask what it
+/// runs from, stop it, delete that dir. The conversation is `lpa-client`'s;
+/// this function is only the port half.
+pub async fn remove_device_project(
+    port_id: u32,
+    fallback_storage_id: &str,
+    events: LinkManagementEventSink,
+) -> Result<lpa_client::RemoveReport, LinkError> {
+    let io = PortLineIo {
+        port_id,
+        pending: Vec::new(),
+        events: events.clone(),
+    };
+    let mut client = LpClient::new(io);
+    let mut progress = progress_reporter(&events);
+    lpa_client::remove_project(&mut client, fallback_storage_id, &mut progress)
+        .await
+        .map_err(|error| LinkError::other(format!("removing the project failed: {error}")))
+}
+
+/// The progress closure every conversation on this seam reports through.
+///
+/// A label-only step stays label-only: reporting 0% would make the card's
+/// bar jump backwards between named steps.
+fn progress_reporter(events: &LinkManagementEventSink) -> impl FnMut(String, Option<u8>) + use<'_> {
+    move |label: String, percent: Option<u8>| {
+        let update = LinkManagementProgress::new(label);
+        let update = match percent {
+            Some(percent) => update.with_percent(u32::from(percent)),
+            None => update,
+        };
+        events.emit(LinkManagementEvent::progress(update));
+    }
 }
 
 /// Push a project onto the device over the app protocol.
@@ -87,16 +136,7 @@ pub async fn push_device_project(
         events: events.clone(),
     };
     let mut client = LpClient::new(io);
-    let mut progress = |label: String, percent: Option<u8>| {
-        let update = LinkManagementProgress::new(label);
-        // A label-only step stays label-only: reporting 0% would make the
-        // card's bar jump backwards between named steps.
-        let update = match percent {
-            Some(percent) => update.with_percent(u32::from(percent)),
-            None => update,
-        };
-        events.emit(LinkManagementEvent::progress(update));
-    };
+    let mut progress = progress_reporter(&events);
     lpa_client::push_project(
         &mut client,
         files,
