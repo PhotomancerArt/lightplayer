@@ -10,8 +10,9 @@ use lpa_devices::journal::EvictionReason;
 use lpa_devices::replay::{Expect, Fixture, Replay, Script, Step, replay_inputs};
 use lpa_devices::view::{LoadedProject, roster_view};
 use lpa_devices::{
-    Action, ActivityKind, Classification, DeviceId, DeviceRecord, DeviceStatus, DeviceUid, Escape,
-    IdentityChain, Input, LinkId, Liveness, Millis, Roster, RosterConfig,
+    Action, ActivityKind, Classification, Command, DeviceId, DeviceRecord, DeviceStatus, DeviceUid,
+    Escape, IdentityChain, Input, LinkCommand, LinkId, Liveness, Millis, ResetKind, Roster,
+    RosterConfig,
 };
 
 /// The empty face, the push, and the running face, at the fold's own layer.
@@ -1354,4 +1355,38 @@ fn full_walk_fixture() -> Fixture {
         .at(31_000, Step::Forget { device: 1 })
         .expect(Expect::new().devices(0).pending(0))
         .into_fixture("full walk")
+}
+
+/// The silent-board recovery (G1 2026-08-31): a chip parked in ROM
+/// download-wait prints nothing, so identify can never settle — the Reset
+/// verb pulses the hardware and identify reads whatever boots.
+#[test]
+fn reset_board_pulses_the_hardware_and_identify_reads_the_boot() {
+    let mut replay = Replay::new(RosterConfig::default());
+    replay.step(Millis(0), Step::attach(1, "usb-r"));
+    replay.step(Millis(10), Step::opened(1));
+    // The identify deadline passes with zero evidence: a silent board.
+    replay.advance_to(Millis(9_000));
+    let device = replay.view().pending[0].device;
+
+    let commands = replay.feed(Millis(9_100), Input::Action(Action::ResetBoard { device }));
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            Command::Link {
+                command: LinkCommand::RunReset(ResetKind::Normal),
+                ..
+            }
+        )),
+        "the reset pulse rides the link: {commands:?}"
+    );
+
+    // The boot loop names the chip and the fold settles instantly.
+    replay.step(Millis(9_500), Step::line(1, "ESP-ROM:esp32c6-20220919"));
+    replay.step(Millis(9_520), Step::line(1, "invalid header: 0xffffffff"));
+    let view = replay.view();
+    assert!(
+        view.pending[0].needs_firmware,
+        "the reset turned silence into an honest verdict: {view:?}"
+    );
 }

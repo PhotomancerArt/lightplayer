@@ -177,6 +177,15 @@ pub(crate) fn DeviceRosterCard(
                 }
                 if idle && linked {
                     ActionButton {
+                        key: "{\"reset-board\"}",
+                        action: DevicesOp::action_for(DeviceAction::ResetBoard { device }),
+                        running: false,
+                        variant: ActionButtonVariant::Quiet,
+                        on_action,
+                    }
+                }
+                if idle && linked {
+                    ActionButton {
                         key: "{\"factory-reset\"}",
                         action: DevicesOp::action_for(DeviceAction::Erase { device }),
                         running: false,
@@ -281,6 +290,19 @@ pub(crate) fn PendingLinkCard(
                         variant: ActionButtonVariant::Quiet,
                         on_action,
                     }
+                }
+                // The silent-board recovery: a chip parked in ROM
+                // download-wait prints nothing, so identify can never
+                // settle — a hardware reset reboots it into honest boot
+                // output (G1 2026-08-31, the erased C6).
+                ActionButton {
+                    key: "{\"reset-board\"}",
+                    action: DevicesOp::action_for(DeviceAction::ResetBoard {
+                        device: pending.device,
+                    }),
+                    running: false,
+                    variant: ActionButtonVariant::Quiet,
+                    on_action,
                 }
             }
         }

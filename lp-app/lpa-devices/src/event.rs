@@ -109,6 +109,16 @@ pub enum Action {
         board_id: String,
         build_id: String,
     },
+    /// Reset the board's hardware (DTR/RTS pulse — `ResetKind::Normal`) and
+    /// identify what boots. The direct-control verb for a board wedged in a
+    /// state that produces no evidence: a chip parked in ROM download-wait
+    /// prints NOTHING (G1 2026-08-31 — the erased C6 sat silent, no verdict,
+    /// no flash face, no way forward), and a hardware reset is the one
+    /// gesture that reboots it into honest boot output. Bridge-level, so it
+    /// works on firmware that answers nothing — unlike the wire Reboot.
+    ResetBoard {
+        device: DeviceId,
+    },
     /// Factory reset: wipe the board's flash entirely (firmware, projects,
     /// everything stored). Identity survives by design — it lives in the
     /// efuse (ADR 2026-08-04) — so the entry and its registry row stay, and
@@ -151,6 +161,7 @@ impl Action {
             | Self::Flash { device, .. }
             | Self::Erase { device }
             | Self::RemoveProject { device }
+            | Self::ResetBoard { device }
             | Self::SetName { device, .. }
             | Self::SetAutoconnect { device, .. } => Some(*device),
             Self::AddFromUsb

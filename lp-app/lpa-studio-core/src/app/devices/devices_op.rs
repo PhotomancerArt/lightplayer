@@ -122,6 +122,11 @@ impl ControllerOp for DevicesOp {
                 "Send the picked project to this board and start it running.",
                 ActionPriority::Primary,
             ),
+            Action::ResetBoard { .. } => ActionMeta::new(
+                "Reset",
+                "Reboot the board (a hardware reset) and identify what starts up.",
+                ActionPriority::Secondary,
+            ),
             Action::Erase { .. } => ActionMeta::new(
                 "Factory reset",
                 "Erase the firmware and everything stored on this board.",

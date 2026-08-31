@@ -476,6 +476,24 @@ impl Device {
                 self.intent.connection = ConnectionIntent::Connected;
                 self.spawn_erase(now, ctx)
             }
+            Action::ResetBoard { .. } => {
+                // A hardware reset is a direct gesture, not an activity: one
+                // command, then identify reads whatever boots. Refused while
+                // an activity runs (I5 — a reset under a flash would wreck
+                // it) and without a link there is nothing to pulse.
+                if self.activity.is_some() {
+                    return Vec::new();
+                }
+                let Some(link) = self.link() else {
+                    return Vec::new();
+                };
+                let mut commands = vec![Command::Link {
+                    link,
+                    command: crate::link::LinkCommand::RunReset(crate::link::ResetKind::Normal),
+                }];
+                commands.extend(self.spawn_identify(now, ctx));
+                commands
+            }
             Action::RemoveProject { .. } => {
                 // Clearing a board implies staying connected to put
                 // something else on it — the empty face is the next stop.
