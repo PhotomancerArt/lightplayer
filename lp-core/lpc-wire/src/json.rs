@@ -198,10 +198,17 @@ mod ser_write_json_tests {
         // absent (the additive-FIELD rule the wire posture depends on).
         let old = r#"{"id":0,"msg":{"heartbeat":{"fps":{"avg":60.0,"sdev":1.0,"min":58.0,"max":62.0},"frame_count":7,"loaded_projects":[],"uptime_ms":5000,"memory":{"freeBytes":1,"usedBytes":2,"totalBytes":3}}}}"#;
         let msg: ServerMessage = from_str(old).expect("old heartbeat decodes");
-        let ServerMsgBody::Heartbeat { memory, link, .. } = msg.msg else {
+        let ServerMsgBody::Heartbeat {
+            memory,
+            link,
+            identity,
+            ..
+        } = msg.msg
+        else {
             panic!("expected heartbeat");
         };
         assert!(link.is_none(), "link absent on old frames");
+        assert!(identity.is_none(), "identity absent on pre-R4 frames");
         let memory = memory.expect("memory present");
         assert!(memory.largest_free_block.is_none());
         assert!(memory.oom_retry_saves.is_none());
@@ -265,6 +272,10 @@ mod ser_write_json_tests {
                     queue_full_drops: 0,
                     stale_partial_flushes: 2,
                 }),
+                identity: Some(crate::server::HeartbeatIdentity {
+                    device_uid: Some("dev0000000000000001".to_string()),
+                    base_mac: Some("60:55:f9:0a:0b:0c".to_string()),
+                }),
             },
         );
 
@@ -276,10 +287,20 @@ mod ser_write_json_tests {
             (
                 ServerMsgBody::Heartbeat {
                     frame_count: expected,
+                    identity: expected_identity,
                     ..
                 },
-                ServerMsgBody::Heartbeat { frame_count, .. },
-            ) => assert_eq!(expected, frame_count),
+                ServerMsgBody::Heartbeat {
+                    frame_count,
+                    identity,
+                    ..
+                },
+            ) => {
+                assert_eq!(expected, frame_count);
+                // The firmware's serializer is the one that must carry
+                // identity: heartbeats leave a device through ser-write-json.
+                assert_eq!(expected_identity, identity);
+            }
             _ => panic!("variant mismatch"),
         }
     }

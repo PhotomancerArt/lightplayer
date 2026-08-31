@@ -1,4 +1,5 @@
 use js_sys::{Array, Promise, Reflect};
+use lpa_devices::link::ResetKind;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -60,7 +61,7 @@ extern "C" {
     fn js_get_granted_ports() -> Promise;
 
     #[wasm_bindgen(js_name = openPort)]
-    fn js_open(id: u32, baud_rate: u32, reset: bool) -> Promise;
+    fn js_open(id: u32, baud_rate: u32, reset: bool, reset_kind: &str) -> Promise;
 
     #[wasm_bindgen(js_name = writeLine)]
     fn js_write_line(id: u32, line: &str) -> Promise;
@@ -75,7 +76,8 @@ extern "C" {
     fn js_release(id: u32) -> Promise;
 
     #[wasm_bindgen(js_name = resetAndRead)]
-    fn js_reset_and_read(id: u32, baud_rate: u32, read_window_ms: u32) -> Promise;
+    fn js_reset_and_read(id: u32, baud_rate: u32, read_window_ms: u32, reset_kind: &str)
+    -> Promise;
 
     #[wasm_bindgen(js_name = closePort)]
     fn js_close(id: u32) -> Promise;
@@ -133,14 +135,53 @@ fn port_handle(value: &JsValue) -> Result<BrowserSerialPortHandle, LinkError> {
     })
 }
 
+/// The JS `runReset` sequence each model reset kind selects.
+///
+/// The controller (`browser_esp32_device_controller.js`) is the only place
+/// these run, and the JS layer has no CI (docs/debt/
+/// web-serial-js-untestable.md), so the table lives here too — a rename on
+/// either side that is not mirrored is a silently DIFFERENT reset, which is
+/// worse than a failed one.
+///
+/// | [`ResetKind`] | JS name | sequence |
+/// |---|---|---|
+/// | `Normal` | `"normal"` | `D0 W100 R1 W100 R0` |
+/// | `RtsOnly` | `"rts-only"` | `R1 W100 R0` |
+/// | `UsbJtagDownload` | `"usb-jtag-download"` | `R0 D0 W100 D1 R0 W100 R1 D0 R1 W100 R0 D0` |
+/// | `BothThenDrop` | `"both-then-drop"` | whole-status: (0,0) (1,1) W100 (0,1) (0,0) |
+///
+/// `BothThenDrop` is the CH34x sequence and the only one written as
+/// whole-status pairs: the WCH macOS driver ignores single-pin writes, and
+/// (DTR asserted, RTS released) selects the ROM bootloader rather than
+/// rebooting the app — so that crossing never appears in it.
+fn reset_kind_js_name(kind: ResetKind) -> &'static str {
+    match kind {
+        ResetKind::Normal => "normal",
+        ResetKind::RtsOnly => "rts-only",
+        ResetKind::UsbJtagDownload => "usb-jtag-download",
+        ResetKind::BothThenDrop => "both-then-drop",
+    }
+}
+
+/// Open the protocol port, optionally resetting the board on the way in.
+///
+/// `reset: None` opens WITHOUT any reset — what identify needs, because a
+/// USB-Serial-JTAG chip re-enumerates on a hard reset and kills the port
+/// that was just opened.
 pub async fn open(
     id: u32,
     baud_rate: u32,
-    reset: bool,
+    reset: Option<ResetKind>,
 ) -> Result<BrowserSerialProtocolOpenResult, LinkError> {
-    let value = JsFuture::from(js_open(id, baud_rate, reset))
-        .await
-        .map_err(js_error)?;
+    let kind = reset.unwrap_or(ResetKind::Normal);
+    let value = JsFuture::from(js_open(
+        id,
+        baud_rate,
+        reset.is_some(),
+        reset_kind_js_name(kind),
+    ))
+    .await
+    .map_err(js_error)?;
     Ok(BrowserSerialProtocolOpenResult {
         logs: reflect_string_array(&value, "logs")?,
         progress: reflect_progress_array(&value, "progress")?,
@@ -173,10 +214,16 @@ pub async fn reset_and_read(
     id: u32,
     baud_rate: u32,
     read_window_ms: u32,
+    reset_kind: ResetKind,
 ) -> Result<BrowserSerialResetResult, LinkError> {
-    let value = JsFuture::from(js_reset_and_read(id, baud_rate, read_window_ms))
-        .await
-        .map_err(js_error)?;
+    let value = JsFuture::from(js_reset_and_read(
+        id,
+        baud_rate,
+        read_window_ms,
+        reset_kind_js_name(reset_kind),
+    ))
+    .await
+    .map_err(js_error)?;
     Ok(BrowserSerialResetResult {
         logs: reflect_string_array(&value, "logs")?,
     })

@@ -222,6 +222,10 @@ pub async fn run_server_loop<T: ServerTransport>(
                     ),
                     outputs: crate::output::wire_stats_source::current(),
                     link: crate::serial::link_counters::current(),
+                    // Who we are, on every heartbeat: a Studio that attached
+                    // mid-stream never saw our boot hello, and this resolves
+                    // it passively within one heartbeat period (R4a).
+                    identity: server.heartbeat_identity(),
                 },
             );
 

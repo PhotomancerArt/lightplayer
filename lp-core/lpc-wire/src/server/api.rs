@@ -49,6 +49,15 @@ pub enum ServerMsgBody {
     StopAllProjects,
     /// Ack for SetLogLevel: the level has been applied globally.
     SetLogLevel,
+    /// Ack for [`crate::ClientRequest::Reboot`]: the request was accepted and
+    /// the device resets once this frame is on the wire.
+    ///
+    /// The ack is sent BEFORE the reset, not after it (there is no after):
+    /// the embedder's reset hook fires only once the transport reports the
+    /// frame written, so a client sees its answer and then the boot banner.
+    /// An embedder with no reset hook answers [`ServerMsgBody::Error`]
+    /// instead — a reboot that will not happen must never be acked.
+    Reboot,
 
     Log {
         level: LogLevel,
@@ -103,6 +112,16 @@ pub enum ServerMsgBody {
         /// wire-visible trace (2026-08-26 inbound-loss defect).
         #[serde(default)]
         link: Option<crate::server::LinkCounters>,
+        /// Who this device is, repeated on every heartbeat.
+        ///
+        /// A client that attaches MID-STREAM never sees the boot hello, so
+        /// without this it stays anonymous until its own `Hello` request is
+        /// answered. Repeating identity on the unsolicited channel resolves
+        /// such an attach passively, within one heartbeat period. Absent
+        /// from embedders that know no identity (and from pre-R4 firmware,
+        /// which is why it is optional rather than required).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<HeartbeatIdentity>,
     },
     /// Error response for any request type
     Error {
@@ -165,6 +184,36 @@ pub struct MemoryStats {
     /// (fragmentation pressure evidence). Absent where unsupported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oom_retry_saves: Option<u32>,
+}
+
+/// The identity a heartbeat announces: the same two facts the hello carries,
+/// and no more.
+///
+/// Deliberately a SUBSET of [`crate::ServerHello`] rather than a second
+/// identity vocabulary — `device_uid` is the stamped `dev…` uid
+/// ([`crate::ServerHello::device_uid`]) and `base_mac` is the efuse address
+/// ([`crate::HardwareFacts::base_mac`]). Build provenance and capabilities
+/// stay off the heartbeat: they never change while a device runs, so
+/// repeating them every second would only cost frame bytes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatIdentity {
+    /// See [`crate::ServerHello::device_uid`]. `None` = unstamped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_uid: Option<String>,
+    /// See [`crate::HardwareFacts::base_mac`]. `None` from embedders with
+    /// no efuse to read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_mac: Option<String>,
+}
+
+impl HeartbeatIdentity {
+    /// Whether this announcement carries anything at all — an embedder that
+    /// knows neither fact sends no identity rather than an empty record.
+    pub fn is_empty(&self) -> bool {
+        self.device_uid.is_none() && self.base_mac.is_none()
+    }
 }
 
 /// Serial-link loss/corruption counters, monotonic since boot.

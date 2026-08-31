@@ -358,8 +358,10 @@ fn initials_style(hue: u16) -> String {
 
 /// The URL hero's box: the terminal surface, because it holds an address.
 const URL_HERO_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-border tw:bg-terminal tw:px-2.5 tw:py-2";
-/// The one filled button in the panel — the link IS the share.
-const COPY_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:border-accent-border tw:bg-accent tw:px-2.5 tw:py-1.5 tw:text-accent-foreground tw:transition-colors tw:hover:bg-accent-hover";
+/// The one Primary-voiced button in the panel — the link IS the share, so
+/// it wears the standing spectrum outline (the app's one standing rainbow;
+/// devices-treatments gate 2026-08-31 succeeded the gradient fill).
+const COPY_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:px-2.5 tw:py-1.5 tw:transition-colors ux-spectrum-cta ux-focus-ring";
 /// The three-way segment's frame.
 const SEGMENT_CLASS: &str =
     "tw:flex tw:min-w-0 tw:overflow-hidden tw:rounded-sm tw:border tw:border-border-strong";
@@ -404,7 +406,14 @@ mod tests {
     #[test]
     fn every_button_class_names_a_background() {
         for class in [COPY_BUTTON_CLASS, ADD_ROW_CLASS] {
-            assert!(class.contains("tw:bg-"), "no background in `{class}`");
+            // `.ux-spectrum-cta` carries ring, text, and an explicit
+            // transparent background together (style.css) — it names a
+            // background the same way `tw:bg-*` does, just as the Primary
+            // action tier composes it.
+            assert!(
+                class.contains("tw:bg-") || class.contains("ux-spectrum-cta"),
+                "no background in `{class}`"
+            );
         }
         for access in [Access::None, Access::View, Access::Edit] {
             for pressed in [false, true] {

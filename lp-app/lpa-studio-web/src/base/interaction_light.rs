@@ -33,7 +33,7 @@
 //! | `ux-drag-chip` | the lifted shadow a dragged card wears |
 //! | `ux-press-flare` | the `:active` bloom on action buttons |
 //! | `ux-focus-ring` | the focus convention — see [`focus_ring_class`] |
-//! | `ux-primary-gradient` | the Q3 gradient primary fill |
+//! | `ux-spectrum-cta` | the standing spectrum-outline Primary (self-contained ring — never compose with `ux-ir-ring`; devices-treatments gate 2026-08-31 succeeded the gradient fill) |
 //! | `ux-conic-spinner` | see [`conic_spinner_class`] |
 //! | `ux-iri-fill` / `-static` | see [`iridescent_fill_class`] |
 

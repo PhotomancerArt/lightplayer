@@ -257,6 +257,8 @@ journal be replayed.
   as a Setup projection; the post-flash reset ladder as effects (vision
   R5).
 - Vision R4 (firmware stamps identity into the heartbeat as well as the
-  hello) is already modeled: `ServerFrameBody::Heartbeat` carries an
-  optional `PeerIdentity`, so a mid-stream attach resolves identity
-  passively within one heartbeat period once the firmware sends it.
+  hello) is modeled AND live since round 2's wire groundwork: the firmware
+  stamps `HeartbeatIdentity` (uid + base MAC) on every heartbeat and the
+  link adapter decodes it into the model's optional `PeerIdentity`, so a
+  mid-stream attach resolves identity passively within one heartbeat
+  period.

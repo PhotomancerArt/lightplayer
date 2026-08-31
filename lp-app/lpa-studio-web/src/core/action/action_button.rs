@@ -7,6 +7,10 @@ use crate::base::{StudioIcon, action_icon_name};
 /// How long a two-click confirmation stays ARMED before it stands down on
 /// its own. Long enough to read the changed label, short enough that a
 /// forgotten armed button cannot ambush a later stray click.
+///
+/// Must match `--ux-armed-win` on `.ux-armed-chip` (style.css) — the drain
+/// track animates over that var, and constants can't cross the Rust/CSS
+/// boundary, so these two comments pin them together.
 const ARMED_CONFIRM_WINDOW_MS: u32 = 4_000;
 
 /// How an action renders in its surrounding context. One action model
@@ -33,6 +37,11 @@ pub fn ActionButton(
     action: UiAction,
     running: bool,
     #[props(default)] variant: ActionButtonVariant,
+    /// Story-only: start with the two-click confirmation already ARMED, so
+    /// captures can show the armed dress (and the card's `:has()` marking)
+    /// deterministically. Real surfaces never set this.
+    #[props(default)]
+    armed_preview: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let action_to_run = action.clone();
@@ -52,22 +61,27 @@ pub fn ActionButton(
     };
 
     // The two-click confirmation: the first click ARMS the button (the
-    // button itself asks, wearing the confirm label), the second click
-    // dispatches. Arming stands down on blur or after a short window —
-    // the native dialog stays for confirmations not marked inline.
+    // button itself asks, wearing "Confirm ⟨verb⟩" — the 2K+ reading from
+    // the devices-treatments spike gate), the second click dispatches.
+    // Arming stands down on blur or after a short window — the native
+    // dialog stays for confirmations not marked inline. The armed dress
+    // (prefix reveal, ramp, knock, quiet drain) lives in `.ux-armed-chip`/
+    // `.ux-armed` (style.css); the owning card marks itself via
+    // `.ux-armed-scope:has(.ux-armed)`, so no armed state leaves this
+    // component.
     let inline_confirm = confirmation.as_ref().is_some_and(|c| c.inline);
-    let mut armed = use_signal(|| false);
+    let mut armed = use_signal(|| armed_preview);
     let mut arm_generation = use_signal(|| 0u64);
-    let armed_label = confirmation
+    let armed_verb = confirmation
         .as_ref()
-        .map(|c| format!("{}?", c.confirm_label))
+        .map(|c| c.confirm_label.clone())
         .unwrap_or_default();
     let armed_title = confirmation
         .as_ref()
         .map(|c| c.message.clone())
         .unwrap_or_default();
     let shown_label = if inline_confirm && armed() {
-        armed_label
+        armed_verb
     } else {
         label
     };
@@ -76,8 +90,8 @@ pub fn ActionButton(
     } else {
         summary
     };
-    let shown_class = if inline_confirm && armed() {
-        format!("{class} tw:bg-status-error-bg tw:border-status-error-border")
+    let shown_class = if inline_confirm {
+        confirm_chip_class(class, armed())
     } else {
         class.to_string()
     };
@@ -122,12 +136,37 @@ pub fn ActionButton(
                         }
                     }
                 }
-                span { "{shown_label}" }
+                // The "Confirm " prefix is always in the DOM (a content
+                // swap cannot drive a width transition); arming opens its
+                // grid column. Prefix and verb share one wrapper so the
+                // button's flex gap can't open a seam between them; the
+                // prefix is hidden from AT — the armed `title` carries the
+                // confirmation message.
+                span { class: "tw:inline-flex",
+                    if inline_confirm {
+                        span { class: "ux-armed-prefix", aria_hidden: "true",
+                            span { "Confirm\u{a0}" }
+                        }
+                    }
+                    span { "{shown_label}" }
+                }
             }
             if let Some(reason) = disabled_reason.as_ref() {
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-dim-foreground", "{reason}" }
             }
         }
+    }
+}
+
+/// The inline-confirm chip's classes for its current armed state. The base
+/// chip always wears `ux-armed-chip` (prefix mechanics + quiet drain host);
+/// arming adds `ux-armed` (error tint, knock, drain running). Kept as a
+/// plain function so the composition is testable without mounting.
+fn confirm_chip_class(base: &'static str, armed: bool) -> String {
+    if armed {
+        format!("{base} ux-armed-chip ux-armed")
+    } else {
+        format!("{base} ux-armed-chip")
     }
 }
 
@@ -162,16 +201,16 @@ fn action_class(
 
 fn solid_class(priority: ActionPriority) -> &'static str {
     match priority {
-        // G1-2: KEEP ("gradient is good") — the gradient is simply the
-        // Primary fill now, not a gated alternative. The fill lives in
-        // `.ux-primary-gradient` (style.css) rather than an arbitrary
-        // Tailwind value: it carries fill, edge and text together, and a
-        // class is the only place a hover `filter` can live without
-        // becoming an animated inline style.
+        // Devices-treatments spike gate (2026-08-31, "1F for the primary
+        // for now"): the gradient FILL stands down — rainbow-bg with dark
+        // text didn't work — and Primary is the standing spectrum OUTLINE.
+        // `.ux-spectrum-cta` (style.css) carries ring, text and hover glow
+        // together, and owns its own ring pseudo — so no `ux-ir-ring` here:
+        // composing the two would fight over `::before`.
         ActionPriority::Primary => {
             concat!(
                 "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:break-words tw:disabled:cursor-not-allowed tw:disabled:opacity-60",
-                " ux-primary-gradient ux-ir-ring ux-focus-ring ux-press-flare"
+                " ux-spectrum-cta ux-focus-ring ux-press-flare"
             )
         }
         ActionPriority::Secondary => {
@@ -321,10 +360,13 @@ mod tests {
 
     #[test]
     fn the_ring_stops_at_the_quiet_tiers() {
-        // Loud tiers take the ring; transparent chips and menu rows keep
-        // their own wash (a rainbow edge on a menu row is noise, and the
-        // destructive rows must stay unmistakably red).
-        assert!(solid_class(ActionPriority::Primary).contains("ux-ir-ring"));
+        // Secondary takes the hover ring; Primary owns a STANDING ring of
+        // its own (`ux-spectrum-cta` — self-contained, so composing
+        // `ux-ir-ring` on top would fight over `::before`). Transparent
+        // chips and menu rows keep their own wash (a rainbow edge on a
+        // menu row is noise, and the destructive rows must stay
+        // unmistakably red).
+        assert!(!solid_class(ActionPriority::Primary).contains("ux-ir-ring"));
         assert!(solid_class(ActionPriority::Secondary).contains("ux-ir-ring"));
         for class in [
             solid_class(ActionPriority::Tertiary),
@@ -353,11 +395,32 @@ mod tests {
     }
 
     #[test]
-    fn the_primary_fill_is_the_spectrum_gradient() {
-        // G1-2 ruling (2026-08-30, "gradient is good"): the gradient is
-        // the Primary fill, not a gated alternative to a flat accent fill.
+    fn the_armed_chip_composes_the_armed_dress_over_its_base() {
+        // 2K+ (devices-treatments gate): the inline-confirm chip always
+        // hosts the prefix/drain mechanics; arming adds the tint/knock
+        // class. The spectrum ring never reaches a destructive chip.
+        let idle = confirm_chip_class(quiet_class(true), false);
+        assert!(idle.contains("ux-armed-chip"), "{idle}");
+        assert!(!idle.contains("ux-armed "), "{idle}");
+        assert!(!idle.ends_with("ux-armed"), "{idle}");
+        let armed = confirm_chip_class(quiet_class(true), true);
+        assert!(armed.contains("ux-armed-chip"), "{armed}");
+        assert!(armed.ends_with("ux-armed"), "{armed}");
+        for class in [&idle, &armed] {
+            assert!(!class.contains("ux-ir-ring"), "{class}");
+            assert!(!class.contains("ux-spectrum-cta"), "{class}");
+        }
+    }
+
+    #[test]
+    fn the_primary_voice_is_the_spectrum_outline() {
+        // Devices-treatments spike gate (2026-08-31, "1F for the primary
+        // for now"): the standing spectrum ring succeeded the gradient
+        // fill, and the class is self-contained — never composed with the
+        // hover ring, never an accent fill.
         let class = solid_class(ActionPriority::Primary);
-        assert!(class.contains("ux-primary-gradient"), "{class}");
+        assert!(class.contains("ux-spectrum-cta"), "{class}");
+        assert!(!class.contains("ux-primary-gradient"), "{class}");
         assert!(!class.contains("accent"), "{class}");
     }
 
