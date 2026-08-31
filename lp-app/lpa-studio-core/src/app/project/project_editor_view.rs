@@ -11,6 +11,8 @@ pub struct UiProjectManifest {
     pub format: Option<u32>,
     pub uid: Option<String>,
     pub name: Option<String>,
+    /// ISO date the project was created (manifest `created`), when authored.
+    pub created: Option<String>,
     /// Display label for the project's authored kind (`"General"` |
     /// `"Pattern"` | `"Show"` | `"Rig"`; module authoring unit, P1) — the
     /// resolved [`lpc_model::ProjectKind`]'s label

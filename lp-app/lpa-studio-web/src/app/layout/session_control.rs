@@ -136,6 +136,10 @@ pub struct ProjectPopoverInputs {
     pub on_fork: Option<EventHandler<()>>,
     /// Why the fork verb cannot act, when it cannot.
     pub fork_blocked: String,
+    /// The core view's monotonic fork counter — the panel compares it to
+    /// the value it mounted with to announce a fork that happened under
+    /// the open popover (G1: the flip alone was too quiet).
+    pub fork_generation: u64,
     pub on_copy: Option<EventHandler<()>>,
     pub on_access: Option<EventHandler<Access>>,
     pub on_add: Option<EventHandler<String>>,
@@ -328,6 +332,8 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
                             // riding the same gather as everything else
                             // here — no fetch, no second source of truth.
                             history: project.history().clone(),
+                            created: project.created().map(str::to_string),
+                            fork_generation: project_popover.fork_generation,
                             details: Some(project.clone()),
                             on_fork: project_popover.on_fork,
                             fork_blocked: project_popover.fork_blocked.clone(),

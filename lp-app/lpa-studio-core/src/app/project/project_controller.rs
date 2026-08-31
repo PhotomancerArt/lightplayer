@@ -5285,6 +5285,7 @@ impl ProjectController {
             format: fields.format,
             uid: fields.uid,
             name: fields.name,
+            created: fields.created,
             kind,
         })
     }

@@ -132,6 +132,12 @@ impl ProjectDetailContent {
         &self.history
     }
 
+    /// ISO date the project was created (manifest `created`), when the
+    /// manifest states one — the relationship panel's identity line.
+    pub fn created(&self) -> Option<&str> {
+        self.manifest.as_ref()?.created.as_deref()
+    }
+
     /// The controller's contextual header actions (Save / Revert-to-saved),
     /// empty while the project is clean — the header session·project
     /// control's trailing segments read them.

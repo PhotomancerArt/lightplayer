@@ -6,7 +6,7 @@
 //! ┌───────────────────────────────────┐
 //! │ Aurora Field                    ✕ │  header
 //! │ [Project] History                 │  tabs (D10 — history is a TAB)
-//! │ WHERE ────────────────────────────│
+//! │ name · standing · created (identity, above the tabs) │
 //! │   ◈ Yours — published; link live. │  standing sentence
 //! │   lightplayer.app/p/aurora-…  Copy│  the URL: the project's ADDRESS
 //! │ ACCESS ───────────────────────────│
@@ -67,9 +67,7 @@ use crate::app::share::access_controls::{
 use crate::app::share::relationship::ProjectRelationship;
 use crate::app::share::share_person::SharePerson;
 use crate::app::share::share_url::ShareUrl;
-use crate::base::{
-    InlineButtonTone, PopoverCloseHandle, StudioIcon, StudioIconName, inline_icon_button_class,
-};
+use crate::base::{StudioIcon, StudioIconName};
 use crate::core::inline_link_row_class;
 
 /// Which tab the panel opens on. History is a real tab (D10): the
@@ -174,6 +172,16 @@ pub fn ProjectRelationshipPanel(
     #[props(default)] on_access: Option<EventHandler<Access>>,
     #[props(default)] on_add: Option<EventHandler<String>>,
     #[props(default)] on_remove: Option<EventHandler<String>>,
+    /// ISO date the project was created (manifest `created`); rides the
+    /// identity block's dim line when authored.
+    #[props(default)]
+    created: Option<String>,
+    /// The core view's monotonic fork counter. The panel remembers the
+    /// value it MOUNTED with; a bump while this popover is open means the
+    /// fork happened right here, and the panel says so loudly — G1
+    /// feedback: "it should be much more obvious that something changed".
+    #[props(default = 0)]
+    fork_generation: u64,
     /// Stories only: which tab to mount on.
     #[props(default)]
     initial_tab: PanelTab,
@@ -181,8 +189,11 @@ pub fn ProjectRelationshipPanel(
     #[props(default = false)]
     menu_open: bool,
 ) -> Element {
-    let close = try_consume_context::<PopoverCloseHandle>();
     let mut tab = use_signal(|| initial_tab);
+    // Captured once per popover-open (the popover unmounts its content on
+    // close): a bump after mount = the fork happened under this very panel.
+    let generation_at_open = use_hook(|| fork_generation);
+    let forked_here = fork_generation > generation_at_open;
     let mut menu = use_signal(|| menu_open);
     let mut details_open = use_signal(|| false);
 
@@ -237,17 +248,34 @@ pub fn ProjectRelationshipPanel(
         // One explicit grid wrapper: the popover primitive nests children
         // in its own content div, so the panel class never reaches them.
         div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:p-3.5",
-            div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
+            if forked_here {
+                // The fork's receipt, unmissable (G1): the state flip alone
+                // was too quiet for the moment the document became yours.
+                div { class: FORKED_BANNER_CLASS,
+                    span { "\u{2713} Saved \u{2014} this copy is yours. It's in your Projects now." }
+                }
+            }
+            // The identity block (G1 rework): name, standing, and origin
+            // TOGETHER — a bare title read as odd, and a "Where" rule-line
+            // under it drew a border through one thought. It sits above the
+            // tabs so History keeps its context too.
+            div { class: "tw:grid tw:min-w-0 tw:gap-1",
                 strong { class: "tw:min-w-0 tw:truncate tw:text-[12.5px] tw:font-bold tw:text-strong-foreground",
                     "{name}"
                 }
-                if let Some(mut close) = close {
-                    button {
-                        class: inline_icon_button_class(InlineButtonTone::Neutral, false),
-                        r#type: "button",
-                        aria_label: "Close",
-                        onclick: move |_| close.close(),
-                        StudioIcon { name: StudioIconName::Cancel, size: 13 }
+                div { class: "tw:flex tw:min-w-0 tw:items-start tw:gap-2",
+                    span { class: "tw:flex tw:flex-none tw:items-center tw:pt-px tw:text-dim-foreground",
+                        StudioIcon { name: glyph, size: 12 }
+                    }
+                    p { class: "tw:m-0 tw:min-w-0 tw:text-[11px] tw:leading-snug tw:text-muted-foreground",
+                        strong { class: "tw:font-semibold tw:text-strong-foreground", "{lead}" }
+                        "{rest}"
+                    }
+                }
+                p { class: "tw:m-0 tw:px-0.5 tw:text-[10px] tw:leading-snug tw:text-dim-foreground",
+                    "{sub}"
+                    if let Some(created) = created.as_ref() {
+                        span { " \u{b7} Created {created}" }
                     }
                 }
             }
@@ -274,19 +302,6 @@ pub fn ProjectRelationshipPanel(
             }
 
             if on_project_tab {
-                SectionHead { label: "Where" }
-                div { class: "tw:flex tw:min-w-0 tw:items-start tw:gap-2",
-                    span { class: "tw:flex tw:flex-none tw:items-center tw:pt-px tw:text-dim-foreground",
-                        StudioIcon { name: glyph, size: 12 }
-                    }
-                    p { class: "tw:m-0 tw:min-w-0 tw:text-[11px] tw:leading-snug tw:text-muted-foreground",
-                        strong { class: "tw:font-semibold tw:text-strong-foreground", "{lead}" }
-                        "{rest}"
-                    }
-                }
-                p { class: "tw:m-0 tw:px-0.5 tw:text-[10px] tw:leading-snug tw:text-dim-foreground",
-                    "{sub}"
-                }
                 if let Some(url) = url.clone() {
                     ShareUrlHero { url, on_copy }
                     if let Some(note) = note {
@@ -779,6 +794,9 @@ fn fork_button_class(hero: bool) -> String {
 
 /// The tab row: a hairline under the whole row, each tab underlining
 /// itself over it.
+/// The fork receipt (G1): status-good, full-width, impossible to miss.
+const FORKED_BANNER_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:rounded-md tw:border tw:border-status-good-border tw:bg-status-good-bg tw:px-2.5 tw:py-2 tw:text-[11px] tw:font-semibold tw:text-status-good-foreground";
+
 const TAB_ROW_CLASS: &str = "tw:flex tw:min-w-0 tw:gap-0.5 tw:border-b tw:border-border-muted";
 /// One tab button, before its state. Border-bottom is the underline, so
 /// the other three sides are explicitly zero.
