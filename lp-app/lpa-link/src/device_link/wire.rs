@@ -5,7 +5,8 @@
 //! | `lpc_wire::WireServerMessage` | [`ServerFrame`] |
 //! |---|---|
 //! | `ServerMsgBody::Hello` | [`ServerFrameBody::Hello`](lpa_devices::wire::ServerFrameBody::Hello) with [`HelloFacts`] |
-//! | `ServerMsgBody::Heartbeat` at id 0 | [`ServerFrameBody::Heartbeat`](lpa_devices::wire::ServerFrameBody::Heartbeat) |
+//! | `ServerMsgBody::Heartbeat` at id 0 | [`ServerFrameBody::Heartbeat`](lpa_devices::wire::ServerFrameBody::Heartbeat), loaded-project report included |
+//! | `ServerMsgBody::ListLoadedProjects` | [`ServerFrameBody::Loaded`](lpa_devices::wire::ServerFrameBody::Loaded) |
 //! | everything else | [`ServerFrameBody::Other`](lpa_devices::wire::ServerFrameBody::Other) with a stable label |
 //!
 //! and the other direction, [`ClientFrame`] → `lpc_wire::ClientMessage`.
@@ -26,7 +27,9 @@
 use lpa_devices::identity::{DeviceUid, EndpointKey, MacAddress, PeerIdentity};
 use lpa_devices::link::{LinkInfo, UsbIds};
 use lpa_devices::roster::RosterConfig;
-use lpa_devices::wire::{ClientFrame, ClientFrameBody, HelloFacts, ServerFrame};
+use lpa_devices::wire::{
+    ClientFrame, ClientFrameBody, HelloFacts, LoadedProjectFacts, ServerFrame,
+};
 use lpc_wire::{
     ClientMessage, ClientRequest, ServerHello, ServerMsgBody, WIRE_PROTO_VERSION, WireServerMessage,
 };
@@ -87,11 +90,31 @@ pub fn server_frame(message: &WireServerMessage) -> ServerFrame {
         // heartbeat period — instead of waiting on a hello ANSWER. Pre-R4
         // firmware sends none, and an anonymous heartbeat is still live-peer
         // evidence.
-        ServerMsgBody::Heartbeat { identity, .. } if message.id == 0 => {
-            ServerFrame::heartbeat(identity.as_ref().map(heartbeat_identity))
-        }
+        ServerMsgBody::Heartbeat {
+            identity,
+            loaded_projects,
+            ..
+        } if message.id == 0 => ServerFrame::heartbeat_with_loaded(
+            identity.as_ref().map(heartbeat_identity),
+            loaded_projects.iter().map(loaded_project_facts).collect(),
+        ),
+        // The one non-hello RESPONSE body the mirror decodes rather than
+        // labels: whether a board has a project on it is what the empty and
+        // running faces are made of (M3), and a label cannot carry it.
+        ServerMsgBody::ListLoadedProjects { projects } => ServerFrame::loaded_report(
+            request_id,
+            projects.iter().map(loaded_project_facts).collect(),
+        ),
         other => ServerFrame::other(request_id, body_label(other)),
     }
+}
+
+/// One loaded-project report, as the fold reads it: the storage path and
+/// nothing else. The wire handle is a per-session number with no meaning to
+/// the model, and the library's own name for a project is a JOIN the app
+/// makes — never a fact the device is asked to remember.
+fn loaded_project_facts(project: &lpc_wire::server::LoadedProject) -> LoadedProjectFacts {
+    LoadedProjectFacts::new(project.path.as_str())
 }
 
 /// The hello facts the fold reads, from the full wire hello.
@@ -188,6 +211,7 @@ pub fn client_message(frame: &ClientFrame) -> Result<ClientMessage, String> {
         // real response before the boot output, and a firmware too old to
         // know the variant answers an error instead of going quiet.
         ClientFrameBody::Reboot => ClientRequest::Reboot,
+        ClientFrameBody::ListLoadedProjects => ClientRequest::ListLoadedProjects,
         ClientFrameBody::Opaque { label } => {
             return Err(format!(
                 "lpa-link cannot forward an opaque request ({label}): coarse effects go \

@@ -36,7 +36,7 @@ use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 
 use lpa_devices::activity::{ActivityKind, ActivityOutcome};
-use lpa_devices::event::{ActivityMarker, Command, EffectRequest, Event, Input};
+use lpa_devices::event::{ActivityMarker, Command, EffectId, EffectRequest, Event, Input};
 use lpa_devices::identity::{DeviceId, EndpointKey, MacAddress, PeerIdentity};
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkId, LinkInfo};
 use lpa_devices::record::DeviceRecord;
@@ -84,12 +84,56 @@ const MAX_SWEEP_LINKS: usize = 8;
 pub struct PendingWrites {
     pub persist: Vec<DeviceRecord>,
     pub delete: Vec<DeviceId>,
+    /// Pushes that completed and verified, for the library to bank
+    /// (`CatalogOp::RecordPush`: a history `Pushed` event + the device
+    /// association).
+    pub pushes: Vec<CompletedPush>,
 }
 
 impl PendingWrites {
     pub fn is_empty(&self) -> bool {
-        self.persist.is_empty() && self.delete.is_empty()
+        self.persist.is_empty() && self.delete.is_empty() && self.pushes.is_empty()
     }
+}
+
+/// What the library needs to remember about one finished push.
+///
+/// It is reported from HERE rather than as a model command on purpose: the
+/// model holds no project identity — what a board runs is evidence, and the
+/// library is the historian. The effects layer is the only place that knows
+/// both which project's bytes went down and that they arrived intact.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompletedPush {
+    pub device: DeviceId,
+    /// The library project whose bytes were sent.
+    pub project_uid: String,
+    /// The canonical content hash that was verified on the device.
+    pub version: String,
+}
+
+/// One project, resolved and waiting for the effect that will send it.
+///
+/// Staged rather than carried on the action because
+/// [`Action::Push`](lpa_devices::Action::Push)'s journal record is written
+/// verbatim and replayed from JSON — a project's bytes have no business in a
+/// flight recorder. The app resolves the source (an example installed, a
+/// library project read, a starter generated) and stages the RESULT here,
+/// including the failure: a project that could not be prepared and a device
+/// that refused the write then reach the card by the same road.
+pub type StagedPush = Result<PushPayload, String>;
+
+/// The bytes and the identity of one prepared push.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PushPayload {
+    /// The library project this came from — bookkeeping only; the device is
+    /// never told.
+    pub project_uid: String,
+    /// Display label for the progress line ("porch-sign").
+    pub label: String,
+    pub files: Vec<(String, Vec<u8>)>,
+    pub content_hash: String,
+    /// Storage dir to use when the board reports nothing loaded.
+    pub fallback_storage_id: String,
 }
 
 /// One routed transport plus what the effects layer knows about it.
@@ -127,6 +171,15 @@ pub struct DeviceEffects {
     /// Puts model inputs back on the actor's queue.
     sink: Option<Rc<dyn Fn(Input)>>,
     writes: PendingWrites,
+    /// Payloads staged for a push that has not run yet, by device. A
+    /// one-shot handoff, not a store: it is written just before the gesture
+    /// is folded, taken by the effect, and dropped with the device.
+    staged_pushes: BTreeMap<DeviceId, StagedPush>,
+    /// Verified pushes reported by spawned effect futures, drained into
+    /// [`PendingWrites`] at the next take. Shared because a spawned future
+    /// cannot hold `&mut self` across an await — the same reason
+    /// [`Self::arrivals`] exists.
+    completed_pushes: Rc<RefCell<Vec<CompletedPush>>>,
     next_link: u64,
 }
 
@@ -146,8 +199,21 @@ impl DeviceEffects {
             timer: None,
             sink: None,
             writes: PendingWrites::default(),
+            staged_pushes: BTreeMap::new(),
+            completed_pushes: Rc::new(RefCell::new(Vec::new())),
             next_link: 0,
         }
+    }
+
+    /// Stage what a [`Action::Push`](lpa_devices::Action::Push) gesture will
+    /// send — or the reason it cannot be sent.
+    ///
+    /// Called immediately before the gesture is folded. A second stage for
+    /// the same device replaces the first, which is what makes an in-place
+    /// Retry after a failure send freshly resolved bytes rather than a
+    /// stale snapshot.
+    pub fn stage_push(&mut self, device: DeviceId, staged: StagedPush) {
+        self.staged_pushes.insert(device, staged);
     }
 
     /// Install the platform transport (wasm: browser Web Serial; host tests:
@@ -181,6 +247,9 @@ impl DeviceEffects {
 
     /// Record writes to perform, taken by the roster sub-controller.
     pub fn take_writes(&mut self) -> PendingWrites {
+        self.writes
+            .pushes
+            .extend(self.completed_pushes.borrow_mut().drain(..));
         core::mem::take(&mut self.writes)
     }
 
@@ -215,13 +284,18 @@ impl DeviceEffects {
             Command::StartTimer { timer, after_ms } => self.start_timer(timer, after_ms),
             Command::RequestUsbGrant => self.request_grant(),
             Command::PersistRecord(record) => self.writes.persist.push(record),
-            Command::DeleteRecord(device) => self.writes.delete.push(device),
+            Command::DeleteRecord(device) => {
+                // A forgotten device takes its unsent payload with it.
+                self.staged_pushes.remove(&device);
+                self.writes.delete.push(device);
+            }
             Command::RevokeGrant(info) => self.revoke_grant(info),
             Command::RunEffect {
                 device,
                 link,
+                effect_id,
                 effect,
-            } => self.run_effect(device, link, effect),
+            } => self.run_effect(device, link, effect_id, effect),
         }
     }
 
@@ -234,7 +308,14 @@ impl DeviceEffects {
     /// that is merely written somewhere a rebuild would read is exactly how
     /// a flash once ran for a minute with nothing on screen
     /// (`docs/defects/2026-07-28-flash-progress-never-reached-the-ui.md`).
-    fn run_effect(&mut self, device: DeviceId, link: LinkId, effect: EffectRequest) {
+    fn run_effect(
+        &mut self,
+        device: DeviceId,
+        link: LinkId,
+        effect_id: EffectId,
+        effect: EffectRequest,
+    ) {
+        let kind = effect_kind(&effect);
         let (Some(transport), Some(spawn), Some(sink)) = (
             self.transport.clone(),
             self.spawn.clone(),
@@ -249,6 +330,8 @@ impl DeviceEffects {
             // still deserves an ending.
             sink(effect_ended(
                 device,
+                effect_id,
+                kind,
                 ActivityOutcome::Failed {
                     message: "the port is gone".to_string(),
                 },
@@ -257,10 +340,28 @@ impl DeviceEffects {
         };
         let info = slot.info.clone();
         let borrowed = Rc::clone(&slot.borrowed);
-        let call = match resolve_effect_call(&effect) {
+        let payload = matches!(effect, EffectRequest::Push)
+            .then(|| self.staged_pushes.remove(&device))
+            .flatten();
+        let pushed = payload
+            .as_ref()
+            .and_then(|staged| staged.as_ref().ok())
+            .map(|payload: &PushPayload| {
+                (
+                    payload.project_uid.clone(),
+                    payload.label.clone(),
+                    payload.content_hash.clone(),
+                )
+            });
+        let call = match resolve_effect_call(effect, payload) {
             Ok(call) => call,
             Err(message) => {
-                sink(effect_ended(device, ActivityOutcome::Failed { message }));
+                sink(effect_ended(
+                    device,
+                    effect_id,
+                    kind,
+                    ActivityOutcome::Failed { message },
+                ));
                 return;
             }
         };
@@ -269,11 +370,13 @@ impl DeviceEffects {
             Rc::new(move |label: String, percent: Option<u8>| {
                 sink(Input::Event(Event::ActivityMarker {
                     device,
+                    effect: Some(effect_id),
                     marker: ActivityMarker::Progress { label, percent },
                 }));
             })
         };
         borrowed.set(true);
+        let writes = Rc::clone(&self.completed_pushes);
         spawn(Box::pin(async move {
             let result = transport.run_effect(info, call, progress).await;
             // Give the wire back BEFORE the end marker folds: the reducer's
@@ -282,6 +385,17 @@ impl DeviceEffects {
             borrowed.set(false);
             match result {
                 Ok(facts) => {
+                    // A verified push is the library's to bank. Recorded
+                    // here because this is the only place that knows both
+                    // whose bytes went down and that they arrived intact.
+                    if let Some((project_uid, label, version)) = pushed {
+                        writes.borrow_mut().push(CompletedPush {
+                            device,
+                            project_uid,
+                            version,
+                        });
+                        log::debug!("pushed {label} to device {device:?}");
+                    }
                     // Normalized HERE, not trusted from the tool: the JS
                     // side is untestable, and an unnormalized (or garbage)
                     // MAC would mint a second identity for a board the
@@ -304,13 +418,20 @@ impl DeviceEffects {
                     }
                     sink(effect_ended(
                         device,
+                        effect_id,
+                        kind,
                         ActivityOutcome::Succeeded {
                             summary: facts.summary,
                         },
                     ));
                 }
                 Err(message) => {
-                    sink(effect_ended(device, ActivityOutcome::Failed { message }));
+                    sink(effect_ended(
+                        device,
+                        effect_id,
+                        kind,
+                        ActivityOutcome::Failed { message },
+                    ));
                 }
             }
         }));
@@ -548,32 +669,64 @@ fn spawn_pump(
     }));
 }
 
-/// The Ended marker a coarse effect reports through the sink.
-fn effect_ended(device: DeviceId, outcome: ActivityOutcome) -> Input {
+/// The Ended marker a coarse effect reports through the sink, stamped with
+/// the generation the model handed out. The stamp is what lets the fold drop
+/// this marker if the activity that asked for it has since been evicted.
+fn effect_ended(
+    device: DeviceId,
+    effect_id: EffectId,
+    kind: ActivityKind,
+    outcome: ActivityOutcome,
+) -> Input {
     Input::Event(Event::ActivityMarker {
         device,
-        marker: ActivityMarker::Ended {
-            kind: ActivityKind::Flash,
-            outcome,
-        },
+        effect: Some(effect_id),
+        marker: ActivityMarker::Ended { kind, outcome },
     })
+}
+
+/// Which activity a coarse effect belongs to.
+fn effect_kind(effect: &EffectRequest) -> ActivityKind {
+    match effect {
+        EffectRequest::Flash { .. } | EffectRequest::WriteBoardManifest { .. } => {
+            ActivityKind::Flash
+        }
+        EffectRequest::Push => ActivityKind::Push,
+    }
 }
 
 /// Resolve a model effect into platform terms. The board manifest is looked
 /// up HERE (the app layer owns `lpa-boards`), so a display-only board id
-/// degrades honestly instead of writing junk to the device.
-fn resolve_effect_call(effect: &EffectRequest) -> Result<DeviceEffectCall, String> {
+/// degrades honestly instead of writing junk to the device; a push's payload
+/// is the staged one, and its absence is an honest failure rather than a
+/// silent no-op.
+fn resolve_effect_call(
+    effect: EffectRequest,
+    payload: Option<StagedPush>,
+) -> Result<DeviceEffectCall, String> {
     match effect {
-        EffectRequest::Flash { build_id, .. } => Ok(DeviceEffectCall::FlashFirmware {
-            build_id: build_id.clone(),
-        }),
+        EffectRequest::Flash { build_id, .. } => Ok(DeviceEffectCall::FlashFirmware { build_id }),
         EffectRequest::WriteBoardManifest { board_id } => {
-            let manifest_json = lpa_boards::runtime_manifest_json(board_id)
+            let manifest_json = lpa_boards::runtime_manifest_json(&board_id)
                 .ok_or_else(|| format!("board {board_id} has no checked-in runtime manifest"))?;
             Ok(DeviceEffectCall::WriteHardwareManifest {
                 manifest_json: manifest_json.to_string(),
             })
         }
+        EffectRequest::Push => match payload {
+            // The app could not prepare a project (a generate that refused,
+            // a library read that failed): its reason IS the outcome, so the
+            // card says what actually went wrong.
+            Some(Err(message)) => Err(message),
+            Some(Ok(payload)) => Ok(DeviceEffectCall::PushProject {
+                files: payload.files,
+                expected_hash: payload.content_hash,
+                fallback_storage_id: payload.fallback_storage_id,
+            }),
+            // Unreachable through the app (every Push gesture stages first),
+            // and honest rather than silent if it ever is not.
+            None => Err("nothing was prepared to send to this board".to_string()),
+        },
     }
 }
 
@@ -616,6 +769,83 @@ mod tests {
         assert_eq!(writes.persist, vec![record]);
         assert_eq!(writes.delete, vec![DeviceId(2)]);
         assert!(effects.take_writes().is_empty(), "taken means taken");
+    }
+
+    /// A staged payload becomes the platform call verbatim; nothing about
+    /// the project reaches the model on the way.
+    #[test]
+    fn a_staged_push_resolves_into_the_conversations_own_arguments() {
+        let staged = Ok(PushPayload {
+            project_uid: "prj000000daqf6dvvqz".to_string(),
+            label: "porch-sign".to_string(),
+            files: vec![("project.json".to_string(), b"{}".to_vec())],
+            content_hash: "lph1:abc".to_string(),
+            fallback_storage_id: "studio".to_string(),
+        });
+
+        let call = resolve_effect_call(EffectRequest::Push, Some(staged)).expect("resolved");
+
+        assert_eq!(
+            call,
+            DeviceEffectCall::PushProject {
+                files: vec![("project.json".to_string(), b"{}".to_vec())],
+                expected_hash: "lph1:abc".to_string(),
+                fallback_storage_id: "studio".to_string(),
+            }
+        );
+    }
+
+    /// A project the app could not prepare fails with ITS reason, so the
+    /// card says what actually went wrong rather than "the push failed".
+    #[test]
+    fn a_preparation_failure_becomes_the_effects_own_message() {
+        let staged = Err("this board has no catalog entry".to_string());
+
+        let error = resolve_effect_call(EffectRequest::Push, Some(staged)).expect_err("refused");
+
+        assert_eq!(error, "this board has no catalog entry");
+    }
+
+    /// Unreachable through the app — every Push gesture stages first — and
+    /// honest rather than silent if it ever is not.
+    #[test]
+    fn a_push_with_nothing_staged_refuses_out_loud() {
+        let error = resolve_effect_call(EffectRequest::Push, None).expect_err("refused");
+
+        assert!(error.contains("nothing was prepared"), "{error}");
+    }
+
+    /// Each effect belongs to the activity that asked for it — the kind the
+    /// end marker wears, and the one the fold brackets against.
+    #[test]
+    fn effects_name_the_activity_they_belong_to() {
+        assert_eq!(
+            effect_kind(&EffectRequest::Flash {
+                build_id: "esp32c6-4mb".to_string(),
+                board_id: "seeed-xiao-esp32c6".to_string(),
+            }),
+            ActivityKind::Flash
+        );
+        assert_eq!(
+            effect_kind(&EffectRequest::WriteBoardManifest {
+                board_id: "seeed-xiao-esp32c6".to_string(),
+            }),
+            ActivityKind::Flash,
+            "the manifest stamp is the flash's second half, not its own flow"
+        );
+        assert_eq!(effect_kind(&EffectRequest::Push), ActivityKind::Push);
+    }
+
+    /// Forgetting a device drops whatever was staged for it: a payload
+    /// waiting for a card that no longer exists is nobody's.
+    #[test]
+    fn forgetting_a_device_drops_its_staged_payload() {
+        let mut effects = DeviceEffects::new();
+        effects.stage_push(DeviceId(1), Err("never mind".to_string()));
+
+        effects.apply(vec![Command::DeleteRecord(DeviceId(1))]);
+
+        assert!(effects.staged_pushes.is_empty());
     }
 
     /// Without a transport nothing is attempted — a host build and a browser

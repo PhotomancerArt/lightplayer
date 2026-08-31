@@ -68,6 +68,46 @@ pub async fn write_device_file(
     Ok(())
 }
 
+/// Push a project onto the device over the app protocol.
+///
+/// The conversation itself is `lpa-client`'s — the same stop → clear →
+/// chunked write → load → hash-verify the studio runs against the sim — so
+/// this function is only the port half: build the io, hand the progress
+/// through, translate the error.
+pub async fn push_device_project(
+    port_id: u32,
+    files: &[(String, Vec<u8>)],
+    expected_hash: &str,
+    fallback_storage_id: &str,
+    events: LinkManagementEventSink,
+) -> Result<lpa_client::PushReport, LinkError> {
+    let io = PortLineIo {
+        port_id,
+        pending: Vec::new(),
+        events: events.clone(),
+    };
+    let mut client = LpClient::new(io);
+    let mut progress = |label: String, percent: Option<u8>| {
+        let update = LinkManagementProgress::new(label);
+        // A label-only step stays label-only: reporting 0% would make the
+        // card's bar jump backwards between named steps.
+        let update = match percent {
+            Some(percent) => update.with_percent(u32::from(percent)),
+            None => update,
+        };
+        events.emit(LinkManagementEvent::progress(update));
+    };
+    lpa_client::push_project(
+        &mut client,
+        files,
+        expected_hash,
+        fallback_storage_id,
+        &mut progress,
+    )
+    .await
+    .map_err(|error| LinkError::other(format!("push failed: {error}")))
+}
+
 /// `ClientIo` over one port's raw line framing.
 struct PortLineIo {
     port_id: u32,

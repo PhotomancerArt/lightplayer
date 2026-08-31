@@ -531,6 +531,66 @@ impl StudioController {
                 log::warn!("device record not forgotten: {error}");
             }
         }
+        for push in writes.pushes {
+            self.bank_completed_push(push).await;
+        }
+    }
+
+    /// Bank one verified push: a `Pushed` event on the project's history and
+    /// the device association naming what that board was last given.
+    ///
+    /// Best-effort, like every other record write. The push already happened
+    /// and the board is already running the project; a bookkeeping failure
+    /// is a log line, never a card that claims the push did not work.
+    ///
+    /// Two honest skips:
+    ///
+    /// - A board still keyed on its MAC (`mac:aa:bb:…`) has no `dev…`
+    ///   identity for the history to name, and inventing one would put an
+    ///   unresolvable device in a permanent event log. It gets its uid when
+    ///   the firmware provisions one; until then the push is unbanked, which
+    ///   M4's sync verdicts read as "unknown", not as "up to date".
+    /// - A version the project's history has never recorded (an unsaved
+    ///   working copy pushed straight off disk) is refused by
+    ///   `record_push` itself, for the same reason: an event may not name a
+    ///   snapshot the library cannot produce.
+    async fn bank_completed_push(&mut self, push: crate::CompletedPush) {
+        // The row is derived from the MODEL's record rather than read back
+        // from the gallery's cached rows: the record is what the fold just
+        // persisted, and the catalog op merges against the live registry
+        // anyway, so nothing here can be stale.
+        let Some(row) = self
+            .devices
+            .roster()
+            .devices()
+            .iter()
+            .find(|entry| entry.id == push.device)
+            .and_then(|entry| entry.record.as_ref())
+            .and_then(crate::app::devices::registry_row_from_record)
+        else {
+            log::debug!(
+                "push not banked: device {:?} has no persisted record",
+                push.device
+            );
+            return;
+        };
+        let version: lpc_history::ContentHash = match push.version.parse() {
+            Ok(version) => version,
+            Err(error) => {
+                log::warn!("push not banked: unreadable content hash: {error}");
+                return;
+            }
+        };
+        if let Err(error) = self
+            .run_catalog_op(CatalogOp::RecordPush {
+                project_uid: push.project_uid,
+                device: Box::new(row),
+                version,
+            })
+            .await
+        {
+            log::warn!("push not banked: {error}");
+        }
     }
 
     /// The registry key a device id currently maps to, read off the hydrated
@@ -1761,6 +1821,10 @@ impl StudioController {
             let op = action.into_op::<crate::DevicesOp>()?;
             return self.execute_devices_op(op).await;
         }
+        if node_id.as_str() == crate::DevicePushOp::NODE_ID {
+            let op = action.into_op::<crate::DevicePushOp>()?;
+            return self.execute_device_push_op(op).await;
+        }
         if node_id == project_node_id {
             // Slot edits and node-level reverts target the project node too
             // (the op carries the full slot/node address), so route by op
@@ -2492,6 +2556,138 @@ impl StudioController {
         self.fold_device_input(crate::DeviceInput::Action(op.0));
         self.settle_device_records().await;
         Ok(UiNotices::new())
+    }
+
+    /// The empty face's gesture: prepare a project, then push it.
+    ///
+    /// Two steps, in this order and for this reason. The preparation is
+    /// library work — install the example, generate the starter, read the
+    /// package — which is asynchronous and knows about uids, slugs and
+    /// content hashes; none of that may enter the device model (its journal
+    /// records every input verbatim, and project bytes have no business in a
+    /// flight recorder). So the result is STAGED with the effects layer and
+    /// the model is handed a bare `Action::Push`.
+    ///
+    /// A preparation that FAILED is staged too, as its own message. That is
+    /// what makes "the generator refused" and "the board refused the write"
+    /// land on the same honest problem face with the same in-place retry,
+    /// instead of one of them being a toast the card never hears about.
+    async fn execute_device_push_op(&mut self, op: crate::DevicePushOp) -> UiResult {
+        let staged = self.prepare_push(&op.source).await;
+        if let Err(reason) = &staged {
+            log::warn!("nothing to push to {:?}: {reason}", op.device);
+        }
+        self.devices.effects_mut().stage_push(op.device, staged);
+        self.fold_device_input(crate::DeviceInput::Action(crate::DeviceAction::Push {
+            device: op.device,
+        }));
+        self.settle_device_records().await;
+        Ok(UiNotices::new())
+    }
+
+    /// Resolve a picked source into the bytes that will go on the board.
+    ///
+    /// The three sources converge on one shape — a library project — because
+    /// a push must be recordable: the history event and the device
+    /// association are written against a `prj…` uid, and something pushed
+    /// from nowhere could never be banked or compared afterwards. So an
+    /// example is INSTALLED first (fresh uid minted at install, the incoming
+    /// manifest untouched — the examples vision's rule) and a starter is
+    /// GENERATED into the library first.
+    async fn prepare_push(&mut self, source: &crate::PushSource) -> crate::StagedPush {
+        let uid = match source {
+            crate::PushSource::Library { project_uid } => project_uid.clone(),
+            crate::PushSource::Example { example_id } => {
+                let example = crate::app::home::embedded_example::embedded_example(example_id)
+                    .ok_or_else(|| format!("this build has no example called {example_id}"))?;
+                // No naming step (ruled): the library's dated-slug
+                // convention names it from the example's own label.
+                self.install_for_push(CatalogOp::ForkTransientCopy {
+                    name: example.name.to_string(),
+                    files: example.files(),
+                    provenance: crate::app::library::PackageProvenance::SeededFrom {
+                        source: example.id.to_string(),
+                    },
+                })
+                .await?
+            }
+            crate::PushSource::NewForBoard { board_id } => {
+                self.install_for_push(CatalogOp::GenerateForBoard {
+                    board_id: board_id.clone(),
+                })
+                .await?
+            }
+        };
+        let (files, content_hash, label) = self.read_push_payload(&uid).await?;
+        Ok(crate::PushPayload {
+            project_uid: uid,
+            label,
+            files,
+            content_hash,
+            fallback_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
+                .to_string(),
+        })
+    }
+
+    /// Run a creation-shaped catalog op and return the uid it installed.
+    async fn install_for_push(&mut self, op: CatalogOp) -> Result<String, String> {
+        let outcome = self
+            .run_catalog_op(op)
+            .await
+            .map_err(|error| error.to_string())?;
+        outcome
+            .summary
+            .map(|summary| summary.uid.to_string())
+            .ok_or_else(|| "the project was not installed".to_string())
+    }
+
+    /// Read a library project's files + canonical hash.
+    ///
+    /// Through the LIVE handle when that project is open in this tab (asking
+    /// the host for a second open would be refused — this tab holds the
+    /// lock), otherwise through a read-only open whose receipt is abandoned
+    /// the moment the bytes are in hand, so a push never leaves a lock
+    /// behind.
+    async fn read_push_payload(
+        &mut self,
+        uid: &str,
+    ) -> Result<(Vec<(String, Vec<u8>)>, String, String), String> {
+        if let Some(read) = self.project.read_open_package(uid) {
+            let (files, hash) = read.map_err(|error| error.to_string())?;
+            // The open handle has no slug to hand back through this seam, so
+            // the label comes from the gallery's own row — the same name the
+            // user picked in the list.
+            let label = self
+                .home_inputs
+                .as_ref()
+                .and_then(|inputs| inputs.projects.iter().find(|card| card.uid == uid))
+                .map(|card| card.slug.clone())
+                .unwrap_or_else(|| uid.to_string());
+            return Ok((files, hash, label));
+        }
+        let host = self.library_host().map_err(|error| error.to_string())?;
+        let opened = host
+            .open_project(uid)
+            .await
+            .map_err(|error| self.library_error_with_name(error).to_string())?;
+        let handle = crate::app::library::PackageHandle::load(
+            opened.uid,
+            opened.slug.clone(),
+            opened.package_fs,
+            opened.history_fs,
+        )
+        .map_err(|error| error.to_string());
+        let payload = handle.and_then(|handle| {
+            crate::app::project::project_controller::read_package_payload(&handle)
+                .map_err(|error| error.to_string())
+        });
+        // Read-only by construction: the receipt is given back either way,
+        // so a failed read cannot strand the project's lock. Abandoning IS
+        // the release (unregister, stop the flushers, drop the lock) — a
+        // `close_project` on top would be closing something nothing holds.
+        opened.receipt.abandon();
+        let (files, hash) = payload?;
+        Ok((files, hash, opened.slug))
     }
 
     /// The auto-name that precedes a Flash on a still-unnamed board, if one

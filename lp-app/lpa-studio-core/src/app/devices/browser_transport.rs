@@ -153,6 +153,31 @@ impl DeviceTransport for BrowserSerialTransport {
                         ..Default::default()
                     })
                 }
+                DeviceEffectCall::PushProject {
+                    files,
+                    expected_hash,
+                    fallback_storage_id,
+                } => {
+                    // The conversation is `lpa-client`'s, on the raw `M!`
+                    // line framing the JS controller already does. The
+                    // effects layer paused this port's pump before calling
+                    // us — two drainers would split the responses between
+                    // them and both halves would look like a dead board.
+                    let report = provider
+                        .push_device_project(
+                            &endpoint,
+                            &files,
+                            &expected_hash,
+                            &fallback_storage_id,
+                            events,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: format!("project sent to {}", report.storage_id),
+                        ..Default::default()
+                    })
+                }
             }
         })
     }

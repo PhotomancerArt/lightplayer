@@ -527,6 +527,31 @@ impl BrowserSerialEsp32Provider {
         super::port_client_io::write_device_file(port_id, path, bytes, events).await
     }
 
+    /// Push a project onto the device over the app protocol (round 2's
+    /// second coarse effect): find the storage dir the board runs from,
+    /// replace it, load it, and verify the package hash.
+    ///
+    /// ⚠️ Same exclusive-borrow rule as [`Self::write_device_file`]: the
+    /// model's link pump for this endpoint must be paused while this runs.
+    pub async fn push_device_project(
+        &self,
+        endpoint_id: &LinkEndpointId,
+        files: &[(String, Vec<u8>)],
+        expected_hash: &str,
+        fallback_storage_id: &str,
+        events: LinkManagementEventSink,
+    ) -> Result<lpa_client::PushReport, LinkError> {
+        let port_id = self.endpoint_port_id(endpoint_id)?;
+        super::port_client_io::push_device_project(
+            port_id,
+            files,
+            expected_hash,
+            fallback_storage_id,
+            events,
+        )
+        .await
+    }
+
     /// Session-scoped [`Self::probe_target`], for the connector's
     /// mode-detection escalation. Releases the app-protocol port first: the
     /// SYNC handshake needs the wire to itself and reboots the device.

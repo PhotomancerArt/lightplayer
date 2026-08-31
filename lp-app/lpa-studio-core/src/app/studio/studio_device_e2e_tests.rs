@@ -83,6 +83,24 @@ struct ScriptedTransport {
     flash_plan: Rc<Cell<FlashPlan>>,
     /// `/hardware.json` payloads the manifest-write effect was handed.
     manifest_writes: Rc<RefCell<Vec<String>>>,
+    /// What a push effect does. Unlike the flash, `Real` is not scripted at
+    /// all: it runs the actual `lpa-client` conversation against the fake's
+    /// REAL `LpServer`, so a green push here means the stop/write/load order
+    /// and the hash verification both worked over real framing.
+    push_plan: Rc<Cell<PushPlan>>,
+}
+
+/// The scripted outcomes a push effect can play out.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum PushPlan {
+    /// The real conversation, end to end, against the fake's `LpServer`.
+    #[default]
+    Real,
+    /// The wire refuses. Stands in for every "the board would not take it"
+    /// failure (a dropped response, a full flash, a hash mismatch).
+    Fail,
+    /// The effect never completes; only eviction bounds the activity.
+    Hang,
 }
 
 /// The scripted outcomes a flash effect can play out (§5 of the milestone:
@@ -192,6 +210,154 @@ impl DeviceTransport for ScriptedTransport {
                     ..Default::default()
                 })))
             }
+            DeviceEffectCall::PushProject {
+                files,
+                expected_hash,
+                fallback_storage_id,
+            } => {
+                let plan = self.push_plan.get();
+                let device = self.device.clone();
+                Box::pin(async move {
+                    match plan {
+                        PushPlan::Fail => Err("the board refused the write (scripted)".to_string()),
+                        PushPlan::Hang => {
+                            core::future::pending::<()>().await;
+                            unreachable!("a hung effect never completes")
+                        }
+                        PushPlan::Real => {
+                            // The REAL conversation, over the fake's own
+                            // `M!` byte wire, into a real `LpServer` over
+                            // `LpFsMemory`. Nothing about the stop/write/
+                            // load order or the hash check is faked.
+                            let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device));
+                            let mut report = |label: String, percent: Option<u8>| {
+                                progress(label, percent);
+                            };
+                            let report = lpa_client::push_project(
+                                &mut client,
+                                &files,
+                                &expected_hash,
+                                &fallback_storage_id,
+                                &mut report,
+                            )
+                            .await
+                            .map_err(|error| error.to_string())?;
+                            Ok(DeviceEffectFacts {
+                                summary: format!("project sent to {}", report.storage_id),
+                                ..Default::default()
+                            })
+                        }
+                    }
+                })
+            }
+        }
+    }
+}
+
+/// A `ClientIo` over the fake device's byte wire.
+///
+/// The mirror of `lpa-link`'s browser `PortLineIo`: `M!<json>` lines out,
+/// `M!<json>` lines in, everything else on the wire (boot banner, logs)
+/// dropped. It exists so the bench's push is a real protocol conversation
+/// rather than a scripted outcome — the fake runs an actual `LpServer`, and
+/// the whole point of M3 is that the conversation works.
+struct FakeDeviceIo {
+    stream: lpa_link::providers::fake_device::FakeDeviceByteStream,
+    /// Bytes read but not yet forming a complete line.
+    partial: String,
+    /// Frames decoded but not yet handed out.
+    pending: VecDeque<lpc_wire::WireServerMessage>,
+}
+
+impl FakeDeviceIo {
+    fn new(device: &FakeEsp32Device) -> Self {
+        Self {
+            stream: lpa_link::providers::fake_device::FakeDeviceByteStream::new(device.clone()),
+            partial: String::new(),
+            pending: VecDeque::new(),
+        }
+    }
+
+    /// Drain whatever the wire has right now into [`Self::pending`].
+    fn drain(&mut self) {
+        let mut buf = [0u8; 8192];
+        loop {
+            let read = read_available(&mut self.stream, &mut buf);
+            if read == 0 {
+                return;
+            }
+            self.partial
+                .push_str(&String::from_utf8_lossy(&buf[..read]));
+            while let Some(newline) = self.partial.find('\n') {
+                let line: String = self.partial.drain(..=newline).collect();
+                let line = line.trim_end_matches(['\n', '\r']);
+                let Some(json) = line.strip_prefix("M!") else {
+                    continue;
+                };
+                if let Ok(message) = lpc_wire::json::from_str::<lpc_wire::WireServerMessage>(json) {
+                    self.pending.push_back(message);
+                }
+            }
+        }
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl lpa_client::ClientIo for FakeDeviceIo {
+    async fn send(&mut self, msg: lpc_wire::ClientMessage) -> Result<(), lpc_wire::TransportError> {
+        use lpa_link::stream::DeviceByteStream;
+        let json = lpc_wire::json::to_string(&msg)
+            .map_err(|error| lpc_wire::TransportError::Other(format!("encode failed: {error}")))?;
+        self.stream
+            .write_all(format!("M!{json}\n").as_bytes())
+            .map_err(|error| lpc_wire::TransportError::Other(error.to_string()))
+    }
+
+    async fn receive(&mut self) -> Result<lpc_wire::WireServerMessage, lpc_wire::TransportError> {
+        let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+        loop {
+            self.drain();
+            if let Some(message) = self.pending.pop_front() {
+                return Ok(message);
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(lpc_wire::TransportError::Other(
+                    "the fake device did not answer".to_string(),
+                ));
+            }
+            // Yield to the bench's task pump so the rest of the app keeps
+            // turning while this conversation waits — the same shape the
+            // browser io's `setTimeout` poll has.
+            YieldOnce::default().await;
+        }
+    }
+
+    async fn close(&mut self) -> Result<(), lpc_wire::TransportError> {
+        // The port belongs to the model's link; the borrow ends, the port
+        // stays open.
+        Ok(())
+    }
+}
+
+/// Pending once, then ready: one turn back to the bench's pump.
+#[derive(Default)]
+struct YieldOnce {
+    yielded: bool,
+}
+
+impl Future for YieldOnce {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<()> {
+        match core::mem::replace(&mut self.yielded, true) {
+            true => Poll::Ready(()),
+            false => {
+                // The bench re-polls every task each step; a real executor
+                // gets a wake from the waker the same way the `Sleep` above
+                // relies on.
+                std::thread::sleep(Duration::from_millis(1));
+                Poll::Pending
+            }
         }
     }
 }
@@ -272,6 +438,7 @@ struct DeviceBench {
     chooser_grants: Rc<Cell<bool>>,
     flash_plan: Rc<Cell<FlashPlan>>,
     manifest_writes: Rc<RefCell<Vec<String>>>,
+    push_plan: Rc<Cell<PushPlan>>,
     started: std::time::Instant,
 }
 
@@ -320,6 +487,13 @@ impl DeviceBench {
             expected_proto: lpc_wire::WIRE_PROTO_VERSION,
             flash_rung_ms: 400,
             flash_reopen_retry_ms: 100,
+            // The push budgets shrink for the same reason the flash ones do:
+            // the SHAPE under test is the phases, never their size. The
+            // deadline stays generous — it is the backstop, and a real
+            // conversation with a real server is what runs inside it.
+            push_deadline_ms: 20_000,
+            push_cancel_grace_ms: 500,
+            push_observe_ms: 400,
             ..Default::default()
         });
         controller.attach_library(Rc::new(host));
@@ -342,6 +516,7 @@ impl DeviceBench {
         });
         let flash_plan: Rc<Cell<FlashPlan>> = Rc::new(Cell::new(FlashPlan::default()));
         let manifest_writes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let push_plan: Rc<Cell<PushPlan>> = Rc::new(Cell::new(PushPlan::default()));
         controller.set_device_transport(Rc::new(ScriptedTransport {
             device: device.clone(),
             endpoint: endpoint.to_string(),
@@ -350,6 +525,7 @@ impl DeviceBench {
             revoked: Rc::clone(&revoked),
             flash_plan: Rc::clone(&flash_plan),
             manifest_writes: Rc::clone(&manifest_writes),
+            push_plan: Rc::clone(&push_plan),
         }));
 
         let bench = Self {
@@ -362,6 +538,7 @@ impl DeviceBench {
             chooser_grants,
             flash_plan,
             manifest_writes,
+            push_plan,
             started: std::time::Instant::now(),
         };
         (bench, tasks)
@@ -409,10 +586,21 @@ impl DeviceBench {
         drive(self.controller.dispatch(action)).expect("a device gesture never fails loudly");
     }
 
+    /// The empty face's gesture, through the ordinary action path.
+    fn push_gesture(&mut self, device: crate::DeviceId, source: crate::PushSource) {
+        let action: UiAction = crate::DevicePushOp::action_for(device, source);
+        drive(self.controller.dispatch(action)).expect("a push gesture never fails loudly");
+    }
+
     fn registry(&self) -> Vec<crate::app::places::RegisteredDevice> {
         DeviceRegistry::new(self.store.fs_handle())
             .list()
             .expect("the registry reads back")
+    }
+
+    /// What the library holds, as the gallery would list it.
+    fn library(&self) -> Vec<crate::app::library::PackageSummary> {
+        self.store.list().expect("the library reads back")
     }
 }
 
@@ -928,6 +1116,259 @@ fn forgetting_mid_flash_evicts_the_hung_effect_and_cleans_up() {
     assert!(bench.view().devices.is_empty(), "the card is gone");
     assert!(bench.view().pending.is_empty());
     assert_eq!(bench.revoked.borrow().len(), 1, "the grant went back");
+}
+
+// ---------------------------------------------------------------------
+// M3: the empty face, the push, and the running face
+// ---------------------------------------------------------------------
+
+/// A LightPlayer board with nothing loaded, heartbeating like real firmware
+/// so the fold learns what it is running (and what it is not).
+fn empty_light_player(uid: &str) -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(uid, "Bench board"))
+            .with_base_mac("60:55:f9:0a:0b:0c")
+            // The loaded-project fact rides heartbeats; the fake's host
+            // server never heartbeats on its own, so a script that wants a
+            // truthful empty/running face has to opt in.
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )))
+}
+
+/// The example the picker's first entry resolves to.
+fn bundled_example() -> crate::PushSource {
+    crate::PushSource::Example {
+        example_id: crate::first_bundled_example_id()
+            .expect("this build bundles examples")
+            .to_string(),
+    }
+}
+
+/// Drive a board to its settled card.
+fn identified(device: &FakeEsp32Device, endpoint: &str) -> (DeviceBench, TaskPool) {
+    let (mut bench, tasks) = DeviceBench::granted(device, endpoint);
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    (bench, tasks)
+}
+
+/// M3's walk, end to end through the real effects layer and a REAL push
+/// conversation: a LightPlayer with nothing on it wears the empty face, the
+/// picker's example is installed into the library and sent over the wire
+/// (stop → clear → chunked writes → load → hash verify, all of it against
+/// the fake's own `LpServer`), and the card comes back running it.
+#[test]
+fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
+    let device = empty_light_player("dev000000daqf6dvvqz");
+    let (mut bench, tasks) = identified(&device, "usb-push-1");
+
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    assert!(
+        card.can_receive_project,
+        "the empty face's primary verb is live: {card:?}"
+    );
+    // The picker really is built from the gallery's two lists.
+    let offer = crate::push_offer(&card, &[], &[]);
+    assert!(
+        offer.new_project_unavailable.is_some(),
+        "a board that has not named itself cannot have a starter generated: {offer:?}"
+    );
+    assert!(bench.library().is_empty(), "nothing installed yet");
+
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = &bench.view().devices[0];
+    let outcome = card.last_outcome.as_ref().expect("an outcome");
+    assert!(outcome.ok, "{outcome:?}");
+    // The board's OWN report is what the running face is made of.
+    assert!(
+        matches!(
+            &card.loaded_project,
+            lpa_devices::view::LoadedProject::Running { label } if !label.is_empty()
+        ),
+        "the running face reads the board's report: {card:?}"
+    );
+    assert!(
+        !card.can_receive_project || card.loaded_project != lpa_devices::view::LoadedProject::Empty,
+        "the empty face is gone"
+    );
+
+    // The example became a real library project — no naming step anywhere.
+    let library = bench.library();
+    assert_eq!(library.len(), 1, "{library:?}");
+    // And the push was banked: the device row names what it was last given.
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let association = rows[0]
+        .association
+        .as_ref()
+        .expect("a verified push is banked");
+    assert_eq!(association.project, library[0].uid);
+    assert_eq!(
+        association.version.to_string(),
+        association.version.to_string(),
+        "the banked version is the verified content hash"
+    );
+}
+
+/// A push the board refuses lands on the problem face: the outcome line says
+/// what happened, the picker is still there (retry in place), and every
+/// escape survives.
+#[test]
+fn a_refused_push_lands_on_an_honest_face_with_the_picker_re_offered() {
+    let device = empty_light_player("dev000000daqf6dvvr0");
+    let (mut bench, tasks) = identified(&device, "usb-push-2");
+    bench.push_plan.set(PushPlan::Fail);
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+
+    bench.push_gesture(device_id, bundled_example());
+    bench.run_until(&tasks, "the failure to settle", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = &bench.view().devices[0];
+    let outcome = card.last_outcome.as_ref().expect("an outcome");
+    assert!(!outcome.ok);
+    assert!(outcome.summary.contains("refused the write"), "{outcome:?}");
+    assert!(
+        card.can_receive_project && card.loaded_project == lpa_devices::view::LoadedProject::Empty,
+        "the empty face re-offers the picker — retry in place: {card:?}"
+    );
+    assert!(!card.escapes.is_empty(), "always a way out");
+    // Nothing was banked for a push that never landed.
+    assert!(
+        bench.registry()[0].association.is_none(),
+        "a failed push is not a push"
+    );
+}
+
+/// A source the app cannot prepare fails the SAME way a refused wire does:
+/// on the card, with the reason, and with the picker still there. (A
+/// generate for a board this build has no catalog entry for is the real
+/// shape of this — the generator refuses rather than guessing a pin.)
+#[test]
+fn a_project_that_cannot_be_prepared_fails_on_the_card_not_in_a_log() {
+    let device = empty_light_player("dev000000daqf6dvvr1");
+    let (mut bench, tasks) = identified(&device, "usb-push-3");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+
+    bench.push_gesture(
+        device_id,
+        crate::PushSource::NewForBoard {
+            board_id: "no-such-board".to_string(),
+        },
+    );
+    bench.run_until(&tasks, "the refusal to settle", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = &bench.view().devices[0];
+    let outcome = card.last_outcome.as_ref().expect("an outcome");
+    assert!(!outcome.ok, "{outcome:?}");
+    assert!(
+        card.can_receive_project,
+        "the picker is still there: {card:?}"
+    );
+    assert!(bench.library().is_empty(), "nothing half-installed");
+}
+
+/// Cancel mid-push: the conversation cannot be torn out (the device's
+/// project dir is already cleared), so the cancel is held — and eviction
+/// bounds the hold. The card comes back escapable, not stuck.
+#[test]
+fn cancelling_mid_push_is_held_then_bounded_by_eviction() {
+    let device = empty_light_player("dev000000daqf6dvvr2");
+    let (mut bench, tasks) = identified(&device, "usb-push-4");
+    bench.push_plan.set(PushPlan::Hang);
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+
+    bench.push_gesture(device_id, bundled_example());
+    bench.run_until(&tasks, "the push to be visibly running", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_some())
+    });
+
+    bench.gesture(DeviceAction::CancelActivity { device: device_id });
+    assert!(
+        bench.view().devices[0]
+            .activity
+            .as_ref()
+            .is_some_and(|activity| activity.cancel_requested),
+        "the card says it is cancelling rather than stopping mid-write"
+    );
+
+    bench.run_until(&tasks, "the cancel grace to bound the hold", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none())
+    });
+
+    let card = &bench.view().devices[0];
+    assert!(
+        card.last_outcome
+            .as_ref()
+            .is_some_and(|outcome| !outcome.ok),
+        "an interrupted push is not a success: {card:?}"
+    );
+    assert!(!card.escapes.is_empty(), "always a way out");
+    assert!(
+        bench.registry()[0].association.is_none(),
+        "an evicted push banks nothing"
+    );
 }
 
 /// The seam `lpa-link` calls the ONLY honest source of `expected_proto`: the

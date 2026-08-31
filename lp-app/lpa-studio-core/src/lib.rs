@@ -36,10 +36,12 @@ pub use app::bus::{
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use app::devices::BrowserSerialTransport;
 pub use app::devices::{
-    DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects, DeviceRoster,
-    DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture, DeviceTransport, DeviceTransportFuture,
-    DevicesOp, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, device_escape_action,
-    device_status_kind, flash_offer, pending_escape_action,
+    CompletedPush, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects,
+    DevicePushOp, DeviceRoster, DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture,
+    DeviceTransport, DeviceTransportFuture, DevicesOp, FlashBoardChoice, FlashOffer, GrantedLink,
+    JournalLine, PushOffer, PushPayload, PushSource, PushSourceChoice, PushSourceGroup, StagedPush,
+    device_escape_action, device_status_kind, first_bundled_example_id, flash_offer,
+    pending_escape_action, push_offer,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::home::{
@@ -157,8 +159,8 @@ pub use core::{
 /// and dispatches it without a second dependency edge. The model is the ONE
 /// device vocabulary — there is no `Ui*` mirror of it, on purpose.
 pub use lpa_devices::view::{
-    ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape, OutcomeView,
-    PendingLinkView, RosterView,
+    ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape,
+    LoadedProject as DeviceLoadedProject, OutcomeView, PendingLinkView, RosterView,
 };
 pub use lpa_devices::{
     Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,

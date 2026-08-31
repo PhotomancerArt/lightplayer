@@ -113,6 +113,15 @@ impl ControllerOp for DevicesOp {
                 "Write LightPlayer firmware for the picked board onto this chip.",
                 ActionPriority::Primary,
             ),
+            // No confirmation: the empty face's picker IS the deliberate
+            // gesture, and a board with nothing on it has nothing to lose.
+            // (Pushing OVER a project is M4's banking question, not this
+            // face's.)
+            Action::Push { .. } => ActionMeta::new(
+                "Put it on the board",
+                "Send the picked project to this board and start it running.",
+                ActionPriority::Primary,
+            ),
             Action::SetName { .. } => ActionMeta::new(
                 "Rename",
                 "Change what Studio calls this device.",

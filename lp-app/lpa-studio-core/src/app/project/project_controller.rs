@@ -2674,6 +2674,30 @@ impl ProjectController {
         self.transient_fork_generation
     }
 
+    /// Read a NON-transient library project's on-disk content off the handle
+    /// this tab already holds open — files plus the canonical hash, the two
+    /// halves a push payload is made of.
+    ///
+    /// `None` when `uid` is not the project open here, which is the caller's
+    /// signal to take a read-only open through the host instead. It exists
+    /// because this tab HOLDS that project's lock: asking the host to open
+    /// it again would be refused (`OpenInThisTab`), and a push of a project
+    /// you are looking at is the ordinary case, not the exotic one.
+    ///
+    /// A transient session is deliberately excluded: its uid is ephemeral
+    /// RAM identity with no library row behind it, so there would be nothing
+    /// to record the push against.
+    pub(crate) fn read_open_package(
+        &self,
+        uid: &str,
+    ) -> Option<Result<(Vec<(String, Vec<u8>)>, String), UiError>> {
+        let active = self.library.as_ref()?.active.as_ref()?;
+        if active.transient.is_some() || active.handle.uid.to_string() != uid {
+            return None;
+        }
+        Some(read_package_payload(&active.handle))
+    }
+
     /// Open someone else's View-access shared project as a transient view
     /// session (P5): pre-fetched working copy + real history, the cloud
     /// document's own uid (D17), nothing installed. The explicit save
@@ -9339,6 +9363,20 @@ fn static_export_findings(
         .collect();
     let findings = lpc_model::check_exports(&exports, &set).findings;
     (exports, findings)
+}
+
+/// One package's push payload: every file, and the canonical hash the device
+/// will be checked against.
+///
+/// The same two reads `open_library_project` does for the sim, in one place
+/// so a device push and a sim open can never disagree about what "the
+/// library's copy" means.
+pub(crate) fn read_package_payload(
+    handle: &crate::app::library::PackageHandle,
+) -> Result<(Vec<(String, Vec<u8>)>, String), UiError> {
+    let files = handle.read_all_files().map_err(library_ui_error)?;
+    let hash = handle.content_hash().map_err(library_ui_error)?.to_string();
+    Ok((files, hash))
 }
 
 fn library_ui_error(e: crate::app::library::LibraryError) -> UiError {

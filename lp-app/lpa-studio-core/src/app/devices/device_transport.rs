@@ -49,6 +49,23 @@ pub enum DeviceEffectCall {
     /// Write the board runtime manifest to `/hardware.json` over the app
     /// protocol (board-selection D4; effective next boot).
     WriteHardwareManifest { manifest_json: String },
+    /// Run the `lpa-client` push conversation over the borrowed port: find
+    /// the storage dir the board runs from, replace it, load it, verify the
+    /// package hash.
+    ///
+    /// The files arrive already resolved — the app read them out of the
+    /// library (or out of the live handle for a project open in this tab)
+    /// before the gesture was folded, because the model must not carry
+    /// project bytes through its journal.
+    PushProject {
+        files: Vec<(String, Vec<u8>)>,
+        /// The library copy's canonical hash. A device that ends up with
+        /// anything else is a failed push, not a quiet one.
+        expected_hash: String,
+        /// Where to write when the board reports nothing loaded — a
+        /// freshly flashed board has no dir to replace.
+        fallback_storage_id: String,
+    },
 }
 
 /// What a finished effect learned, beyond succeeding.
