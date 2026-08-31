@@ -24,6 +24,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::activity::activity_cell::Reducer;
+use crate::activity::erase::EraseActivity;
 use crate::activity::flash::FlashActivity;
 use crate::activity::identify::IdentifyActivity;
 use crate::activity::push::PushActivity;
@@ -281,6 +282,32 @@ impl Device {
         commands
     }
 
+    /// Spawn the Erase activity — Factory reset — unless the device is
+    /// already busy (I5) or has no link to erase over.
+    pub(crate) fn spawn_erase(&mut self, now: Millis, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
+        if self.activity.is_some() || self.link().is_none() {
+            return Vec::new();
+        }
+        let effect_id = self.mint_effect_id();
+        let reducer = EraseActivity::new(self.id);
+        let commands = {
+            let activity_ctx = ActivityCtx {
+                link: self.evidence.link(),
+                evidence: &self.evidence,
+                config: ctx.config,
+                effect_id,
+            };
+            reducer.spawn_commands(&activity_ctx)
+        };
+        let cell = ActivityCell::new(
+            now,
+            now.plus_ms(ctx.config.flash_deadline_ms),
+            Reducer::Erase(reducer),
+        );
+        self.install_activity(now, cell, effect_id, &commands, ctx);
+        commands
+    }
+
     /// Spawn the Push activity, unless the device is already busy (I5) or
     /// has no link to push over. The payload was staged with the effects
     /// layer before this gesture was folded — see
@@ -385,6 +412,11 @@ impl Device {
                 // Sending a project implies wanting the board connected.
                 self.intent.connection = ConnectionIntent::Connected;
                 self.spawn_push(now, ctx)
+            }
+            Action::Erase { .. } => {
+                // A wipe implies staying connected to re-flash afterwards.
+                self.intent.connection = ConnectionIntent::Connected;
+                self.spawn_erase(now, ctx)
             }
             Action::SetName { name, .. } => {
                 self.intent.name = Some(name.clone());

@@ -12,6 +12,7 @@ use crate::link::LinkId;
 use crate::roster::RosterConfig;
 use crate::time::Millis;
 
+use super::erase::EraseActivity;
 use super::flash::FlashActivity;
 use super::identify::IdentifyActivity;
 use super::push::PushActivity;
@@ -24,6 +25,7 @@ pub enum ActivityKind {
     Identify,
     Flash,
     Push,
+    Erase,
 }
 
 impl ActivityKind {
@@ -33,6 +35,7 @@ impl ActivityKind {
             Self::Identify => "Identifying",
             Self::Flash => "Flashing firmware",
             Self::Push => "Sending the project",
+            Self::Erase => "Erasing the flash",
         }
     }
 
@@ -51,6 +54,9 @@ impl ActivityKind {
             // the cancel waits out the conversation rather than leaving half
             // a project on the board.
             Self::Push => config.push_cancel_grace_ms,
+            // An erase cannot be aborted mid-wipe either; the flash grace
+            // is the same physics.
+            Self::Erase => config.flash_cancel_grace_ms,
         }
     }
 }
@@ -249,6 +255,7 @@ pub(crate) enum Reducer {
     Identify(IdentifyActivity),
     Flash(FlashActivity),
     Push(PushActivity),
+    Erase(EraseActivity),
 }
 
 impl ActivityReducer for Reducer {
@@ -257,6 +264,7 @@ impl ActivityReducer for Reducer {
             Self::Identify(reducer) => reducer.kind(),
             Self::Flash(reducer) => reducer.kind(),
             Self::Push(reducer) => reducer.kind(),
+            Self::Erase(reducer) => reducer.kind(),
         }
     }
 
@@ -265,6 +273,7 @@ impl ActivityReducer for Reducer {
             Self::Identify(reducer) => reducer.handle(now, input, ctx),
             Self::Flash(reducer) => reducer.handle(now, input, ctx),
             Self::Push(reducer) => reducer.handle(now, input, ctx),
+            Self::Erase(reducer) => reducer.handle(now, input, ctx),
         }
     }
 
@@ -273,6 +282,7 @@ impl ActivityReducer for Reducer {
             Self::Identify(reducer) => reducer.next_deadline(),
             Self::Flash(reducer) => reducer.next_deadline(),
             Self::Push(reducer) => reducer.next_deadline(),
+            Self::Erase(reducer) => reducer.next_deadline(),
         }
     }
 }

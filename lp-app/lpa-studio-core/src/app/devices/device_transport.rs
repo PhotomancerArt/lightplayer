@@ -46,6 +46,10 @@ pub enum DeviceEffectCall {
     /// esptool flash of a packaged build. The chip guard and the pre-write
     /// base-MAC read live below this seam and are load-bearing.
     FlashFirmware { build_id: String },
+    /// esptool full-flash erase (the card's Factory reset). Verification —
+    /// the completion line outranking the benign flash-id warning (C6 rev 2
+    /// lore) — lives below this seam in the shipped JS.
+    EraseFlash,
     /// Write the board runtime manifest to `/hardware.json` over the app
     /// protocol (board-selection D4; effective next boot).
     WriteHardwareManifest { manifest_json: String },

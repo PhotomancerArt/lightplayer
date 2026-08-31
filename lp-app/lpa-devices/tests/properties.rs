@@ -376,6 +376,20 @@ fn gestures() -> Vec<(&'static str, Vec<Step>)> {
         ("dismiss the link", vec![Step::Dismiss { link: 1 }]),
         ("forget", vec![Step::Forget { device: 1 }]),
         ("flash", vec![flash_step()]),
+        ("factory reset", vec![Step::Erase { device: 1 }]),
+        (
+            "factory reset then the effect ends",
+            vec![
+                Step::Erase { device: 1 },
+                Step::EffectEnded {
+                    device: 1,
+                    ok: true,
+                    message: None,
+                    effect: None,
+                    kind: Some(ActivityKind::Erase),
+                },
+            ],
+        ),
         (
             "flash then the effect fails",
             vec![

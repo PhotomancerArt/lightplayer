@@ -138,6 +138,20 @@ impl DeviceTransport for BrowserSerialTransport {
                         chip_name: result.chip_name,
                     })
                 }
+                DeviceEffectCall::EraseFlash => {
+                    // Same exclusive-borrow discipline as the flash; the
+                    // erase's own verification (completion line outranking
+                    // the benign flash-id warning on C6 rev 2) lives in the
+                    // shipped JS.
+                    provider
+                        .erase_device_flash_with_events(&endpoint, events)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: "flash erased".to_string(),
+                        ..Default::default()
+                    })
+                }
                 DeviceEffectCall::WriteHardwareManifest { manifest_json } => {
                     provider
                         .write_device_file(

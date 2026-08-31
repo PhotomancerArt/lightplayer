@@ -203,6 +203,18 @@ impl DeviceTransport for ScriptedTransport {
                     }
                 })
             }
+            DeviceEffectCall::EraseFlash => {
+                let device = self.device.clone();
+                Box::pin(async move {
+                    progress("Erasing flash".to_string(), Some(50));
+                    device.fake_erase();
+                    progress("Flash erased".to_string(), Some(100));
+                    Ok(DeviceEffectFacts {
+                        summary: "flash erased".to_string(),
+                        ..Default::default()
+                    })
+                })
+            }
             DeviceEffectCall::WriteHardwareManifest { manifest_json } => {
                 self.manifest_writes.borrow_mut().push(manifest_json);
                 Box::pin(core::future::ready(Ok(DeviceEffectFacts {
@@ -1392,4 +1404,50 @@ fn the_bench_shares_one_clock_between_the_model_and_the_store() {
     let millis = bench.controller.device_now_for_test();
 
     assert_eq!(millis.0, (seconds * 1_000.0) as u64);
+}
+
+/// Factory reset: a Ready board is wiped from its card, and the card comes
+/// back honest — needs-firmware, entry and registry row intact (identity is
+/// efuse; an erase cannot take it). This is the loop the bench needs to
+/// re-run the first-plug walk without a second board.
+#[test]
+fn factory_reset_wipes_the_board_and_the_card_comes_back_blank() {
+    let device = light_player("dev_wipeme");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-bench-9");
+
+    bench.run_until(&tasks, "the hello to settle the link", |bench| {
+        !bench.view().devices.is_empty()
+    });
+    let card = &bench.view().devices[0];
+    assert_eq!(card.state_label, "Ready", "{card:?}");
+    let wiped = card.id;
+
+    bench.gesture(DeviceAction::Erase { device: wiped });
+    bench.run_until(&tasks, "the erase to settle as a blank verdict", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.needs_firmware && card.activity.is_none())
+    });
+
+    let cards = bench.view().devices;
+    assert_eq!(cards.len(), 1, "the entry survives the wipe: {cards:?}");
+    assert!(
+        cards[0]
+            .last_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.ok),
+        "the erase reports success on the card: {:?}",
+        cards[0].last_outcome
+    );
+    assert!(
+        cards[0].escapes.contains(&Escape::Forget),
+        "a wiped board still has every way out"
+    );
+    assert_eq!(
+        bench.registry().len(),
+        1,
+        "identity lives in the efuse — the registry row survives an erase"
+    );
 }

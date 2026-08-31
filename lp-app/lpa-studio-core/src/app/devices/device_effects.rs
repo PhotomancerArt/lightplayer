@@ -692,6 +692,7 @@ fn effect_kind(effect: &EffectRequest) -> ActivityKind {
             ActivityKind::Flash
         }
         EffectRequest::Push => ActivityKind::Push,
+        EffectRequest::Erase => ActivityKind::Erase,
     }
 }
 
@@ -727,6 +728,7 @@ fn resolve_effect_call(
             // and honest rather than silent if it ever is not.
             None => Err("nothing was prepared to send to this board".to_string()),
         },
+        EffectRequest::Erase => Ok(DeviceEffectCall::EraseFlash),
     }
 }
 

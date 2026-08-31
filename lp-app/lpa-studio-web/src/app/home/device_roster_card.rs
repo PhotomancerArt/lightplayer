@@ -22,9 +22,10 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceAction, DeviceActivityView, DeviceId, DeviceLoadedProject, DevicePushOp, DeviceView,
-    DevicesOp, PendingLinkView, PushSourceGroup, UiAction, UiExampleCard, UiPackageCard, UiStatus,
-    device_escape_action, device_status_kind, flash_offer, pending_escape_action, push_offer,
+    DeviceAction, DeviceActivityView, DeviceEscape, DeviceId, DeviceLoadedProject, DevicePushOp,
+    DeviceView, DevicesOp, PendingLinkView, PushSourceGroup, UiAction, UiExampleCard,
+    UiPackageCard, UiStatus, device_escape_action, device_status_kind, flash_offer,
+    pending_escape_action, push_offer,
 };
 
 use crate::base::icon::{NodeKindIcon, StudioIconName};
@@ -110,11 +111,24 @@ pub(crate) fn DeviceRosterCard(
 
             // Every escape the projection carries, in every state — including
             // Forget mid-activity, which the shipped system could not do.
+            // Factory reset joins the always-row when the board is linked
+            // and idle (the same condition the model's spawn checks —
+            // Disconnect in the escapes IS "linked" in projection terms);
+            // its armed inline confirm rides the action meta.
             footer { class: "tw:mt-auto tw:flex tw:flex-wrap tw:gap-2",
                 for escape in card.escapes.iter().copied() {
                     ActionButton {
                         key: "{escape:?}",
                         action: device_escape_action(escape, device),
+                        running: false,
+                        variant: ActionButtonVariant::Quiet,
+                        on_action,
+                    }
+                }
+                if card.activity.is_none() && card.escapes.contains(&DeviceEscape::Disconnect) {
+                    ActionButton {
+                        key: "{\"factory-reset\"}",
+                        action: DevicesOp::action_for(DeviceAction::Erase { device }),
                         running: false,
                         variant: ActionButtonVariant::Quiet,
                         on_action,

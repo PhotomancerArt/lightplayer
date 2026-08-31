@@ -109,6 +109,13 @@ pub enum Action {
         board_id: String,
         build_id: String,
     },
+    /// Factory reset: wipe the board's flash entirely (firmware, projects,
+    /// everything stored). Identity survives by design — it lives in the
+    /// efuse (ADR 2026-08-04) — so the entry and its registry row stay, and
+    /// the board comes back as a blank chip ready for the flash face.
+    Erase {
+        device: DeviceId,
+    },
     SetName {
         device: DeviceId,
         name: String,
@@ -130,6 +137,7 @@ impl Action {
             | Self::Identify { device }
             | Self::Push { device }
             | Self::Flash { device, .. }
+            | Self::Erase { device }
             | Self::SetName { device, .. }
             | Self::SetAutoconnect { device, .. } => Some(*device),
             Self::AddFromUsb
@@ -272,6 +280,10 @@ pub enum EffectRequest {
     /// [`Action::Push`](crate::Action::Push) was folded — see that action for
     /// why the model does not carry project bytes.
     Push,
+    /// Wipe the flash with esptool (the card's Factory reset). The erase
+    /// completion is verified in the platform layer (the completion line
+    /// outranks the benign flash-id warning — C6 rev 2 lore).
+    Erase,
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@
 //! Push ARE the flows.
 
 pub(crate) mod activity_cell;
+pub mod erase;
 pub mod flash;
 pub mod identify;
 pub mod push;
@@ -26,6 +27,7 @@ pub use activity_cell::{
     ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityProgress, ActivityReducer,
     ActivityStep, CancelPhase,
 };
+pub use erase::EraseActivity;
 pub use flash::FlashActivity;
 pub use identify::IdentifyActivity;
 pub use push::PushActivity;

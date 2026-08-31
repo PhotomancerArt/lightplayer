@@ -122,6 +122,21 @@ impl ControllerOp for DevicesOp {
                 "Send the picked project to this board and start it running.",
                 ActionPriority::Primary,
             ),
+            Action::Erase { .. } => ActionMeta::new(
+                "Factory reset",
+                "Erase the firmware and everything stored on this board.",
+                ActionPriority::Tertiary,
+            )
+            .destructive()
+            .with_confirmation(
+                ActionConfirmation::new(
+                    "Factory reset this board?",
+                    "Everything on its flash is erased — firmware, projects, settings. \
+                     Its identity lives in silicon and survives; Studio keeps the entry.",
+                    "Erase everything",
+                )
+                .inline(),
+            ),
             Action::SetName { .. } => ActionMeta::new(
                 "Rename",
                 "Change what Studio calls this device.",

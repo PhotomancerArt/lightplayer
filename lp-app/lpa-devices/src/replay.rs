@@ -181,6 +181,10 @@ pub enum Step {
     Push {
         device: u64,
     },
+    /// The Factory-reset gesture.
+    Erase {
+        device: u64,
+    },
     /// A coarse effect's progress marker, as the effects layer sinks it.
     ///
     /// `effect` is the generation stamp the effects layer puts on every
@@ -407,6 +411,9 @@ impl Step {
                 build_id: build,
             }),
             Self::Push { device } => Input::Action(Action::Push {
+                device: DeviceId(device),
+            }),
+            Self::Erase { device } => Input::Action(Action::Erase {
                 device: DeviceId(device),
             }),
             Self::EffectProgress {
