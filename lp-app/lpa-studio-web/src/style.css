@@ -5877,19 +5877,186 @@ select:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
-   Gradient primary — G1-2 RULED KEEP (2026-08-30, "gradient is good"): the
-   spectrum-gradient fill IS the Primary tier now, not a gated alternative
-   to a flat mint fill. See `solid_class` in
-   src/core/action/action_button.rs.
+   Spectrum-outline primary — the devices-treatments spike gate (2026-08-31,
+   "1F for the primary for now") retired the gradient FILL: rainbow-bg with
+   dark text didn't work. The Primary voice is now a STANDING spectrum ring —
+   same masked-conic mechanics as `.ux-ir-ring`, dimmed at rest, bright and
+   spinning on hover — with the text staying strong white. Self-contained on
+   purpose: it owns its `::before`, so it must never be composed with
+   `.ux-ir-ring` (they would fight over the pseudo). Amends Aurora D1: the
+   ring marks THE standing action, exactly the slot the gradient fill held.
+   Design record: spikes/devices-page-treatments/index.html (1F/1G).
    -------------------------------------------------------------------------- */
-.ux-primary-gradient {
-    background: linear-gradient(105deg, #5fe08b, #53c6f2 55%, #a58af7);
-    border-color: rgba(255, 255, 255, 0.25);
-    color: #071010;
+.ux-spectrum-cta {
+    position: relative;
+    border-color: transparent;
+    background: transparent;
+    color: var(--studio-color-text-strong);
 }
 
-.ux-primary-gradient:hover:not(:disabled) {
-    filter: brightness(1.08);
+.ux-spectrum-cta::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: 3;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(from var(--ux-ir-angle), var(--studio-spectrum), #5fe08b);
+    mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    opacity: 0.62;
+    pointer-events: none;
+    transition: opacity 0.3s;
+}
+
+.ux-spectrum-cta:hover:not(:disabled)::before {
+    opacity: 1;
+    animation: ux-ir-spin 3.2s linear infinite;
+}
+
+/* The ruled glow bump: the standard bloom plus a wider soft halo, so the
+   chosen Primary answers the pointer a step louder than the ring family. */
+.ux-spectrum-cta:hover:not(:disabled) {
+    box-shadow:
+        0 2px 24px var(--studio-glow),
+        0 0 46px rgba(140, 170, 255, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-spectrum-cta:hover:not(:disabled)::before {
+        animation: none;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Armed destructive chip (2K+) — devices-treatments spike gate 2026-08-31.
+   Two-click keeps its machine (action_button.rs); this is the armed
+   READING: the label grows a "Confirm " prefix (an inline-grid span
+   animating 0fr→1fr — a content swap can't drive a width transition, so
+   the prefix is always in the DOM and only its column opens), red ramps
+   in over 160ms with a small knock, and the stand-down window shows as a
+   QUIET drain: border-tone, hairline, 55% — ruled "quieter" at the final
+   spike gate; never the bright error text.
+   -------------------------------------------------------------------------- */
+.ux-armed-chip {
+    /* Must match ARMED_CONFIRM_WINDOW_MS in action_button.rs — constants
+       can't cross the Rust/CSS boundary, so these two comments pin them. */
+    --ux-armed-win: 4000ms;
+    position: relative;
+    white-space: nowrap;
+    /* Standing down relaxes slowly — an exhale, not a snap. Arming's
+       faster ramp is on .ux-armed below (later, so it wins while armed). */
+    transition:
+        background-color 0.5s ease-out,
+        border-color 0.5s ease-out;
+}
+
+.ux-armed-chip .ux-armed-prefix {
+    display: inline-grid;
+    grid-template-columns: 0fr;
+    overflow: hidden;
+    transition: grid-template-columns 0.22s ease;
+}
+
+.ux-armed-chip .ux-armed-prefix > span {
+    min-width: 0;
+    overflow: hidden;
+}
+
+@keyframes ux-armed-knock {
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    35% {
+        transform: scale(1.07);
+    }
+}
+
+.ux-armed {
+    background: var(--studio-status-error-bg);
+    border-color: var(--studio-status-error-border);
+    transition:
+        background-color 0.16s ease-in,
+        border-color 0.16s ease-in;
+    animation: ux-armed-knock 0.22s ease-out;
+}
+
+.ux-armed .ux-armed-prefix {
+    grid-template-columns: 1fr;
+}
+
+/* The quiet drain track. */
+.ux-armed-chip::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    bottom: 1px;
+    height: 1.5px;
+    border-radius: 2px;
+    background: var(--studio-status-error-border);
+    transform-origin: left;
+    transform: scaleX(0);
+    opacity: 0;
+}
+
+@keyframes ux-armed-drain {
+    from {
+        transform: scaleX(1);
+    }
+
+    to {
+        transform: scaleX(0);
+    }
+}
+
+.ux-armed::after {
+    opacity: 0.55;
+    animation: ux-armed-drain var(--ux-armed-win) linear forwards;
+}
+
+/* The card previews its own removal: `:has()` marks the owning scope, so
+   the renderer stays decision-free — no armed state ever reaches Rust.
+   Only the `.ux-armed-dim` body dims; the footer (the chip and its
+   neighbors) keeps full contrast. */
+.ux-armed-scope:has(.ux-armed) {
+    border-color: var(--studio-status-error-border);
+    box-shadow: inset 0 0 0 1px var(--studio-status-error-border);
+}
+
+.ux-armed-dim {
+    transition:
+        opacity 0.25s,
+        filter 0.25s;
+}
+
+.ux-armed-scope:has(.ux-armed) .ux-armed-dim {
+    opacity: 0.4;
+    filter: saturate(0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-armed {
+        animation: none;
+    }
+
+    /* The window is still SHOWN, just not animated. */
+    .ux-armed::after {
+        animation: none;
+        transform: scaleX(1);
+    }
+
+    .ux-armed-chip .ux-armed-prefix {
+        transition: none;
+    }
 }
 
 /* --------------------------------------------------------------------------
