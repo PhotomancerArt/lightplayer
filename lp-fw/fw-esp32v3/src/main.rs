@@ -383,6 +383,22 @@ fn read_headroom_probe() -> Option<u32> {
     Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
 }
 
+/// The `ClientRequest::Reboot` action: the chip reset the chip-agnostic
+/// server cannot perform itself.
+///
+/// Called only after the ack frame is written (`LpServer::tick_and_send`),
+/// so the client reads its answer and then this board's boot banner. On
+/// this board it is also the ONLY restart a browser can still cause once a
+/// CH340 replug has killed the Web Serial grant. Not a crash path: the boot
+/// was marked complete on the first served frame, long before any request
+/// could arrive, so this reset never counts toward the boot-loop safe-mode
+/// gate.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+fn reboot_now() {
+    log::info!("[REBOOT] client requested a restart");
+    esp_hal::system::software_reset()
+}
+
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     let free = esp_alloc::HEAP.free();
@@ -719,6 +735,7 @@ fn boot_firmware() -> FirmwareApp {
     // and the pusher's mailboxes.
     server.set_total_led_budget(total_led_budget);
     server.set_read_headroom_probe(Some(read_headroom_probe));
+    server.set_reboot_hook(Some(Rc::new(reboot_now)));
     fw_esp32_common::output::wire_stats_source::install(collect_wire_stats);
 
     // Auto-load a project at boot — unless repeated incomplete boots put us in

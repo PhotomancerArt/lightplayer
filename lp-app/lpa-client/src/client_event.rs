@@ -25,6 +25,9 @@ pub enum ClientEvent {
         outputs: Option<Vec<lpc_wire::server::OutputWireStatus>>,
         /// Serial-link loss counters since boot (device targets only).
         link: Option<lpc_wire::server::LinkCounters>,
+        /// Who the device says it is, repeated every heartbeat so a
+        /// mid-stream attach resolves identity without a hello answer.
+        identity: Option<lpc_wire::server::HeartbeatIdentity>,
     },
     /// Firmware/server log line carried by the protocol.
     Log { level: LogLevel, message: String },
@@ -52,6 +55,7 @@ impl ClientEvent {
                 recovery,
                 outputs,
                 link,
+                identity,
             } => Some(Self::Heartbeat {
                 fps,
                 frame_count,
@@ -61,6 +65,7 @@ impl ClientEvent {
                 recovery,
                 outputs,
                 link,
+                identity,
             }),
             WireServerMsgBody::Log { level, message } => Some(Self::Log { level, message }),
             _ => None,

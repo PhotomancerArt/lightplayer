@@ -182,6 +182,20 @@ fn read_headroom_probe() -> Option<u32> {
     Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
 }
 
+/// The `ClientRequest::Reboot` action: the chip reset the chip-agnostic
+/// server cannot perform itself.
+///
+/// Called only after the ack frame is written (`LpServer::tick_and_send`),
+/// so the client reads its answer and then this board's boot banner. Not a
+/// crash path: the boot was marked complete on the first served frame, long
+/// before any request could arrive, so this reset never counts toward the
+/// boot-loop safe-mode gate.
+#[cfg(not(fw_harness))]
+fn reboot_now() {
+    log::info!("[REBOOT] client requested a restart");
+    esp_hal::system::software_reset()
+}
+
 #[cfg(not(fw_harness))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     Some((
@@ -411,6 +425,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // silicon revision, and — the C6 has an 802.15.4 radio — its EUI-64.
     // The server cannot derive any of it.
     server.set_hardware_identity(chip_identity());
+    server.set_reboot_hook(Some(Rc::new(reboot_now)));
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless

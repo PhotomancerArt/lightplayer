@@ -33,6 +33,16 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 19: `ClientRequest::Reboot` + its `ServerMsgBody::Reboot` ack — the
+///   bridge-independent restart the round-2 recovery ladder needs (a CH340
+///   board whose grant dies on replug cannot be reset by any signal dance
+///   the browser can still run). New variants on BOTH request and response
+///   enums: an old firmware cannot decode the request and an old client
+///   cannot decode the ack, which is what earns the bump. The device
+///   ANSWERS, then resets — the embedder's reset hook fires only after the
+///   transport reports the ack written. Landing beside it, and NOT earning
+///   a bump on its own: `ServerMsgBody::Heartbeat`'s optional `identity`
+///   (uid + base MAC), an additive optional field per the rule below.
 /// - 18: display layouts cross the wire PACKED — `ControlLayout2d`
 ///   serializes as packing spans (`[first_lamp, count, sample_start,
 ///   sample_stride, radius]` 5-tuples) plus base64 u16le lamp centers,
@@ -143,7 +153,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 18;
+pub const WIRE_PROTO_VERSION: u32 = 19;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

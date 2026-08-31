@@ -36,7 +36,7 @@ pub use project::Project;
 pub use project_manager::{ProjectManager, is_project_dir};
 pub use server::{
     LpServer, MemoryStatsFn, PROJECT_LOAD_MIN_HEADROOM_BYTES, PROJECT_READ_MIN_HEADROOM_BYTES,
-    ReadHeadroomProbe,
+    ReadHeadroomProbe, RebootHook,
 };
 
 /// GLSL frontend that ships on LightPlayer devices — the product constant.

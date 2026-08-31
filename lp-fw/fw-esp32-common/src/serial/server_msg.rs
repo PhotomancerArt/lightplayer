@@ -220,6 +220,7 @@ pub fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
         }
         lpc_wire::server::ServerMsgBody::StopAllProjects => "StopAllProjects".into(),
         lpc_wire::server::ServerMsgBody::SetLogLevel => "SetLogLevel".into(),
+        lpc_wire::server::ServerMsgBody::Reboot => "Reboot".into(),
         lpc_wire::server::ServerMsgBody::Log { level, .. } => {
             format!("Log level={level:?}")
         }

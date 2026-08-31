@@ -179,7 +179,7 @@ impl BrowserLinkInner {
         // No hard reset on the identify open: the model identifies
         // mid-stream via a hello request, and a USB-Serial-JTAG chip
         // would re-enumerate (and kill this very port) on the reset.
-        match self.provider.open_protocol(&session, baud, false).await {
+        match self.provider.open_protocol(&session, baud, None).await {
             Ok(()) => {
                 self.open.set(true);
                 self.push(LinkEvent::Opened {
@@ -221,27 +221,16 @@ impl BrowserLinkInner {
 
     /// Run a reset through the shipped controller.
     ///
-    /// Only [`ResetKind::Normal`] is reachable from here today, and it is
-    /// reached the way the shipped code does it: re-opening the protocol
-    /// port, whose `openProtocol` runs `D0 W100 R1 W100 R0` — the normal
-    /// ESP32 hard reset — and leaves the boot output in the line buffer where
-    /// [`Link::poll_event`] picks it up as diagnosis.
-    ///
-    /// The other kinds exist in the JS controller's `runReset` but are not
-    /// plumbed through `browser_serial.js`'s `resetAndRead`, and
-    /// [`ResetKind::BothThenDrop`] (the CH34x sequence) is not in the
-    /// controller at all. Refusing loudly beats silently performing a
-    /// DIFFERENT reset than the one asked for: a caller that thinks it put a
-    /// board into the ROM downloader and did not would misread everything
-    /// after.
+    /// Every [`ResetKind`] is reached the way the shipped code reaches the
+    /// normal one: re-opening the protocol port with the kind attached, so
+    /// the controller's `runReset` drives the sequence and the boot output
+    /// lands in the line buffer where [`Link::poll_event`] picks it up as
+    /// diagnosis. The kind→sequence table lives beside the JS binding
+    /// (`browser_serial::reset_kind_js_name`) — a kind must never quietly
+    /// perform a DIFFERENT reset than the one asked for: a caller that
+    /// thinks it put a board into the ROM downloader and did not would
+    /// misread everything after.
     async fn run_reset(&self, kind: ResetKind) {
-        if kind != ResetKind::Normal {
-            self.push(LinkEvent::Error(format!(
-                "{kind:?} is not plumbed through browser Web Serial yet; only Normal is"
-            )));
-            self.push(LinkEvent::ResetOutcome { kind, ok: false });
-            return;
-        }
         let Some(session) = self.session.borrow().clone() else {
             self.push(LinkEvent::Error(
                 "reset on a link with no session".to_string(),
@@ -254,7 +243,11 @@ impl BrowserLinkInner {
             self.fail("release", &error);
         }
         self.open.set(false);
-        match self.provider.open_protocol(&session, baud, true).await {
+        match self
+            .provider
+            .open_protocol(&session, baud, Some(kind))
+            .await
+        {
             Ok(()) => {
                 self.open.set(true);
                 self.push(LinkEvent::ResetOutcome { kind, ok: true });

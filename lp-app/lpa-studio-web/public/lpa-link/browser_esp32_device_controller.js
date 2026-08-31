@@ -49,7 +49,7 @@ export class BrowserEsp32DeviceController {
     return () => this.listeners.delete(listener);
   }
 
-  async openProtocol({ baudRate = 115200, reset = true } = {}) {
+  async openProtocol({ baudRate = 115200, reset = true, resetKind = "normal" } = {}) {
     const logs = [];
     const progress = [];
     const log = (source, text) => {
@@ -97,7 +97,7 @@ export class BrowserEsp32DeviceController {
         totalSteps: 3,
         percent: 60,
       });
-      resetOutcome = await this.tryNormalReset({ log });
+      resetOutcome = await this.runReset(resetKind, { log });
       pushProgress({
         label: "Waiting for device boot",
         completedSteps: 3,
@@ -270,6 +270,26 @@ export class BrowserEsp32DeviceController {
     return this.runReset("normal", { log });
   }
 
+  // The CH34x sequence: assert DTR+RTS TOGETHER, hold, drop them together.
+  //
+  // Two constraints the D/R mini-language above cannot express, both learned
+  // on the bench (see `lpa-link`'s byte_stream.rs for the same table):
+  //
+  //  - WHOLE-STATUS writes only. The WCH macOS driver ignores single-bit
+  //    calls, so each step must set both pins in one setSignals() call —
+  //    `setDTR`/`setRTS` (and therefore D0/R1/…) will not move this chip.
+  //  - NEVER (DTR asserted, RTS released). On a CH34x that crossing is the
+  //    ROM-bootloader selection, not a reboot: a board reset this way comes
+  //    back in the downloader and everything read after is misread.
+  async runBothThenDropReset({ log = null } = {}) {
+    log?.("lpa-link", "CH34x reset: DTR+RTS asserted together, hold 100ms, dropped together");
+    await this.setSignals({ dataTerminalReady: false, requestToSend: false });
+    await this.setSignals({ dataTerminalReady: true, requestToSend: true });
+    await sleep(100);
+    await this.setSignals({ dataTerminalReady: false, requestToSend: true });
+    await this.setSignals({ dataTerminalReady: false, requestToSend: false });
+  }
+
   async runReset(resetKind, { log = null } = {}) {
     try {
       if (resetKind === "usb-jtag-download") {
@@ -278,6 +298,8 @@ export class BrowserEsp32DeviceController {
       } else if (resetKind === "rts-only") {
         log?.("lpa-link", "RTS-only reset: R1 W100 R0");
         await this.runSignalSequence("R1 W100 R0", { log });
+      } else if (resetKind === "both-then-drop") {
+        await this.runBothThenDropReset({ log });
       } else {
         log?.("lpa-link", "Hard resetting via RTS pin...");
         await this.runSignalSequence("D0 W100 R1 W100 R0", { log });

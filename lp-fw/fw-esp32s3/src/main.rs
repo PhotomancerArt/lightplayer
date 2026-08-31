@@ -246,6 +246,20 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     ))
 }
 
+/// The `ClientRequest::Reboot` action: the chip reset the chip-agnostic
+/// server cannot perform itself.
+///
+/// Called only after the ack frame is written (`LpServer::tick_and_send`),
+/// so the client reads its answer and then this board's boot banner. Not a
+/// crash path: the boot was marked complete on the first served frame, long
+/// before any request could arrive, so this reset never counts toward the
+/// boot-loop safe-mode gate.
+#[cfg(not(fw_harness))]
+fn reboot_now() {
+    log::info!("[REBOOT] client requested a restart");
+    esp_hal::system::software_reset()
+}
+
 /// Heartbeat memory report. This chip has no largest-free-block probe yet
 /// (no recovery/panic_path port), so the fragmentation fields stay absent.
 #[cfg(not(fw_harness))]
@@ -399,6 +413,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // The chip's own permanent identity (efuse): the factory MAC and the
     // silicon revision. The server cannot derive either.
     server.set_hardware_identity(chip_identity());
+    server.set_reboot_hook(Some(Rc::new(reboot_now)));
     // The one feature the server cannot see: whether the shader engine
     // linked into THIS image does native f32 math (`float-f32` is a fact of
     // this crate's Cargo graph, invisible from `Arc<dyn LpGraphics>`).

@@ -76,6 +76,11 @@ pub fn handle_client_message(
     output_provider: &Rc<RefCell<dyn OutputProvider>>,
     memory_stats: Option<&MemoryStatsFn>,
     read_headroom_probe: Option<ReadHeadroomProbe>,
+    // Whether the embedder installed a reset action
+    // (`LpServer::set_reboot_hook`). Deliberately the FACT and not the hook
+    // itself: this function decides whether `Reboot` can be honored, while
+    // firing the hook belongs to the caller, once the ack is on the wire.
+    reboot_supported: bool,
     time_provider: Option<Rc<dyn TimeProvider>>,
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
@@ -148,6 +153,16 @@ pub fn handle_client_message(
             handle_stop_all_projects(project_manager, memory_stats)?
         }
         lpc_wire::ClientRequest::SetLogLevel { level } => handle_set_log_level(level),
+        lpc_wire::ClientRequest::Reboot => {
+            if !reboot_supported {
+                return Err(ServerError::Core(alloc::string::String::from(
+                    "reboot is not supported by this server: no reset action is wired",
+                )));
+            }
+            // The ack only; the reset itself happens after this frame is
+            // written (`LpServer::tick_and_send`) — see `RebootHook`.
+            ServerMessagePayload::Reboot
+        }
     };
 
     Ok(WireServerMessage::new(id, response))

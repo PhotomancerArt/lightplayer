@@ -82,10 +82,14 @@ pub fn server_frame(message: &WireServerMessage) -> ServerFrame {
     let request_id = u32::try_from(message.id).unwrap_or(u32::MAX);
     match &message.msg {
         ServerMsgBody::Hello(hello) => ServerFrame::hello(request_id, hello_facts(hello)),
-        // Identity in a heartbeat is vision R4: the firmware does not stamp
-        // one yet, so a mid-stream attach still needs the hello ANSWER to
-        // resolve identity.
-        ServerMsgBody::Heartbeat { .. } if message.id == 0 => ServerFrame::heartbeat(None),
+        // R4a: firmware repeats its identity on every heartbeat, so a
+        // mid-stream attach resolves identity passively — within one
+        // heartbeat period — instead of waiting on a hello ANSWER. Pre-R4
+        // firmware sends none, and an anonymous heartbeat is still live-peer
+        // evidence.
+        ServerMsgBody::Heartbeat { identity, .. } if message.id == 0 => {
+            ServerFrame::heartbeat(identity.as_ref().map(heartbeat_identity))
+        }
         other => ServerFrame::other(request_id, body_label(other)),
     }
 }
@@ -117,6 +121,28 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
     }
 }
 
+/// The identity a heartbeat announced, in the model's vocabulary.
+///
+/// Same normalization as [`hello_facts`], and for the same reason: a MAC
+/// crossing an untyped boundary that is not normalized here would mint a
+/// SECOND identity for a board the hello already bound. `name` stays `None`
+/// — the provisioned name lives in the device's `/.lp/device.json` and
+/// reaches the app through a filesystem read, never through a frame.
+fn heartbeat_identity(identity: &lpc_wire::server::HeartbeatIdentity) -> PeerIdentity {
+    PeerIdentity {
+        uid: identity
+            .device_uid
+            .as_ref()
+            .map(|uid| DeviceUid(uid.clone())),
+        mac: identity
+            .base_mac
+            .as_deref()
+            .and_then(normalize_base_mac)
+            .map(MacAddress),
+        name: None,
+    }
+}
+
 /// Display label for the firmware behind a hello ("fw-esp32c6 abc1234").
 fn firmware_label(hello: &ServerHello) -> String {
     let build = &hello.build;
@@ -142,6 +168,7 @@ fn body_label(body: &ServerMsgBody) -> &'static str {
         ServerMsgBody::ListLoadedProjects { .. } => "ListLoadedProjects",
         ServerMsgBody::StopAllProjects => "StopAllProjects",
         ServerMsgBody::SetLogLevel => "SetLogLevel",
+        ServerMsgBody::Reboot => "Reboot",
         ServerMsgBody::Log { .. } => "Log",
         ServerMsgBody::Heartbeat { .. } => "Heartbeat",
         ServerMsgBody::Error { .. } => "Error",
@@ -150,20 +177,17 @@ fn body_label(body: &ServerMsgBody) -> &'static str {
 
 /// Map one model request into a wire client message.
 ///
-/// `Reboot` has no wire request yet (vision R4 is an explicit non-goal of
-/// this milestone) and `Opaque` is a placeholder for round-2 coarse effects,
-/// so both are refused here rather than mistranslated. The refusal reaches
-/// the model as `LinkEvent::Error`, which is the honest shape: the transport
-/// could not do what it was asked.
+/// `Opaque` is a placeholder for round-2 coarse effects, so it is refused
+/// here rather than mistranslated. The refusal reaches the model as
+/// `LinkEvent::Error`, which is the honest shape: the transport could not do
+/// what it was asked.
 pub fn client_message(frame: &ClientFrame) -> Result<ClientMessage, String> {
     let msg = match &frame.body {
         ClientFrameBody::Hello => ClientRequest::Hello,
-        ClientFrameBody::Reboot => {
-            return Err(
-                "the wire has no Reboot request yet (vision R4); reset the link instead"
-                    .to_string(),
-            );
-        }
+        // R4b: the device answers, THEN resets — so this request gets a
+        // real response before the boot output, and a firmware too old to
+        // know the variant answers an error instead of going quiet.
+        ClientFrameBody::Reboot => ClientRequest::Reboot,
         ClientFrameBody::Opaque { label } => {
             return Err(format!(
                 "lpa-link cannot forward an opaque request ({label}): coarse effects go \
@@ -226,13 +250,62 @@ mod tests {
 
     #[test]
     fn an_id_zero_heartbeat_is_the_unsolicited_channel() {
-        let heartbeat = WireServerMessage::new(0, heartbeat_body());
+        let heartbeat = WireServerMessage::new(0, heartbeat_body(None));
 
         let frame = server_frame(&heartbeat);
 
         assert_eq!(frame.request_id, 0);
         assert!(matches!(frame.body, ServerFrameBody::Heartbeat { .. }));
-        assert_eq!(frame.identity(), None, "identity in a heartbeat is R4");
+        assert_eq!(
+            frame.identity(),
+            None,
+            "pre-R4 firmware announces nothing on the heartbeat"
+        );
+    }
+
+    /// R4a: identity rides every heartbeat, so a client that attached
+    /// mid-stream — after the boot hello it never saw — knows who this board
+    /// is without asking.
+    #[test]
+    fn a_heartbeat_resolves_identity_without_a_hello() {
+        let heartbeat = WireServerMessage::new(
+            0,
+            heartbeat_body(Some(lpc_wire::server::HeartbeatIdentity {
+                device_uid: Some("dev_2f8a".to_string()),
+                base_mac: Some("60:55:F9:0A:0B:0C".to_string()),
+            })),
+        );
+
+        let frame = server_frame(&heartbeat);
+
+        let identity = frame.identity().expect("the heartbeat announced identity");
+        assert_eq!(identity.uid, Some(DeviceUid("dev_2f8a".to_string())));
+        // Normalized exactly like the hello's: one spelling per board, or
+        // the same board binds twice.
+        assert_eq!(
+            identity.mac,
+            Some(MacAddress("60:55:f9:0a:0b:0c".to_string()))
+        );
+    }
+
+    /// A garbage MAC on the heartbeat channel is refused the same way it is
+    /// on the hello: an anonymous device beats an invented identity.
+    #[test]
+    fn a_nonsense_heartbeat_mac_announces_no_mac() {
+        let heartbeat = WireServerMessage::new(
+            0,
+            heartbeat_body(Some(lpc_wire::server::HeartbeatIdentity {
+                device_uid: None,
+                base_mac: Some("ff:ff:ff:ff:ff:ff".to_string()),
+            })),
+        );
+
+        let identity = server_frame(&heartbeat)
+            .identity()
+            .cloned()
+            .expect("the heartbeat announced an identity record");
+        assert_eq!(identity.mac, None);
+        assert_eq!(identity.uid, None);
     }
 
     #[test]
@@ -272,11 +345,21 @@ mod tests {
     }
 
     #[test]
-    fn requests_the_wire_cannot_carry_are_refused_rather_than_mistranslated() {
-        let reboot = ClientFrame {
-            request_id: 1,
+    fn a_reboot_request_round_trips_to_the_line_a_device_answers() {
+        let line = encode_client_frame(&ClientFrame {
+            request_id: 5,
             body: ClientFrameBody::Reboot,
-        };
+        })
+        .expect("encode");
+
+        let decoded: ClientMessage =
+            lpc_wire::json::from_str(line.trim_start_matches("M!").trim_end()).expect("decode");
+        assert_eq!(decoded.id, 5);
+        assert!(matches!(decoded.msg, ClientRequest::Reboot));
+    }
+
+    #[test]
+    fn requests_the_wire_cannot_carry_are_refused_rather_than_mistranslated() {
         let opaque = ClientFrame {
             request_id: 2,
             body: ClientFrameBody::Opaque {
@@ -284,7 +367,6 @@ mod tests {
             },
         };
 
-        assert!(encode_client_frame(&reboot).is_err());
         assert!(encode_client_frame(&opaque).is_err());
     }
 
@@ -314,7 +396,7 @@ mod tests {
             .expect("encode")
     }
 
-    fn heartbeat_body() -> ServerMsgBody {
+    fn heartbeat_body(identity: Option<lpc_wire::server::HeartbeatIdentity>) -> ServerMsgBody {
         ServerMsgBody::Heartbeat {
             fps: lpc_wire::server::SampleStats {
                 avg: 0.0,
@@ -329,6 +411,7 @@ mod tests {
             recovery: None,
             outputs: None,
             link: None,
+            identity,
         }
     }
 }

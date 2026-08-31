@@ -31,6 +31,23 @@ pub type MemoryStatsFn = fn() -> Option<(u32, u32)>;
 /// never refused.
 pub type ReadHeadroomProbe = fn() -> Option<u32>;
 
+/// Embedder-supplied "restart this device now" action, backing
+/// [`lpc_wire::ClientRequest::Reboot`].
+///
+/// The server cannot reset anything itself (sans-IO, and chip-agnostic:
+/// `esp_hal::system::software_reset()` exists per chip crate), so an
+/// embedder that CAN reset installs it via [`LpServer::set_reboot_hook`].
+/// Embedders that cannot (host, browser worker, `lp-cli`) leave it unset
+/// and the request is refused rather than acked — the recovery ladder must
+/// never be told a board is rebooting when nothing will.
+///
+/// Called by [`LpServer::tick_and_send`] AFTER the ack frame is written,
+/// never by the handler that produced it: on hardware the call does not
+/// return, so anything still owed to the client must already be on the
+/// wire. A closure rather than a bare `fn` so a test/fake embedder can
+/// record the request.
+pub type RebootHook = Rc<dyn Fn()>;
+
 /// Minimum largest-free-block headroom to *begin* serving a ProjectRead.
 ///
 /// Below this, assembly of even a well-behaved streamed read (one slot root or
@@ -127,6 +144,9 @@ pub struct LpServer {
     /// LoadProject headroom refusal gates. Unset (hosts/browser) = requests
     /// are never refused.
     read_headroom_probe: Option<ReadHeadroomProbe>,
+    /// Optional embedder reset action backing `ClientRequest::Reboot`.
+    /// Unset (hosts/browser) = the request is refused, not acked.
+    reboot_hook: Option<RebootHook>,
     /// Optional time provider for perf timing (e.g. shader comp). ESP32/emu pass, others None.
     time_provider: Option<Rc<dyn TimeProvider>>,
     /// Optional hardware button service for input nodes.
@@ -291,6 +311,7 @@ impl LpServer {
             project_read_frame_budget: Some(lpc_wire::PROJECT_READ_FRAME_MAX_BYTES),
             memory_stats,
             read_headroom_probe: None,
+            reboot_hook: None,
             time_provider,
             button_service,
             radio_service,
@@ -405,6 +426,32 @@ impl LpServer {
     /// unsolicited (id 0) by embedder loops.
     pub fn hello(&self) -> &lpc_wire::ServerHello {
         &self.hello
+    }
+
+    /// The identity to stamp on an outgoing heartbeat
+    /// ([`lpc_wire::HeartbeatIdentity`]), or `None` when this unit knows
+    /// neither fact.
+    ///
+    /// Both facts come from the held hello — the embedder's boot-time read
+    /// and its injected efuse facts — and NOT from a fresh filesystem read
+    /// the way `ClientRequest::Hello` answers do. That asymmetry is
+    /// deliberate: on a device the base fs is littlefs over flash, and a
+    /// periodic flash read is exactly the kind of interrupt-masking op that
+    /// starves the serial io task on the classic. A heartbeat must stay
+    /// cheap. Nothing is lost in practice — identity is silicon
+    /// (`docs/adr/2026-08-04-device-identity-anchored-in-silicon.md`: efuse
+    /// MAC, no stamp step), and the legacy
+    /// root uid file is written only by host-class embedders, whose hello
+    /// answer remains the live truth.
+    pub fn heartbeat_identity(&self) -> Option<lpc_wire::HeartbeatIdentity> {
+        let identity = lpc_wire::HeartbeatIdentity {
+            device_uid: self.hello.device_uid.clone(),
+            base_mac: self.hello.hardware.base_mac.clone(),
+        };
+        match identity.is_empty() {
+            true => None,
+            false => Some(identity),
+        }
     }
 
     /// Advance loaded projects by one frame without processing client messages.
@@ -699,6 +746,7 @@ impl LpServer {
                                 &self.output_provider,
                                 self.memory_stats.as_ref(),
                                 self.read_headroom_probe,
+                                self.reboot_hook.is_some(),
                                 self.time_provider.clone(),
                                 self.button_service.clone(),
                                 self.radio_service.clone(),
@@ -720,11 +768,24 @@ impl LpServer {
                                     )
                                 }
                             };
+                            // A `Reboot` ack is the only response that owes
+                            // an action once it is written; the handler
+                            // produced it only if a hook exists.
+                            let acked_reboot =
+                                matches!(response.msg, lpc_wire::server::ServerMsgBody::Reboot);
                             transport
                                 .send(response)
                                 .await
                                 .map_err(|error| ServerError::Core(format!("{error}")))?;
                             response_count += 1;
+                            if acked_reboot && let Some(reboot) = self.reboot_hook.clone() {
+                                // Answer, THEN reset. `send` returns once the
+                                // transport reports the frame written, so the
+                                // client has its ack before the board goes
+                                // down; on hardware this call never returns.
+                                log::info!("tick_and_send: reboot acked, resetting");
+                                reboot();
+                            }
                         }
                     }
                 }
@@ -773,6 +834,12 @@ impl LpServer {
     /// [`PROJECT_LOAD_MIN_HEADROOM_BYTES`]). Unset = never refuse.
     pub fn set_read_headroom_probe(&mut self, probe: Option<ReadHeadroomProbe>) {
         self.read_headroom_probe = probe;
+    }
+
+    /// Install the embedder's reset action (see [`RebootHook`]). Unset =
+    /// `ClientRequest::Reboot` is refused with an error instead of acked.
+    pub fn set_reboot_hook(&mut self, reboot: Option<RebootHook>) {
+        self.reboot_hook = reboot;
     }
 
     pub fn memory_stats(&self) -> Option<MemoryStatsFn> {

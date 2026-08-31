@@ -1,6 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
+use lpa_devices::link::ResetKind;
+
 use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
 use crate::provider::management_request::LinkManagementRequest;
 use crate::provider::management_result::{
@@ -179,16 +181,19 @@ impl BrowserSerialEsp32Provider {
         self.endpoint(&endpoint_id)
     }
 
-    /// `reset: false` opens the port WITHOUT the D0/R1/R0 hard reset.
-    /// Identify relies on it: a USB-Serial-JTAG chip (C6) re-enumerates on
-    /// hard reset, which kills the port that was just opened — the model's
-    /// mid-stream hello request needs no reset at all (G1 finding,
-    /// 2026-08-31: identify wedged at "Not responding" on every C6 open).
+    /// `reset: None` opens the port WITHOUT any reset. Identify relies on
+    /// it: a USB-Serial-JTAG chip (C6) re-enumerates on hard reset, which
+    /// kills the port that was just opened — the model's mid-stream hello
+    /// request needs no reset at all (G1 finding, 2026-08-31: identify
+    /// wedged at "Not responding" on every C6 open).
+    ///
+    /// `Some(kind)` runs that reset sequence as part of the open; see
+    /// `browser_serial::reset_kind_js_name` for what each kind drives.
     pub async fn open_protocol(
         &self,
         session_id: &LinkSessionId,
         baud_rate: u32,
-        reset: bool,
+        reset: Option<ResetKind>,
     ) -> Result<(), LinkError> {
         let (endpoint_id, port_id) = self.session_endpoint_and_port(session_id)?;
         let result = browser_serial::open(port_id, baud_rate, reset).await?;
@@ -356,9 +361,16 @@ impl BrowserSerialEsp32Provider {
             }
             LinkManagementRequest::ResetRuntime => {
                 events.emit(crate::LinkManagementEvent::log("Resetting device"));
-                let result =
-                    browser_serial::reset_and_read(port_id, RESET_BAUD_RATE, RESET_READ_WINDOW_MS)
-                        .await?;
+                let result = browser_serial::reset_and_read(
+                    port_id,
+                    RESET_BAUD_RATE,
+                    RESET_READ_WINDOW_MS,
+                    // The management verb has always meant the plain
+                    // hard reset; kind selection belongs to the link
+                    // adapter, which asks for it per board.
+                    ResetKind::Normal,
+                )
+                .await?;
                 for message in &result.logs {
                     events.emit(crate::LinkManagementEvent::log(message.clone()));
                 }

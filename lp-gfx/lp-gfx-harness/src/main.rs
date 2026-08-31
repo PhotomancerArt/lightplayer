@@ -218,6 +218,7 @@ fn run(args: &Args) -> Result<(), String> {
                 &output_provider,
                 None,
                 None,
+                false, // no reboot hook
                 None,
                 None,
                 None,

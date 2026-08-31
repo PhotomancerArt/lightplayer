@@ -3,6 +3,8 @@
 
 use std::collections::VecDeque;
 use std::future::Future;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::{Duration, Instant};
@@ -56,8 +58,20 @@ impl FakeEsp32Device {
                 failure: FakeFailurePlan::none(),
                 dtr_high_seen: false,
                 last_rts: None,
+                reboot_requests: Arc::new(AtomicUsize::new(0)),
+                reboots_performed: 0,
             })),
         }
+    }
+
+    /// How many `ClientRequest::Reboot`s this device's server has ACCEPTED,
+    /// counted by the embedder reset hook the fake installs.
+    ///
+    /// The hook fires only after the ack frame is written, so a nonzero
+    /// count means the client's answer is already on (or heading for) the
+    /// wire — the same ordering real firmware gets.
+    pub fn reboot_requests(&self) -> usize {
+        self.lock().reboot_requests.load(Ordering::SeqCst)
     }
 
     /// Install (or replace) the stream failure plan. Byte thresholds count
@@ -212,6 +226,13 @@ pub(crate) struct FakeDeviceCore {
     failure: FakeFailurePlan,
     dtr_high_seen: bool,
     last_rts: Option<bool>,
+    /// Reboots the server's reset hook has asked for, cumulative. Shared
+    /// with the server thread (the hook runs there), and held at DEVICE
+    /// level because the counter must survive the reboot it causes.
+    reboot_requests: Arc<AtomicUsize>,
+    /// Reboots this device has actually performed — the difference from
+    /// [`Self::reboot_requests`] is a reset still owed.
+    reboots_performed: usize,
 }
 
 impl FakeDeviceCore {
@@ -294,6 +315,7 @@ impl FakeDeviceCore {
                     let heartbeat_interval = lp.heartbeat_interval;
                     self.emit_heartbeat_if_due(heartbeat_interval);
                     self.pump_server_frames();
+                    self.reboot_if_owed();
                 }
                 FakePhase::Passive { .. } => {}
             },
@@ -317,6 +339,7 @@ impl FakeDeviceCore {
         let project_dir = lp.project_dir.clone();
         let identity = lp.identity.clone();
         let base_mac = lp.base_mac.clone();
+        let reboot_requests = Arc::clone(&self.reboot_requests);
         let hello_identity = lp
             .provenance
             .clone()
@@ -342,6 +365,14 @@ impl FakeDeviceCore {
                 }
             }
             let mut server = create_memory_server_with(fs, hello_identity);
+            // The embedder's reset action (real firmware calls
+            // `software_reset()` here). Recording rather than resetting is
+            // the point: the server fires this only AFTER the ack frame is
+            // written, so the device core can hold the reset until those
+            // bytes reach the reader — the ordering silicon gives for free.
+            server.set_reboot_hook(Some(Rc::new(move || {
+                reboot_requests.fetch_add(1, Ordering::SeqCst);
+            })));
             // The efuse half of the hello: only the embedder can read it,
             // so the fake plays embedder here (A1 identity evidence).
             if base_mac.is_some() {
@@ -427,6 +458,11 @@ impl FakeDeviceCore {
     /// cadence says it is due. Real firmware's server loop heartbeats every
     /// 5 s; the fake's host `LpServer` never does, so scripts that need a
     /// live-but-not-answering wire opt in via `heartbeat_interval`.
+    ///
+    /// The heartbeat carries the same identity the firmware loop stamps
+    /// (R4a: uid from the scripted stamp, MAC from efuse), so host tests
+    /// cover the passive mid-stream resolution path — attaching to a device
+    /// that booted long ago and learning who it is without a hello.
     fn emit_heartbeat_if_due(&mut self, interval: Option<Duration>) {
         let Some(interval) = interval else {
             return;
@@ -441,6 +477,7 @@ impl FakeDeviceCore {
             return;
         }
         self.last_heartbeat = Some(Instant::now());
+        let identity = self.heartbeat_identity();
         let frame = lpc_wire::WireServerMessage::new(
             0,
             lpc_wire::ServerMsgBody::Heartbeat {
@@ -457,9 +494,49 @@ impl FakeDeviceCore {
                 recovery: None,
                 outputs: None,
                 link: None,
+                identity,
             },
         );
         self.emit_wire_frame(&frame);
+    }
+
+    /// The identity this device announces on its heartbeats, mirroring
+    /// `LpServer::heartbeat_identity`: the stamped uid and the efuse MAC,
+    /// or `None` when the script gave it neither.
+    fn heartbeat_identity(&self) -> Option<lpc_wire::HeartbeatIdentity> {
+        let FakeBootState::LightPlayer(lp) = &self.script.boot else {
+            return None;
+        };
+        let identity = lpc_wire::HeartbeatIdentity {
+            device_uid: lp.identity.as_ref().map(|identity| identity.uid.clone()),
+            base_mac: self.efuse_mac.clone(),
+        };
+        match identity.is_empty() {
+            true => None,
+            false => Some(identity),
+        }
+    }
+
+    /// Perform a reset the server's reboot hook asked for — but only once
+    /// its ack has left the wire.
+    ///
+    /// This is where the fake reproduces the ANSWER-THEN-RESET contract.
+    /// The hook fires on the server thread once the in-proc transport
+    /// accepted the ack, so the frame is already in the transport channel
+    /// when the flag appears: pump it into the byte wire, and hold the reset
+    /// until the reader has taken those bytes. Resetting earlier would clear
+    /// `out` and eat the answer, which real hardware does not do — it
+    /// finishes the UART write before the ROM restarts.
+    fn reboot_if_owed(&mut self) {
+        if self.reboot_requests.load(Ordering::SeqCst) == self.reboots_performed {
+            return;
+        }
+        self.pump_server_frames();
+        if !self.out.is_empty() {
+            return;
+        }
+        self.reboots_performed = self.reboot_requests.load(Ordering::SeqCst);
+        self.reset_current();
     }
 
     /// Serialize one protocol frame onto the byte wire as an `M!<json>\n`

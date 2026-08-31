@@ -144,6 +144,7 @@ fn test_stop_all_projects() {
             &output_provider,
             None,
             None,
+            false, // no reboot hook
             None,
             None,
             None,

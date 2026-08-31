@@ -79,6 +79,7 @@ fn wire_load(
             &output_provider,
             None,
             None,
+            false, // no reboot hook
             None,
             None,
             None,

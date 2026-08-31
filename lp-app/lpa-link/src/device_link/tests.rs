@@ -286,6 +286,11 @@ fn a_mid_stream_connect_is_classified_by_the_answer_to_our_own_hello() {
 /// The old system hung here. The model must instead reach the identify
 /// deadline and say something honest — frames flowed, no hello ever came —
 /// with the card still escapable.
+///
+/// Since R4a those heartbeats also carry identity, so the honest outcome is
+/// now BETTER than it was: the board is named (uid off the unsolicited
+/// channel) while its verdict stays the truthful "never said hello". Naming
+/// it is what moves it out of `pending` and onto a real card.
 #[test]
 fn dropped_responses_settle_as_honest_evidence_instead_of_hanging() {
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
@@ -314,37 +319,44 @@ fn dropped_responses_settle_as_honest_evidence_instead_of_hanging() {
     bench.run_until("identification to settle without a hello", |bench| {
         bench
             .roster
-            .pending()
+            .devices()
             .first()
-            .is_some_and(|pending| pending.verdict().is_some())
+            .is_some_and(|device| device.evidence.classification.is_verdict())
     });
 
-    let pending = &bench.roster.pending()[0];
+    let device_entry = &bench.roster.devices()[0];
     assert_eq!(
-        pending.verdict(),
-        Some(&Classification::Incompatible {
+        device_entry.evidence.classification,
+        Classification::Incompatible {
             reason: IncompatibleReason::NoHello
-        }),
+        },
         "frames flowed and no hello came: that is the honest verdict"
     );
     assert!(
-        pending.evidence().frames_seen() > 0,
+        device_entry.evidence.frames_seen() > 0,
         "the heartbeats were absorbed as live-peer evidence"
     );
-    assert!(!pending.evidence().has_hello());
+    assert!(!device_entry.evidence.has_hello());
     assert!(
-        !pending.is_identifying(),
+        device_entry.activity.is_none(),
         "the deadline ended it; nothing is still waiting"
     );
 
-    // It stays anonymous (no hello, no identity), which is exactly the state
-    // the shipped system could never escape — and the projection still
-    // offers a way out.
-    assert!(pending.identity().is_anonymous());
+    // R4a: the heartbeats named it, so the board is no longer the anonymous
+    // stuck card the shipped system could never escape — and the projection
+    // still offers a way out.
+    assert_eq!(
+        device_entry.identity.uid,
+        Some(lpa_devices::identity::DeviceUid("dev_starved".to_string())),
+        "a starved wire still says who it is, every heartbeat"
+    );
     let view = bench.view();
-    assert_eq!(view.pending.len(), 1);
-    assert!(view.pending[0].can_adopt);
-    assert!(view.pending[0].escapes.contains(&Escape::Forget));
+    assert!(
+        view.pending.is_empty(),
+        "a named board is not a pending link"
+    );
+    assert_eq!(view.devices.len(), 1);
+    assert!(view.devices[0].escapes.contains(&Escape::Forget));
 }
 
 /// A starved wire that HEALS: the same link, the same roster, and a re-asked
@@ -367,22 +379,29 @@ fn a_healed_wire_re_identifies_without_a_new_link() {
     let mut bench = Bench::with_config(&device, "usb-bench-4", config);
 
     bench.attach();
+    // R4a names it off the heartbeats, so the settled entry is a device
+    // card carrying the honest "never said hello" verdict.
     bench.run_until("the starved identification to settle", |bench| {
-        bench
-            .roster
-            .pending()
-            .first()
-            .is_some_and(|pending| pending.verdict().is_some())
+        bench.roster.devices().first().is_some_and(|device| {
+            matches!(
+                device.evidence.classification,
+                Classification::Incompatible { .. }
+            )
+        })
     });
 
     device.set_drop_responses(false);
     // The user's escape from a stale verdict: ask again.
-    let pending_device = bench.roster.pending()[0].device_id();
+    let starved_device = bench.roster.devices()[0].id;
     bench.feed(Input::Action(Action::Identify {
-        device: pending_device,
+        device: starved_device,
     }));
     bench.run_until("the healed wire to answer", |bench| {
-        !bench.roster.devices().is_empty()
+        bench
+            .roster
+            .devices()
+            .first()
+            .is_some_and(|device| device.evidence.classification.is_light_player())
     });
 
     let device_entry = &bench.roster.devices()[0];

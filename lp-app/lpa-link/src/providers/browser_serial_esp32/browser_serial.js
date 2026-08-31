@@ -117,8 +117,12 @@ export async function requestPort() {
   return sessionForPort(BrowserEsp32DeviceController, port, label);
 }
 
-export async function openPort(id, baudRate, reset = true) {
-  return requireSession(id).openProtocol({ baudRate, reset });
+// `resetKind` names one of the controller's `runReset` sequences
+// ("normal" | "rts-only" | "usb-jtag-download" | "both-then-drop"); it is
+// ignored when `reset` is false. The Rust side owns the naming
+// (`browser_serial.rs`'s reset_kind_js_name).
+export async function openPort(id, baudRate, reset = true, resetKind = "normal") {
+  return requireSession(id).openProtocol({ baudRate, reset, resetKind });
 }
 
 export async function writeLine(id, line) {
@@ -180,10 +184,11 @@ export async function releasePort(id) {
   await session.releaseProtocol();
 }
 
-export async function resetAndRead(id, baudRate, readWindowMs) {
+export async function resetAndRead(id, baudRate, readWindowMs, resetKind = "normal") {
   return requireSession(id).resetAndRead({
     baudRate,
     readWindowMs,
+    resetKind,
   });
 }
 
