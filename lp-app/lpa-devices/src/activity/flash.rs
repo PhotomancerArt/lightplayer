@@ -63,6 +63,14 @@ const LADDER_EXHAUSTED: &str = "firmware was written, but the board never answer
 /// Where the flash currently is.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 enum FlashPhase {
+    /// Driving the chip into its ROM downloader before the effect (native
+    /// USB only): a blank native-USB chip boot-loops and re-enumerates
+    /// every few seconds, cutting esptool mid-connect — the downloader
+    /// waits stably with USB up (bench, G1 2026-08-31: two straight
+    /// mid-SYNC losses on the C6). Best effort: the reset outcome OR the
+    /// deadline starts the effect either way — parking is an odds-improver,
+    /// never a gate.
+    Parking { deadline: Millis },
     /// The coarse effect owns the wire; we absorb markers.
     Writing,
     /// The effect succeeded; the ladder is bringing the board back.
@@ -93,6 +101,7 @@ pub struct FlashActivity {
     device: DeviceId,
     board_id: String,
     build_id: String,
+    park_first: bool,
     phase: FlashPhase,
     /// Cancel arrived during the write window: esptool cannot stop cleanly,
     /// so the wind-down happens when the effect ends instead of the ladder.
@@ -103,11 +112,12 @@ pub struct FlashActivity {
 }
 
 impl FlashActivity {
-    pub fn new(device: DeviceId, board_id: String, build_id: String) -> Self {
+    pub fn new(device: DeviceId, board_id: String, build_id: String, park_first: bool) -> Self {
         Self {
             device,
             board_id,
             build_id,
+            park_first,
             phase: FlashPhase::Writing,
             cancel_after_effect: false,
             winding_down: false,
@@ -117,10 +127,29 @@ impl FlashActivity {
 
     /// The command that starts the coarse effect. Emitted by
     /// [`Device::spawn_flash`](crate::Device::spawn_flash) at spawn.
-    pub(crate) fn spawn_commands(&self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
+    pub(crate) fn spawn_commands(&mut self, now: Millis, ctx: &ActivityCtx<'_>) -> Vec<Command> {
         let Some(link) = ctx.link else {
             return Vec::new();
         };
+        if self.park_first {
+            self.phase = FlashPhase::Parking {
+                deadline: now.plus_ms(ctx.config.flash_rung_ms),
+            };
+            return vec![Command::Link {
+                link,
+                command: LinkCommand::RunReset(ResetKind::UsbJtagDownload),
+            }];
+        }
+        self.start_effect(ctx)
+    }
+
+    /// The command that hands the wire to the flasher. From spawn directly
+    /// (UART bridges), or once parking resolves (native USB).
+    fn start_effect(&mut self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
+        let Some(link) = ctx.link else {
+            return Vec::new();
+        };
+        self.phase = FlashPhase::Writing;
         vec![Command::RunEffect {
             device: self.device,
             link,
@@ -236,6 +265,7 @@ impl FlashActivity {
             return ActivityStep::nothing();
         };
         match &self.phase {
+            FlashPhase::Parking { .. } => ActivityStep::nothing(),
             FlashPhase::Writing => {
                 if self.cancel_after_effect {
                     // The write window is over; honour the held cancel now,
@@ -277,6 +307,15 @@ impl FlashActivity {
             return ActivityStep::nothing();
         }
         match self.phase.clone() {
+            FlashPhase::Parking { deadline } => {
+                if now >= deadline {
+                    // Parking is an odds-improver, never a gate: if the
+                    // downloader dance went quiet, hand esptool the wire
+                    // and let it fight its own fight.
+                    return ActivityStep::Continue(self.start_effect(ctx));
+                }
+                ActivityStep::nothing()
+            }
             FlashPhase::Writing => ActivityStep::nothing(),
             FlashPhase::Reconnecting {
                 rung,
@@ -388,6 +427,13 @@ impl FlashActivity {
             }
             // Opens, boot lines, reset outcomes and errors are diagnosis the
             // fold already recorded; the timers decide.
+            LinkEvent::ResetOutcome { .. }
+                if matches!(self.phase, FlashPhase::Parking { .. }) && !self.winding_down =>
+            {
+                // Parked (or the dance failed — either way the answer is
+                // in): the flasher takes the wire now.
+                ActivityStep::Continue(self.start_effect(ctx))
+            }
             LinkEvent::Opened { .. }
             | LinkEvent::Line(_)
             | LinkEvent::ResetOutcome { .. }
@@ -408,6 +454,8 @@ impl ActivityReducer for FlashActivity {
                     return ActivityStep::nothing();
                 }
                 match self.phase {
+                    // Nothing owns the wire during parking; stop politely.
+                    FlashPhase::Parking { .. } => self.wind_down(ctx),
                     // esptool-js cannot abort a write cleanly: hold the
                     // cancel through the write window (the card says
                     // "cancelling") and wind down when the effect ends.
@@ -444,6 +492,7 @@ impl ActivityReducer for FlashActivity {
             return None;
         }
         match &self.phase {
+            FlashPhase::Parking { deadline } => Some(*deadline),
             // The effect drives; the supervision backstop bounds it (I1).
             FlashPhase::Writing => None,
             FlashPhase::Reconnecting {
@@ -465,11 +514,70 @@ mod tests {
     use crate::roster::RosterConfig;
     use crate::wire::{HelloFacts, ServerFrame};
 
+    #[test]
+    fn parking_holds_the_effect_until_the_downloader_answers() {
+        // Native USB: the downloader dance first, the flasher second — a
+        // boot-looping chip cuts esptool mid-connect otherwise (bench,
+        // G1 2026-08-31).
+        let mut activity = FlashActivity::new(
+            DeviceId(1),
+            "seeed-xiao-esp32c6".to_string(),
+            "esp32c6-4mb".to_string(),
+            true,
+        );
+        let evidence = Evidence::default();
+        let config = RosterConfig::default();
+        let commands = with_ctx(&evidence, &config, |ctx| {
+            activity.spawn_commands(Millis(0), ctx)
+        });
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                Command::Link {
+                    command: LinkCommand::RunReset(ResetKind::UsbJtagDownload),
+                    ..
+                }
+            )),
+            "spawn parks first: {commands:?}"
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, Command::RunEffect { .. })),
+            "the effect waits for the downloader"
+        );
+
+        // The dance answers (either way) — the flasher takes the wire.
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(100),
+                &Input::Event(Event::Link {
+                    link: LinkId(1),
+                    event: LinkEvent::ResetOutcome {
+                        kind: ResetKind::UsbJtagDownload,
+                        ok: true,
+                    },
+                }),
+                ctx,
+            )
+        });
+        let ActivityStep::Continue(commands) = step else {
+            panic!("parking continues into the write: {step:?}");
+        };
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, Command::RunEffect { .. })),
+            "the effect starts once parked: {commands:?}"
+        );
+    }
+
     fn flash() -> FlashActivity {
         FlashActivity::new(
             DeviceId(1),
             "seeed-xiao-esp32c6".to_string(),
             "esp32c6-4mb".to_string(),
+            false,
         )
     }
 
@@ -552,7 +660,9 @@ mod tests {
         opened(&mut evidence, Millis(0), &config);
         let mut activity = flash();
 
-        let commands = with_ctx(&evidence, &config, |ctx| activity.spawn_commands(ctx));
+        let commands = with_ctx(&evidence, &config, |ctx| {
+            activity.spawn_commands(Millis(0), ctx)
+        });
         assert!(matches!(
             commands.as_slice(),
             [Command::RunEffect {

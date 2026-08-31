@@ -281,13 +281,19 @@ impl Device {
         now: Millis,
         board_id: &str,
         build_id: &str,
+        park_first: bool,
         ctx: &mut ModelCtx<'_>,
     ) -> Vec<Command> {
         if self.activity.is_some() || self.link().is_none() {
             return Vec::new();
         }
         let effect_id = self.mint_effect_id();
-        let reducer = FlashActivity::new(self.id, board_id.to_string(), build_id.to_string());
+        let mut reducer = FlashActivity::new(
+            self.id,
+            board_id.to_string(),
+            build_id.to_string(),
+            park_first,
+        );
         let commands = {
             let activity_ctx = ActivityCtx {
                 link: self.evidence.link(),
@@ -295,7 +301,7 @@ impl Device {
                 config: ctx.config,
                 effect_id,
             };
-            reducer.spawn_commands(&activity_ctx)
+            reducer.spawn_commands(now, &activity_ctx)
         };
         let cell = ActivityCell::new(
             now,
@@ -460,11 +466,14 @@ impl Device {
                 self.spawn_identify(now, ctx)
             }
             Action::Flash {
-                board_id, build_id, ..
+                board_id,
+                build_id,
+                park_first,
+                ..
             } => {
                 // Flashing implies wanting the board connected afterwards.
                 self.intent.connection = ConnectionIntent::Connected;
-                self.spawn_flash(now, board_id, build_id, ctx)
+                self.spawn_flash(now, board_id, build_id, *park_first, ctx)
             }
             Action::Push { .. } => {
                 // Sending a project implies wanting the board connected.

@@ -420,6 +420,7 @@ impl Step {
                 device: DeviceId(device),
                 board_id: board,
                 build_id: build,
+                park_first: false,
             }),
             Self::Push { device } => Input::Action(Action::Push {
                 device: DeviceId(device),

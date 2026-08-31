@@ -39,6 +39,13 @@ pub struct FlashBoardChoice {
     pub blurb: String,
     /// The served build this pick resolves to — carried on the Flash action.
     pub build_id: String,
+    /// Park the chip in its ROM downloader before flashing. Native-USB
+    /// families only: a blank native-USB chip boot-loops and re-enumerates
+    /// every few seconds, cutting esptool's connect mid-SYNC (bench, G1
+    /// 2026-08-31 — two straight losses on the C6), while the downloader
+    /// waits stably with USB up. Classic UART bridges keep USB alive
+    /// through any chip state, and their dance already worked on silicon.
+    pub park_first: bool,
 }
 
 /// Everything the needs-firmware face needs to offer a board pick.
@@ -74,6 +81,7 @@ pub fn flash_offer(detected_chip: Option<&str>) -> FlashOffer {
                 title: board.display_name.clone(),
                 blurb: format!("{} · {} flash", board.manufacturer, board.flash),
                 build_id: build_id.to_string(),
+                park_first: board.family != "esp32",
             })
         })
         .collect();

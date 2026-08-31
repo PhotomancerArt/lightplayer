@@ -386,6 +386,7 @@ fn FlashFace(
                         device,
                         board_id: choice.board_id.clone(),
                         build_id: choice.build_id.clone(),
+                        park_first: choice.park_first,
                     }),
                     running: false,
                     variant: ActionButtonVariant::Solid,

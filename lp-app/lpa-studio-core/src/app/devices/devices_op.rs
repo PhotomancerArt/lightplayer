@@ -225,6 +225,7 @@ mod tests {
                 device,
                 board_id: "seeed-xiao-esp32c6".to_string(),
                 build_id: "esp32c6-4mb".to_string(),
+                park_first: false,
             },
             Action::SetName {
                 device,

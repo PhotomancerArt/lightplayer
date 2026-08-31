@@ -999,6 +999,7 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
         device: target,
         board_id: choice.board_id.clone(),
         build_id: choice.build_id.clone(),
+        park_first: false,
     });
 
     // The gesture adopts: the pending card becomes a device card, busy
@@ -1078,6 +1079,7 @@ fn a_mid_write_failure_lands_on_an_honest_face_with_retry_in_place() {
         device: target,
         board_id: choice.board_id,
         build_id: choice.build_id,
+        park_first: false,
     });
     bench.run_until(&tasks, "the failure to settle", |bench| {
         bench
@@ -1124,6 +1126,7 @@ fn post_flash_silence_climbs_the_ladder_then_fails_with_honest_guidance() {
         device: target,
         board_id: choice.board_id,
         build_id: choice.build_id,
+        park_first: false,
     });
     bench.run_until(&tasks, "the ladder to exhaust", |bench| {
         bench
@@ -1171,6 +1174,7 @@ fn forgetting_mid_flash_evicts_the_hung_effect_and_cleans_up() {
         device: target,
         board_id: choice.board_id,
         build_id: choice.build_id,
+        park_first: false,
     });
     bench.run_until(&tasks, "the flash to be visibly running", |bench| {
         bench

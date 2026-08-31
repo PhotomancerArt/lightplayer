@@ -108,6 +108,13 @@ pub enum Action {
         device: DeviceId,
         board_id: String,
         build_id: String,
+        /// Park the chip in its ROM downloader (UsbJtagDownload reset)
+        /// before the effect: a blank native-USB chip boot-loops and
+        /// re-enumerates, cutting esptool mid-connect; the downloader
+        /// holds still. Resolved from the picked board's family by the
+        /// app; the model treats it as data.
+        #[serde(default)]
+        park_first: bool,
     },
     /// Reset the board's hardware (DTR/RTS pulse — `ResetKind::Normal`) and
     /// identify what boots. The direct-control verb for a board wedged in a
@@ -366,6 +373,7 @@ mod tests {
                 device,
                 board_id: "seeed-xiao-esp32c6".to_string(),
                 build_id: "esp32c6-4mb".to_string(),
+                park_first: false,
             },
             Action::SetName {
                 device,
