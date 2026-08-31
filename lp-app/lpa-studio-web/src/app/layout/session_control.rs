@@ -902,14 +902,9 @@ enum SegmentTint {
 
 /// One segment button. `open` selects the settled ACTIVE-TAB look the
 /// popover's merged outline grows out of (D15: the bar is the tab row);
-/// otherwise the segment washes on hover alone.
-///
-/// The open, untinted segment wears the you-are-here spectrum underline —
-/// the same mark the site chrome's nav tabs wear, because "which section
-/// is open" is the same question "which page am I on" is (#481 selection
-/// grammar: nav you-are-here = spectrum line on the nav axis's edge). A
-/// status-TINTED open segment keeps its semantic bed alone: semantics
-/// beat decoration, the same rule the popover chrome follows.
+/// otherwise the segment washes on hover alone. The raised bed is the
+/// whole active mark — a spectrum you-are-here underline was tried at G1
+/// round 2 and dropped as too heavy for a control this small.
 ///
 /// No preflight in this build, so a `<button>` names its border AND its
 /// background explicitly — a bare one paints UA `buttonface` over the
@@ -922,9 +917,7 @@ fn segment_class(edge: SegmentEdge, tint: SegmentTint, open: bool) -> String {
     };
     let background = match (tint, open) {
         (SegmentTint::None, false) => " tw:bg-transparent tw:hover:bg-card-raised",
-        (SegmentTint::None, true) => {
-            " tw:bg-card-raised tw:relative tw:after:absolute tw:after:inset-x-2 tw:after:bottom-0 tw:after:h-0.5 tw:after:rounded-full tw:after:bg-[linear-gradient(90deg,var(--studio-spectrum))] tw:after:content-['']"
-        }
+        (SegmentTint::None, true) => " tw:bg-card-raised",
         (SegmentTint::Warning, false) => {
             " tw:bg-status-warning-bg tw:hover:bg-status-warning-border"
         }
@@ -1118,20 +1111,20 @@ mod tests {
         assert_eq!(words, ["Example", "Private", "Shared", "Member", "Viewing"]);
     }
 
-    /// The active-tab mark (D15 + #481 grammar): the open untinted segment
-    /// wears the spectrum you-are-here underline; a status-tinted open
-    /// segment keeps its semantic bed alone (semantics beat decoration).
+    /// The active mark stays the raised bed alone — the spectrum underline
+    /// was tried at G1 round 2 and ruled too heavy (no standing rainbow on
+    /// the segments, whatever their tint).
     #[test]
-    fn only_the_untinted_open_segment_wears_the_spectrum_line() {
-        let open_neutral = segment_class(SegmentEdge::First, SegmentTint::None, true);
-        let closed_neutral = segment_class(SegmentEdge::First, SegmentTint::None, false);
-        let open_warning = segment_class(SegmentEdge::Last, SegmentTint::Warning, true);
-        let open_error = segment_class(SegmentEdge::Last, SegmentTint::Error, true);
-
-        assert!(open_neutral.contains("--studio-spectrum"));
-        assert!(!closed_neutral.contains("--studio-spectrum"));
-        assert!(!open_warning.contains("--studio-spectrum"));
-        assert!(!open_error.contains("--studio-spectrum"));
+    fn no_segment_state_wears_the_spectrum() {
+        for tint in [SegmentTint::None, SegmentTint::Warning, SegmentTint::Error] {
+            for open in [false, true] {
+                let class = segment_class(SegmentEdge::First, tint, open);
+                assert!(
+                    !class.contains("--studio-spectrum"),
+                    "spectrum in `{class}`"
+                );
+            }
+        }
     }
 
     /// The tab protocol (D15): clicking the open section closes; clicking
