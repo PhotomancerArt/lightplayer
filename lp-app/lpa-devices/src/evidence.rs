@@ -28,7 +28,7 @@ use crate::journal::JournalNote;
 use crate::link::{LinkEvent, LinkId};
 use crate::roster::RosterConfig;
 use crate::time::Millis;
-use crate::wire::{HelloFacts, ServerFrameBody};
+use crate::wire::{HelloFacts, LoadedProjectFacts, ServerFrameBody};
 
 /// Boot signatures, mirroring `lpa-link`'s shipped `BootLineClassifier`.
 const BLANK_HEADER_SIGNATURE: &str = "invalid header: 0xffffffff";
@@ -135,6 +135,15 @@ impl Evidence {
     /// Chip identity read from a passive boot banner, when one named it.
     pub fn detected_chip(&self) -> Option<&str> {
         self.observations.detected_chip.as_deref()
+    }
+
+    /// What the board last reported having loaded.
+    ///
+    /// `None` means it has not said — which is NOT "nothing loaded". The
+    /// empty face turns on the difference, and over-claiming "this board is
+    /// empty" would offer to overwrite a project that is right there.
+    pub fn loaded_projects(&self) -> Option<&[LoadedProjectFacts]> {
+        self.observations.loaded.as_deref()
     }
 
     /// Bounded tail of recent non-protocol serial lines, for diagnosis copy.
@@ -422,6 +431,9 @@ struct Observations {
     detected_chip: Option<String>,
     frames_seen: usize,
     hello: Option<HelloFacts>,
+    /// The board's own report of what it is running. Window-scoped like
+    /// every other observation: a reopened port has to be told again.
+    loaded: Option<Vec<LoadedProjectFacts>>,
     wrong_proto: Option<u32>,
     errors: usize,
     settled: bool,
@@ -447,7 +459,20 @@ impl Observations {
             }
             // Absorbed, never condemned: a running server heartbeats, so a
             // mid-stream attach sees frames before any hello answer.
-            ServerFrameBody::Heartbeat { .. } | ServerFrameBody::Other { .. } => {
+            ServerFrameBody::Heartbeat { loaded, .. } => {
+                self.frames_seen += 1;
+                // Only a heartbeat that CARRIES the report replaces it:
+                // older firmware sends none, and treating its silence as
+                // "nothing loaded" would offer to overwrite a live project.
+                if let Some(loaded) = loaded {
+                    self.loaded = Some(loaded.clone());
+                }
+            }
+            ServerFrameBody::Loaded { loaded } => {
+                self.frames_seen += 1;
+                self.loaded = Some(loaded.clone());
+            }
+            ServerFrameBody::Other { .. } => {
                 self.frames_seen += 1;
             }
         }

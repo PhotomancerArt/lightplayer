@@ -83,6 +83,20 @@ pub enum Action {
     Identify {
         device: DeviceId,
     },
+    /// Put the prepared project on this board (round 2's second coarse
+    /// effect).
+    ///
+    /// It carries no project: the payload — which files, which content hash
+    /// — is resolved by the app and STAGED with the effects layer before
+    /// this action is folded. Two reasons, both load-bearing. The journal
+    /// records every input verbatim and fixtures round-trip through JSON, so
+    /// a project's bytes riding an action would put megabytes in a flight
+    /// recorder. And what the board ends up running is not this action's to
+    /// claim: it enters the model as EVIDENCE, off the heartbeat's
+    /// loaded-project report, exactly like every other device fact (I6).
+    Push {
+        device: DeviceId,
+    },
     /// Flash firmware onto this board (round 2's first coarse effect). The
     /// board is the user's pick from the chip-compatible list; the build id
     /// was resolved by the app from (board, detected chip) — **no fallback
@@ -114,6 +128,7 @@ impl Action {
             | Self::Forget { device }
             | Self::CancelActivity { device }
             | Self::Identify { device }
+            | Self::Push { device }
             | Self::Flash { device, .. }
             | Self::SetName { device, .. }
             | Self::SetAutoconnect { device, .. } => Some(*device),
@@ -149,8 +164,17 @@ pub enum Event {
     /// A marker from a coarse effect the model asked for but does not drive
     /// frame by frame (esptool-js flashing, in round 2). Activity brackets
     /// the model raises itself are journaled directly.
+    ///
+    /// `effect` names WHICH effect the marker belongs to. An effect runs
+    /// outside the model in a spawned future that nothing can cancel: when
+    /// its activity is evicted mid-run and a new one is spawned, the old
+    /// effect's `Ended` still arrives — and without a stamp it would read as
+    /// the NEW activity's ending. `None` is a marker the model raised for
+    /// itself (the brackets), which is never stale by construction.
     ActivityMarker {
         device: DeviceId,
+        #[serde(default)]
+        effect: Option<EffectId>,
         marker: ActivityMarker,
     },
     /// Identity a coarse effect learned out-of-band (the flash preflight
@@ -213,12 +237,22 @@ pub enum Command {
     RunEffect {
         device: DeviceId,
         link: LinkId,
+        /// The generation stamp every marker this effect reports must carry.
+        /// Minted by the device, so a marker from an EVICTED effect can be
+        /// recognized and dropped instead of ending the activity that
+        /// replaced it.
+        effect_id: EffectId,
         effect: EffectRequest,
     },
 }
 
-/// The closed set of coarse effects (data, not behavior). M3 adds `Push`;
-/// M4 adds `Pull`/`Erase`.
+/// One coarse effect's generation stamp, unique per device for the life of
+/// the roster. Monotonic on purpose: a bigger id is always the newer effect.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct EffectId(pub u64);
+
+/// The closed set of coarse effects (data, not behavior). M4 adds
+/// `Pull`/`Erase`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum EffectRequest {
     /// Write a firmware image with esptool. The chip guard and the pre-write
@@ -229,6 +263,15 @@ pub enum EffectRequest {
     /// provision's D4 ruling). Emitted by the Flash activity once the
     /// post-flash hello proves the app protocol is up.
     WriteBoardManifest { board_id: String },
+    /// Run the `lpa-client` push conversation over the borrowed wire: find
+    /// the storage dir the board actually runs from, replace it, load it,
+    /// and verify the package hash.
+    ///
+    /// A unit variant, deliberately. The payload (files + expected hash) was
+    /// staged with the effects layer by the app before
+    /// [`Action::Push`](crate::Action::Push) was folded — see that action for
+    /// why the model does not carry project bytes.
+    Push,
 }
 
 #[cfg(test)]
@@ -244,6 +287,7 @@ mod tests {
             Action::Forget { device },
             Action::CancelActivity { device },
             Action::Identify { device },
+            Action::Push { device },
             Action::Flash {
                 device,
                 board_id: "seeed-xiao-esp32c6".to_string(),

@@ -26,10 +26,11 @@ use serde::{Deserialize, Serialize};
 use crate::activity::activity_cell::Reducer;
 use crate::activity::flash::FlashActivity;
 use crate::activity::identify::IdentifyActivity;
+use crate::activity::push::PushActivity;
 use crate::activity::{
     ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityProgress, ActivityStep,
 };
-use crate::event::{Action, ActivityMarker, Command, Event, Input};
+use crate::event::{Action, ActivityMarker, Command, EffectId, Event, Input};
 use crate::evidence::{Classification, Evidence};
 use crate::identity::{DeviceId, IdentityBinding, IdentityChain};
 use crate::intent::{ConnectionIntent, Intent};
@@ -59,6 +60,11 @@ pub struct Device {
     /// gesture that asks again.
     #[serde(default)]
     identify_retries: u32,
+    /// Generations handed to coarse effects on this device. Monotonic and
+    /// never reset: a marker from an effect this device started two
+    /// activities ago must not be able to look current.
+    #[serde(default)]
+    next_effect_id: u64,
 }
 
 impl Device {
@@ -72,6 +78,7 @@ impl Device {
             activity: None,
             armed_timer: None,
             identify_retries: 0,
+            next_effect_id: 0,
         }
     }
 
@@ -220,6 +227,7 @@ impl Device {
             return Vec::new();
         }
         let settle_at = now.plus_ms(ctx.config.identify_deadline_ms);
+        let effect_id = self.mint_effect_id();
         let mut reducer =
             IdentifyActivity::new(now, settle_at, ctx.config.hello_request_interval_ms);
         let commands = {
@@ -227,6 +235,7 @@ impl Device {
                 link: self.evidence.link(),
                 evidence: &self.evidence,
                 config: ctx.config,
+                effect_id,
             };
             reducer.spawn_commands(&mut activity_ctx)
         };
@@ -235,11 +244,7 @@ impl Device {
             settle_at.plus_ms(ctx.config.supervision_slack_ms),
             Reducer::Identify(reducer),
         );
-        let kind = cell.kind;
-        self.activity = Some(cell);
-        ctx.journal
-            .note(now, self.scope(), JournalNote::ActivityStarted { kind });
-        self.raise_marker(now, ActivityMarker::Started { kind }, ctx);
+        self.install_activity(now, cell, effect_id, &commands, ctx);
         commands
     }
 
@@ -256,12 +261,14 @@ impl Device {
         if self.activity.is_some() || self.link().is_none() {
             return Vec::new();
         }
+        let effect_id = self.mint_effect_id();
         let reducer = FlashActivity::new(self.id, board_id.to_string(), build_id.to_string());
         let commands = {
             let activity_ctx = ActivityCtx {
                 link: self.evidence.link(),
                 evidence: &self.evidence,
                 config: ctx.config,
+                effect_id,
             };
             reducer.spawn_commands(&activity_ctx)
         };
@@ -270,12 +277,65 @@ impl Device {
             now.plus_ms(ctx.config.flash_deadline_ms),
             Reducer::Flash(reducer),
         );
+        self.install_activity(now, cell, effect_id, &commands, ctx);
+        commands
+    }
+
+    /// Spawn the Push activity, unless the device is already busy (I5) or
+    /// has no link to push over. The payload was staged with the effects
+    /// layer before this gesture was folded — see
+    /// [`Action::Push`](crate::Action::Push) for why the model does not
+    /// carry it.
+    pub(crate) fn spawn_push(&mut self, now: Millis, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
+        if self.activity.is_some() || self.link().is_none() {
+            return Vec::new();
+        }
+        let effect_id = self.mint_effect_id();
+        let reducer = PushActivity::new(self.id);
+        let commands = {
+            let activity_ctx = ActivityCtx {
+                link: self.evidence.link(),
+                evidence: &self.evidence,
+                config: ctx.config,
+                effect_id,
+            };
+            reducer.spawn_commands(&activity_ctx)
+        };
+        let cell = ActivityCell::new(
+            now,
+            now.plus_ms(ctx.config.push_deadline_ms),
+            Reducer::Push(reducer),
+        );
+        self.install_activity(now, cell, effect_id, &commands, ctx);
+        commands
+    }
+
+    /// Seat a freshly spawned activity: journal the bracket, raise the
+    /// `Started` marker, and remember which coarse effect (if any) the
+    /// spawn started, so that effect's markers can be told apart from a
+    /// predecessor's.
+    fn install_activity(
+        &mut self,
+        now: Millis,
+        mut cell: ActivityCell,
+        effect_id: EffectId,
+        commands: &[Command],
+        ctx: &mut ModelCtx<'_>,
+    ) {
+        if starts_effect(commands, effect_id) {
+            cell.current_effect = Some(effect_id);
+        }
         let kind = cell.kind;
         self.activity = Some(cell);
         ctx.journal
             .note(now, self.scope(), JournalNote::ActivityStarted { kind });
         self.raise_marker(now, ActivityMarker::Started { kind }, ctx);
-        commands
+    }
+
+    /// The stamp the next coarse effect this device starts will wear.
+    fn mint_effect_id(&mut self) -> EffectId {
+        self.next_effect_id += 1;
+        EffectId(self.next_effect_id)
     }
 
     pub(crate) fn scope(&self) -> Scope {
@@ -321,6 +381,11 @@ impl Device {
                 self.intent.connection = ConnectionIntent::Connected;
                 self.spawn_flash(now, board_id, build_id, ctx)
             }
+            Action::Push { .. } => {
+                // Sending a project implies wanting the board connected.
+                self.intent.connection = ConnectionIntent::Connected;
+                self.spawn_push(now, ctx)
+            }
             Action::SetName { name, .. } => {
                 self.intent.name = Some(name.clone());
                 vec![Command::PersistRecord(self.record_snapshot())]
@@ -340,6 +405,30 @@ impl Device {
     }
 
     fn handle_event(&mut self, now: Millis, event: &Event, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
+        // A coarse effect runs in a spawned future nothing can cancel. When
+        // its activity is evicted mid-run — a cancel grace that expired, a
+        // deadline, a Forget — the effect keeps going and eventually reports.
+        // Without this guard that straggler's `Ended` would fold as the END
+        // of whatever activity is running NOW, retiring a live push because
+        // an old flash finally finished. It is dropped before the fold, and
+        // journaled so the timeline still explains the silence.
+        if let Event::ActivityMarker {
+            effect: Some(effect),
+            marker,
+            ..
+        } = event
+            && self.activity.as_ref().and_then(|cell| cell.current_effect) != Some(*effect)
+        {
+            ctx.journal.note(
+                now,
+                self.scope(),
+                JournalNote::StaleEffectMarker {
+                    effect: *effect,
+                    ended: matches!(marker, ActivityMarker::Ended { .. }),
+                },
+            );
+            return Vec::new();
+        }
         if matches!(event, Event::LinkAttached { .. }) {
             // A fresh link generation gets a fresh auto-retry budget.
             self.identify_retries = 0;
@@ -434,6 +523,7 @@ impl Device {
         input: &Input,
         ctx: &mut ModelCtx<'_>,
     ) -> Option<ActivityStep> {
+        let effect_id = self.mint_effect_id();
         let Self {
             activity, evidence, ..
         } = self;
@@ -442,8 +532,13 @@ impl Device {
             link: evidence.link(),
             evidence,
             config: ctx.config,
+            effect_id,
         };
-        Some(cell.handle(now, input, &mut activity_ctx))
+        let step = cell.handle(now, input, &mut activity_ctx);
+        if starts_effect(step_commands(&step), effect_id) {
+            cell.current_effect = Some(effect_id);
+        }
+        Some(step)
     }
 
     fn apply_step(
@@ -540,8 +635,11 @@ impl Device {
     }
 
     fn raise_marker(&mut self, now: Millis, marker: ActivityMarker, ctx: &mut ModelCtx<'_>) {
+        // The model's own bracket: no effect stamp, and therefore never
+        // stale — it is raised by the same fold that would judge it.
         let event = Event::ActivityMarker {
             device: self.id,
+            effect: None,
             marker,
         };
         let notes = self
@@ -587,6 +685,23 @@ impl Device {
             timer,
             after_ms: at.since(now),
         }]
+    }
+}
+
+/// Whether a batch of commands starts the coarse effect stamped `effect_id`.
+fn starts_effect(commands: &[Command], effect_id: EffectId) -> bool {
+    commands.iter().any(|command| {
+        matches!(
+            command,
+            Command::RunEffect { effect_id: started, .. } if *started == effect_id
+        )
+    })
+}
+
+/// The commands a step is carrying, whichever shape it took.
+fn step_commands(step: &ActivityStep) -> &[Command] {
+    match step {
+        ActivityStep::Continue(commands) | ActivityStep::Done { commands, .. } => commands,
     }
 }
 

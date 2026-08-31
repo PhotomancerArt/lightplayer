@@ -16,7 +16,7 @@
 
 use lpa_devices::replay::{Replay, Step};
 use lpa_devices::view::{DeviceView, PendingLinkView, RosterView};
-use lpa_devices::{Escape, Millis, RosterConfig};
+use lpa_devices::{ActivityKind, Escape, Millis, RosterConfig};
 
 #[test]
 fn the_projection_is_total_and_always_escapable() {
@@ -186,6 +186,18 @@ fn assert_device(device: &DeviceView, case: &str) {
         assert!(
             !freshness.is_empty(),
             "[{case}] an empty freshness label is worse than none"
+        );
+    }
+    // The empty face's verb is never drawn over a running activity — one
+    // activity per device (I5), and a second gesture would be refused.
+    assert!(
+        !(device.can_receive_project && device.activity.is_some()),
+        "[{case}] a push offered on a busy device"
+    );
+    if let lpa_devices::view::LoadedProject::Running { label } = &device.loaded_project {
+        assert!(
+            !label.is_empty(),
+            "[{case}] a running face with nothing to name"
         );
     }
 }
@@ -372,6 +384,8 @@ fn gestures() -> Vec<(&'static str, Vec<Step>)> {
                     device: 1,
                     ok: false,
                     message: Some("write failed at 0x2000".to_string()),
+                    effect: None,
+                    kind: None,
                 },
             ],
         ),
@@ -383,12 +397,45 @@ fn gestures() -> Vec<(&'static str, Vec<Step>)> {
                     device: 1,
                     ok: true,
                     message: None,
+                    effect: None,
+                    kind: None,
                 },
             ],
         ),
         (
             "flash then cancel",
             vec![flash_step(), Step::Cancel { device: 1 }],
+        ),
+        ("push", vec![Step::Push { device: 1 }]),
+        (
+            "push then the effect fails",
+            vec![
+                Step::Push { device: 1 },
+                Step::EffectEnded {
+                    device: 1,
+                    ok: false,
+                    message: Some("the board refused the write".to_string()),
+                    effect: None,
+                    kind: Some(ActivityKind::Push),
+                },
+            ],
+        ),
+        (
+            "push then the effect succeeds",
+            vec![
+                Step::Push { device: 1 },
+                Step::EffectEnded {
+                    device: 1,
+                    ok: true,
+                    message: Some("project sent".to_string()),
+                    effect: None,
+                    kind: Some(ActivityKind::Push),
+                },
+            ],
+        ),
+        (
+            "push then cancel",
+            vec![Step::Push { device: 1 }, Step::Cancel { device: 1 }],
         ),
         (
             "adopt then forget",

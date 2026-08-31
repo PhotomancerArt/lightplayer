@@ -442,6 +442,7 @@ mod tests {
             link: Some(LinkId(1)),
             evidence,
             config,
+            effect_id: crate::event::EffectId(1),
         };
         body(&mut ctx)
     }

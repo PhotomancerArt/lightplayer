@@ -55,9 +55,9 @@ pub mod time;
 pub mod view;
 pub mod wire;
 
-pub use activity::{ActivityCell, ActivityKind, ActivityOutcome, CancelPhase};
+pub use activity::{ActivityCell, ActivityKind, ActivityOutcome, CancelPhase, PushActivity};
 pub use device::{Device, DeviceStatus};
-pub use event::{Action, ActivityMarker, Command, EffectRequest, Event, Input};
+pub use event::{Action, ActivityMarker, Command, EffectId, EffectRequest, Event, Input};
 pub use evidence::{Classification, Evidence, Freshness, IncompatibleReason, Liveness, Presence};
 pub use identity::{DeviceId, DeviceUid, EndpointKey, IdentityChain, MacAddress, PeerIdentity};
 pub use intent::{ConnectionIntent, Intent};
@@ -66,5 +66,7 @@ pub use link::{Link, LinkCommand, LinkEvent, LinkId, LinkInfo, ResetKind};
 pub use record::DeviceRecord;
 pub use roster::{PendingLink, Roster, RosterConfig};
 pub use time::{Millis, TimerId};
-pub use view::{DeviceView, Escape, RosterView};
-pub use wire::{ClientFrame, ClientFrameBody, HelloFacts, ServerFrame, ServerFrameBody};
+pub use view::{DeviceView, Escape, LoadedProject, RosterView};
+pub use wire::{
+    ClientFrame, ClientFrameBody, HelloFacts, LoadedProjectFacts, ServerFrame, ServerFrameBody,
+};

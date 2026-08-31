@@ -73,6 +73,19 @@ pub struct RosterConfig {
     /// The retry/ask cadence inside a rung: reopen a closed port (session
     /// adoption absorbs a re-enumerated one) or re-ask a quiet open one.
     pub flash_reopen_retry_ms: u64,
+    /// Supervision backstop for the whole Push activity: the `lpa-client`
+    /// conversation (clear, chunked writes, load, hash) over a serial wire.
+    pub push_deadline_ms: u64,
+    /// Wind-down grace for a cancelled push. Wide for the same reason the
+    /// flash's is: the conversation clears the device's project dir before
+    /// it writes, so a cancel is held until the write window closes rather
+    /// than leaving half a project on the board.
+    pub push_cancel_grace_ms: u64,
+    /// How long a finished push waits for the board to REPORT what it is
+    /// running before settling anyway. Wider than a heartbeat period: the
+    /// loaded-project fact rides heartbeats, and a push that succeeded must
+    /// not be reported as anything else just because the board is unhurried.
+    pub push_observe_ms: u64,
     /// Silence before freshness flips to quiet. Wider than two heartbeat
     /// periods on purpose: a lossy wire must not flap the timeline.
     pub quiet_after_ms: u64,
@@ -93,6 +106,9 @@ impl Default for RosterConfig {
             flash_cancel_grace_ms: 180_000,
             flash_rung_ms: 8_000,
             flash_reopen_retry_ms: 1_000,
+            push_deadline_ms: 180_000,
+            push_cancel_grace_ms: 120_000,
+            push_observe_ms: 8_000,
             quiet_after_ms: 12_000,
             journal_capacity: 512,
         }

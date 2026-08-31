@@ -10,15 +10,17 @@
 //! what makes eviction safe — there is no half-finished future holding
 //! controller state — and what makes every flow testable by event script.
 //!
-//! Shipped activities: [`identify::IdentifyActivity`] (round 1) and
-//! [`flash::FlashActivity`] (round 2's coarse-effect centerpiece). Push and
-//! Pull are the remaining round-2 variants of [`ActivityKind`] and
-//! `Reducer` (M3/M4); the old Setup/Provision orchestrators dissolved into
-//! the card ruling — Flash and Push ARE the flows.
+//! Shipped activities: [`identify::IdentifyActivity`] (round 1),
+//! [`flash::FlashActivity`] (round 2's coarse-effect centerpiece) and
+//! [`push::PushActivity`] (its second consumer). Pull is the remaining
+//! round-2 variant of [`ActivityKind`] and `Reducer` (M4); the old
+//! Setup/Provision orchestrators dissolved into the card ruling — Flash and
+//! Push ARE the flows.
 
 pub(crate) mod activity_cell;
 pub mod flash;
 pub mod identify;
+pub mod push;
 
 pub use activity_cell::{
     ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityProgress, ActivityReducer,
@@ -26,3 +28,4 @@ pub use activity_cell::{
 };
 pub use flash::FlashActivity;
 pub use identify::IdentifyActivity;
+pub use push::PushActivity;

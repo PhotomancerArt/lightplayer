@@ -124,6 +124,7 @@ impl FlashActivity {
         vec![Command::RunEffect {
             device: self.device,
             link,
+            effect_id: ctx.effect_id,
             effect: EffectRequest::Flash {
                 build_id: self.build_id.clone(),
                 board_id: self.board_id.clone(),
@@ -193,6 +194,7 @@ impl FlashActivity {
         ActivityStep::Continue(vec![Command::RunEffect {
             device: self.device,
             link,
+            effect_id: ctx.effect_id,
             effect: EffectRequest::WriteBoardManifest {
                 board_id: self.board_id.clone(),
             },
@@ -467,6 +469,7 @@ mod tests {
     fn ended(outcome: ActivityOutcome) -> Input {
         Input::Event(Event::ActivityMarker {
             device: DeviceId(1),
+            effect: Some(crate::event::EffectId(1)),
             marker: ActivityMarker::Ended {
                 kind: ActivityKind::Flash,
                 outcome,
@@ -492,6 +495,7 @@ mod tests {
             link: Some(LinkId(1)),
             evidence,
             config,
+            effect_id: crate::event::EffectId(1),
         };
         body(&mut ctx)
     }
