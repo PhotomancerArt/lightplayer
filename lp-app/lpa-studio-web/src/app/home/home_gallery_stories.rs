@@ -21,8 +21,9 @@ use lpa_studio_core::{
 
 use lpa_studio_core::UiAction;
 use lpa_studio_core::{
-    DeviceActivityKind, DeviceActivityView, DeviceEscape, DeviceId, DeviceLinkId, DeviceRosterView,
-    DeviceStatus, DeviceView, OutcomeView, PendingLinkView, RosterView,
+    DeviceActivityKind, DeviceActivityView, DeviceEscape, DeviceId, DeviceLinkId,
+    DeviceLoadedProject, DeviceRosterView, DeviceStatus, DeviceView, OutcomeView, PendingLinkView,
+    RosterView,
 };
 
 use crate::app::home::card_thumb::CardThumb;
@@ -548,7 +549,14 @@ fn roster_fixture() -> DeviceRosterView {
                     freshness_label: Some("last heard 3 s ago".to_string()),
                     identity_label: Some("dev000000daqf6dvvqz".to_string()),
                     detected_chip: None,
+                    board_id: Some("dig-uno".to_string()),
                     needs_firmware: false,
+                    // The RUNNING face (M3): what the board itself reports,
+                    // named by the storage dir it runs from.
+                    loaded_project: DeviceLoadedProject::Running {
+                        label: "2026-07-09-1421-porch-sign".to_string(),
+                    },
+                    can_receive_project: true,
                     activity: None,
                     last_outcome: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
@@ -562,7 +570,11 @@ fn roster_fixture() -> DeviceRosterView {
                     freshness_label: Some("last heard just now".to_string()),
                     identity_label: Some("60:55:f9:0a:0b:0c".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
+                    board_id: None,
                     needs_firmware: false,
+                    loaded_project: DeviceLoadedProject::Unknown,
+                    // Busy: one activity per device, so no second verb.
+                    can_receive_project: false,
                     activity: Some(DeviceActivityView {
                         kind: DeviceActivityKind::Identify,
                         label: "Identifying…".to_string(),
@@ -587,11 +599,36 @@ fn roster_fixture() -> DeviceRosterView {
                     freshness_label: None,
                     identity_label: Some("dev000000000shelf01".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
+                    board_id: None,
                     needs_firmware: true,
+                    loaded_project: DeviceLoadedProject::Unknown,
+                    can_receive_project: false,
                     activity: None,
                     last_outcome: Some(OutcomeView {
                         summary: "identification timed out".to_string(),
                         ok: false,
+                    }),
+                    escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+                },
+                // The EMPTY face (M3): a LightPlayer that has SAID it has
+                // nothing on it, wearing the one inline picker.
+                DeviceView {
+                    id: DeviceId(4),
+                    title: "Seeed XIAO ESP32-C6 · Aug 30".to_string(),
+                    status: DeviceStatus::Ready,
+                    state_label: "Ready".to_string(),
+                    detail: Some("LightPlayer · seeed-xiao-esp32c6".to_string()),
+                    freshness_label: Some("last heard just now".to_string()),
+                    identity_label: Some("60:55:f9:0a:0b:0d".to_string()),
+                    detected_chip: Some("esp32c6".to_string()),
+                    board_id: Some("seeed-xiao-esp32c6".to_string()),
+                    needs_firmware: false,
+                    loaded_project: DeviceLoadedProject::Empty,
+                    can_receive_project: true,
+                    activity: None,
+                    last_outcome: Some(OutcomeView {
+                        summary: "firmware installed — seeed-xiao-esp32c6".to_string(),
+                        ok: true,
                     }),
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },

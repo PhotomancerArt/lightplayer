@@ -22,18 +22,24 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceAction, DeviceActivityView, DeviceId, DeviceView, DevicesOp, PendingLinkView, UiAction,
-    UiStatus, device_escape_action, device_status_kind, flash_offer, pending_escape_action,
+    DeviceAction, DeviceActivityView, DeviceId, DeviceLoadedProject, DevicePushOp, DeviceView,
+    DevicesOp, PendingLinkView, PushSourceGroup, UiAction, UiExampleCard, UiPackageCard, UiStatus,
+    device_escape_action, device_status_kind, flash_offer, pending_escape_action, push_offer,
 };
 
-use crate::base::icon::StudioIconName;
+use crate::base::icon::{NodeKindIcon, StudioIconName};
 use crate::base::option_cards::{OptionCard, OptionCards};
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip};
 
 /// One device card.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn DeviceRosterCard(card: DeviceView, on_action: EventHandler<UiAction>) -> Element {
+pub(crate) fn DeviceRosterCard(
+    card: DeviceView,
+    projects: Vec<UiPackageCard>,
+    examples: Vec<UiExampleCard>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
     let device = card.id;
     let status = UiStatus {
         label: card.state_label.clone(),
@@ -42,6 +48,14 @@ pub(crate) fn DeviceRosterCard(card: DeviceView, on_action: EventHandler<UiActio
     // The flash face appears on a settled needs-firmware verdict, never
     // while an activity runs (the activity row is the face then).
     let offer_flash = card.needs_firmware && card.activity.is_none();
+    // The empty face: a LightPlayer that has REPORTED nothing loaded. A
+    // board that simply has not said yet gets neither face — see
+    // `DeviceLoadedProject::Unknown`.
+    let offer_push = card.can_receive_project && card.loaded_project == DeviceLoadedProject::Empty;
+    let running = match &card.loaded_project {
+        DeviceLoadedProject::Running { label } => Some(label.clone()),
+        DeviceLoadedProject::Empty | DeviceLoadedProject::Unknown => None,
+    };
 
     rsx! {
         article { class: card_class(),
@@ -58,6 +72,11 @@ pub(crate) fn DeviceRosterCard(card: DeviceView, on_action: EventHandler<UiActio
             }
 
             div { class: "tw:grid tw:gap-1",
+                // The running face's headline: what the board says it is
+                // running, above the firmware detail.
+                if let Some(running) = running.clone() {
+                    p { class: detail_class(), "Running {running}" }
+                }
                 if let Some(detail) = card.detail.clone() {
                     p { class: detail_class(), "{detail}" }
                 }
@@ -83,6 +102,10 @@ pub(crate) fn DeviceRosterCard(card: DeviceView, on_action: EventHandler<UiActio
                     detected_chip: card.detected_chip.clone(),
                     on_action,
                 }
+            }
+
+            if offer_push {
+                EmptyFace { card: card.clone(), projects, examples, on_action }
             }
 
             // Every escape the projection carries, in every state — including
@@ -252,6 +275,104 @@ fn FlashFace(
                     disabled: true,
                     title: "Pick the board first — the pin map is written to the device.",
                     "Flash firmware"
+                }
+            }
+        }
+    }
+}
+
+/// The empty face: ONE inline picker with three sources, and one primary
+/// verb (the card ruling — no wizard, no dialog flow).
+///
+/// The pick is ephemeral UI state, exactly like the board pick above it:
+/// nothing is journaled until the verb is pressed, and the op it dispatches
+/// carries the chosen source. A retry after a failure is the same face,
+/// still here, still picked — which is what "in place" means.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn EmptyFace(
+    card: DeviceView,
+    projects: Vec<UiPackageCard>,
+    examples: Vec<UiExampleCard>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let device = card.id;
+    let offer = push_offer(&card, &projects, &examples);
+    let mut picked = use_signal(|| offer.preselect.clone());
+    // The library and the example list can both grow under a card that is
+    // already on screen; a pick that no longer exists must not survive it.
+    let pick_exists = picked
+        .read()
+        .as_deref()
+        .is_some_and(|key| offer.choices.iter().any(|choice| choice.key == key));
+    let effective = match pick_exists {
+        true => picked.read().clone(),
+        false => offer.preselect.clone(),
+    };
+
+    if let Some(unavailable) = offer.unavailable.clone() {
+        return rsx! {
+            div { class: note_class(),
+                p { class: "tw:m-0", "{unavailable}" }
+            }
+        };
+    }
+
+    let chosen = effective.as_deref().and_then(|key| {
+        offer
+            .choices
+            .iter()
+            .find(|choice| choice.key == key)
+            .cloned()
+    });
+    let options: Vec<OptionCard> = offer
+        .choices
+        .iter()
+        .map(|choice| {
+            OptionCard::new(
+                &choice.key,
+                // A project is a project: the group label already says
+                // where it comes from, so only the one being CREATED wears
+                // a different glyph.
+                match choice.group {
+                    PushSourceGroup::New => StudioIconName::Add,
+                    PushSourceGroup::Example | PushSourceGroup::Library => {
+                        StudioIconName::NodeKind(NodeKindIcon::Module)
+                    }
+                },
+                &format!("{} · {}", choice.group.label(), choice.title),
+                &choice.blurb,
+            )
+        })
+        .collect();
+
+    rsx! {
+        div { class: "tw:grid tw:gap-2",
+            OptionCards {
+                label: Some("Put something on it".to_string()),
+                options,
+                selected: effective.clone(),
+                on_pick: move |key: String| picked.set(Some(key)),
+            }
+            // Said out loud rather than silently omitted: a board that
+            // cannot have a starter generated for it has a reason.
+            if let Some(reason) = offer.new_project_unavailable.clone() {
+                p { class: quiet_line_class(), "{reason}" }
+            }
+            if let Some(chosen) = chosen {
+                ActionButton {
+                    action: DevicePushOp::action_for(device, chosen.source.clone()),
+                    running: false,
+                    variant: ActionButtonVariant::Solid,
+                    on_action,
+                }
+            } else {
+                button {
+                    class: disabled_button_class(),
+                    r#type: "button",
+                    disabled: true,
+                    title: "Pick what to put on the board first.",
+                    "Put it on the board"
                 }
             }
         }
