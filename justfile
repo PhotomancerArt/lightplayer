@@ -413,11 +413,27 @@ claude-launch-json:
     EOF
     echo "wrote .claude/launch.json (studio-dev port ${port})"
 
+# studio-dev on a reserved bench-block port, so the standing WebSerial
+# grant (`just serial-grant`) covers the origin and the chooser never
+# appears. HARDWARE WALKS ONLY — the block is tiny and deliberately
+# exclusive (Yona: bench sessions shouldn't share); everyday dev uses
+# plain `just studio-dev` and hashed ports. The printed URL is the source
+# of truth, as always (docs/defects/2026-07-27-launch-json-pinned-port.md).
+studio-dev-bench:
+    STUDIO_BENCH=1 just studio-dev
+
 studio-dev: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
-    port="$(scripts/dev-port.sh studio-dev "${STUDIO_WEB_PORT:-}")"
+    # STUDIO_BENCH=1 (via `just studio-dev-bench`) serves from the reserved
+    # bench block so the standing WebSerial grant covers the origin — see
+    # the serial-grant recipe. Hardware walks only; ordinary dev hashes.
+    if [[ -n "${STUDIO_BENCH:-}" ]]; then
+        port="$(scripts/dev-port.sh --bench studio-dev)"
+    else
+        port="$(scripts/dev-port.sh studio-dev "${STUDIO_WEB_PORT:-}")"
+    fi
     public_dir="target/dx/lpa-studio-web/debug/web/public"
     sidecar_dir="{{ studio_assets_dir }}/debug/pkg"
     # Read once, outside the 1 s loop — the served list does not change while
@@ -1976,37 +1992,44 @@ hardware-list *args:
 # them on reload, and CH340 boards carry no USB serial number so a grant
 # also dies on replug.
 #
-# ⚠️ A plain `defaults write com.brave.Browser ...` DOES NOT WORK for this
-# policy — empirically refuted 2026-08-30 (fresh Brave relaunch, getPorts()
-# probe returned zero grants). Mechanism, from Chromium source: the macOS
-# policy loader treats non-forced preferences as POLICY_LEVEL_RECOMMENDED
-# (policy_loader_mac.mm), and SerialAllowAllPortsForUrls is mandatory-only
-# (no can_be_recommended in its template), so the value is silently
-# dropped. Generic blog examples of `defaults write` policies work because
-# most of those policies accept the recommended level; this family doesn't.
-# The policy is NOT in GetSensitivePolicies(), so it is not subject to the
-# unmanaged-machine sensitive filter — a FORCED (managed) preference is
-# honored without MDM. On an unmanaged Mac that means a configuration
-# profile installed by hand.
+# Hard-won mechanics (verified 2026-08-30/31, on silicon + in Chromium
+# source — do not relitigate):
 #
-# So this recipe generates ~/.photomancer/serial-grant.mobileconfig (an MCX
-# custom-settings profile forcing the policy for Brave) and opens it. NOT
-# target/ — a cargo-cache prune wiped the profile there before it could be
-# installed (2026-08-31); ~/.photomancer survives pruning, reboots, and
-# worktree deletion, and the recipe works identically from any worktree.
-# Once the profile is INSTALLED the file itself is disposable — macOS keeps
-# the profile; rerun this recipe any time to regenerate.
+# ⚠️ A plain `defaults write com.brave.Browser ...` DOES NOT WORK for this
+# policy. The macOS policy loader treats non-forced preferences as
+# POLICY_LEVEL_RECOMMENDED (policy_loader_mac.mm), and
+# SerialAllowAllPortsForUrls is mandatory-only, so the value silently
+# drops. Generic blog examples of `defaults write` policies work because
+# most policies accept the recommended level; this family doesn't. The
+# policy is NOT in GetSensitivePolicies(), so a FORCED (managed)
+# preference is honored without MDM — on an unmanaged Mac that means a
+# configuration profile, which is what this recipe generates. Verified
+# working end-to-end in Brave (MCX-Forced profile → gesture-free
+# getPorts()) 2026-08-31.
+#
+# ⚠️ Policy entries are STRICT ORIGINS, not URL patterns
+# (serial_policy_allowed_ports.cc: GURL → url::Origin, exact
+# scheme+host+PORT match). "http://localhost" grants port 80 ONLY. So the
+# profile enumerates the BENCH BLOCK — the small port range dev-port.sh
+# reserves out of its hash space (`scripts/dev-port.sh --bench-block`) —
+# on both loopback hosts. Hardware-walk sessions serve from that block
+# via `just studio-dev-bench`; ordinary dev keeps hashed ports. Per Yona:
+# a dedicated USB-testing port set is fine — bench sessions shouldn't be
+# sharing anyway. The profile is static after one install; getPorts()
+# probe pages must also sit on block ports or they escape the grant.
+#
+# Output goes to ~/.photomancer/serial-grant.mobileconfig, NOT target/ —
+# a cargo-cache prune wiped an earlier staged profile out of target/
+# before it could be installed. Once INSTALLED the file is disposable
+# (macOS keeps the profile); rerun this recipe any time to regenerate.
+# PayloadIdentifier stays art.photomancer.serial-grant so a reinstall
+# REPLACES the standing profile instead of stacking beside it.
 # Finish the install yourself: System Settings → General → Device
 # Management → double-click the downloaded profile → Install (admin
 # password). Then restart Brave and verify at brave://policy that
 # SerialAllowAllPortsForUrls shows level "Mandatory" with no error badge;
 # the real proof is navigator.serial.getPorts() returning ports with no
-# gesture on a dev page.
-#
-# The URL patterns are PORT-LESS on purpose: the enterprise URL-pattern
-# format treats a missing port as "any port", and dev-port.sh hashes each
-# worktree's server into 20000-40000, so enumerating ports is a losing
-# game. Scope stays loopback-only — no external origin gains serial access.
+# gesture on a bench-block dev page.
 #
 # Note the dialog did TWO jobs — permission grant AND port selection. This
 # grant replaces only the permission half; picking WHICH port belongs to
@@ -2018,7 +2041,9 @@ serial-grant:
     # diagnosis; clear them if present.
     defaults delete com.brave.Browser SerialAllowAllPortsForUrls 2>/dev/null || true
     mkdir -p "$HOME/.photomancer"
-    cat > "$HOME/.photomancer/serial-grant.mobileconfig" <<'EOF'
+    out="$HOME/.photomancer/serial-grant.mobileconfig"
+    read -r block_lo block_hi < <(scripts/dev-port.sh --bench-block)
+    cat > "$out" <<'EOF'
     <?xml version="1.0" encoding="UTF-8"?>
     <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
     <plist version="1.0">
@@ -2037,8 +2062,12 @@ serial-grant:
                   <dict>
                     <key>SerialAllowAllPortsForUrls</key>
                     <array>
-                      <string>http://localhost</string>
-                      <string>http://127.0.0.1</string>
+    EOF
+    for port in $(seq "$block_lo" "$block_hi"); do
+      printf '                  <string>http://127.0.0.1:%s</string>\n' "$port" >> "$out"
+      printf '                  <string>http://localhost:%s</string>\n' "$port" >> "$out"
+    done
+    cat >> "$out" <<'EOF'
                     </array>
                   </dict>
                 </dict>
@@ -2054,7 +2083,7 @@ serial-grant:
           <key>PayloadType</key>
           <string>com.apple.ManagedClient.preferences</string>
           <key>PayloadUUID</key>
-          <string>FB16DE69-D966-44B2-B6A5-D14DA8A59EEC</string>
+          <string>8C90D62A-B188-42F6-87E4-36A84EB0546A</string>
           <key>PayloadVersion</key>
           <integer>1</integer>
         </dict>
@@ -2070,16 +2099,17 @@ serial-grant:
       <key>PayloadType</key>
       <string>Configuration</string>
       <key>PayloadUUID</key>
-      <string>99F61D66-9FD2-45C9-BC37-21CD65901EE0</string>
+      <string>44278F52-84A0-4C9C-B2F8-A55D6F19D354</string>
       <key>PayloadVersion</key>
       <integer>1</integer>
     </dict>
     </plist>
     EOF
     open "$HOME/.photomancer/serial-grant.mobileconfig"
-    echo "profile generated and handed to macOS."
+    echo "profile generated (bench block ${block_lo}-${block_hi}, both loopback hosts) and handed to macOS."
     echo "finish: System Settings → General → Device Management → install it (admin password)"
     echo "then:   restart Brave and check brave://policy (SerialAllowAllPortsForUrls, level Mandatory)"
+    echo "serve:  just studio-dev-bench (hardware walks only)"
 
 # Best-effort check of the standing grant: managed preferences appear under
 # /Library/Managed Preferences once the profile is installed. brave://policy
