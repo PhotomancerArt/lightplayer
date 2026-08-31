@@ -85,31 +85,47 @@ The face is **neutral** (no accent, post-`#478`; no status-blue for
 "Shared"): a face states who this document is to you, which is identity,
 not health.
 
-### 2. The bar is three segments, each opening a different panel
+### 2. The bar is three segments — tabs into ONE shared panel
 
 `[ device | project | changes ]` — one bordered shell with internal
-hairlines, three independently-clickable `DetailPopover` triggers, and
-Save standing beside the shell as the one direct act.
+hairlines, and Save standing beside the shell as the one direct act.
+
+Round 1 shipped this as three independent `DetailPopover` triggers; the
+G1 round-2 ruling (D15) replaced them with **one panel, segments as
+tabs**: moving between sections was a close-reopen-animate cycle for
+what reads as switching tabs on a single control. The segments are plain
+buttons now, driving a lifted `(open, section)` pair; the shared panel is
+one `DetailPopover` whose own trigger is hidden, whose **controlled
+open-state** (`open_signal`, added to the popover primitive for this)
+the segments write, and whose merged outline anchors on the WHOLE shell —
+the panel visibly hangs off the bar, and the bar is the tab row. Clicking
+another segment while open switches the content **in place** (the panel
+ResizeObserver and outline retarget absorb the resize); clicking the open
+segment closes. While open, the segments render again in the top layer as
+the popover's interactive anchor visual, so the tabs keep working above
+the merged outline. The panel width is pinned to the 320px detail card
+across sections so switching never jiggles.
 
 **This amends `2026-08-19-single-session-web-and-session-control.md`.**
 That ADR ruled (R8-2) that *every segment of the lockup opens the panel*,
 and the shipped control washed on hover as ONE object — correctly, given
 its own premise: device and project did the same thing, so lighting them
 separately would have promised a distinction that did not exist. **The
-argument inverts once the segments open different panels.** Each segment
+argument inverts once the segments open different content.** Each segment
 now answers a different question — what is running · what document is open
 · what is in flight — so the hover wash rides the segment under the cursor
-and the shell stays quiet. The wash is now the honest promise it once
+and the shell stays quiet, and the open segment wears the selected
+treatment as the panel's active tab. The wash is now the honest promise it once
 would have faked. Everything else that ADR decided stands: one session per
 tab, navigation is studio-or-site, the ungated single mount, and Save as a
 sibling button rather than a segment (the stateless-trigger constraint is
 what makes the sibling necessary, and it is unchanged).
 
 Three questions was also the answer to *where the old detail popup goes*:
-the device popover states what is running, the changes popover lists what
-is in flight, and the project popover is the document's own panel, with
-the surviving settings/identity/stats sections behind its ⋯ menu's
-Details row.
+the device section states what is running, the changes section lists what
+is in flight over the banked history, and the project section is the
+document's own panel, with the surviving settings/identity/stats sections
+behind its ⋯ menu's Details row.
 
 ### 3. Changes are their own concept, and Save stays a sibling
 
@@ -134,9 +150,10 @@ directly rather than minting a synthetic pane action.
 
 ### 4. One popover skeleton for all five states; Where owns the URL
 
-The project popover renders the same sections in the same order for every
-relationship: header → tabs `[Project | History]` → **Where** → **Access**
-→ a fixed action row. Only the words and which controls are live change.
+The project section renders the same skeleton in the same order for every
+relationship: identity block → **Where** → **Access** → a fixed action
+row. Only the words and which controls are live change. (Round 1 carried
+an inner `[Project | History]` tab row; D14 deleted it — see §5.)
 Five panels that each invented their own shape is what the spike's
 rejected rounds looked like.
 
@@ -163,14 +180,23 @@ rejected rounds looked like.
   edge. The node-style vertical rail was built and **rejected** at spike
   round 6.
 
-### 5. History is a read-only tab
+### 5. History is the changes panel's banked timeline (D14)
 
-`ProjectHistory::events()` gets its first UI consumer as a **tab** of the
-document popover (not a second door): version, kind, what, when — newest
-first, from core's capped projection of the OPEN handle's own events. No
-server fetch, so a tab never claims completeness it does not have, and a
-transient example gets the honest empty state ("history begins at your
-first save") rather than a list of the open's own bookkeeping.
+`ProjectHistory::events()` gets its first UI consumer as the read-only
+**banked timeline under the changes section's pending block**: version,
+kind, what, when — newest first, from core's capped projection of the
+OPEN handle's own events. Round 1 put it behind a History tab of the
+document popover; the G1 round-2 ruling moved it: **changes and history
+are one temporal axis** — the receipt "Save banks v13" and the timeline's
+"v12 saved" are the same ledger read from opposite ends — so the pending
+block sits on top and the banked rows below, in one panel, with no tab
+between them. The project popover keeps the identity axis alone. The
+receipt now names the version Save will bank when the projection knows
+it, and the timeline carries no synthetic "editing" row (the pending
+block above IS the in-flight statement). No server fetch, so the timeline
+never claims completeness it does not have, and a transient example gets
+the honest empty state ("history begins at your first save") rather than
+a list of the open's own bookkeeping.
 
 **Restore stays parked.** `SnapshotStore::materialize` and
 `LocalProject::checkout` exist; putting a verb on these rows is its own
@@ -258,8 +284,13 @@ destination now is what keeps the next person from inventing a third home.
   not a property of the document's identity, they span the device and the
   library, and burying them under "what is this project" is the wart the
   old detail popup already had.
-- **History as its own door / in-panel navigation.** Rejected: a tab keeps
-  it a view of THIS document, one click from the standing that explains it.
+- **History as its own door / in-panel navigation.** Rejected round 1 in
+  favor of a tab; the tab itself was then rejected at G1 round 2 (D14) in
+  favor of riding the changes panel — same ledger, one panel.
+- **Three independent per-segment popovers** (round 1 as shipped).
+  Rejected at G1 round 2 (D15): section-switching read as tabs but cost a
+  close-reopen animation each time; the lifted-state single panel switches
+  in place.
 - **A vertical section rail in the popover** (the node-tree idiom).
   Built at spike round 5, rejected at round 6: plain horizontal headings
   with a rule read better at this width.
