@@ -852,14 +852,26 @@ impl Device {
         if !self.evidence.presence.is_attached() {
             return DeviceStatus::Offline;
         }
+        // Statuses that CLAIM we are listening (Ready, NotResponding) are
+        // only honest on an open port: a surviving verdict on a closed one
+        // (the window outlives a close — a close is our action, not
+        // evidence) renders as Attached instead, because "Ready" from a
+        // port nobody holds is the same lie "port closed" was. Verdicts
+        // that ask for action (needs-firmware family) keep their face:
+        // they are actionable exactly as stored, listening or not.
         match &self.evidence.classification {
-            Classification::LightPlayer { .. } => DeviceStatus::Ready,
+            Classification::LightPlayer { .. } => {
+                if self.evidence.presence.is_open() {
+                    DeviceStatus::Ready
+                } else {
+                    DeviceStatus::Attached
+                }
+            }
             Classification::Incompatible { .. }
             | Classification::Blank
             | Classification::Bootloader
             | Classification::Foreign { .. } => DeviceStatus::NeedsAttention,
-            Classification::Quiet { .. } => DeviceStatus::NotResponding,
-            Classification::Unknown => {
+            Classification::Quiet { .. } | Classification::Unknown => {
                 if self.evidence.presence.is_open() {
                     DeviceStatus::NotResponding
                 } else {

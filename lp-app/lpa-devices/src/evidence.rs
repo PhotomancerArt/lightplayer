@@ -258,8 +258,14 @@ impl Evidence {
                 }
             }
             LinkEvent::Closed { .. } => {
+                // A close moves presence only. It is OUR action — the board
+                // did not change because we stopped listening — so the
+                // observation window and its verdict survive (the ADR's
+                // ruled list: OPEN, successful RESET and DETACH clear the
+                // window; close never did). Clearing here ate every
+                // ROM-conclusive verdict the moment identify settled and
+                // handed the port back (bench regression, G1 2026-08-31).
                 self.presence = Presence::Present { link, since: now };
-                self.begin_window(now);
             }
             LinkEvent::Frame(frame) => {
                 self.observations.observe_frame(&frame.body, config);

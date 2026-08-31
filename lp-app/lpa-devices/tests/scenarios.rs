@@ -1389,4 +1389,15 @@ fn reset_board_pulses_the_hardware_and_identify_reads_the_boot() {
         view.pending[0].needs_firmware,
         "the reset turned silence into an honest verdict: {view:?}"
     );
+
+    // The early settle hands the port back — and the verdict must SURVIVE
+    // that close (regression pin, G1 2026-08-31: a begin_window on Closed
+    // wiped every ROM verdict the instant identify settled; a close is our
+    // action, not evidence about the board).
+    replay.step(Millis(9_600), Step::closed(1));
+    let view = replay.view();
+    assert!(
+        view.pending[0].needs_firmware,
+        "the verdict survives us hanging up: {view:?}"
+    );
 }
