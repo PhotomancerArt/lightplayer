@@ -513,7 +513,12 @@ fn devices_page_armed_confirm() -> Element {
     let armed = idle.clone();
     rsx! {
         div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
-            DeviceRosterCard { card: idle, on_action: |_| {} }
+            DeviceRosterCard {
+                card: idle,
+                projects: vec![],
+                examples: vec![],
+                on_action: |_| {},
+            }
             DeviceRosterCard {
                 card: armed,
                 projects: vec![],
