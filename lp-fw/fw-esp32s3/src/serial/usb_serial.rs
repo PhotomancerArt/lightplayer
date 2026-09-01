@@ -23,7 +23,10 @@ use fw_core::serial::{SerialError, SerialIo};
 /// Mirrors `WritePolicy::USB_SERIAL_JTAG`'s 250 ms chunk timeout: a healthy
 /// full-speed host drains the buffer in well under a millisecond, so reaching
 /// this deadline means nobody is reading, not that the host is slow.
-#[allow(dead_code, reason = "used by the harness entry points, like the type itself")]
+#[allow(
+    dead_code,
+    reason = "used by the harness entry points, like the type itself"
+)]
 const DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// ESP32 USB-serial SerialIo implementation
