@@ -8,6 +8,8 @@ pub mod client;
 pub mod client_error;
 pub mod client_event;
 pub mod client_io;
+pub mod device_push;
+pub mod device_remove;
 pub mod file_sync_ops;
 #[cfg(feature = "host")]
 pub mod local;
@@ -34,6 +36,8 @@ pub use client::{ClientOutcome, ClientTimerFuture, LpClient, RequestDeadline};
 pub use client_error::{ClientError, ClientResult};
 pub use client_event::ClientEvent;
 pub use client_io::ClientIo;
+pub use device_push::{PushReport, push_project};
+pub use device_remove::{READY_ATTEMPTS, RemoveReport, remove_project, wait_until_ready};
 #[cfg(feature = "host")]
 pub use local::{
     AsyncLocalClientTransport, AsyncLocalServerTransport, create_local_transport_pair,

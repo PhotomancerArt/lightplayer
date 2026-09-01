@@ -97,6 +97,25 @@ impl IdentifyActivity {
         }
     }
 
+    /// Settle immediately on a ROM-conclusive classification, handing the
+    /// port back in the same step (see the `Line` arm for why waiting for
+    /// the settle window loses the race against a boot-looping board).
+    fn settle_on_rom_verdict(&self, summary: &str, ctx: &ActivityCtx<'_>) -> ActivityStep {
+        let commands = match ctx.link {
+            Some(link) => vec![Command::Link {
+                link,
+                command: LinkCommand::Close,
+            }],
+            None => Vec::new(),
+        };
+        ActivityStep::Done {
+            outcome: ActivityOutcome::Succeeded {
+                summary: summary.to_string(),
+            },
+            commands,
+        }
+    }
+
     fn settle(&self, now: Millis, ctx: &ActivityCtx<'_>) -> ActivityStep {
         let outcome = match ctx.evidence.verdict_if_settled(now) {
             Classification::LightPlayer { hello } => ActivityOutcome::Succeeded {
@@ -201,10 +220,11 @@ impl IdentifyActivity {
                 ActivityStep::nothing()
             }
             // Link loss is supervision's business (it evicts and recovers),
-            // not a verdict this reducer should invent; identity news is the
-            // fold's.
+            // not a verdict this reducer should invent; identity news and
+            // the wire borrow are the fold's.
             Event::LinkAttached { .. }
             | Event::LinkDetached { .. }
+            | Event::LinkBorrow { .. }
             | Event::ActivityMarker { .. }
             | Event::IdentityObserved { .. } => ActivityStep::nothing(),
         }
@@ -237,8 +257,24 @@ impl IdentifyActivity {
                 }
                 ActivityStep::nothing()
             }
-            // Boot lines, errors and reset outcomes are diagnosis: the fold
-            // has already recorded them and the deadline decides.
+            // A conclusive ROM verdict settles NOW, not at the deadline. An
+            // erased native-USB chip boot-loops, flooding its signature
+            // hundreds of times a second and watchdog-resetting (which
+            // re-enumerates USB) every few seconds — waiting the settle
+            // window out LOSES that race, ending every cycle Interrupted
+            // (bench 2026-08-30: 49 adoption cycles in a row on a wiped
+            // C6). The port goes back in the same step: a blank board has
+            // nothing more to say, and listening only floods the journal.
+            LinkEvent::Line(_) if !self.winding_down => match ctx.evidence.classification {
+                Classification::Blank => self.settle_on_rom_verdict("blank or erased flash", ctx),
+                Classification::Bootloader => {
+                    self.settle_on_rom_verdict("waiting in ROM download mode", ctx)
+                }
+                _ => ActivityStep::nothing(),
+            },
+            // Boot lines (pre-verdict), errors and reset outcomes are
+            // diagnosis: the fold has already recorded them and the
+            // deadline decides.
             LinkEvent::Line(_) | LinkEvent::Error(_) | LinkEvent::ResetOutcome { .. } => {
                 ActivityStep::nothing()
             }
@@ -442,6 +478,7 @@ mod tests {
             link: Some(LinkId(1)),
             evidence,
             config,
+            effect_id: crate::event::EffectId(1),
         };
         body(&mut ctx)
     }

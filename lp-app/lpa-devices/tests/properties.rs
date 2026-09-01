@@ -16,7 +16,7 @@
 
 use lpa_devices::replay::{Replay, Step};
 use lpa_devices::view::{DeviceView, PendingLinkView, RosterView};
-use lpa_devices::{Escape, Millis, RosterConfig};
+use lpa_devices::{ActivityKind, Escape, Millis, RosterConfig};
 
 #[test]
 fn the_projection_is_total_and_always_escapable() {
@@ -186,6 +186,32 @@ fn assert_device(device: &DeviceView, case: &str) {
         assert!(
             !freshness.is_empty(),
             "[{case}] an empty freshness label is worse than none"
+        );
+    }
+    // The empty face's verb is never drawn over a running activity — one
+    // activity per device (I5), and a second gesture would be refused.
+    assert!(
+        !(device.can_receive_project && device.activity.is_some()),
+        "[{case}] a push offered on a busy device"
+    );
+    // Same rule for the other always-action verb, and one more: a board
+    // that has not SAID what it holds must never be offered a delete.
+    assert!(
+        !(device.can_remove_project && device.activity.is_some()),
+        "[{case}] a removal offered on a busy device"
+    );
+    assert!(
+        !(device.can_remove_project
+            && !matches!(
+                device.loaded_project,
+                lpa_devices::view::LoadedProject::Running { .. }
+            )),
+        "[{case}] a removal offered for a project the board never reported"
+    );
+    if let lpa_devices::view::LoadedProject::Running { label } = &device.loaded_project {
+        assert!(
+            !label.is_empty(),
+            "[{case}] a running face with nothing to name"
         );
     }
 }
@@ -364,6 +390,20 @@ fn gestures() -> Vec<(&'static str, Vec<Step>)> {
         ("dismiss the link", vec![Step::Dismiss { link: 1 }]),
         ("forget", vec![Step::Forget { device: 1 }]),
         ("flash", vec![flash_step()]),
+        ("factory reset", vec![Step::Erase { device: 1 }]),
+        (
+            "factory reset then the effect ends",
+            vec![
+                Step::Erase { device: 1 },
+                Step::EffectEnded {
+                    device: 1,
+                    ok: true,
+                    message: None,
+                    effect: None,
+                    kind: Some(ActivityKind::Erase),
+                },
+            ],
+        ),
         (
             "flash then the effect fails",
             vec![
@@ -372,6 +412,8 @@ fn gestures() -> Vec<(&'static str, Vec<Step>)> {
                     device: 1,
                     ok: false,
                     message: Some("write failed at 0x2000".to_string()),
+                    effect: None,
+                    kind: None,
                 },
             ],
         ),
@@ -383,12 +425,89 @@ fn gestures() -> Vec<(&'static str, Vec<Step>)> {
                     device: 1,
                     ok: true,
                     message: None,
+                    effect: None,
+                    kind: None,
                 },
             ],
         ),
         (
             "flash then cancel",
             vec![flash_step(), Step::Cancel { device: 1 }],
+        ),
+        ("push", vec![Step::Push { device: 1 }]),
+        (
+            "push then the effect fails",
+            vec![
+                Step::Push { device: 1 },
+                Step::EffectEnded {
+                    device: 1,
+                    ok: false,
+                    message: Some("the board refused the write".to_string()),
+                    effect: None,
+                    kind: Some(ActivityKind::Push),
+                },
+            ],
+        ),
+        (
+            "push then the effect succeeds",
+            vec![
+                Step::Push { device: 1 },
+                Step::EffectEnded {
+                    device: 1,
+                    ok: true,
+                    message: Some("project sent".to_string()),
+                    effect: None,
+                    kind: Some(ActivityKind::Push),
+                },
+            ],
+        ),
+        (
+            "push then cancel",
+            vec![Step::Push { device: 1 }, Step::Cancel { device: 1 }],
+        ),
+        ("remove project", vec![Step::RemoveProject { device: 1 }]),
+        (
+            "remove project then the effect succeeds",
+            vec![
+                Step::RemoveProject { device: 1 },
+                Step::EffectEnded {
+                    device: 1,
+                    ok: true,
+                    message: Some("removed zook-dome".to_string()),
+                    effect: None,
+                    kind: Some(ActivityKind::RemoveProject),
+                },
+            ],
+        ),
+        (
+            "remove project then cancel",
+            vec![
+                Step::RemoveProject { device: 1 },
+                Step::Cancel { device: 1 },
+            ],
+        ),
+        // A borrow that is never given back: the enumeration's instants run
+        // far past the quiet window, so this is where "a borrowed wire never
+        // goes quiet" has to keep the projection honest rather than stuck.
+        (
+            "the wire is borrowed and never released",
+            vec![Step::Borrow {
+                link: 1,
+                held: true,
+            }],
+        ),
+        (
+            "the wire is borrowed then released",
+            vec![
+                Step::Borrow {
+                    link: 1,
+                    held: true,
+                },
+                Step::Borrow {
+                    link: 1,
+                    held: false,
+                },
+            ],
         ),
         (
             "adopt then forget",

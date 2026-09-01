@@ -231,12 +231,25 @@ impl BrowserLinkInner {
     /// thinks it put a board into the ROM downloader and did not would
     /// misread everything after.
     async fn run_reset(&self, kind: ResetKind) {
-        let Some(session) = self.session.borrow().clone() else {
-            self.push(LinkEvent::Error(
-                "reset on a link with no session".to_string(),
-            ));
-            self.push(LinkEvent::ResetOutcome { kind, ok: false });
-            return;
+        // A reset on a session-less link CONNECTS one first, exactly like
+        // `open_port` — the Reset verb's whole point is waking a board
+        // whose port nobody currently holds (bench, G1 2026-08-31: the
+        // parked C6's reset failed with "no session" because identify had
+        // politely handed the port back).
+        let known_session = self.session.borrow().clone();
+        let session = match known_session {
+            Some(session) => session,
+            None => match self.provider.connect(&self.endpoint).await {
+                Ok(session) => {
+                    *self.session.borrow_mut() = Some(session.id.clone());
+                    session.id
+                }
+                Err(error) => {
+                    self.fail("connect", &error);
+                    self.push(LinkEvent::ResetOutcome { kind, ok: false });
+                    return;
+                }
+            },
         };
         let baud = self.baud.get();
         if let Err(error) = self.provider.release_protocol(&session).await {

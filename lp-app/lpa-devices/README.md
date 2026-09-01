@@ -158,13 +158,14 @@ cargo check -p lpa-devices --target wasm32-unknown-unknown   # `just check` skip
 
 ## Not here yet
 
-- Push and Pull activities (round-2 M3/M4) — new `ActivityKind` variants
-  and new `Reducer` arms plus `EffectRequest` arms, following Flash's
-  shape. (Flash landed in M2 as the first coarse-effect activity; the old
-  Setup/Provision orchestrators dissolved into the card ruling — the card
-  face picks the verb from fold evidence.)
-- Journal and record persistence wiring: the model emits serializable
-  entries and `PersistRecord` / `DeleteRecord`; the app picks storage (M3).
-- The `lpc-wire` reconciliation: `wire.rs` is a deliberate minimal mirror
-  and M3 writes the adapter (see that file's header for the mapping).
+- The Pull activity (round-2 M4) — one more `ActivityKind` variant, one
+  more `Reducer` arm, one more `EffectRequest` arm, following the shape
+  Flash (M2) and Push (M3) share. The old Setup/Provision orchestrators
+  dissolved into the card ruling: the card face picks the verb from fold
+  evidence.
+- Sync verdicts and the banking verbs (M4). What a board is running enters
+  as evidence here (`Evidence::loaded_projects`, off the heartbeat's report
+  and the `ListLoadedProjects` answer); relating that to a library project
+  is a projection-time JOIN in the app, and `DeviceSyncState` is NOT coming
+  back as a store.
 - The sim as a peer `Link` implementation (vision R1, slice S5).

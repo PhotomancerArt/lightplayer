@@ -737,7 +737,12 @@ fn structural_target_uid(op: &CatalogOp) -> Option<&str> {
         CatalogOp::Rename { uid, .. }
         | CatalogOp::Duplicate { uid }
         | CatalogOp::Delete { uid }
-        | CatalogOp::UpgradePackageFormat { project_uid: uid } => Some(uid),
+        | CatalogOp::UpgradePackageFormat { project_uid: uid }
+        // The push record appends to the project's own history log, so it
+        // takes that project's lock like any other write to it.
+        | CatalogOp::RecordPush {
+            project_uid: uid, ..
+        } => Some(uid),
         CatalogOp::Create { .. }
         | CatalogOp::ImportZip { .. }
         | CatalogOp::ImportJson { .. }

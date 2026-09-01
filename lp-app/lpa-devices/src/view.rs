@@ -49,12 +49,36 @@ pub struct DeviceView {
     /// Chip read off the boot banner, normalized ("esp32c6"). What the
     /// needs-firmware face filters the board pick by.
     pub detected_chip: Option<String>,
+    /// The board this firmware says it was built for, from the hello's
+    /// hardware facts (`/hardware.json`, written at flash and effective the
+    /// NEXT boot). `None` until the board reports one — the empty face's
+    /// "a new project" entry is honestly disabled rather than guessing a
+    /// pin map.
+    pub board_id: Option<String>,
     /// The fold says this board wants firmware (blank, bootloader, foreign,
     /// or incompatible) — the face that offers a board pick + Flash.
     pub needs_firmware: bool,
+    /// What the board says it is running. The empty face and the running
+    /// face are the two answers; [`LoadedProject::Unknown`] is the third,
+    /// and it offers neither rather than guessing.
+    pub loaded_project: LoadedProject,
+    /// Whether a project could be sent to this board right now: a
+    /// proto-compatible LightPlayer, on a link, with nothing else running.
+    /// The empty face's primary verb is drawn only when this is true.
+    pub can_receive_project: bool,
+    /// Whether "Remove project" is a real verb right now: the board has
+    /// REPORTED something loaded, the port is open, and nothing else is
+    /// running. Never offered on [`LoadedProject::Unknown`] — a board that
+    /// has not said what it holds must not be offered a delete.
+    pub can_remove_project: bool,
     pub activity: Option<ActivityView>,
     /// Survives disconnect; cleared when a new activity supersedes it.
     pub last_outcome: Option<OutcomeView>,
+    /// The card's terminal panel: what the board said and what Studio did
+    /// to it, oldest first. Serial lines and activity narration interleaved,
+    /// because that is the order they happened in — a flash's progress used
+    /// to be visible only in the browser console (G1 bench, 2026-08-31).
+    pub terminal_lines: Vec<String>,
     /// Never empty (invariant I3).
     pub escapes: Vec<Escape>,
 }
@@ -68,6 +92,24 @@ pub struct ActivityView {
     pub cancellable: bool,
     /// A cancel has been asked for and the activity is winding down.
     pub cancel_requested: bool,
+}
+
+/// What a board is running, as the card is allowed to state it.
+///
+/// Three answers, not two. Collapsing [`Self::Unknown`] into [`Self::Empty`]
+/// would put "Put something on it" on a board whose project we simply have
+/// not been told about yet — the over-claim the whole model leans away from.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum LoadedProject {
+    /// The board has not reported yet (no heartbeat carrying the fact since
+    /// the port opened, or firmware too old to send it).
+    #[default]
+    Unknown,
+    /// The board reported its loaded list, and it was empty.
+    Empty,
+    /// The board is running something, named by the storage dir it runs
+    /// from — the only name the wire carries.
+    Running { label: String },
 }
 
 /// A finished activity's outcome line.
@@ -137,6 +179,7 @@ pub fn roster_view(roster: &Roster, now: Millis) -> RosterView {
 /// reads no clocks.
 pub fn device_view(device: &Device, now: Millis) -> DeviceView {
     let status = device.status();
+    let loaded = loaded_project(device);
     let activity = device.activity.as_ref().map(|cell| ActivityView {
         kind: cell.kind,
         label: format!("{}…", cell.kind.label()),
@@ -180,17 +223,47 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         freshness_label: freshness_label(device, now),
         identity_label: device.identity.strongest_label(),
         detected_chip: device.evidence.detected_chip().map(str::to_string),
+        board_id: device
+            .evidence
+            .classification
+            .hello()
+            .and_then(|hello| hello.board_id.clone()),
         needs_firmware: needs_firmware(&device.evidence.classification),
+        // The mirror of the push condition, over the OTHER answer: a board
+        // that reported something running, on an open port, idle.
+        can_remove_project: matches!(loaded, LoadedProject::Running { .. })
+            && device.evidence.presence.is_open()
+            && device.activity.is_none(),
+        loaded_project: loaded,
+        // An OPEN port, not merely an attached one: the push conversation
+        // talks over this port, and a verb that could only fail is worse
+        // than no verb. (The fold already implies it — closing a port
+        // begins a fresh window, which drops the LightPlayer verdict — but
+        // stating it keeps the two from drifting apart.)
+        can_receive_project: device.evidence.classification.is_light_player()
+            && device.evidence.presence.is_open()
+            && device.activity.is_none(),
         activity,
         last_outcome: device.evidence.last_outcome.as_ref().map(outcome_view),
+        terminal_lines: device
+            .evidence
+            .recent_output()
+            .map(str::to_string)
+            .collect(),
         escapes,
     }
 }
 
 /// Whether a classification is one Flash fixes: blank or erased flash, a
-/// board parked in the ROM downloader, somebody else's firmware, or a
-/// LightPlayer this build cannot speak to. All four get the board pick +
-/// "Flash firmware" face.
+/// board parked in the ROM downloader, somebody else's firmware, a
+/// LightPlayer this build cannot speak to — or a board that answers
+/// NOTHING. The settled-quiet arm is the old wizard's Unresponsive
+/// verdict, which offered flash after its bootloader escalation; our
+/// parking IS that escalation now, and without this arm a silent chip
+/// (parked in the downloader by a failed flash, say) had no verb at all
+/// (it bit three times at G1, 2026-08-31). The widened pick's copy says
+/// the pick is checked against the silicon before anything is written —
+/// the chip guard is the safety, here as everywhere.
 fn needs_firmware(classification: &Classification) -> bool {
     matches!(
         classification,
@@ -198,7 +271,28 @@ fn needs_firmware(classification: &Classification) -> bool {
             | Classification::Bootloader
             | Classification::Foreign { .. }
             | Classification::Incompatible { .. }
+            | Classification::Quiet { .. }
     )
+}
+
+/// What this board is running, from its own report.
+///
+/// Only a LightPlayer gets an answer: a blank chip's silence is not an empty
+/// project storage, and offering to push at a board that cannot receive one
+/// would be a verb that does nothing.
+fn loaded_project(device: &Device) -> LoadedProject {
+    if !device.evidence.classification.is_light_player() {
+        return LoadedProject::Unknown;
+    }
+    match device.evidence.loaded_projects() {
+        None => LoadedProject::Unknown,
+        Some([]) => LoadedProject::Empty,
+        // Firmware loads one project; a host server with several has no card
+        // to draw, so the first entry is the answer.
+        Some([first, ..]) => LoadedProject::Running {
+            label: first.label().to_string(),
+        },
+    }
 }
 
 /// Project one pending link.
@@ -249,7 +343,10 @@ fn state_label(device: &Device, status: DeviceStatus) -> String {
             .map(|kind| format!("{}…", kind.label()))
             .unwrap_or_else(|| "Working…".to_string()),
         DeviceStatus::Offline => "Offline".to_string(),
-        DeviceStatus::Attached => "Attached — port closed".to_string(),
+        // "port closed" was true and useless: it named an implementation
+        // detail for a board that is plugged in and simply not being
+        // listened to. On the bench it read as a fault (G1, 2026-08-31).
+        DeviceStatus::Attached => "Attached — not listening".to_string(),
         DeviceStatus::Ready => "Ready".to_string(),
         DeviceStatus::NotResponding => "Not responding".to_string(),
         DeviceStatus::NeedsAttention => classification_label(&device.evidence.classification),

@@ -138,6 +138,45 @@ impl DeviceTransport for BrowserSerialTransport {
                         chip_name: result.chip_name,
                     })
                 }
+                DeviceEffectCall::EraseFlash => {
+                    // Same exclusive-borrow discipline as the flash; the
+                    // erase's own verification (completion line outranking
+                    // the benign flash-id warning on C6 rev 2) lives in the
+                    // shipped JS.
+                    provider
+                        .erase_device_flash_with_events(&endpoint, events)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: "flash erased".to_string(),
+                        ..Default::default()
+                    })
+                }
+                DeviceEffectCall::RemoveProject {
+                    fallback_storage_id,
+                } => {
+                    // Same borrow discipline as the push, and the same
+                    // `lpa-client` framing under it. WHICH dir goes is read
+                    // from the board inside the conversation — the model
+                    // never names a path.
+                    let report = provider
+                        .remove_device_project(&endpoint, &fallback_storage_id, events)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: match report.was_loaded {
+                            true => format!("removed {}", report.storage_id),
+                            // Under-claim: the board had already stopped
+                            // reporting it, so "removed" would be a claim
+                            // about something we never saw.
+                            false => format!(
+                                "the board reported nothing loaded; cleared {}",
+                                report.storage_id
+                            ),
+                        },
+                        ..Default::default()
+                    })
+                }
                 DeviceEffectCall::WriteHardwareManifest { manifest_json } => {
                     provider
                         .write_device_file(
@@ -150,6 +189,31 @@ impl DeviceTransport for BrowserSerialTransport {
                         .map_err(|error| error.to_string())?;
                     Ok(DeviceEffectFacts {
                         summary: "board manifest written".to_string(),
+                        ..Default::default()
+                    })
+                }
+                DeviceEffectCall::PushProject {
+                    files,
+                    expected_hash,
+                    fallback_storage_id,
+                } => {
+                    // The conversation is `lpa-client`'s, on the raw `M!`
+                    // line framing the JS controller already does. The
+                    // effects layer paused this port's pump before calling
+                    // us — two drainers would split the responses between
+                    // them and both halves would look like a dead board.
+                    let report = provider
+                        .push_device_project(
+                            &endpoint,
+                            &files,
+                            &expected_hash,
+                            &fallback_storage_id,
+                            events,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: format!("project sent to {}", report.storage_id),
                         ..Default::default()
                     })
                 }

@@ -21,8 +21,9 @@ use lpa_studio_core::{
 
 use lpa_studio_core::UiAction;
 use lpa_studio_core::{
-    DeviceActivityKind, DeviceActivityView, DeviceEscape, DeviceId, DeviceLinkId, DeviceRosterView,
-    DeviceStatus, DeviceView, OutcomeView, PendingLinkView, RosterView,
+    DeviceActivityKind, DeviceActivityView, DeviceEscape, DeviceId, DeviceLinkId,
+    DeviceLoadedProject, DeviceRosterView, DeviceStatus, DeviceView, OutcomeView, PendingLinkView,
+    RosterView,
 };
 
 use crate::app::home::card_thumb::CardThumb;
@@ -512,8 +513,19 @@ fn devices_page_armed_confirm() -> Element {
     let armed = idle.clone();
     rsx! {
         div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
-            DeviceRosterCard { card: idle, on_action: |_| {} }
-            DeviceRosterCard { card: armed, armed_preview: true, on_action: |_| {} }
+            DeviceRosterCard {
+                card: idle,
+                projects: vec![],
+                examples: vec![],
+                on_action: |_| {},
+            }
+            DeviceRosterCard {
+                card: armed,
+                projects: vec![],
+                examples: vec![],
+                armed_preview: true,
+                on_action: |_| {},
+            }
         }
     }
 }
@@ -562,9 +574,24 @@ fn roster_fixture() -> DeviceRosterView {
                     freshness_label: Some("last heard 3 s ago".to_string()),
                     identity_label: Some("dev000000daqf6dvvqz".to_string()),
                     detected_chip: None,
+                    board_id: Some("dig-uno".to_string()),
                     needs_firmware: false,
+                    // The RUNNING face (M3): what the board itself reports,
+                    // named by the storage dir it runs from.
+                    loaded_project: DeviceLoadedProject::Running {
+                        label: "2026-07-09-1421-porch-sign".to_string(),
+                    },
+                    can_receive_project: true,
+                    // Running, open, idle: the always-actions row offers to
+                    // take the project off.
+                    can_remove_project: true,
                     activity: None,
                     last_outcome: None,
+                    terminal_lines: vec![
+                        "ESP-ROM:esp32c6-20220919".to_string(),
+                        "[INIT] fw-esp32 initialized, starting server loop".to_string(),
+                        "[INIT] loaded /projects/2026-07-09-1421-porch-sign".to_string(),
+                    ],
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
                 DeviceView {
@@ -576,7 +603,12 @@ fn roster_fixture() -> DeviceRosterView {
                     freshness_label: Some("last heard just now".to_string()),
                     identity_label: Some("60:55:f9:0a:0b:0c".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
+                    board_id: None,
                     needs_firmware: false,
+                    loaded_project: DeviceLoadedProject::Unknown,
+                    // Busy: one activity per device, so no second verb.
+                    can_receive_project: false,
+                    can_remove_project: false,
                     activity: Some(DeviceActivityView {
                         kind: DeviceActivityKind::Identify,
                         label: "Identifying…".to_string(),
@@ -585,6 +617,15 @@ fn roster_fixture() -> DeviceRosterView {
                         cancel_requested: false,
                     }),
                     last_outcome: None,
+                    // Mid-activity: the bar is in the state zone above and
+                    // the narration is here, which is the whole point of the
+                    // terminal panel.
+                    terminal_lines: vec![
+                        "— Identifying —".to_string(),
+                        "ESP-ROM:esp32c6-20220919".to_string(),
+                        "SPIWP:0xee".to_string(),
+                        "mode:DIO, clock div:2".to_string(),
+                    ],
                     // Cancel FIRST: a running activity\'s way out leads.
                     escapes: vec![
                         DeviceEscape::Cancel,
@@ -601,12 +642,60 @@ fn roster_fixture() -> DeviceRosterView {
                     freshness_label: None,
                     identity_label: Some("dev000000000shelf01".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
+                    board_id: None,
                     needs_firmware: true,
+                    loaded_project: DeviceLoadedProject::Unknown,
+                    can_receive_project: false,
+                    can_remove_project: false,
                     activity: None,
                     last_outcome: Some(OutcomeView {
                         summary: "identification timed out".to_string(),
                         ok: false,
                     }),
+                    // The blank-flash boot loop, which is what "needs
+                    // firmware" is actually made of.
+                    terminal_lines: vec![
+                        "ESP-ROM:esp32c6-20220919".to_string(),
+                        "invalid header: 0xffffffff".to_string(),
+                        "invalid header: 0xffffffff".to_string(),
+                    ],
+                    escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+                },
+                // The EMPTY face (M3): a LightPlayer that has SAID it has
+                // nothing on it, wearing the one inline picker.
+                DeviceView {
+                    id: DeviceId(4),
+                    title: "Seeed XIAO ESP32-C6 · Aug 30".to_string(),
+                    status: DeviceStatus::Ready,
+                    state_label: "Ready".to_string(),
+                    detail: Some("LightPlayer · seeed-xiao-esp32c6".to_string()),
+                    freshness_label: Some("last heard just now".to_string()),
+                    identity_label: Some("60:55:f9:0a:0b:0d".to_string()),
+                    detected_chip: Some("esp32c6".to_string()),
+                    board_id: Some("seeed-xiao-esp32c6".to_string()),
+                    needs_firmware: false,
+                    loaded_project: DeviceLoadedProject::Empty,
+                    can_receive_project: true,
+                    // Nothing on it to remove — the empty face's picker is
+                    // the verb here.
+                    can_remove_project: false,
+                    activity: None,
+                    last_outcome: Some(OutcomeView {
+                        summary: "firmware installed — seeed-xiao-esp32c6".to_string(),
+                        ok: true,
+                    }),
+                    // A flash's narration, kept across the reconnect
+                    // ladder's reopen — the log the bench had to read in the
+                    // browser console.
+                    terminal_lines: vec![
+                        "— Flashing firmware —".to_string(),
+                        "Connecting to the chip".to_string(),
+                        "Writing firmware".to_string(),
+                        "Waiting for the board to come back (1/5)".to_string(),
+                        "ESP-ROM:esp32c6-20220919".to_string(),
+                        "[INIT] fw-esp32 initialized, starting server loop".to_string(),
+                        "firmware installed — seeed-xiao-esp32c6".to_string(),
+                    ],
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
             ],

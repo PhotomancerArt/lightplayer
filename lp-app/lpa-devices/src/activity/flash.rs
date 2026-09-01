@@ -55,6 +55,9 @@ use super::activity_cell::{
     ActivityCtx, ActivityKind, ActivityOutcome, ActivityReducer, ActivityStep,
 };
 
+/// How long a parked port gets to re-enumerate before esptool takes it.
+const PARK_SETTLE_MS: u64 = 2_500;
+
 /// The honest failure copy when every rung of the ladder stayed quiet.
 const LADDER_EXHAUSTED: &str = "firmware was written, but the board never answered. If it is \
      on a CH340/V3 bridge, unplug it, plug it back in, and use Reconnect — a replug loses the \
@@ -63,6 +66,23 @@ const LADDER_EXHAUSTED: &str = "firmware was written, but the board never answer
 /// Where the flash currently is.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 enum FlashPhase {
+    /// Driving the chip into its ROM downloader before the effect (native
+    /// USB only): a blank native-USB chip boot-loops and re-enumerates
+    /// every few seconds, cutting esptool mid-connect — the downloader
+    /// waits stably with USB up (bench, G1 2026-08-31: two straight
+    /// mid-SYNC losses on the C6). Best effort: the reset outcome OR the
+    /// deadline starts the effect either way — parking is an odds-improver,
+    /// never a gate.
+    Parking {
+        deadline: Millis,
+        /// Set once the downloader dance answered: entering the downloader
+        /// RE-ENUMERATES a native-USB port, and the OS needs a beat to
+        /// enumerate the replacement — handing esptool the wire before
+        /// that finishes gives it the dead generation (bench, G1
+        /// 2026-08-31: a parked flash still died at setSignals in 5.8s).
+        /// The effect starts when this settle instant passes.
+        settle_at: Option<Millis>,
+    },
     /// The coarse effect owns the wire; we absorb markers.
     Writing,
     /// The effect succeeded; the ladder is bringing the board back.
@@ -93,6 +113,13 @@ pub struct FlashActivity {
     device: DeviceId,
     board_id: String,
     build_id: String,
+    park_first: bool,
+    /// Dead-port retries left. Enumeration jitter after the park has more
+    /// faces than one settle constant covers (bench: esptool died at
+    /// setSignals ~8s AFTER a clean park) — one in-activity retry
+    /// re-settles and hands the wire over again; the chip is already
+    /// parked, so the retry costs seconds and no dance.
+    open_retries_left: u8,
     phase: FlashPhase,
     /// Cancel arrived during the write window: esptool cannot stop cleanly,
     /// so the wind-down happens when the effect ends instead of the ladder.
@@ -103,11 +130,13 @@ pub struct FlashActivity {
 }
 
 impl FlashActivity {
-    pub fn new(device: DeviceId, board_id: String, build_id: String) -> Self {
+    pub fn new(device: DeviceId, board_id: String, build_id: String, park_first: bool) -> Self {
         Self {
             device,
             board_id,
             build_id,
+            park_first,
+            open_retries_left: 1,
             phase: FlashPhase::Writing,
             cancel_after_effect: false,
             winding_down: false,
@@ -117,13 +146,34 @@ impl FlashActivity {
 
     /// The command that starts the coarse effect. Emitted by
     /// [`Device::spawn_flash`](crate::Device::spawn_flash) at spawn.
-    pub(crate) fn spawn_commands(&self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
+    pub(crate) fn spawn_commands(&mut self, now: Millis, ctx: &ActivityCtx<'_>) -> Vec<Command> {
         let Some(link) = ctx.link else {
             return Vec::new();
         };
+        if self.park_first {
+            self.phase = FlashPhase::Parking {
+                deadline: now.plus_ms(ctx.config.flash_rung_ms),
+                settle_at: None,
+            };
+            return vec![Command::Link {
+                link,
+                command: LinkCommand::RunReset(ResetKind::UsbJtagDownload),
+            }];
+        }
+        self.start_effect(ctx)
+    }
+
+    /// The command that hands the wire to the flasher. From spawn directly
+    /// (UART bridges), or once parking resolves (native USB).
+    fn start_effect(&mut self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
+        let Some(link) = ctx.link else {
+            return Vec::new();
+        };
+        self.phase = FlashPhase::Writing;
         vec![Command::RunEffect {
             device: self.device,
             link,
+            effect_id: ctx.effect_id,
             effect: EffectRequest::Flash {
                 build_id: self.build_id.clone(),
                 board_id: self.board_id.clone(),
@@ -187,12 +237,18 @@ impl FlashActivity {
                  the compiled-in default pin map stands",
             ));
         };
+        // The stamp's OWN budget, not a ladder rung: the write goes to a
+        // board that may still be formatting its littlefs, and the seam
+        // below waits for it to answer a cheap request before writing at
+        // all. Reusing the 8 s rung gave up ~30 s before the classic was
+        // ever going to be ready (G1 bench, 2026-08-31).
         self.phase = FlashPhase::Stamping {
-            deadline: now.plus_ms(ctx.config.flash_rung_ms),
+            deadline: now.plus_ms(ctx.config.stamp_deadline_ms),
         };
         ActivityStep::Continue(vec![Command::RunEffect {
             device: self.device,
             link,
+            effect_id: ctx.effect_id,
             effect: EffectRequest::WriteBoardManifest {
                 board_id: self.board_id.clone(),
             },
@@ -229,6 +285,7 @@ impl FlashActivity {
             return ActivityStep::nothing();
         };
         match &self.phase {
+            FlashPhase::Parking { .. } => ActivityStep::nothing(),
             FlashPhase::Writing => {
                 if self.cancel_after_effect {
                     // The write window is over; honour the held cancel now,
@@ -236,6 +293,21 @@ impl FlashActivity {
                     return self.wind_down(ctx);
                 }
                 match outcome {
+                    ActivityOutcome::Failed { message }
+                        if self.open_retries_left > 0
+                            && (message.contains("Failed to open serial port")
+                                || message.contains("port is closed")) =>
+                    {
+                        // The dead-port signature: esptool grabbed a stale
+                        // generation. The chip is parked (or parking is
+                        // moot); re-settle and hand the wire over again.
+                        self.open_retries_left -= 1;
+                        self.phase = FlashPhase::Parking {
+                            deadline: now.plus_ms(ctx.config.flash_rung_ms),
+                            settle_at: Some(now.plus_ms(PARK_SETTLE_MS)),
+                        };
+                        ActivityStep::nothing()
+                    }
                     ActivityOutcome::Succeeded { .. } => {
                         // The flasher's closing hard reset just rebooted the
                         // board (and on a C6, re-enumerated its port). Climb.
@@ -270,6 +342,24 @@ impl FlashActivity {
             return ActivityStep::nothing();
         }
         match self.phase.clone() {
+            FlashPhase::Parking {
+                deadline,
+                settle_at,
+            } => {
+                if let Some(settle_at) = settle_at {
+                    if now >= settle_at {
+                        // Parked AND enumerated: esptool gets a still,
+                        // live port.
+                        return ActivityStep::Continue(self.start_effect(ctx));
+                    }
+                } else if now >= deadline {
+                    // Parking is an odds-improver, never a gate: if the
+                    // downloader dance went quiet, hand esptool the wire
+                    // and let it fight its own fight.
+                    return ActivityStep::Continue(self.start_effect(ctx));
+                }
+                ActivityStep::nothing()
+            }
             FlashPhase::Writing => ActivityStep::nothing(),
             FlashPhase::Reconnecting {
                 rung,
@@ -381,6 +471,21 @@ impl FlashActivity {
             }
             // Opens, boot lines, reset outcomes and errors are diagnosis the
             // fold already recorded; the timers decide.
+            LinkEvent::ResetOutcome { .. }
+                if matches!(self.phase, FlashPhase::Parking { .. }) && !self.winding_down =>
+            {
+                // Parked (or the dance failed — either way the answer is
+                // in). Not the wire yet: the dance re-enumerated the port,
+                // so wait out the OS's enumeration before the flasher
+                // takes it.
+                if let FlashPhase::Parking { deadline, .. } = self.phase {
+                    self.phase = FlashPhase::Parking {
+                        deadline,
+                        settle_at: Some(now.plus_ms(PARK_SETTLE_MS)),
+                    };
+                }
+                ActivityStep::nothing()
+            }
             LinkEvent::Opened { .. }
             | LinkEvent::Line(_)
             | LinkEvent::ResetOutcome { .. }
@@ -401,6 +506,8 @@ impl ActivityReducer for FlashActivity {
                     return ActivityStep::nothing();
                 }
                 match self.phase {
+                    // Nothing owns the wire during parking; stop politely.
+                    FlashPhase::Parking { .. } => self.wind_down(ctx),
                     // esptool-js cannot abort a write cleanly: hold the
                     // cancel through the write window (the card says
                     // "cancelling") and wind down when the effect ends.
@@ -422,10 +529,12 @@ impl ActivityReducer for FlashActivity {
                 Event::TimerFired { .. } => self.handle_timer(now, ctx),
                 Event::Link { event, .. } => self.handle_link_event(now, event, ctx),
                 // Identity learned by the preflight is fold business; link
-                // loss is supervision's (it evicts and recovers).
+                // loss is supervision's (it evicts and recovers); the wire
+                // borrow is the fold's too (it pauses freshness).
                 Event::IdentityObserved { .. }
                 | Event::LinkAttached { .. }
-                | Event::LinkDetached { .. } => ActivityStep::nothing(),
+                | Event::LinkDetached { .. }
+                | Event::LinkBorrow { .. } => ActivityStep::nothing(),
             },
         }
     }
@@ -435,6 +544,10 @@ impl ActivityReducer for FlashActivity {
             return None;
         }
         match &self.phase {
+            FlashPhase::Parking {
+                deadline,
+                settle_at,
+            } => Some(settle_at.map_or(*deadline, |settle| settle.min(*deadline))),
             // The effect drives; the supervision backstop bounds it (I1).
             FlashPhase::Writing => None,
             FlashPhase::Reconnecting {
@@ -456,17 +569,105 @@ mod tests {
     use crate::roster::RosterConfig;
     use crate::wire::{HelloFacts, ServerFrame};
 
+    #[test]
+    fn parking_holds_the_effect_until_the_downloader_answers() {
+        // Native USB: the downloader dance first, the flasher second — a
+        // boot-looping chip cuts esptool mid-connect otherwise (bench,
+        // G1 2026-08-31).
+        let mut activity = FlashActivity::new(
+            DeviceId(1),
+            "seeed-xiao-esp32c6".to_string(),
+            "esp32c6-4mb".to_string(),
+            true,
+        );
+        let evidence = Evidence::default();
+        let config = RosterConfig::default();
+        let commands = with_ctx(&evidence, &config, |ctx| {
+            activity.spawn_commands(Millis(0), ctx)
+        });
+        assert!(
+            commands.iter().any(|command| matches!(
+                command,
+                Command::Link {
+                    command: LinkCommand::RunReset(ResetKind::UsbJtagDownload),
+                    ..
+                }
+            )),
+            "spawn parks first: {commands:?}"
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, Command::RunEffect { .. })),
+            "the effect waits for the downloader"
+        );
+
+        // The dance answers — but the port just re-enumerated, so the
+        // flasher waits out the settle rather than grabbing a dead
+        // generation.
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(100),
+                &Input::Event(Event::Link {
+                    link: LinkId(1),
+                    event: LinkEvent::ResetOutcome {
+                        kind: ResetKind::UsbJtagDownload,
+                        ok: true,
+                    },
+                }),
+                ctx,
+            )
+        });
+        assert!(
+            matches!(step, ActivityStep::Continue(ref commands) if commands.is_empty())
+                || matches!(step, ActivityStep::Continue(_)) == false,
+            "the effect does NOT start at the outcome: {step:?}"
+        );
+        assert!(
+            activity
+                .next_deadline()
+                .is_some_and(|at| at <= Millis(2_600)),
+            "the settle instant is armed: {:?}",
+            activity.next_deadline()
+        );
+
+        // The settle passes — NOW esptool takes the wire.
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(2_700),
+                &Input::Event(Event::TimerFired {
+                    timer: crate::time::TimerId {
+                        scope: crate::journal::Scope::Device(DeviceId(1)),
+                        seq: 1,
+                    },
+                }),
+                ctx,
+            )
+        });
+        let ActivityStep::Continue(commands) = step else {
+            panic!("the settle hands over the wire: {step:?}");
+        };
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, Command::RunEffect { .. })),
+            "the effect starts once parked AND enumerated: {commands:?}"
+        );
+    }
+
     fn flash() -> FlashActivity {
         FlashActivity::new(
             DeviceId(1),
             "seeed-xiao-esp32c6".to_string(),
             "esp32c6-4mb".to_string(),
+            false,
         )
     }
 
     fn ended(outcome: ActivityOutcome) -> Input {
         Input::Event(Event::ActivityMarker {
             device: DeviceId(1),
+            effect: Some(crate::event::EffectId(1)),
             marker: ActivityMarker::Ended {
                 kind: ActivityKind::Flash,
                 outcome,
@@ -492,6 +693,7 @@ mod tests {
             link: Some(LinkId(1)),
             evidence,
             config,
+            effect_id: crate::event::EffectId(1),
         };
         body(&mut ctx)
     }
@@ -541,7 +743,9 @@ mod tests {
         opened(&mut evidence, Millis(0), &config);
         let mut activity = flash();
 
-        let commands = with_ctx(&evidence, &config, |ctx| activity.spawn_commands(ctx));
+        let commands = with_ctx(&evidence, &config, |ctx| {
+            activity.spawn_commands(Millis(0), ctx)
+        });
         assert!(matches!(
             commands.as_slice(),
             [Command::RunEffect {
@@ -752,6 +956,68 @@ mod tests {
                 } if summary.contains("default pin map")
             ),
             "the flash stands: {step:?}"
+        );
+    }
+
+    /// C1 (G1 bench, 2026-08-31): the stamp used to inherit the ladder's 8 s
+    /// rung, which gave up ~30 s before a freshly flashed classic — still
+    /// formatting its littlefs — was ever going to answer. It gets its own
+    /// budget now, and the budget is the one that has to hold.
+    #[test]
+    fn the_stamp_waits_on_its_own_deadline_not_a_ladder_rung() {
+        let config = RosterConfig::default();
+        assert!(
+            config.stamp_deadline_ms > config.flash_rung_ms,
+            "a stamp that inherits a rung is the defect this closes"
+        );
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = flash();
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(0),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "written".to_string(),
+                }),
+                ctx,
+            )
+        });
+        hello(&mut evidence, Millis(1_000), &config);
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(Millis(1_000), &timer(), ctx)
+        });
+
+        // A rung past the hello, the stamp is still waiting — the board is
+        // allowed to be slow.
+        let a_rung_later = Millis(1_000 + config.flash_rung_ms + 1);
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(a_rung_later, &timer(), ctx)
+        });
+        assert_eq!(
+            step,
+            ActivityStep::nothing(),
+            "the ladder's rung is not the stamp's deadline"
+        );
+        assert_eq!(
+            activity.next_deadline(),
+            Some(Millis(1_000 + config.stamp_deadline_ms)),
+            "the stamp is timed by its own budget"
+        );
+
+        // Its OWN deadline still bounds it (I1), and the flash still stands.
+        let past_the_stamp = Millis(1_000 + config.stamp_deadline_ms + 1);
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(past_the_stamp, &timer(), ctx)
+        });
+        assert!(
+            matches!(
+                step,
+                ActivityStep::Done {
+                    outcome: ActivityOutcome::Succeeded { ref summary },
+                    ..
+                } if summary.contains("default pin map")
+            ),
+            "{step:?}"
         );
     }
 

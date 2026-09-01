@@ -117,6 +117,54 @@ impl ControllerOp for DevicesOp {
                 "Write LightPlayer firmware for the picked board onto this chip.",
                 ActionPriority::Primary,
             ),
+            // No confirmation: the empty face's picker IS the deliberate
+            // gesture, and a board with nothing on it has nothing to lose.
+            // (Pushing OVER a project is M4's banking question, not this
+            // face's.)
+            Action::Push { .. } => ActionMeta::new(
+                "Put it on the board",
+                "Send the picked project to this board and start it running.",
+                ActionPriority::Primary,
+            ),
+            Action::ResetBoard { .. } => ActionMeta::new(
+                "Reset",
+                "Reboot the board (a hardware reset) and identify what starts up.",
+                ActionPriority::Secondary,
+            ),
+            Action::Erase { .. } => ActionMeta::new(
+                "Factory reset",
+                "Erase the firmware and everything stored on this board.",
+                ActionPriority::Tertiary,
+            )
+            .destructive()
+            .with_confirmation(
+                ActionConfirmation::new(
+                    "Factory reset this board?",
+                    "Everything on its flash is erased — firmware, projects, settings. \
+                     Its identity lives in silicon and survives; Studio keeps the entry.",
+                    "Erase everything",
+                )
+                .inline(),
+            ),
+            // Destructive on the BOARD and nowhere else, which is exactly
+            // what the confirm has to say: the library copy is a different
+            // object and this does not touch it.
+            Action::RemoveProject { .. } => ActionMeta::new(
+                "Remove project",
+                "Stop what this board is running and delete it from the board.",
+                ActionPriority::Tertiary,
+            )
+            .destructive()
+            .with_confirmation(
+                ActionConfirmation::new(
+                    "Remove the project from this board?",
+                    "The board stops running it and the project is deleted from the \
+                     board's storage. The firmware stays, and your copy in the \
+                     library is untouched.",
+                    "Remove project",
+                )
+                .inline(),
+            ),
             Action::SetName { .. } => ActionMeta::new(
                 "Rename",
                 "Change what Studio calls this device.",
@@ -181,6 +229,7 @@ mod tests {
                 device,
                 board_id: "seeed-xiao-esp32c6".to_string(),
                 build_id: "esp32c6-4mb".to_string(),
+                park_first: false,
             },
             Action::SetName {
                 device,

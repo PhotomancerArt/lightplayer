@@ -73,6 +73,36 @@ pub struct RosterConfig {
     /// The retry/ask cadence inside a rung: reopen a closed port (session
     /// adoption absorbs a re-enumerated one) or re-ask a quiet open one.
     pub flash_reopen_retry_ms: u64,
+    /// How long the post-flash `/hardware.json` stamp gets.
+    ///
+    /// Its OWN budget, not the ladder's rung: a freshly flashed classic
+    /// formats littlefs on first boot, which stalls fs writes far past a
+    /// rung — ~40 s observed on the bench (G1, 2026-08-31), against an 8 s
+    /// rung that gave up long before the board was ever going to answer.
+    ///
+    /// The wait-for-ready below the seam lives INSIDE this budget, so the
+    /// arithmetic has to work out: `lpa_client::READY_ATTEMPTS` asks at the
+    /// port io's 5 s per-request ceiling, which is 25 s of patience, and the
+    /// write itself is one more request. 30 s would cover that with nothing
+    /// to spare; the bench already met the no-spare case (~40 s observed on
+    /// a first-boot classic still formatting littlefs), so the default
+    /// carries headroom past the observed worst rather than equalling the
+    /// arithmetic. A board slower still degrades honestly — the flash
+    /// stands and the card says the default pin map does too.
+    pub stamp_deadline_ms: u64,
+    /// Supervision backstop for the whole Push activity: the `lpa-client`
+    /// conversation (clear, chunked writes, load, hash) over a serial wire.
+    pub push_deadline_ms: u64,
+    /// Wind-down grace for a cancelled push. Wide for the same reason the
+    /// flash's is: the conversation clears the device's project dir before
+    /// it writes, so a cancel is held until the write window closes rather
+    /// than leaving half a project on the board.
+    pub push_cancel_grace_ms: u64,
+    /// How long a finished push waits for the board to REPORT what it is
+    /// running before settling anyway. Wider than a heartbeat period: the
+    /// loaded-project fact rides heartbeats, and a push that succeeded must
+    /// not be reported as anything else just because the board is unhurried.
+    pub push_observe_ms: u64,
     /// Silence before freshness flips to quiet. Wider than two heartbeat
     /// periods on purpose: a lossy wire must not flap the timeline.
     pub quiet_after_ms: u64,
@@ -93,6 +123,10 @@ impl Default for RosterConfig {
             flash_cancel_grace_ms: 180_000,
             flash_rung_ms: 8_000,
             flash_reopen_retry_ms: 1_000,
+            stamp_deadline_ms: 45_000,
+            push_deadline_ms: 180_000,
+            push_cancel_grace_ms: 120_000,
+            push_observe_ms: 8_000,
             quiet_after_ms: 12_000,
             journal_capacity: 512,
         }
@@ -302,7 +336,8 @@ impl Roster {
         match event {
             Event::LinkAttached { link, info } => self.attach_link(now, *link, info, input),
             Event::LinkDetached { link } => self.detach_link(now, *link, input),
-            Event::Link { link, .. } => match self.owner_of(*link) {
+            Event::Link { link, .. } | Event::LinkBorrow { link, .. } => match self.owner_of(*link)
+            {
                 Some(Owner::Device(device)) => self.dispatch_to_device(now, device, input),
                 Some(Owner::Pending(index)) => self.dispatch_to_pending(now, index, input),
                 None => {

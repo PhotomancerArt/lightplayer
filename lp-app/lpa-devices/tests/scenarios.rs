@@ -8,11 +8,286 @@
 
 use lpa_devices::journal::EvictionReason;
 use lpa_devices::replay::{Expect, Fixture, Replay, Script, Step, replay_inputs};
-use lpa_devices::view::roster_view;
+use lpa_devices::view::{LoadedProject, roster_view};
 use lpa_devices::{
-    Action, ActivityKind, Classification, DeviceId, DeviceRecord, DeviceStatus, DeviceUid, Escape,
-    IdentityChain, Input, LinkId, Liveness, Millis, Roster, RosterConfig,
+    Action, ActivityKind, Classification, Command, DeviceId, DeviceRecord, DeviceStatus, DeviceUid,
+    Escape, IdentityChain, Input, LinkCommand, LinkId, Liveness, Millis, ResetKind, Roster,
+    RosterConfig,
 };
+
+/// The empty face, the push, and the running face, at the fold's own layer.
+///
+/// The three claims that matter: a board that has SAID it has nothing gets
+/// the verb (and one that has merely said nothing does not); the push is one
+/// coarse effect; and the running face is drawn from the board's own report,
+/// never from the push having succeeded.
+#[test]
+fn an_empty_board_earns_the_push_verb_and_the_running_face_comes_from_its_report() {
+    let config = RosterConfig::default();
+    let mut replay = Replay::new(config);
+    replay.step(Millis(0), Step::attach(1, "usb-1"));
+    replay.step(Millis(10), Step::opened(1));
+    replay.step(Millis(100), Step::hello(1).uid("dev_abc"));
+
+    // Identified, but it has not said what it is running. No verb yet:
+    // offering to put something on a board that may already have a project
+    // is the over-claim (M4 owns pushing OVER something).
+    let card = replay.view().devices[0].clone();
+    assert_eq!(card.state_label, "Ready");
+    assert_eq!(card.loaded_project, LoadedProject::Unknown, "{card:?}");
+
+    // It answers: nothing loaded. NOW the empty face is honest.
+    replay.step(
+        Millis(200),
+        Step::Loaded {
+            link: 1,
+            projects: Vec::new(),
+        },
+    );
+    let card = replay.view().devices[0].clone();
+    assert_eq!(card.loaded_project, LoadedProject::Empty);
+    assert!(card.can_receive_project, "{card:?}");
+
+    // The gesture is one coarse effect and nothing else on the wire.
+    let commands = replay.step(Millis(300), Step::Push { device: card.id.0 });
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::RunEffect {
+                effect: lpa_devices::EffectRequest::Push,
+                ..
+            }
+        )),
+        "{commands:?}"
+    );
+    assert_eq!(
+        replay.view().devices[0]
+            .activity
+            .as_ref()
+            .map(|activity| activity.kind),
+        Some(ActivityKind::Push)
+    );
+
+    // The effect succeeds; the reducer asks the board what it has now.
+    let commands = replay.step(
+        Millis(9_000),
+        Step::EffectEnded {
+            device: card.id.0,
+            ok: true,
+            message: Some("project sent to demo".to_string()),
+            effect: None,
+            kind: Some(ActivityKind::Push),
+        },
+    );
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::Link {
+                command: lpa_devices::LinkCommand::SendFrame(_),
+                ..
+            }
+        )),
+        "the running face is asked for, not assumed: {commands:?}"
+    );
+    assert!(
+        replay.view().devices[0].activity.is_some(),
+        "still observing"
+    );
+
+    // The board answers, and the card settles on what IT said.
+    replay.step(
+        Millis(9_200),
+        Step::Loaded {
+            link: 1,
+            projects: vec!["/projects/demo".to_string()],
+        },
+    );
+    let card = replay.view().devices[0].clone();
+    assert!(card.activity.is_none(), "{card:?}");
+    assert_eq!(
+        card.loaded_project,
+        LoadedProject::Running {
+            label: "demo".to_string()
+        }
+    );
+    assert!(
+        card.last_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.ok && outcome.summary.contains("running demo")),
+        "{card:?}"
+    );
+    assert!(
+        !card.can_receive_project || card.loaded_project != LoadedProject::Empty,
+        "the empty face is gone"
+    );
+}
+
+/// A push the board refuses lands on the problem face with the reason, and
+/// the empty face is right back — retry in place, no dialog, no dead end.
+#[test]
+fn a_failed_push_re_offers_the_empty_face_in_place() {
+    let mut replay = Replay::new(RosterConfig::default());
+    replay.step(Millis(0), Step::attach(1, "usb-1"));
+    replay.step(Millis(10), Step::opened(1));
+    replay.step(Millis(100), Step::hello(1).uid("dev_abc"));
+    replay.step(
+        Millis(200),
+        Step::Loaded {
+            link: 1,
+            projects: Vec::new(),
+        },
+    );
+    let device = replay.view().devices[0].id;
+
+    replay.step(Millis(300), Step::Push { device: device.0 });
+    replay.step(
+        Millis(1_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: false,
+            message: Some("the board ended up with different bytes".to_string()),
+            effect: None,
+            kind: Some(ActivityKind::Push),
+        },
+    );
+
+    let card = replay.view().devices[0].clone();
+    assert!(card.activity.is_none());
+    assert!(
+        card.last_outcome
+            .as_ref()
+            .is_some_and(|outcome| !outcome.ok && outcome.summary.contains("different bytes")),
+        "{card:?}"
+    );
+    assert!(
+        card.can_receive_project && card.loaded_project == LoadedProject::Empty,
+        "the picker is back, in place: {card:?}"
+    );
+    assert!(card.escapes.contains(&Escape::Forget));
+}
+
+/// The M2 scrutiny item, closed: a coarse effect runs in a spawned future
+/// nothing can cancel, so an EVICTED effect keeps going and eventually
+/// reports. Without a generation stamp its `Ended` folds as the ending of
+/// whatever activity is running now — retiring a live flash because a dead
+/// one finally finished.
+///
+/// The walk: flash, cancel, let the grace expire (eviction), flash again,
+/// then deliver the FIRST effect's end marker. The second flash must still
+/// be running, and the timeline must say why the marker went nowhere.
+#[test]
+fn a_marker_from_an_evicted_effect_never_ends_the_activity_that_replaced_it() {
+    let config = RosterConfig {
+        flash_cancel_grace_ms: 1_000,
+        ..RosterConfig::default()
+    };
+    let mut replay = Replay::new(config);
+    replay.step(Millis(0), Step::attach(1, "usb-1"));
+    replay.step(Millis(10), Step::opened(1));
+    replay.step(Millis(20), Step::line(1, "ESP-ROM:esp32c6-20220919"));
+    replay.step(Millis(30), Step::line(1, "invalid header: 0xffffffff"));
+    replay.advance_to(Millis(config.identify_deadline_ms + 200));
+    let device = replay.view().pending[0].device;
+
+    let flash = Step::Flash {
+        device: device.0,
+        board: "seeed-xiao-esp32c6".to_string(),
+        build: "esp32c6-4mb".to_string(),
+    };
+    let commands = replay.step(Millis(6_000), flash.clone());
+    let evicted_effect = commands
+        .iter()
+        .find_map(|command| match command {
+            lpa_devices::Command::RunEffect { effect_id, .. } => Some(*effect_id),
+            _ => None,
+        })
+        .expect("the flash starts a coarse effect");
+
+    // Cancel is HELD through the write window, so only the grace ends it.
+    replay.step(Millis(6_100), Step::Cancel { device: device.0 });
+    replay.advance_to(Millis(6_100 + config.flash_cancel_grace_ms + 100));
+    assert!(
+        !replay.roster().devices()[0].is_busy(),
+        "the cancel grace evicts: {:?}",
+        replay.view().devices[0]
+    );
+
+    // A second flash starts — and the first effect is still out there.
+    let commands = replay.step(Millis(20_000), flash);
+    let live_effect = commands
+        .iter()
+        .find_map(|command| match command {
+            lpa_devices::Command::RunEffect { effect_id, .. } => Some(*effect_id),
+            _ => None,
+        })
+        .expect("the retry starts its own effect");
+    assert_ne!(
+        evicted_effect, live_effect,
+        "each effect gets its own generation"
+    );
+
+    // The DEAD effect finally reports. It must land on nothing.
+    replay.step(
+        Millis(21_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: Some("written".to_string()),
+            effect: Some(evicted_effect.0),
+            kind: None,
+        },
+    );
+
+    let view = replay.view();
+    assert_eq!(
+        view.devices[0]
+            .activity
+            .as_ref()
+            .map(|activity| activity.kind),
+        Some(ActivityKind::Flash),
+        "the live flash is untouched: {:?}",
+        view.devices[0]
+    );
+    assert!(
+        view.devices[0].last_outcome.is_none(),
+        "a straggler must not write an outcome: {:?}",
+        view.devices[0]
+    );
+    assert!(
+        replay
+            .journal_notes()
+            .iter()
+            .any(|note| note.contains("StaleEffectMarker") && note.contains("ended: true")),
+        "the timeline explains the silence: {:?}",
+        replay.journal_notes()
+    );
+
+    // The LIVE effect's own end still works, on the same device.
+    replay.step(
+        Millis(22_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: Some("written".to_string()),
+            effect: Some(live_effect.0),
+            kind: None,
+        },
+    );
+    assert!(
+        replay
+            .commands()
+            .iter()
+            .any(|(at, command)| *at == Millis(22_000)
+                && matches!(
+                    command,
+                    lpa_devices::Command::Link {
+                        command: lpa_devices::LinkCommand::Open { .. },
+                        ..
+                    }
+                )),
+        "the current effect's end still drives the ladder"
+    );
+}
 
 #[test]
 fn mid_stream_attach_fixture() {
@@ -537,6 +812,7 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
             device: device.0,
             label: "Writing firmware".to_string(),
             percent: Some(62),
+            effect: None,
         },
     );
     let view = replay.view();
@@ -555,6 +831,8 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
             device: device.0,
             ok: true,
             message: None,
+            effect: None,
+            kind: None,
         },
     );
     assert!(
@@ -589,6 +867,8 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
             device: device.0,
             ok: true,
             message: Some("manifest written".to_string()),
+            effect: None,
+            kind: None,
         },
     );
 
@@ -630,6 +910,8 @@ fn a_silent_board_after_a_flash_climbs_the_ladder_then_fails_honestly() {
             device: device.0,
             ok: true,
             message: None,
+            effect: None,
+            kind: None,
         },
     );
     replay.step(Millis(30_100), Step::opened(1));
@@ -695,6 +977,302 @@ fn forget_mid_flash_evicts_and_cleans_up() {
     assert!(deletes_a_record(&commands));
     assert!(revokes_a_grant(&commands));
     assert_eq!(count_notes(&replay, "ActivityEvicted"), 1);
+}
+
+/// The dead end the bench walked into (G1, 2026-08-31), and its way out: a
+/// reflash preserves littlefs, so a board comes back auto-loading a project
+/// from a previous life — a running face with no verbs on it. Removing the
+/// project keeps the firmware and lands the card back on the empty face,
+/// where the picker is.
+#[test]
+fn removing_the_project_takes_a_running_board_back_to_the_empty_face() {
+    let mut replay = ready_device();
+    let device = first_device(&replay);
+    replay.step(
+        Millis(300),
+        Step::Loaded {
+            link: 1,
+            projects: vec!["/projects/zook-dome".to_string()],
+        },
+    );
+
+    let card = replay.view().devices[0].clone();
+    assert!(
+        matches!(card.loaded_project, LoadedProject::Running { .. }),
+        "{card:?}"
+    );
+    assert!(
+        card.can_remove_project,
+        "the running face offers it: {card:?}"
+    );
+    assert!(
+        !card.can_receive_project || card.loaded_project != LoadedProject::Empty,
+        "and the empty face is not showing"
+    );
+
+    // The gesture is one coarse effect and nothing else on the wire — the
+    // path it deletes is the board's, read inside the conversation.
+    let commands = replay.step(Millis(400), Step::RemoveProject { device: device.0 });
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::RunEffect {
+                effect: lpa_devices::EffectRequest::RemoveProject,
+                ..
+            }
+        )),
+        "{commands:?}"
+    );
+    assert_eq!(
+        replay
+            .roster()
+            .device(device)
+            .expect("device")
+            .activity_kind(),
+        Some(ActivityKind::RemoveProject)
+    );
+
+    // The conversation succeeds — and the card still says "running", because
+    // the BOARD has not said otherwise yet (I6).
+    replay.step(
+        Millis(1_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: Some("removed zook-dome".to_string()),
+            effect: None,
+            kind: Some(ActivityKind::RemoveProject),
+        },
+    );
+    assert!(
+        replay.roster().device(device).expect("device").is_busy(),
+        "the observation window is still open"
+    );
+
+    // The board answers the ask: nothing loaded. NOW the face turns over.
+    replay.step(
+        Millis(1_100),
+        Step::Loaded {
+            link: 1,
+            projects: Vec::new(),
+        },
+    );
+
+    let card = replay.view().devices[0].clone();
+    assert!(!card.activity.is_some(), "settled: {card:?}");
+    assert_eq!(card.loaded_project, LoadedProject::Empty);
+    assert!(card.can_receive_project, "the picker is back: {card:?}");
+    assert!(!card.can_remove_project, "nothing left to remove");
+    assert!(
+        card.last_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.ok && outcome.summary.contains("zook-dome")),
+        "{:?}",
+        card.last_outcome
+    );
+    assert!(card.escapes.contains(&Escape::Forget), "always a way out");
+}
+
+/// C2 (G1 bench, 2026-08-31): an activity that ends while its coarse effect
+/// is STILL RUNNING must hand the wire back. The orphaned effect cannot be
+/// stopped, but its exclusive borrow can be released — and it must be, or
+/// the pump stays paused and the fold goes deaf for the rest of the
+/// effect's own budget (forty seconds, on the bench).
+#[test]
+fn an_activity_that_ends_over_a_live_effect_hands_the_wire_back() {
+    let config = RosterConfig {
+        push_deadline_ms: 5_000,
+        ..RosterConfig::default()
+    };
+    let mut replay = ready_device_with(config);
+    let device = first_device(&replay);
+
+    let commands = replay.step(Millis(1_000), Step::Push { device: device.0 });
+    let effect = commands
+        .iter()
+        .find_map(|command| match command {
+            lpa_devices::Command::RunEffect { effect_id, .. } => Some(*effect_id),
+            _ => None,
+        })
+        .expect("the push starts a coarse effect");
+
+    // The effect never reports; only the supervision deadline ends the
+    // activity. The effect is still out there holding the wire.
+    replay.advance_to(Millis(1_000 + config.push_deadline_ms + 100));
+
+    assert!(
+        !replay.roster().device(device).expect("device").is_busy(),
+        "the deadline evicts"
+    );
+    assert!(
+        replay.commands().iter().any(|(_, command)| matches!(
+            command,
+            lpa_devices::Command::AbandonEffect { effect_id, .. } if *effect_id == effect
+        )),
+        "the orphaned effect's borrow is released by name: {:?}",
+        replay.commands()
+    );
+}
+
+/// C3 (G1 bench, 2026-08-31): while a coarse effect holds the wire the pump
+/// is stopped, so nothing CAN be heard. Freshness must not read that as the
+/// board going quiet — a two-minute flash used to end on "quiet — last heard
+/// 2 m ago" for a board that was talking the whole time.
+#[test]
+fn a_borrowed_wire_never_goes_quiet_and_resumes_timing_when_it_is_given_back() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    replay.step(Millis(1_000), Step::heartbeat(1));
+
+    replay.step(
+        Millis(1_100),
+        Step::Borrow {
+            link: 1,
+            held: true,
+        },
+    );
+    // Far past the quiet window, with nothing on the wire — because nobody
+    // is reading it.
+    replay.advance_to(Millis(1_100 + config.quiet_after_ms * 4));
+
+    assert_eq!(
+        count_notes(&replay, "WentQuiet"),
+        0,
+        "silence under a borrow is not evidence: {:?}",
+        notes(&replay)
+    );
+    assert_eq!(
+        replay.roster().devices()[0].evidence.freshness.state,
+        Liveness::Live
+    );
+    assert_eq!(
+        replay.view().devices[0].state_label,
+        "Ready",
+        "the card does not decay mid-effect"
+    );
+
+    // The wire comes back, and so does the timing: real silence from here
+    // is real.
+    let at = Millis(1_100 + config.quiet_after_ms * 4);
+    replay.step(
+        at,
+        Step::Borrow {
+            link: 1,
+            held: false,
+        },
+    );
+    replay.advance_to(Millis(at.0 + config.quiet_after_ms * 2));
+
+    assert_eq!(
+        count_notes(&replay, "WentQuiet"),
+        1,
+        "a released wire is timed again: {:?}",
+        notes(&replay)
+    );
+}
+
+/// The borrow's own escape hatch: a board unplugged MID-EFFECT never gets
+/// the release event, because by the time the effect finishes the link it
+/// names is not this device's any more. A borrow flag left standing would
+/// freeze the device's freshness for the rest of the session, so a link
+/// change clears it.
+#[test]
+fn an_unplug_during_a_borrow_does_not_freeze_the_device_forever() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    replay.step(Millis(1_000), Step::heartbeat(1));
+    replay.step(
+        Millis(1_100),
+        Step::Borrow {
+            link: 1,
+            held: true,
+        },
+    );
+
+    // Unplugged. No release will ever arrive for LinkId(1).
+    replay.step(Millis(2_000), Step::detach(1));
+    assert!(
+        !replay.roster().devices()[0].evidence.wire_borrowed,
+        "a link that is gone holds nothing"
+    );
+
+    // The same board comes back and goes genuinely quiet. It is timed.
+    replay.step(Millis(3_000), Step::attach(2, "usb-1"));
+    replay.step(Millis(3_100), Step::opened(2));
+    replay.step(Millis(3_200), Step::heartbeat(2));
+    replay.advance_to(Millis(3_200 + config.quiet_after_ms * 2));
+
+    assert_eq!(
+        count_notes(&replay, "WentQuiet"),
+        1,
+        "freshness is working again: {:?}",
+        notes(&replay)
+    );
+}
+
+/// The terminal panel's contents, at the fold's layer: what the board said
+/// and what Studio did to it, in order, and surviving the port reopen a
+/// reconnect ladder performs. Progress that only ever reached the browser
+/// console is the defect this closes (G1 bench, 2026-08-31).
+#[test]
+fn the_terminal_panel_keeps_boot_lines_and_effect_narration_across_a_reopen() {
+    let mut replay = ready_device();
+    let device = first_device(&replay);
+    replay.step(Millis(300), Step::line(1, "ESP-ROM:esp32c6-20220919"));
+    replay.step(
+        Millis(400),
+        Step::Flash {
+            device: device.0,
+            board: "dig-uno".to_string(),
+            build: "esp32-4mb".to_string(),
+        },
+    );
+    for at in [500_u64, 520, 540] {
+        // The same label ticking with different percents: the bar's
+        // business, and exactly one line.
+        replay.step(
+            Millis(at),
+            Step::EffectProgress {
+                device: device.0,
+                label: "Writing firmware".to_string(),
+                percent: Some(u8::try_from(at / 10).unwrap_or(100)),
+                effect: None,
+            },
+        );
+    }
+    // The ladder's reopen restarts the classification WINDOW — the log must
+    // not restart with it.
+    replay.step(Millis(600), Step::opened(1));
+    replay.step(Millis(700), Step::line(1, "fw-esp32 initialized"));
+
+    let lines = replay.view().devices[0].terminal_lines.clone();
+    assert!(
+        lines.iter().any(|line| line.contains("ESP-ROM:esp32c6")),
+        "boot output survives the reopen: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|line| line == "Writing firmware"),
+        "effect narration reaches the panel: {lines:?}"
+    );
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| *line == "Writing firmware")
+            .count(),
+        1,
+        "a percent-ticking label is one line, not three: {lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .position(|line| line == "Writing firmware")
+            .unwrap()
+            < lines
+                .iter()
+                .position(|line| line.contains("fw-esp32 initialized"))
+                .unwrap(),
+        "in the order they happened: {lines:?}"
+    );
 }
 
 // ---------------------------------------------------------------- helpers
@@ -777,4 +1355,49 @@ fn full_walk_fixture() -> Fixture {
         .at(31_000, Step::Forget { device: 1 })
         .expect(Expect::new().devices(0).pending(0))
         .into_fixture("full walk")
+}
+
+/// The silent-board recovery (G1 2026-08-31): a chip parked in ROM
+/// download-wait prints nothing, so identify can never settle — the Reset
+/// verb pulses the hardware and identify reads whatever boots.
+#[test]
+fn reset_board_pulses_the_hardware_and_identify_reads_the_boot() {
+    let mut replay = Replay::new(RosterConfig::default());
+    replay.step(Millis(0), Step::attach(1, "usb-r"));
+    replay.step(Millis(10), Step::opened(1));
+    // The identify deadline passes with zero evidence: a silent board.
+    replay.advance_to(Millis(9_000));
+    let device = replay.view().pending[0].device;
+
+    let commands = replay.feed(Millis(9_100), Input::Action(Action::ResetBoard { device }));
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            Command::Link {
+                command: LinkCommand::RunReset(ResetKind::Normal),
+                ..
+            }
+        )),
+        "the reset pulse rides the link: {commands:?}"
+    );
+
+    // The boot loop names the chip and the fold settles instantly.
+    replay.step(Millis(9_500), Step::line(1, "ESP-ROM:esp32c6-20220919"));
+    replay.step(Millis(9_520), Step::line(1, "invalid header: 0xffffffff"));
+    let view = replay.view();
+    assert!(
+        view.pending[0].needs_firmware,
+        "the reset turned silence into an honest verdict: {view:?}"
+    );
+
+    // The early settle hands the port back — and the verdict must SURVIVE
+    // that close (regression pin, G1 2026-08-31: a begin_window on Closed
+    // wiped every ROM verdict the instant identify settled; a close is our
+    // action, not evidence about the board).
+    replay.step(Millis(9_600), Step::closed(1));
+    let view = replay.view();
+    assert!(
+        view.pending[0].needs_firmware,
+        "the verdict survives us hanging up: {view:?}"
+    );
 }

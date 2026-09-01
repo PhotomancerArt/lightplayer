@@ -46,9 +46,39 @@ pub enum DeviceEffectCall {
     /// esptool flash of a packaged build. The chip guard and the pre-write
     /// base-MAC read live below this seam and are load-bearing.
     FlashFirmware { build_id: String },
+    /// esptool full-flash erase (the card's Factory reset). Verification —
+    /// the completion line outranking the benign flash-id warning (C6 rev 2
+    /// lore) — lives below this seam in the shipped JS.
+    EraseFlash,
+    /// Run the `lpa-client` remove conversation over the borrowed port: ask
+    /// the board what storage dir it runs from, stop it, and delete that
+    /// dir. The firmware stays; only the project goes.
+    RemoveProject {
+        /// Where to delete when the board reports nothing loaded — the race
+        /// between the card offering the verb and the effect running. An
+        /// absent dir is a no-op, never an error.
+        fallback_storage_id: String,
+    },
     /// Write the board runtime manifest to `/hardware.json` over the app
     /// protocol (board-selection D4; effective next boot).
     WriteHardwareManifest { manifest_json: String },
+    /// Run the `lpa-client` push conversation over the borrowed port: find
+    /// the storage dir the board runs from, replace it, load it, verify the
+    /// package hash.
+    ///
+    /// The files arrive already resolved — the app read them out of the
+    /// library (or out of the live handle for a project open in this tab)
+    /// before the gesture was folded, because the model must not carry
+    /// project bytes through its journal.
+    PushProject {
+        files: Vec<(String, Vec<u8>)>,
+        /// The library copy's canonical hash. A device that ends up with
+        /// anything else is a failed push, not a quiet one.
+        expected_hash: String,
+        /// Where to write when the board reports nothing loaded — a
+        /// freshly flashed board has no dir to replace.
+        fallback_storage_id: String,
+    },
 }
 
 /// What a finished effect learned, beyond succeeding.

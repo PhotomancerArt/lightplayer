@@ -782,22 +782,39 @@ where
         project_id: &str,
         files: impl IntoIterator<Item = ProjectDeployFile>,
     ) -> ClientResult<ClientOutcome<()>> {
-        use lpc_model::AsLpPathBuf;
         let mut events = Vec::new();
+        let cleared = self.delete_project_dir(project_id).await?;
+        events.extend(cleared.events);
+        let push = self.push_project_files(project_id, files).await?;
+        events.extend(push.events);
+        Ok(ClientOutcome::new((), events))
+    }
+
+    /// Delete a project directory outright.
+    ///
+    /// Half of a whole-project replace, and the whole of a removal (the
+    /// card's "Remove project"), so it is one function: a delete that
+    /// tolerated a missing dir in one caller and not the other would be two
+    /// different meanings of the same word.
+    ///
+    /// An absent directory is SUCCESS. Deleting nothing is what the caller
+    /// wanted either way, and firmware disagrees about how to say it —
+    /// current builds report success, older LittleFS ones a list_dir error.
+    pub async fn delete_project_dir(
+        &mut self,
+        project_id: &str,
+    ) -> ClientResult<ClientOutcome<()>> {
+        use lpc_model::AsLpPathBuf;
         let prefix = format!("/projects/{project_id}");
         let request = ClientRequest::Filesystem(FsRequest::DeleteDir {
             path: prefix.as_str().as_path_buf(),
         });
         let outcome = self.send_request(request).await?;
-        events.extend(outcome.events);
         if let WireServerMsgBody::Filesystem(FsResponse::DeleteDir {
             error: Some(error), ..
         }) = &outcome.value.msg
         {
-            // fs errors cross the wire as display strings; a missing dir is
-            // fine (replacing an absent project — current firmware reports
-            // success, older LittleFS builds a "no such file or directory"
-            // list_dir error), anything else isn't
+            // fs errors cross the wire as display strings.
             if !error.starts_with("File not found") && !error.contains("no such file or directory")
             {
                 return Err(ClientError::Server(format!(
@@ -805,9 +822,7 @@ where
                 )));
             }
         }
-        let push = self.push_project_files(project_id, files).await?;
-        events.extend(push.events);
-        Ok(ClientOutcome::new((), events))
+        Ok(ClientOutcome::new((), outcome.events))
     }
 
     /// Whole-project replace, then load: StopAll → clear dir → chunked

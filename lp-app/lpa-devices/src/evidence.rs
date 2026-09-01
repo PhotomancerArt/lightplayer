@@ -28,7 +28,7 @@ use crate::journal::JournalNote;
 use crate::link::{LinkEvent, LinkId};
 use crate::roster::RosterConfig;
 use crate::time::Millis;
-use crate::wire::{HelloFacts, ServerFrameBody};
+use crate::wire::{HelloFacts, LoadedProjectFacts, ServerFrameBody};
 
 /// Boot signatures, mirroring `lpa-link`'s shipped `BootLineClassifier`.
 const BLANK_HEADER_SIGNATURE: &str = "invalid header: 0xffffffff";
@@ -39,6 +39,14 @@ const KNOWN_FOREIGN_BOOT_STRINGS: &[(&str, &str)] = &[(
     "Seeed XIAO factory firmware",
 )];
 const RECENT_LINE_LIMIT: usize = 80;
+
+/// How many lines the card's terminal panel keeps.
+///
+/// Deliberately longer than the classification window's tail: this is a LOG,
+/// not an observation. A flash's narration plus the boot output that follows
+/// it has to fit, because "what did this board actually say" is the question
+/// the panel exists to answer.
+const OUTPUT_LINE_LIMIT: usize = 200;
 
 /// Everything the world has told us about one device.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -51,6 +59,24 @@ pub struct Evidence {
     /// Survives disconnect on purpose (invariant I4): "flash failed" must
     /// still be readable after the board drops off the bus.
     pub last_outcome: Option<ActivityOutcome>,
+    /// A coarse effect holds this device's wire exclusively.
+    ///
+    /// Folded from [`Event::LinkBorrow`], and read for exactly one thing:
+    /// freshness does not evaluate against a wire nobody is listening to.
+    /// The pump is stopped for the length of a borrow, so silence during one
+    /// says nothing about the board.
+    #[serde(default)]
+    pub wire_borrowed: bool,
+    /// The card's terminal tail: raw serial lines and activity narration, in
+    /// the order they happened.
+    ///
+    /// Deliberately NOT inside [`Observations`]: a window is what the
+    /// classifier reasons over and it restarts on every port open, while
+    /// this is a log and must survive the reopen that a flash's reconnect
+    /// ladder performs — otherwise the panel wipes itself exactly when the
+    /// board comes back. Bounded, fold-written, and read only for display.
+    #[serde(default)]
+    output: VecDeque<String>,
     observations: Observations,
 }
 
@@ -77,6 +103,9 @@ impl Evidence {
                     since: now,
                 };
                 self.begin_window(now);
+                // A borrow belongs to the link it was taken on. This is a
+                // different link, so nothing is holding it.
+                self.wire_borrowed = false;
                 if let Some(learned) = identity.bind_endpoint(info.endpoint.clone()) {
                     notes.extend(identity_notes(learned));
                 }
@@ -84,12 +113,25 @@ impl Evidence {
             Event::LinkDetached { .. } => {
                 self.presence = Presence::Detached { since: now };
                 self.begin_window(now);
+                // Unplugged mid-effect: the release event the effect will
+                // eventually raise addresses a link this device no longer
+                // has, so it would never arrive. Without this the device
+                // would stop evaluating freshness for good.
+                self.wire_borrowed = false;
             }
             Event::Link { link, event } => {
                 notes.extend(self.fold_link_event(now, *link, event, identity, config));
             }
+            Event::LinkBorrow { held, .. } => {
+                self.wire_borrowed = *held;
+            }
             Event::TimerFired { .. } => {
-                if let Some(note) = self.freshness.evaluate(now, config.quiet_after_ms) {
+                // A borrowed wire is a wire with no reader: the pump is
+                // stopped for the effect's duration, so silence proves
+                // nothing about the board and must not become a verdict.
+                if !self.wire_borrowed
+                    && let Some(note) = self.freshness.evaluate(now, config.quiet_after_ms)
+                {
                     notes.push(note);
                 }
             }
@@ -137,9 +179,53 @@ impl Evidence {
         self.observations.detected_chip.as_deref()
     }
 
-    /// Bounded tail of recent non-protocol serial lines, for diagnosis copy.
+    /// What the board last reported having loaded.
+    ///
+    /// `None` means it has not said — which is NOT "nothing loaded". The
+    /// empty face turns on the difference, and over-claiming "this board is
+    /// empty" would offer to overwrite a project that is right there.
+    pub fn loaded_projects(&self) -> Option<&[LoadedProjectFacts]> {
+        self.observations.loaded.as_deref()
+    }
+
+    /// Bounded tail of recent non-protocol serial lines in the CURRENT
+    /// window, for diagnosis copy. Window-scoped on purpose: the detail line
+    /// it feeds describes the machine that is on the wire now.
     pub fn recent_lines(&self) -> impl Iterator<Item = &str> {
         self.observations.lines.iter().map(String::as_str)
+    }
+
+    /// The card's terminal tail: serial lines and activity narration, oldest
+    /// first, across window resets. See [`Self::output`].
+    pub fn recent_output(&self) -> impl Iterator<Item = &str> {
+        self.output.iter().map(String::as_str)
+    }
+
+    /// When the next quiet check is due, if one is.
+    ///
+    /// `None` while a coarse effect holds the wire: nothing is reading the
+    /// port, so there is no silence to time. The release event re-arms the
+    /// device's timer, because every fold ends by re-arming.
+    pub fn quiet_deadline(&self, quiet_after_ms: u64) -> Option<Millis> {
+        if self.wire_borrowed {
+            return None;
+        }
+        self.freshness.quiet_deadline(quiet_after_ms)
+    }
+
+    /// Append one line to the terminal tail, collapsing an immediate repeat.
+    ///
+    /// The collapse is what keeps a percent-ticking effect from filling the
+    /// panel with two hundred copies of "Writing firmware": the percent is
+    /// the bar's business, and the label is the narration.
+    fn push_output(&mut self, line: &str) {
+        if self.output.back().is_some_and(|last| last == line) {
+            return;
+        }
+        self.output.push_back(line.to_string());
+        while self.output.len() > OUTPUT_LINE_LIMIT {
+            self.output.pop_front();
+        }
     }
 
     /// Whether identification has produced a verdict in this window.
@@ -172,8 +258,14 @@ impl Evidence {
                 }
             }
             LinkEvent::Closed { .. } => {
+                // A close moves presence only. It is OUR action — the board
+                // did not change because we stopped listening — so the
+                // observation window and its verdict survive (the ADR's
+                // ruled list: OPEN, successful RESET and DETACH clear the
+                // window; close never did). Clearing here ate every
+                // ROM-conclusive verdict the moment identify settled and
+                // handed the port back (bench regression, G1 2026-08-31).
                 self.presence = Presence::Present { link, since: now };
-                self.begin_window(now);
             }
             LinkEvent::Frame(frame) => {
                 self.observations.observe_frame(&frame.body, config);
@@ -187,6 +279,7 @@ impl Evidence {
             }
             LinkEvent::Line(line) => {
                 self.observations.observe_line(line);
+                self.push_output(line);
                 if let Some(note) = self.freshness.heard(now, false) {
                     notes.push(note);
                 }
@@ -207,13 +300,22 @@ impl Evidence {
 
     fn fold_marker(&mut self, marker: &ActivityMarker) -> Vec<JournalNote> {
         match marker {
-            ActivityMarker::Started { .. } => {
+            ActivityMarker::Started { kind } => {
                 // A new activity supersedes the previous outcome.
                 self.last_outcome = None;
+                self.push_output(&format!("— {} —", kind.label()));
                 Vec::new()
             }
-            ActivityMarker::Progress { .. } => Vec::new(),
+            // The narration a coarse effect streams IS what the terminal
+            // panel is for: a flash's progress used to be visible only in
+            // the browser console (G1 bench, 2026-08-31). Percent stays the
+            // bar's; the label is the line.
+            ActivityMarker::Progress { label, .. } => {
+                self.push_output(label);
+                Vec::new()
+            }
             ActivityMarker::Ended { outcome, .. } => {
+                self.push_output(&outcome.summary());
                 self.last_outcome = Some(outcome.clone());
                 // An activity that reached an end has settled the window:
                 // "no verdict yet" stops being an honest answer.
@@ -422,6 +524,9 @@ struct Observations {
     detected_chip: Option<String>,
     frames_seen: usize,
     hello: Option<HelloFacts>,
+    /// The board's own report of what it is running. Window-scoped like
+    /// every other observation: a reopened port has to be told again.
+    loaded: Option<Vec<LoadedProjectFacts>>,
     wrong_proto: Option<u32>,
     errors: usize,
     settled: bool,
@@ -447,7 +552,20 @@ impl Observations {
             }
             // Absorbed, never condemned: a running server heartbeats, so a
             // mid-stream attach sees frames before any hello answer.
-            ServerFrameBody::Heartbeat { .. } | ServerFrameBody::Other { .. } => {
+            ServerFrameBody::Heartbeat { loaded, .. } => {
+                self.frames_seen += 1;
+                // Only a heartbeat that CARRIES the report replaces it:
+                // older firmware sends none, and treating its silence as
+                // "nothing loaded" would offer to overwrite a live project.
+                if let Some(loaded) = loaded {
+                    self.loaded = Some(loaded.clone());
+                }
+            }
+            ServerFrameBody::Loaded { loaded } => {
+                self.frames_seen += 1;
+                self.loaded = Some(loaded.clone());
+            }
+            ServerFrameBody::Other { .. } => {
                 self.frames_seen += 1;
             }
         }

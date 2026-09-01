@@ -21,7 +21,7 @@ export async function probeTarget(portId, esptoolModulePath) {
   }
 
   try {
-    const port = getPort(portId);
+    const port = await getPort(portId);
     await releasePort(portId);
 
     const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
@@ -82,7 +82,7 @@ export async function flashFirmware(
     const manifest = await loadFullManifest(manifestPath);
     const imageFiles = await loadImageFiles(manifest, manifestPath);
     const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
-    const port = getPort(portId);
+    const port = await getPort(portId);
     await releasePort(portId);
 
     const transport = new Transport(port, ESPTOOL_TRANSPORT_TRACING);
@@ -167,7 +167,7 @@ export async function eraseDeviceFlash(portId, esptoolModulePath, onEvent) {
   const progress = [];
   const terminal = terminalFor(logs, "esp32-erase", onEvent);
   try {
-    const port = getPort(portId);
+    const port = await getPort(portId);
     await releasePort(portId);
 
     const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
@@ -242,7 +242,7 @@ export async function writeBootControl(portId, esptoolModulePath, address, recor
   const progress = [];
   const terminal = terminalFor(logs, "esp32-bootctl", onEvent);
   try {
-    const port = getPort(portId);
+    const port = await getPort(portId);
     await releasePort(portId);
 
     const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
@@ -344,7 +344,7 @@ export async function readRawFilesystem(portId, esptoolModulePath, resolveRegion
   const progress = [];
   const terminal = terminalFor(logs, "esp32-fsread", onEvent);
   try {
-    const port = getPort(portId);
+    const port = await getPort(portId);
     await releasePort(portId);
 
     const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);

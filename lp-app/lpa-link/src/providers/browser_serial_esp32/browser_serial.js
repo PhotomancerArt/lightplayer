@@ -192,7 +192,23 @@ export async function resetAndRead(id, baudRate, readWindowMs, resetKind = "norm
   });
 }
 
-export function getPort(id) {
+export async function getPort(id) {
+  // Resolve to a LIVE SerialPort, adopting first: a boot-looping native-USB
+  // chip re-enumerates every few seconds, so the object this session holds
+  // may be a dead generation by the time a consumer (the esptool bridge)
+  // asks — its open() then fails instantly with NetworkError (bench, G1
+  // 2026-08-31: flashing the blank C6 lost the race on the first try).
+  // Adoption is what pairs the dead generation to the replacement, and it
+  // previously ran only on hotplug sweeps, never at resolution time.
+  const serial = navigator.serial;
+  if (serial?.getPorts) {
+    try {
+      await adoptReenumeratedPorts(await serial.getPorts());
+    } catch (error) {
+      // Resolution still answers with what the session holds; a failed
+      // adoption pass must not mask the real open error downstream.
+    }
+  }
   return requireSession(id).port;
 }
 

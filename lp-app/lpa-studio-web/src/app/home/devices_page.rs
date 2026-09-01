@@ -84,6 +84,11 @@ pub fn DevicesPage(home: UiHomeView, on_action: EventHandler<UiAction>) -> Eleme
                             DeviceRosterCard {
                                 key: "device-{card.id.0}",
                                 card,
+                                // The empty face's picker reads the SAME two
+                                // lists the gallery does — there is no
+                                // separate device-side project source.
+                                projects: home.projects.clone(),
+                                examples: home.examples.clone(),
                                 on_action,
                             }
                         }

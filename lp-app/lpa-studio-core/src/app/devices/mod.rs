@@ -13,6 +13,7 @@
 //! | `PersistRecord` / `DeleteRecord` | [`DeviceRoster`] → the kept `places::device_registry`, through the library host's locked catalog |
 //! | `RequestUsbGrant` | [`DeviceTransport::request_grant`] → the platform chooser |
 //! | `RevokeGrant` | [`DeviceTransport::revoke_grant`] → the provider's `forget_endpoint` |
+//! | `RunEffect` | [`DeviceEffects::run_effect`] → the wire, borrowed exclusively: esptool for a flash, the `lpa-client` conversation for a push |
 //!
 //! # Invariant I7: the fold loop never awaits device IO
 //!
@@ -35,6 +36,7 @@ pub mod browser_transport;
 pub mod device_affordance;
 pub mod device_effects;
 pub mod device_flash;
+pub mod device_push;
 pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
@@ -43,9 +45,16 @@ pub mod devices_op;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use browser_transport::BrowserSerialTransport;
 pub use device_affordance::{device_escape_action, device_status_kind, pending_escape_action};
-pub use device_effects::{DeviceEffects, DeviceTaskFuture, DeviceTimerFuture, PendingWrites};
+pub use device_effects::{
+    CompletedPush, DeviceEffects, DeviceTaskFuture, DeviceTimerFuture, PendingWrites, PushPayload,
+    StagedPush,
+};
 pub use device_flash::{
     FlashBoardChoice, FlashOffer, derive_flash_name, flash_offer, taken_device_titles,
+};
+pub use device_push::{
+    DevicePushOp, PushOffer, PushSource, PushSourceChoice, PushSourceGroup,
+    first_bundled_example_id, push_offer,
 };
 pub use device_records::{record_from_registry_row, registry_row_from_record};
 pub use device_roster::{DeviceRoster, DeviceRosterView, JournalLine};

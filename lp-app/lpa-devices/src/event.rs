@@ -83,6 +83,20 @@ pub enum Action {
     Identify {
         device: DeviceId,
     },
+    /// Put the prepared project on this board (round 2's second coarse
+    /// effect).
+    ///
+    /// It carries no project: the payload — which files, which content hash
+    /// — is resolved by the app and STAGED with the effects layer before
+    /// this action is folded. Two reasons, both load-bearing. The journal
+    /// records every input verbatim and fixtures round-trip through JSON, so
+    /// a project's bytes riding an action would put megabytes in a flight
+    /// recorder. And what the board ends up running is not this action's to
+    /// claim: it enters the model as EVIDENCE, off the heartbeat's
+    /// loaded-project report, exactly like every other device fact (I6).
+    Push {
+        device: DeviceId,
+    },
     /// Flash firmware onto this board (round 2's first coarse effect). The
     /// board is the user's pick from the chip-compatible list; the build id
     /// was resolved by the app from (board, detected chip) — **no fallback
@@ -94,6 +108,42 @@ pub enum Action {
         device: DeviceId,
         board_id: String,
         build_id: String,
+        /// Park the chip in its ROM downloader (UsbJtagDownload reset)
+        /// before the effect: a blank native-USB chip boot-loops and
+        /// re-enumerates, cutting esptool mid-connect; the downloader
+        /// holds still. Resolved from the picked board's family by the
+        /// app; the model treats it as data.
+        #[serde(default)]
+        park_first: bool,
+    },
+    /// Reset the board's hardware (DTR/RTS pulse — `ResetKind::Normal`) and
+    /// identify what boots. The direct-control verb for a board wedged in a
+    /// state that produces no evidence: a chip parked in ROM download-wait
+    /// prints NOTHING (G1 2026-08-31 — the erased C6 sat silent, no verdict,
+    /// no flash face, no way forward), and a hardware reset is the one
+    /// gesture that reboots it into honest boot output. Bridge-level, so it
+    /// works on firmware that answers nothing — unlike the wire Reboot.
+    ResetBoard {
+        device: DeviceId,
+    },
+    /// Factory reset: wipe the board's flash entirely (firmware, projects,
+    /// everything stored). Identity survives by design — it lives in the
+    /// efuse (ADR 2026-08-04) — so the entry and its registry row stay, and
+    /// the board comes back as a blank chip ready for the flash face.
+    Erase {
+        device: DeviceId,
+    },
+    /// Take the loaded project off this board: stop it, then delete the
+    /// storage dir the board says it runs from. The firmware stays, so the
+    /// board comes back on the EMPTY face rather than needing a re-flash —
+    /// which is the escape a board arriving with somebody else's project on
+    /// it had none of (G1 bench, 2026-08-31).
+    ///
+    /// It carries no project, for the same reason [`Self::Push`] does not:
+    /// which dir to remove is the board's own report, read over the wire by
+    /// the effect. The library copy is untouched.
+    RemoveProject {
+        device: DeviceId,
     },
     SetName {
         device: DeviceId,
@@ -114,7 +164,11 @@ impl Action {
             | Self::Forget { device }
             | Self::CancelActivity { device }
             | Self::Identify { device }
+            | Self::Push { device }
             | Self::Flash { device, .. }
+            | Self::Erase { device }
+            | Self::RemoveProject { device }
+            | Self::ResetBoard { device }
             | Self::SetName { device, .. }
             | Self::SetAutoconnect { device, .. } => Some(*device),
             Self::AddFromUsb
@@ -143,14 +197,37 @@ pub enum Event {
     LinkDetached {
         link: LinkId,
     },
+    /// A coarse effect took the wire, or gave it back.
+    ///
+    /// The effects layer borrows a link exclusively for the length of an
+    /// effect: the pump stops draining, so NOTHING can be heard from the
+    /// board while the borrow holds. That is a fact about the world, so it
+    /// enters as an event (I6) rather than as a flag some second store keeps
+    /// — and the fold uses it for one thing: freshness does not evaluate
+    /// against a wire nobody is listening to. Without it a two-minute flash
+    /// ends with "quiet — last heard 2 m ago" on a board that was talking
+    /// the whole time (G1 bench, 2026-08-31).
+    LinkBorrow {
+        link: LinkId,
+        held: bool,
+    },
     TimerFired {
         timer: TimerId,
     },
     /// A marker from a coarse effect the model asked for but does not drive
     /// frame by frame (esptool-js flashing, in round 2). Activity brackets
     /// the model raises itself are journaled directly.
+    ///
+    /// `effect` names WHICH effect the marker belongs to. An effect runs
+    /// outside the model in a spawned future that nothing can cancel: when
+    /// its activity is evicted mid-run and a new one is spawned, the old
+    /// effect's `Ended` still arrives — and without a stamp it would read as
+    /// the NEW activity's ending. `None` is a marker the model raised for
+    /// itself (the brackets), which is never stale by construction.
     ActivityMarker {
         device: DeviceId,
+        #[serde(default)]
+        effect: Option<EffectId>,
         marker: ActivityMarker,
     },
     /// Identity a coarse effect learned out-of-band (the flash preflight
@@ -213,12 +290,39 @@ pub enum Command {
     RunEffect {
         device: DeviceId,
         link: LinkId,
+        /// The generation stamp every marker this effect reports must carry.
+        /// Minted by the device, so a marker from an EVICTED effect can be
+        /// recognized and dropped instead of ending the activity that
+        /// replaced it.
+        effect_id: EffectId,
         effect: EffectRequest,
+    },
+    /// Let go of a coarse effect that is still running: its activity has
+    /// ended (settled, cancelled, evicted, forgotten) and nothing will read
+    /// what it eventually says.
+    ///
+    /// A coarse effect runs in a spawned future the model cannot cancel, so
+    /// this does not stop the work — it releases the effect's **exclusive
+    /// wire borrow** so the link pump resumes immediately. Without it an
+    /// orphaned effect held the fold deaf for the rest of its own budget:
+    /// forty seconds of a card that had stopped saying anything, which on
+    /// the bench read as a dead board and got the device unplugged (G1,
+    /// 2026-08-31). The effect's own late markers are already dropped by the
+    /// generation stamp.
+    AbandonEffect {
+        device: DeviceId,
+        link: LinkId,
+        effect_id: EffectId,
     },
 }
 
-/// The closed set of coarse effects (data, not behavior). M3 adds `Push`;
-/// M4 adds `Pull`/`Erase`.
+/// One coarse effect's generation stamp, unique per device for the life of
+/// the roster. Monotonic on purpose: a bigger id is always the newer effect.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct EffectId(pub u64);
+
+/// The closed set of coarse effects (data, not behavior). M4 adds
+/// `Pull`/`Erase`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum EffectRequest {
     /// Write a firmware image with esptool. The chip guard and the pre-write
@@ -229,6 +333,26 @@ pub enum EffectRequest {
     /// provision's D4 ruling). Emitted by the Flash activity once the
     /// post-flash hello proves the app protocol is up.
     WriteBoardManifest { board_id: String },
+    /// Run the `lpa-client` push conversation over the borrowed wire: find
+    /// the storage dir the board actually runs from, replace it, load it,
+    /// and verify the package hash.
+    ///
+    /// A unit variant, deliberately. The payload (files + expected hash) was
+    /// staged with the effects layer by the app before
+    /// [`Action::Push`](crate::Action::Push) was folded — see that action for
+    /// why the model does not carry project bytes.
+    Push,
+    /// Wipe the flash with esptool (the card's Factory reset). The erase
+    /// completion is verified in the platform layer (the completion line
+    /// outranks the benign flash-id warning — C6 rev 2 lore).
+    Erase,
+    /// Run the `lpa-client` remove conversation over the borrowed wire: ask
+    /// the board what it runs from, stop it, and delete that dir.
+    ///
+    /// A unit variant like [`Self::Push`], and for a stronger reason: WHICH
+    /// dir gets deleted is not the model's to name. The board's own report
+    /// is the only honest answer, and it is read inside the conversation.
+    RemoveProject,
 }
 
 #[cfg(test)]
@@ -244,10 +368,12 @@ mod tests {
             Action::Forget { device },
             Action::CancelActivity { device },
             Action::Identify { device },
+            Action::Push { device },
             Action::Flash {
                 device,
                 board_id: "seeed-xiao-esp32c6".to_string(),
                 build_id: "esp32c6-4mb".to_string(),
+                park_first: false,
             },
             Action::SetName {
                 device,
