@@ -565,6 +565,14 @@ impl StudioController {
         self.device_now()
     }
 
+    /// Replace the roster's config wholesale, for benches that shrink the
+    /// model's budgets (a real flash ladder is 24 s of rungs; a bench's fake
+    /// clock walks 5 ms per step). Only valid before anything is folded.
+    #[cfg(test)]
+    pub(crate) fn set_device_roster_config_for_test(&mut self, config: crate::DeviceRosterConfig) {
+        self.devices = crate::DeviceRoster::new(config);
+    }
+
     /// Provisional device ids of the links still being identified — the
     /// handle a Cancel gesture on a fresh plug addresses.
     #[cfg(test)]
@@ -2471,10 +2479,61 @@ impl StudioController {
     /// Nothing here decides anything about a device — the model does. That is
     /// the point: a UI gesture and a link event enter through the same door,
     /// with the same rights the fold gives each arm.
+    ///
+    /// The ONE piece of app policy layered on top: a Flash gesture at an
+    /// unnamed board auto-derives its name first ("<board display_name> ·
+    /// <Mon D>", the skip-ALL-naming ruling). It rides as a `SetName` action
+    /// — a journaled user-stream write, exactly what a rename later uses —
+    /// so the model's two-stream rights stay untouched.
     async fn execute_devices_op(&mut self, op: crate::DevicesOp) -> UiResult {
+        if let Some(name_first) = self.derive_flash_name_action(op.action()) {
+            self.fold_device_input(crate::DeviceInput::Action(name_first));
+        }
         self.fold_device_input(crate::DeviceInput::Action(op.0));
         self.settle_device_records().await;
         Ok(UiNotices::new())
+    }
+
+    /// The auto-name that precedes a Flash on a still-unnamed board, if one
+    /// is due. `None` for every other gesture, for a named board (a re-flash
+    /// must not rename), and for a target the roster does not hold.
+    fn derive_flash_name_action(
+        &self,
+        action: &crate::DeviceAction,
+    ) -> Option<crate::DeviceAction> {
+        let crate::DeviceAction::Flash {
+            device, board_id, ..
+        } = action
+        else {
+            return None;
+        };
+        let named = self
+            .devices
+            .roster()
+            .devices()
+            .iter()
+            .find(|entry| entry.id == *device)
+            .map(|entry| entry.intent.name.is_some() || entry.identity.name.is_some())
+            .or_else(|| {
+                self.devices
+                    .roster()
+                    .pending()
+                    .iter()
+                    .find(|entry| entry.device_id() == *device)
+                    .map(|entry| entry.identity().name.is_some())
+            })?;
+        if named {
+            return None;
+        }
+        let board_display = lpa_boards::board_by_id(board_id)
+            .map(|board| board.display_name.clone())
+            .unwrap_or_else(|| board_id.clone());
+        let taken =
+            crate::app::devices::taken_device_titles(&self.device_roster_view().roster.devices);
+        Some(crate::DeviceAction::SetName {
+            device: *device,
+            name: crate::app::devices::derive_flash_name(&board_display, (self.now_secs)(), &taken),
+        })
     }
 
     async fn execute_runtime_op(&mut self, op: crate::RuntimeOp) -> UiResult {

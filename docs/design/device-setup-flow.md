@@ -12,9 +12,30 @@ plan's `flow-spec.md` after its G1 ruling.
 > description of code that exists.
 
 The reducer this document was one artifact with
-(`lp-app/lpa-studio-core/src/app/setup_flow/`) is gone. Wizard v2 is round
-2 of the rebuild; whatever it becomes gets its own document, and the §2
-transition table below is the record of what the first one decided.
+(`lp-app/lpa-studio-core/src/app/setup_flow/`) is gone — and **the wizard
+is not coming back** (Yona's simplicity ruling, 2026-08-30, ratified in the
+round-2 plan: *the card is the whole flow*). Round 2's M2 implemented Flash
+as an activity surfaced directly on the device card (needs-firmware face →
+board pick → Flash with progress and the post-flash reconnect ladder →
+auto-name + registration); Push follows in M3. See the round-2 plan's "The
+card (product shape, ruled)" section for the current product shape.
+
+Product rulings from this document that SURVIVE the wizard (restated in
+the round-2 plan):
+
+- **Verdict under-claim bias** — over-claiming LightPlayer is the one
+  unrecoverable mistake.
+- **No firmware fallback build** — either the pick resolves, or it is a
+  fail case.
+- **Finishing setup does NOT auto-open the editor.**
+- **Naming is derived** ("<board display_name> · <Mon D>", collision
+  suffix ` 2`, ` 3`) — round 2 made this the ONLY naming path (no naming
+  step anywhere; rename later).
+- **`/hardware.json` written at provision** (D4) — now the flash
+  activity's post-hello stamp.
+
+The §2 transition table below is the record of what the first
+implementation decided.
 
 The steps are **Connect → Flash → Provision → Device home**, with
 board-state detection inside Flash, naming derived at Provision, and full

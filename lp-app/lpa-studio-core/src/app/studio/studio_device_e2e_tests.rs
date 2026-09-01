@@ -43,8 +43,9 @@ use lpa_link::providers::fake_device::{
 use crate::app::library::{LibraryStore, MemoryLibraryHost};
 use crate::app::places::DeviceRegistry;
 use crate::{
-    DeviceAction, DeviceInput, DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, DevicesOp,
-    GrantedLink, StudioController, UiAction,
+    DeviceAction, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceInput,
+    DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink,
+    StudioController, UiAction,
 };
 
 /// Wall-clock ceiling on a `run_until`. Generous: the fake boots a real host
@@ -78,7 +79,33 @@ struct ScriptedTransport {
     /// Whether the chooser hands a port back, or the user dismisses it.
     chooser_grants: Rc<Cell<bool>>,
     revoked: Rc<RefCell<Vec<String>>>,
+    /// What a scripted flash effect does.
+    flash_plan: Rc<Cell<FlashPlan>>,
+    /// `/hardware.json` payloads the manifest-write effect was handed.
+    manifest_writes: Rc<RefCell<Vec<String>>>,
 }
+
+/// The scripted outcomes a flash effect can play out (§5 of the milestone:
+/// success, mid-write failure, post-flash silence — plus a hang for the
+/// eviction path).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum FlashPlan {
+    /// The fake becomes a fresh LightPlayer (efuse MAC read by the
+    /// preflight), the way a real flash ends.
+    #[default]
+    Success,
+    /// esptool dies mid-write.
+    FailMidWrite,
+    /// The tool reports success but the board never comes back — the ladder
+    /// must climb and then fail honestly.
+    SilentAfterWrite,
+    /// The effect never completes; only eviction bounds the activity.
+    Hang,
+}
+
+/// The MAC the scripted preflight reports, deliberately UPPERCASE: the
+/// executor's normalization is part of the evidence path under test.
+const SCRIPTED_PREFLIGHT_MAC: &str = "60:55:F9:0A:0B:0C";
 
 impl ScriptedTransport {
     fn link(&self) -> GrantedLink {
@@ -118,6 +145,54 @@ impl DeviceTransport for ScriptedTransport {
         self.granted.set(false);
         self.revoked.borrow_mut().push(info.endpoint.0);
         Box::pin(core::future::ready(Ok(())))
+    }
+
+    fn run_effect(
+        &self,
+        _info: lpa_devices::LinkInfo,
+        call: DeviceEffectCall,
+        progress: DeviceEffectProgress,
+    ) -> DeviceTransportFuture<Result<DeviceEffectFacts, String>> {
+        match call {
+            DeviceEffectCall::FlashFirmware { build_id } => {
+                let plan = self.flash_plan.get();
+                let device = self.device.clone();
+                Box::pin(async move {
+                    progress("Connecting to the chip".to_string(), Some(5));
+                    progress("Writing firmware".to_string(), Some(50));
+                    match plan {
+                        FlashPlan::Success => {
+                            device.fake_flash(&build_id);
+                            progress("Firmware written".to_string(), Some(100));
+                            Ok(DeviceEffectFacts {
+                                summary: format!("wrote {build_id}"),
+                                probed_mac: Some(SCRIPTED_PREFLIGHT_MAC.to_string()),
+                                chip_name: Some("ESP32-C6 (fake)".to_string()),
+                            })
+                        }
+                        FlashPlan::FailMidWrite => {
+                            Err("write failed at 0x2000 (scripted)".to_string())
+                        }
+                        FlashPlan::SilentAfterWrite => Ok(DeviceEffectFacts {
+                            summary: format!("wrote {build_id}"),
+                            probed_mac: Some(SCRIPTED_PREFLIGHT_MAC.to_string()),
+                            chip_name: Some("ESP32-C6 (fake)".to_string()),
+                        }),
+                        FlashPlan::Hang => {
+                            core::future::pending::<()>().await;
+                            unreachable!("a hung effect never completes")
+                        }
+                    }
+                })
+            }
+            DeviceEffectCall::WriteHardwareManifest { manifest_json } => {
+                self.manifest_writes.borrow_mut().push(manifest_json);
+                Box::pin(core::future::ready(Ok(DeviceEffectFacts {
+                    summary: "board manifest written".to_string(),
+                    ..Default::default()
+                })))
+            }
+        }
     }
 }
 
@@ -195,6 +270,8 @@ struct DeviceBench {
     revoked: Rc<RefCell<Vec<String>>>,
     granted: Rc<Cell<bool>>,
     chooser_grants: Rc<Cell<bool>>,
+    flash_plan: Rc<Cell<FlashPlan>>,
+    manifest_writes: Rc<RefCell<Vec<String>>>,
     started: std::time::Instant,
 }
 
@@ -236,6 +313,15 @@ impl DeviceBench {
             let clock = Rc::clone(&clock);
             move || clock.get()
         });
+        // Shrink the flash ladder's budgets to bench scale (the fake clock
+        // walks 5 ms per step; a real 8 s rung would be 1600 steps of wall
+        // time each). The SHAPE under test is the rungs, never their size.
+        controller.set_device_roster_config_for_test(crate::DeviceRosterConfig {
+            expected_proto: lpc_wire::WIRE_PROTO_VERSION,
+            flash_rung_ms: 400,
+            flash_reopen_retry_ms: 100,
+            ..Default::default()
+        });
         controller.attach_library(Rc::new(host));
         controller.set_device_spawner({
             let tasks = Rc::clone(&tasks);
@@ -254,14 +340,16 @@ impl DeviceBench {
             let inbox = Rc::clone(&inbox);
             move |input| inbox.borrow_mut().push_back(input)
         });
-        // Short budgets keep the bench quick; the SHAPE under test is the
-        // deadline, never its size.
+        let flash_plan: Rc<Cell<FlashPlan>> = Rc::new(Cell::new(FlashPlan::default()));
+        let manifest_writes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         controller.set_device_transport(Rc::new(ScriptedTransport {
             device: device.clone(),
             endpoint: endpoint.to_string(),
             granted: Rc::clone(&granted),
             chooser_grants: Rc::clone(&chooser_grants),
             revoked: Rc::clone(&revoked),
+            flash_plan: Rc::clone(&flash_plan),
+            manifest_writes: Rc::clone(&manifest_writes),
         }));
 
         let bench = Self {
@@ -272,6 +360,8 @@ impl DeviceBench {
             revoked,
             granted,
             chooser_grants,
+            flash_plan,
+            manifest_writes,
             started: std::time::Instant::now(),
         };
         (bench, tasks)
@@ -603,6 +693,241 @@ fn dropped_responses_degrade_honestly_instead_of_hanging() {
     let registry = bench.registry();
     assert_eq!(registry.len(), 1, "{registry:?}");
     assert_eq!(registry[0].uid, "dev_starved");
+}
+
+/// A factory-fresh board, straight out of the bag: blank flash, no MAC on
+/// the wire until the flash preflight reads efuse.
+fn blank_board() -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::BlankFlash))
+}
+
+/// The board pick a C6 boot banner resolves to, through the REAL join
+/// (chip necessary, board refinement, served build required — no fallback).
+fn c6_board_choice() -> crate::FlashBoardChoice {
+    let offer = crate::flash_offer(Some("esp32c6"));
+    offer
+        .candidates
+        .first()
+        .cloned()
+        .expect("the checked-in catalog serves a C6 build")
+}
+
+/// M2's walk, end to end through the real effects layer: a blank board's
+/// pending card offers the needs-firmware face; Flash adopts it, streams
+/// progress into the projection, identity-joins off the preflight MAC,
+/// climbs the ladder to the new firmware's hello, stamps `/hardware.json`,
+/// and lands Ready — auto-named, with a registry row. No manual replug, no
+/// naming step.
+#[test]
+fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
+    let device = blank_board();
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-flash-1");
+
+    bench.run_until(&tasks, "the blank verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware)
+    });
+    let pending = &bench.view().pending[0];
+    assert_eq!(pending.detected_chip.as_deref(), Some("esp32c6"));
+    let target = pending.device;
+    let choice = c6_board_choice();
+
+    bench.gesture(DeviceAction::Flash {
+        device: target,
+        board_id: choice.board_id.clone(),
+        build_id: choice.build_id.clone(),
+    });
+
+    // The gesture adopts: the pending card becomes a device card, busy
+    // flashing, with the effect's progress visibly on it (the 2026-07-28
+    // defect's regression: progress must REACH the projection).
+    bench.run_until(&tasks, "flash progress to reach the card", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity
+                .as_ref()
+                .is_some_and(|activity| activity.percent == Some(100))
+        })
+    });
+    assert!(bench.view().pending.is_empty(), "adopted, not duplicated");
+
+    bench.run_until(&tasks, "the flashed board to land Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready" && card.activity.is_none())
+    });
+
+    let card = &bench.view().devices[0];
+    assert!(
+        card.last_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.ok && outcome.summary.contains("firmware installed")),
+        "{card:?}"
+    );
+    // Auto-name: "<board display_name> · <Mon D>" (bench clock = epoch
+    // second 1000 = Jan 1), no naming step anywhere.
+    assert_eq!(
+        card.title,
+        format!("{} · Jan 1", choice.title),
+        "the derived name is the card's title"
+    );
+
+    // The registry row was earned by the preflight MAC (normalized from the
+    // tool's UPPERCASE spelling), and carries the derived name.
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].uid, "mac:60:55:f9:0a:0b:0c");
+    assert_eq!(rows[0].name, card.title);
+    assert_eq!(
+        rows[0].hardware_id.as_deref(),
+        Some("efuse:60:55:f9:0a:0b:0c")
+    );
+
+    // The board manifest went to the device (D4), exactly once, verbatim.
+    let writes = bench.manifest_writes.borrow();
+    assert_eq!(writes.len(), 1, "one stamp per flash");
+    assert_eq!(
+        writes[0],
+        lpa_boards::runtime_manifest_json(&choice.board_id).expect("a served board has a manifest")
+    );
+}
+
+/// A mid-write failure lands on an honest problem face: outcome line with
+/// the tool's message, the needs-firmware face re-offered (retry in place),
+/// and every escape still present.
+#[test]
+fn a_mid_write_failure_lands_on_an_honest_face_with_retry_in_place() {
+    let device = blank_board();
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-flash-2");
+    bench.flash_plan.set(FlashPlan::FailMidWrite);
+    bench.run_until(&tasks, "the blank verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware)
+    });
+    let target = bench.view().pending[0].device;
+    let choice = c6_board_choice();
+
+    bench.gesture(DeviceAction::Flash {
+        device: target,
+        board_id: choice.board_id,
+        build_id: choice.build_id,
+    });
+    bench.run_until(&tasks, "the failure to settle", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = &bench.view().devices[0];
+    let outcome = card.last_outcome.as_ref().expect("an outcome");
+    assert!(!outcome.ok);
+    assert!(
+        outcome.summary.contains("write failed at 0x2000"),
+        "{outcome:?}"
+    );
+    assert!(
+        card.needs_firmware,
+        "the face re-offers the flash — retry in place: {card:?}"
+    );
+    assert!(!card.escapes.is_empty(), "always a way out");
+}
+
+/// Post-flash silence: the tool claims success but the board never answers.
+/// The ladder climbs (reopen → Normal → BothThenDrop, real reset commands
+/// through the real link) and then fails with the honest replug/Reconnect
+/// guidance.
+#[test]
+fn post_flash_silence_climbs_the_ladder_then_fails_with_honest_guidance() {
+    let device = blank_board();
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-flash-3");
+    bench.flash_plan.set(FlashPlan::SilentAfterWrite);
+    bench.run_until(&tasks, "the blank verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware)
+    });
+    let target = bench.view().pending[0].device;
+    let choice = c6_board_choice();
+
+    bench.gesture(DeviceAction::Flash {
+        device: target,
+        board_id: choice.board_id,
+        build_id: choice.build_id,
+    });
+    bench.run_until(&tasks, "the ladder to exhaust", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let outcome = bench.view().devices[0]
+        .last_outcome
+        .clone()
+        .expect("an outcome");
+    assert!(!outcome.ok);
+    assert!(
+        outcome.summary.contains("Reconnect"),
+        "the V3/CH340 guidance: {outcome:?}"
+    );
+    // The identity STILL joined off the preflight MAC — a failed reconnect
+    // does not orphan the board.
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].uid, "mac:60:55:f9:0a:0b:0c");
+}
+
+/// Forget mid-flash: eviction bounds even an effect that never completes.
+/// The entry, its record and its grant all go; the late markers land on
+/// nothing and nothing panics.
+#[test]
+fn forgetting_mid_flash_evicts_the_hung_effect_and_cleans_up() {
+    let device = blank_board();
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-flash-4");
+    bench.flash_plan.set(FlashPlan::Hang);
+    bench.run_until(&tasks, "the blank verdict to settle", |bench| {
+        bench
+            .view()
+            .pending
+            .first()
+            .is_some_and(|pending| pending.needs_firmware)
+    });
+    let target = bench.view().pending[0].device;
+    let choice = c6_board_choice();
+
+    bench.gesture(DeviceAction::Flash {
+        device: target,
+        board_id: choice.board_id,
+        build_id: choice.build_id,
+    });
+    bench.run_until(&tasks, "the flash to be visibly running", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_some())
+    });
+
+    bench.gesture(DeviceAction::Forget { device: target });
+    for _ in 0..20 {
+        bench.step(&tasks);
+    }
+
+    assert!(bench.view().devices.is_empty(), "the card is gone");
+    assert!(bench.view().pending.is_empty());
+    assert_eq!(bench.revoked.borrow().len(), 1, "the grant went back");
 }
 
 /// The seam `lpa-link` calls the ONLY honest source of `expected_proto`: the

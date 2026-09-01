@@ -36,10 +36,56 @@ pub struct GrantedLink {
     pub link: Box<dyn Link>,
 }
 
+/// One coarse-effect call, in platform terms. The model's
+/// [`EffectRequest`](lpa_devices::EffectRequest) is resolved into this by
+/// the effects layer (build ids stay opaque; the board manifest is resolved
+/// to its JSON before it crosses the seam, so a transport never depends on
+/// `lpa-boards`).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeviceEffectCall {
+    /// esptool flash of a packaged build. The chip guard and the pre-write
+    /// base-MAC read live below this seam and are load-bearing.
+    FlashFirmware { build_id: String },
+    /// Write the board runtime manifest to `/hardware.json` over the app
+    /// protocol (board-selection D4; effective next boot).
+    WriteHardwareManifest { manifest_json: String },
+}
+
+/// What a finished effect learned, beyond succeeding.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DeviceEffectFacts {
+    /// One line for the activity outcome.
+    pub summary: String,
+    /// The base MAC the flash preflight read from efuse, already normalized
+    /// — identity evidence for a blank board.
+    pub probed_mac: Option<String>,
+    /// The chip the operation talked to, as the tool reported it.
+    pub chip_name: Option<String>,
+}
+
+/// Progress callback for a running effect: label + optional percent. Called
+/// from inside the effect's own future; the effects layer turns each call
+/// into an `ActivityMarker::Progress` event.
+pub type DeviceEffectProgress = std::rc::Rc<dyn Fn(String, Option<u8>)>;
+
 /// How the app reaches real ports.
 pub trait DeviceTransport {
     /// A short label for logs ("browser Web Serial").
     fn label(&self) -> &'static str;
+
+    /// Run one coarse effect against a granted endpoint, with **exclusive
+    /// ownership of the wire** for the duration (the `device_manage.rs`
+    /// discipline): the effects layer pauses the link's pump before calling
+    /// this, and the platform below releases the port's reader/writer before
+    /// any tool touches the port. Never hold a handle across a reset that
+    /// re-enumerates (ADR 2026-07-30) — handles are re-derived from the
+    /// endpoint afterwards.
+    fn run_effect(
+        &self,
+        info: LinkInfo,
+        call: DeviceEffectCall,
+        progress: DeviceEffectProgress,
+    ) -> DeviceTransportFuture<Result<DeviceEffectFacts, String>>;
 
     /// The grants this origin ALREADY holds, as closed links. No chooser, no
     /// prompt — this is the startup and hotplug sweep.

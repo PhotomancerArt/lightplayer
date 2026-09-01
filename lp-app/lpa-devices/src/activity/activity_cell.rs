@@ -12,6 +12,7 @@ use crate::link::LinkId;
 use crate::roster::RosterConfig;
 use crate::time::Millis;
 
+use super::flash::FlashActivity;
 use super::identify::IdentifyActivity;
 
 /// Which flow an activity is running. One per device at a time (invariant
@@ -20,6 +21,7 @@ use super::identify::IdentifyActivity;
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ActivityKind {
     Identify,
+    Flash,
 }
 
 impl ActivityKind {
@@ -27,6 +29,20 @@ impl ActivityKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Identify => "Identifying",
+            Self::Flash => "Flashing firmware",
+        }
+    }
+
+    /// How long a cancelled activity of this kind gets to wind down before
+    /// eviction. Flash is wide on purpose: esptool-js cannot abort a write
+    /// cleanly, so the reducer holds a cancel through the write window with
+    /// an honest label — a 2 s grace would evict it into a half-written
+    /// image. Cancellation stays bounded (I2); the bound is just as wide as
+    /// the physics.
+    pub fn cancel_grace_ms(self, config: &RosterConfig) -> u64 {
+        match self {
+            Self::Identify => config.cancel_grace_ms,
+            Self::Flash => config.flash_cancel_grace_ms,
         }
     }
 }
@@ -212,24 +228,28 @@ impl ActivityCell {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) enum Reducer {
     Identify(IdentifyActivity),
+    Flash(FlashActivity),
 }
 
 impl ActivityReducer for Reducer {
     fn kind(&self) -> ActivityKind {
         match self {
             Self::Identify(reducer) => reducer.kind(),
+            Self::Flash(reducer) => reducer.kind(),
         }
     }
 
     fn handle(&mut self, now: Millis, input: &Input, ctx: &mut ActivityCtx<'_>) -> ActivityStep {
         match self {
             Self::Identify(reducer) => reducer.handle(now, input, ctx),
+            Self::Flash(reducer) => reducer.handle(now, input, ctx),
         }
     }
 
     fn next_deadline(&self) -> Option<Millis> {
         match self {
             Self::Identify(reducer) => reducer.next_deadline(),
+            Self::Flash(reducer) => reducer.next_deadline(),
         }
     }
 }

@@ -16,9 +16,16 @@ use lpa_devices::link::LinkInfo;
 use lpa_link::device_link::browser_serial::BrowserSerialLink;
 use lpa_link::device_link::wire::link_info;
 use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Provider;
-use lpa_link::{LinkEndpointId, LinkProvider};
+use lpa_link::{LinkEndpointId, LinkManagementEvent, LinkManagementEventSink, LinkProvider};
 
-use super::device_transport::{DeviceTransport, DeviceTransportFuture, GrantedLink};
+use super::device_transport::{
+    DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
+    DeviceTransportFuture, GrantedLink,
+};
+
+/// Where the board runtime manifest lives on a device (read by the
+/// firmware's loader at boot — effective next restart, board-selection D4).
+const DEVICE_HARDWARE_MANIFEST_PATH: &str = "/hardware.json";
 
 /// The browser Web Serial transport.
 pub struct BrowserSerialTransport {
@@ -66,8 +73,87 @@ impl DeviceTransport for BrowserSerialTransport {
                 .map_err(|error| error.to_string())?;
             Ok(granted
                 .iter()
+                // Under Brave's `SerialAllowAllPortsForUrls` policy,
+                // `getPorts()` also surfaces Bluetooth serial nodes (no USB
+                // ids at all). Only ports that could be an ESP32-class
+                // bridge become links — the same allowlist the chooser
+                // filter uses — so junk grants can never mint pending
+                // cards. The chooser path is unfiltered on purpose: a
+                // HUMAN pick through `requestPort` is already filtered by
+                // the JS side, and honoring it beats second-guessing it.
+                .filter(|grant| {
+                    let keep = lpa_link::is_esp32_serial_candidate(grant.usb_vid_pid);
+                    if !keep {
+                        log::debug!(
+                            "granted port {} is not an ESP32-class serial bridge; skipping",
+                            grant.endpoint.id.as_str()
+                        );
+                    }
+                    keep
+                })
                 .map(|grant| Self::granted(&provider, &grant.endpoint, grant.usb_vid_pid))
                 .collect())
+        })
+    }
+
+    fn run_effect(
+        &self,
+        info: LinkInfo,
+        call: DeviceEffectCall,
+        progress: DeviceEffectProgress,
+    ) -> DeviceTransportFuture<Result<DeviceEffectFacts, String>> {
+        let provider = Rc::clone(&self.provider);
+        Box::pin(async move {
+            let endpoint = LinkEndpointId::new(info.endpoint.0.clone());
+            // The connector-level event stream becomes the progress sink the
+            // effects layer turns into `ActivityMarker::Progress` — the ONE
+            // road to the screen (the 2026-07-28 defect's lesson). Logs ride
+            // it too, as label-only progress, so the card's narration keeps
+            // moving between percent ticks.
+            let events = LinkManagementEventSink::new(move |event| match event {
+                LinkManagementEvent::Log { message } => (progress)(message, None),
+                LinkManagementEvent::Progress(update) => (progress)(
+                    update.label,
+                    update
+                        .percent
+                        .map(|percent| u8::try_from(percent.min(100)).unwrap_or(100)),
+                ),
+            });
+            match call {
+                DeviceEffectCall::FlashFirmware { build_id } => {
+                    // `flashFirmware` in the JS releases the port's
+                    // reader/writer and closes it before esptool builds its
+                    // transport — the release half of the exclusive-borrow
+                    // discipline; the effects layer paused the pump for the
+                    // read half. The chip guard and the pre-write
+                    // `readBaseMac` live in that same JS and are
+                    // load-bearing — this path must never bypass them.
+                    let result = provider
+                        .flash_firmware_with_events(&endpoint, Some(&build_id), events)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: format!("wrote {}", result.manifest.display_name),
+                        probed_mac: result.base_mac,
+                        chip_name: result.chip_name,
+                    })
+                }
+                DeviceEffectCall::WriteHardwareManifest { manifest_json } => {
+                    provider
+                        .write_device_file(
+                            &endpoint,
+                            DEVICE_HARDWARE_MANIFEST_PATH,
+                            manifest_json.as_bytes(),
+                            events,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: "board manifest written".to_string(),
+                        ..Default::default()
+                    })
+                }
+            }
         })
     }
 

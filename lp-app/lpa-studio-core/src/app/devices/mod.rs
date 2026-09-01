@@ -34,6 +34,7 @@
 pub mod browser_transport;
 pub mod device_affordance;
 pub mod device_effects;
+pub mod device_flash;
 pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
@@ -43,7 +44,13 @@ pub mod devices_op;
 pub use browser_transport::BrowserSerialTransport;
 pub use device_affordance::{device_escape_action, device_status_kind, pending_escape_action};
 pub use device_effects::{DeviceEffects, DeviceTaskFuture, DeviceTimerFuture, PendingWrites};
+pub use device_flash::{
+    FlashBoardChoice, FlashOffer, derive_flash_name, flash_offer, taken_device_titles,
+};
 pub use device_records::{record_from_registry_row, registry_row_from_record};
 pub use device_roster::{DeviceRoster, DeviceRosterView, JournalLine};
-pub use device_transport::{DeviceTransport, DeviceTransportFuture, GrantedLink};
+pub use device_transport::{
+    DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
+    DeviceTransportFuture, GrantedLink,
+};
 pub use devices_op::DevicesOp;

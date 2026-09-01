@@ -24,3 +24,4 @@ pub mod management_result;
 pub mod operation;
 pub mod provider;
 pub mod session;
+pub mod usb_vendors;

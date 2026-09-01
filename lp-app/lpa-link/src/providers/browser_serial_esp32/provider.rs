@@ -509,6 +509,24 @@ impl BrowserSerialEsp32Provider {
             .map(|state| state.endpoint.id.clone())
     }
 
+    /// Write `bytes` to `path` on the device over the app protocol, on the
+    /// raw line framing (round 2's coarse-effect seam; first consumer is
+    /// the flash activity's `/hardware.json` stamp, D4).
+    ///
+    /// ⚠️ The caller owns the exclusive-borrow discipline: the model's link
+    /// pump for this endpoint must be paused while this runs, or the two
+    /// drainers split the frames between them.
+    pub async fn write_device_file(
+        &self,
+        endpoint_id: &LinkEndpointId,
+        path: &str,
+        bytes: &[u8],
+        events: LinkManagementEventSink,
+    ) -> Result<(), LinkError> {
+        let port_id = self.endpoint_port_id(endpoint_id)?;
+        super::port_client_io::write_device_file(port_id, path, bytes, events).await
+    }
+
     /// Session-scoped [`Self::probe_target`], for the connector's
     /// mode-detection escalation. Releases the app-protocol port first: the
     /// SYNC handshake needs the wire to itself and reboots the device.

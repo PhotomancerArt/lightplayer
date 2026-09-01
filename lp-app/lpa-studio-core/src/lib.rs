@@ -36,9 +36,10 @@ pub use app::bus::{
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use app::devices::BrowserSerialTransport;
 pub use app::devices::{
-    DeviceEffects, DeviceRoster, DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture,
-    DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink, JournalLine,
-    device_escape_action, device_status_kind, pending_escape_action,
+    DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects, DeviceRoster,
+    DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture, DeviceTransport, DeviceTransportFuture,
+    DevicesOp, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, device_escape_action,
+    device_status_kind, flash_offer, pending_escape_action,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::home::{

@@ -464,6 +464,239 @@ fn a_reset_reopens_the_question_instead_of_latching_a_verdict() {
     );
 }
 
+/// The M2 walk: a blank board is flashed FROM ITS PENDING CARD. The gesture
+/// adopts the link, the preflight MAC identity-joins the anonymous entry
+/// (and earns a registry write), progress reaches the projection, the
+/// ladder's reopen finds the boot hello, the board manifest is stamped, and
+/// the activity ends Ready.
+#[test]
+fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
+    let config = RosterConfig::default();
+    let mut replay = Replay::new(config);
+    replay.step(Millis(0), Step::attach(1, "usb-1"));
+    replay.step(Millis(20), Step::opened(1));
+    replay.step(Millis(40), Step::line(1, "ESP-ROM:esp32c6-20220919"));
+    replay.step(Millis(60), Step::line(1, "invalid header: 0xffffffff"));
+    replay.advance_to(Millis(6_000));
+    let view = replay.view();
+    assert!(view.pending[0].needs_firmware, "{:?}", view.pending[0]);
+    assert_eq!(view.pending[0].detected_chip.as_deref(), Some("esp32c6"));
+    let device = view.pending[0].device;
+
+    // The flash gesture: adopt + spawn + the coarse effect command.
+    let commands = replay.step(
+        Millis(6_100),
+        Step::Flash {
+            device: device.0,
+            board: "seeed-xiao-esp32c6".to_string(),
+            build: "esp32c6-4mb".to_string(),
+        },
+    );
+    assert!(replay.roster().pending().is_empty(), "flash adopts");
+    assert_eq!(replay.roster().devices().len(), 1);
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::RunEffect {
+                effect: lpa_devices::EffectRequest::Flash { .. },
+                ..
+            }
+        )),
+        "{commands:?}"
+    );
+    let view = replay.view();
+    assert_eq!(
+        view.devices[0]
+            .activity
+            .as_ref()
+            .map(|activity| activity.kind),
+        Some(ActivityKind::Flash)
+    );
+
+    // The preflight reads the efuse MAC: the anonymous entry becomes a
+    // rememberable identity, and the record write follows.
+    let commands = replay.step(
+        Millis(7_000),
+        Step::MacObserved {
+            device: device.0,
+            mac: "60:55:f9:0a:0b:0c".to_string(),
+        },
+    );
+    assert!(
+        commands.iter().any(
+            |command| matches!(command, lpa_devices::Command::PersistRecord(record)
+                if record.identity.mac.as_ref().is_some_and(|mac| mac.0 == "60:55:f9:0a:0b:0c"))
+        ),
+        "the MAC join persists: {commands:?}"
+    );
+
+    // Progress reaches the projection.
+    replay.step(
+        Millis(20_000),
+        Step::EffectProgress {
+            device: device.0,
+            label: "Writing firmware".to_string(),
+            percent: Some(62),
+        },
+    );
+    let view = replay.view();
+    assert_eq!(
+        view.devices[0]
+            .activity
+            .as_ref()
+            .and_then(|activity| activity.percent),
+        Some(62)
+    );
+
+    // The effect ends; the ladder reopens; the new firmware hellos.
+    let commands = replay.step(
+        Millis(60_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+        },
+    );
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::Link {
+                command: lpa_devices::LinkCommand::Open { .. },
+                ..
+            }
+        )),
+        "the ladder starts by reopening: {commands:?}"
+    );
+    replay.step(Millis(61_000), Step::opened(1));
+    let commands = replay.step(
+        Millis(62_000),
+        Step::hello(1).uid("dev_2f8a").board("seeed-xiao-esp32c6"),
+    );
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::RunEffect {
+                effect: lpa_devices::EffectRequest::WriteBoardManifest { board_id },
+                ..
+            } if board_id == "seeed-xiao-esp32c6"
+        )),
+        "the hello proves the app protocol; the D4 stamp follows: {commands:?}"
+    );
+
+    replay.step(
+        Millis(62_500),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: Some("manifest written".to_string()),
+        },
+    );
+
+    let view = replay.view();
+    assert_eq!(
+        view.devices[0].state_label, "Ready",
+        "{:?}",
+        view.devices[0]
+    );
+    assert!(!view.devices[0].needs_firmware);
+    let outcome = view.devices[0].last_outcome.as_ref().expect("an outcome");
+    assert!(outcome.ok, "{outcome:?}");
+    assert!(
+        outcome.summary.contains("firmware installed"),
+        "{outcome:?}"
+    );
+    assert_eq!(count_notes(&replay, "ActivityEnded"), 2, "identify + flash");
+}
+
+/// Scripted post-flash silence: the ladder escalates reopen → Normal →
+/// BothThenDrop and then fails with the honest replug/Reconnect guidance
+/// (V3/CH340: a replug kills the grant).
+#[test]
+fn a_silent_board_after_a_flash_climbs_the_ladder_then_fails_honestly() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    let device = first_device(&replay);
+    replay.step(
+        Millis(2_000),
+        Step::Flash {
+            device: device.0,
+            board: "dig-uno".to_string(),
+            build: "esp32-4mb".to_string(),
+        },
+    );
+    replay.step(
+        Millis(30_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+        },
+    );
+    replay.step(Millis(30_100), Step::opened(1));
+
+    // Silence through every rung. The runner fires the scheduled pokes and
+    // escalations on the way.
+    let exhausted = 30_000 + 3 * config.flash_rung_ms + 1_000;
+    replay.advance_to(Millis(exhausted));
+
+    let commands: Vec<&lpa_devices::Command> = replay
+        .commands()
+        .iter()
+        .map(|(_, command)| command)
+        .collect();
+    let resets: Vec<&lpa_devices::ResetKind> = commands
+        .iter()
+        .filter_map(|command| match command {
+            lpa_devices::Command::Link {
+                command: lpa_devices::LinkCommand::RunReset(kind),
+                ..
+            } => Some(kind),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resets,
+        vec![
+            &lpa_devices::ResetKind::Normal,
+            &lpa_devices::ResetKind::BothThenDrop
+        ],
+        "the escalation order is the bench-proven one"
+    );
+
+    let view = replay.view();
+    assert!(!view.devices[0].status.eq(&DeviceStatus::Busy));
+    let outcome = view.devices[0].last_outcome.as_ref().expect("an outcome");
+    assert!(!outcome.ok);
+    assert!(
+        outcome.summary.contains("Reconnect"),
+        "honest guidance: {outcome:?}"
+    );
+}
+
+/// Forget works mid-flash (I3): the entry, record and grant go, and the
+/// journal shows an eviction — cancellation bounded by removal.
+#[test]
+fn forget_mid_flash_evicts_and_cleans_up() {
+    let mut replay = ready_device();
+    let device = first_device(&replay);
+    replay.step(
+        Millis(2_000),
+        Step::Flash {
+            device: device.0,
+            board: "dig-uno".to_string(),
+            build: "esp32-4mb".to_string(),
+        },
+    );
+    assert!(replay.roster().device(device).expect("device").is_busy());
+
+    let commands = replay.step(Millis(10_000), Step::Forget { device: device.0 });
+
+    assert!(replay.roster().devices().is_empty());
+    assert!(deletes_a_record(&commands));
+    assert!(revokes_a_grant(&commands));
+    assert_eq!(count_notes(&replay, "ActivityEvicted"), 1);
+}
+
 // ---------------------------------------------------------------- helpers
 
 fn run_fixture(json: &str) {

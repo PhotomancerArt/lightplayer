@@ -35,13 +35,14 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 
-use lpa_devices::event::{Command, Event, Input};
-use lpa_devices::identity::{DeviceId, EndpointKey};
+use lpa_devices::activity::{ActivityKind, ActivityOutcome};
+use lpa_devices::event::{ActivityMarker, Command, EffectRequest, Event, Input};
+use lpa_devices::identity::{DeviceId, EndpointKey, MacAddress, PeerIdentity};
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkId, LinkInfo};
 use lpa_devices::record::DeviceRecord;
 use lpa_devices::time::TimerId;
 
-use super::device_transport::{DeviceTransport, GrantedLink};
+use super::device_transport::{DeviceEffectCall, DeviceTransport, GrantedLink};
 
 /// A spawned task. `?Send` like everything else in the studio.
 pub type DeviceTaskFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
@@ -99,10 +100,20 @@ struct LinkSlot {
     /// carries. Not a second state machine: it is used for exactly one
     /// question — "did this port die?" — on a hotplug disconnect.
     open: Rc<Cell<bool>>,
+    /// A coarse effect holds the wire: the pump stops draining until the
+    /// borrow ends, so the effect's own conversation is the only reader.
+    /// This is the executor's half of the exclusive-borrow discipline.
+    borrowed: Rc<Cell<bool>>,
 }
 
 /// A link that arrived from a spawned future, waiting to join the routing map.
-type Arrival = (LinkId, LinkInfo, Rc<RefCell<Box<dyn Link>>>, Rc<Cell<bool>>);
+struct Arrival {
+    link: LinkId,
+    info: LinkInfo,
+    handle: Rc<RefCell<Box<dyn Link>>>,
+    open: Rc<Cell<bool>>,
+    borrowed: Rc<Cell<bool>>,
+}
 
 /// Owns the links, the platform seams, and the spawning.
 pub struct DeviceEffects {
@@ -178,13 +189,14 @@ impl DeviceEffects {
     /// `LinkAttached` it queued behind itself is handled.
     pub fn settle(&mut self) {
         let arrived: Vec<Arrival> = self.arrivals.borrow_mut().drain(..).collect();
-        for (link, info, handle, open) in arrived {
+        for arrival in arrived {
             self.links.insert(
-                link,
+                arrival.link,
                 LinkSlot {
-                    info,
-                    link: handle,
-                    open,
+                    info: arrival.info,
+                    link: arrival.handle,
+                    open: arrival.open,
+                    borrowed: arrival.borrowed,
                 },
             );
         }
@@ -205,7 +217,103 @@ impl DeviceEffects {
             Command::PersistRecord(record) => self.writes.persist.push(record),
             Command::DeleteRecord(device) => self.writes.delete.push(device),
             Command::RevokeGrant(info) => self.revoke_grant(info),
+            Command::RunEffect {
+                device,
+                link,
+                effect,
+            } => self.run_effect(device, link, effect),
         }
+    }
+
+    /// Execute one coarse effect: borrow the wire exclusively, run the
+    /// operation through the transport, stream progress and the end marker
+    /// back through the sink — the round-2 seam
+    /// (`docs/adr/2026-08-25-event-fold-device-model.md`).
+    ///
+    /// ⚠️ Every marker goes through `self.sink` and nothing else — progress
+    /// that is merely written somewhere a rebuild would read is exactly how
+    /// a flash once ran for a minute with nothing on screen
+    /// (`docs/defects/2026-07-28-flash-progress-never-reached-the-ui.md`).
+    fn run_effect(&mut self, device: DeviceId, link: LinkId, effect: EffectRequest) {
+        let (Some(transport), Some(spawn), Some(sink)) = (
+            self.transport.clone(),
+            self.spawn.clone(),
+            self.sink.clone(),
+        ) else {
+            log::warn!("a coarse effect was requested before the platform seams were installed");
+            return;
+        };
+        let Some(slot) = self.links.get(&link) else {
+            // The port vanished between the fold and the effect — the same
+            // race the detach event right behind it describes. The activity
+            // still deserves an ending.
+            sink(effect_ended(
+                device,
+                ActivityOutcome::Failed {
+                    message: "the port is gone".to_string(),
+                },
+            ));
+            return;
+        };
+        let info = slot.info.clone();
+        let borrowed = Rc::clone(&slot.borrowed);
+        let call = match resolve_effect_call(&effect) {
+            Ok(call) => call,
+            Err(message) => {
+                sink(effect_ended(device, ActivityOutcome::Failed { message }));
+                return;
+            }
+        };
+        let progress: super::device_transport::DeviceEffectProgress = {
+            let sink = Rc::clone(&sink);
+            Rc::new(move |label: String, percent: Option<u8>| {
+                sink(Input::Event(Event::ActivityMarker {
+                    device,
+                    marker: ActivityMarker::Progress { label, percent },
+                }));
+            })
+        };
+        borrowed.set(true);
+        spawn(Box::pin(async move {
+            let result = transport.run_effect(info, call, progress).await;
+            // Give the wire back BEFORE the end marker folds: the reducer's
+            // very next command may be the ladder's reopen, and a pump still
+            // paused would eat the boot hello.
+            borrowed.set(false);
+            match result {
+                Ok(facts) => {
+                    // Normalized HERE, not trusted from the tool: the JS
+                    // side is untestable, and an unnormalized (or garbage)
+                    // MAC would mint a second identity for a board the
+                    // hello later binds properly. Invalid reads are dropped,
+                    // exactly like the old `record_probed_mac`.
+                    let mac = facts
+                        .probed_mac
+                        .as_deref()
+                        .and_then(lpa_link::normalize_base_mac);
+                    if let Some(mac) = mac {
+                        // Identity learned by the preflight enters as an
+                        // event (I6): the join for a blank board.
+                        sink(Input::Event(Event::IdentityObserved {
+                            device,
+                            identity: PeerIdentity {
+                                mac: Some(MacAddress(mac)),
+                                ..Default::default()
+                            },
+                        }));
+                    }
+                    sink(effect_ended(
+                        device,
+                        ActivityOutcome::Succeeded {
+                            summary: facts.summary,
+                        },
+                    ));
+                }
+                Err(message) => {
+                    sink(effect_ended(device, ActivityOutcome::Failed { message }));
+                }
+            }
+        }));
     }
 
     fn submit(&mut self, link: LinkId, command: LinkCommand) {
@@ -372,9 +480,14 @@ impl DeviceEffects {
             let info = granted.info.clone();
             let handle = Rc::new(RefCell::new(granted.link));
             let open = Rc::new(Cell::new(false));
-            arrivals
-                .borrow_mut()
-                .push((link, info.clone(), Rc::clone(&handle), Rc::clone(&open)));
+            let borrowed = Rc::new(Cell::new(false));
+            arrivals.borrow_mut().push(Arrival {
+                link,
+                info: info.clone(),
+                handle: Rc::clone(&handle),
+                open: Rc::clone(&open),
+                borrowed: Rc::clone(&borrowed),
+            });
             if let (Some(spawn), Some(timer)) = (spawn.clone(), timer.clone()) {
                 spawn_pump(
                     &spawn,
@@ -382,6 +495,7 @@ impl DeviceEffects {
                     link,
                     Rc::downgrade(&handle),
                     open,
+                    borrowed,
                     Rc::clone(&sink),
                 );
             }
@@ -398,13 +512,16 @@ impl DeviceEffects {
 /// One pump future per link: drain everything the wire has, then breathe.
 ///
 /// It holds a WEAK handle, so dropping the link (forget, revoke, detach) ends
-/// the pump on its next tick without a cancellation channel.
+/// the pump on its next tick without a cancellation channel. While a coarse
+/// effect holds the `borrowed` flag the pump does not touch the wire at all —
+/// the effect's own conversation is the only reader (exclusive borrow).
 fn spawn_pump(
     spawn: &Rc<dyn Fn(DeviceTaskFuture)>,
     timer: &Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>,
     link: LinkId,
     handle: Weak<RefCell<Box<dyn Link>>>,
     open: Rc<Cell<bool>>,
+    borrowed: Rc<Cell<bool>>,
     sink: Rc<dyn Fn(Input)>,
 ) {
     let timer = Rc::clone(timer);
@@ -414,7 +531,7 @@ fn spawn_pump(
                 return;
             };
             // Drain synchronously: `poll_event` never blocks, by contract.
-            loop {
+            while !borrowed.get() {
                 let next = strong.borrow_mut().poll_event();
                 let Some(event) = next else { break };
                 match &event {
@@ -429,6 +546,35 @@ fn spawn_pump(
             sleep.await;
         }
     }));
+}
+
+/// The Ended marker a coarse effect reports through the sink.
+fn effect_ended(device: DeviceId, outcome: ActivityOutcome) -> Input {
+    Input::Event(Event::ActivityMarker {
+        device,
+        marker: ActivityMarker::Ended {
+            kind: ActivityKind::Flash,
+            outcome,
+        },
+    })
+}
+
+/// Resolve a model effect into platform terms. The board manifest is looked
+/// up HERE (the app layer owns `lpa-boards`), so a display-only board id
+/// degrades honestly instead of writing junk to the device.
+fn resolve_effect_call(effect: &EffectRequest) -> Result<DeviceEffectCall, String> {
+    match effect {
+        EffectRequest::Flash { build_id, .. } => Ok(DeviceEffectCall::FlashFirmware {
+            build_id: build_id.clone(),
+        }),
+        EffectRequest::WriteBoardManifest { board_id } => {
+            let manifest_json = lpa_boards::runtime_manifest_json(board_id)
+                .ok_or_else(|| format!("board {board_id} has no checked-in runtime manifest"))?;
+            Ok(DeviceEffectCall::WriteHardwareManifest {
+                manifest_json: manifest_json.to_string(),
+            })
+        }
+    }
 }
 
 #[cfg(test)]

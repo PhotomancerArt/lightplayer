@@ -1,6 +1,7 @@
 mod browser_esp32_flash;
 mod browser_serial;
 mod browser_serial_esp32_options;
+mod port_client_io;
 mod provider;
 
 pub use browser_esp32_flash::{

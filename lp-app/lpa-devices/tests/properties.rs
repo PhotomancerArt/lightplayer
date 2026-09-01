@@ -363,6 +363,33 @@ fn gestures() -> Vec<(&'static str, Vec<Step>)> {
         ("adopt the link", vec![Step::Adopt { link: 1 }]),
         ("dismiss the link", vec![Step::Dismiss { link: 1 }]),
         ("forget", vec![Step::Forget { device: 1 }]),
+        ("flash", vec![flash_step()]),
+        (
+            "flash then the effect fails",
+            vec![
+                flash_step(),
+                Step::EffectEnded {
+                    device: 1,
+                    ok: false,
+                    message: Some("write failed at 0x2000".to_string()),
+                },
+            ],
+        ),
+        (
+            "flash then the effect succeeds",
+            vec![
+                flash_step(),
+                Step::EffectEnded {
+                    device: 1,
+                    ok: true,
+                    message: None,
+                },
+            ],
+        ),
+        (
+            "flash then cancel",
+            vec![flash_step(), Step::Cancel { device: 1 }],
+        ),
         (
             "adopt then forget",
             vec![Step::Adopt { link: 1 }, Step::Forget { device: 1 }],
@@ -372,7 +399,19 @@ fn gestures() -> Vec<(&'static str, Vec<Step>)> {
 }
 
 /// Instants worth landing on: before any deadline, past the identify
-/// deadline, past the cancel grace, past the quiet window, and long after.
+/// deadline, past the cancel grace, past the quiet window, long after, and
+/// past the flash ladder + deadline.
 fn instants() -> Vec<u64> {
-    vec![0, 1_500, 6_500, 14_000, 40_000]
+    vec![0, 1_500, 6_500, 14_000, 40_000, 300_000]
+}
+
+/// The flash gesture aimed at entry 1 (a device, a pending link — which the
+/// gesture adopts — or nothing at all; the space includes the misses on
+/// purpose).
+fn flash_step() -> Step {
+    Step::Flash {
+        device: 1,
+        board: "seeed-xiao-esp32c6".to_string(),
+        build: "esp32c6-4mb".to_string(),
+    }
 }

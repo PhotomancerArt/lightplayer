@@ -158,8 +158,11 @@ cargo check -p lpa-devices --target wasm32-unknown-unknown   # `just check` skip
 
 ## Not here yet
 
-- Setup, Flash, Provision, Push and Pull activities (round 2) — they are
-  new `ActivityKind` variants and new `Reducer` arms, nothing structural.
+- Push and Pull activities (round-2 M3/M4) — new `ActivityKind` variants
+  and new `Reducer` arms plus `EffectRequest` arms, following Flash's
+  shape. (Flash landed in M2 as the first coarse-effect activity; the old
+  Setup/Provision orchestrators dissolved into the card ruling — the card
+  face picks the verb from fold evidence.)
 - Journal and record persistence wiring: the model emits serializable
   entries and `PersistRecord` / `DeleteRecord`; the app picks storage (M3).
 - The `lpc-wire` reconciliation: `wire.rs` is a deliberate minimal mirror
