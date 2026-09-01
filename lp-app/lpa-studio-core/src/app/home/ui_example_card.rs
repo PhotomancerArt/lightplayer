@@ -11,7 +11,4 @@ pub struct UiExampleCard {
     pub name: String,
     /// Package kind, for the section's kind filter chips.
     pub kind: String,
-    /// One line about the fixture this example runs on (the card's
-    /// hover reveal) — authored per example in the embedded registry.
-    pub blurb: String,
 }

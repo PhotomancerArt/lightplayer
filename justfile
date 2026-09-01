@@ -392,10 +392,27 @@ studio-story-check *filters: studio-web-story-build
 # harness browser pane to another worktree's server (see
 # docs/defects/2026-07-27-launch-json-pinned-port.md). Run this before
 # opening a harness preview; it is idempotent.
-claude-launch-json:
+#
+# `just claude-launch-json bench` predicts the bench-block port instead
+# and points the entry at studio-dev-bench (hardware walks — see that
+# recipe). The bench prediction is more collision-prone than a hashed one
+# (ten shared slots): if another worktree grabs the slot between query and
+# launch, the server probes onward and the entry goes stale — regenerate.
+# The server's printed URL remains the source of truth.
+claude-launch-json mode="":
     #!/usr/bin/env bash
     set -euo pipefail
-    port="$(scripts/dev-port.sh --query studio-dev "${STUDIO_WEB_PORT:-}")"
+    case "{{ mode }}" in
+      bench)
+        port="$(scripts/dev-port.sh --query --bench studio-dev)"
+        recipe="studio-dev-bench"
+        ;;
+      "")
+        port="$(scripts/dev-port.sh --query studio-dev "${STUDIO_WEB_PORT:-}")"
+        recipe="studio-dev"
+        ;;
+      *) echo "unknown mode: {{ mode }} (want empty | bench)" >&2; exit 2 ;;
+    esac
     mkdir -p .claude
     cat > .claude/launch.json <<EOF
     {
@@ -404,20 +421,36 @@ claude-launch-json:
         {
           "name": "studio-dev",
           "runtimeExecutable": "just",
-          "runtimeArgs": ["studio-dev"],
+          "runtimeArgs": ["${recipe}"],
           "port": ${port},
           "autoPort": false
         }
       ]
     }
     EOF
-    echo "wrote .claude/launch.json (studio-dev port ${port})"
+    echo "wrote .claude/launch.json (${recipe} port ${port})"
+
+# studio-dev on a reserved bench-block port, so the standing WebSerial
+# grant (`just serial-grant`) covers the origin and the chooser never
+# appears. HARDWARE WALKS ONLY — the block is tiny and deliberately
+# exclusive (Yona: bench sessions shouldn't share); everyday dev uses
+# plain `just studio-dev` and hashed ports. The printed URL is the source
+# of truth, as always (docs/defects/2026-07-27-launch-json-pinned-port.md).
+studio-dev-bench:
+    STUDIO_BENCH=1 just studio-dev
 
 studio-dev: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
-    port="$(scripts/dev-port.sh studio-dev "${STUDIO_WEB_PORT:-}")"
+    # STUDIO_BENCH=1 (via `just studio-dev-bench`) serves from the reserved
+    # bench block so the standing WebSerial grant covers the origin — see
+    # the serial-grant recipe. Hardware walks only; ordinary dev hashes.
+    if [[ -n "${STUDIO_BENCH:-}" ]]; then
+        port="$(scripts/dev-port.sh --bench studio-dev)"
+    else
+        port="$(scripts/dev-port.sh studio-dev "${STUDIO_WEB_PORT:-}")"
+    fi
     public_dir="target/dx/lpa-studio-web/debug/web/public"
     sidecar_dir="{{ studio_assets_dir }}/debug/pkg"
     # Read once, outside the 1 s loop — the served list does not change while
@@ -1968,6 +2001,151 @@ watch-pr *args:
 # with `--chip esp32s3`, script with `--json`.
 hardware-list *args:
     cargo run -q -p lp-cli -- hardware list {{ args }}
+
+# Remove the WebSerial chooser dialog for local dev servers by granting Brave
+# standing serial access via the Chromium enterprise policy
+# SerialAllowAllPortsForUrls. Why: the chooser is a NATIVE dialog no agent
+# tooling can click, and per-device grants are fragile anyway — Brave drops
+# them on reload, and CH340 boards carry no USB serial number so a grant
+# also dies on replug.
+#
+# Hard-won mechanics (verified 2026-08-30/31, on silicon + in Chromium
+# source — do not relitigate):
+#
+# ⚠️ A plain `defaults write com.brave.Browser ...` DOES NOT WORK for this
+# policy. The macOS policy loader treats non-forced preferences as
+# POLICY_LEVEL_RECOMMENDED (policy_loader_mac.mm), and
+# SerialAllowAllPortsForUrls is mandatory-only, so the value silently
+# drops. Generic blog examples of `defaults write` policies work because
+# most policies accept the recommended level; this family doesn't. The
+# policy is NOT in GetSensitivePolicies(), so a FORCED (managed)
+# preference is honored without MDM — on an unmanaged Mac that means a
+# configuration profile, which is what this recipe generates. Verified
+# working end-to-end in Brave (MCX-Forced profile → gesture-free
+# getPorts()) 2026-08-31.
+#
+# ⚠️ Policy entries are STRICT ORIGINS, not URL patterns
+# (serial_policy_allowed_ports.cc: GURL → url::Origin, exact
+# scheme+host+PORT match). "http://localhost" grants port 80 ONLY. So the
+# profile enumerates the BENCH BLOCK — the small port range dev-port.sh
+# reserves out of its hash space (`scripts/dev-port.sh --bench-block`) —
+# on both loopback hosts. Hardware-walk sessions serve from that block
+# via `just studio-dev-bench`; ordinary dev keeps hashed ports. Per Yona:
+# a dedicated USB-testing port set is fine — bench sessions shouldn't be
+# sharing anyway. The profile is static after one install; getPorts()
+# probe pages must also sit on block ports or they escape the grant.
+#
+# Output goes to ~/.photomancer/serial-grant.mobileconfig, NOT target/ —
+# a cargo-cache prune wiped an earlier staged profile out of target/
+# before it could be installed. Once INSTALLED the file is disposable
+# (macOS keeps the profile); rerun this recipe any time to regenerate.
+# PayloadIdentifier stays art.photomancer.serial-grant so a reinstall
+# REPLACES the standing profile instead of stacking beside it.
+# Finish the install yourself: System Settings → General → Device
+# Management → double-click the downloaded profile → Install (admin
+# password). Then restart Brave and verify at brave://policy that
+# SerialAllowAllPortsForUrls shows level "Mandatory" with no error badge;
+# the real proof is navigator.serial.getPorts() returning ports with no
+# gesture on a bench-block dev page.
+#
+# Note the dialog did TWO jobs — permission grant AND port selection. This
+# grant replaces only the permission half; picking WHICH port belongs to
+# the app (navigator.serial.getPorts() + VID filtering in the device flow).
+serial-grant:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Stale user-domain defaults from the refuted approach only muddy
+    # diagnosis; clear them if present.
+    defaults delete com.brave.Browser SerialAllowAllPortsForUrls 2>/dev/null || true
+    mkdir -p "$HOME/.photomancer"
+    out="$HOME/.photomancer/serial-grant.mobileconfig"
+    read -r block_lo block_hi < <(scripts/dev-port.sh --bench-block)
+    cat > "$out" <<'EOF'
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+      <key>PayloadContent</key>
+      <array>
+        <dict>
+          <key>PayloadContent</key>
+          <dict>
+            <key>com.brave.Browser</key>
+            <dict>
+              <key>Forced</key>
+              <array>
+                <dict>
+                  <key>mcx_preference_settings</key>
+                  <dict>
+                    <key>SerialAllowAllPortsForUrls</key>
+                    <array>
+    EOF
+    for port in $(seq "$block_lo" "$block_hi"); do
+      printf '                  <string>http://127.0.0.1:%s</string>\n' "$port" >> "$out"
+      printf '                  <string>http://localhost:%s</string>\n' "$port" >> "$out"
+    done
+    cat >> "$out" <<'EOF'
+                    </array>
+                  </dict>
+                </dict>
+              </array>
+            </dict>
+          </dict>
+          <key>PayloadEnabled</key>
+          <true/>
+          <key>PayloadDisplayName</key>
+          <string>Brave WebSerial localhost grant</string>
+          <key>PayloadIdentifier</key>
+          <string>art.photomancer.serial-grant.brave</string>
+          <key>PayloadType</key>
+          <string>com.apple.ManagedClient.preferences</string>
+          <key>PayloadUUID</key>
+          <string>8C90D62A-B188-42F6-87E4-36A84EB0546A</string>
+          <key>PayloadVersion</key>
+          <integer>1</integer>
+        </dict>
+      </array>
+      <key>PayloadDisplayName</key>
+      <string>LightPlayer dev — Brave WebSerial grant (loopback only)</string>
+      <key>PayloadIdentifier</key>
+      <string>art.photomancer.serial-grant</string>
+      <key>PayloadRemovalDisallowed</key>
+      <false/>
+      <key>PayloadScope</key>
+      <string>System</string>
+      <key>PayloadType</key>
+      <string>Configuration</string>
+      <key>PayloadUUID</key>
+      <string>44278F52-84A0-4C9C-B2F8-A55D6F19D354</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+    </dict>
+    </plist>
+    EOF
+    open "$HOME/.photomancer/serial-grant.mobileconfig"
+    echo "profile generated (bench block ${block_lo}-${block_hi}, both loopback hosts) and handed to macOS."
+    echo "finish: System Settings → General → Device Management → install it (admin password)"
+    echo "then:   restart Brave and check brave://policy (SerialAllowAllPortsForUrls, level Mandatory)"
+    echo "serve:  just studio-dev-bench (hardware walks only)"
+
+# Best-effort check of the standing grant: managed preferences appear under
+# /Library/Managed Preferences once the profile is installed. brave://policy
+# is the authoritative view.
+serial-grant-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if defaults read "/Library/Managed Preferences/com.brave.Browser" SerialAllowAllPortsForUrls 2>/dev/null; then
+      echo "managed grant present (verify level Mandatory at brave://policy)"
+    else
+      echo "no managed grant found — run \`just serial-grant\` and install the profile"
+      exit 1
+    fi
+
+# Remove the standing grant. Configuration profiles cannot be removed from
+# the CLI on modern macOS; do it in System Settings.
+serial-ungrant:
+    @echo 'System Settings → General → Device Management → "LightPlayer dev — Brave WebSerial grant" → Remove'
+    @defaults delete com.brave.Browser SerialAllowAllPortsForUrls 2>/dev/null || true
 
 # Build and flash a FIXTURE firmware — a CURRENT build that misreports its
 # hello, so a current Studio classifies it Incompatible on purpose.

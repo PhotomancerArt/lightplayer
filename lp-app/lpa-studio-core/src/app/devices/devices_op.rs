@@ -37,12 +37,16 @@ impl DevicesOp {
 impl ControllerOp for DevicesOp {
     fn default_action_meta(&self) -> ActionMeta {
         match &self.0 {
+            // The verb names the TRANSPORT, not the abstract act: the add
+            // card's invitation stays transport-open ("connect a board"),
+            // and this button is the USB way in — a future network path
+            // gets its own verb beside it instead of a mode switch.
             Action::AddFromUsb => ActionMeta::new(
-                "Add a device",
-                "Pick a USB port to look for a LightPlayer board on.",
+                "It's plugged in",
+                "Pick the USB port your LightPlayer board is plugged into.",
                 ActionPriority::Primary,
             )
-            .with_icon("add"),
+            .with_icon("usb"),
             Action::AdoptLink { .. } => ActionMeta::new(
                 "Set up this device",
                 "Remember this board so it can be set up.",
@@ -58,7 +62,7 @@ impl ControllerOp for DevicesOp {
                 ActionConfirmation::new(
                     "Dismiss this port?",
                     "Studio hands the browser's permission for this port back. \
-                     You can pick it again from Add a device.",
+                     You can pick it again from the add-device card.",
                     "Dismiss",
                 )
                 .inline(),
