@@ -514,7 +514,13 @@ fn devices_page_armed_confirm() -> Element {
     rsx! {
         div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
             DeviceRosterCard { card: idle, on_action: |_| {} }
-            DeviceRosterCard { card: armed, armed_preview: true, on_action: |_| {} }
+            DeviceRosterCard {
+                card: armed,
+                projects: vec![],
+                examples: vec![],
+                armed_preview: true,
+                on_action: |_| {},
+            }
         }
     }
 }
