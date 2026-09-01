@@ -392,10 +392,27 @@ studio-story-check *filters: studio-web-story-build
 # harness browser pane to another worktree's server (see
 # docs/defects/2026-07-27-launch-json-pinned-port.md). Run this before
 # opening a harness preview; it is idempotent.
-claude-launch-json:
+#
+# `just claude-launch-json bench` predicts the bench-block port instead
+# and points the entry at studio-dev-bench (hardware walks — see that
+# recipe). The bench prediction is more collision-prone than a hashed one
+# (ten shared slots): if another worktree grabs the slot between query and
+# launch, the server probes onward and the entry goes stale — regenerate.
+# The server's printed URL remains the source of truth.
+claude-launch-json mode="":
     #!/usr/bin/env bash
     set -euo pipefail
-    port="$(scripts/dev-port.sh --query studio-dev "${STUDIO_WEB_PORT:-}")"
+    case "{{ mode }}" in
+      bench)
+        port="$(scripts/dev-port.sh --query --bench studio-dev)"
+        recipe="studio-dev-bench"
+        ;;
+      "")
+        port="$(scripts/dev-port.sh --query studio-dev "${STUDIO_WEB_PORT:-}")"
+        recipe="studio-dev"
+        ;;
+      *) echo "unknown mode: {{ mode }} (want empty | bench)" >&2; exit 2 ;;
+    esac
     mkdir -p .claude
     cat > .claude/launch.json <<EOF
     {
@@ -404,14 +421,14 @@ claude-launch-json:
         {
           "name": "studio-dev",
           "runtimeExecutable": "just",
-          "runtimeArgs": ["studio-dev"],
+          "runtimeArgs": ["${recipe}"],
           "port": ${port},
           "autoPort": false
         }
       ]
     }
     EOF
-    echo "wrote .claude/launch.json (studio-dev port ${port})"
+    echo "wrote .claude/launch.json (${recipe} port ${port})"
 
 # studio-dev on a reserved bench-block port, so the standing WebSerial
 # grant (`just serial-grant`) covers the origin and the chooser never

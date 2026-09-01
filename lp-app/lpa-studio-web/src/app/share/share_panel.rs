@@ -473,9 +473,10 @@ const SHARE_POPUP_CLASS: &str =
     "tw:grid tw:w-[348px] tw:min-w-0 tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 /// The URL hero's box: the terminal surface, because it holds an address.
 const URL_HERO_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-border tw:bg-terminal tw:px-2.5 tw:py-2";
-/// The one filled button in the panel — the link IS the share, so it wears
-/// the Primary gradient (the app's one loud fill; accent reckoning D1).
-const COPY_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:px-2.5 tw:py-1.5 tw:transition-colors ux-primary-gradient ux-focus-ring";
+/// The one Primary-voiced button in the panel — the link IS the share, so
+/// it wears the standing spectrum outline (the app's one standing rainbow;
+/// devices-treatments gate 2026-08-31 succeeded the gradient fill).
+const COPY_BUTTON_CLASS: &str = "tw:inline-flex tw:flex-none tw:cursor-pointer tw:items-center tw:gap-1.5 tw:rounded-sm tw:border tw:px-2.5 tw:py-1.5 tw:transition-colors ux-spectrum-cta ux-focus-ring";
 /// The three-way segment's frame.
 const SEGMENT_CLASS: &str =
     "tw:flex tw:min-w-0 tw:overflow-hidden tw:rounded-sm tw:border tw:border-border-strong";
@@ -530,11 +531,12 @@ mod tests {
             COPY_BUTTON_CLASS,
             ADD_ROW_CLASS,
         ] {
-            // `.ux-primary-gradient` carries fill, edge, and text together
-            // (style.css) — it names a background the same way `tw:bg-*`
-            // does, just as the Primary action tier composes it.
+            // `.ux-spectrum-cta` carries ring, text, and an explicit
+            // transparent background together (style.css) — it names a
+            // background the same way `tw:bg-*` does, just as the Primary
+            // action tier composes it.
             assert!(
-                class.contains("tw:bg-") || class.contains("ux-primary-gradient"),
+                class.contains("tw:bg-") || class.contains("ux-spectrum-cta"),
                 "no background in `{class}`"
             );
         }

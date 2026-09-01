@@ -25,7 +25,7 @@ use lpa_studio_core::{DeviceAction, DeviceRosterView, DevicesOp, UiAction, UiHom
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::sim_card::SimCard;
 use crate::app::home::{device_grid_class, section_title_class};
-use crate::core::{ActionButton, ActionButtonVariant};
+use crate::core::ActionButton;
 
 /// The runtime roster page (roadmap M4's gallery top, re-homed).
 #[component]
@@ -111,18 +111,26 @@ pub fn DevicesPage(home: UiHomeView, on_action: EventHandler<UiAction>) -> Eleme
 /// will appear. It doubles as the empty state — same slot, same copy, same
 /// layout whether it is the first board or the fifth (clear minimalism,
 /// G1 ruling) — so there is no separate empty-state block to jump around.
+///
+/// The CTA wears the default Solid/Primary tier: the Outline override was
+/// the round-1 dodge for the too-bold gradient fill, and the spike gate
+/// (2026-08-31, "1F for the primary") made Primary the spectrum outline
+/// the slot wanted all along.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn AddDeviceCard(on_action: EventHandler<UiAction>) -> Element {
     rsx! {
         div { class: "tw:flex tw:min-h-40 tw:flex-col tw:items-center tw:justify-center tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-5 tw:py-6",
+            // The invitation is transport-OPEN: connecting is the goal, and
+            // the USB specifics live on the verb below ("It's plugged in"),
+            // so a network path can join later as a sibling verb rather
+            // than a rewrite.
             p { class: "tw:m-0 tw:max-w-56 tw:text-center tw:text-xs tw:leading-relaxed tw:text-muted-foreground",
-                "Plug in a LightPlayer board and pick its USB port."
+                "Connect a LightPlayer board to control\u{a0}it."
             }
             ActionButton {
                 action: DevicesOp::action_for(DeviceAction::AddFromUsb),
                 running: false,
-                variant: ActionButtonVariant::Outline,
                 on_action,
             }
         }

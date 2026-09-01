@@ -57,6 +57,11 @@ pub(crate) fn DeviceRosterCard(
     card: DeviceView,
     projects: Vec<UiPackageCard>,
     examples: Vec<UiExampleCard>,
+    /// Story-only: render the Forget escape already ARMED, so captures can
+    /// show the 2K+ armed dress and the card's `:has()` marking. Real
+    /// surfaces never set this.
+    #[props(default)]
+    armed_preview: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let device = card.id;
@@ -84,70 +89,78 @@ pub(crate) fn DeviceRosterCard(
 
     rsx! {
         article { class: card_class(),
-            // ── zone 1: header ──────────────────────────────────────────
-            header { class: "tw:grid tw:gap-1.5",
-                div { class: "tw:flex tw:items-start tw:justify-between tw:gap-3",
-                    h3 { class: "tw:m-0 tw:min-w-0 tw:truncate tw:text-sm tw:font-bold tw:text-strong-foreground",
-                        "{card.title}"
+            // The armed-confirm scope (design spike, main): while a footer
+            // chip is ARMED, the card previews its own removal — this
+            // wrapper dims and the scope grows a red inset ring, all via
+            // `:has()` (style.css), so no armed state ever reaches this
+            // renderer. Zones 1-3 live inside; the actions footer stays
+            // OUTSIDE so the asking chip keeps full contrast.
+            div { class: "ux-armed-dim tw:grid tw:gap-3",
+                // ── zone 1: header ──────────────────────────────────────
+                header { class: "tw:grid tw:gap-1.5",
+                    div { class: "tw:flex tw:items-start tw:justify-between tw:gap-3",
+                        h3 { class: "tw:m-0 tw:min-w-0 tw:truncate tw:text-sm tw:font-bold tw:text-strong-foreground",
+                            "{card.title}"
+                        }
+                        StatusChip { status }
                     }
-                    StatusChip { status }
+                    if let Some(identity) = card.identity_label.clone() {
+                        p { class: mono_line_class(), "{identity}" }
+                    }
                 }
-                if let Some(identity) = card.identity_label.clone() {
-                    p { class: mono_line_class(), "{identity}" }
-                }
-            }
 
-            // ── zone 2: state — what it is, what is happening, one verb ──
-            section { class: zone_class(),
-                div { class: "tw:grid tw:gap-1",
-                    // The running face's headline: what the board says it is
-                    // running, above the firmware detail.
-                    if let Some(running) = running.clone() {
-                        p { class: detail_class(), "Running {running}" }
-                    }
-                    if let Some(detail) = card.detail.clone() {
-                        p { class: detail_class(), "{detail}" }
-                    }
-                    // Honest staleness instead of a spinner that means nothing.
-                    if let Some(freshness) = card.freshness_label.clone() {
-                        p { class: quiet_line_class(), "{freshness}" }
-                    }
-                    if let Some(outcome) = card.last_outcome.clone() {
-                        p {
-                            class: if outcome.ok { detail_class() } else { failure_line_class() },
-                            "{outcome.summary}"
+                // ── zone 2: state — what it is, what happens, one verb ──
+                section { class: zone_class(),
+                    div { class: "tw:grid tw:gap-1",
+                        // The running face's headline: what the board says
+                        // it is running, above the firmware detail.
+                        if let Some(running) = running.clone() {
+                            p { class: detail_class(), "Running {running}" }
+                        }
+                        if let Some(detail) = card.detail.clone() {
+                            p { class: detail_class(), "{detail}" }
+                        }
+                        // Honest staleness instead of a meaningless spinner.
+                        if let Some(freshness) = card.freshness_label.clone() {
+                            p { class: quiet_line_class(), "{freshness}" }
+                        }
+                        if let Some(outcome) = card.last_outcome.clone() {
+                            p {
+                                class: if outcome.ok { detail_class() } else { failure_line_class() },
+                                "{outcome.summary}"
+                            }
                         }
                     }
-                }
 
-                // The bar and its label stay HERE, with the state they
-                // describe; the terminal below carries the narration.
-                if let Some(activity) = card.activity.clone() {
-                    ActivityRow { activity }
-                }
+                    // The bar and its label stay HERE, with the state they
+                    // describe; the terminal carries the narration.
+                    if let Some(activity) = card.activity.clone() {
+                        ActivityRow { activity }
+                    }
 
-                if offer_flash {
-                    FlashFace {
-                        device,
-                        detected_chip: card.detected_chip.clone(),
-                        on_action,
+                    if offer_flash {
+                        FlashFace {
+                            device,
+                            detected_chip: card.detected_chip.clone(),
+                            on_action,
+                        }
+                    }
+
+                    if offer_push {
+                        EmptyFace { card: card.clone(), projects, examples, on_action }
                     }
                 }
 
-                if offer_push {
-                    EmptyFace { card: card.clone(), projects, examples, on_action }
+                // ── zone 3: terminal ────────────────────────────────────
+                // Always present on a linked card, empty or not: a panel
+                // that comes and goes is a panel that resizes the card,
+                // which is the churn the four zones exist to stop.
+                if linked {
+                    TerminalPanel { lines: card.terminal_lines.clone() }
                 }
             }
 
-            // ── zone 3: terminal ────────────────────────────────────────
-            // Always present on a linked card, empty or not: a panel that
-            // comes and goes is a panel that resizes the card, which is the
-            // churn the four zones exist to stop.
-            if linked {
-                TerminalPanel { lines: card.terminal_lines.clone() }
-            }
-
-            // ── zone 4: actions ─────────────────────────────────────────
+            // ── zone 4: actions (outside the armed-dim scope) ───────────
             // Every escape the projection carries, in every state — including
             // Forget mid-activity, which the shipped system could not do.
             // The always-actions join when the board is linked and idle (the
@@ -160,6 +173,7 @@ pub(crate) fn DeviceRosterCard(
                         action: device_escape_action(escape, device),
                         running: false,
                         variant: ActionButtonVariant::Quiet,
+                        armed_preview: armed_preview && escape == DeviceEscape::Forget,
                         on_action,
                     }
                 }
@@ -250,34 +264,37 @@ pub(crate) fn PendingLinkCard(
 
     rsx! {
         article { class: card_class(),
-            header { class: "tw:flex tw:items-start tw:justify-between tw:gap-3",
-                h3 { class: "tw:m-0 tw:min-w-0 tw:truncate tw:text-sm tw:font-bold tw:text-strong-foreground",
-                    "{pending.title}"
+            // Same armed-confirm scope as the device card: Dismiss armed =
+            // this entry previews its removal; the footer keeps contrast.
+            div { class: "ux-armed-dim tw:grid tw:gap-3",
+                header { class: "tw:flex tw:items-start tw:justify-between tw:gap-3",
+                    h3 { class: "tw:m-0 tw:min-w-0 tw:truncate tw:text-sm tw:font-bold tw:text-strong-foreground",
+                        "{pending.title}"
+                    }
+                    StatusChip { status }
                 }
-                StatusChip { status }
-            }
-            p { class: detail_class(), "{pending.state_label}" }
-            if let Some(detail) = pending.detail.clone() {
-                p { class: quiet_line_class(), "{detail}" }
-            }
+                p { class: detail_class(), "{pending.state_label}" }
+                if let Some(detail) = pending.detail.clone() {
+                    p { class: quiet_line_class(), "{detail}" }
+                }
 
-            if pending.needs_firmware {
-                FlashFace {
-                    device: pending.device,
-                    detected_chip: pending.detected_chip.clone(),
-                    on_action,
-                }
-            } else if pending.can_adopt {
-                // A blank chip may never identify itself, so a user gesture
-                // must be able to keep it. On a needs-firmware verdict the
-                // Flash verb IS that gesture; here the plain adopt is live
-                // (it was a disabled "coming back soon" stub through round
-                // 1).
-                ActionButton {
-                    action: DevicesOp::action_for(DeviceAction::AdoptLink { link }),
-                    running: false,
-                    variant: ActionButtonVariant::Outline,
-                    on_action,
+                if pending.needs_firmware {
+                    FlashFace {
+                        device: pending.device,
+                        detected_chip: pending.detected_chip.clone(),
+                        on_action,
+                    }
+                } else if pending.can_adopt {
+                    // A blank chip may never identify itself, so a user
+                    // gesture must be able to keep it. On a needs-firmware
+                    // verdict the Flash verb IS that gesture; here the plain
+                    // adopt is live (a disabled stub through round 1).
+                    ActionButton {
+                        action: DevicesOp::action_for(DeviceAction::AdoptLink { link }),
+                        running: false,
+                        variant: ActionButtonVariant::Outline,
+                        on_action,
+                    }
                 }
             }
 
@@ -544,7 +561,9 @@ fn ActivityRow(activity: DeviceActivityView) -> Element {
 }
 
 fn card_class() -> &'static str {
-    "tw:grid tw:content-start tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-panel tw:p-4"
+    // `ux-armed-scope`: the card is the blast radius of its own armed
+    // destructive chips — `:has(.ux-armed)` marks it (style.css).
+    "ux-armed-scope tw:grid tw:content-start tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-panel tw:p-4"
 }
 
 /// One zone below the header: a rule above it, and room to breathe. The
