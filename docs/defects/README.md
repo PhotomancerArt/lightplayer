@@ -180,6 +180,12 @@ genuinely fits none of these, and define it here in one line.
   added anywhere in the pipeline (a deferred queue, a render-cycle
   bounce) turns it routine. The fix shape is a queue of everything still
   in flight, never a bigger window on a single slot.
+- **`arena-retained-transient`** — a value that is transient by intent
+  (an intermediate of a recursive build, a type copied "for convenience"
+  onto every node) is pushed into an arena whose lifetime is the whole
+  pass, so the working set scales with references × payload size instead
+  of with the result. Presents as an allocation failure far larger than
+  the input could justify.
 
 ## Index
 
@@ -359,6 +365,7 @@ values; statistical diffs are for the arithmetic in between.
 | unbounded-restatement | 2026-07-28 | [tick-error-restated-every-frame](2026-07-28-tick-error-restated-every-frame.md) | fixed | lpa-server (advance_frame) |
 | unsynchronized-shared-artifact | 2026-07-29 | [builtins-elf-uplift-race](2026-07-29-builtins-elf-uplift-race.md) | fixed | justfile `test` + lpvm-cranelift/build.rs |
 | missing-coverage | 2026-07-29 | [uniform-struct-array-runtime-index](2026-07-29-uniform-struct-array-runtime-index.md) | fixed | examples/effects/meteor + lps-frontend lowering |
+| arena-retained-transient | 2026-09-01 | [hir-place-clones-exhaust-c6-heap-at-compute-compile](2026-09-01-hir-place-clones-exhaust-c6-heap-at-compute-compile.md) | fixed | lps-glsl hir/typeck + hir/place + lower/place; lpc-engine shader nodes ([mem] bracket) |
 
 ## Predecessor: `docs/bugs/`
 
