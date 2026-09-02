@@ -388,9 +388,9 @@ fn example_shader_compile_peaks() {
     let backend_measured = !lpvm_native::regalloc_trace_enabled();
     if !backend_measured {
         println!(
-            "
-NOTE: lpvm-native `debug` feature is on in this build (workspace feature              unification); backend ceilings skipped, frontend ceilings apply."
+            "\nNOTE: lpvm-native `debug` feature is on in this build (workspace feature unification);"
         );
+        println!("      backend ceilings skipped, frontend ceilings apply.");
     }
     for r in &rows {
         let ceiling = match r.kind {
