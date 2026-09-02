@@ -2904,11 +2904,14 @@ impl StudioController {
         }
         let attachment = match self.device_lens_attachment(uid) {
             Ok(attachment) => attachment,
-            // A known board that is not ready yet (a reload: the route
-            // asked while the port is still identifying) is an intent to
-            // hold, not a failure to report — the tick attaches it the
-            // moment the hello lands.
-            Err(error) if self.devices.device_for_key(uid).is_some() => {
+            // Not ready yet — or not even known yet: a reload asks for the
+            // lens while the registry rows are still loading and the
+            // granted port is still identifying. Either way the address
+            // is an intent to hold, not a failure to report: the gallery
+            // renders the board's honest state meanwhile, and the tick
+            // attaches the lens the moment the board says hello. Only a
+            // gesture on the gallery (close, another open) lets it go.
+            Err(error) => {
                 self.pending_device_lens = Some(uid.to_string());
                 self.push_log(UiLogDraft::new(
                     UiLogLevel::Info,
@@ -2917,7 +2920,6 @@ impl StudioController {
                 ));
                 return Ok(UiNotices::new().with_notice(UiNotice::info("Waiting for the board")));
             }
-            Err(error) => return Err(error),
         };
         self.pending_device_lens = None;
         emit_activity(
@@ -2986,6 +2988,13 @@ impl StudioController {
         let link = device
             .link()
             .ok_or_else(|| UiError::MissingSession("this board is not connected".to_string()))?;
+        // Attached is not open: a port the model closed (Disconnect, a
+        // cancelled identify) has stale hello evidence and no wire to lend.
+        if !device.evidence.presence.is_open() {
+            return Err(UiError::MissingSession(
+                "this board's port is closed — connect it first".to_string(),
+            ));
+        }
         let hello = device.evidence.classification.hello().ok_or_else(|| {
             UiError::MissingSession(
                 "this board has not identified itself as a LightPlayer yet".to_string(),
@@ -3086,15 +3095,12 @@ impl StudioController {
     /// Attach a held `/device/<uid>` intent once its board is ready. Runs
     /// from the refresh tick (the one recurring async seam); a board that
     /// is still not ready keeps the intent, one that vanished drops it.
-    async fn try_pending_device_lens(&mut self) {
+    pub(crate) async fn try_pending_device_lens(&mut self) {
         let Some(uid) = self.pending_device_lens.clone() else {
             return;
         };
-        if self.devices.device_for_key(&uid).is_none() {
-            self.pending_device_lens = None;
-            return;
-        }
         if self.device_lens_attachment(&uid).is_err() {
+            // Still loading, identifying, or busy: keep holding.
             return;
         }
         if let Err(error) = self.open_device_lens(&uid, UxUpdateSink::noop()).await {

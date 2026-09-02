@@ -956,15 +956,88 @@ fn a_card_verb_on_the_lens_device_closes_the_editor_and_then_runs() {
     });
 }
 
-/// A board that is not a connected LightPlayer cannot be opened, and the
-/// refusal says why instead of installing a dead session.
+/// The reload row (D37, reload = re-derivation): `/device/<uid>` asks for
+/// the lens BEFORE the roster knows the board — rows still loading, port
+/// still identifying. The intent is held, the gallery stays honest, and
+/// the tick attaches the lens the moment the board says hello.
 #[test]
-fn opening_a_lens_on_a_board_that_is_not_ready_refuses_honestly() {
+fn an_open_asked_before_the_board_is_ready_attaches_once_it_says_hello() {
+    let device = empty_light_player("dev000000daqf6dvvr5");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-lens-5");
+    // The registry knows this board from a previous sitting; its row is
+    // what a `/device/<uid>` address names. (Identify it once to earn the
+    // row, then reboot the bench the way a reload would: fresh roster,
+    // same registry, same granted port.)
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    let uid = bench.registry()[0].uid.clone();
+    let device_id = bench.view().devices[0].id;
+    bench.gesture(DeviceAction::Disconnect { device: device_id });
+    bench.run_until(&tasks, "the port to close", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label.starts_with("Attached"))
+    });
+
+    // The address arrives while the board is NOT ready: held, not refused.
+    bench
+        .open_lens(&uid)
+        .expect("an early open is an intent, never an error");
+    assert!(bench.lens_device_uid().is_none(), "nothing attached yet");
+
+    // The board comes back (the connect the sweep would perform) and says
+    // hello; the tick attaches the held lens.
+    let device_id = bench.view().devices[0].id;
+    bench.gesture(DeviceAction::Connect { device: device_id });
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    loop {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        if bench.lens_device_uid().as_deref() == Some(uid.as_str()) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held lens never attached: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        bench.controller.runtime_pool_for_test().lens().is_some(),
+        true,
+        "the editor is the lens on the board"
+    );
+}
+
+/// An address the roster cannot serve yet is HELD, never refused: the
+/// gallery stays honest, nothing dead is installed, and closing the lens
+/// (leaving the route) lets the intent go.
+#[test]
+fn opening_a_lens_on_an_unknown_board_is_held_not_refused() {
     let device = empty_light_player("dev000000daqf6dvvr3");
     let (mut bench, _tasks) = identified(&device, "usb-lens-3");
-    let error = bench.open_lens("devnobody").expect_err("unknown uid");
-    assert!(error.to_string().contains("no device"), "{error}");
+    bench
+        .open_lens("devnobody")
+        .expect("an address the roster cannot serve yet is an intent");
     assert!(bench.lens_device_uid().is_none());
+    assert!(bench.controller.runtime_pool_for_test().lens().is_none());
+    drive(bench.controller.try_pending_device_lens());
+    assert!(
+        bench.lens_device_uid().is_none(),
+        "still nothing to attach to"
+    );
+
+    // Leaving the route clears the intent.
+    let close = UiAction::from_op(crate::RuntimeOp::NODE_ID, crate::RuntimeOp::CloseDeviceLens);
+    drive(bench.controller.dispatch(close)).expect("close is quiet with nothing open");
     assert!(bench.controller.runtime_pool_for_test().lens().is_none());
 }
 
