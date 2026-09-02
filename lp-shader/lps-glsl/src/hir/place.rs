@@ -20,6 +20,17 @@ pub(crate) enum AccessMode {
     CallActual,
 }
 
+/// One typed place: a root plus the projections applied to it.
+///
+/// `ty` is the type of the whole path (the last projection's result). The
+/// root and the index segments deliberately carry no type of their own:
+/// the root's is in the function's local/param tables or the module's
+/// uniform/global tables, and an index's element type follows from the type
+/// it indexes ([`index_element_type`]). Storing them here made every
+/// `a[i].f` reference hold two more copies of `a`'s full type — for a
+/// struct-array global that is the whole struct, member names and all — and
+/// the arena keeps every place until the function lowers. That was the
+/// meteor sim compile exhausting the ESP32-C6 heap (2026-09-01).
 #[derive(Debug, Clone)]
 pub(crate) struct HirPlace {
     pub(crate) root: PlaceRoot,
@@ -29,24 +40,10 @@ pub(crate) struct HirPlace {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PlaceRoot {
-    Local {
-        local: usize,
-        ty: LpsType,
-    },
-    Param {
-        param: usize,
-        ty: LpsType,
-    },
-    Uniform {
-        name: String,
-        byte_offset: u32,
-        ty: LpsType,
-    },
-    Global {
-        name: String,
-        byte_offset: u32,
-        ty: LpsType,
-    },
+    Local { local: usize },
+    Param { param: usize },
+    Uniform { name: String, byte_offset: u32 },
+    Global { name: String, byte_offset: u32 },
 }
 
 #[derive(Debug, Clone)]
@@ -69,17 +66,13 @@ pub(crate) enum PlaceSegment {
     },
     Index {
         index: ExprId,
-        ty: LpsType,
     },
 }
 
 impl HirPlace {
     pub(super) fn local(local: usize, ty: LpsType) -> Self {
         Self {
-            root: PlaceRoot::Local {
-                local,
-                ty: ty.clone(),
-            },
+            root: PlaceRoot::Local { local },
             segments: Vec::new(),
             ty,
         }
@@ -87,10 +80,7 @@ impl HirPlace {
 
     pub(super) fn param(param: usize, ty: LpsType) -> Self {
         Self {
-            root: PlaceRoot::Param {
-                param,
-                ty: ty.clone(),
-            },
+            root: PlaceRoot::Param { param },
             segments: Vec::new(),
             ty,
         }
@@ -98,11 +88,7 @@ impl HirPlace {
 
     pub(super) fn uniform(name: String, byte_offset: u32, ty: LpsType) -> Self {
         Self {
-            root: PlaceRoot::Uniform {
-                name,
-                byte_offset,
-                ty: ty.clone(),
-            },
+            root: PlaceRoot::Uniform { name, byte_offset },
             segments: Vec::new(),
             ty,
         }
@@ -110,11 +96,7 @@ impl HirPlace {
 
     pub(super) fn global(name: String, byte_offset: u32, ty: LpsType) -> Self {
         Self {
-            root: PlaceRoot::Global {
-                name,
-                byte_offset,
-                ty: ty.clone(),
-            },
+            root: PlaceRoot::Global { name, byte_offset },
             segments: Vec::new(),
             ty,
         }
@@ -147,33 +129,35 @@ impl HirPlace {
     }
 
     pub(super) fn push_index(&mut self, index: ExprId, span: Span) -> Result<(), Diagnostic> {
-        // The matrix/array/vector questions are answered by the type itself;
-        // building a `TypeShape` here would clone the whole type (and, for
-        // structs, every field) per index segment to ask three predicates.
-        if let Some(column_ty) = self.ty.matrix_column_type() {
-            self.ty = column_ty.clone();
-            self.segments.push(PlaceSegment::Index {
-                index,
-                ty: column_ty,
-            });
-            return Ok(());
-        }
-        if let LpsType::Array { element, .. } = &self.ty {
-            let ty = (**element).clone();
-            self.ty = ty.clone();
-            self.segments.push(PlaceSegment::Index { index, ty });
-            return Ok(());
-        }
-        if let Some(base) = scalar_base_type(&self.ty) {
-            self.ty = base.clone();
-            self.segments.push(PlaceSegment::Index { index, ty: base });
-            return Ok(());
-        }
-        Err(Diagnostic::error(
-            span,
-            "index base must be vector, matrix, or array",
-        ))
+        let Some(ty) = index_element_type(&self.ty) else {
+            return Err(Diagnostic::error(
+                span,
+                "index base must be vector, matrix, or array",
+            ));
+        };
+        self.ty = ty;
+        self.segments.push(PlaceSegment::Index { index });
+        Ok(())
     }
+}
+
+/// The type `ty[i]` has: a matrix's column, an array's element, or a
+/// vector's scalar. `None` when `ty` cannot be indexed.
+///
+/// Shared by the HIR build (the place's own type narrowing) and lowering
+/// (which re-derives the element type from the value it indexes instead of
+/// reading one stored on the segment). The matrix/array/vector questions are
+/// answered by the type itself; building a `TypeShape` here would clone the
+/// whole type (and, for structs, every field) per index to ask three
+/// predicates.
+pub(crate) fn index_element_type(ty: &LpsType) -> Option<LpsType> {
+    if let Some(column_ty) = ty.matrix_column_type() {
+        return Some(column_ty);
+    }
+    if let LpsType::Array { element, .. } = ty {
+        return Some((**element).clone());
+    }
+    scalar_base_type(ty)
 }
 
 impl PlaceRoot {

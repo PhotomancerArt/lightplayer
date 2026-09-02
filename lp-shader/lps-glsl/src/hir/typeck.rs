@@ -823,12 +823,7 @@ impl<'a> TypeCtx<'a> {
                 format!("{fn_name} expects sampler2D uniform"),
             ));
         }
-        let PlaceRoot::Uniform {
-            name,
-            byte_offset,
-            ty: _,
-        } = place_ref.root.clone()
-        else {
+        let PlaceRoot::Uniform { name, byte_offset } = place_ref.root.clone() else {
             return Err(Diagnostic::error(
                 expr.span,
                 format!("{fn_name} sampler must be a uniform sampler2D"),
@@ -1097,33 +1092,46 @@ impl<'a> TypeCtx<'a> {
     }
 
     fn type_place(&mut self, expr: &ParsedExpr, mode: AccessMode) -> Result<PlaceId, Diagnostic> {
-        let place = match &expr.kind {
-            ParsedExprKind::Name(name) => self
-                .arena
-                .push_place(self.type_name_place(expr.span, name)?),
+        let place = self.build_place(expr, mode)?;
+        Ok(self.arena.push_place(place))
+    }
+
+    /// Type a place expression into one [`HirPlace`], by value.
+    ///
+    /// Only the finished place reaches the arena (see [`Self::type_place`]).
+    /// This used to push every intermediate of `a[i].f.x` too — `a`, `a[i]`,
+    /// `a[i].f` — each a full clone of the one before, root type and all.
+    /// Nothing ever read those intermediates, but the arena is not freed
+    /// until the function lowers, so a struct-array global referenced N
+    /// times held ~3N copies of its whole type (member names included) for
+    /// the entire HIR build. On the ESP32-C6 that was the meteor sim
+    /// compile: 40 references to `meteors[i].field` exhausted a 300 KB heap.
+    fn build_place(&mut self, expr: &ParsedExpr, mode: AccessMode) -> Result<HirPlace, Diagnostic> {
+        match &expr.kind {
+            ParsedExprKind::Name(name) => {
+                let place = self.type_name_place(expr.span, name)?;
+                if mode != AccessMode::Read && !place.root.is_writable() {
+                    return Err(Diagnostic::error(
+                        expr.span,
+                        "cannot write to uniform variable",
+                    ));
+                }
+                Ok(place)
+            }
             ParsedExprKind::Swizzle { base, fields } => {
-                let base_id = self.type_place(base, mode)?;
-                let mut base = self.arena.place(base_id).clone();
+                let mut base = self.build_place(base, mode)?;
                 base.push_field(expr.span, fields)?;
-                self.arena.push_place(base)
+                Ok(base)
             }
             ParsedExprKind::Index { base, index } => {
-                let base_id = self.type_place(base, mode)?;
-                let mut base = self.arena.place(base_id).clone();
+                let mut base = self.build_place(base, mode)?;
                 let index = self.type_expr(index)?;
                 let index = self.coerce_expr(index, &LpsType::Int)?;
                 base.push_index(index, expr.span)?;
-                self.arena.push_place(base)
+                Ok(base)
             }
-            _ => return Err(Diagnostic::error(expr.span, "invalid place expression")),
-        };
-        if mode != AccessMode::Read && !self.arena.place(place).root.is_writable() {
-            return Err(Diagnostic::error(
-                expr.span,
-                "cannot write to uniform variable",
-            ));
+            _ => Err(Diagnostic::error(expr.span, "invalid place expression")),
         }
-        Ok(place)
     }
 
     /// Cheap syntactic precheck for the speculative `type_place` probes on
