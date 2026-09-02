@@ -296,6 +296,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| stand-in-divergence | 2026-09-02 | [ignored-emu-fuel-probe-renders-black-on-first-probe](2026-09-02-ignored-emu-fuel-probe-renders-black-on-first-probe.md) | open | lpc-engine compile-window deferral vs render probes; fw-tests recovery_emu (ignored) |
 | state-conflation | 2026-09-01 | [silent-black-under-node-quarantine](2026-09-01-silent-black-under-node-quarantine.md) | fixed | lpc-engine node status + output fallback; lpa-devices heartbeat mirror |
 | misattributed-symptom | 2026-08-31 | [c6-rmt-ws281x-dark](2026-08-31-c6-rmt-ws281x-dark.md) | harness fixed (#491); app half fixed (#495 heap, #496 fault pattern + card) | fw-esp32c6 harness serial io + lpc-engine shader node under lp-recovery |
 | unit-mismatch | 2026-08-24 | [map2d-sample-diameter-unit-mismatch](2026-08-24-map2d-sample-diameter-unit-mismatch.md) | fixed | lpc-engine map2d resolve + ResolvedMappingCompact consumers |
