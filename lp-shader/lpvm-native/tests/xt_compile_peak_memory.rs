@@ -32,7 +32,7 @@ use lpir::FloatMode;
 use lps_shared::TextureStorageFormat;
 use lpvm_native::isa::IsaTarget;
 
-use peak_alloc::{StepRecord, TrackingAlloc, live, trace_backend, trace_frontend};
+use peak_alloc::{Trace, TrackingAlloc, live, trace_backend, trace_frontend};
 
 #[global_allocator]
 static ALLOC: TrackingAlloc = TrackingAlloc;
@@ -40,13 +40,13 @@ static ALLOC: TrackingAlloc = TrackingAlloc;
 /// Step the full device px pipeline over `glsl`, recording one entry per
 /// step into `records`. Returns the emitted code size as a sanity check
 /// that the pipeline actually completed.
-fn trace_compile(glsl: &str, records: &mut Vec<StepRecord>) -> usize {
+fn trace_compile(glsl: &str, trace: &mut Trace) -> usize {
     let options = lps_glsl::CompileOptions {
         texture_specs: Default::default(),
         texel_fetch_bounds: lpir::TexelFetchBoundsMode::default(),
     };
-    let output = trace_frontend(glsl, options, records)
-        .unwrap_or_else(|err| panic!("frontend failed: {err}"));
+    let output =
+        trace_frontend(glsl, options, trace).unwrap_or_else(|err| panic!("frontend failed: {err}"));
     let (mut ir, mut meta) = (output.ir, output.meta);
 
     // -- Prepare: the two synth wrappers the px path always adds (zook's
@@ -56,7 +56,7 @@ fn trace_compile(glsl: &str, records: &mut Vec<StepRecord>) -> usize {
         .iter()
         .position(|f| f.name == "render_2d")
         .expect("px shader has render_2d");
-    peak_alloc::record(records, "prepare:synth-texture", None, &mut || {
+    trace.record("prepare:synth-texture", None, &mut || {
         lp_shader::synth::synthesise_render_texture(
             &mut ir,
             &mut meta,
@@ -67,7 +67,7 @@ fn trace_compile(glsl: &str, records: &mut Vec<StepRecord>) -> usize {
         )
         .expect("synth render_texture");
     });
-    peak_alloc::record(records, "prepare:synth-samples", None, &mut || {
+    trace.record("prepare:synth-samples", None, &mut || {
         lp_shader::synth::synthesise_render_samples_rgba16(
             &mut ir,
             &mut meta,
@@ -78,7 +78,7 @@ fn trace_compile(glsl: &str, records: &mut Vec<StepRecord>) -> usize {
         .expect("synth render_samples");
     });
 
-    trace_backend(ir, meta, IsaTarget::Xtensa, records)
+    trace_backend(ir, meta, IsaTarget::Xtensa, trace)
         .unwrap_or_else(|err| panic!("backend failed: {err}"))
 }
 
@@ -102,19 +102,17 @@ fn zook_dome_compile_peak_profile() {
     // Warm-up pass: fault in lazy allocations that belong to the process,
     // not the compile (logger, pass singletons, allocator pools), so the
     // measured pass starts from a settled baseline.
-    let mut warmup = Vec::with_capacity(4096);
+    let mut warmup = Trace::with_capacity(4096);
     let warm_code = trace_compile(&glsl, &mut warmup);
     drop(warmup);
 
-    let mut records: Vec<StepRecord> = Vec::with_capacity(4096);
+    let mut trace = Trace::with_capacity(4096);
     let baseline = live();
-    let code_bytes = trace_compile(&glsl, &mut records);
+    let code_bytes = trace_compile(&glsl, &mut trace);
     assert_eq!(code_bytes, warm_code, "compile is deterministic");
     assert!(code_bytes > 0, "pipeline emitted no code");
-    assert!(
-        records.len() < 4096,
-        "record buffer reallocated mid-measurement; raise the capacity"
-    );
+    trace.assert_no_growth(4096);
+    let records = &trace.records;
 
     let peak_record = records
         .iter()
@@ -125,7 +123,7 @@ fn zook_dome_compile_peak_profile() {
     peak_alloc::print_steps(
         &format!("zook-dome GLSL -> Xtensa/Q32 compile, per-step memory (emitted {code_bytes} B)"),
         baseline,
-        &records,
+        records,
     );
     println!(
         "\noverall peak above baseline: {} B, reached in {} (fn {:?})",
@@ -148,5 +146,5 @@ fn zook_dome_compile_peak_profile() {
         peak_record.stage
     );
 
-    peak_alloc::print_stage_maxima(baseline, &records);
+    peak_alloc::print_stage_maxima(baseline, records);
 }

@@ -23,7 +23,7 @@ use lps_filetests::parse::parse_test_file;
 use lps_filetests::parse::test_type::TestType;
 use lps_filetests::targets::{Disposition, Target, directive_disposition};
 
-use peak_alloc::{StepRecord, Summary, TrackingAlloc, live, trace_frontend};
+use peak_alloc::{Summary, Trace, TrackingAlloc, live, trace_frontend};
 
 #[global_allocator]
 static ALLOC: TrackingAlloc = TrackingAlloc;
@@ -32,16 +32,16 @@ fn filetests_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("filetests")
 }
 
-fn trace(
+fn trace_file(
     glsl: &str,
     texture_specs: &lps_filetests::parse::test_type::TextureSpecs,
-    records: &mut Vec<StepRecord>,
+    trace: &mut Trace,
 ) -> Result<usize, String> {
     let options = lps_glsl::CompileOptions {
         texture_specs: texture_specs.clone(),
         texel_fetch_bounds: lpir::TexelFetchBoundsMode::default(),
     };
-    let output = trace_frontend(glsl, options, records)?;
+    let output = trace_frontend(glsl, options, trace)?;
     Ok(output.ir.functions.len())
 }
 
@@ -68,7 +68,7 @@ fn filetest_corpus_frontend_peaks() {
     let mut skipped_disposition = 0usize;
     let mut skipped_parse = 0usize;
     let mut failed: Vec<(String, String)> = Vec::new();
-    let mut records: Vec<StepRecord> = Vec::with_capacity(1024);
+    let mut trace = Trace::with_capacity(1024);
 
     for path in &files {
         let label = path
@@ -107,11 +107,11 @@ fn filetest_corpus_frontend_peaks() {
         }
 
         // Warm-up (lazy process allocations), then the measured pass.
-        records.clear();
-        let warm = trace(&file.glsl_source, &file.texture_specs, &mut records);
-        records.clear();
+        trace.clear();
+        let warm = trace_file(&file.glsl_source, &file.texture_specs, &mut trace);
+        trace.clear();
         let baseline = live();
-        let result = trace(&file.glsl_source, &file.texture_specs, &mut records);
+        let result = trace_file(&file.glsl_source, &file.texture_specs, &mut trace);
         match (warm, result) {
             (Ok(a), Ok(b)) => assert_eq!(a, b, "{label}: compile is deterministic"),
             (_, Err(err)) | (Err(err), _) => {
@@ -119,16 +119,20 @@ fn filetest_corpus_frontend_peaks() {
                 continue;
             }
         }
-        assert!(
-            records.len() < 1024,
-            "record buffer reallocated mid-measurement"
-        );
+        trace.assert_no_growth(1024);
+        if peak_alloc::census_wanted(&label) {
+            let source = file.glsl_source.clone();
+            let specs = file.texture_specs.clone();
+            peak_alloc::run_census(&label, 2048, &mut |t| {
+                let _ = trace_file(&source, &specs, t);
+            });
+        }
         rows.push(peak_alloc::summarize(
             label,
             "filetest",
             file.glsl_source.len(),
             baseline,
-            &records,
+            &trace.records,
         ));
     }
 

@@ -52,7 +52,7 @@ use lpir::FloatMode;
 use lps_shared::TextureStorageFormat;
 use lpvm_native::isa::IsaTarget;
 
-use peak_alloc::{StepRecord, Summary, TrackingAlloc, live, trace_backend, trace_frontend};
+use peak_alloc::{StepRecord, Summary, Trace, TrackingAlloc, live, trace_backend, trace_frontend};
 
 #[global_allocator]
 static ALLOC: TrackingAlloc = TrackingAlloc;
@@ -165,11 +165,7 @@ fn example_dirs() -> Vec<String> {
 /// once and the backend for every ISA in `isas`, each from the same
 /// post-synth module (cloned outside the recorded steps). Returns the
 /// emitted code sizes per ISA as a sanity check that the pipeline completed.
-fn trace_compile(
-    input: &CompilerInput,
-    isas: &[IsaTarget],
-    records: &mut Vec<StepRecord>,
-) -> Vec<usize> {
+fn trace_compile(input: &CompilerInput, isas: &[IsaTarget], trace: &mut Trace) -> Vec<usize> {
     let (texture_specs, space) = match &input.kind {
         ShaderKind::Compute => (Default::default(), None),
         ShaderKind::Px { textures, space } => (textures.clone(), Some(*space)),
@@ -178,7 +174,7 @@ fn trace_compile(
         texture_specs,
         texel_fetch_bounds: lpir::TexelFetchBoundsMode::default(),
     };
-    let output = trace_frontend(&input.glsl, options, records)
+    let output = trace_frontend(&input.glsl, options, trace)
         .unwrap_or_else(|err| panic!("{}: frontend failed: {err}", input.label));
     let (mut ir, mut meta) = (output.ir, output.meta);
 
@@ -191,7 +187,7 @@ fn trace_compile(
             .iter()
             .position(|f| f.name == entry)
             .unwrap_or_else(|| panic!("{}: px shader has no `{entry}`", input.label));
-        peak_alloc::record(records, "prepare:synth-texture", None, &mut || {
+        trace.record("prepare:synth-texture", None, &mut || {
             lp_shader::synth::synthesise_render_texture(
                 &mut ir,
                 &mut meta,
@@ -202,7 +198,7 @@ fn trace_compile(
             )
             .expect("synth render_texture");
         });
-        peak_alloc::record(records, "prepare:synth-samples", None, &mut || {
+        trace.record("prepare:synth-samples", None, &mut || {
             lp_shader::synth::synthesise_render_samples_rgba16(
                 &mut ir,
                 &mut meta,
@@ -225,7 +221,7 @@ fn trace_compile(
         } else {
             (ir.clone(), meta.clone())
         };
-        let size = trace_backend(ir_i, meta_i, *isa, records)
+        let size = trace_backend(ir_i, meta_i, *isa, trace)
             .unwrap_or_else(|err| panic!("{}: {isa:?} backend failed: {err}", input.label));
         sizes.push(size);
     }
@@ -241,13 +237,13 @@ fn profile_shader(input: &CompilerInput) -> Summary {
     };
     // Warm-up pass: fault in lazy allocations that belong to the process,
     // not the compile, so the measured pass starts from a settled baseline.
-    let mut warmup = Vec::with_capacity(4096);
+    let mut warmup = Trace::with_capacity(4096);
     let warm_sizes = trace_compile(input, isas, &mut warmup);
     drop(warmup);
 
-    let mut records: Vec<StepRecord> = Vec::with_capacity(4096);
+    let mut trace = Trace::with_capacity(4096);
     let baseline = live();
-    let sizes = trace_compile(input, isas, &mut records);
+    let sizes = trace_compile(input, isas, &mut trace);
     assert_eq!(
         sizes, warm_sizes,
         "{}: compile is deterministic",
@@ -258,10 +254,8 @@ fn profile_shader(input: &CompilerInput) -> Summary {
         "{}: pipeline emitted no code",
         input.label
     );
-    assert!(
-        records.len() < 4096,
-        "record buffer reallocated mid-measurement; raise the capacity"
-    );
+    trace.assert_no_growth(4096);
+    let records = &trace.records;
 
     let kind = match input.kind {
         ShaderKind::Compute => "compute",
@@ -274,14 +268,14 @@ fn profile_shader(input: &CompilerInput) -> Summary {
             input.glsl.len()
         ),
         baseline,
-        &records,
+        records,
     );
     let mut summary = peak_alloc::summarize(
         input.label.clone(),
         kind,
         input.glsl.len(),
         baseline,
-        &records,
+        records,
     );
     // Split the backend records per ISA: the backend runs are sequential
     // and each starts with its own `backend:new(move ir)` step.
@@ -303,7 +297,6 @@ fn profile_shader(input: &CompilerInput) -> Summary {
         match isa {
             IsaTarget::Rv32imac => summary.rv32_peak = Some(peak),
             IsaTarget::Xtensa => summary.xt_peak = Some(peak),
-            _ => {}
         }
     }
     println!(
@@ -352,6 +345,18 @@ fn example_shader_compile_peaks() {
     for example in example_dirs() {
         for input in example_compiler_inputs(&example) {
             rows.push(profile_shader(&input));
+            // Attribution by allocation size for the shaders named in
+            // `LP_PROBE_CENSUS` (see `peak_alloc::run_census`); never part
+            // of the measured pass.
+            if peak_alloc::census_wanted(&input.label) {
+                let isas: &[IsaTarget] = match input.kind {
+                    ShaderKind::Compute => &[IsaTarget::Rv32imac],
+                    ShaderKind::Px { .. } => &[IsaTarget::Rv32imac],
+                };
+                peak_alloc::run_census(&input.label, 2048, &mut |trace| {
+                    trace_compile(&input, isas, trace);
+                });
+            }
         }
     }
     peak_alloc::print_table(
