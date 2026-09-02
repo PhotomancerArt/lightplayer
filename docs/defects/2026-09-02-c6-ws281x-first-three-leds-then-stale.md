@@ -1,5 +1,6 @@
 ---
-status: open           # candidate fix committed on this branch; bench A/B pending
+status: fixed
+fixed: this change     # bench-verified 2026-09-02, see Fix
 found: 2026-09-02      # how: report (Yona, 8-LED strip on a XIAO C6 running an example)
 area: lp-fw/fw-esp32c6 output/rmt + lp-fw/lp-ws281x (refill path placement)
 class: deadline-margin-by-accident
@@ -49,8 +50,7 @@ be ported to the C6: the archived P4 logs (cell C, 60-LED frames on
 frames) prove the C6's `tx_lim` is a window position, with the same
 `c6_rmt.rs` sequence that ships today.
 
-**Fix (candidate; this branch)** — put the whole service path in IRAM
-and make it cheaper:
+**Fix** — put the whole service path in IRAM and make it cheaper:
 - `fw-esp32c6` enables `lp-ws281x/isr-in-ram` (+~1 KB `.rwtext`; main
   stack 72,768 → 71,704 B against a measured 36,936 B high-water).
 - `C6Rmt::ram_window` (one window derivation per fill, mirroring the
@@ -66,9 +66,35 @@ and make it cheaper:
   trip): a value stuck on 72 frame after frame is this defect's
   signature and separates a deterministically late refill from load.
 
-If margin alone does not clear it on the bench, the remaining lever is
-the block plan (a wide window whenever only one output is opened), which
-is a product/architecture decision, not a patch.
+Bench A/B, 2026-09-02, XIAO C6 `A0:F2:62:87:B4:8C`, storage project
+"studio" (meteor, 231 LEDs = 693 bytes on `ws281x0`/D10, 2-channel plan,
+24-word halves), 60 s of `[WS281X]` telemetry each, same board and load:
+
+| | baseline (main 9feb434f4) | this change |
+|---|---|---|
+| frames / complete | 1,414 / 4 | 1,197 / 1,194 |
+| guard trips | 1,410 (99.7 %) | 3 (0.25 %) |
+| guard skips | 502 | 0 |
+| refill work, avg / max (words of a 24-word half) | 15.6 / 22 | 5.7 / 7 |
+| entry delay max (words) | 25 | 21 |
+| services with entry delay ≥ 24 words | 696 | 0 |
+
+The refill *work* was the larger half of the budget: 15.6 words (~20 µs)
+to write a 24-word half from flash with two plan lookups per word, versus
+5.7 words from IRAM through the hoisted window. The three residual trips
+landed mid-frame (`trip_at=3000`, `864`), the random-load class the
+scan-truncation debt entry already carries, at ~0.25 % under meteor.
+
+**Residual exposure (carried, not fixed here)** — one service per frame
+still enters at 18-23 words (`entry_hist` buckets 6-7 ≈ frame count,
+`entry_max=21`): that is the first interrupt after a render, and its
+cost is now outside this crate's code — esp-hal's trap/dispatch path and
+whatever the render loop leaves masked. With the refill at 7 words that
+leaves a 3-word margin on the first refill of every frame. The levers
+left are the block plan (a 192-word window whenever only one output is
+opened — 96-word halves, 120 µs deadlines) or moving esp-hal's dispatch
+into RAM; both are decisions, tracked in
+`docs/debt/c6-scan-truncation-accepted.md`'s reopen path.
 
 **Regression coverage** — none on silicon: no S3/C6 hardware test
 transmits an untruncated frame longer than the prefill. The S3 loopback's

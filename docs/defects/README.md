@@ -371,7 +371,7 @@ values; statistical diffs are for the arithmetic in between.
 | unsynchronized-shared-artifact | 2026-07-29 | [builtins-elf-uplift-race](2026-07-29-builtins-elf-uplift-race.md) | fixed | justfile `test` + lpvm-cranelift/build.rs |
 | missing-coverage | 2026-07-29 | [uniform-struct-array-runtime-index](2026-07-29-uniform-struct-array-runtime-index.md) | fixed | examples/effects/meteor + lps-frontend lowering |
 | arena-retained-transient | 2026-09-01 | [hir-place-clones-exhaust-c6-heap-at-compute-compile](2026-09-01-hir-place-clones-exhaust-c6-heap-at-compute-compile.md) | fixed | lps-glsl hir/typeck + hir/place + lower/place; lpc-engine shader nodes ([mem] bracket) |
-| deadline-margin-by-accident | 2026-09-02 | [c6-ws281x-first-three-leds-then-stale](2026-09-02-c6-ws281x-first-three-leds-then-stale.md) | **open** (candidate on branch, bench pending) | fw-esp32c6 output/rmt + lp-ws281x refill path placement |
+| deadline-margin-by-accident | 2026-09-02 | [c6-ws281x-first-three-leds-then-stale](2026-09-02-c6-ws281x-first-three-leds-then-stale.md) | fixed | fw-esp32c6 output/rmt + lp-ws281x refill path placement |
 | untested-path | 2026-09-02 | [studio-flasher-cannot-recover-a-boot-looping-c6](2026-09-02-studio-flasher-cannot-recover-a-boot-looping-c6.md) | **open** | lpa-studio-web device card flash flow (esptool-js ladder) |
 
 ## Predecessor: `docs/bugs/`
