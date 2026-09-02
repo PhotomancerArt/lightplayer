@@ -401,7 +401,12 @@ struct RuntimeSourceAsset {
 /// Compose the compiler input (generated uniform header + user source) and
 /// return it with the number of lines the header prefix occupies before the
 /// user's line 1.
-fn compute_glsl_source(
+///
+/// Public so the memory probes (`tests/meteor_compute_compile_peak_memory.rs`)
+/// can compile exactly the text the node compiles, header included — the
+/// header is where the produced struct-array globals get declared, and those
+/// are what the frontend's per-reference type clones scale with.
+pub fn compute_glsl_source(
     def: &ComputeShaderDef,
     source: &str,
     slot_shapes: &SlotShapeRegistry,
