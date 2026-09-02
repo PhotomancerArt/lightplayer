@@ -497,7 +497,9 @@ pub fn App() -> Element {
                     // as-is
                 } else if matches!(
                     current,
-                    StudioRoute::Project { .. } | StudioRoute::Example { .. }
+                    StudioRoute::Project { .. }
+                        | StudioRoute::Example { .. }
+                        | StudioRoute::Device { .. }
                 ) {
                     // the editor went away: home without an in-flight open
                     // (after one started) means the open ended — the URL

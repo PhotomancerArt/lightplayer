@@ -561,7 +561,7 @@ impl BrowserSerialEsp32Provider {
     pub fn lens_client_io(
         &self,
         endpoint_id: &LinkEndpointId,
-        tap: std::rc::Rc<dyn Fn(String)>,
+        tap: std::rc::Rc<dyn Fn(super::port_client_io::LensTapLine)>,
         events: LinkManagementEventSink,
     ) -> Result<Box<dyn lpa_client::ClientIo>, LinkError> {
         let port_id = self.endpoint_port_id(endpoint_id)?;

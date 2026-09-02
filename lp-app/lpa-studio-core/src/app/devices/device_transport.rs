@@ -98,12 +98,25 @@ pub struct DeviceEffectFacts {
 /// into an `ActivityMarker::Progress` event.
 pub type DeviceEffectProgress = std::rc::Rc<dyn Fn(String, Option<u8>)>;
 
-/// The lens tap: every whole line the lens io drains from the wire — `M!`
-/// frames and console output alike, verbatim — before the io decodes it for
-/// its own conversation. The effects layer demuxes each line into the same
-/// `LinkEvent` the paused pump would have produced and feeds the roster
-/// fold, so the card keeps its evidence while the editor owns the port.
-pub type LensLineTap = std::rc::Rc<dyn Fn(String)>;
+/// What the lens io tees to the effects layer (round-2 M5): every whole
+/// line it drains from the wire — `M!` frames and console output alike,
+/// verbatim, before the io decodes it for its own conversation — and every
+/// port error the platform reports underneath it. The effects layer turns
+/// each into the `LinkEvent` the paused pump would have produced and feeds
+/// the roster fold, so the card keeps its evidence while the editor owns
+/// the port, and hears the port die the way the pump would have.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LensTapEvent {
+    /// One whole line off the wire.
+    Line(String),
+    /// The port failed under the io (unplug, the OS revoking it): the
+    /// platform's own message. The pump's rule applies — an error means the
+    /// port died, so the fold hears an error AND a close.
+    PortError(String),
+}
+
+/// The lens tap sink.
+pub type LensLineTap = std::rc::Rc<dyn Fn(LensTapEvent)>;
 
 /// How the app reaches real ports.
 pub trait DeviceTransport {

@@ -60,6 +60,6 @@ pub use device_records::{record_from_registry_row, registry_row_from_record};
 pub use device_roster::{DeviceRoster, DeviceRosterView, JournalLine};
 pub use device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
-    DeviceTransportFuture, GrantedLink, LensLineTap,
+    DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 pub use devices_op::DevicesOp;

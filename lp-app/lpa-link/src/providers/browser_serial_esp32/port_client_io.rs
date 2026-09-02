@@ -168,7 +168,7 @@ pub async fn push_device_project(
 /// release is what resumes the pump.
 pub fn lens_client_io(
     port_id: u32,
-    tap: Rc<dyn Fn(String)>,
+    tap: Rc<dyn Fn(LensTapLine)>,
     events: LinkManagementEventSink,
 ) -> Box<dyn ClientIo> {
     Box::new(PortLineIo {
@@ -186,10 +186,20 @@ struct PortLineIo {
     /// carry several).
     pending: Vec<WireServerMessage>,
     events: LinkManagementEventSink,
-    /// The lens tap: every drained line, verbatim, before decoding. `None`
-    /// for the one-shot conversations (the paused pump has nothing to hear
-    /// while an effect runs; the fold waits for the end marker).
-    tap: Option<Rc<dyn Fn(String)>>,
+    /// The lens tap: every drained line, verbatim, before decoding, and
+    /// every port error the JS controller reports. `None` for the one-shot
+    /// conversations (the paused pump has nothing to hear while an effect
+    /// runs; the fold waits for the end marker).
+    tap: Option<Rc<dyn Fn(LensTapLine)>>,
+}
+
+/// What the lens io tees: a line off the wire, or the controller's own
+/// error (the port died — unplug, revocation). Mirrors the studio's
+/// `LensTapEvent`; this crate stays independent of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LensTapLine {
+    Line(String),
+    PortError(String),
 }
 
 #[async_trait(?Send)]
@@ -208,9 +218,23 @@ impl ClientIo for PortLineIo {
             if !self.pending.is_empty() {
                 return Ok(self.pending.remove(0));
             }
+            if let Some(tap) = &self.tap {
+                // The controller's errors are the port dying underneath
+                // us (the pump's mark-gone rule); the lens hears them
+                // here because the pump is paused — and the conversation
+                // fails NOW rather than waiting out its budget on a port
+                // that is gone.
+                let errors = browser_serial::take_errors(self.port_id);
+                if let Some(first) = errors.first().cloned() {
+                    for error in errors {
+                        tap(LensTapLine::PortError(error));
+                    }
+                    return Err(TransportError::Other(first));
+                }
+            }
             for line in browser_serial::take_lines(self.port_id) {
                 if let Some(tap) = &self.tap {
-                    tap(line.clone());
+                    tap(LensTapLine::Line(line.clone()));
                 }
                 match line.strip_prefix("M!") {
                     Some(json) => match lpc_wire::json::from_str::<WireServerMessage>(json) {

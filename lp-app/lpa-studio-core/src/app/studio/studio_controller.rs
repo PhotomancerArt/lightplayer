@@ -462,7 +462,7 @@ impl StudioController {
                 },
             );
         }
-        self.drop_device_lens_if_unrouted();
+        self.drop_device_lens_if_wireless();
         self.mark_dirty();
     }
 
@@ -3068,20 +3068,28 @@ impl StudioController {
         self.mark_dirty();
     }
 
-    /// The unplug-mid-lens row: once the model stops routing the lens's
-    /// link (port died, board forgotten), the session has no wire and goes
-    /// with it — no refresh needed. The card's own detach evidence is
-    /// already in the fold; this only keeps the pool honest.
-    fn drop_device_lens_if_unrouted(&mut self) {
-        let Some(link) = self
+    /// The unplug-mid-lens row: once the lens's wire is gone — the model
+    /// stopped routing the link (departure sweep, forget), or the fold
+    /// heard the port close under the lens (the io's port error, teed
+    /// through the tap) — the session has no wire and goes with it, no
+    /// refresh needed. The card's own detach evidence is already in the
+    /// fold; this only keeps the pool honest.
+    fn drop_device_lens_if_wireless(&mut self) {
+        let Some(attachment) = self
             .pool
             .device_session()
             .and_then(crate::RuntimeSession::device_attachment)
-            .map(|attachment| attachment.link)
+            .cloned()
         else {
             return;
         };
-        if self.devices.link_is_routable(link) {
+        let link = attachment.link;
+        let port_open = self
+            .devices
+            .roster()
+            .device(attachment.device)
+            .is_some_and(|device| device.evidence.presence.is_open());
+        if self.devices.link_is_routable(link) && port_open {
             return;
         }
         self.push_log(UiLogDraft::new(

@@ -45,7 +45,7 @@ use crate::app::places::DeviceRegistry;
 use crate::{
     DeviceAction, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceInput,
     DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink, LensLineTap,
-    ProjectController, ProjectOp, StudioController, UiAction,
+    LensTapEvent, ProjectController, ProjectOp, StudioController, UiAction,
 };
 
 /// Wall-clock ceiling on a `run_until`. Generous: the fake boots a real host
@@ -348,6 +348,9 @@ struct FakeDeviceIo {
     pending: VecDeque<lpc_wire::WireServerMessage>,
     /// The lens tap (M5): every whole line, verbatim, before decoding.
     tap: Option<LensLineTap>,
+    /// The wire died (an unplug script): every read from here on is EOF,
+    /// so receive fails fast instead of waiting out its budget.
+    dead: Option<String>,
 }
 
 impl FakeDeviceIo {
@@ -357,6 +360,7 @@ impl FakeDeviceIo {
             partial: String::new(),
             pending: VecDeque::new(),
             tap: None,
+            dead: None,
         }
     }
 
@@ -369,7 +373,21 @@ impl FakeDeviceIo {
     fn drain(&mut self) {
         let mut buf = [0u8; 8192];
         loop {
-            let read = read_available(&mut self.stream, &mut buf);
+            let read = match read_available_checked(&mut self.stream, &mut buf) {
+                Ok(read) => read,
+                // The wire died under the lens (an unplug script): the
+                // tap carries it, exactly as the browser io reports the
+                // controller's error.
+                Err(error) => {
+                    if self.dead.is_none() {
+                        if let Some(tap) = &self.tap {
+                            tap(LensTapEvent::PortError(error.clone()));
+                        }
+                        self.dead = Some(error);
+                    }
+                    return;
+                }
+            };
             if read == 0 {
                 return;
             }
@@ -379,7 +397,7 @@ impl FakeDeviceIo {
                 let line: String = self.partial.drain(..=newline).collect();
                 let line = line.trim_end_matches(['\n', '\r']);
                 if let Some(tap) = &self.tap {
-                    tap(line.to_string());
+                    tap(LensTapEvent::Line(line.to_string()));
                 }
                 let Some(json) = line.strip_prefix("M!") else {
                     continue;
@@ -409,6 +427,9 @@ impl lpa_client::ClientIo for FakeDeviceIo {
             self.drain();
             if let Some(message) = self.pending.pop_front() {
                 return Ok(message);
+            }
+            if let Some(error) = &self.dead {
+                return Err(lpc_wire::TransportError::Other(error.clone()));
             }
             if std::time::Instant::now() >= deadline {
                 return Err(lpc_wire::TransportError::Other(
@@ -1017,6 +1038,64 @@ fn an_open_asked_before_the_board_is_ready_attaches_once_it_says_hello() {
     );
 }
 
+/// Unplug under the lens with NO hotplug event (the pump is paused, so the
+/// only witness is the lens io itself): the io's port error rides the tap,
+/// the fold hears error + close, and the lens drops — the road the walk
+/// found missing when the departure sweep did not fire.
+#[test]
+fn a_port_that_dies_under_the_lens_closes_the_editor_through_the_tap() {
+    let device = empty_light_player("dev000000daqf6dvvr6");
+    let (mut bench, tasks) = identified(&device, "usb-lens-6");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench.open_lens(&uid).expect("opens");
+    assert!(bench.lens_device_uid().is_some());
+
+    // The wire dies now: every read from here on is EOF. No hotplug edge
+    // is delivered — the grant stays "held" as far as the sweep knows.
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none()
+            .with_disconnect_after_bytes(device.served_bytes()),
+    );
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    loop {
+        // A lens pull is what touches the wire and meets the EOF.
+        let refresh = UiAction::from_op(ProjectController::NODE_ID, ProjectOp::RefreshProject);
+        let _ = drive(bench.controller.dispatch(refresh));
+        bench.step(&tasks);
+        if bench.lens_device_uid().is_none() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the dead wire never closed the lens: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(bench.controller.runtime_pool_for_test().lens().is_none());
+    let card = &bench.view().devices[0];
+    assert!(
+        card.state_label.starts_with("Attached"),
+        "the card knows the port closed: {card:?}"
+    );
+}
+
 /// An address the roster cannot serve yet is HELD, never refused: the
 /// gallery stays honest, nothing dead is installed, and closing the lens
 /// (leaving the route) lets the intent go.
@@ -1093,6 +1172,18 @@ fn read_available(
 ) -> usize {
     use lpa_link::stream::DeviceByteStream;
     stream.read_available(buf).expect("the fake is alive")
+}
+
+/// The lens io's read: a dead wire is an answer (the port-error tap), not a
+/// panic — an unplug script ends the read path with `Closed`.
+fn read_available_checked(
+    stream: &mut lpa_link::providers::fake_device::FakeDeviceByteStream,
+    buf: &mut [u8],
+) -> Result<usize, String> {
+    use lpa_link::stream::DeviceByteStream;
+    stream
+        .read_available(buf)
+        .map_err(|error| format!("Serial port disconnected: {error:?}"))
 }
 
 /// A LightPlayer board with a stamped identity and a MAC — the everyday case.

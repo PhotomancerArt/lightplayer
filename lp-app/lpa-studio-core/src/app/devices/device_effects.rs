@@ -299,11 +299,27 @@ impl DeviceEffects {
         let borrowed = Rc::clone(&slot.borrowed);
         let tap: super::device_transport::LensLineTap = {
             let sink = Rc::clone(&sink);
-            Rc::new(move |line: String| {
-                sink(Input::link(
-                    link,
-                    lpa_link::device_link::demux::demux_line(&line),
-                ));
+            Rc::new(move |event: super::device_transport::LensTapEvent| {
+                use super::device_transport::LensTapEvent;
+                match event {
+                    LensTapEvent::Line(line) => sink(Input::link(
+                        link,
+                        lpa_link::device_link::demux::demux_line(&line),
+                    )),
+                    // The pump's mark-gone rule, replayed for the lens: a
+                    // port error means the port died underneath us, so the
+                    // fold hears the error AND the close.
+                    LensTapEvent::PortError(message) => {
+                        sink(Input::link(
+                            link,
+                            lpa_devices::link::LinkEvent::Error(message.clone()),
+                        ));
+                        sink(Input::link(
+                            link,
+                            lpa_devices::link::LinkEvent::Closed { reason: message },
+                        ));
+                    }
+                }
             })
         };
         borrowed.set(Some(LENS_EFFECT_ID));
@@ -937,7 +953,7 @@ fn resolve_effect_call(
 #[cfg(test)]
 mod tests {
     use super::super::device_transport::{
-        DeviceEffectFacts, DeviceEffectProgress, DeviceTransportFuture, LensLineTap,
+        DeviceEffectFacts, DeviceEffectProgress, DeviceTransportFuture, LensLineTap, LensTapEvent,
     };
     use super::*;
     use lpa_devices::identity::DeviceId;
@@ -1219,8 +1235,13 @@ mod tests {
         effects.attach_lens_wire(LinkId(1)).expect("io");
         let tap = Rc::clone(&taps.borrow()[0]);
 
-        tap("[INFO] boot line".to_string());
-        tap("M!{\"id\":0,\"msg\":\"unloadProject\"}".to_string());
+        tap(LensTapEvent::Line("[INFO] boot line".to_string()));
+        tap(LensTapEvent::Line(
+            "M!{\"id\":0,\"msg\":\"unloadProject\"}".to_string(),
+        ));
+        tap(LensTapEvent::PortError(
+            "Serial port disconnected.".to_string(),
+        ));
 
         let events: Vec<Input> = inputs
             .borrow()
@@ -1228,7 +1249,7 @@ mod tests {
             .filter(|input| matches!(input, Input::Event(Event::Link { .. })))
             .cloned()
             .collect();
-        assert_eq!(events.len(), 2, "{events:?}");
+        assert_eq!(events.len(), 4, "{events:?}");
         assert!(matches!(
             &events[0],
             Input::Event(Event::Link { link: LinkId(1), event: LinkEvent::Line(line) }) if line == "[INFO] boot line"
@@ -1237,6 +1258,17 @@ mod tests {
             &events[1],
             Input::Event(Event::Link { link: LinkId(1), event: LinkEvent::Frame(frame) })
                 if matches!(frame.body, ServerFrameBody::Other { .. })
+        ));
+        // A port error is the pump's mark-gone rule: error, then close.
+        assert!(matches!(
+            &events[2],
+            Input::Event(Event::Link { link: LinkId(1), event: LinkEvent::Error(message) })
+                if message.contains("disconnected")
+        ));
+        assert!(matches!(
+            &events[3],
+            Input::Event(Event::Link { link: LinkId(1), event: LinkEvent::Closed { reason } })
+                if reason.contains("disconnected")
         ));
     }
 

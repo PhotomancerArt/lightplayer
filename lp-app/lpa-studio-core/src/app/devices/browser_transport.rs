@@ -20,7 +20,7 @@ use lpa_link::{LinkEndpointId, LinkManagementEvent, LinkManagementEventSink, Lin
 
 use super::device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
-    DeviceTransportFuture, GrantedLink, LensLineTap,
+    DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 
 /// Where the board runtime manifest lives on a device (read by the
@@ -275,6 +275,16 @@ impl DeviceTransport for BrowserSerialTransport {
                 log::debug!("lens io: {message}");
             }
         });
+        // The provider's tap vocabulary is its own (lpa-link stays
+        // independent of the studio's); the join is one match.
+        let tap: Rc<dyn Fn(lpa_link::providers::browser_serial_esp32::LensTapLine)> =
+            Rc::new(move |line| {
+                use lpa_link::providers::browser_serial_esp32::LensTapLine;
+                tap(match line {
+                    LensTapLine::Line(line) => LensTapEvent::Line(line),
+                    LensTapLine::PortError(error) => LensTapEvent::PortError(error),
+                })
+            });
         self.provider
             .lens_client_io(&endpoint, tap, events)
             .map_err(|error| error.to_string())
