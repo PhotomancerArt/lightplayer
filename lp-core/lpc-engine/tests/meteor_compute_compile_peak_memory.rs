@@ -293,43 +293,27 @@ fn profile_compute_shader(label: &str, glsl: &str) -> usize {
     overall_peak
 }
 
-/// Measure the meteor sim compile's peak allocation profile and print the
-/// per-stage table (`--nocapture`). The assertion pins the overall
-/// transient peak.
+/// Every checked-in example's compute shaders through the device pipeline,
+/// one per-stage table each plus a summary (`--nocapture`), every peak
+/// under one ceiling.
+///
+/// ONE test on purpose: the tracking allocator's counters are process-wide,
+/// so two `#[test]`s in this binary would run on parallel threads and each
+/// would read the other's allocations as its own peak (CI measured fluid at
+/// 951 KB that way). Everything that measures lives in this function, in
+/// sequence.
+///
+/// Meteor is the case the ceiling was set from: measured 2026-09-01 at
+/// 116,392 B host after the HIR place fix (317,600 B before it, when every
+/// `meteors[i].field` reference held ~5 copies of the Emitter struct type
+/// in the arena), gated at ~1.4x. The number it is read against on the
+/// device is the ~195 KB the XIAO ESP32-C6 has free after the meteor
+/// project loads (300 KB heap), with host bytes overstating device DRAM by
+/// ~1.5-2x. The other examples ride the same ceiling so a new example that
+/// regresses the frontend's residency shape fails here before it reaches a
+/// board. Raise deliberately, with a fresh measurement, never casually.
 #[test]
-fn meteor_sim_compile_peak_profile() {
-    let inputs = compute_compiler_inputs("meteor");
-    let (file, glsl) = inputs
-        .iter()
-        .find(|(file, _)| file == "sim.glsl")
-        .expect("meteor/sim.glsl is the sim node's source");
-    let overall_peak = profile_compute_shader(&format!("meteor/{file}"), glsl);
-
-    // Ceiling on the whole compile's transient peak above the pre-compile
-    // baseline. Measured 2026-09-01 at 116,392 B host after the HIR place
-    // fix (it was 317,600 B before: every `meteors[i].field` reference held
-    // ~5 copies of the Emitter struct type in the arena), gated at ~1.4x.
-    // The number this is compared against on the device is the ~195 KB the
-    // XIAO ESP32-C6 has free after the meteor project loads (300 KB heap),
-    // with host bytes overstating device DRAM by ~1.5-2x. Raise deliberately,
-    // with a fresh measurement, never casually.
-    const METEOR_COMPILE_PEAK_CEILING_BYTES: usize = 160 * 1024;
-    assert!(
-        overall_peak <= METEOR_COMPILE_PEAK_CEILING_BYTES,
-        "meteor sim compile transient peak {overall_peak} B exceeds the \
-         {METEOR_COMPILE_PEAK_CEILING_BYTES} B ceiling"
-    );
-}
-
-/// Every checked-in example's compute shaders, same pipeline, one table
-/// each plus a summary (`--nocapture`). The comparison the meteor ceiling
-/// is read against: which of the flagship board's authored compute shaders
-/// is the heaviest to compile, and by how much. Pinned loosely — the
-/// per-shader ceiling is the same one meteor carries — so a new example
-/// that regresses the frontend's residency shape fails here before it
-/// reaches a board.
-#[test]
-fn every_example_compute_shader_compile_peak() {
+fn compute_shader_compile_peaks() {
     const EXAMPLES: &[&str] = &["events", "fluid", "meteor"];
     const PER_SHADER_CEILING_BYTES: usize = 160 * 1024;
     let mut summary: Vec<(String, usize, usize)> = Vec::new();
@@ -346,8 +330,10 @@ fn every_example_compute_shader_compile_peak() {
         println!("{label:<28} {source_len:>10} {peak:>12}");
     }
     assert!(
-        !summary.is_empty(),
-        "no compute shaders found in the examples"
+        summary
+            .iter()
+            .any(|(label, _, _)| label == "meteor/sim.glsl"),
+        "meteor/sim.glsl (the flagship case) was not measured"
     );
     for (label, _, peak) in &summary {
         assert!(

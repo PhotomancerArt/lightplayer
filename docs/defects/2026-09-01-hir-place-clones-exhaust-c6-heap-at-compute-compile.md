@@ -97,16 +97,17 @@ size. Device validation (the Studio flash/push flow on the bench, the
 host number is the proof of shape, not the margin.
 
 **Regression coverage** —
-`lp-core/lpc-engine/tests/meteor_compute_compile_peak_memory.rs`:
-`meteor_sim_compile_peak_profile` pins the meteor sim compile's transient
-peak under 160 KB host (≈1.4× the fixed measurement, half the unfixed
-one); `every_example_compute_shader_compile_peak` runs every checked-in
-example's compute shaders (events, fluid, meteor) through the same
-pipeline under the same per-shader ceiling and prints the comparison.
-Both compose the compiler input through the node's own
-`compute_glsl_source` seam, header included, so they compile what the
-device compiles. The lps-glsl/lp-shader suites (151 tests) cover the
-lowering rewrites; the filetest corpora cover the emitted IR.
+`lp-core/lpc-engine/tests/meteor_compute_compile_peak_memory.rs::compute_shader_compile_peaks`
+runs every checked-in example's compute shaders (events, fluid, meteor)
+through the device pipeline under the tracking allocator, prints the
+comparison, and pins each transient peak under 160 KB host (≈1.4× the
+fixed meteor measurement, half the unfixed one). One `#[test]` on
+purpose: the allocator counters are process-wide, and two tests in the
+binary measured each other's allocations on CI's parallel threads. It
+composes the compiler input through the node's own `compute_glsl_source`
+seam, header included, so it compiles what the device compiles. The
+lps-glsl/lp-shader suites (151 tests) cover the lowering rewrites; the
+filetest corpora cover the emitted IR.
 
 **Lesson** — an arena is a lifetime decision, not a container: anything
 pushed into it lives until the pass ends, so a recursive builder that
