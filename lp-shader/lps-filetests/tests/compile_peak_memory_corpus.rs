@@ -50,10 +50,10 @@ fn filetest_corpus_frontend_peaks() {
     // Ceiling: measured 2026-09-02 over the corpus; see the planning notes
     // (2026-09-02-0817-hir-per-node-copies-corpus). Set at ~1.4× the largest
     // file's peak, rounded up to a KB. Raise deliberately, never casually.
-    // Largest: struct/deep-nested.glsl at 324,030 B after F3 (361,128 B
-    // after F4, 382,991 B before) — a 5.3 KB file of three-level nested
-    // structs; see the notes for why.
-    const FRONTEND_CEILING_BYTES: usize = 443 * 1024;
+    // Largest: struct/deep-nested.glsl at 299,934 B after F9 (324,030 B
+    // after F3, 361,128 B after F4, 382,991 B before) — a 5.3 KB file of
+    // three-level nested structs; see the notes for why.
+    const FRONTEND_CEILING_BYTES: usize = 411 * 1024;
 
     let dir = filetests_dir();
     let target = Target::from_name("rv32lpn.q32").expect("lps-glsl device target");

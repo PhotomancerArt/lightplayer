@@ -6,7 +6,7 @@ use lps_shared::LpsType;
 use crate::Span;
 
 use super::place::{HirPlace, PlaceRecord, PlaceSegment, SegmentList};
-use super::types::{HirExpr, HirExprKind};
+use super::types::{HirExpr, HirExprKind, HirUserCallWriteback};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ExprId(u32);
@@ -20,6 +20,22 @@ pub struct ExprList {
     len: u16,
 }
 
+/// A span of [`HirUserCallWriteback`]s in the arena's writeback list; most
+/// calls have none and cost eight bytes for saying so.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WritebackList {
+    start: u32,
+    len: u16,
+}
+
+impl WritebackList {
+    pub const EMPTY: Self = Self { start: 0, len: 0 };
+
+    pub fn is_empty(self) -> bool {
+        self.len == 0
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct HirArena {
     exprs: ChunkedVec<HirExpr>,
@@ -29,6 +45,8 @@ pub struct HirArena {
     /// own. One list instead of one `Vec` per place: a place has one or
     /// two segments and a `Vec` of them cost a 4-element allocation each.
     segments: Vec<PlaceSegment>,
+    /// Every call's `out`/`inout` writebacks, back to back.
+    writebacks: Vec<HirUserCallWriteback>,
 }
 
 impl HirArena {
@@ -108,6 +126,24 @@ impl HirArena {
         let start = list.start as usize;
         let end = start + usize::from(list.len);
         &self.expr_lists[start..end]
+    }
+
+    pub(crate) fn push_writebacks<I>(&mut self, items: I) -> WritebackList
+    where
+        I: IntoIterator<Item = HirUserCallWriteback>,
+    {
+        let start = self.writebacks.len();
+        self.writebacks.extend(items);
+        let len = self.writebacks.len() - start;
+        WritebackList {
+            start: start.try_into().expect("HIR writeback list exceeded u32"),
+            len: len.try_into().expect("HIR writeback list exceeded u16"),
+        }
+    }
+
+    pub(crate) fn writebacks(&self, list: WritebackList) -> &[HirUserCallWriteback] {
+        let start = list.start as usize;
+        &self.writebacks[start..start + usize::from(list.len)]
     }
 }
 

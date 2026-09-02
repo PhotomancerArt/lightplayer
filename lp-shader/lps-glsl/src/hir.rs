@@ -45,7 +45,8 @@ use typeck::TypeCtx;
 use types::StructTypes;
 pub use types::{
     BuiltinKind, GlobalInfo, HirExpr, HirExprKind, HirFunction, HirFunctionBody, HirModule,
-    HirOutArg, HirParam, HirStmt, HirTextureOperand, HirUserCallWriteback, ImportKey, UniformInfo,
+    HirOutArg, HirParam, HirStmt, HirTextureOperand, HirUserCallWriteback, ImportId, ImportInfo,
+    ImportKey, UniformInfo,
 };
 pub use typing::{scalar_base_type, scalar_ir_types, scalar_lane_count};
 

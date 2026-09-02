@@ -1,10 +1,11 @@
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use lp_collection::VecMap;
 
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec};
 
-use super::arena::{ExprId, ExprList, HirArena, PlaceId};
+use super::arena::{ExprId, ExprList, HirArena, PlaceId, WritebackList};
 use crate::Span;
 use crate::body::{BinaryOp, IncDecOp, UnaryOp};
 
@@ -43,6 +44,66 @@ pub struct ImportInfo {
 }
 
 pub(super) type StructTypes = VecMap<String, LpsType>;
+
+/// Index of an import in [`HirModule::imports`] — what a call node carries
+/// instead of the owning [`ImportKey`] (two `String`s) it used to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImportId(pub u32);
+
+impl ImportId {
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// The lanes an rvalue swizzle or field access selects, without a heap
+/// vector: a field is always a contiguous run (any width), a swizzle picks
+/// at most four lanes in any order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwizzleLanes {
+    Contiguous { start: u16, len: u16 },
+    Picked { lanes: [u8; 4], len: u8 },
+}
+
+impl SwizzleLanes {
+    /// `None` when the selection is neither contiguous nor at most four
+    /// lanes (no GLSL access produces that).
+    pub fn from_slice(lanes: &[usize]) -> Option<Self> {
+        let contiguous = lanes
+            .first()
+            .is_some_and(|first| lanes.iter().enumerate().all(|(i, l)| *l == first + i));
+        if contiguous || lanes.is_empty() {
+            let start = u16::try_from(lanes.first().copied().unwrap_or(0)).ok()?;
+            let len = u16::try_from(lanes.len()).ok()?;
+            return Some(Self::Contiguous { start, len });
+        }
+        if lanes.len() > 4 {
+            return None;
+        }
+        let mut picked = [0u8; 4];
+        for (slot, lane) in picked.iter_mut().zip(lanes) {
+            *slot = u8::try_from(*lane).ok()?;
+        }
+        Some(Self::Picked {
+            lanes: picked,
+            len: lanes.len() as u8,
+        })
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Contiguous { len, .. } => usize::from(*len),
+            Self::Picked { len, .. } => usize::from(*len),
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..self.len()).map(move |i| match self {
+            Self::Contiguous { start, .. } => usize::from(*start) + i,
+            Self::Picked { lanes, .. } => usize::from(lanes[i]),
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ImportKey {
@@ -151,7 +212,7 @@ pub enum HirExprKind {
     },
     Swizzle {
         base: ExprId,
-        lanes: Vec<usize>,
+        lanes: SwizzleLanes,
     },
     Index {
         base: ExprId,
@@ -160,27 +221,27 @@ pub enum HirExprKind {
     Builtin {
         kind: BuiltinKind,
         args: ExprList,
-        writebacks: Vec<HirUserCallWriteback>,
+        writebacks: WritebackList,
     },
     UserCall {
         function: usize,
         args: ExprList,
-        writebacks: Vec<HirUserCallWriteback>,
+        writebacks: WritebackList,
     },
     ImportCall {
-        import: ImportKey,
+        import: ImportId,
         args: ExprList,
         out: Option<HirOutArg>,
     },
     TexelFetch {
-        sampler: HirTextureOperand,
+        sampler: Box<HirTextureOperand>,
         coord: ExprId,
         lod: ExprId,
     },
     Texture {
-        sampler: HirTextureOperand,
+        sampler: Box<HirTextureOperand>,
         coord: ExprId,
-        import: ImportKey,
+        import: ImportId,
     },
     Unary {
         op: UnaryOp,
@@ -214,11 +275,13 @@ pub enum HirExprKind {
     },
 }
 
-#[derive(Debug, Clone)]
+/// An LPFN out-argument: the local it writes (whose declared type is the
+/// out type — see [`HirFunctionBody::locals`]) and the position the
+/// pointer takes in the call's argument list.
+#[derive(Debug, Clone, Copy)]
 pub struct HirOutArg {
-    pub local: usize,
-    pub ty: LpsType,
-    pub arg_index: usize,
+    pub local: u32,
+    pub arg_index: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -227,11 +290,13 @@ pub struct HirTextureOperand {
     pub descriptor_byte_offset: u32,
 }
 
-#[derive(Debug, Clone)]
+/// One `out`/`inout` argument of a call: the place written back after the
+/// call (its type is the place's, [`crate::hir::PlaceRecord::ty`]) and the
+/// argument position it occupies. Lives in the arena's writeback list.
+#[derive(Debug, Clone, Copy)]
 pub struct HirUserCallWriteback {
-    pub arg_index: usize,
+    pub arg_index: u32,
     pub target: PlaceId,
-    pub ty: LpsType,
     pub copy_in: bool,
 }
 

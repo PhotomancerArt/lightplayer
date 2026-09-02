@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -10,6 +11,7 @@ use lps_shared::{
 use crate::body::{AssignOp, BinaryOp, ParsedExpr, ParsedExprKind, ParsedStmt, UnaryOp};
 use crate::{Diagnostic, Span};
 
+use super::arena::WritebackList;
 use super::arena::{ExprId, ExprList, HirArena, PlaceId};
 use super::array_size::ArraySizeConsts;
 use super::const_fold::{fold_binary, fold_builtin_call, fold_glsl_import_call, fold_unary};
@@ -18,7 +20,7 @@ use super::place::{AccessMode, HirPlace, PlaceRoot, PlaceSegment};
 use super::types::StructTypes;
 use super::types::{
     GlobalInfo, HirExprKind, HirFunctionBody, HirLocal, HirOutArg, HirParam, HirStmt,
-    HirTextureOperand, HirUserCallWriteback, UniformInfo,
+    HirTextureOperand, HirUserCallWriteback, SwizzleLanes, UniformInfo,
 };
 use super::typing::builtin_has_out_args;
 use super::typing::{
@@ -375,6 +377,8 @@ impl<'a> TypeCtx<'a> {
                 }
                 let base = self.type_expr(base)?;
                 let (lanes, ty) = access_lanes(expr.span, self.arena.expr_ty(base), fields)?;
+                let lanes = SwizzleLanes::from_slice(&lanes)
+                    .ok_or_else(|| Diagnostic::error(expr.span, "unsupported swizzle"))?;
                 Ok(self
                     .arena
                     .push_expr(expr.span, ty, HirExprKind::Swizzle { base, lanes }))
@@ -602,9 +606,8 @@ impl<'a> TypeCtx<'a> {
                         }
                         call_args.push(zero_expr(&mut self.arena, arg.span, &param.ty)?);
                         writebacks.push(HirUserCallWriteback {
-                            arg_index,
+                            arg_index: arg_index as u32,
                             target,
-                            ty: param.ty.clone(),
                             copy_in: false,
                         });
                     }
@@ -619,15 +622,15 @@ impl<'a> TypeCtx<'a> {
                         let value = self.type_expr(arg)?;
                         call_args.push(self.coerce_expr(value, &param.ty)?);
                         writebacks.push(HirUserCallWriteback {
-                            arg_index,
+                            arg_index: arg_index as u32,
                             target,
-                            ty: param.ty.clone(),
                             copy_in: true,
                         });
                     }
                 }
             }
             let args = self.arena.push_expr_list(call_args);
+            let writebacks = self.arena.push_writebacks(writebacks);
             return Ok(self.arena.push_expr(
                 span,
                 sig.return_ty.clone(),
@@ -667,7 +670,7 @@ impl<'a> TypeCtx<'a> {
                 HirExprKind::Builtin {
                     kind,
                     args,
-                    writebacks: Vec::new(),
+                    writebacks: WritebackList::EMPTY,
                 },
             ));
         }
@@ -744,7 +747,7 @@ impl<'a> TypeCtx<'a> {
             span,
             LpsType::Vec4,
             HirExprKind::TexelFetch {
-                sampler,
+                sampler: Box::new(sampler),
                 coord,
                 lod,
             },
@@ -803,7 +806,7 @@ impl<'a> TypeCtx<'a> {
             span,
             LpsType::Vec4,
             HirExprKind::Texture {
-                sampler,
+                sampler: Box::new(sampler),
                 coord,
                 import,
             },
@@ -897,9 +900,10 @@ impl<'a> TypeCtx<'a> {
                     format!("lpfn_psrdnoise gradient argument must be a local {gradient_ty:?}"),
                 ));
             };
+            let local =
+                u32::try_from(index).map_err(|_| Diagnostic::error(span, "too many locals"))?;
             out = Some(HirOutArg {
-                local: index,
-                ty: gradient_ty,
+                local,
                 arg_index: 3,
             });
             gradient_arg = Some(3);
@@ -1372,7 +1376,7 @@ impl<'a> TypeCtx<'a> {
             },
             HirExprKind::Swizzle { base, lanes } => HirExprKind::Swizzle {
                 base: self.clone_expr_from(source, *base),
-                lanes: lanes.clone(),
+                lanes: *lanes,
             },
             HirExprKind::Index { base, index } => HirExprKind::Index {
                 base: self.clone_expr_from(source, *base),
@@ -1385,7 +1389,7 @@ impl<'a> TypeCtx<'a> {
             } => HirExprKind::Builtin {
                 kind: *kind,
                 args: self.clone_expr_list_from(source, *args),
-                writebacks: writebacks.clone(),
+                writebacks: self.clone_writebacks_from(source, *writebacks),
             },
             HirExprKind::UserCall {
                 function,
@@ -1394,12 +1398,12 @@ impl<'a> TypeCtx<'a> {
             } => HirExprKind::UserCall {
                 function: *function,
                 args: self.clone_expr_list_from(source, *args),
-                writebacks: writebacks.clone(),
+                writebacks: self.clone_writebacks_from(source, *writebacks),
             },
             HirExprKind::ImportCall { import, args, out } => HirExprKind::ImportCall {
-                import: import.clone(),
+                import: *import,
                 args: self.clone_expr_list_from(source, *args),
-                out: out.clone(),
+                out: *out,
             },
             HirExprKind::TexelFetch {
                 sampler,
@@ -1417,7 +1421,7 @@ impl<'a> TypeCtx<'a> {
             } => HirExprKind::Texture {
                 sampler: sampler.clone(),
                 coord: self.clone_expr_from(source, *coord),
-                import: import.clone(),
+                import: *import,
             },
             HirExprKind::Unary { op, expr } => HirExprKind::Unary {
                 op: *op,
@@ -1466,6 +1470,19 @@ impl<'a> TypeCtx<'a> {
             .map(|expr| self.clone_expr_from(source, *expr))
             .collect::<Vec<_>>();
         self.arena.push_expr_list(ids)
+    }
+
+    fn clone_writebacks_from(&mut self, source: &HirArena, list: WritebackList) -> WritebackList {
+        let cloned = source
+            .writebacks(list)
+            .iter()
+            .map(|w| HirUserCallWriteback {
+                arg_index: w.arg_index,
+                target: self.clone_place_from(source, w.target),
+                copy_in: w.copy_in,
+            })
+            .collect::<Vec<_>>();
+        self.arena.push_writebacks(cloned)
     }
 
     fn clone_place_from(&mut self, source: &HirArena, place: PlaceId) -> PlaceId {

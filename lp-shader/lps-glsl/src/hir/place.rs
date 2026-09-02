@@ -194,7 +194,7 @@ pub(crate) fn field_name(ty: &LpsType, member: u16) -> Option<String> {
     let m = members.get(usize::from(member))?;
     Some(match &m.name {
         Some(name) => name.clone(),
-        None => alloc::format!("_{}", member),
+        None => alloc::format!("_{member}"),
     })
 }
 

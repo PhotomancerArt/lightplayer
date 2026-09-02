@@ -39,18 +39,18 @@ impl<'a> TypeCtx<'a> {
                 }
 
                 let args = self.arena.push_expr_list([value]);
+                let writebacks = self.arena.push_writebacks([HirUserCallWriteback {
+                    arg_index: 1,
+                    target: integer,
+                    copy_in: false,
+                }]);
                 Ok(self.arena.push_expr(
                     span,
-                    ty.clone(),
+                    ty,
                     HirExprKind::Builtin {
                         kind,
                         args,
-                        writebacks: alloc::vec![HirUserCallWriteback {
-                            arg_index: 1,
-                            target: integer,
-                            ty,
-                            copy_in: false,
-                        }],
+                        writebacks,
                     },
                 ))
             }
@@ -72,18 +72,18 @@ impl<'a> TypeCtx<'a> {
                 }
 
                 let args = self.arena.push_expr_list([lhs, rhs]);
+                let writebacks = self.arena.push_writebacks([HirUserCallWriteback {
+                    arg_index: 2,
+                    target: carry,
+                    copy_in: false,
+                }]);
                 Ok(self.arena.push_expr(
                     span,
-                    ty.clone(),
+                    ty,
                     HirExprKind::Builtin {
                         kind,
                         args,
-                        writebacks: alloc::vec![HirUserCallWriteback {
-                            arg_index: 2,
-                            target: carry,
-                            ty,
-                            copy_in: false,
-                        }],
+                        writebacks,
                     },
                 ))
             }
@@ -111,26 +111,25 @@ impl<'a> TypeCtx<'a> {
                 }
 
                 let args = self.arena.push_expr_list([lhs, rhs]);
+                let writebacks = self.arena.push_writebacks([
+                    HirUserCallWriteback {
+                        arg_index: 2,
+                        target: msb,
+                        copy_in: false,
+                    },
+                    HirUserCallWriteback {
+                        arg_index: 3,
+                        target: lsb,
+                        copy_in: false,
+                    },
+                ]);
                 Ok(self.arena.push_expr(
                     span,
                     LpsType::Void,
                     HirExprKind::Builtin {
                         kind,
                         args,
-                        writebacks: alloc::vec![
-                            HirUserCallWriteback {
-                                arg_index: 2,
-                                target: msb,
-                                ty: ty.clone(),
-                                copy_in: false,
-                            },
-                            HirUserCallWriteback {
-                                arg_index: 3,
-                                target: lsb,
-                                ty,
-                                copy_in: false,
-                            },
-                        ],
+                        writebacks,
                     },
                 ))
             }
