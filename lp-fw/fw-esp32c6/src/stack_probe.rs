@@ -22,11 +22,19 @@ const PATTERN: u32 = 0xA5A5_5A5A;
 /// Bytes below the current `sp` left unpainted so the painter's own frame
 /// and any interrupt frame that lands during the paint stay intact.
 const PAINT_MARGIN: usize = 1024;
+/// Bytes above the stack bottom left alone: esp-hal keeps the main stack's
+/// guard word there (`ESP_HAL_CONFIG_STACK_GUARD_OFFSET` from `_stack_end`)
+/// under a hardware watchpoint, and painting over it is itself reported as
+/// an overflow — "Detected a write to the main stack's guard value" on the
+/// first boot of this probe. The high-water scan starts above it too; the
+/// 256 B it costs the measurement are noise against a 72 KB stack.
+const GUARD_SKIP: usize = 256;
 
 static HIGH_WATER_REPORTED: AtomicUsize = AtomicUsize::new(0);
 
+/// Lowest address the probe touches: the stack bottom plus the guard zone.
 fn stack_bottom() -> usize {
-    (&raw const _stack_end) as usize
+    (&raw const _stack_end) as usize + GUARD_SKIP
 }
 
 fn stack_top() -> usize {
@@ -40,9 +48,9 @@ fn current_sp() -> usize {
     sp
 }
 
-/// Total main-stack size in bytes.
+/// Total main-stack size in bytes (guard zone included).
 pub fn total_bytes() -> usize {
-    stack_top() - stack_bottom()
+    stack_top() - (&raw const _stack_end) as usize
 }
 
 /// Paint everything between the stack bottom and (a margin below) the
