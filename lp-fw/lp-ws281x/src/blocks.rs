@@ -380,6 +380,11 @@ impl<const N: usize> SharedBlockPlan<N> {
     }
 
     /// [`BlockPlan::blocks`], fail-closed: `0` before init.
+    ///
+    /// `always`-inlined (with the two helpers below): backends call these from
+    /// the interrupt path, and an outlined copy in flash is a cache miss on the
+    /// refill deadline — measured on the ESP32-C6 image at `opt-level = "z"`.
+    #[inline(always)]
     pub fn blocks(&self, ch: u8) -> u8 {
         use core::sync::atomic::Ordering::{Acquire, Relaxed};
         if !self.set.load(Acquire) || ch as usize >= N {
@@ -394,12 +399,14 @@ impl<const N: usize> SharedBlockPlan<N> {
     }
 
     /// [`BlockPlan::window_words`], fail-closed: `0` before init.
+    #[inline(always)]
     pub fn window_words(&self, ch: u8, block_words: usize) -> usize {
         self.blocks(ch) as usize * block_words
     }
 
     /// [`BlockPlan::window_start`] — needs no plan, kept here so backends can
     /// speak to one type.
+    #[inline(always)]
     pub fn window_start(&self, ch: u8, block_words: usize) -> usize {
         ch as usize * block_words
     }
