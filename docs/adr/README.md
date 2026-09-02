@@ -180,6 +180,10 @@ holds the full context.
 | A1: wire values decode under the CURRENT fixture's lamp type (owner's when mapped, else the next-unmapped object's) — the panel states the assumption rather than implying certainty | `2026-08-20-walk-up-assignment-selection-model` | Per-port lamp-type data exists on the surface |
 | The lamps−/+ control is mock-level room only (dashed, disabled): editing an object's lamp count is a mapping write, not a patch verb | `2026-08-20-walk-up-assignment-selection-model` | The count edit gets a home on the mapping write path |
 | The ProjectRead refusal threshold (32 KiB largest-free-block) and the staged sync's 16-node slot page size are provisional constants | `2026-08-28-project-reads-bounded-streamed-refusable` | The wire-evolution round-1 G1 bench walk reads real heartbeat numbers on the classic |
+| Persisted black-on-fault preference (`project.json` or a device setting; needs a format bump either way) | `2026-09-02-fault-is-never-black` | A user asks for the pattern off by default, or a project ships intending `Black` |
+| Dependency-path fault taint and per-fragment verdicts (today's rule is project-level: any `Fault` paints every output) | `2026-09-02-fault-is-never-black` | A project needs some outputs to keep rendering while a sibling output's own chain is faulted |
+| Meteor heap headroom on the C6 (~250 B over the 300,000 B arena at compute-shader compile) | `2026-09-02-fault-is-never-black` | The flagship example must fit with margin, not just reproduce the fault demo |
+| Flash-persisted recovery ledger | `2026-07-04-crash-recovery-model`; `2026-09-02-fault-is-never-black` | A quarantine needs to survive a power cycle, not just a Clear-faults verb |
 
 ## Relationship To Shared Planning
 
