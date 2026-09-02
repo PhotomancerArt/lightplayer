@@ -58,6 +58,20 @@ pub enum ServerMsgBody {
     /// An embedder with no reset hook answers [`ServerMsgBody::Error`]
     /// instead — a reboot that will not happen must never be acked.
     Reboot,
+    /// Ack for [`crate::ClientRequest::ClearFaults`]: the engine's faulted
+    /// nodes have been re-armed, and `ledger_cleared` says whether there was
+    /// a crash-recovery ledger to forget as well.
+    ///
+    /// `false` is not a failure. A host or browser server installs no
+    /// recovery region, so it has no quarantine to lift and never had one;
+    /// the engine half still happened. Reporting the difference keeps the
+    /// client from claiming a device forgot something it never recorded.
+    ///
+    /// Nothing resets and nothing is retried in the request path: the
+    /// cleared state takes effect on the device's next tick.
+    ClearFaults {
+        ledger_cleared: bool,
+    },
 
     Log {
         level: LogLevel,

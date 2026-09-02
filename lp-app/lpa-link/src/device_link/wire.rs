@@ -251,6 +251,7 @@ fn body_label(body: &ServerMsgBody) -> &'static str {
         ServerMsgBody::StopAllProjects => "StopAllProjects",
         ServerMsgBody::SetLogLevel => "SetLogLevel",
         ServerMsgBody::Reboot => "Reboot",
+        ServerMsgBody::ClearFaults { .. } => "ClearFaults",
         ServerMsgBody::Log { .. } => "Log",
         ServerMsgBody::Heartbeat { .. } => "Heartbeat",
         ServerMsgBody::Error { .. } => "Error",
@@ -271,6 +272,12 @@ pub fn client_message(frame: &ClientFrame) -> Result<ClientMessage, String> {
         // know the variant answers an error instead of going quiet.
         ClientFrameBody::Reboot => ClientRequest::Reboot,
         ClientFrameBody::ListLoadedProjects => ClientRequest::ListLoadedProjects,
+        // Nothing to wait for on the far side: the device acks and the
+        // cleared state takes effect on its next tick. The ack itself is
+        // labelled, not mirrored — whether the ledger existed to clear is a
+        // diagnostic, and the card re-derives from the loaded report that
+        // follows this frame.
+        ClientFrameBody::ClearFaults => ClientRequest::ClearFaults,
         ClientFrameBody::Opaque { label } => {
             return Err(format!(
                 "lpa-link cannot forward an opaque request ({label}): coarse effects go \
@@ -510,6 +517,38 @@ mod tests {
             lpc_wire::json::from_str(line.trim_start_matches("M!").trim_end()).expect("decode");
         assert_eq!(decoded.id, 5);
         assert!(matches!(decoded.msg, ClientRequest::Reboot));
+    }
+
+    #[test]
+    fn a_clear_faults_request_round_trips_to_the_line_a_device_answers() {
+        let line = encode_client_frame(&ClientFrame::clear_faults(6)).expect("encode");
+
+        let decoded: ClientMessage =
+            lpc_wire::json::from_str(line.trim_start_matches("M!").trim_end()).expect("decode");
+        assert_eq!(decoded.id, 6);
+        assert!(matches!(decoded.msg, ClientRequest::ClearFaults));
+    }
+
+    /// The ack is LABELLED, not mirrored: whether the device had a ledger
+    /// to forget is a diagnostic, and the card re-derives from the loaded
+    /// report that follows. The label still has to be honest, because a
+    /// journal is what explains a card that did not change.
+    #[test]
+    fn the_clear_faults_ack_arrives_as_a_named_frame() {
+        let frame = server_frame(&WireServerMessage::new(
+            6,
+            ServerMsgBody::ClearFaults {
+                ledger_cleared: true,
+            },
+        ));
+
+        assert_eq!(frame.request_id, 6);
+        assert_eq!(
+            frame.body,
+            lpa_devices::wire::ServerFrameBody::Other {
+                label: "ClearFaults".to_string()
+            }
+        );
     }
 
     #[test]

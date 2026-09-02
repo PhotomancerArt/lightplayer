@@ -8,12 +8,12 @@
 
 use lpa_devices::view::roster_view;
 use lpa_devices::wire::{
-    LoadedProjectFacts, ProjectFaultFacts, RecoveryFacts, RecoveryLevelFacts, RecoveryPathFacts,
-    ServerFrame,
+    ClientFrameBody, LoadedProjectFacts, ProjectFaultFacts, RecoveryFacts, RecoveryLevelFacts,
+    RecoveryPathFacts, ServerFrame,
 };
 use lpa_devices::{
-    DeviceStatus, HelloFacts, Input, LinkEvent, LinkId, LinkInfo, Millis, PeerIdentity, Roster,
-    RosterConfig,
+    Action, DeviceStatus, HelloFacts, Input, LinkEvent, LinkId, LinkInfo, Millis, PeerIdentity,
+    Roster, RosterConfig,
 };
 
 fn identified_board() -> Roster {
@@ -238,4 +238,130 @@ fn the_degraded_line_is_the_same_line_every_heartbeat() {
     }
     assert_eq!(seen[0], seen[1]);
     assert_eq!(seen[1], seen[2]);
+}
+
+// --- the Clear faults verb ------------------------------------------------
+//
+// The escape from the quarantine the tests above only describe. It is a
+// DIRECT verb: one request over the link, no activity, and nothing to wait
+// for on the board — the cleared ledger takes effect on the device's next
+// tick, and the card re-derives from what it reports after that.
+
+fn clear_faults(roster: &mut Roster, at: Millis) -> Vec<lpa_devices::Command> {
+    let device = roster_view(roster, at).devices[0].id;
+    roster.handle(at, Input::Action(Action::ClearFaults { device }))
+}
+
+fn frames(commands: &[lpa_devices::Command]) -> Vec<ClientFrameBody> {
+    commands
+        .iter()
+        .filter_map(|command| match command {
+            lpa_devices::Command::Link {
+                command: lpa_devices::LinkCommand::SendFrame(frame),
+                ..
+            } => Some(frame.body.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn clearing_faults_asks_the_board_and_then_asks_what_it_is_running() {
+    let mut roster = identified_board();
+    heartbeat(
+        &mut roster,
+        Millis(200),
+        Some(vec![LoadedProjectFacts::faulted(
+            "/projects/meteor",
+            quarantined(),
+        )]),
+        None,
+    );
+
+    let commands = clear_faults(&mut roster, Millis(300));
+
+    assert_eq!(
+        frames(&commands),
+        vec![
+            ClientFrameBody::ClearFaults,
+            // Asked for, not waited for: the loaded report carries the
+            // fault verdict, and a card that kept saying Degraded for a
+            // whole heartbeat period would read as a verb that did nothing.
+            ClientFrameBody::ListLoadedProjects,
+        ],
+        "{commands:?}"
+    );
+    assert!(
+        roster_view(&roster, Millis(310)).devices[0]
+            .activity
+            .is_none(),
+        "a direct verb spawns nothing to supervise"
+    );
+}
+
+#[test]
+fn the_board_re_degrades_if_the_fault_comes_back() {
+    // The honest outcome, and the one the verb's own description promises:
+    // clearing forgives, it does not fix. The next report is the truth.
+    let mut roster = identified_board();
+    heartbeat(
+        &mut roster,
+        Millis(200),
+        Some(vec![LoadedProjectFacts::faulted(
+            "/projects/meteor",
+            quarantined(),
+        )]),
+        None,
+    );
+    clear_faults(&mut roster, Millis(300));
+
+    // The board answers the re-read with a clean list: the card recovers.
+    roster.handle(
+        Millis(400),
+        Input::link(
+            LinkId(1),
+            LinkEvent::Frame(ServerFrame::loaded_report(
+                2,
+                vec![LoadedProjectFacts::new("/projects/meteor")],
+            )),
+        ),
+    );
+    assert_eq!(
+        roster_view(&roster, Millis(410)).devices[0].status,
+        DeviceStatus::Ready
+    );
+
+    // ...and the node faults again on the next tick, as it will whenever
+    // the failure is still there.
+    heartbeat(
+        &mut roster,
+        Millis(1_400),
+        Some(vec![LoadedProjectFacts::faulted(
+            "/projects/meteor",
+            quarantined(),
+        )]),
+        None,
+    );
+    let card = roster_view(&roster, Millis(1_410)).devices[0].clone();
+    assert_eq!(card.status, DeviceStatus::Degraded, "{card:?}");
+    assert!(card.degraded.is_some());
+}
+
+#[test]
+fn clearing_faults_is_refused_while_an_activity_owns_the_port() {
+    // Invariant I5, the same rule Reset keeps: a request written into a
+    // flash's stream would walk over its correlation.
+    let mut roster = identified_board();
+    let device = roster_view(&roster, Millis(200)).devices[0].id;
+    roster.handle(Millis(210), Input::Action(Action::Identify { device }));
+    assert!(
+        roster_view(&roster, Millis(220)).devices[0]
+            .activity
+            .is_some(),
+        "the identify is running"
+    );
+
+    let commands = roster.handle(Millis(230), Input::Action(Action::ClearFaults { device }));
+
+    assert_eq!(frames(&commands), Vec::new(), "{commands:?}");
 }

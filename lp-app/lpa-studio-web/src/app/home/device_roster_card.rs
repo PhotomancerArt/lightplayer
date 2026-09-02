@@ -41,7 +41,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceAction, DeviceActivityView, DeviceEscape, DeviceId, DeviceLoadedProject, DevicePushOp,
-    DeviceView, DevicesOp, PendingLinkView, PushSourceGroup, UiAction, UiExampleCard,
+    DeviceStatus, DeviceView, DevicesOp, PendingLinkView, PushSourceGroup, UiAction, UiExampleCard,
     UiPackageCard, UiStatus, device_escape_action, device_status_kind, flash_offer,
     pending_escape_action, push_offer,
 };
@@ -86,6 +86,11 @@ pub(crate) fn DeviceRosterCard(
     // port, which is the same condition the model's own spawns check.
     let linked = card.escapes.contains(&DeviceEscape::Disconnect);
     let idle = card.activity.is_none();
+    // The one condition Clear faults turns on. The status is the derived
+    // headline — a board is Degraded exactly when it reported a faulted node
+    // or a non-green recovery state — so the verb appears with the attention
+    // chip and the line under "Running …", and leaves with them.
+    let degraded = card.status == DeviceStatus::Degraded;
 
     rsx! {
         article { class: card_class(),
@@ -192,6 +197,18 @@ pub(crate) fn DeviceRosterCard(
                     ActionButton {
                         key: "{\"remove-project\"}",
                         action: DevicesOp::action_for(DeviceAction::RemoveProject { device }),
+                        running: false,
+                        variant: ActionButtonVariant::Quiet,
+                        on_action,
+                    }
+                }
+                // Only on a board that has SAID it is degraded: a verb to
+                // forget faults offered over a healthy card would invite a
+                // gesture with nothing to do, and would keep inviting it.
+                if degraded && idle && linked {
+                    ActionButton {
+                        key: "{\"clear-faults\"}",
+                        action: DevicesOp::action_for(DeviceAction::ClearFaults { device }),
                         running: false,
                         variant: ActionButtonVariant::Quiet,
                         on_action,

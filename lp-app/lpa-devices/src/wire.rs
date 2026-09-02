@@ -342,11 +342,18 @@ impl ClientFrame {
             body: ClientFrameBody::ListLoadedProjects,
         }
     }
+
+    pub fn clear_faults(request_id: u32) -> Self {
+        Self {
+            request_id,
+            body: ClientFrameBody::ClearFaults,
+        }
+    }
 }
 
 /// The client requests the model itself issues. Deliberately tiny: the model
-/// asks who a peer is and (round 2) asks it to reboot; every other request
-/// belongs to the app above it.
+/// asks who a peer is, what it is running, and (round 2) asks it to reboot or
+/// to forget its faults; every other request belongs to the app above it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ClientFrameBody {
     /// `ClientRequest::Hello` — the ONLY thing that can grant a verdict on a
@@ -358,12 +365,17 @@ pub enum ClientFrameBody {
     Reboot,
     /// `ClientRequest::ListLoadedProjects` — "what have you got on you?".
     ///
-    /// The third and last thing the model asks a peer itself, and it earns
-    /// its place the same way the hello does: the empty and running faces
-    /// are made of the answer, and waiting for a heartbeat to volunteer it
-    /// would leave a just-pushed card claiming nothing for a heartbeat
-    /// period.
+    /// It earns its place the same way the hello does: the empty and
+    /// running faces are made of the answer, and waiting for a heartbeat to
+    /// volunteer it would leave a just-pushed card claiming nothing for a
+    /// heartbeat period.
     ListLoadedProjects,
+    /// `ClientRequest::ClearFaults` — "stop holding it against yourself".
+    ///
+    /// The device forgets its crash-recovery ledger and re-arms the nodes
+    /// that faulted. Nothing resets, so there is no boot to wait for: the
+    /// card re-derives from what the board reports next.
+    ClearFaults,
     /// An opaque request forwarded on behalf of a coarse effect; the label
     /// exists so journals read honestly.
     Opaque { label: String },

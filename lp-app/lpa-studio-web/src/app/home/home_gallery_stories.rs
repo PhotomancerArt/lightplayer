@@ -531,7 +531,7 @@ fn devices_page_armed_confirm() -> Element {
 }
 
 #[story(
-    description = "Running vs Degraded, side by side (a fault is never black, 2026-09-02). Left: the healthy running card. Right: the SAME board reporting a faulted node — the chip drops from Ready to Degraded in the attention tone, and one line under \"Running …\" names the node and the runtime's own reason. The running face is deliberately kept: a degraded board is still running, and dropping the project name would answer \"what is on it?\" with a complaint. This is the card that lied for two days while a quarantined shader rendered black (2026-09-01 bench)."
+    description = "Running vs Degraded, side by side (a fault is never black, 2026-09-02). Left: the healthy running card. Right: the SAME board reporting a faulted node — the chip drops from Ready to Degraded in the attention tone, and one line under \"Running …\" names the node and the runtime's own reason. The running face is deliberately kept: a degraded board is still running, and dropping the project name would answer \"what is on it?\" with a complaint. This is the card that lied for two days while a quarantined shader rendered black (2026-09-01 bench). The degraded card also carries one extra verb in the actions row — Clear faults, beside Reset — which forgets the board\'s crash ledger and re-arms the faulted nodes; the healthy card does not offer it, because there would be nothing for it to do."
 )]
 fn devices_page_degraded_card() -> Element {
     let healthy = roster_fixture().roster.devices.remove(0);

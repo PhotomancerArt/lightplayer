@@ -33,6 +33,29 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 20: `ClientRequest::ClearFaults` + its `ServerMsgBody::ClearFaults {
+///   ledger_cleared }` ack — the studio's Clear faults verb, which forgets
+///   the crash-recovery ledger and re-arms the engine's faulted nodes.
+///   Quarantine used to end only at power-on, so a board that disabled a
+///   node kept rendering black until somebody reached its USB cable
+///   (2026-09-01 bench). New variants on BOTH request and response enums:
+///   an old firmware cannot decode the request and an old client cannot
+///   decode the ack, which is what earns the bump. Unlike v19's `Reboot`
+///   the device ANSWERS and then does nothing — the cleared state takes
+///   effect on the next tick.
+///
+///   This bump ALSO covers `NodeRuntimeStatus::Fault(String)`, the new
+///   runtime-failure status level, which rides the tree delta
+///   (`WireTreeDelta`) in project-read frames: an old client deserializing
+///   the status enum has no such variant and cannot decode the node's
+///   entry at all. It rides here rather than earning its own bump because
+///   both land in the same train (the "a fault is never black" plan) and a
+///   version means "assume nothing works" either way.
+///
+///   Landing beside them, and NOT earning a bump on their own: the
+///   heartbeat's per-project fault (`LoadedProject.fault`, an optional
+///   `#[serde(default)]` field carrying `ProjectFaultWire`) — additive per
+///   the rule below, so an old peer reads it as `None`.
 /// - 19: `ClientRequest::Reboot` + its `ServerMsgBody::Reboot` ack — the
 ///   bridge-independent restart the round-2 recovery ladder needs (a CH340
 ///   board whose grant dies on replug cannot be reset by any signal dance
@@ -153,7 +176,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 19;
+pub const WIRE_PROTO_VERSION: u32 = 20;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -444,6 +467,20 @@ mod tests {
         assert_eq!(json, "\"hello\"");
         let back: crate::ClientRequest = crate::json::from_str(&json).unwrap();
         assert!(matches!(back, crate::ClientRequest::Hello));
+    }
+
+    /// The version is PINNED, not derived: every bump marks every fielded
+    /// board Incompatible until it is reflashed, so it must be a deliberate
+    /// edit with a History entry beside it — never a number that drifted
+    /// with a refactor. Bumping this line without adding an entry above is
+    /// the mistake this assertion exists to catch.
+    #[test]
+    fn the_proto_version_is_pinned_to_its_history() {
+        assert_eq!(
+            WIRE_PROTO_VERSION, 20,
+            "if you meant to bump, add the History entry in this file's \
+             doc comment and update this pin"
+        );
     }
 
     /// The embedder half defaults to this build's proto and no uid, and the

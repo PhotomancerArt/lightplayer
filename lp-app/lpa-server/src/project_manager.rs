@@ -256,6 +256,20 @@ impl ProjectManager {
             .collect()
     }
 
+    /// Re-arm every loaded engine's faulted nodes
+    /// ([`lpc_engine::Engine::clear_faults`]) — the engine half of the
+    /// `ClearFaults` request.
+    ///
+    /// Every loaded project, not the one a handle names: a fault is a
+    /// device-level condition (the recovery ledger it usually comes from
+    /// has no idea which project a path belonged to), and the verb the user
+    /// pressed is on the DEVICE card.
+    pub fn clear_faults(&mut self) {
+        for project in self.projects.values_mut() {
+            project.engine_mut().clear_faults();
+        }
+    }
+
     /// List all available projects on the filesystem
     ///
     /// Returns project names that exist on disk but may not be loaded.

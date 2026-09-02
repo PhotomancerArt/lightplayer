@@ -163,6 +163,20 @@ pub fn handle_client_message(
             // written (`LpServer::tick_and_send`) — see `RebootHook`.
             ServerMessagePayload::Reboot
         }
+        lpc_wire::ClientRequest::ClearFaults => {
+            // Both halves, in this order for no reason but readability:
+            // the ledger stops denying the frames, and the engine re-arms
+            // the nodes that gave up. Neither alone is a retry — a re-armed
+            // node whose path is still gated faults again on the next tick.
+            //
+            // No reboot hook equivalent: nothing resets and nothing is
+            // retried here. The next tick does the work, and if the failure
+            // is still there the node faults again and the heartbeat says
+            // so. Answering "cleared" is not a promise that it is fixed.
+            let ledger_cleared = lp_recovery::clear_ledger();
+            project_manager.clear_faults();
+            ServerMessagePayload::ClearFaults { ledger_cleared }
+        }
     };
 
     Ok(WireServerMessage::new(id, response))

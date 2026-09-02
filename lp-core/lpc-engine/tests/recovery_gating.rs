@@ -188,6 +188,55 @@ fn denied_shader_compile_is_a_fault() {
         matches!(node.runtime_status(), Some(NodeRuntimeStatus::Fault(_))),
         "the retry re-entered the gate (proving needs_compile was re-armed) and was denied again",
     );
+
+    // --- P3: the verb that ends the quarantine ---------------------------
+    // Both halves are needed and this is where that is provable: the node
+    // above was ALREADY re-armed by `clear_fault` and still faulted,
+    // because the ledger was still denying the frame. Clearing the ledger
+    // is what lets the compile through.
+    assert!(
+        lp_recovery::clear_ledger(),
+        "an installed global reports the clear"
+    );
+    assert_eq!(
+        lp_recovery::snapshot().unwrap().level,
+        RecoveryLevel::Green,
+        "every accusation is forgotten, not just the compile's"
+    );
+
+    node.clear_fault();
+    lpc_engine::node::RenderNode::render_texture_into(
+        &mut node,
+        product,
+        &request,
+        &mut texture,
+        &mut ctx,
+    )
+    .expect("render after the clear");
+    // The compile RAN this time — it got past the gate and reached the
+    // backend, which rejected this fixture's deliberately bogus source. The
+    // status flipping from Fault to Error is the whole taxonomy in one
+    // assertion: the runtime is no longer refusing the work, and what is
+    // left is an authoring problem with a diagnostic to point at.
+    match node.runtime_status() {
+        Some(NodeRuntimeStatus::Error(message)) => assert!(
+            message.contains("shader compile"),
+            "the compile reached the backend: {message}"
+        ),
+        other => panic!("expected a compile Error once the gate lifted, got {other:?}"),
+    }
+    assert!(
+        node.compilation_error().is_some(),
+        "and it is a diagnostic again, unlike the quarantine"
+    );
+
+    // The path the FIRST steps of this test gated is admitted again too:
+    // clearing is device-wide, exactly like the power cycle it replaces.
+    let ran = catch_node_panic_framed(FrameKind::NodeRender, "nodes/crashy", || {
+        Ok::<_, NodeError>("ran")
+    })
+    .expect("the previously gated node path is admitted again");
+    assert_eq!(ran, "ran");
 }
 
 /// Without the shader node kind there is no compile to deny.

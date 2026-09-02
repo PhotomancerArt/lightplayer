@@ -312,6 +312,30 @@ mod ser_write_json_tests {
         }
     }
 
+    /// The ack the device writes with its own serializer, not the host's:
+    /// `ledger_cleared` is the only thing it carries and the only thing the
+    /// client reads, so a boolean that failed to survive the firmware's
+    /// encoder would be silent.
+    #[test]
+    fn ser_write_json_clear_faults_ack_round_trips() {
+        for ledger_cleared in [true, false] {
+            let msg = ServerMessage::new(7, ServerMsgBody::ClearFaults { ledger_cleared });
+
+            let json = serialize_with_ser_write_json(&msg).expect("ser-write-json serialize");
+            let deserialized: ServerMessage = from_str(&json).expect("decode the ack");
+
+            assert_eq!(deserialized.id, 7);
+            match deserialized.msg {
+                ServerMsgBody::ClearFaults {
+                    ledger_cleared: got,
+                } => {
+                    assert_eq!(got, ledger_cleared, "{json}");
+                }
+                other => panic!("expected the ClearFaults ack, got {other:?}"),
+            }
+        }
+    }
+
     #[test]
     fn ser_write_json_heartbeat_round_trips() {
         let msg = ServerMessage::new(

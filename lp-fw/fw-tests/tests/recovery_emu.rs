@@ -29,10 +29,11 @@ use lpa_client::TokioLpClient;
 use lpc_model::{AsLpPath, NodeId, NodeRuntimeStatus};
 use lpc_shared::ProjectBuilder;
 use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
+use lpc_wire::server::ServerMsgBody;
 use lpc_wire::{
-    NodeReadQuery, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
-    ReadLevel, RenderProductProbeRequest, RenderProductProbeResult, RuntimeReadQuery,
-    WireTextureFormat,
+    ClientMessage, ClientRequest, NodeReadQuery, ProjectProbeRequest, ProjectProbeResult,
+    ProjectReadQuery, ProjectReadRequest, ReadLevel, RenderProductProbeRequest,
+    RenderProductProbeResult, RuntimeReadQuery, WireServerMessage, WireTextureFormat,
 };
 use lpfs::{LpFs, LpFsMemory};
 
@@ -55,6 +56,8 @@ struct RecoveryEmuHarness {
     area_addr: u32,
     emulator: Option<Riscv32Emulator>,
     saved_region: Option<Vec<u8>>,
+    /// Serial bytes drained from the guest but not yet split into lines.
+    serial: Vec<u8>,
 }
 
 impl RecoveryEmuHarness {
@@ -85,6 +88,7 @@ impl RecoveryEmuHarness {
             area_addr,
             emulator: None,
             saved_region: None,
+            serial: Vec::new(),
         }
     }
 
@@ -173,6 +177,57 @@ impl RecoveryEmuHarness {
             }
         }
         panic!("guest never reached boot-complete");
+    }
+
+    /// Ask the guest's server one wire question and run frames until it
+    /// answers.
+    ///
+    /// The other emulator tests in this file drive the guest through the
+    /// fault-injection handshake, which needs no server. A verb the USER
+    /// presses has to come in the way the studio sends it — as an `M!` line
+    /// on the serial link — or the test proves the ledger API and not the
+    /// feature.
+    fn request(&mut self, id: u64, msg: ClientRequest) -> ServerMsgBody {
+        let json = lpc_wire::json::to_string(&ClientMessage { id, msg }).expect("encode request");
+        let line = format!("M!{json}\n");
+        self.emulator
+            .as_mut()
+            .expect("no emulator booted")
+            .serial_write(line.as_bytes());
+
+        for _ in 0..20 {
+            assert_eq!(self.run_frame(), RunOutcome::Yielded);
+            if let Some(body) = self.take_answer(id) {
+                return body;
+            }
+        }
+        panic!("the guest never answered request {id}");
+    }
+
+    /// Pull the answer to `id` out of the guest's serial output, keeping
+    /// anything else (log lines, unsolicited hellos, heartbeats) buffered.
+    fn take_answer(&mut self, id: u64) -> Option<ServerMsgBody> {
+        let drained = self
+            .emulator
+            .as_mut()
+            .expect("no emulator booted")
+            .drain_serial_output();
+        self.serial.extend_from_slice(&drained);
+
+        while let Some(end) = self.serial.iter().position(|&byte| byte == b'\n') {
+            let line: Vec<u8> = self.serial.drain(..=end).collect();
+            let text = String::from_utf8_lossy(&line[..line.len() - 1]).into_owned();
+            let Some(json) = text.trim().strip_prefix("M!") else {
+                continue; // a log line, not a frame
+            };
+            let Ok(message) = lpc_wire::json::from_str::<WireServerMessage>(json) else {
+                continue;
+            };
+            if message.id == id {
+                return Some(message.msg);
+            }
+        }
+        None
     }
 
     /// Inspect the recovery region as the guest sees it right now.
@@ -315,6 +370,92 @@ fn repeat_panics_gate_then_power_on_clears() {
     let snapshot = harness.snapshot();
     assert_eq!(snapshot.level, RecoveryLevel::Green);
     assert!(snapshot.last_crash.is_none());
+}
+
+/// The Clear faults verb, over the real wire, against a real gate.
+///
+/// The bench case's escape (2026-09-01): a node crashed twice, the ledger
+/// disabled it, and the only thing that lifted a quarantine was a power
+/// cycle — so a board on a ceiling kept rendering black. Here the studio's
+/// request comes in as an `M!` line, the ledger forgets, and the injected
+/// fault BODY runs again on the very next ask.
+///
+/// The re-gate half matters just as much: forgiving is not immunizing. A
+/// cleared path that crashes twice more is disabled exactly as before, which
+/// is what makes "if the fault recurs the card degrades again" true rather
+/// than a hope.
+#[test_log::test]
+#[ignore = "slow emulator suite; run via `just test-recovery-emu`"]
+fn clearing_faults_over_the_wire_lifts_the_gate_and_a_fresh_pair_re_gates() {
+    let mut harness = RecoveryEmuHarness::new();
+    harness.boot(hs::CAUSE_POWER_ON, false);
+    harness.run_until_boot_complete();
+
+    // Two terminal offenses on one path, each costing a boot: red.
+    for _ in 0..2 {
+        let (outcome, _) = inject(&mut harness, hs::FAULT_FRAMED_PANIC, 1);
+        assert_eq!(outcome, RunOutcome::ResetRequested);
+        harness.reboot_preserving(hs::CAUSE_SOFTWARE_RESET);
+        harness.run_until_boot_complete();
+    }
+    assert_eq!(harness.snapshot().level, RecoveryLevel::Red);
+    let (outcome, result) = inject(&mut harness, hs::FAULT_FRAMED_PANIC, 1);
+    assert_eq!(
+        outcome,
+        RunOutcome::Yielded,
+        "the gate holds before the verb"
+    );
+    assert_eq!(result, hs::FAULT_RESULT_GATED);
+
+    // The verb. Nothing resets: the answer IS the whole request path.
+    let answer = harness.request(1, ClientRequest::ClearFaults);
+    assert!(
+        matches!(
+            answer,
+            ServerMsgBody::ClearFaults {
+                ledger_cleared: true
+            }
+        ),
+        "a device with a recovery region reports the clear, got {answer:?}"
+    );
+
+    let snapshot = harness.snapshot();
+    assert_eq!(snapshot.level, RecoveryLevel::Green);
+    assert_eq!(
+        entry_states(&snapshot),
+        Vec::new(),
+        "no accusation survives"
+    );
+    assert!(
+        snapshot.last_crash.is_some(),
+        "the crash record is kept: the heartbeat still says what died, and          history is not blame"
+    );
+
+    // The proof the gate is really gone: the fault body RUNS again, which
+    // on this injection means it panics and asks for a reset.
+    let (outcome, _) = inject(&mut harness, hs::FAULT_FRAMED_PANIC, 1);
+    assert_eq!(
+        outcome,
+        RunOutcome::ResetRequested,
+        "a cleared path is entered, not denied"
+    );
+
+    // ...and that offense starts the ladder over. One more pair re-gates.
+    harness.reboot_preserving(hs::CAUSE_SOFTWARE_RESET);
+    harness.run_until_boot_complete();
+    assert_eq!(
+        harness.snapshot().level,
+        RecoveryLevel::Yellow,
+        "one crash after a clear is a watch, not a gate"
+    );
+    let (outcome, _) = inject(&mut harness, hs::FAULT_FRAMED_PANIC, 1);
+    assert_eq!(outcome, RunOutcome::ResetRequested);
+    harness.reboot_preserving(hs::CAUSE_SOFTWARE_RESET);
+    harness.run_until_boot_complete();
+    assert_eq!(harness.snapshot().level, RecoveryLevel::Red);
+    let (outcome, result) = inject(&mut harness, hs::FAULT_FRAMED_PANIC, 1);
+    assert_eq!(outcome, RunOutcome::Yielded);
+    assert_eq!(result, hs::FAULT_RESULT_GATED, "the quarantine is back");
 }
 
 /// Crashes under two DISTINCT children escalate to the parent, and clean runs

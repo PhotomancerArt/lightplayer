@@ -94,6 +94,10 @@ pub trait RecoveryHandle {
     /// reset fallback.
     fn finalize_crash_and_reset(&mut self);
     fn mark_boot_complete(&mut self);
+    /// Forget the blame ledger: every gated/watched path entry and the
+    /// consecutive-incomplete-boot count. See the free function
+    /// [`clear_ledger`] for what is kept and why.
+    fn clear_ledger(&mut self);
     fn snapshot(&mut self) -> RecoverySnapshot;
 }
 
@@ -330,6 +334,10 @@ impl<B: RecoveryBackend> RecoveryHandle for Recovery<B> {
         self.backend.region().set_boot_complete();
     }
 
+    fn clear_ledger(&mut self) {
+        self.backend.region().ledger_mut().clear();
+    }
+
     fn snapshot(&mut self) -> RecoverySnapshot {
         RecoverySnapshot::capture(self.backend.region(), self.boot_cause)
     }
@@ -466,6 +474,28 @@ pub fn finalize_crash_and_reset() -> bool {
 /// Mark the boot-complete milestone for this run.
 pub fn mark_boot_complete() {
     with_global(|r| r.mark_boot_complete());
+}
+
+/// Forget the blame ledger. Returns `false` when no global is installed (or
+/// it was busy) — a host or browser server has no recovery region, and
+/// saying "cleared" there would be a claim about nothing.
+///
+/// This is the device half of the studio's **Clear faults** verb: the engine
+/// re-arms its faulted nodes (`Engine::clear_faults`) and this lifts the
+/// quarantine that made them fault. Both halves are needed — re-arming a
+/// node whose path is still gated just faults it again on the next tick.
+///
+/// What is cleared: every path entry (yellow watches and red gates alike)
+/// and the consecutive-incomplete-boot count behind safe mode. What is
+/// KEPT: the crash record, the boot count and the generation, so the next
+/// heartbeat still reports the last crash with `boots_ago` intact. History
+/// is not blame.
+///
+/// It fixes nothing by itself. The retried path either survives — and the
+/// clean completions carry it back to green on their own — or it crashes
+/// again and walks the yellow → red ladder from the start.
+pub fn clear_ledger() -> bool {
+    with_global(|r| r.clear_ledger()).is_some()
 }
 
 /// Snapshot recovery state for reporting, if a global is installed.
@@ -774,6 +804,46 @@ mod tests {
             .expect("sibling unaffected");
         recovery.leave_frame(ok);
         recovery.leave_frame(b);
+    }
+
+    /// The clear verb lifts a gate that only a power cycle used to lift,
+    /// and keeps the crash record that explains why the gate was there.
+    #[test]
+    fn clearing_the_ledger_admits_the_gated_path_and_keeps_the_crash() {
+        let (mut recovery, _) = boot_fresh();
+        recovery.mark_boot_complete();
+        let b = recovery.enter_frame(FrameKind::Boot, "boot").unwrap();
+        for _ in 0..2 {
+            let n = recovery
+                .enter_frame(FrameKind::NodeRender, "nodes/bad")
+                .unwrap();
+            recovery.stage_crash(CrashCause::Panic, &"caught", None, &[], None);
+            recovery.leave_frame(n);
+            recovery.record_recovered_crash();
+        }
+        recovery.leave_frame(b);
+        // A committed crash to keep, from a boot that really did die.
+        recovery.stage_crash(CrashCause::Panic, &"boom", None, &[], None);
+        recovery.commit_staged_crash();
+        assert_eq!(recovery.snapshot().level, RecoveryLevel::Red);
+
+        recovery.clear_ledger();
+
+        let snap = recovery.snapshot();
+        assert_eq!(snap.level, RecoveryLevel::Green);
+        assert!(
+            snap.path_entries.iter().all(|entry| entry.is_empty()),
+            "every accusation is forgotten"
+        );
+        assert!(
+            snap.last_crash.is_some(),
+            "the crash record survives: history is not blame"
+        );
+        assert_eq!(snap.boot_count, 1, "the boot count is not history to lose");
+        let admitted = recovery
+            .enter_frame(FrameKind::NodeRender, "nodes/bad")
+            .expect("the previously gated path is admitted again");
+        recovery.leave_frame(admitted);
     }
 
     /// a→b→c then a→b→f crashing (across reboots) gates b itself.

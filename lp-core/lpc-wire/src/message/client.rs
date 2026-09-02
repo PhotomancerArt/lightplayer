@@ -55,6 +55,20 @@ pub enum ClientRequest {
     /// answers an error instead: an unhonored ack would make the recovery
     /// ladder wait for a boot that never comes.
     Reboot,
+    /// Forget what the device is holding against itself: clear the
+    /// crash-recovery ledger and re-arm every faulted node.
+    ///
+    /// The escape from a quarantine that used to need a power cycle. A node
+    /// that crashed twice is gated until the region is invalidated, so a
+    /// board on a ceiling kept rendering a default input — black — with
+    /// every log looking healthy (2026-09-01 bench). This is the retry.
+    ///
+    /// Answered with [`crate::server::ServerMsgBody::ClearFaults`] and then
+    /// NOTHING resets: unlike [`ClientRequest::Reboot`] this changes only
+    /// bookkeeping, and the cleared ledger takes effect on the next tick.
+    /// If the failure is still there the node faults again and the device
+    /// re-degrades within a heartbeat — the honest answer, not a bug.
+    ClearFaults,
 }
 
 #[cfg(test)]
@@ -198,6 +212,16 @@ mod tests {
         assert_eq!(json, "\"reboot\"");
         let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         assert!(matches!(deserialized, ClientRequest::Reboot));
+    }
+
+    /// Same unit-variant spelling as `Reboot`: `"clearFaults"`, bare.
+    #[test]
+    fn test_clear_faults_request() {
+        let req = ClientRequest::ClearFaults;
+        let json = crate::json::to_string(&req).unwrap();
+        assert_eq!(json, "\"clearFaults\"");
+        let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, ClientRequest::ClearFaults));
     }
 
     #[test]
