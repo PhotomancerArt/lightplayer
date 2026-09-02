@@ -252,7 +252,11 @@ lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, opt
 # guard-word flicker protection, all tested on the host. Unconditional, because
 # the RMT backend under it is shared by the app path and the `test_loopback`
 # harness. `default-features = false` drops the host-only `MockRmt`.
-lp-ws281x = { path = "../lp-ws281x", default-features = false }
+# `isr-in-ram`: the refill path lives in `.rwtext` (IRAM). Same exposure as
+# the C6 — 48-word blocks, 24-word halves at four channels — and the same
+# rule: the full interrupt-handler path goes in RAM. See
+# `output/rmt/s3_rmt.rs` and the C6 defect entry of 2026-09-02.
+lp-ws281x = { path = "../lp-ws281x", default-features = false, features = ["isr-in-ram"] }
 
 # Hardware registry/manifest for the WS281x output driver, and the filesystem
 # traits the server is handed.
