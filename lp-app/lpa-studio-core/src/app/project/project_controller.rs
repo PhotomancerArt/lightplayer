@@ -10599,6 +10599,9 @@ mod tests {
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
+        // This is a SIM-lens test: the device policy (focused-only) is the
+        // conservative default for an unknown lens (round-2 M5).
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
 
         project.apply_project_view(&view).unwrap();
 
@@ -11660,6 +11663,9 @@ mod tests {
         install_ui_projection_slots(&mut view, 2, Revision::new(4));
 
         let mut project = ProjectController::new();
+        // This is a SIM-lens test: the device policy (focused-only) is the
+        // conservative default for an unknown lens (round-2 M5).
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         project.apply_project_view(&view).unwrap();
         clear_node_focus(&mut project.root_nodes);
@@ -11785,6 +11791,9 @@ mod tests {
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
+        // This is a SIM-lens test: the device policy (focused-only) is the
+        // conservative default for an unknown lens (round-2 M5).
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         project.apply_project_view(&view).unwrap();
         clear_node_focus(&mut project.root_nodes);

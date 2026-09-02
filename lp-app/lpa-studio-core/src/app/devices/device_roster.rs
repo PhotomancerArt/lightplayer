@@ -111,6 +111,33 @@ impl DeviceRoster {
         &mut self.effects
     }
 
+    pub fn effects(&self) -> &DeviceEffects {
+        &self.effects
+    }
+
+    /// The registry uid a device's record lives under, when it has one — the
+    /// address the editor lens opens it by (round-2 M5).
+    pub fn key_for(&self, device: lpa_devices::DeviceId) -> Option<&str> {
+        self.keys.get(&device.0).map(String::as_str)
+    }
+
+    /// The device whose record lives under `key` (the `/device/<uid>`
+    /// address), when the roster holds it.
+    pub fn device_for_key(&self, key: &str) -> Option<&lpa_devices::Device> {
+        let id = self
+            .keys
+            .iter()
+            .find(|(_, uid)| uid.as_str() == key)
+            .map(|(id, _)| lpa_devices::DeviceId(*id))?;
+        self.roster.device(id)
+    }
+
+    /// Whether the model still routes this link — false once the port died
+    /// or was forgotten (the lens's unplug signal).
+    pub fn link_is_routable(&self, link: lpa_devices::LinkId) -> bool {
+        self.roster.link_info(link).is_some()
+    }
+
     pub fn roster(&self) -> &Roster {
         &self.roster
     }

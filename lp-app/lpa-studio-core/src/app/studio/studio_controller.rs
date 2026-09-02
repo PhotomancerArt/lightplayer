@@ -456,6 +456,7 @@ impl StudioController {
                 },
             );
         }
+        self.drop_device_lens_if_unrouted();
         self.mark_dirty();
     }
 
@@ -1839,7 +1840,7 @@ impl StudioController {
         }
         if node_id.as_str() == crate::RuntimeOp::NODE_ID {
             let op = action.into_op::<crate::RuntimeOp>()?;
-            return self.execute_runtime_op(op).await;
+            return self.execute_runtime_op(op, updates).await;
         }
         if node_id.as_str() == crate::DevicesOp::NODE_ID {
             let op = action.into_op::<crate::DevicesOp>()?;
@@ -2578,12 +2579,42 @@ impl StudioController {
     /// — a journaled user-stream write, exactly what a rename later uses —
     /// so the model's two-stream rights stay untouched.
     async fn execute_devices_op(&mut self, op: crate::DevicesOp) -> UiResult {
+        self.yield_lens_wire_for(op.action());
         if let Some(name_first) = self.derive_flash_name_action(op.action()) {
             self.fold_device_input(crate::DeviceInput::Action(name_first));
         }
         self.fold_device_input(crate::DeviceInput::Action(op.0));
         self.settle_device_records().await;
         Ok(UiNotices::new())
+    }
+
+    /// One wire, one owner: a card gesture that needs the board's wire
+    /// while the editor is a lens on that board closes the lens FIRST, so
+    /// the gesture gets the wire instead of fighting the session's client
+    /// for it (direct-control doctrine — the card's verbs always work; the
+    /// editor is the thing that yields). Gestures that never touch the wire
+    /// (a rename, the autoconnect toggle) leave the lens alone.
+    fn yield_lens_wire_for(&mut self, action: &crate::DeviceAction) {
+        let touches_wire = !matches!(
+            action,
+            crate::DeviceAction::SetName { .. } | crate::DeviceAction::SetAutoconnect { .. }
+        );
+        let Some(target) = action.device() else {
+            return;
+        };
+        let lens_device = self
+            .pool
+            .device_session()
+            .and_then(crate::RuntimeSession::device_attachment)
+            .map(|attachment| attachment.device);
+        if touches_wire && lens_device == Some(target) {
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Info,
+                UiLogOrigin::Studio,
+                "the editor closed so the board's wire is free for this".to_string(),
+            ));
+            self.close_device_lens();
+        }
     }
 
     /// The empty face's gesture: prepare a project, then push it.
@@ -2601,6 +2632,7 @@ impl StudioController {
     /// land on the same honest problem face with the same in-place retry,
     /// instead of one of them being a toast the card never hears about.
     async fn execute_device_push_op(&mut self, op: crate::DevicePushOp) -> UiResult {
+        self.yield_lens_wire_for(&crate::DeviceAction::Push { device: op.device });
         let staged = self.prepare_push(&op.source).await;
         if let Err(reason) = &staged {
             log::warn!("nothing to push to {:?}: {reason}", op.device);
@@ -2760,11 +2792,247 @@ impl StudioController {
         })
     }
 
-    async fn execute_runtime_op(&mut self, op: crate::RuntimeOp) -> UiResult {
+    async fn execute_runtime_op(
+        &mut self,
+        op: crate::RuntimeOp,
+        updates: UxUpdateSink,
+    ) -> UiResult {
         match op {
             crate::RuntimeOp::StopSimulator => self.stop_simulator().await,
             crate::RuntimeOp::SetLogLevel { level } => self.set_runtime_log_level(level).await,
+            crate::RuntimeOp::OpenDeviceLens { uid } => self.open_device_lens(&uid, updates).await,
+            crate::RuntimeOp::CloseDeviceLens => {
+                self.close_device_lens();
+                Ok(UiNotices::new())
+            }
         }
+    }
+
+    // -----------------------------------------------------------------
+    // The device lens (round-2 M5): the editor on a roster device
+    // -----------------------------------------------------------------
+
+    /// Open the editor as a lens on the roster device registered as `uid`.
+    ///
+    /// The board stays the roster's: its identity, evidence and activities
+    /// never move. What happens here is a HANDOVER of its wire — the effects
+    /// layer pauses the pump and lends the port to a wire client the pool
+    /// session owns, every line that client drains is teed back into the
+    /// fold, and the ordinary lens attach runs on top (running project,
+    /// mirror, sync). Single-session policy: a running sim is stopped first.
+    ///
+    /// Refusals are honest and leave nothing half-done: an unknown uid, a
+    /// board that is not connected and identified as LightPlayer, one busy
+    /// with an activity, or a wire the transport cannot lend.
+    async fn open_device_lens(&mut self, uid: &str, updates: UxUpdateSink) -> UiResult {
+        // Already there: re-attaching the same lens is a no-op with a
+        // fresh mirror, like clicking the sim card's grow twice.
+        if let Some(session) = self.pool.device_session() {
+            if session
+                .device_attachment()
+                .is_some_and(|attachment| attachment.uid == uid)
+            {
+                let id = session.id();
+                return self.attach_lens(id, updates).await;
+            }
+            // A lens on ANOTHER device: give its wire back first.
+            self.close_device_lens();
+        }
+        let attachment = self.device_lens_attachment(uid)?;
+        emit_activity(
+            &updates,
+            UxActivityTarget::pane(ProjectController::NODE_ID),
+            "Opening board",
+            "Opening",
+            &format!("Opening {}", attachment.name),
+        );
+        if self.pool.sim_session().is_some() {
+            // The tab runs one session; the sim's worker is closed properly
+            // rather than dropped by the pool's replacement.
+            self.stop_simulator().await?;
+        }
+        let deadline = self.device_request_deadline()?;
+        let link = attachment.link;
+        let io = self
+            .devices
+            .effects_mut()
+            .attach_lens_wire(link)
+            .map_err(UiError::MissingSession)?;
+        let client = crate::StudioServerClient::from_lens_io(io, deadline, "usb-serial");
+        let id = self.pool.install(crate::RuntimePayload::Device(attachment));
+        self.record_device_event(
+            Some(&id.to_string()),
+            None,
+            DeviceEventKind::Pool {
+                action: "install".to_string(),
+                detail: format!("device lens {uid}"),
+            },
+        );
+        match self.pool.session_mut(id) {
+            Some(session) => session.attach_device_client(client),
+            None => {
+                self.devices.effects_mut().release_lens_wire(link);
+                return Err(UiError::MissingSession(
+                    "the device session vanished after install".to_string(),
+                ));
+            }
+        }
+        self.pool.set_lens(id);
+        match self.attach_lens(id, updates).await {
+            Ok(notices) => Ok(notices),
+            Err(error) => {
+                // The board answered hello but not the attach conversation:
+                // no lens, no session, the wire goes back — the card says
+                // the rest.
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!("could not open the board in the editor: {error}"),
+                ));
+                self.close_device_lens();
+                Err(error)
+            }
+        }
+    }
+
+    /// The lens's handle on the device registered as `uid`, or the honest
+    /// reason it cannot be opened right now.
+    fn device_lens_attachment(&self, uid: &str) -> Result<crate::DeviceLensAttachment, UiError> {
+        let device = self
+            .devices
+            .device_for_key(uid)
+            .ok_or_else(|| UiError::MissingSession(format!("no device is registered as {uid}")))?;
+        let link = device
+            .link()
+            .ok_or_else(|| UiError::MissingSession("this board is not connected".to_string()))?;
+        let hello = device.evidence.classification.hello().ok_or_else(|| {
+            UiError::MissingSession(
+                "this board has not identified itself as a LightPlayer yet".to_string(),
+            )
+        })?;
+        if let Some(proto) = device.evidence.mismatched_proto() {
+            return Err(UiError::MissingSession(format!(
+                "this board speaks wire proto {proto}; update its firmware first"
+            )));
+        }
+        if device.is_busy() {
+            return Err(UiError::MissingSession(
+                "this board is busy with an activity; wait for it to finish".to_string(),
+            ));
+        }
+        Ok(crate::DeviceLensAttachment {
+            device: device.id,
+            link,
+            uid: uid.to_string(),
+            name: device.title(),
+            board_id: hello.board_id.clone(),
+            // The hello the fold mirrors carries no build features; until
+            // the attach conversation reads them off the wire, the add-node
+            // picker offers everything (the same as the sim).
+            features: None,
+        })
+    }
+
+    /// The hardware request deadline: the device-session default budget,
+    /// on the platform timer device waits already run on.
+    fn device_request_deadline(&self) -> Result<lpa_client::RequestDeadline, UiError> {
+        let timer = self.devices.effects().timer_factory().ok_or_else(|| {
+            UiError::MissingSession("the device timer is not installed".to_string())
+        })?;
+        Ok(lpa_client::RequestDeadline::new(
+            lpa_link::device_session::DEFAULT_REQUEST_TOTAL_DEADLINE,
+            move |duration| (timer.borrow_mut())(duration),
+        ))
+    }
+
+    /// Close the device lens, if one is open: quiesce the mirror, drop the
+    /// session, give the wire back so the roster's pump resumes. Quiet when
+    /// there is none. The device keeps its card and its evidence.
+    pub(crate) fn close_device_lens(&mut self) {
+        let Some(session) = self.pool.device_session() else {
+            return;
+        };
+        let id = session.id();
+        let link = session
+            .device_attachment()
+            .map(|attachment| attachment.link);
+        if self.pool.lens() == Some(id) {
+            self.quiesce_lens();
+        }
+        if let Some(mut session) = self.pool.remove_device() {
+            let pending = session.take_pending_logs();
+            self.record_session_logs(id, pending);
+        }
+        if let Some(link) = link {
+            self.devices.effects_mut().release_lens_wire(link);
+        }
+        self.record_device_event(
+            Some(&id.to_string()),
+            None,
+            DeviceEventKind::Pool {
+                action: "remove".to_string(),
+                detail: "device lens closed".to_string(),
+            },
+        );
+        self.mark_dirty();
+    }
+
+    /// The unplug-mid-lens row: once the model stops routing the lens's
+    /// link (port died, board forgotten), the session has no wire and goes
+    /// with it — no refresh needed. The card's own detach evidence is
+    /// already in the fold; this only keeps the pool honest.
+    fn drop_device_lens_if_unrouted(&mut self) {
+        let Some(link) = self
+            .pool
+            .device_session()
+            .and_then(crate::RuntimeSession::device_attachment)
+            .map(|attachment| attachment.link)
+        else {
+            return;
+        };
+        if self.devices.link_is_routable(link) {
+            return;
+        }
+        self.push_log(UiLogDraft::new(
+            UiLogLevel::Warn,
+            UiLogOrigin::Studio,
+            "the board under the editor went away; the editor is closed".to_string(),
+        ));
+        self.close_device_lens();
+    }
+
+    /// The storage dir a device lens's project sync must target: the dir
+    /// the board reports it runs from (a device's dir differs for CLI
+    /// uploads and older pushes, and saving from the wrong dir silently
+    /// skipped the library save — 2026-07-26). Nothing loaded → the push
+    /// fallback, so a later push and the sync agree.
+    async fn discover_device_storage_id(
+        &mut self,
+        id: crate::RuntimeId,
+    ) -> Result<String, UiError> {
+        let catalog = self
+            .pool
+            .session_mut(id)
+            .ok_or_else(|| UiError::MissingSession("runtime session is not attached".to_string()))?
+            .client_mut()?
+            .list_loaded_projects()
+            .await?;
+        self.record_session_logs(id, catalog.logs);
+        Ok(catalog
+            .projects
+            .first()
+            .map(|project| {
+                project
+                    .project_id
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(project.project_id.as_str())
+                    .to_string()
+            })
+            .filter(|storage| !storage.is_empty())
+            .unwrap_or_else(|| {
+                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
+            }))
     }
 
     /// Ask the lens session's server to log at `level`, and remember the
@@ -3732,6 +4000,17 @@ impl StudioController {
     /// executes. By the time we run, no edit ack is in flight; acked
     /// overlay state is server-side and survives for re-attach.
     fn detach_lens(&mut self) -> UiResult {
+        // A device lens has no life without the editor: detaching is
+        // closing (the wire goes back to the roster). The sim keeps running
+        // detached, as ever.
+        if self
+            .pool
+            .lens_session()
+            .is_some_and(|session| session.kind() == crate::RuntimeKind::Device)
+        {
+            self.close_device_lens();
+            return Ok(UiNotices::new());
+        }
         self.quiesce_lens();
         Ok(UiNotices::new())
     }
@@ -3782,13 +4061,15 @@ impl StudioController {
             self.pool.set_lens(id);
         }
         // Library sync must target the dir this runtime ACTUALLY serves.
-        // The sim has no discovered dir, so it keeps the demo slot; the
-        // rebuilt device model re-adds connect-time discovery (a device's
-        // dir differs for CLI uploads and older pushes, and saving from
-        // the wrong dir silently skipped the library save — 2026-07-26).
-        self.project.set_runtime_storage_id(
-            crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string(),
-        );
+        // The sim has no discovered dir, so it keeps the demo slot; a device
+        // lens asks the board (round-2 M5).
+        let storage_id = match self.pool.session(id).map(crate::RuntimeSession::kind) {
+            Some(crate::RuntimeKind::Device) => self.discover_device_storage_id(id).await?,
+            Some(crate::RuntimeKind::Sim) | None => {
+                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID.to_string()
+            }
+        };
+        self.project.set_runtime_storage_id(storage_id);
         self.connect_running_project(updates).await
     }
 
@@ -3976,6 +4257,10 @@ impl StudioController {
     #[cfg(test)]
     pub(crate) fn project_for_test(&self) -> &ProjectController {
         &self.project
+    }
+
+    pub(crate) fn devices_for_test(&self) -> &crate::DeviceRoster {
+        &self.devices
     }
 
     pub(crate) fn runtime_pool_for_test(&self) -> &RuntimePool {

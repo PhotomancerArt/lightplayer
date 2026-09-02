@@ -256,6 +256,13 @@ impl DeviceEffects {
         self.sink = Some(Rc::new(sink));
     }
 
+    /// The platform timer factory, shared: the lens session's wire client
+    /// builds its request deadlines from the SAME clock device waits run
+    /// on, so a lens pull and a device timer cannot drift onto two clocks.
+    pub fn timer_factory(&self) -> Option<Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>> {
+        self.timer.clone()
+    }
+
     /// Whether the seams a real device needs are all installed.
     pub fn is_wired(&self) -> bool {
         self.transport.is_some() && self.spawn.is_some() && self.sink.is_some()
