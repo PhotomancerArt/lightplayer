@@ -287,7 +287,7 @@ fn lower_modf_builtin(
         span,
         integer_writeback.target,
         LowerValue {
-            ty: integer_writeback.ty.clone(),
+            ty: ctx.arena.place(integer_writeback.target).ty.clone(),
             lanes: integer_lanes,
         },
     )?;

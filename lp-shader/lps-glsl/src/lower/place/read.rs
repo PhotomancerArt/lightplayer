@@ -11,8 +11,9 @@ pub(in crate::lower) fn try_read_place_direct(
     span: Span,
     target: PlaceId,
 ) -> Result<Option<LowerValue>, Diagnostic> {
+    let segments = ctx.arena.place_segments(target);
     let target = ctx.arena.place(target);
-    let Some(place) = lower_place(ctx, span, &target.root, &target.segments)? else {
+    let Some(place) = lower_place(ctx, span, &target.root, segments)? else {
         return Ok(None);
     };
     Ok(Some(match place {

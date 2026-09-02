@@ -281,7 +281,7 @@ fn lower_add_sub_carry_builtin(
         span,
         carry_writeback.target,
         LowerValue {
-            ty: carry_writeback.ty.clone(),
+            ty: ctx.arena.place(carry_writeback.target).ty.clone(),
             lanes: carry_lanes,
         },
     )?;
@@ -305,7 +305,7 @@ fn lower_mul_extended_builtin(
             "multiply-extended builtin writeback mismatch",
         ));
     };
-    let width = scalar_lane_count(&msb_writeback.ty);
+    let width = scalar_lane_count(&ctx.arena.place(msb_writeback.target).ty);
     let mut msb_lanes = Lanes::new();
     let mut lsb_lanes = Lanes::new();
     for i in 0..width {
@@ -326,7 +326,7 @@ fn lower_mul_extended_builtin(
         span,
         msb_writeback.target,
         LowerValue {
-            ty: msb_writeback.ty.clone(),
+            ty: ctx.arena.place(msb_writeback.target).ty.clone(),
             lanes: msb_lanes,
         },
     )?;
@@ -335,7 +335,7 @@ fn lower_mul_extended_builtin(
         span,
         lsb_writeback.target,
         LowerValue {
-            ty: lsb_writeback.ty.clone(),
+            ty: ctx.arena.place(lsb_writeback.target).ty.clone(),
             lanes: lsb_lanes,
         },
     )?;
