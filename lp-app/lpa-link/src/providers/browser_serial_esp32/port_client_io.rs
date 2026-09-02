@@ -209,7 +209,17 @@ impl ClientIo for PortLineIo {
             .map_err(|error| TransportError::Other(format!("encode failed: {error}")))?;
         browser_serial::write_line(self.port_id, &format!("M!{json}\n"))
             .await
-            .map_err(|error| TransportError::Other(error.to_string()))
+            .map_err(|error| {
+                // A write only fails when the port is gone or closed under
+                // us ("Serial port is not open." after an unplug — bench,
+                // 2026-09-02: the read pump ended silently and the write
+                // was the first thing to say so). The lens tap carries it
+                // so the fold hears the port die.
+                if let Some(tap) = &self.tap {
+                    tap(LensTapLine::PortError(error.to_string()));
+                }
+                TransportError::Other(error.to_string())
+            })
     }
 
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {

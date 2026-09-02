@@ -418,7 +418,14 @@ impl lpa_client::ClientIo for FakeDeviceIo {
             .map_err(|error| lpc_wire::TransportError::Other(format!("encode failed: {error}")))?;
         self.stream
             .write_all(format!("M!{json}\n").as_bytes())
-            .map_err(|error| lpc_wire::TransportError::Other(error.to_string()))
+            .map_err(|error| {
+                // Mirror of the browser io: a failed write is the port
+                // dying under the lens.
+                if let Some(tap) = &self.tap {
+                    tap(LensTapEvent::PortError(error.to_string()));
+                }
+                lpc_wire::TransportError::Other(error.to_string())
+            })
     }
 
     async fn receive(&mut self) -> Result<lpc_wire::WireServerMessage, lpc_wire::TransportError> {
