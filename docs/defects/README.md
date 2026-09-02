@@ -274,6 +274,7 @@ values; statistical diffs are for the arithmetic in between.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| misattributed-symptom | 2026-08-31 | [c6-rmt-ws281x-dark](2026-08-31-c6-rmt-ws281x-dark.md) | harness fixed (#491); app half **open** (OOM → recovery quarantine → black fallback) | fw-esp32c6 harness serial io + lpc-engine shader node under lp-recovery |
 | unit-mismatch | 2026-08-24 | [map2d-sample-diameter-unit-mismatch](2026-08-24-map2d-sample-diameter-unit-mismatch.md) | fixed | lpc-engine map2d resolve + ResolvedMappingCompact consumers |
 | lifecycle-ownership | 2026-08-14 | [post-acquire-open-failure-leaks-the-project-lock](2026-08-14-post-acquire-open-failure-leaks-the-project-lock.md) | fixed | lpa-studio-web library_host_opfs + lpa-studio-core project_controller |
 | lock-held-across-foreign-latency | 2026-08-14 | [sync-holds-the-project-lock-across-the-network](2026-08-14-sync-holds-the-project-lock-across-the-network.md) | fixed | lpa-studio-web cloud/sync + library_host_opfs |
