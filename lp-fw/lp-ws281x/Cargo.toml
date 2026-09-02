@@ -20,13 +20,27 @@ mock = []
 # never be enabled in production firmware.
 test_hooks = []
 # Place the interrupt-service path in `.rwtext` (IRAM on ESP32-class chips,
-# the section esp-hal's `#[ram]` uses). Off by default: host builds have no
-# such section, and single-core deployments already tolerate flash-cached
-# service code. A cross-core deployment must enable it: the ISR core's
-# flash-resident code stalls behind the *other* core's cache misses on the
-# shared SPI bus — measured on the classic ESP32 as entry delays exploding
-# from ≤53 to 65+ words (frame-fatal) the moment transmission overlapped
-# render, with per-refill cost unchanged.
+# the section esp-hal's `#[ram]` uses). Off by default ONLY because host
+# builds have no such section: **every firmware deployment must enable it.**
+# The rule (2026-09-02): the full interrupt-handler path goes in RAM unless
+# it costs a lot of RAM — this one costs ~1 KB.
+#
+# Two measurements, one per deployment shape:
+# * cross-core (classic ESP32, ISR on the APP core): flash-resident service
+#   code stalls behind the *other* core's cache misses on the shared SPI bus —
+#   entry delays exploding from ≤53 to 65+ words (frame-fatal) the moment
+#   transmission overlapped render, per-refill cost unchanged.
+# * single-core (ESP32-C6, 24-word halves): the render loop owns the cache,
+#   so the path is cold on each frame's first refills — 99.7 % of frames
+#   truncated under the meteor example with the path in flash, 0.25 % with
+#   it in RAM; refill work 15.6 → 5.7 words (defect
+#   `docs/defects/2026-09-02-c6-ws281x-first-three-leds-then-stale.md`).
+#
+# The feature is necessary, not sufficient: a backend's `RmtHw` methods must
+# be `#[inline(always)]` (plain `#[inline]` is ignored at `opt-level = "z"`),
+# and the hot path must not use closures (a closure is its own codegen item
+# and does not inherit the caller's section). Verify with `llvm-nm`, not by
+# reading attributes.
 isr-in-ram = []
 
 [dependencies]
