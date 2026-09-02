@@ -437,6 +437,10 @@ pub struct Summary {
     /// that reached it.
     pub peak: usize,
     pub peak_stage: String,
+    /// Peak above baseline over the frontend and prepare steps only — the
+    /// figure that survives a build where `lpvm-native`'s `debug` feature
+    /// inflates the backend (see `lpvm_native::regalloc_trace_enabled`).
+    pub frontend_peak: usize,
     /// Live bytes above baseline when the HIR build finished — the finished
     /// HIR plus whatever the build still held.
     pub build_hir_resident: usize,
@@ -477,12 +481,19 @@ pub fn summarize(
         .filter(|r| r.stage == FRONTEND_BUILD_HIR)
         .next_back()
         .map_or(0, |r| r.live_after.saturating_sub(baseline));
+    let frontend_peak = records
+        .iter()
+        .filter(|r| !r.stage.starts_with("backend:"))
+        .map(|r| r.step_peak.saturating_sub(baseline))
+        .max()
+        .unwrap_or(0);
     Summary {
         label,
         kind,
         source_bytes,
         peak: peak_record.step_peak.saturating_sub(baseline),
         peak_stage,
+        frontend_peak,
         build_hir_resident,
         rv32_peak: None,
         xt_peak: None,

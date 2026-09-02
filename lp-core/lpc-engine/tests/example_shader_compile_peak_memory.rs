@@ -378,19 +378,37 @@ fn example_shader_compile_peaks() {
         rows.iter().any(|r| r.label == "zook-dome/shader.glsl"),
         "zook-dome/shader.glsl (the classic's case) was not measured"
     );
+    // A workspace-wide `cargo test` unifies `lpvm-native`'s `debug` feature
+    // into this binary (lps-filetests turns it on), and with it the
+    // register allocator records a formatted trace entry per decision —
+    // ~90 KB per function that no device build allocates. The frontend
+    // figures are unaffected and stay pinned; the backend ceilings only
+    // mean something when the trace is off, as in `cargo test -p
+    // lpc-engine` and on the device.
+    let backend_measured = !lpvm_native::regalloc_trace_enabled();
+    if !backend_measured {
+        println!(
+            "
+NOTE: lpvm-native `debug` feature is on in this build (workspace feature              unification); backend ceilings skipped, frontend ceilings apply."
+        );
+    }
     for r in &rows {
         let ceiling = match r.kind {
             "compute" => COMPUTE_CEILING_BYTES,
             _ => PX_CEILING_BYTES,
         };
+        let (peak, what) = if backend_measured {
+            (r.peak, "compile transient peak")
+        } else {
+            (r.frontend_peak, "frontend transient peak")
+        };
         assert!(
-            r.peak <= ceiling,
-            "{}: compile transient peak {} B exceeds the {ceiling} B ceiling ({})",
+            peak <= ceiling,
+            "{}: {what} {peak} B exceeds the {ceiling} B ceiling ({})",
             r.label,
-            r.peak,
             r.peak_stage
         );
-        if let Some(xt) = r.xt_peak {
+        if let (true, Some(xt)) = (backend_measured, r.xt_peak) {
             assert!(
                 xt <= PX_XT_CEILING_BYTES,
                 "{}: Xtensa backend peak {xt} B exceeds the {PX_XT_CEILING_BYTES} B ceiling",
