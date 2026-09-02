@@ -216,9 +216,8 @@ mod tests {
     fn loaded_response(id: u64, path: Option<&str>) -> WireServerMessage {
         use lpc_model::AsLpPathBuf;
         let projects = path
-            .map(|path| lpc_wire::LoadedProject {
-                handle: lpc_wire::WireProjectHandle(1),
-                path: path.as_path_buf(),
+            .map(|path| {
+                lpc_wire::LoadedProject::new(lpc_wire::WireProjectHandle(1), path.as_path_buf())
             })
             .into_iter()
             .collect();

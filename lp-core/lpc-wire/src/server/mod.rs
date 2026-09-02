@@ -7,8 +7,8 @@ pub mod output_wire_status;
 pub mod recovery_status;
 
 pub use api::{
-    AvailableProject, HeartbeatIdentity, LinkCounters, LoadedProject, MemoryStats, SampleStats,
-    ServerMsgBody,
+    AvailableProject, FAULT_MESSAGE_CAP_BYTES, FAULT_NODES_CAP, FaultedNodeWire, HeartbeatIdentity,
+    LinkCounters, LoadedProject, MemoryStats, ProjectFaultWire, SampleStats, ServerMsgBody,
 };
 pub use config::ServerConfig;
 pub use file_chunk::{FileChangeKind, FileChunk, FileCursor};

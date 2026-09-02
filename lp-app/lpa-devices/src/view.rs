@@ -23,6 +23,7 @@ use crate::identity::DeviceId;
 use crate::link::LinkId;
 use crate::roster::{PendingLink, Roster};
 use crate::time::{Millis, describe_age_ms};
+use crate::wire::{ProjectFaultFacts, RecoveryFacts, RecoveryLevelFacts, RecoveryPathFacts};
 
 /// Everything the device surface needs to draw itself.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -58,6 +59,15 @@ pub struct DeviceView {
     /// The fold says this board wants firmware (blank, bootloader, foreign,
     /// or incompatible) — the face that offers a board pick + Flash.
     pub needs_firmware: bool,
+    /// ONE line naming why a running board is not running well: a node in
+    /// fault, or a recovery state the device reported as not green.
+    ///
+    /// It rides UNDER the running face rather than replacing it — a
+    /// degraded board is still running, and a card that dropped the project
+    /// name would answer "what is on it?" with a complaint. `None` = the
+    /// board reported nothing wrong, which on an embedder that reports no
+    /// recovery at all means only "no fault", never "healthy".
+    pub degraded: Option<String>,
     /// What the board says it is running. The empty face and the running
     /// face are the two answers; [`LoadedProject::Unknown`] is the third,
     /// and it offers neither rather than guessing.
@@ -229,6 +239,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             .hello()
             .and_then(|hello| hello.board_id.clone()),
         needs_firmware: needs_firmware(&device.evidence.classification),
+        degraded: degraded(device),
         // The mirror of the push condition, over the OTHER answer: a board
         // that reported something running, on an open port, idle.
         can_remove_project: matches!(loaded, LoadedProject::Running { .. })
@@ -295,6 +306,78 @@ fn loaded_project(device: &Device) -> LoadedProject {
     }
 }
 
+/// The ONE line that says why a running board is not running well.
+///
+/// Deterministic by construction — same evidence, same words, in the same
+/// order — because it sits on a card that redraws every heartbeat, and a
+/// line that reshuffled its clauses would read as new news every second.
+///
+/// Only a LightPlayer on an OPEN port gets one: degradation is a live
+/// report, and repeating the last thing a board said before we stopped
+/// listening would age into a lie.
+fn degraded(device: &Device) -> Option<String> {
+    let evidence = &device.evidence;
+    if !evidence.classification.is_light_player() || !evidence.presence.is_open() {
+        return None;
+    }
+    let recovery = evidence
+        .recovery()
+        .filter(|recovery| recovery.is_degraded());
+    // The fault leads when there is one: it names the node, which is the
+    // actionable half. Recovery is the device-wide backdrop, and a fault
+    // raised BY the ledger already quotes it in its own message.
+    let line = evidence
+        .project_fault()
+        .and_then(fault_line)
+        .or_else(|| recovery.map(recovery_line))?;
+    Some(line)
+}
+
+/// "Degraded: node /x faulted — <why>", plus a count when several are.
+fn fault_line(fault: &ProjectFaultFacts) -> Option<String> {
+    let (path, message) = fault.nodes.first()?;
+    let mut line = format!("Degraded: node {path} faulted — {message}");
+    let others = fault.nodes.len().saturating_sub(1);
+    if others > 0 {
+        line.push_str(&format!(" (+{others} more)"));
+    }
+    Some(line)
+}
+
+/// The device-wide recovery state in one sentence.
+fn recovery_line(recovery: &RecoveryFacts) -> String {
+    let gated: Vec<&RecoveryPathFacts> = recovery.gated().collect();
+    let mut line = match recovery.level {
+        RecoveryLevelFacts::Red => match gated.as_slice() {
+            [] => "Recovery red: a path is disabled after repeated crashes".to_string(),
+            [only] => format!(
+                "Recovery red: {} disabled after repeated crashes",
+                only.label
+            ),
+            [first, ..] => format!(
+                "Recovery red: {} paths disabled (first: {})",
+                gated.len(),
+                first.label
+            ),
+        },
+        RecoveryLevelFacts::Yellow => match recovery.paths.len() {
+            1 => "Recovery yellow: 1 watched path".to_string(),
+            watched => format!("Recovery yellow: {watched} watched paths"),
+        },
+        // Green and still here means safe mode is the whole story.
+        RecoveryLevelFacts::Green => {
+            "Safe mode: project auto-load skipped after repeated incomplete boots".to_string()
+        }
+    };
+    if let Some(crash) = &recovery.last_crash {
+        line.push_str(&format!(" (last crash: {crash})"));
+    }
+    if recovery.safe_mode && recovery.level != RecoveryLevelFacts::Green {
+        line.push_str(" · safe mode");
+    }
+    line
+}
+
 /// Project one pending link.
 pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
     let state_label = match entry.verdict() {
@@ -348,6 +431,7 @@ fn state_label(device: &Device, status: DeviceStatus) -> String {
         // listened to. On the bench it read as a fault (G1, 2026-08-31).
         DeviceStatus::Attached => "Attached — not listening".to_string(),
         DeviceStatus::Ready => "Ready".to_string(),
+        DeviceStatus::Degraded => "Degraded".to_string(),
         DeviceStatus::NotResponding => "Not responding".to_string(),
         DeviceStatus::NeedsAttention => classification_label(&device.evidence.classification),
     }

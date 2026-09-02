@@ -164,6 +164,105 @@ pub struct SampleStats {
 pub struct LoadedProject {
     pub handle: WireProjectHandle,
     pub path: LpPathBuf,
+    /// The project's runtime fault verdict, when it has one (any node in
+    /// `NodeRuntimeStatus::Fault`). Absent = no node is faulted, and absent
+    /// from firmware built before the fault policy — which is why it is
+    /// additive and optional rather than a required empty record.
+    ///
+    /// This is what stops the device card saying "Running" over a board
+    /// whose show is a red breathe (`docs/adr/` fault-is-never-black).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fault: Option<ProjectFaultWire>,
+}
+
+impl LoadedProject {
+    /// A loaded project with no fault — the shape every non-heartbeat
+    /// listing wants.
+    pub fn new(handle: WireProjectHandle, path: LpPathBuf) -> Self {
+        Self {
+            handle,
+            path,
+            fault: None,
+        }
+    }
+}
+
+/// Byte cap for one faulted node's message on the wire.
+///
+/// The C6 rebuilds this record every heartbeat out of engine status strings
+/// that carry no length promise, so the cap lives with the type rather than
+/// at any one fill site.
+pub const FAULT_MESSAGE_CAP_BYTES: usize = 120;
+
+/// Cap on faulted nodes reported per project per heartbeat. A project with
+/// more faulted nodes than this is already unambiguously degraded; the card
+/// needs the first few, not all of them.
+pub const FAULT_NODES_CAP: usize = 8;
+
+/// A project-level fault verdict as the heartbeat carries it.
+///
+/// Project-level rather than per-output by policy (D1): a fault anywhere
+/// means every output of the project is showing the fault pattern, so the
+/// card never has to know which strand hangs off which broken node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectFaultWire {
+    /// Frame time in milliseconds at which the project first had a node in
+    /// fault, CONTINUOUSLY until now. Same clock as the engine's frame
+    /// time, so it is comparable only against itself — a client wanting
+    /// "how long" subtracts it from the current frame time, never from
+    /// uptime.
+    pub since_ms: u64,
+    /// The faulted nodes, in tree order (steady frame over frame for status
+    /// diffing), capped at [`FAULT_NODES_CAP`].
+    pub nodes: Vec<FaultedNodeWire>,
+}
+
+impl ProjectFaultWire {
+    /// Build a capped record from a `(tree path, message)` list.
+    pub fn new(since_ms: u64, nodes: impl IntoIterator<Item = (String, String)>) -> Self {
+        Self {
+            since_ms,
+            nodes: nodes
+                .into_iter()
+                .take(FAULT_NODES_CAP)
+                .map(|(path, message)| FaultedNodeWire::new(path, message))
+                .collect(),
+        }
+    }
+}
+
+/// One node in fault: where it is and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FaultedNodeWire {
+    /// The node's tree path, e.g. `/studio.show/s`.
+    pub path: String,
+    /// The runtime's own reason, truncated to [`FAULT_MESSAGE_CAP_BYTES`].
+    pub message: String,
+}
+
+impl FaultedNodeWire {
+    /// Build one entry, truncating the message on a char boundary.
+    pub fn new(path: String, message: String) -> Self {
+        Self {
+            path,
+            message: truncate_on_char_boundary(message, FAULT_MESSAGE_CAP_BYTES),
+        }
+    }
+}
+
+/// Truncate to at most `cap` bytes without splitting a char.
+fn truncate_on_char_boundary(mut text: String, cap: usize) -> String {
+    if text.len() <= cap {
+        return text;
+    }
+    let mut end = cap;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
+    text
 }
 
 /// Optional memory statistics (platform-dependent; ESP32 reports heap).

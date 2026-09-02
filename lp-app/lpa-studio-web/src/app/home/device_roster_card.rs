@@ -117,6 +117,14 @@ pub(crate) fn DeviceRosterCard(
                         if let Some(running) = running.clone() {
                             p { class: detail_class(), "Running {running}" }
                         }
+                        // Directly under the running face, never instead of
+                        // it: a degraded board IS still running, and the
+                        // project name is the first thing anyone looks for.
+                        // The attention tone matches the status chip the
+                        // same state wears.
+                        if let Some(degraded) = card.degraded.clone() {
+                            p { class: degraded_line_class(), "{degraded}" }
+                        }
                         if let Some(detail) = card.detail.clone() {
                             p { class: detail_class(), "{detail}" }
                         }
@@ -595,6 +603,11 @@ fn quiet_line_class() -> &'static str {
     "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-subtle-foreground"
 }
 
+/// The degradation line: the Attention tone the status chip already wears
+/// for this state, semibold because it is the reason the chip changed.
+fn degraded_line_class() -> &'static str {
+    "tw:m-0 tw:text-xs tw:leading-relaxed tw:font-semibold tw:text-status-attention-foreground"
+}
 fn failure_line_class() -> &'static str {
     "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-status-error-foreground"
 }
@@ -609,4 +622,31 @@ fn note_class() -> &'static str {
 
 fn disabled_button_class() -> &'static str {
     "tw:inline-flex tw:w-fit tw:cursor-not-allowed tw:items-center tw:rounded-md tw:border tw:border-border tw:px-2.5 tw:py-1 tw:text-xs tw:font-semibold tw:text-subtle-foreground tw:opacity-60"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lpa_studio_core::UiStatusKind;
+
+    /// The degradation line must wear the tone its own status chip wears,
+    /// and it must be a SANCTIONED tone: the accent reckoning removed hue
+    /// accents, so Attention is the one this state gets. A line in a colour
+    /// nothing else uses is how a design language leaks.
+    #[test]
+    fn the_degraded_line_wears_the_same_tone_as_the_degraded_chip() {
+        assert_eq!(
+            device_status_kind(lpa_studio_core::DeviceStatus::Degraded),
+            UiStatusKind::Attention,
+        );
+        assert!(
+            degraded_line_class().contains("tw:text-status-attention-foreground"),
+            "{}",
+            degraded_line_class()
+        );
+        // Not the muted detail voice, and not the error voice either: an
+        // error line is for a failed OUTCOME, and this board is running.
+        assert_ne!(degraded_line_class(), detail_class());
+        assert_ne!(degraded_line_class(), failure_line_class());
+    }
 }

@@ -844,6 +844,14 @@ pub enum DeviceStatus {
     Busy,
     /// Identified as a usable LightPlayer.
     Ready,
+    /// A usable LightPlayer that is running something BROKEN: a node in
+    /// fault, or a crash-recovery state it reported as not green.
+    ///
+    /// Still a running board — the loaded-project face stays `Running` —
+    /// but "Ready" over a show that is painting the fault pattern is the
+    /// lie this status exists to stop (2026-09-01 bench: two days of
+    /// "Running" over a black strip).
+    Degraded,
     /// Identified as something else: blank, bootloader, foreign,
     /// incompatible.
     NeedsAttention,
@@ -870,10 +878,16 @@ impl Device {
         // they are actionable exactly as stored, listening or not.
         match &self.evidence.classification {
             Classification::LightPlayer { .. } => {
-                if self.evidence.presence.is_open() {
-                    DeviceStatus::Ready
-                } else {
-                    DeviceStatus::Attached
+                if !self.evidence.presence.is_open() {
+                    return DeviceStatus::Attached;
+                }
+                // Degradation is a refinement of Ready, never of a verdict
+                // that already asks for action: a board we are not
+                // listening to has nothing current to say about its own
+                // health, and a blank chip has no project to fault.
+                match self.evidence.is_degraded() {
+                    true => DeviceStatus::Degraded,
+                    false => DeviceStatus::Ready,
                 }
             }
             Classification::Incompatible { .. }

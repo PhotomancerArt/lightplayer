@@ -28,7 +28,9 @@ use crate::journal::JournalNote;
 use crate::link::{LinkEvent, LinkId};
 use crate::roster::RosterConfig;
 use crate::time::Millis;
-use crate::wire::{HelloFacts, LoadedProjectFacts, ServerFrameBody};
+use crate::wire::{
+    HelloFacts, LoadedProjectFacts, ProjectFaultFacts, RecoveryFacts, ServerFrameBody,
+};
 
 /// Boot signatures, mirroring `lpa-link`'s shipped `BootLineClassifier`.
 const BLANK_HEADER_SIGNATURE: &str = "invalid header: 0xffffffff";
@@ -186,6 +188,35 @@ impl Evidence {
     /// empty" would offer to overwrite a project that is right there.
     pub fn loaded_projects(&self) -> Option<&[LoadedProjectFacts]> {
         self.observations.loaded.as_deref()
+    }
+
+    /// The board's last reported crash-recovery state.
+    ///
+    /// `None` means it never said — an embedder with no recovery region
+    /// (browser sim, host server) or firmware too old to report. It is NOT
+    /// "green", and no caller may render it as healthy.
+    pub fn recovery(&self) -> Option<&RecoveryFacts> {
+        self.observations.recovery.as_ref()
+    }
+
+    /// The fault verdict of the project the card speaks for — the first
+    /// reported one, matching the running face's own choice (firmware runs
+    /// one project; a host server with several has no card to draw).
+    pub fn project_fault(&self) -> Option<&ProjectFaultFacts> {
+        self.observations
+            .loaded
+            .as_ref()
+            .and_then(|loaded| loaded.first())
+            .and_then(|project| project.fault.as_ref())
+    }
+
+    /// Whether the board is running but not running WELL: a faulted
+    /// project, or a recovery state it reported as anything but green.
+    pub fn is_degraded(&self) -> bool {
+        self.project_fault().is_some()
+            || self
+                .recovery()
+                .is_some_and(|recovery| recovery.is_degraded())
     }
 
     /// Bounded tail of recent non-protocol serial lines in the CURRENT
@@ -527,6 +558,10 @@ struct Observations {
     /// The board's own report of what it is running. Window-scoped like
     /// every other observation: a reopened port has to be told again.
     loaded: Option<Vec<LoadedProjectFacts>>,
+    /// The board's own report of its crash-recovery state. Window-scoped
+    /// for the same reason, and — like `loaded` — only REPLACED by a frame
+    /// that carries one.
+    recovery: Option<RecoveryFacts>,
     wrong_proto: Option<u32>,
     errors: usize,
     settled: bool,
@@ -552,13 +587,24 @@ impl Observations {
             }
             // Absorbed, never condemned: a running server heartbeats, so a
             // mid-stream attach sees frames before any hello answer.
-            ServerFrameBody::Heartbeat { loaded, .. } => {
+            ServerFrameBody::Heartbeat {
+                loaded, recovery, ..
+            } => {
                 self.frames_seen += 1;
                 // Only a heartbeat that CARRIES the report replaces it:
                 // older firmware sends none, and treating its silence as
                 // "nothing loaded" would offer to overwrite a live project.
                 if let Some(loaded) = loaded {
                     self.loaded = Some(loaded.clone());
+                }
+                // Same rule, and it matters MORE here: a frame with no
+                // recovery block is a device that did not say, so the last
+                // thing it did say stands. Clearing on silence would make
+                // an embedder without a recovery region (and old firmware)
+                // look green, which is the lie this whole fact exists to
+                // stop.
+                if let Some(recovery) = recovery {
+                    self.recovery = Some(recovery.clone());
                 }
             }
             ServerFrameBody::Loaded { loaded } => {

@@ -440,7 +440,11 @@ fn handle_list_available_projects(
 fn handle_list_loaded_projects(
     project_manager: &ProjectManager,
 ) -> Result<ServerMessagePayload, ServerError> {
-    let projects = project_manager.list_loaded_projects();
+    // With faults: this answer is the OTHER thing the device card's
+    // running face is made of (the model asks it right after a push, not
+    // waiting a heartbeat period), so it must not be the honest heartbeat's
+    // amnesiac twin.
+    let projects = project_manager.list_loaded_projects_with_faults();
     Ok(ServerMessagePayload::ListLoadedProjects { projects })
 }
 
