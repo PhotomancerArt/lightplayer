@@ -3996,6 +3996,7 @@ dependencies = [
 name = "fw-esp32c6"
 version = "40.0.0"
 dependencies = [
+ "critical-section",
  "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.8.0",

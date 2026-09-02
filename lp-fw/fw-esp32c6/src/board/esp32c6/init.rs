@@ -25,10 +25,24 @@ pub fn init_board() -> (
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    // Allocate heap while leaving enough RAM for the main task stack. Project loading
-    // and on-device shader compilation use deep filesystem/compiler call stacks; too
-    // large a heap reservation shrinks that stack and corrupts execution before OOM.
-    esp_alloc::heap_allocator!(size: 300_000);
+    // The RAM split. Main RAM (`RAM` in esp-hal's memory.x, 0x6E610 B) holds
+    // .data/.bss — this heap array included — and the main task's stack is
+    // whatever is left above them: with a 300_000 B heap that was 32,776 B,
+    // and the meteor example's steady-state tick (resolver recursion four
+    // demand levels deep under the compute node) overflowed it by a few
+    // hundred bytes into the heap array (2026-09-01 bench, `Stack overflow
+    // detected … Stack pointer: 408664e0`, `_stack_end` = 40866610). At
+    // 260_000 B the stack is 72,776 B. `stack_probe` paints it at boot and
+    // the heartbeat logs the high-water mark, so the margin is a number in
+    // the journal rather than a guess.
+    esp_alloc::heap_allocator!(size: 260_000);
+    // The 40 KB the main region gave up comes back with interest from
+    // `dram2_seg`: the 64 KB the ESP-IDF second-stage bootloader used as
+    // its loader segment (0x4086E610..0x4087E610) and never touches again
+    // once the app runs — esp-hal's `#[ram(reclaimed)]` exists for exactly
+    // this. A second `esp_alloc` region: `HEAP.free()`/`used()` sum both,
+    // allocations fill the main region first. Heap total 325,536 B.
+    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 65_536);
 
     // Extract peripherals we need before moving others
     let rmt = peripherals.RMT;
