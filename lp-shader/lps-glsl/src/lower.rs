@@ -864,3 +864,20 @@ fn lower_import_call_with_out(
         lanes: results,
     })
 }
+
+#[cfg(test)]
+mod size_tests {
+    extern crate std;
+    /// Lowering-side node sizes for the memory probes (see
+    /// `hir::arena::size_tests`).
+    #[test]
+    fn lower_node_sizes_print() {
+        use core::mem::size_of;
+        std::println!("LowerValue     {:>4} B", size_of::<super::LowerValue>());
+        std::println!("Lanes          {:>4} B", size_of::<super::Lanes>());
+        std::println!(
+            "LocalStorage   {:>4} B",
+            size_of::<super::storage::LocalStorage>()
+        );
+    }
+}

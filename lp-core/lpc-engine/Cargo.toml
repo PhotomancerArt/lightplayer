@@ -142,7 +142,9 @@ lpc-view = { path = "../lpc-view", default-features = false, features = ["std"] 
 env_logger = { workspace = true }
 serde_json = { workspace = true }
 # The compile-peak memory probe steps the device's own compile pipeline
-# (lps-glsl staged frontend, lpvm-native rv32 backend) on the host under a
-# tracking allocator. Only the rv32 ISA: that is what the ESP32-C6 links.
+# (lps-glsl staged frontend, lpvm-native backend) on the host under a
+# tracking allocator. Both device ISAs: rv32 is what the ESP32-C6 links,
+# Xtensa is what the classic (fw-esp32v3) and the S3 link, and the probe
+# puts the two backends' peaks on one table. The emitters need no toolchain.
 lps-glsl = { path = "../../lp-shader/lps-glsl", default-features = false }
-lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, features = ["isa-rv32"] }
+lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, features = ["isa-rv32", "isa-xt"] }

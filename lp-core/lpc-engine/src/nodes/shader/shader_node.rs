@@ -1664,6 +1664,21 @@ fn palette_slot_count(slots: &MapSlot<String, ShaderSlotDef>) -> usize {
 /// That would be a model change (a new authored field on `ShaderSlotDef`),
 /// and nothing has yet wanted a palette sampled any other way; the one spec
 /// is what makes every baked strip interchangeable across shaders.
+/// The compile inputs a shader node derives from its definition, for a
+/// host probe that wants to compile exactly what the node compiles: the
+/// palette texture specs for its `sampler2D` slots and the entry-space
+/// contract its `space` declaration imposes. The node compiles the raw
+/// authored source (no generated header, unlike the compute node's
+/// [`super::compute_shader_node::compute_glsl_source`]); everything else it
+/// hands the backend is here. Used by
+/// `lpc-engine/tests/example_shader_compile_peak_memory.rs`.
+pub fn px_compile_inputs(def: &ShaderDef) -> (lp_shader::TextureBindingSpecs, ShaderEntrySpace) {
+    (
+        palette_texture_specs(&def.consumed_slots),
+        entry_space_for(def.space.value()),
+    )
+}
+
 fn palette_texture_specs(slots: &MapSlot<String, ShaderSlotDef>) -> lp_shader::TextureBindingSpecs {
     let mut specs = lp_shader::TextureBindingSpecs::new();
     for (name, slot) in &slots.entries {

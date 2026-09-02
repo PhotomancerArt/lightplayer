@@ -111,3 +111,33 @@ impl ExprList {
         self.len == 0
     }
 }
+
+#[cfg(test)]
+mod size_tests {
+    extern crate std;
+    /// Prints the HIR node sizes the memory probes reason with (`cargo test
+    /// -p lps-glsl -- hir_node_sizes_print --nocapture`). No assertion: the
+    /// numbers are host sizes (8-byte pointers) and feed the per-node
+    /// arithmetic in the compile-peak investigation, not a contract.
+    #[test]
+    fn hir_node_sizes_print() {
+        use core::mem::size_of;
+        use lps_shared::{LpsType, StructMember};
+
+        use super::super::place::{HirPlace, PlaceSegment};
+        use super::super::types::{HirExpr, HirStmt};
+        use super::*;
+        use crate::Token;
+        use crate::body::ParsedExpr;
+
+        std::println!("LpsType        {:>4} B", size_of::<LpsType>());
+        std::println!("StructMember   {:>4} B", size_of::<StructMember>());
+        std::println!("HirExpr        {:>4} B", size_of::<HirExpr>());
+        std::println!("HirPlace       {:>4} B", size_of::<HirPlace>());
+        std::println!("PlaceSegment   {:>4} B", size_of::<PlaceSegment>());
+        std::println!("HirStmt        {:>4} B", size_of::<HirStmt>());
+        std::println!("Token          {:>4} B", size_of::<Token>());
+        std::println!("ParsedExpr     {:>4} B", size_of::<ParsedExpr>());
+        std::println!("ExprId/PlaceId {:>4} B", size_of::<ExprId>());
+    }
+}
