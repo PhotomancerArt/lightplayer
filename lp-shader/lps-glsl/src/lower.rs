@@ -713,8 +713,8 @@ fn expr_list_needs_lazy_eval(arena: &HirArena, list: ExprList) -> bool {
 }
 
 fn place_needs_lazy_eval(arena: &HirArena, place: PlaceId) -> bool {
-    arena.place(place).segments.iter().any(|seg| match seg {
-        crate::hir::PlaceSegment::Index { index, .. } => expr_needs_lazy_eval(arena, *index),
+    arena.place_segments(place).iter().any(|seg| match seg {
+        crate::hir::PlaceSegment::Index { index } => expr_needs_lazy_eval(arena, *index),
         _ => false,
     })
 }

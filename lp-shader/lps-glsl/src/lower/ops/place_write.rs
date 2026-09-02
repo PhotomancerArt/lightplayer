@@ -18,15 +18,16 @@ pub(in crate::lower) fn assign_target(
     target: PlaceId,
     value: LowerValue,
 ) -> Result<(), Diagnostic> {
+    let segments = ctx.arena.place_segments(target);
     let place = ctx.arena.place(target);
-    if place.segments.is_empty() {
+    if segments.is_empty() {
         return assign_root(ctx, span, &place.root, value);
     }
     if try_assign_place_direct(ctx, span, target, &value)? {
         return Ok(());
     }
     let dst = root_value(ctx, span, &place.root)?;
-    let dst = assign_segments(ctx, span, dst, &place.segments, value)?;
+    let dst = assign_segments(ctx, span, dst, segments, value)?;
     write_root_back_if_memory_root(ctx, span, &place.root, &dst)
 }
 

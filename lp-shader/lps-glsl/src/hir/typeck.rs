@@ -829,17 +829,32 @@ impl<'a> TypeCtx<'a> {
                 format!("{fn_name} sampler must be a uniform sampler2D"),
             ));
         };
+        // Walk the projected type alongside the segments: a field segment
+        // carries its member index, and the name comes from the struct.
+        let mut current_ty = self
+            .uniforms
+            .get(&name)
+            .map(|u| &u.ty)
+            .ok_or_else(|| Diagnostic::error(expr.span, format!("unknown uniform `{name}`")))?;
         let mut path = name;
         let mut descriptor_byte_offset = byte_offset;
-        for segment in place_ref.segments.clone() {
-            match segment {
+        for segment in self.arena.place_segments(place) {
+            match *segment {
                 PlaceSegment::Field {
-                    name, byte_offset, ..
+                    member,
+                    byte_offset,
+                    ..
                 } => {
+                    let member_name =
+                        super::place::field_name(current_ty, member).ok_or_else(|| {
+                            Diagnostic::error(expr.span, "struct member out of range")
+                        })?;
                     path.push('.');
-                    path.push_str(&name);
-                    descriptor_byte_offset =
-                        descriptor_byte_offset.saturating_add(byte_offset as u32);
+                    path.push_str(&member_name);
+                    current_ty = super::place::field_type(current_ty, member).ok_or_else(|| {
+                        Diagnostic::error(expr.span, "struct member out of range")
+                    })?;
+                    descriptor_byte_offset = descriptor_byte_offset.saturating_add(byte_offset);
                 }
                 PlaceSegment::Index { .. } | PlaceSegment::Swizzle { .. } => {
                     return Err(Diagnostic::error(
@@ -1454,13 +1469,21 @@ impl<'a> TypeCtx<'a> {
     }
 
     fn clone_place_from(&mut self, source: &HirArena, place: PlaceId) -> PlaceId {
-        let mut place = source.place(place).clone();
-        for segment in &mut place.segments {
-            if let PlaceSegment::Index { index, .. } = segment {
-                *index = self.clone_expr_from(source, *index);
-            }
+        let record = source.place(place);
+        let mut segments = Vec::with_capacity(source.place_segments(place).len());
+        for segment in source.place_segments(place) {
+            segments.push(match *segment {
+                PlaceSegment::Index { index } => PlaceSegment::Index {
+                    index: self.clone_expr_from(source, index),
+                },
+                other => other,
+            });
         }
-        self.arena.push_place(place)
+        self.arena.push_place(HirPlace {
+            root: record.root.clone(),
+            segments,
+            ty: record.ty.clone(),
+        })
     }
 
     fn one_lanes_expr(&mut self, span: Span, ty: &LpsType) -> Result<ExprId, Diagnostic> {

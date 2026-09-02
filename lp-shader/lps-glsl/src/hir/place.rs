@@ -20,22 +20,44 @@ pub(crate) enum AccessMode {
     CallActual,
 }
 
-/// One typed place: a root plus the projections applied to it.
+/// One typed place under construction: a root plus the projections applied
+/// to it. Built by value during typing ([`TypeCtx::build_place`]) and then
+/// pushed into the arena, where it becomes a [`PlaceRecord`] whose segments
+/// live in the arena's flat segment list — no heap vector per place.
 ///
 /// `ty` is the type of the whole path (the last projection's result). The
-/// root and the index segments deliberately carry no type of their own:
-/// the root's is in the function's local/param tables or the module's
-/// uniform/global tables, and an index's element type follows from the type
-/// it indexes ([`index_element_type`]). Storing them here made every
-/// `a[i].f` reference hold two more copies of `a`'s full type — for a
-/// struct-array global that is the whole struct, member names and all — and
-/// the arena keeps every place until the function lowers. That was the
-/// meteor sim compile exhausting the ESP32-C6 heap (2026-09-01).
+/// root and the segments deliberately carry no type of their own: the
+/// root's is in the function's local/param tables or the module's
+/// uniform/global tables, a field's follows from the struct it projects
+/// ([`field_type`]), a swizzle's from the vector it projects
+/// ([`swizzle_type`]) and an index's from the type it indexes
+/// ([`index_element_type`]). Storing them here made every `a[i].f`
+/// reference hold copies of `a`'s full type — for a struct-array global
+/// that is the whole struct, member names and all — and the arena keeps
+/// every place until the function lowers. That was the meteor sim compile
+/// exhausting the ESP32-C6 heap (2026-09-01), and the 104 B segment with
+/// its own `String` and `LpsType` was the next 19 KB of it (2026-09-02).
 #[derive(Debug, Clone)]
 pub(crate) struct HirPlace {
     pub(crate) root: PlaceRoot,
     pub(crate) segments: Vec<PlaceSegment>,
     pub(crate) ty: LpsType,
+}
+
+/// A place as the arena stores it: the segments are a span into the
+/// arena's segment list ([`HirArena::place_segments`]).
+#[derive(Debug, Clone)]
+pub(crate) struct PlaceRecord {
+    pub(crate) root: PlaceRoot,
+    pub(crate) segments: SegmentList,
+    pub(crate) ty: LpsType,
+}
+
+/// A span of [`PlaceSegment`]s in the arena's segment list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SegmentList {
+    pub(super) start: u32,
+    pub(super) len: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,27 +68,35 @@ pub(crate) enum PlaceRoot {
     Global { name: String, byte_offset: u32 },
 }
 
-#[derive(Debug, Clone)]
-#[allow(
-    dead_code,
-    reason = "place paths intentionally carry layout metadata before slot-backed lowering consumes it"
-)]
+/// One projection step. `Copy` and 16 bytes: the member is an index into
+/// the struct being projected, a swizzle is at most four lane numbers, and
+/// the projected type is derived from the type it applies to rather than
+/// stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlaceSegment {
     Field {
-        name: String,
-        ty: LpsType,
-        lane_offset: usize,
-        lane_count: usize,
-        byte_offset: usize,
+        member: u16,
+        lane_offset: u32,
+        lane_count: u32,
+        byte_offset: u32,
     },
     Swizzle {
-        fields: String,
-        lanes: Vec<usize>,
-        ty: LpsType,
+        lanes: [u8; 4],
+        len: u8,
     },
     Index {
         index: ExprId,
     },
+}
+
+impl PlaceSegment {
+    /// The lanes a swizzle segment selects (`None` for other segments).
+    pub(crate) fn swizzle_lanes(&self) -> Option<&[u8]> {
+        match self {
+            PlaceSegment::Swizzle { lanes, len } => Some(&lanes[..usize::from(*len)]),
+            _ => None,
+        }
+    }
 }
 
 impl HirPlace {
@@ -104,26 +134,30 @@ impl HirPlace {
 
     pub(super) fn push_field(&mut self, span: Span, name: &str) -> Result<(), Diagnostic> {
         if let Some(field) = struct_field(&self.ty, name) {
-            let ty = field.ty.clone();
-            let lane_offset = field.lane_offset;
-            let lane_count = field.lane_count;
-            let byte_offset = field.byte_offset;
-            self.ty = ty.clone();
-            self.segments.push(PlaceSegment::Field {
-                name: String::from(name),
-                ty,
-                lane_offset,
-                lane_count,
-                byte_offset,
-            });
+            let member = u16::try_from(field.index)
+                .map_err(|_| Diagnostic::error(span, "struct has too many members"))?;
+            let segment = PlaceSegment::Field {
+                member,
+                lane_offset: field.lane_offset as u32,
+                lane_count: field.lane_count as u32,
+                byte_offset: field.byte_offset as u32,
+            };
+            self.ty = field.ty.clone();
+            self.segments.push(segment);
             return Ok(());
         }
         let (relative_lanes, ty) = swizzle_lanes(span, &self.ty, name)?;
-        self.ty = ty.clone();
+        let mut lanes = [0u8; 4];
+        if relative_lanes.len() > lanes.len() {
+            return Err(Diagnostic::error(span, "swizzle selects too many lanes"));
+        }
+        for (slot, lane) in lanes.iter_mut().zip(relative_lanes.iter()) {
+            *slot = *lane as u8;
+        }
+        self.ty = ty;
         self.segments.push(PlaceSegment::Swizzle {
-            fields: String::from(name),
-            lanes: relative_lanes,
-            ty,
+            lanes,
+            len: relative_lanes.len() as u8,
         });
         Ok(())
     }
@@ -138,6 +172,40 @@ impl HirPlace {
         self.ty = ty;
         self.segments.push(PlaceSegment::Index { index });
         Ok(())
+    }
+}
+
+/// The type member `member` of struct `ty` has, borrowed from the struct.
+/// `None` when `ty` is not a struct or the index is out of range.
+pub(crate) fn field_type(ty: &LpsType, member: u16) -> Option<&LpsType> {
+    let LpsType::Struct { members, .. } = ty else {
+        return None;
+    };
+    members.get(usize::from(member)).map(|m| &m.ty)
+}
+
+/// The name member `member` of struct `ty` answers to: its declared name,
+/// or `_{index}` for an unnamed member (the spelling [`struct_field`]
+/// matches).
+pub(crate) fn field_name(ty: &LpsType, member: u16) -> Option<String> {
+    let LpsType::Struct { members, .. } = ty else {
+        return None;
+    };
+    let m = members.get(usize::from(member))?;
+    Some(match &m.name {
+        Some(name) => name.clone(),
+        None => alloc::format!("_{}", member),
+    })
+}
+
+/// The type a swizzle of `len` lanes of vector `ty` has: the scalar base for
+/// one lane, the vector of that base otherwise.
+pub(crate) fn swizzle_type(ty: &LpsType, len: usize) -> Option<LpsType> {
+    let base = scalar_base_type(ty)?;
+    if len == 1 {
+        Some(base)
+    } else {
+        LpsType::vector_type(&base, len)
     }
 }
 
@@ -244,16 +312,19 @@ mod tests {
         assert_eq!(place.ty, LpsType::Vec2);
         let [
             PlaceSegment::Field {
+                member,
                 byte_offset,
                 lane_offset,
                 lane_count,
-                ..
             },
         ] = place.segments.as_slice()
         else {
             panic!("expected one field segment");
         };
-        assert_eq!((*byte_offset, *lane_offset, *lane_count), (8, 1, 2));
+        assert_eq!(
+            (*member, *byte_offset, *lane_offset, *lane_count),
+            (1, 8, 1, 2)
+        );
     }
 
     #[test]
@@ -261,10 +332,10 @@ mod tests {
         let mut place = local_place(0, LpsType::Vec4);
         place.push_field(Span::new(0, 2), "zy").unwrap();
         assert_eq!(place.ty, LpsType::Vec2);
-        let [PlaceSegment::Swizzle { lanes, .. }] = place.segments.as_slice() else {
+        let [segment] = place.segments.as_slice() else {
             panic!("expected one swizzle segment");
         };
-        assert_eq!(lanes, &[2, 1]);
+        assert_eq!(segment.swizzle_lanes(), Some(&[2u8, 1][..]));
     }
 
     #[test]

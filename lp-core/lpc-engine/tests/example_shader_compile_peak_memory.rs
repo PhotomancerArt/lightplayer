@@ -331,16 +331,18 @@ fn profile_shader(input: &CompilerInput) -> Summary {
 ///   figure of the largest example.
 #[test]
 fn example_shader_compile_peaks() {
-    // Compute: meteor/sim at 100,096 B after F4 (token tape dropped after
-    // the header step; 116,392 B before it, 317,600 B before #495).
-    const COMPUTE_CEILING_BYTES: usize = 137 * 1024;
+    // Compute: meteor/sim at 84,547 B after F3 (16 B `PlaceSegment`,
+    // arena-owned segment lists; 100,096 B after F4, 116,392 B before
+    // either, 317,600 B before #495).
+    const COMPUTE_CEILING_BYTES: usize = 116 * 1024;
     // Px ceilings: measured 2026-09-02 on the whole example corpus; see the
     // planning notes (2026-09-02-0817-hir-per-node-copies-corpus) for the
     // table. Set at ~1.4× the largest example's peak, rounded up to a KB.
-    // Largest overall px peak: basic/shader.glsl at 124,133 B after F4
-    // (150,317 B before; frontend build-hir, fn9); largest Xtensa backend
-    // peak: fyeah-*/blast.glsl at 53,882 B (backend emit).
-    const PX_CEILING_BYTES: usize = 170 * 1024;
+    // Largest overall px peak: basic/shader.glsl at 121,470 B after F3
+    // (124,133 B after F4, 150,317 B before; frontend build-hir, fn9);
+    // largest Xtensa backend peak: fyeah-*/blast.glsl at 53,882 B (backend
+    // emit).
+    const PX_CEILING_BYTES: usize = 166 * 1024;
     const PX_XT_CEILING_BYTES: usize = 74 * 1024;
 
     let mut rows: Vec<Summary> = Vec::new();

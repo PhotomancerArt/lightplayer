@@ -5,7 +5,7 @@ use lps_shared::LpsType;
 
 use crate::Span;
 
-use super::place::HirPlace;
+use super::place::{HirPlace, PlaceRecord, PlaceSegment, SegmentList};
 use super::types::{HirExpr, HirExprKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -23,8 +23,12 @@ pub struct ExprList {
 #[derive(Debug, Clone, Default)]
 pub struct HirArena {
     exprs: ChunkedVec<HirExpr>,
-    places: ChunkedVec<HirPlace>,
+    places: ChunkedVec<PlaceRecord>,
     expr_lists: Vec<ExprId>,
+    /// Every place's segments, back to back; a [`PlaceRecord`] spans its
+    /// own. One list instead of one `Vec` per place: a place has one or
+    /// two segments and a `Vec` of them cost a 4-element allocation each.
+    segments: Vec<PlaceSegment>,
 }
 
 impl HirArena {
@@ -60,14 +64,31 @@ impl HirArena {
                 .try_into()
                 .expect("HIR place arena exceeded u32"),
         );
-        self.places.push(place);
+        let start = self.segments.len();
+        self.segments.extend(place.segments);
+        let len = self.segments.len() - start;
+        self.places.push(PlaceRecord {
+            root: place.root,
+            segments: SegmentList {
+                start: start.try_into().expect("HIR segment list exceeded u32"),
+                len: len.try_into().expect("HIR place exceeded u16 segments"),
+            },
+            ty: place.ty,
+        });
         id
     }
 
-    pub(crate) fn place(&self, id: PlaceId) -> &HirPlace {
+    pub(crate) fn place(&self, id: PlaceId) -> &PlaceRecord {
         self.places
             .get(id.index())
             .expect("HIR place id out of range")
+    }
+
+    /// The projections of place `id`, root first.
+    pub(crate) fn place_segments(&self, id: PlaceId) -> &[PlaceSegment] {
+        let list = self.place(id).segments;
+        let start = list.start as usize;
+        &self.segments[start..start + usize::from(list.len)]
     }
 
     pub(crate) fn push_expr_list<I>(&mut self, ids: I) -> ExprList
@@ -124,7 +145,7 @@ mod size_tests {
         use core::mem::size_of;
         use lps_shared::{LpsType, StructMember};
 
-        use super::super::place::{HirPlace, PlaceSegment};
+        use super::super::place::{HirPlace, PlaceRecord, PlaceSegment};
         use super::super::types::{HirExpr, HirStmt};
         use super::*;
         use crate::Token;
@@ -134,6 +155,7 @@ mod size_tests {
         std::println!("StructMember   {:>4} B", size_of::<StructMember>());
         std::println!("HirExpr        {:>4} B", size_of::<HirExpr>());
         std::println!("HirPlace       {:>4} B", size_of::<HirPlace>());
+        std::println!("PlaceRecord    {:>4} B", size_of::<PlaceRecord>());
         std::println!("PlaceSegment   {:>4} B", size_of::<PlaceSegment>());
         std::println!("HirStmt        {:>4} B", size_of::<HirStmt>());
         std::println!("Token          {:>4} B", size_of::<Token>());

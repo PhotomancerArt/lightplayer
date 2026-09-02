@@ -41,6 +41,8 @@ pub(crate) enum TypeShapeKind {
 /// The single-field answer that [`struct_field`] gives without building a
 /// whole [`TypeShape`].
 pub(super) struct FieldPlacement<'a> {
+    /// Position in the struct's member list.
+    pub(super) index: usize,
     pub(super) ty: &'a LpsType,
     pub(super) lane_offset: usize,
     pub(super) lane_count: usize,
@@ -65,6 +67,7 @@ pub(super) fn struct_field<'a>(ty: &'a LpsType, name: &str) -> Option<FieldPlace
         let lane_count = scalar_lane_count(&member.ty);
         if member_name_matches(member.name.as_deref(), index, name) {
             return Some(FieldPlacement {
+                index,
                 ty: &member.ty,
                 lane_offset,
                 lane_count,

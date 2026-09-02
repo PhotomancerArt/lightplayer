@@ -148,13 +148,20 @@ fn apply_segment(
 ) -> Result<Option<LoweredPlace>, Diagnostic> {
     match segment {
         PlaceSegment::Field {
+            member,
             lane_offset,
             lane_count,
-            byte_offset,
-            ty,
             ..
-        } => apply_field(place, span, *lane_offset, *lane_count, *byte_offset, ty),
-        PlaceSegment::Swizzle { lanes, ty, .. } => apply_swizzle(place, span, lanes, ty),
+        } => apply_field(
+            place,
+            span,
+            *member,
+            *lane_offset as usize,
+            *lane_count as usize,
+        ),
+        PlaceSegment::Swizzle { .. } => {
+            apply_swizzle(place, span, segment.swizzle_lanes().unwrap_or_default())
+        }
         PlaceSegment::Index { index } => apply_index(ctx, span, place, *index),
     }
 }
@@ -162,11 +169,14 @@ fn apply_segment(
 fn apply_field(
     place: LoweredPlace,
     span: Span,
+    member: u16,
     lane_offset: usize,
     lane_count: usize,
-    _byte_offset: usize,
-    ty: &LpsType,
 ) -> Result<Option<LoweredPlace>, Diagnostic> {
+    let ty = crate::hir::field_type(place_ty_ref(&place), member)
+        .cloned()
+        .ok_or_else(|| Diagnostic::error(span, "field projection of a non-struct"))?;
+    let ty = &ty;
     Ok(Some(match place {
         LoweredPlace::Flat(flat) => {
             let end = lane_offset + lane_count;
@@ -191,16 +201,18 @@ fn apply_field(
 fn apply_swizzle(
     place: LoweredPlace,
     span: Span,
-    lanes: &[usize],
-    ty: &LpsType,
+    lanes: &[u8],
 ) -> Result<Option<LoweredPlace>, Diagnostic> {
+    let ty = crate::hir::swizzle_type(place_ty_ref(&place), lanes.len())
+        .ok_or_else(|| Diagnostic::error(span, "swizzle of a non-vector"))?;
+    let ty = &ty;
     Ok(Some(match place {
         LoweredPlace::Flat(flat) => {
             let projected = lanes
                 .iter()
                 .map(|lane| {
                     flat.lanes
-                        .get(*lane)
+                        .get(usize::from(*lane))
                         .copied()
                         .ok_or_else(|| Diagnostic::error(span, "swizzle lane out of range"))
                 })
@@ -216,7 +228,7 @@ fn apply_swizzle(
                 .map(|lane| {
                     memory
                         .lane_offsets
-                        .get(*lane)
+                        .get(usize::from(*lane))
                         .copied()
                         .ok_or_else(|| Diagnostic::error(span, "swizzle lane out of range"))
                 })
@@ -362,9 +374,13 @@ fn apply_flat_index(
 }
 
 fn place_ty(place: &LoweredPlace) -> LpsType {
+    place_ty_ref(place).clone()
+}
+
+fn place_ty_ref(place: &LoweredPlace) -> &LpsType {
     match place {
-        LoweredPlace::Flat(flat) => flat.ty.clone(),
-        LoweredPlace::Memory(memory) => memory.ty.clone(),
+        LoweredPlace::Flat(flat) => &flat.ty,
+        LoweredPlace::Memory(memory) => &memory.ty,
     }
 }
 

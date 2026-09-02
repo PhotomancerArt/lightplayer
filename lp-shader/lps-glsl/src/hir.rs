@@ -34,7 +34,9 @@ use array_size::{ArraySizeConsts, eval_array_size_expr};
 #[cfg(test)]
 pub(crate) use builtin::{builtin_has_out_args, builtin_kind, check_builtin_arity, is_glsl_import};
 use function::{FunctionSig, GlobalConst, ImportRegistry};
-pub(crate) use place::{HirPlace, PlaceRoot, PlaceSegment, index_element_type};
+pub(crate) use place::{
+    HirPlace, PlaceRoot, PlaceSegment, field_type, index_element_type, swizzle_type,
+};
 pub(crate) use shape::TypeShape;
 pub use symbols::{
     FnParamSymbol, FnSymbol, StructSymbol, SymbolAnalysis, VarSymbol, analyze_symbols,
