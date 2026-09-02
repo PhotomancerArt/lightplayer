@@ -308,7 +308,13 @@ impl DeviceEffects {
                     )),
                     // The pump's mark-gone rule, replayed for the lens: a
                     // port error means the port died underneath us, so the
-                    // fold hears the error AND the close.
+                    // fold hears the error, the close — and the DEPARTURE.
+                    // A dead port's controller cannot be reused (a replug
+                    // is a new port object), so the link leaves the roster
+                    // now; the connect edge's sweep attaches the board
+                    // afresh, and it re-identifies onto its own card. Left
+                    // attached-but-closed, the card would offer no way to
+                    // re-open it (bench, 2026-09-02).
                     LensTapEvent::PortError(message) => {
                         sink(Input::link(
                             link,
@@ -318,6 +324,7 @@ impl DeviceEffects {
                             link,
                             lpa_devices::link::LinkEvent::Closed { reason: message },
                         ));
+                        sink(Input::Event(Event::LinkDetached { link }));
                     }
                 }
             })
@@ -854,13 +861,37 @@ fn spawn_pump(
             while borrowed.get().is_none() {
                 let next = strong.borrow_mut().poll_event();
                 let Some(event) = next else { break };
+                // The browser controller's own death notices ("The device
+                // has been lost", "Serial port disconnected") are a
+                // departure, not a closed port: the port object is gone
+                // and only a replug brings a new one. The departure sweep
+                // is meant to say so from `getPorts()`, but it did not on
+                // two hub power-cuts (2026-09-02), so the pump says it
+                // from the error itself.
+                let departed = matches!(
+                    &event,
+                    lpa_devices::link::LinkEvent::Error(message) if port_is_gone(message)
+                );
                 sink(Input::link(link, event));
+                if departed {
+                    sink(Input::Event(Event::LinkDetached { link }));
+                    break;
+                }
             }
             drop(strong);
             let sleep = (timer.borrow_mut())(LINK_POLL_INTERVAL);
             sleep.await;
         }
     }));
+}
+
+/// Whether a link error is the platform saying the port itself is gone —
+/// the browser controller's signatures for an unplug or a revoked port.
+fn port_is_gone(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("device has been lost")
+        || message.contains("serial port disconnected")
+        || message.contains("serial port is not open")
 }
 
 /// Release a wire borrow, but only if `effect_id` is the one holding it.
@@ -1250,6 +1281,14 @@ mod tests {
             .cloned()
             .collect();
         assert_eq!(events.len(), 4, "{events:?}");
+        assert!(
+            inputs.borrow().iter().any(|input| matches!(
+                input,
+                Input::Event(Event::LinkDetached { link: LinkId(1) })
+            )),
+            "a dead port is a departure: {:?}",
+            inputs.borrow()
+        );
         assert!(matches!(
             &events[0],
             Input::Event(Event::Link { link: LinkId(1), event: LinkEvent::Line(line) }) if line == "[INFO] boot line"

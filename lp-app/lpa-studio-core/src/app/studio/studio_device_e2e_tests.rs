@@ -1096,11 +1096,35 @@ fn a_port_that_dies_under_the_lens_closes_the_editor_through_the_tap() {
         std::thread::sleep(Duration::from_millis(1));
     }
     assert!(bench.controller.runtime_pool_for_test().lens().is_none());
-    let card = &bench.view().devices[0];
-    assert!(
-        card.state_label.starts_with("Attached"),
-        "the card knows the port closed: {card:?}"
-    );
+    // A dead port is a departure: the board reads Offline, never
+    // "attached but closed" with no way back.
+    bench.run_until(&tasks, "the departure to reach the card", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Offline")
+    });
+    assert_eq!(bench.view().devices.len(), 1, "the card stays");
+
+    // The replug: the wire works again, the connect edge sweeps the grant
+    // back in, the board re-identifies onto its own card and Open returns.
+    device.set_failure_plan(lpa_link::providers::fake_device::FakeFailurePlan::none());
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    bench.run_until(&tasks, "the replug to identify itself", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench
+        .open_lens(&uid)
+        .expect("the replugged board opens again");
+    assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
 }
 
 /// The dead-wire backstop: the browser can take minutes to report a USB
