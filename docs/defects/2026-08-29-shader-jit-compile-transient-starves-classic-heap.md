@@ -85,7 +85,11 @@ PR #497)** — the "Next" list above, answered:
   dropped after the header step, 16-byte place segments in one arena
   list, 56-byte HIR expressions (import ids, arena writeback lists,
   compact swizzles, boxed texture operands, a per-function type table).
-  Device-width estimate ≈ 16 KB against ~126 KB free after load.
+  On the emulator the window only moved 23,757 → **22,858 B**: zook's
+  peak is now the backend's `lower` pass, whose structures carry few
+  pointers, so the frontend's ~1.9× host/device ratio no longer applies
+  and ~23 KB is the backend's own transient — against ~126 KB free after
+  load. Further zook savings are a backend question.
 - *Streaming/budget fix:* not needed at this size; the ceiling tests pin
   the shape instead (xt sentinel 37 KB, px corpus 112 KB host).
 
