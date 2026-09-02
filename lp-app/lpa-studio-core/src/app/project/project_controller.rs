@@ -64,6 +64,11 @@ pub struct ProjectController {
     /// or a link that is not Ready): the add-node picker then offers every
     /// kind. Gating only ever narrows when a device affirmatively reports.
     lens_device_features: Option<Vec<lpc_model::LpFeature>>,
+    /// What kind of runtime the lens is on — the probe policy's key
+    /// (visual probe resolution, product-subscription node scope). Pushed
+    /// by the studio controller's `sync_lens_probe_policy` at every action
+    /// and tick that might move the lens; `None` while detached.
+    lens_runtime_kind: Option<crate::RuntimeKind>,
     /// Every pattern export the local library offers, for the add-node
     /// picker's import source (module authoring unit, P5). Pushed down from
     /// the studio controller at each library settle — a view build must
@@ -433,6 +438,7 @@ impl ProjectController {
             state: ProjectState::NotLoaded,
             running_project_status: RunningProjectStatus::Unknown,
             lens_device_features: None,
+            lens_runtime_kind: None,
             import_patterns: Vec::new(),
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
@@ -4403,9 +4409,8 @@ impl ProjectController {
             // The manifest is library-owned. Looking at a project through a
             // device lens, the bytes you would be editing are not the ones
             // in front of you, so the row disables and says so (planning
-            // Q4) — no device lens exists while the device system is being
-            // rebuilt, so the row is always live.
-            device_session: false,
+            // Q4).
+            device_session: self.lens_runtime_kind == Some(crate::RuntimeKind::Device),
         })
     }
 
@@ -4937,10 +4942,16 @@ impl ProjectController {
             // controller-side signal; today the web pane's collapse
             // toggle is view-local (always false here — effectively
             // "all nodes") and this gate becomes real when the UI
-            // state audit moves live collapse state into core. (The
-            // device arm — focused node only, serial bandwidth being
-            // precious — returns with the rebuilt device model.)
-            ProjectProductSubscriptionIntent::Default => !node.state().collapsed,
+            // state audit moves live collapse state into core.
+            //
+            // A DEVICE lens (and an unknown one) subscribes the focused
+            // node only: every subscribed product is frames pulled over
+            // serial, and a board asked for every expanded node's frames
+            // stops answering heartbeats (round-2 M5 re-arms this).
+            ProjectProductSubscriptionIntent::Default => match self.lens_runtime_kind {
+                Some(crate::RuntimeKind::Sim) => !node.state().collapsed,
+                Some(crate::RuntimeKind::Device) | None => self.is_focused_node(node),
+            },
             ProjectProductSubscriptionIntent::Subscribed => true,
             ProjectProductSubscriptionIntent::Unsubscribed => false,
         }
@@ -5159,6 +5170,12 @@ impl ProjectController {
         self.lens_device_features = features;
     }
 
+    /// Record what kind of runtime the lens is on, so probe policy (visual
+    /// probe resolution, product-subscription node scope) tracks the lens.
+    pub fn set_lens_runtime_kind(&mut self, kind: Option<crate::RuntimeKind>) {
+        self.lens_runtime_kind = kind;
+    }
+
     /// Record what the library can be imported FROM (module authoring
     /// unit, P5): every pattern export the gallery snapshot listed. Pushed
     /// from the studio controller's library settle, the same chokepoint
@@ -5167,11 +5184,14 @@ impl ProjectController {
         self.import_patterns = patterns;
     }
 
-    /// The visual probe resolution for the current lens. The tiered
-    /// device resolution (`VISUAL_DEVICE`) returns with the rebuilt device
-    /// model; a sim lens has always used the default.
+    /// The visual probe resolution for the current lens: the 16×16 device
+    /// tier over serial, the default everywhere else (a sim lens has always
+    /// used the default; a detached mirror is not probing at all).
     fn visual_preview_frame(&self) -> crate::UiProductPreviewFrame {
-        crate::UiProductPreviewFrame::VISUAL_DEFAULT
+        match self.lens_runtime_kind {
+            Some(crate::RuntimeKind::Device) => crate::UiProductPreviewFrame::VISUAL_DEVICE,
+            Some(crate::RuntimeKind::Sim) | None => crate::UiProductPreviewFrame::VISUAL_DEFAULT,
+        }
     }
 
     /// The sync handle for building a read request, with the lens-tier
@@ -13172,6 +13192,65 @@ mod tests {
         assert!(carries("control.out"));
         assert!(!carries("brightness"), "brightness is a plain amplitude");
         assert!(!carries("trigger"));
+    }
+
+    /// Round-2 M5 re-armed the device probe policy: a device lens subscribes
+    /// the focused node only (every product is frames over serial), a sim
+    /// lens streams every expanded node, and a detached mirror is as strict
+    /// as a device.
+    #[test]
+    fn sim_lens_subscribes_unfocused_nodes_device_stays_focused_only() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        clear_node_focus(&mut project.root_nodes);
+
+        // Device lens (and unknown): an unfocused node contributes nothing.
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        assert_eq!(project.subscribed_products(), Vec::new());
+        project.set_lens_runtime_kind(None);
+        assert_eq!(project.subscribed_products(), Vec::new());
+
+        // Sim lens: the unfocused (expanded) node's products stream too.
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        assert_eq!(
+            project.subscribed_products(),
+            vec![
+                UiProductRef::Visual {
+                    node_id: 1,
+                    output: 0
+                },
+                UiProductRef::Control {
+                    node_id: 1,
+                    output: 1,
+                    rows: 2,
+                    samples_per_row: 16
+                }
+            ]
+        );
+    }
+
+    /// The visual probe tier follows the lens kind: 16×16 over serial, the
+    /// default for the sim and while detached.
+    #[test]
+    fn device_lens_probes_at_the_device_tier() {
+        let mut project = ProjectController::new();
+        assert_eq!(
+            project.visual_preview_frame(),
+            crate::UiProductPreviewFrame::VISUAL_DEFAULT
+        );
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Device));
+        assert_eq!(
+            project.visual_preview_frame(),
+            crate::UiProductPreviewFrame::VISUAL_DEVICE
+        );
+        project.set_lens_runtime_kind(Some(crate::RuntimeKind::Sim));
+        assert_eq!(
+            project.visual_preview_frame(),
+            crate::UiProductPreviewFrame::VISUAL_DEFAULT
+        );
     }
 
     fn single_node_view(id: u32, status: NodeRuntimeStatus) -> ProjectView {

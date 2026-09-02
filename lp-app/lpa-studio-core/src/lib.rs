@@ -116,8 +116,9 @@ pub use app::roster::{
     sim_rich_object,
 };
 pub use app::runtime_pool::{
-    CardFeedApply, CardFeedState, RuntimeId, RuntimeOp, RuntimePool, RuntimeSession,
-    SIM_SESSION_CAPACITY, SimAttachment, SimLink, SimLoadedProject,
+    CardFeedApply, CardFeedState, DeviceLensAttachment, RuntimeId, RuntimeKind, RuntimeOp,
+    RuntimePayload, RuntimePool, RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment, SimLink,
+    SimLoadedProject,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerSnapshot, ServerState,

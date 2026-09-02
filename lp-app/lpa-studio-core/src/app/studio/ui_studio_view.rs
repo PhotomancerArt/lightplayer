@@ -10,8 +10,9 @@ use crate::{
 /// document**). The web shell's route reconciliation binds
 /// `/p/<slug>-<project-uid>` to this, never to raw project identity.
 ///
-/// ⚠️ The `Device` arm — and the `/device/<uid>` route it fed — went with
-/// M2 of the device-model rebuild; the rebuilt model re-adds it.
+/// The `Device` arm addresses a roster device by its registered uid (the
+/// `/device/<uid>` route, round-2 M5); a lens only attaches to an
+/// identified device, so the uid is always known.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiLensRuntime {
     /// The lens is on THE sim session. A sim runtime's identity is its
@@ -23,6 +24,10 @@ pub enum UiLensRuntime {
     /// address is cosmetic and comes from
     /// [`UiStudioView::open_project_name`], which tracks renames live.
     Sim { project_uid: Option<String> },
+    /// The lens is on a roster device: `uid` is its registered `dev…` uid,
+    /// the whole of the device route's identity. The project comes from
+    /// the device.
+    Device { uid: String },
 }
 
 /// The header session·project control's three-dot status vocabulary

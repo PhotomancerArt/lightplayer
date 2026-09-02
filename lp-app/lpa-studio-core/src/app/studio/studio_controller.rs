@@ -968,6 +968,22 @@ impl StudioController {
         }
     }
 
+    /// Push the lens session's runtime kind into the project controller so
+    /// probe policy (visual probe resolution, product-subscription node
+    /// scope) tracks the lens — and the lens device's reported build, for
+    /// the add-node picker's gate (a sim lens leaves it `None` and the
+    /// picker offers everything). Called at every action and tick that
+    /// might move the lens; cheap, idempotent.
+    fn sync_lens_probe_policy(&mut self) {
+        let lens = self.pool.lens_session();
+        let kind = lens.map(crate::RuntimeSession::kind);
+        let features = lens
+            .and_then(crate::RuntimeSession::device_features)
+            .map(<[lpc_model::LpFeature]>::to_vec);
+        self.project.set_lens_runtime_kind(kind);
+        self.project.set_lens_device_features(features);
+    }
+
     /// Stamp the lens session's pull-completion time: the next passive pull
     /// becomes due one cadence gap after this moment, not one gap after the
     /// pull started.
@@ -1460,16 +1476,22 @@ impl StudioController {
     /// focused document — the web shell's D37 route reconciliation binds
     /// to this).
     fn lens_runtime(&self) -> Option<crate::UiLensRuntime> {
-        self.pool.lens_session().map(|session| {
-            // the session's loaded-project record (not the library
-            // binding) is the key: it survives detach, so re-attach
-            // flows address the same document
-            crate::UiLensRuntime::Sim {
-                project_uid: session
-                    .sim_loaded_project()
-                    .map(|project| project.uid.clone()),
-            }
-        })
+        self.pool
+            .lens_session()
+            .map(|session| match session.device_attachment() {
+                // A device lens is addressed by the device's registered uid.
+                Some(device) => crate::UiLensRuntime::Device {
+                    uid: device.uid.clone(),
+                },
+                // the session's loaded-project record (not the library
+                // binding) is the key: it survives detach, so re-attach
+                // flows address the same document
+                None => crate::UiLensRuntime::Sim {
+                    project_uid: session
+                        .sim_loaded_project()
+                        .map(|project| project.uid.clone()),
+                },
+            })
     }
 
     /// The home gallery: shown whenever NO project is open — always
@@ -1782,6 +1804,7 @@ impl StudioController {
         if !self.passive_refresh_due() {
             return Ok(Some(ProjectRefreshOutcome::NotDue));
         }
+        self.sync_lens_probe_policy();
         let outcome = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
             self.project
@@ -1802,6 +1825,7 @@ impl StudioController {
     }
 
     async fn dispatch_inner(&mut self, action: UiAction, updates: UxUpdateSink) -> UiResult {
+        self.sync_lens_probe_policy();
         let node_id = action.node_id().clone();
         let project_node_id = self.project.node_id();
 
@@ -2005,7 +2029,7 @@ impl StudioController {
         ) {
             return None;
         }
-        let sim = session.payload();
+        let sim = session.sim_payload()?;
         let message = sim.connector.session_fatal(&sim.session.id)?;
         let sim_id = session.id();
         self.push_log(UiLogDraft::new(
@@ -2028,8 +2052,12 @@ impl StudioController {
         if self.pool.lens() == Some(sim_id) {
             self.quiesce_lens();
         }
-        if let Some(session) = self.pool.remove_sim() {
-            close_runtime_payload(session.into_payload()).await;
+        if let Some(crate::RuntimePayload::Sim(sim)) = self
+            .pool
+            .remove_sim()
+            .map(crate::RuntimeSession::into_payload)
+        {
+            close_runtime_payload(sim).await;
         }
     }
 
@@ -2044,7 +2072,7 @@ impl StudioController {
         // Read BEFORE the install: the question is whether THIS install
         // replaces the session the editor is a lens on.
         let lens_replaced = self.pool.lens_session().is_some();
-        let id = self.pool.install(payload);
+        let id = self.pool.install(crate::RuntimePayload::Sim(payload));
         self.record_device_event(
             Some(&id.to_string()),
             Some(install_endpoint.as_str()),
@@ -3788,7 +3816,9 @@ impl StudioController {
         self.record_logs(pending);
         {
             use lpa_link::LinkProvider;
-            let sim = session.into_payload();
+            let crate::RuntimePayload::Sim(sim) = session.into_payload() else {
+                unreachable!("remove_sim only ever yields a sim session");
+            };
             if let Err(error) = sim.connector.close(&sim.session.id).await {
                 self.push_log(UiLogDraft::new(
                     UiLogLevel::Warn,
@@ -3924,7 +3954,9 @@ impl StudioController {
 
     /// Install a stubbed SIM session and return its id.
     pub(crate) fn install_stub_sim_for_test(&mut self) -> crate::RuntimeId {
-        self.pool.install(crate::SimAttachment::stub_for_test())
+        self.pool.install(crate::RuntimePayload::Sim(
+            crate::SimAttachment::stub_for_test(),
+        ))
     }
 
     /// Install a stubbed SIM session with an injected wire client.

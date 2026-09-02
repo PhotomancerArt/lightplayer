@@ -1,17 +1,22 @@
 //! One attached runtime: its payload, wire client, and per-session state.
 //!
-//! ⚠️ The DEVICE payload arm is gone (M2 of the device-model rebuild):
-//! `DeviceHandle`, the per-device reconcile bundle (`device_sync`,
-//! `hardware_id`, versions, drift times, storage id), the in-flight
-//! `operation` flag, the observed-device-state heartbeat baseline and the
-//! device console sink all died with the flows that wrote them. The pool
-//! was reduced to the SIM's needs (vision R1: the sim keeps its existing
-//! path untouched through round 1); the rebuilt device model owns its own
-//! session shape.
-//!
-//! A [`RuntimeSession`] therefore bundles: the simulator attachment, the
+//! A [`RuntimeSession`] bundles: the runtime attachment (the payload), the
 //! wire client it owns, the server protocol state, the per-session console
 //! tail, the card frame feed, and this session's refresh/heartbeat pacing.
+//! The payload keeps D22's rule in the type system (the sim is not a
+//! device):
+//!
+//! - [`RuntimePayload::Sim`] — the browser-worker simulator. Connect +
+//!   worker io, no boot, no readiness states.
+//! - [`RuntimePayload::Device`] — a board the editor is a LENS on
+//!   (device-model round 2, M5). The board itself lives in the
+//!   `lpa-devices` roster: its identity, evidence, activities and link all
+//!   stay there. This payload is only the lens's handle on that device —
+//!   which roster device, which link the lens borrowed, and the facts the
+//!   editor needs at attach (uid, build features). The old per-device
+//!   reconcile bundle (`device_sync`, `hardware_id`, drift times, the
+//!   in-flight `operation` flag) is NOT back: those were parallel stores
+//!   (invariant I8), and the fold owns their facts now.
 //!
 //! There is no `None` payload: absence of a runtime is absence from the
 //! [`RuntimePool`](super::RuntimePool).
@@ -58,12 +63,66 @@ pub struct SimAttachment {
     pub connection: LinkConnection,
 }
 
-/// One runtime session in the pool: the attached simulator, its wire
-/// client (each session owns its OWN [`StudioServerClient`]), and the
-/// server protocol state.
+/// What kind of runtime a session is attached to (D22: the sim is not a
+/// device). Derived from the payload; never stored separately.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeKind {
+    /// The browser-worker simulator.
+    Sim,
+    /// A real board the editor is a lens on.
+    Device,
+}
+
+/// The lens's handle on a roster device (round-2 M5).
+///
+/// The board is the roster's; this is what the EDITOR needs to know about
+/// the one it is looking through. The wire itself is borrowed from the
+/// roster's link for the lens's lifetime (the effects layer's
+/// exclusive-borrow discipline) and given back at detach — the pool never
+/// owns a port.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeviceLensAttachment {
+    /// The roster device the lens is on.
+    pub device: lpa_devices::DeviceId,
+    /// The roster link the lens borrowed (the port under the session's
+    /// wire client).
+    pub link: lpa_devices::LinkId,
+    /// The device's registered `dev…` uid — the `/device/<uid>` address.
+    pub uid: String,
+    /// The device's display name at attach (the card's title).
+    pub name: String,
+    /// The board the device reports (registry `vendor/product`
+    /// vocabulary), when known.
+    pub board_id: Option<String>,
+    /// The build features the device's hello reported — the add-node
+    /// picker's "Not on this device" gate.
+    pub features: Option<Vec<lpc_model::LpFeature>>,
+}
+
+/// The runtime a session is attached to.
+pub enum RuntimePayload {
+    /// The browser-worker simulator (BrowserWorker): a live provider
+    /// session whose server io is the worker post-message channel.
+    Sim(SimAttachment),
+    /// A roster device the editor is a lens on.
+    Device(DeviceLensAttachment),
+}
+
+impl RuntimePayload {
+    pub fn kind(&self) -> RuntimeKind {
+        match self {
+            Self::Sim(_) => RuntimeKind::Sim,
+            Self::Device(_) => RuntimeKind::Device,
+        }
+    }
+}
+
+/// One runtime session in the pool: the attached runtime, its wire client
+/// (each session owns its OWN [`StudioServerClient`]), and the server
+/// protocol state.
 pub struct RuntimeSession {
     id: RuntimeId,
-    payload: SimAttachment,
+    payload: RuntimePayload,
     client: Option<StudioServerClient>,
     /// The sim's server-protocol standing: opening, connected, or failed.
     ///
@@ -124,7 +183,7 @@ pub struct RuntimeSession {
 impl RuntimeSession {
     /// A fresh session around an attachment: no wire client yet, server
     /// protocol `Disconnected` until [`Self::attach_server`] runs.
-    pub(crate) fn new(id: RuntimeId, payload: SimAttachment) -> Self {
+    pub(crate) fn new(id: RuntimeId, payload: RuntimePayload) -> Self {
         Self {
             id,
             payload,
@@ -145,13 +204,40 @@ impl RuntimeSession {
         self.id
     }
 
-    pub fn payload(&self) -> &SimAttachment {
+    pub fn payload(&self) -> &RuntimePayload {
         &self.payload
+    }
+
+    /// What kind of runtime this session is attached to.
+    pub fn kind(&self) -> RuntimeKind {
+        self.payload.kind()
+    }
+
+    /// The simulator attachment, when this is a SIM session.
+    pub fn sim_payload(&self) -> Option<&SimAttachment> {
+        match &self.payload {
+            RuntimePayload::Sim(sim) => Some(sim),
+            RuntimePayload::Device(_) => None,
+        }
+    }
+
+    /// The lens's device handle, when this is a DEVICE session.
+    pub fn device_attachment(&self) -> Option<&DeviceLensAttachment> {
+        match &self.payload {
+            RuntimePayload::Device(device) => Some(device),
+            RuntimePayload::Sim(_) => None,
+        }
+    }
+
+    /// The build features the lens device reported at attach (`None` for
+    /// the sim, and for a device whose hello carried none).
+    pub fn device_features(&self) -> Option<&[lpc_model::LpFeature]> {
+        self.device_attachment()?.features.as_deref()
     }
 
     /// Tear the session apart into its attachment (teardown: the wire
     /// client and per-session state drop here).
-    pub fn into_payload(self) -> SimAttachment {
+    pub fn into_payload(self) -> RuntimePayload {
         self.payload
     }
 
@@ -212,17 +298,33 @@ impl RuntimeSession {
 
     /// Attach the server protocol to this session's runtime: the sim's
     /// worker io becomes the wire.
+    ///
+    /// SIM only. A device session's client is built by the lens attach
+    /// flow over the borrowed roster wire and installed with
+    /// [`Self::attach_device_client`] — the pool never opens a port.
     pub fn attach_server(&mut self, updates: UxUpdateSink) -> Result<(), UiError> {
+        let RuntimePayload::Sim(sim) = &self.payload else {
+            return Err(UiError::MissingSession(
+                "a device session attaches through its lens wire, not the sim path".to_string(),
+            ));
+        };
         // Direct field write (not a &mut self helper) so the state
         // transition can happen while the payload is borrowed.
         self.server_state = connecting_state();
         let client = StudioServerClient::from_sim_connection(
-            Rc::clone(&self.payload.connector),
-            &self.payload.connection,
+            Rc::clone(&sim.connector),
+            &sim.connection,
             updates,
         )?;
         self.install_client(client);
         Ok(())
+    }
+
+    /// Install a wire client the lens attach flow built over a borrowed
+    /// device wire (device sessions only; the sim attaches through
+    /// [`Self::attach_server`]).
+    pub(crate) fn attach_device_client(&mut self, client: StudioServerClient) {
+        self.install_client(client);
     }
 
     // -----------------------------------------------------------------
@@ -317,9 +419,14 @@ impl RuntimeSession {
     // -----------------------------------------------------------------
 
     /// The passive project-refresh completion-gap while the lens is on this
-    /// session.
+    /// session: the sim's tight loop, or the device gap (the serial wire is
+    /// the bound, and the 150 ms floor is what keeps a board answering
+    /// heartbeats while the editor pulls).
     pub fn cadence_interval(&self) -> Duration {
-        RefreshCadence::simulator().interval()
+        match self.kind() {
+            RuntimeKind::Sim => RefreshCadence::simulator().interval(),
+            RuntimeKind::Device => RefreshCadence::device().interval(),
+        }
     }
 
     /// Stamp a passive pull's completion (injected-clock epoch seconds);
@@ -448,10 +555,63 @@ impl SimAttachment {
     }
 }
 
+#[cfg(test)]
+impl DeviceLensAttachment {
+    /// A stubbed DEVICE lens handle for view/derivation tests: a named
+    /// device on a fixed roster id/link, no wire.
+    pub(crate) fn stub_for_test(uid: &str) -> Self {
+        Self {
+            device: lpa_devices::DeviceId(1),
+            link: lpa_devices::LinkId(1),
+            uid: uid.to_string(),
+            name: "XIAO ESP32-C6 · Sep 1".to_string(),
+            board_id: Some("seeed/xiao-esp32-c6".to_string()),
+            features: None,
+        }
+    }
+}
+
 /// The "Opening server protocol" connecting state every attach passes
 /// through (the retired `ServerController::mark_connecting` label).
 fn connecting_state() -> ServerState {
     ServerState::Connecting {
         progress: crate::ProgressState::new("Opening server protocol"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_refresh_cadence_follows_the_session_kind() {
+        let sim = RuntimeSession::new(
+            RuntimeId::new(1),
+            RuntimePayload::Sim(SimAttachment::stub_for_test()),
+        );
+        assert_eq!(sim.kind(), RuntimeKind::Sim);
+        assert_eq!(
+            sim.cadence_interval(),
+            RefreshCadence::simulator().interval()
+        );
+
+        let device = RuntimeSession::new(
+            RuntimeId::new(2),
+            RuntimePayload::Device(DeviceLensAttachment::stub_for_test("devabc")),
+        );
+        assert_eq!(device.kind(), RuntimeKind::Device);
+        assert_eq!(
+            device.cadence_interval(),
+            RefreshCadence::device().interval(),
+            "a device lens pulls at the serial-safe gap"
+        );
+        assert!(
+            device.device_features().is_none(),
+            "no hello features recorded on the stub"
+        );
+        assert!(
+            device.sim_payload().is_none() && device.device_attachment().is_some(),
+            "kind accessors never cross"
+        );
     }
 }

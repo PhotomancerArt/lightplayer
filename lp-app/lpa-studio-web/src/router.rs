@@ -683,6 +683,9 @@ pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
                 view: ProjectView::Workspace,
             })
         }
+        // The `/device/<uid>` route lands with the route half of round-2
+        // M5; until then a device lens binds no address and the URL stays.
+        UiLensRuntime::Device { .. } => None,
     }
 }
 
