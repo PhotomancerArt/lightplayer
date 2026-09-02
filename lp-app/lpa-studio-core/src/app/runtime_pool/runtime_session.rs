@@ -323,7 +323,7 @@ impl RuntimeSession {
     /// Install a wire client the lens attach flow built over a borrowed
     /// device wire (device sessions only; the sim attaches through
     /// [`Self::attach_server`]).
-    pub(crate) fn attach_device_client(&mut self, client: StudioServerClient) {
+    pub fn attach_device_client(&mut self, client: StudioServerClient) {
         self.install_client(client);
     }
 

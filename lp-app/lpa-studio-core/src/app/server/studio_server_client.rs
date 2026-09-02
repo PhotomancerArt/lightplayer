@@ -114,6 +114,31 @@ impl StudioServerClient {
         }
     }
 
+    /// A client over the editor lens's io on a roster device's borrowed
+    /// wire (round-2 M5). The io is the transport's `lens_client_io`; the
+    /// device's console lines reach the roster fold through the lens tap,
+    /// not this client's pending logs.
+    ///
+    /// Carries a total per-request deadline like every hardware client:
+    /// real firmware can drop a response while heartbeating, and only a
+    /// total bound in the correlation layer turns that into an error
+    /// instead of an unbounded wait.
+    pub fn from_lens_io(
+        io: Box<dyn ClientIo>,
+        deadline: lpa_client::RequestDeadline,
+        protocol: impl Into<String>,
+    ) -> Self {
+        Self {
+            client: LpClient::new(io).with_request_deadline(deadline),
+            protocol: protocol.into(),
+            pending_logs: Rc::new(RefCell::new(Vec::new())),
+            last_recovery: None,
+            last_output_status: None,
+            last_fps: None,
+            last_loaded_projects: None,
+        }
+    }
+
     pub fn protocol(&self) -> &str {
         &self.protocol
     }

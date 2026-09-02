@@ -39,9 +39,9 @@ pub use app::devices::{
     CompletedPush, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects,
     DevicePushOp, DeviceRoster, DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture,
     DeviceTransport, DeviceTransportFuture, DevicesOp, FlashBoardChoice, FlashOffer, GrantedLink,
-    JournalLine, PushOffer, PushPayload, PushSource, PushSourceChoice, PushSourceGroup, StagedPush,
-    device_escape_action, device_status_kind, first_bundled_example_id, flash_offer,
-    pending_escape_action, push_offer,
+    JournalLine, LensLineTap, PushOffer, PushPayload, PushSource, PushSourceChoice,
+    PushSourceGroup, StagedPush, device_escape_action, device_status_kind,
+    first_bundled_example_id, flash_offer, pending_escape_action, push_offer,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::home::{

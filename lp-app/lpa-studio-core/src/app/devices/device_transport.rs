@@ -98,6 +98,13 @@ pub struct DeviceEffectFacts {
 /// into an `ActivityMarker::Progress` event.
 pub type DeviceEffectProgress = std::rc::Rc<dyn Fn(String, Option<u8>)>;
 
+/// The lens tap: every whole line the lens io drains from the wire — `M!`
+/// frames and console output alike, verbatim — before the io decodes it for
+/// its own conversation. The effects layer demuxes each line into the same
+/// `LinkEvent` the paused pump would have produced and feeds the roster
+/// fold, so the card keeps its evidence while the editor owns the port.
+pub type LensLineTap = std::rc::Rc<dyn Fn(String)>;
+
 /// How the app reaches real ports.
 pub trait DeviceTransport {
     /// A short label for logs ("browser Web Serial").
@@ -132,4 +139,20 @@ pub trait DeviceTransport {
     /// `forget_endpoint`). Best-effort: a grant that cannot be revoked is
     /// worth a log line, not a stuck card.
     fn revoke_grant(&self, info: LinkInfo) -> DeviceTransportFuture<Result<(), String>>;
+
+    /// A long-lived `lpa-client` io over a granted endpoint's OPEN port for
+    /// the editor lens (round-2 M5): the session's wire client speaks the
+    /// app protocol through it for as long as the lens is attached.
+    ///
+    /// Same exclusive-borrow discipline as [`Self::run_effect`], held open
+    /// instead of run to completion: the effects layer pauses the link's
+    /// pump before building this and resumes it when the lens releases the
+    /// wire. `tap` receives every line the io drains, so the fold never
+    /// goes deaf. The io never closes the port — it belongs to the model's
+    /// link.
+    fn lens_client_io(
+        &self,
+        info: LinkInfo,
+        tap: LensLineTap,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, String>;
 }

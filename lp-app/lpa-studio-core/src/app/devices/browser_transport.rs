@@ -20,7 +20,7 @@ use lpa_link::{LinkEndpointId, LinkManagementEvent, LinkManagementEventSink, Lin
 
 use super::device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
-    DeviceTransportFuture, GrantedLink,
+    DeviceTransportFuture, GrantedLink, LensLineTap,
 };
 
 /// Where the board runtime manifest lives on a device (read by the
@@ -258,5 +258,25 @@ impl DeviceTransport for BrowserSerialTransport {
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         })
+    }
+
+    fn lens_client_io(
+        &self,
+        info: LinkInfo,
+        tap: LensLineTap,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+        let endpoint = LinkEndpointId::new(info.endpoint.0);
+        // Console lines the lens io sees are ALREADY on their way to the
+        // fold through the tap (the card's terminal shows them); the
+        // management sink only needs to keep the io's own diagnostics
+        // (malformed frames) from vanishing.
+        let events = LinkManagementEventSink::new(|event| {
+            if let LinkManagementEvent::Log { message } = event {
+                log::debug!("lens io: {message}");
+            }
+        });
+        self.provider
+            .lens_client_io(&endpoint, tap, events)
+            .map_err(|error| error.to_string())
     }
 }

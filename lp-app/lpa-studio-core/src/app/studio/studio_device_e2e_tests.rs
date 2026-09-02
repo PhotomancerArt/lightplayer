@@ -44,7 +44,7 @@ use crate::app::library::{LibraryStore, MemoryLibraryHost};
 use crate::app::places::DeviceRegistry;
 use crate::{
     DeviceAction, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceInput,
-    DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink,
+    DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink, LensLineTap,
     StudioController, UiAction,
 };
 
@@ -176,6 +176,17 @@ impl DeviceTransport for ScriptedTransport {
         self.granted.set(false);
         self.revoked.borrow_mut().push(info.endpoint.0);
         Box::pin(core::future::ready(Ok(())))
+    }
+
+    fn lens_client_io(
+        &self,
+        _info: lpa_devices::LinkInfo,
+        tap: LensLineTap,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+        // The real io over the fake's real `M!` wire, teed: what the lens
+        // e2e rows prove is that the fold keeps folding while the client
+        // owns the port.
+        Ok(Box::new(FakeDeviceIo::new(&self.device).with_tap(tap)))
     }
 
     fn run_effect(
@@ -335,6 +346,8 @@ struct FakeDeviceIo {
     partial: String,
     /// Frames decoded but not yet handed out.
     pending: VecDeque<lpc_wire::WireServerMessage>,
+    /// The lens tap (M5): every whole line, verbatim, before decoding.
+    tap: Option<LensLineTap>,
 }
 
 impl FakeDeviceIo {
@@ -343,7 +356,13 @@ impl FakeDeviceIo {
             stream: lpa_link::providers::fake_device::FakeDeviceByteStream::new(device.clone()),
             partial: String::new(),
             pending: VecDeque::new(),
+            tap: None,
         }
+    }
+
+    fn with_tap(mut self, tap: LensLineTap) -> Self {
+        self.tap = Some(tap);
+        self
     }
 
     /// Drain whatever the wire has right now into [`Self::pending`].
@@ -359,6 +378,9 @@ impl FakeDeviceIo {
             while let Some(newline) = self.partial.find('\n') {
                 let line: String = self.partial.drain(..=newline).collect();
                 let line = line.trim_end_matches(['\n', '\r']);
+                if let Some(tap) = &self.tap {
+                    tap(line.to_string());
+                }
                 let Some(json) = line.strip_prefix("M!") else {
                     continue;
                 };
