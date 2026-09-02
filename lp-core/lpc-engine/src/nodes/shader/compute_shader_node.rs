@@ -176,12 +176,17 @@ impl ComputeShaderNode {
         self.needs_compile = false;
         self.compilation_error = None;
         let compile_start_ms = ctx.now_ms();
+        // Heap bracket around the compile: the pair is the device-side
+        // measurement of the compile transient's resident remainder, and the
+        // "before" line is the headroom the compile had to work with.
+        lpc_shared::memory::log_global_memory_checkpoint("compute shader compile before");
         lpc_shared::backtrace::set_oom_context("compute shader node: compile");
         // Terminal on every target — see the sibling comment in `shader_node.rs`.
         let compile_result = graphics
             .compile_compute_shader(desc)
             .map_err(|error| format!("{error}"));
         lpc_shared::backtrace::clear_oom_context();
+        lpc_shared::memory::log_global_memory_checkpoint("compute shader compile after");
         let compile_elapsed_ms = compile_start_ms.and_then(|start| ctx.elapsed_ms(start));
 
         match compile_result {
@@ -401,7 +406,12 @@ struct RuntimeSourceAsset {
 /// Compose the compiler input (generated uniform header + user source) and
 /// return it with the number of lines the header prefix occupies before the
 /// user's line 1.
-fn compute_glsl_source(
+///
+/// Public so the memory probes (`tests/meteor_compute_compile_peak_memory.rs`)
+/// can compile exactly the text the node compiles, header included — the
+/// header is where the produced struct-array globals get declared, and those
+/// are what the frontend's per-reference type clones scale with.
+pub fn compute_glsl_source(
     def: &ComputeShaderDef,
     source: &str,
     slot_shapes: &SlotShapeRegistry,

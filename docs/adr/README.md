@@ -180,6 +180,7 @@ holds the full context.
 | A1: wire values decode under the CURRENT fixture's lamp type (owner's when mapped, else the next-unmapped object's) — the panel states the assumption rather than implying certainty | `2026-08-20-walk-up-assignment-selection-model` | Per-port lamp-type data exists on the surface |
 | The lamps−/+ control is mock-level room only (dashed, disabled): editing an object's lamp count is a mapping write, not a patch verb | `2026-08-20-walk-up-assignment-selection-model` | The count edit gets a home on the mapping write path |
 | The ProjectRead refusal threshold (32 KiB largest-free-block) and the staged sync's 16-node slot page size are provisional constants | `2026-08-28-project-reads-bounded-streamed-refusable` | The wire-evolution round-1 G1 bench walk reads real heartbeat numbers on the classic |
+| The main-stack high-water probe is C6-only; the classic and the S3 keep unmeasured stacks, and the tick's ~37 KB stack consumers are unprofiled | `2026-09-02-esp32c6-ram-split` | A bench journal on either Xtensa board, or a project that pushes the C6 mark past ~50 KB |
 
 ## Relationship To Shared Planning
 

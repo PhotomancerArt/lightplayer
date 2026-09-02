@@ -73,11 +73,21 @@ fn root_place(
                 })),
             }
         }
-        PlaceRoot::Param { param, ty } if is_pointer_param(ctx, *param) => {
+        PlaceRoot::Param { param } if is_pointer_param(ctx, *param) => {
             let base = param_pointer(ctx, span, *param)?;
+            let ty = ctx
+                .params
+                .get(*param)
+                .map(|value| value.ty.clone())
+                .ok_or_else(|| {
+                    Diagnostic::error(
+                        span,
+                        alloc::format!("parameter index {param} is out of range"),
+                    )
+                })?;
             Some(LoweredPlace::Memory(MemoryPlace {
-                lane_offsets: scalar_lane_offsets(ty),
-                ty: ty.clone(),
+                lane_offsets: scalar_lane_offsets(&ty),
+                ty,
                 base,
                 static_offset: 0,
                 dynamic_offset: None,
@@ -95,18 +105,38 @@ fn root_place(
                 lanes: value.lanes,
             }))
         }
-        PlaceRoot::Uniform {
-            byte_offset, ty, ..
+        PlaceRoot::Uniform { name, byte_offset } => {
+            let ty = ctx
+                .uniforms
+                .get(name)
+                .map(|info| info.ty.clone())
+                .ok_or_else(|| {
+                    Diagnostic::error(span, alloc::format!("unknown uniform `{name}`"))
+                })?;
+            Some(LoweredPlace::Memory(MemoryPlace {
+                lane_offsets: scalar_lane_offsets(&ty),
+                ty,
+                base: ctx.vmctx,
+                static_offset: *byte_offset,
+                dynamic_offset: None,
+            }))
         }
-        | PlaceRoot::Global {
-            byte_offset, ty, ..
-        } => Some(LoweredPlace::Memory(MemoryPlace {
-            lane_offsets: scalar_lane_offsets(ty),
-            ty: ty.clone(),
-            base: ctx.vmctx,
-            static_offset: *byte_offset,
-            dynamic_offset: None,
-        })),
+        PlaceRoot::Global { name, byte_offset } => {
+            let ty = ctx
+                .globals
+                .get(name)
+                .map(|info| info.ty.clone())
+                .ok_or_else(|| {
+                    Diagnostic::error(span, alloc::format!("unknown global `{name}`"))
+                })?;
+            Some(LoweredPlace::Memory(MemoryPlace {
+                lane_offsets: scalar_lane_offsets(&ty),
+                ty,
+                base: ctx.vmctx,
+                static_offset: *byte_offset,
+                dynamic_offset: None,
+            }))
+        }
     })
 }
 
@@ -125,7 +155,7 @@ fn apply_segment(
             ..
         } => apply_field(place, span, *lane_offset, *lane_count, *byte_offset, ty),
         PlaceSegment::Swizzle { lanes, ty, .. } => apply_swizzle(place, span, lanes, ty),
-        PlaceSegment::Index { index, ty } => apply_index(ctx, span, place, *index, ty),
+        PlaceSegment::Index { index } => apply_index(ctx, span, place, *index),
     }
 }
 
@@ -207,12 +237,11 @@ fn apply_index(
     span: Span,
     place: LoweredPlace,
     index: crate::hir::ExprId,
-    ty: &LpsType,
 ) -> Result<Option<LoweredPlace>, Diagnostic> {
     let place_ty = place_ty(&place);
     let shape = TypeShape::new(&place_ty);
     if let Some((element, len, stride)) = shape.array_element() {
-        return apply_array_index(ctx, span, place, index, ty, element, len as usize, stride);
+        return apply_array_index(ctx, span, place, index, element, len as usize, stride);
     }
     if let Some(column_ty) = shape.matrix_column() {
         return apply_flat_index(ctx, span, place, index, column_ty);
@@ -228,7 +257,6 @@ fn apply_array_index(
     span: Span,
     place: LoweredPlace,
     index: crate::hir::ExprId,
-    ty: &LpsType,
     element: &LpsType,
     len: usize,
     stride: usize,
@@ -248,7 +276,7 @@ fn apply_array_index(
                 return Err(Diagnostic::error(span, "array index lane out of range"));
             };
             Ok(Some(LoweredPlace::Flat(FlatPlace {
-                ty: ty.clone(),
+                ty: element.clone(),
                 lanes: Lanes::from_slice(lanes),
             })))
         }
@@ -258,8 +286,8 @@ fn apply_array_index(
                     return Ok(None);
                 }
                 return Ok(Some(LoweredPlace::Memory(MemoryPlace {
-                    lane_offsets: scalar_lane_offsets(ty),
-                    ty: ty.clone(),
+                    lane_offsets: scalar_lane_offsets(element),
+                    ty: element.clone(),
                     base: memory.base,
                     static_offset: memory
                         .static_offset
@@ -271,8 +299,8 @@ fn apply_array_index(
             let index = dynamic::clamp_index(ctx, span, index, len)?;
             let offset = dynamic::scale_index(ctx, index, stride);
             Ok(Some(LoweredPlace::Memory(MemoryPlace {
-                lane_offsets: scalar_lane_offsets(ty),
-                ty: ty.clone(),
+                lane_offsets: scalar_lane_offsets(element),
+                ty: element.clone(),
                 base: memory.base,
                 static_offset: memory.static_offset,
                 dynamic_offset: Some(dynamic::add_offsets(ctx, memory.dynamic_offset, offset)),

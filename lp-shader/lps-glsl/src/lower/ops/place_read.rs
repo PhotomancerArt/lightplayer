@@ -32,9 +32,16 @@ pub(super) fn root_value(
             span,
             "assignment target cannot be a uniform",
         )),
-        PlaceRoot::Global {
-            byte_offset, ty, ..
-        } => lower_global_load(ctx, span, *byte_offset, ty),
+        PlaceRoot::Global { name, byte_offset } => {
+            let ty = ctx
+                .globals
+                .get(name)
+                .map(|info| info.ty.clone())
+                .ok_or_else(|| {
+                    Diagnostic::error(span, alloc::format!("unknown global `{name}`"))
+                })?;
+            lower_global_load(ctx, span, *byte_offset, &ty)
+        }
     }
 }
 

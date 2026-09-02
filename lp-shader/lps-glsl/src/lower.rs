@@ -11,8 +11,8 @@ use lps_shared::{LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec};
 
 use crate::body::{BinaryOp, UnaryOp};
 use crate::hir::{
-    ExprId, ExprList, HirArena, HirExprKind, HirFunction, HirModule, HirStmt, ImportKey, PlaceId,
-    scalar_base_type, scalar_ir_types, scalar_lane_count,
+    ExprId, ExprList, GlobalInfo, HirArena, HirExprKind, HirFunction, HirModule, HirStmt,
+    ImportKey, PlaceId, UniformInfo, scalar_base_type, scalar_ir_types, scalar_lane_count,
 };
 use crate::{Diagnostic, Span};
 
@@ -117,6 +117,8 @@ fn lower_function(
         locals,
         arena: &function.body.arena,
         import_map,
+        uniforms: &module.uniforms,
+        globals: &module.globals,
         param_qualifiers: function.params.iter().map(|p| p.qualifier).collect(),
         texture_specs: &module.texture_specs,
         texel_fetch_bounds: module.texel_fetch_bounds,
@@ -135,6 +137,10 @@ struct LowerCtx<'a> {
     locals: Vec<LocalStorage>,
     arena: &'a HirArena,
     import_map: &'a VecMap<ImportKey, CalleeRef>,
+    /// Root types for uniform/global places, which carry only their name
+    /// and byte offset (see `hir::place::HirPlace`).
+    uniforms: &'a VecMap<String, UniformInfo>,
+    globals: &'a VecMap<String, GlobalInfo>,
     param_qualifiers: Vec<ParamQualifier>,
     texture_specs: &'a VecMap<String, TextureBindingSpec>,
     texel_fetch_bounds: lpir::TexelFetchBoundsMode,
