@@ -5,6 +5,7 @@ fixed: this change
 area: lps-glsl HIR build (hir/typeck place typing, hir/place) + lower/place
 class: arena-retained-transient
 related:
+  - ../adr/2026-09-02-esp32c6-ram-split.md
   - 2026-08-29-shader-jit-compile-transient-starves-classic-heap.md
   - 2026-08-31-c6-rmt-ws281x-dark.md
   - ../../lp-core/lpc-engine/tests/meteor_compute_compile_peak_memory.rs
@@ -92,9 +93,27 @@ Measured (host bytes, transient peak above the pre-compile baseline,
 The remaining resident set is the HIR itself (one arena entry per
 expression, ~40 KB host for `tick()`) plus the parsed bodies the build
 still holds; both scale with source size, not with references × type
-size. Device validation (the Studio flash/push flow on the bench, the
-`[mem]` bracket in the journal) is the next bench session's job — the
-host number is the proof of shape, not the margin.
+size.
+
+**Bench validation (2026-09-02, XIAO ESP32-C6, Studio card flash + push
+of Meteor, capture-sink journal)** — the compile now succeeds on the
+board on both paths, bracketed by the new `[mem]` lines:
+
+    [mem] compute shader compile before: 168k free / 149k used
+    [mem] compute shader compile after:  165k free / 152k used
+    [compute-shader-node] compilation succeeded (elapsed=80ms, … final_code_size=1556 bytes)
+    [mem] shader compile before: 157k free / 160k used
+    [mem] shader compile after:  150k free / 167k used
+
+Meteor runs at 26 fps with ~150 KB of heap free after both compiles
+(against 128 B short before). The first push of the fixed image also
+surfaced the *next* cliff: with the sim node ticking for the first
+time, the 32 KB main stack overflowed in the resolver chain under
+`ComputeShaderNode::produce` — that is ADR
+`2026-09-02-esp32c6-ram-split` (72 KB stack, heap +64 KB from
+`dram2_seg`, a painted-stack high-water probe: 36,936 B of 72,768 B in
+steady state). The heap figures above are from that final layout
+(325,536 B total).
 
 **Regression coverage** —
 `lp-core/lpc-engine/tests/meteor_compute_compile_peak_memory.rs::compute_shader_compile_peaks`
@@ -118,12 +137,11 @@ before it was in the code — a 2.7 KB shader with a ~190 KB compile
 transient cannot be paying for its own size — and the device's
 `[mem]` bracket around the load was what made that arithmetic possible
 in the first place. The same bracket now exists around the compile.
-The other three directions the investigation weighed remain true and
-are worth recording: the C6 heap cannot grow from main RAM (the main
-task stack is the 32 KB left above `.bss`, and the compiler's call
-depth needs it), but the 64 KB `dram2_seg` the ESP-IDF bootloader
-leaves behind (`esp_alloc::heap_allocator!(#[ram(reclaimed)] …)`) is an
-untouched second region if margin is ever wanted on top of a fix;
-project residents (~45 KB load, ~60 KB boot baseline with the radio) were
-not the problem here; and no example is "unusually heavy" — every
+The other three directions the investigation weighed: the C6 heap
+cannot grow from main RAM (the main task stack is what is left above
+`.bss`, and the bench then showed even 32 KB of it was ~4 KB too
+little) — so the heap *shrank* there and grew by the 64 KB `dram2_seg`
+the ESP-IDF bootloader leaves behind (ADR `2026-09-02-esp32c6-ram-split`);
+project residents (~45 KB load, ~60 KB boot baseline with the radio)
+were not the problem; and no example is "unusually heavy" — every
 compute shader in the examples now sits under the same ceiling.
