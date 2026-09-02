@@ -5,7 +5,7 @@ use lps_shared::LpsType;
 
 use crate::{Diagnostic, Span};
 
-use super::arena::ExprId;
+use super::arena::{ExprId, TypeId};
 use super::scalar::{scalar_base_type, scalar_lane_count};
 use super::shape::struct_field;
 
@@ -45,12 +45,20 @@ pub(crate) struct HirPlace {
 }
 
 /// A place as the arena stores it: the segments are a span into the
-/// arena's segment list ([`HirArena::place_segments`]).
+/// arena's segment list ([`HirArena::place_segments`]) and the type an id
+/// into its type table.
 #[derive(Debug, Clone)]
 pub(crate) struct PlaceRecord {
     pub(crate) root: PlaceRoot,
     pub(crate) segments: SegmentList,
-    pub(crate) ty: LpsType,
+    pub(crate) ty: TypeId,
+}
+
+/// A place as readers see it: the type resolved through the table.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PlaceRef<'a> {
+    pub(crate) root: &'a PlaceRoot,
+    pub(crate) ty: &'a LpsType,
 }
 
 /// A span of [`PlaceSegment`]s in the arena's segment list.

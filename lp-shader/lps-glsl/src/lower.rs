@@ -86,20 +86,23 @@ fn lower_function(
     module: &HirModule,
     import_map: &[CalleeRef],
 ) -> Result<lpir::IrFunction, Diagnostic> {
-    let return_types = scalar_ir_types(&function.return_ty)?;
+    let types = &function.body.arena;
+    let return_ty = types.ty(function.return_ty);
+    let return_types = scalar_ir_types(return_ty)?;
     let mut fb = FunctionBuilder::new(&function.name, &return_types);
     let mut params = Vec::new();
     for param in &function.params {
+        let param_ty = types.ty(param.ty);
         let lanes = if matches!(param.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
             Lanes::one(fb.add_param(IrType::Pointer))
         } else {
-            scalar_ir_types(&param.ty)?
+            scalar_ir_types(param_ty)?
                 .into_iter()
                 .map(|ty| fb.add_param(ty))
                 .collect()
         };
         params.push(LowerValue {
-            ty: param.ty.clone(),
+            ty: param_ty.clone(),
             lanes,
         });
     }
@@ -110,7 +113,10 @@ fn lower_function(
     });
     let mut locals = Vec::new();
     for local in &function.body.locals {
-        locals.push(local_storage(&mut fb, local.ty.clone())?);
+        locals.push(local_storage(
+            &mut fb,
+            function.body.arena.ty(local.ty).clone(),
+        )?);
     }
     let mut ctx = LowerCtx {
         fb,
@@ -127,7 +133,7 @@ fn lower_function(
         texel_fetch_bounds: module.texel_fetch_bounds,
     };
     lower_statements(&mut ctx, &function.body.statements)?;
-    if function.return_ty == LpsType::Void {
+    if *return_ty == LpsType::Void {
         ctx.fb.push_return(&[]);
     }
     Ok(ctx.fb.finish())

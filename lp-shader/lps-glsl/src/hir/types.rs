@@ -5,7 +5,7 @@ use lp_collection::VecMap;
 
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec};
 
-use super::arena::{ExprId, ExprList, HirArena, PlaceId, WritebackList};
+use super::arena::{ExprId, ExprList, HirArena, PlaceId, TypeId, WritebackList};
 use crate::Span;
 use crate::body::{BinaryOp, IncDecOp, UnaryOp};
 
@@ -113,12 +113,23 @@ pub enum ImportKey {
     Texture { name: String, argc: usize },
 }
 
+/// A typed function. Its return and parameter types are ids into its own
+/// body's type table (`body.arena`): the signature table the build keeps
+/// owns the types once, and the module signature takes them over at the
+/// end; the HIR only refers to them.
 #[derive(Debug, Clone)]
 pub struct HirFunction {
     pub name: String,
-    pub return_ty: LpsType,
-    pub params: Vec<HirParam>,
+    pub return_ty: TypeId,
+    pub params: Vec<HirFunctionParam>,
     pub body: HirFunctionBody,
+}
+
+/// One parameter of a [`HirFunction`], as lowering needs it.
+#[derive(Debug, Clone, Copy)]
+pub struct HirFunctionParam {
+    pub ty: TypeId,
+    pub qualifier: ParamQualifier,
 }
 
 #[derive(Debug, Clone)]
@@ -135,10 +146,13 @@ pub struct HirFunctionBody {
     pub arena: HirArena,
 }
 
+/// A function local. Its type is an id into the function arena's type
+/// table, like every expression's: a struct-typed local shares the
+/// struct with the expressions that read it.
 #[derive(Debug, Clone)]
 pub struct HirLocal {
     pub name: String,
-    pub ty: LpsType,
+    pub ty: TypeId,
 }
 
 #[derive(Debug, Clone)]
@@ -179,11 +193,23 @@ pub enum HirStmt {
     },
 }
 
+/// One typed expression as the arena stores it. The type is an id into
+/// the arena's type table ([`HirArena::intern`]): every expression of the
+/// same type shares one `LpsType`, so a struct-typed expression costs four
+/// bytes, not a clone of the struct (member names included) per node.
 #[derive(Debug, Clone)]
 pub struct HirExpr {
     pub span: Span,
-    pub ty: LpsType,
+    pub ty: TypeId,
     pub kind: HirExprKind,
+}
+
+/// An expression as readers see it: the type resolved through the table.
+#[derive(Debug, Clone, Copy)]
+pub struct HirExprRef<'a> {
+    pub span: Span,
+    pub ty: &'a LpsType,
+    pub kind: &'a HirExprKind,
 }
 
 #[derive(Debug, Clone)]

@@ -26,7 +26,7 @@ mod typeck;
 mod types;
 mod typing;
 
-pub(crate) use arena::{ExprId, ExprList, HirArena, PlaceId};
+pub(crate) use arena::{ExprId, ExprList, HirArena, PlaceId, TypeId};
 use array_size::{ArraySizeConsts, eval_array_size_expr};
 // The builtin checks double as the test-only ground truth for the
 // editor-facing [`crate::builtin_inventory`] (its drift tests tie the
@@ -44,9 +44,9 @@ pub use symbols::{
 use typeck::TypeCtx;
 use types::StructTypes;
 pub use types::{
-    BuiltinKind, GlobalInfo, HirExpr, HirExprKind, HirFunction, HirFunctionBody, HirModule,
-    HirOutArg, HirParam, HirStmt, HirTextureOperand, HirUserCallWriteback, ImportId, ImportInfo,
-    ImportKey, UniformInfo,
+    BuiltinKind, GlobalInfo, HirExprKind, HirExprRef, HirFunction, HirFunctionBody,
+    HirFunctionParam, HirModule, HirOutArg, HirParam, HirStmt, HirTextureOperand,
+    HirUserCallWriteback, ImportId, ImportInfo, ImportKey, UniformInfo,
 };
 pub use typing::{scalar_base_type, scalar_ir_types, scalar_lane_count};
 
@@ -222,11 +222,12 @@ impl<'src> HirBuildJob<'src> {
             &mut state.imports,
             &self.options.texture_specs,
         );
-        let body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
+        let mut body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
+        let (return_ty, params) = intern_signature(&mut body.arena, sig);
         state.functions.push(HirFunction {
             name: sig.name.clone(),
-            return_ty: sig.return_ty.clone(),
-            params: sig.params.clone(),
+            return_ty,
+            params,
             body,
         });
         Ok(())
@@ -287,6 +288,20 @@ fn module_function_sigs(sigs: Vec<FunctionSig>, has_shader_init: bool) -> Vec<Lp
         });
     }
     meta
+}
+
+/// A function's signature types as ids into its own arena's type table.
+fn intern_signature(arena: &mut HirArena, sig: &FunctionSig) -> (TypeId, Vec<HirFunctionParam>) {
+    let return_ty = arena.intern(sig.return_ty.clone());
+    let params = sig
+        .params
+        .iter()
+        .map(|p| HirFunctionParam {
+            ty: arena.intern(p.ty.clone()),
+            qualifier: p.qualifier,
+        })
+        .collect();
+    (return_ty, params)
 }
 
 #[allow(
@@ -362,11 +377,12 @@ pub fn build_hir(
             &mut imports,
             &options.texture_specs,
         );
-        let body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
+        let mut body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
+        let (return_ty, params) = intern_signature(&mut body.arena, sig);
         functions.push(HirFunction {
             name: sig.name.clone(),
-            return_ty: sig.return_ty.clone(),
-            params: sig.params.clone(),
+            return_ty,
+            params,
             body,
         });
     }
@@ -1010,11 +1026,12 @@ fn synthesize_shader_init(
         statements.push(HirStmt::Expr(assign));
     }
     let locals = core::mem::take(&mut ctx.locals);
-    let arena = core::mem::take(&mut ctx.arena);
+    let mut arena = core::mem::take(&mut ctx.arena);
+    let (return_ty, params) = intern_signature(&mut arena, &sig);
     Ok(Some(HirFunction {
         name: sig.name.clone(),
-        return_ty: sig.return_ty.clone(),
-        params: Vec::new(),
+        return_ty,
+        params,
         body: HirFunctionBody {
             locals,
             statements,

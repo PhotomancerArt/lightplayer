@@ -4,9 +4,16 @@ use crate::Span;
 use crate::body::{BinaryOp, UnaryOp};
 
 use super::arena::{ExprId, HirArena};
-use super::types::{BuiltinKind, HirExpr, HirExprKind};
+use super::types::{BuiltinKind, HirExprKind, HirExprRef};
 
-pub(super) fn fold_unary(span: Span, op: UnaryOp, expr: &HirExpr) -> Option<HirExpr> {
+/// A constant-folded expression, owned, ready for `HirArena::push_expr`.
+pub(super) struct Folded {
+    pub(super) span: Span,
+    pub(super) ty: LpsType,
+    pub(super) kind: HirExprKind,
+}
+
+pub(super) fn fold_unary(span: Span, op: UnaryOp, expr: HirExprRef<'_>) -> Option<Folded> {
     match (op, &expr.kind) {
         (UnaryOp::Neg, HirExprKind::FloatLiteral(value)) => Some(float_literal(span, -*value)),
         (UnaryOp::Neg, HirExprKind::IntLiteral(value)) => Some(int_literal(span, -*value)),
@@ -18,9 +25,9 @@ pub(super) fn fold_unary(span: Span, op: UnaryOp, expr: &HirExpr) -> Option<HirE
 pub(super) fn fold_binary(
     span: Span,
     op: BinaryOp,
-    lhs: &HirExpr,
-    rhs: &HirExpr,
-) -> Option<HirExpr> {
+    lhs: HirExprRef<'_>,
+    rhs: HirExprRef<'_>,
+) -> Option<Folded> {
     fold_float_binary(span, op, lhs, rhs)
         .or_else(|| fold_int_binary(span, op, lhs, rhs))
         .or_else(|| fold_uint_binary(span, op, lhs, rhs))
@@ -30,7 +37,7 @@ pub(super) fn fold_binary(
 /// Folds a builtin call whose arguments are already in `arena`.
 ///
 /// Reads the argument nodes through the arena instead of taking owned
-/// [`HirExpr`] copies: every builtin call reaches this, and all but the
+/// [`Folded`] copies: every builtin call reaches this, and all but the
 /// literal-only shapes bail immediately, so materializing the arguments
 /// would be pure churn.
 pub(super) fn fold_builtin_call(
@@ -39,7 +46,7 @@ pub(super) fn fold_builtin_call(
     arena: &HirArena,
     args: &[ExprId],
     result_ty: &LpsType,
-) -> Option<HirExpr> {
+) -> Option<Folded> {
     if *result_ty != LpsType::Float {
         return None;
     }
@@ -93,7 +100,7 @@ pub(super) fn fold_glsl_import_call(
     arena: &HirArena,
     args: &[ExprId],
     result_ty: &LpsType,
-) -> Option<HirExpr> {
+) -> Option<Folded> {
     if *result_ty != LpsType::Float || name != "pow" {
         return None;
     }
@@ -119,7 +126,7 @@ pub(super) fn fold_glsl_import_call(
     Some(float_literal(span, result))
 }
 
-pub(super) fn fold_cast(span: Span, target: &LpsType, expr: &HirExpr) -> Option<HirExpr> {
+pub(super) fn fold_cast(span: Span, target: &LpsType, expr: HirExprRef<'_>) -> Option<Folded> {
     match (target, &expr.kind) {
         (LpsType::Float, HirExprKind::IntLiteral(value)) => {
             Some(float_literal(span, *value as f32))
@@ -151,7 +158,12 @@ pub(super) fn fold_cast(span: Span, target: &LpsType, expr: &HirExpr) -> Option<
     }
 }
 
-fn fold_float_binary(span: Span, op: BinaryOp, lhs: &HirExpr, rhs: &HirExpr) -> Option<HirExpr> {
+fn fold_float_binary(
+    span: Span,
+    op: BinaryOp,
+    lhs: HirExprRef<'_>,
+    rhs: HirExprRef<'_>,
+) -> Option<Folded> {
     let (HirExprKind::FloatLiteral(lhs), HirExprKind::FloatLiteral(rhs)) = (&lhs.kind, &rhs.kind)
     else {
         return None;
@@ -173,7 +185,12 @@ fn fold_float_binary(span: Span, op: BinaryOp, lhs: &HirExpr, rhs: &HirExpr) -> 
     Some(float_literal(span, value))
 }
 
-fn fold_int_binary(span: Span, op: BinaryOp, lhs: &HirExpr, rhs: &HirExpr) -> Option<HirExpr> {
+fn fold_int_binary(
+    span: Span,
+    op: BinaryOp,
+    lhs: HirExprRef<'_>,
+    rhs: HirExprRef<'_>,
+) -> Option<Folded> {
     let (HirExprKind::IntLiteral(lhs), HirExprKind::IntLiteral(rhs)) = (&lhs.kind, &rhs.kind)
     else {
         return None;
@@ -195,7 +212,12 @@ fn fold_int_binary(span: Span, op: BinaryOp, lhs: &HirExpr, rhs: &HirExpr) -> Op
     Some(int_literal(span, value))
 }
 
-fn fold_uint_binary(span: Span, op: BinaryOp, lhs: &HirExpr, rhs: &HirExpr) -> Option<HirExpr> {
+fn fold_uint_binary(
+    span: Span,
+    op: BinaryOp,
+    lhs: HirExprRef<'_>,
+    rhs: HirExprRef<'_>,
+) -> Option<Folded> {
     let (HirExprKind::UIntLiteral(lhs), HirExprKind::UIntLiteral(rhs)) = (&lhs.kind, &rhs.kind)
     else {
         return None;
@@ -217,7 +239,12 @@ fn fold_uint_binary(span: Span, op: BinaryOp, lhs: &HirExpr, rhs: &HirExpr) -> O
     Some(uint_literal(span, value))
 }
 
-fn fold_bool_binary(span: Span, op: BinaryOp, lhs: &HirExpr, rhs: &HirExpr) -> Option<HirExpr> {
+fn fold_bool_binary(
+    span: Span,
+    op: BinaryOp,
+    lhs: HirExprRef<'_>,
+    rhs: HirExprRef<'_>,
+) -> Option<Folded> {
     let (HirExprKind::BoolLiteral(lhs), HirExprKind::BoolLiteral(rhs)) = (&lhs.kind, &rhs.kind)
     else {
         return None;
@@ -242,32 +269,32 @@ fn float_arg(arena: &HirArena, args: &[ExprId], index: usize) -> Option<f32> {
     }
 }
 
-fn float_literal(span: Span, value: f32) -> HirExpr {
-    HirExpr {
+fn float_literal(span: Span, value: f32) -> Folded {
+    Folded {
         span,
         ty: LpsType::Float,
         kind: HirExprKind::FloatLiteral(value),
     }
 }
 
-fn int_literal(span: Span, value: i32) -> HirExpr {
-    HirExpr {
+fn int_literal(span: Span, value: i32) -> Folded {
+    Folded {
         span,
         ty: LpsType::Int,
         kind: HirExprKind::IntLiteral(value),
     }
 }
 
-fn uint_literal(span: Span, value: u32) -> HirExpr {
-    HirExpr {
+fn uint_literal(span: Span, value: u32) -> Folded {
+    Folded {
         span,
         ty: LpsType::UInt,
         kind: HirExprKind::UIntLiteral(value),
     }
 }
 
-fn bool_literal(span: Span, value: bool) -> HirExpr {
-    HirExpr {
+fn bool_literal(span: Span, value: bool) -> Folded {
+    Folded {
         span,
         ty: LpsType::Bool,
         kind: HirExprKind::BoolLiteral(value),

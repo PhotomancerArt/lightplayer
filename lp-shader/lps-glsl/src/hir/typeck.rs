@@ -157,11 +157,11 @@ impl<'a> TypeCtx<'a> {
                     let ty = self.type_decl_ty(ty, *span, None)?;
                     zero_expr(&mut self.arena, *span, &ty)?
                 };
-                let ty = self.arena.expr_ty(init).clone();
+                let ty = self.arena.expr_type_id(init);
                 let local = self.locals.len();
                 self.locals.push(HirLocal {
                     name: name.clone(),
-                    ty: ty.clone(),
+                    ty,
                 });
                 self.scopes
                     .last_mut()
@@ -178,11 +178,11 @@ impl<'a> TypeCtx<'a> {
                         let ty = self.type_decl_ty(&declaration.ty, declaration.span, None)?;
                         zero_expr(&mut self.arena, declaration.span, &ty)?
                     };
-                    let ty = self.arena.expr_ty(init).clone();
+                    let ty = self.arena.expr_type_id(init);
                     let local = self.locals.len();
                     self.locals.push(HirLocal {
                         name: declaration.name.clone(),
-                        ty: ty.clone(),
+                        ty,
                     });
                     self.scopes
                         .last_mut()
@@ -203,10 +203,10 @@ impl<'a> TypeCtx<'a> {
                     kind: ParsedExprKind::Name(name.clone()),
                 })?;
                 let value = self.type_assign_value(*span, &target, *op, value)?;
-                let ty = self.arena.expr_ty(value).clone();
-                let expr = self
-                    .arena
-                    .push_expr(*span, ty, HirExprKind::Assign { target, value });
+                let ty = self.arena.expr_type_id(value);
+                let expr =
+                    self.arena
+                        .push_expr_typed(*span, ty, HirExprKind::Assign { target, value });
                 Ok(alloc::vec![HirStmt::Expr(expr)])
             }
             ParsedStmt::If {
@@ -368,8 +368,8 @@ impl<'a> TypeCtx<'a> {
                 if self.roots_in_a_place(expr)
                     && let Ok(place) = self.type_place(expr, AccessMode::Read)
                 {
-                    let ty = self.arena.place(place).ty.clone();
-                    return Ok(self.arena.push_expr(
+                    let ty = self.arena.place_type_id(place);
+                    return Ok(self.arena.push_expr_typed(
                         expr.span,
                         ty,
                         HirExprKind::PlaceRead { target: place },
@@ -401,8 +401,8 @@ impl<'a> TypeCtx<'a> {
                 if self.roots_in_a_place(expr)
                     && let Ok(place) = self.type_place(expr, AccessMode::Read)
                 {
-                    let ty = self.arena.place(place).ty.clone();
-                    return Ok(self.arena.push_expr(
+                    let ty = self.arena.place_type_id(place);
+                    return Ok(self.arena.push_expr_typed(
                         expr.span,
                         ty,
                         HirExprKind::PlaceRead { target: place },
@@ -466,10 +466,12 @@ impl<'a> TypeCtx<'a> {
             ParsedExprKind::Binary { op, lhs, rhs } if *op == BinaryOp::Comma => {
                 let first = self.type_expr(lhs)?;
                 let second = self.type_expr(rhs)?;
-                let ty = self.arena.expr_ty(second).clone();
-                Ok(self
-                    .arena
-                    .push_expr(expr.span, ty, HirExprKind::Sequence { first, second }))
+                let ty = self.arena.expr_type_id(second);
+                Ok(self.arena.push_expr_typed(
+                    expr.span,
+                    ty,
+                    HirExprKind::Sequence { first, second },
+                ))
             }
             ParsedExprKind::Binary { op, lhs, rhs } => self.type_binary(expr.span, *op, lhs, rhs),
             ParsedExprKind::Conditional {
@@ -480,10 +482,10 @@ impl<'a> TypeCtx<'a> {
             ParsedExprKind::Assign { target, op, value } => {
                 let target = self.type_assign_target(target)?;
                 let value = self.type_assign_value(expr.span, &target, *op, value)?;
-                let ty = self.arena.expr_ty(value).clone();
+                let ty = self.arena.expr_type_id(value);
                 Ok(self
                     .arena
-                    .push_expr(expr.span, ty, HirExprKind::Assign { target, value }))
+                    .push_expr_typed(expr.span, ty, HirExprKind::Assign { target, value }))
             }
             ParsedExprKind::IncDec { target, op, prefix } => {
                 let target = self.type_assign_target(target)?;
@@ -512,9 +514,9 @@ impl<'a> TypeCtx<'a> {
 
     fn type_name(&mut self, span: Span, name: &str) -> Result<ExprId, Diagnostic> {
         if let Some(local) = self.resolve_local(name) {
-            return Ok(self.arena.push_expr(
+            return Ok(self.arena.push_expr_typed(
                 span,
-                self.locals[local].ty.clone(),
+                self.locals[local].ty,
                 HirExprKind::Local { index: local },
             ));
         }
@@ -598,7 +600,7 @@ impl<'a> TypeCtx<'a> {
                     }
                     ParamQualifier::Out => {
                         let target = self.type_assign_target(arg)?;
-                        if self.arena.place(target).ty != param.ty {
+                        if *self.arena.place(target).ty != param.ty {
                             return Err(Diagnostic::error(
                                 arg.span,
                                 "out argument type must match parameter type",
@@ -613,7 +615,7 @@ impl<'a> TypeCtx<'a> {
                     }
                     ParamQualifier::InOut => {
                         let target = self.type_assign_target(arg)?;
-                        if self.arena.place(target).ty != param.ty {
+                        if *self.arena.place(target).ty != param.ty {
                             return Err(Diagnostic::error(
                                 arg.span,
                                 "inout argument type must match parameter type",
@@ -820,7 +822,7 @@ impl<'a> TypeCtx<'a> {
     ) -> Result<HirTextureOperand, Diagnostic> {
         let place = self.type_place(expr, AccessMode::Read)?;
         let place_ref = self.arena.place(place);
-        if place_ref.ty != LpsType::Texture2D {
+        if *place_ref.ty != LpsType::Texture2D {
             return Err(Diagnostic::error(
                 expr.span,
                 format!("{fn_name} expects sampler2D uniform"),
@@ -901,7 +903,7 @@ impl<'a> TypeCtx<'a> {
                 ));
             };
             let local =
-                u32::try_from(index).map_err(|_| Diagnostic::error(span, "too many locals"))?;
+                u32::try_from(*index).map_err(|_| Diagnostic::error(span, "too many locals"))?;
             out = Some(HirOutArg {
                 local,
                 arg_index: 3,
@@ -1185,7 +1187,7 @@ impl<'a> TypeCtx<'a> {
 
     fn type_name_place(&self, span: Span, name: &str) -> Result<HirPlace, Diagnostic> {
         if let Some(local) = self.resolve_local(name) {
-            let ty = self.locals[local].ty.clone();
+            let ty = self.arena.ty(self.locals[local].ty).clone();
             return Ok(HirPlace::local(local, ty));
         }
         if let Some((param, p)) = self
@@ -1366,7 +1368,7 @@ impl<'a> TypeCtx<'a> {
 
     fn clone_expr_from(&mut self, source: &HirArena, expr: ExprId) -> ExprId {
         let source_expr = source.expr(expr);
-        let kind = match &source_expr.kind {
+        let kind = match source_expr.kind {
             HirExprKind::Constructor { args } => {
                 let args = self.clone_expr_list_from(source, *args);
                 HirExprKind::Constructor { args }

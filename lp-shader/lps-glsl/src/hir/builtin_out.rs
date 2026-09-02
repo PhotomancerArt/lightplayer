@@ -31,7 +31,7 @@ impl<'a> TypeCtx<'a> {
                 }
                 let ty = value_ty;
                 let integer = self.type_assign_target(&args[1])?;
-                if self.arena.place(integer).ty != ty {
+                if *self.arena.place(integer).ty != ty {
                     return Err(Diagnostic::error(
                         args[1].span,
                         "out argument type must match builtin argument type",
@@ -64,7 +64,7 @@ impl<'a> TypeCtx<'a> {
                 require_integer_lane_type(span, kind, &ty, LpsType::UInt)?;
 
                 let carry = self.type_assign_target(&args[2])?;
-                if self.arena.place(carry).ty != ty {
+                if *self.arena.place(carry).ty != ty {
                     return Err(Diagnostic::error(
                         args[2].span,
                         "out argument type must match builtin argument type",
@@ -103,7 +103,7 @@ impl<'a> TypeCtx<'a> {
 
                 let msb = self.type_assign_target(&args[2])?;
                 let lsb = self.type_assign_target(&args[3])?;
-                if self.arena.place(msb).ty != ty || self.arena.place(lsb).ty != ty {
+                if *self.arena.place(msb).ty != ty || *self.arena.place(lsb).ty != ty {
                     return Err(Diagnostic::error(
                         span,
                         "out argument types must match builtin argument type",

@@ -132,14 +132,15 @@ fn zook_dome_compile_peak_profile() {
 
     // Absolute ceiling: the whole zook-dome compile's transient peak,
     // measured 2026-08-29 at 46,561 B on this fixture (held during the
-    // frontend's HIR build) and 2026-09-02 at 28,146 B after the HIR
-    // slimming (F4/F3/F9 of the per-node-copies plan), gated at ~1.4x. If
+    // frontend's HIR build) and 2026-09-02 at 26,971 B after the HIR
+    // slimming (F4/F3/F9/F1 of the per-node-copies plan; the peak moved to
+    // the backend's emit pass), gated at ~1.4x. If
     // this trips, some pass regressed to materialize-first — e.g. per-stage
     // module clones, which `NativeCompileJob` used to make ("they used to
     // triple IR residency"). Raise deliberately, with a fresh measurement,
     // never casually: the classic's whole remaining headroom at compile
     // time is what this number is read against.
-    const ZOOK_COMPILE_PEAK_CEILING_BYTES: usize = 39 * 1024;
+    const ZOOK_COMPILE_PEAK_CEILING_BYTES: usize = 37 * 1024;
     assert!(
         overall_peak <= ZOOK_COMPILE_PEAK_CEILING_BYTES,
         "zook-dome compile transient peak {overall_peak} B exceeds the \
