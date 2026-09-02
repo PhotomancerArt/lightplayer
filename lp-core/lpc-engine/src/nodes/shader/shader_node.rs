@@ -327,6 +327,8 @@ impl ShaderNode {
         };
 
         let compile_start_ms = ctx.now_ms();
+        // Heap bracket around the compile (see the compute node's sibling).
+        lpc_shared::memory::log_global_memory_checkpoint("shader compile before");
         lpc_shared::backtrace::set_oom_context("shader node: compile");
         // A panic in the compiler is terminal on every target now (ADR
         // 2026-08-02-rv32-firmwares-are-abort-tier); this used to be wrapped in
@@ -337,6 +339,7 @@ impl ShaderNode {
             .compile_shader(self.glsl_source.as_str(), &compile_opts)
             .map_err(|error| format!("{error}"));
         lpc_shared::backtrace::clear_oom_context();
+        lpc_shared::memory::log_global_memory_checkpoint("shader compile after");
         let compile_elapsed_ms = compile_start_ms.and_then(|start| ctx.elapsed_ms(start));
         lp_perf::emit_end!(lp_perf::EVENT_SHADER_COMPILE);
 

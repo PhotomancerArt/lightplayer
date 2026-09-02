@@ -230,10 +230,10 @@ the Meteor/C6 OOM which needs real hardware pressure to reproduce.
   setting; home undecided — either needs a format bump).
 - Dependency-path fault taint and per-fragment verdicts (deferred scope
   from §2; `notes.md`'s discovery map is the starting point).
-- Meteor heap headroom on the C6 — the compute-shader compile is ~250 B
-  over the 300,000 B arena; a separate item, not addressed by this plan
-  (the hardware walk still reproduces the quarantine because Meteor still
-  OOMs at compile).
+- Meteor heap headroom on the C6 — landed on `main` the same day as this ADR
+  (PR #495, `2026-09-02-esp32c6-ram-split.md`: the OOM was `lps-glsl` HIR place
+  clones, and the RAM was re-split). Meteor is expected to run with light on the
+  C6 now; `examples/fault-demo` is the deterministic reproduction of the pattern.
 - Flash-persisted recovery ledger — deferred by
   [2026-07-04-crash-recovery-model.md](2026-07-04-crash-recovery-model.md)
   and still deferred; "Clear faults" makes the in-RAM ledger's quarantine

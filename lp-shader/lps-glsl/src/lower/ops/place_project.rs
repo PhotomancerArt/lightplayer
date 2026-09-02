@@ -4,6 +4,12 @@ use lps_shared::LpsType;
 use crate::hir::PlaceSegment;
 use crate::{Diagnostic, Span};
 
+/// The element type an index segment selects from a value of type `ty`.
+fn index_element_type(span: Span, ty: &LpsType) -> Result<LpsType, Diagnostic> {
+    crate::hir::index_element_type(ty)
+        .ok_or_else(|| Diagnostic::error(span, "index base must be vector, matrix, or array"))
+}
+
 use super::super::{Lanes, LowerCtx, LowerValue, lower_expr};
 use super::access::copy_value;
 use super::index::{assign_index_value, lower_index};
@@ -25,9 +31,10 @@ pub(super) fn read_segments(
             ..
         } => read_contiguous_lanes(span, value, *lane_offset, *lane_count, ty)?,
         PlaceSegment::Swizzle { lanes, ty, .. } => read_lane_map(span, value, lanes, ty)?,
-        PlaceSegment::Index { index, ty } => {
+        PlaceSegment::Index { index } => {
+            let ty = index_element_type(span, &value.ty)?;
             let index = lower_expr(ctx, *index)?;
-            lower_index(ctx, span, value, index, ty)?
+            lower_index(ctx, span, value, index, &ty)?
         }
     };
     read_segments(ctx, span, value, rest)
@@ -63,15 +70,16 @@ pub(super) fn assign_segments(
         PlaceSegment::Swizzle { lanes, ty, .. } => {
             assign_lane_map(ctx, span, value, lanes, ty, rest, assignment)
         }
-        PlaceSegment::Index { index, ty } => {
+        PlaceSegment::Index { index } => {
+            let ty = index_element_type(span, &value.ty)?;
             let index = lower_expr(ctx, *index)?;
             if rest.is_empty() {
-                assign_index_value(ctx, span, value.clone(), index, ty, assignment)?;
+                assign_index_value(ctx, span, value.clone(), index, &ty, assignment)?;
                 return Ok(value);
             }
-            let selected = lower_index(ctx, span, value.clone(), index.clone(), ty)?;
+            let selected = lower_index(ctx, span, value.clone(), index.clone(), &ty)?;
             let updated = assign_segments(ctx, span, selected, rest, assignment)?;
-            assign_index_value(ctx, span, value.clone(), index, ty, updated)?;
+            assign_index_value(ctx, span, value.clone(), index, &ty, updated)?;
             Ok(value)
         }
     }

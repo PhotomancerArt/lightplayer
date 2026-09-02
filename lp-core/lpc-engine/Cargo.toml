@@ -141,3 +141,8 @@ lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std
 lpc-view = { path = "../lpc-view", default-features = false, features = ["std"] }
 env_logger = { workspace = true }
 serde_json = { workspace = true }
+# The compile-peak memory probe steps the device's own compile pipeline
+# (lps-glsl staged frontend, lpvm-native rv32 backend) on the host under a
+# tracking allocator. Only the rv32 ISA: that is what the ESP32-C6 links.
+lps-glsl = { path = "../../lp-shader/lps-glsl", default-features = false }
+lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, features = ["isa-rv32"] }

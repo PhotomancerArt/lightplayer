@@ -283,6 +283,10 @@ impl LpServer {
         radio_service: Option<Rc<dyn RadioService>>,
         graphics: Arc<dyn LpGraphics>,
     ) -> Self {
+        // The engine's shader nodes bracket their JIT compile with `[mem]`
+        // lines through this process-wide hook; the server is the one place
+        // that holds the platform's heap counters.
+        lpc_shared::memory::set_global_memory_stats(memory_stats);
         let project_manager = ProjectManager::new(projects_base_dir);
         let hardware = lpc_wire::HardwareFacts {
             radio: radio_service.is_some(),
