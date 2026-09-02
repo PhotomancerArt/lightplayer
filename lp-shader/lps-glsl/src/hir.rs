@@ -37,7 +37,6 @@ use function::{FunctionSig, GlobalConst, ImportRegistry};
 pub(crate) use place::{
     HirPlace, PlaceRoot, PlaceSegment, field_type, index_element_type, swizzle_type,
 };
-pub(crate) use shape::TypeShape;
 pub use symbols::{
     FnParamSymbol, FnSymbol, StructSymbol, SymbolAnalysis, VarSymbol, analyze_symbols,
 };

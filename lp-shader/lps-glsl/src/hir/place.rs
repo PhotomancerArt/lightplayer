@@ -223,7 +223,7 @@ pub(crate) fn swizzle_type(ty: &LpsType, len: usize) -> Option<LpsType> {
 /// Shared by the HIR build (the place's own type narrowing) and lowering
 /// (which re-derives the element type from the value it indexes instead of
 /// reading one stored on the segment). The matrix/array/vector questions are
-/// answered by the type itself; building a `TypeShape` here would clone the
+/// answered by the type itself; building a shape table here would clone the
 /// whole type (and, for structs, every field) per index to ask three
 /// predicates.
 pub(crate) fn index_element_type(ty: &LpsType) -> Option<LpsType> {

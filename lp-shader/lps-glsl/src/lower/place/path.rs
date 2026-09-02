@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use lpir::VReg;
 use lps_shared::LpsType;
 
-use crate::hir::{PlaceRoot, PlaceSegment, TypeShape};
+use crate::hir::{PlaceRoot, PlaceSegment};
 use crate::{Diagnostic, Span};
 
 use super::super::storage::{LocalStorage, is_pointer_param, param_pointer};
@@ -250,18 +250,29 @@ fn apply_index(
     place: LoweredPlace,
     index: crate::hir::ExprId,
 ) -> Result<Option<LoweredPlace>, Diagnostic> {
-    let place_ty = place_ty(&place);
-    let shape = TypeShape::new(&place_ty);
-    if let Some((element, len, stride)) = shape.array_element() {
-        return apply_array_index(ctx, span, place, index, element, len as usize, stride);
+    // Ask the place's type directly instead of building a shape table
+    // (the old `TypeShape`), which cloned the whole type (for `Emitter[4]` that is the struct,
+    // member names and all) per index — 200 such clones per meteor sim
+    // compile, all transient.
+    match place_ty_ref(&place) {
+        LpsType::Array { element, len } => {
+            let element = (**element).clone();
+            let len = *len as usize;
+            let stride =
+                lps_shared::layout::array_stride(&element, lps_shared::LayoutRules::Std430);
+            apply_array_index(ctx, span, place, index, &element, len, stride)
+        }
+        ty if ty.is_matrix() => {
+            let column_ty = ty
+                .matrix_column_type()
+                .ok_or_else(|| Diagnostic::error(span, "index base must be matrix"))?;
+            apply_flat_index(ctx, span, place, index, &column_ty)
+        }
+        ty => match crate::hir::scalar_base_type(ty) {
+            Some(base) => apply_flat_index(ctx, span, place, index, &base),
+            None => Ok(None),
+        },
     }
-    if let Some(column_ty) = shape.matrix_column() {
-        return apply_flat_index(ctx, span, place, index, column_ty);
-    }
-    if let Some(base) = crate::hir::scalar_base_type(&place_ty) {
-        return apply_flat_index(ctx, span, place, index, &base);
-    }
-    Ok(None)
 }
 
 fn apply_array_index(
@@ -332,7 +343,7 @@ fn apply_flat_index(
         return Ok(None);
     };
     let width = crate::hir::scalar_lane_count(ty);
-    let place_ty = place_ty(&place);
+    let place_ty = place_ty_ref(&place);
     let source_width = if place_ty.is_matrix() || place_ty.is_array() {
         width
     } else {
@@ -371,10 +382,6 @@ fn apply_flat_index(
             }))
         }
     })
-}
-
-fn place_ty(place: &LoweredPlace) -> LpsType {
-    place_ty_ref(place).clone()
 }
 
 fn place_ty_ref(place: &LoweredPlace) -> &LpsType {
