@@ -50,7 +50,6 @@ pub use typing::{scalar_base_type, scalar_ir_types, scalar_lane_count};
 #[derive(Debug)]
 pub struct HirBuildJob<'src> {
     source: &'src str,
-    tokens: Vec<Token>,
     index: TopLevelIndex,
     options: CompileOptions,
     state: HirBuildState,
@@ -58,7 +57,13 @@ pub struct HirBuildJob<'src> {
 
 #[derive(Debug)]
 enum HirBuildState {
+    /// The token tape lives here, not on the job: only the header step
+    /// reads it (array-size consts, global initialisers), and it is the
+    /// largest thing the build holds — 24 B per token, ~16 KB for meteor's
+    /// sim shader — so it is dropped with this state instead of staying
+    /// resident under every function's typing.
     Header {
+        tokens: Vec<Token>,
         bodies: Vec<(String, ParsedFunctionBody)>,
     },
     Functions(Box<HirBuildFunctionState>),
@@ -103,25 +108,24 @@ impl<'src> HirBuildJob<'src> {
     ) -> Self {
         Self {
             source,
-            tokens,
             index,
             options,
-            state: HirBuildState::Header { bodies },
+            state: HirBuildState::Header { tokens, bodies },
         }
     }
 
     pub fn step(&mut self) -> Result<HirBuildStepResult, Diagnostic> {
         let state = core::mem::replace(&mut self.state, HirBuildState::Done);
         match state {
-            HirBuildState::Header { bodies } => {
+            HirBuildState::Header { tokens, bodies } => {
                 let (array_size_consts, const_init_cache) =
-                    build_array_size_consts(self.source, &self.tokens, &self.index)?;
+                    build_array_size_consts(self.source, &tokens, &self.index)?;
                 let structs = build_struct_types(&self.index, &array_size_consts)?;
                 let (uniforms, uniforms_type, uniforms_size) =
                     build_uniforms(&self.index, &structs, &array_size_consts)?;
                 let (global_vars, globals_type, global_inits) = build_global_vars(
                     self.source,
-                    &self.tokens,
+                    &tokens,
                     &self.index,
                     &structs,
                     &array_size_consts,
@@ -132,7 +136,7 @@ impl<'src> HirBuildJob<'src> {
                 let mut imports = ImportRegistry::default();
                 let globals = build_global_consts(
                     self.source,
-                    &self.tokens,
+                    &tokens,
                     &self.index,
                     &uniforms,
                     &global_vars,
