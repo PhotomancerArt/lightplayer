@@ -50,6 +50,10 @@ pub struct DeviceRosterView {
     /// build or a browser without Web Serial, and the page says so instead of
     /// showing an empty roster that looks like "no devices".
     pub transport_available: bool,
+    /// Each registered device's editor address (round-2 M5): the model's
+    /// handle → the registry uid `/device/<uid>` opens it by. A device
+    /// without a row (still identifying) has no honest address and no Open.
+    pub open_addresses: std::collections::BTreeMap<u64, String>,
 }
 
 impl Default for DeviceRosterView {
@@ -60,6 +64,7 @@ impl Default for DeviceRosterView {
                 pending: Vec::new(),
             },
             transport_available: false,
+            open_addresses: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -240,6 +245,7 @@ impl DeviceRoster {
         DeviceRosterView {
             roster: roster_view(&self.roster, now),
             transport_available: self.effects.is_wired(),
+            open_addresses: self.keys.clone(),
         }
     }
 

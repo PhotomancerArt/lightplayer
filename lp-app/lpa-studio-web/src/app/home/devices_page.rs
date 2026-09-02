@@ -83,6 +83,10 @@ pub fn DevicesPage(home: UiHomeView, on_action: EventHandler<UiAction>) -> Eleme
                         for card in devices.roster.devices.iter().cloned() {
                             DeviceRosterCard {
                                 key: "device-{card.id.0}",
+                                // The running face's Open needs the
+                                // device's editor address (its registry
+                                // uid); a board still identifying has none.
+                                open_uid: devices.open_addresses.get(&card.id.0).cloned(),
                                 card,
                                 // The empty face's picker reads the SAME two
                                 // lists the gallery does — there is no
@@ -226,6 +230,7 @@ mod tests {
         DeviceRosterView {
             roster,
             transport_available,
+            open_addresses: Default::default(),
         }
     }
 

@@ -2038,8 +2038,6 @@ fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes
 /// unplug, replug, and the board comes back on its own card, identified.
 #[test]
 fn a_board_unplugged_with_its_port_closed_departs_and_a_replug_brings_it_back() {
-    use crate::app::studio::studio_command::DeviceHotplug;
-
     let device = light_player("dev_replug");
     let (mut bench, tasks) = DeviceBench::granted(&device, "usb-replug-1");
     bench.run_until(&tasks, "the board to identify", |bench| {
@@ -2089,7 +2087,7 @@ fn a_board_unplugged_with_its_port_closed_departs_and_a_replug_brings_it_back() 
     bench.granted.set(true);
     bench
         .controller
-        .note_device_hotplug(DeviceHotplug::Connected);
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
     bench.run_until(&tasks, "the replug to identify itself", |bench| {
         bench
             .view()
@@ -2113,8 +2111,6 @@ fn a_board_unplugged_with_its_port_closed_departs_and_a_replug_brings_it_back() 
 /// took out a board that was simply idle.
 #[test]
 fn an_unrelated_disconnect_leaves_a_still_granted_port_alone() {
-    use crate::app::studio::studio_command::DeviceHotplug;
-
     let device = light_player("dev_bystander");
     let (mut bench, tasks) = DeviceBench::granted(&device, "usb-bystander-1");
     bench.run_until(&tasks, "the board to identify", |bench| {

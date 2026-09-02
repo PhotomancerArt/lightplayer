@@ -62,6 +62,12 @@ pub(crate) fn DeviceRosterCard(
     /// surfaces never set this.
     #[props(default)]
     armed_preview: bool,
+    /// The device's editor address (`/device/<uid>`), when it is
+    /// registered — the running face's Open (round-2 M5). `None` for a
+    /// board that has not earned a registry row yet: no honest address, no
+    /// verb.
+    #[props(default)]
+    open_uid: Option<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let device = card.id;
@@ -86,6 +92,15 @@ pub(crate) fn DeviceRosterCard(
     // port, which is the same condition the model's own spawns check.
     let linked = card.escapes.contains(&DeviceEscape::Disconnect);
     let idle = card.activity.is_none();
+    // The running face's ONE verb: Open — the editor as a lens on this
+    // board. Opening is NAVIGATION, so it is a real `<a>` to the device
+    // route (the same road the project cards take): a plain click rides the
+    // route listener, cmd/middle-click opens a tab natively, and the
+    // address bar ends up saying where you are.
+    let open_href = match (&running, linked && idle, open_uid.as_deref()) {
+        (Some(_), true, Some(uid)) => Some(format!("/device/{uid}")),
+        _ => None,
+    };
 
     rsx! {
         article { class: card_class(),
@@ -113,9 +128,20 @@ pub(crate) fn DeviceRosterCard(
                 section { class: zone_class(),
                     div { class: "tw:grid tw:gap-1",
                         // The running face's headline: what the board says
-                        // it is running, above the firmware detail.
+                        // it is running, above the firmware detail — and
+                        // its one verb, Open.
                         if let Some(running) = running.clone() {
-                            p { class: detail_class(), "Running {running}" }
+                            div { class: "tw:flex tw:items-center tw:justify-between tw:gap-3",
+                                p { class: detail_class(), "Running {running}" }
+                                if let Some(href) = open_href.clone() {
+                                    a {
+                                        class: open_link_class(),
+                                        href: "{href}",
+                                        title: "Open this board in the editor",
+                                        "Open"
+                                    }
+                                }
+                            }
                         }
                         if let Some(detail) = card.detail.clone() {
                             p { class: detail_class(), "{detail}" }
@@ -585,6 +611,12 @@ fn actions_zone_class() -> &'static str {
 /// [`TerminalPanel`] for why the rows are fed in reverse.
 fn terminal_class() -> &'static str {
     "tw:flex tw:h-40 tw:flex-col-reverse tw:overflow-y-auto tw:overflow-x-hidden tw:rounded-md tw:border tw:border-border tw:bg-subtle-bg tw:px-2 tw:py-1.5 tw:font-mono tw:text-[0.68rem] tw:leading-[1.35] tw:text-subtle-foreground"
+}
+
+/// The running face's Open link: the Primary voice (the standing spectrum
+/// ring every surface's one primary verb wears), as an anchor.
+fn open_link_class() -> &'static str {
+    "ux-spectrum-cta tw:inline-flex tw:h-8 tw:flex-none tw:items-center tw:rounded-md tw:px-3 tw:text-sm tw:font-semibold tw:text-strong-foreground tw:no-underline"
 }
 
 fn detail_class() -> &'static str {

@@ -43,8 +43,8 @@ use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
     HOME_NODE_ID, HomeOp, RuntimeOp, STUDIO_LOG_SINK, SettingsCommand, StudioActor, StudioCommand,
-    StudioController, UiAction, UiChromeSessionControl, UiLogEntry, UiLogLevel, UiStudioView,
-    has_unsaved_work,
+    StudioController, UiAction, UiChromeSessionControl, UiChromeSessionKind, UiLogEntry,
+    UiLogLevel, UiStudioView, has_unsaved_work,
 };
 use lpc_cloud_api::share_link;
 use lpc_history::PrefixedUid;
@@ -458,6 +458,7 @@ pub fn App() -> Element {
                         | StudioRoute::Projects
                         | StudioRoute::Project { .. }
                         | StudioRoute::Example { .. }
+                        | StudioRoute::Device { .. }
                 );
                 // …and never while a nav teardown is in flight. Leaving
                 // the studio is initiated BY navigation to a site route
@@ -757,6 +758,31 @@ pub fn App() -> Element {
                         )));
                     }
                 }
+                StudioRoute::Device { uid, .. } => {
+                    // The device route (round-2 M5): attach the editor as a
+                    // lens on the board registered as `uid`. The actor
+                    // owns readiness — a board still identifying holds the
+                    // intent and attaches when it says hello — so this
+                    // dispatch never waits on the roster here.
+                    let already_bound = matches!(
+                        &*nav_bound_route.borrow(),
+                        Some(StudioRoute::Device { uid: bound, .. }) if bound == uid
+                    );
+                    if !already_bound
+                        && nav_unsaved.get()
+                        && !unsaved_gate::confirm_discarding_unsaved(OPEN_DISCARDS_PROMPT)
+                    {
+                        router::navigate(&old);
+                        return true;
+                    }
+                    if !already_bound {
+                        nav_pending_route_open.set(true);
+                        nav_bridge.tx.send(StudioCommand::Action(UiAction::from_op(
+                            RuntimeOp::NODE_ID,
+                            RuntimeOp::OpenDeviceLens { uid: uid.clone() },
+                        )));
+                    }
+                }
                 StudioRoute::Devices
                 | StudioRoute::Projects
                 | StudioRoute::Home
@@ -874,6 +900,19 @@ pub fn App() -> Element {
                                 },
                             )));
                     }
+                }
+                // A cold `/device/<uid>` load: the intent goes to the actor
+                // now; the granted port is still being swept and
+                // identified, and the actor attaches the lens the moment
+                // the board says hello (reload = re-derivation, D37).
+                StudioRoute::Device { uid, .. } => {
+                    startup_pending_route_open.set(true);
+                    startup_bridge
+                        .tx
+                        .send(StudioCommand::Action(UiAction::from_op(
+                            RuntimeOp::NODE_ID,
+                            RuntimeOp::OpenDeviceLens { uid: uid.clone() },
+                        )));
                 }
                 StudioRoute::Home
                 | StudioRoute::Project { .. }
@@ -1273,9 +1312,15 @@ fn nav_session_plan(
 
 /// The action that ends `session`: the sim's own stop verb — the same op
 /// the card's danger-zone row dispatches, so leaving the studio and
-/// clicking Stop are literally the same teardown.
-fn session_teardown(_session: &UiChromeSessionControl) -> UiAction {
-    UiAction::from_op(RuntimeOp::NODE_ID, RuntimeOp::StopSimulator)
+/// clicking Stop are literally the same teardown. A device lens closes
+/// instead (the board keeps running; only the editor's wire goes back).
+fn session_teardown(session: &UiChromeSessionControl) -> UiAction {
+    match session.kind {
+        UiChromeSessionKind::Sim => UiAction::from_op(RuntimeOp::NODE_ID, RuntimeOp::StopSimulator),
+        UiChromeSessionKind::Device => {
+            UiAction::from_op(RuntimeOp::NODE_ID, RuntimeOp::CloseDeviceLens)
+        }
+    }
 }
 
 /// The one line a teardown-by-nav leaves behind (ruled copy, R8-4).
@@ -1283,8 +1328,11 @@ fn session_teardown(_session: &UiChromeSessionControl) -> UiAction {
 /// The draft clause is conditional: with nothing unsaved there is no
 /// draft to reassure anyone about, and a promise made on every stop is a
 /// promise nobody reads.
-fn session_stopped_line(_session: &UiChromeSessionControl, dirty: bool) -> String {
-    let stopped = "Simulator stopped".to_string();
+fn session_stopped_line(session: &UiChromeSessionControl, dirty: bool) -> String {
+    let stopped = match session.kind {
+        UiChromeSessionKind::Sim => "Simulator stopped".to_string(),
+        UiChromeSessionKind::Device => format!("Closed {} — the board keeps running", session.name),
+    };
     if dirty {
         format!("{stopped} — your edits are saved as a draft")
     } else {
@@ -1704,6 +1752,7 @@ mod tests {
     /// The tab's session, as the view loop latches it for the listener.
     fn session() -> UiChromeSessionControl {
         UiChromeSessionControl {
+            kind: UiChromeSessionKind::Sim,
             key: "runtime-sim".to_string(),
             name: "Sim".to_string(),
             board: Some("ESP32-C6".to_string()),

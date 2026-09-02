@@ -13,9 +13,10 @@ use lpa_studio_web_story_macros::story;
 use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     ProjectController, ProjectEditorView, ProjectNodeStatusTone, ProjectNodeTreeView,
-    ProjectSyncPhase, SimCardState, UiAgentStatus, UiExampleCard, UiHomeView, UiLogEntry,
-    UiLogLevel, UiLogOrigin, UiLogSource, UiNodeFace, UiNodeHeader, UiNodeTab, UiNodeView,
-    UiPackageCard, UiPaneView, UiSimCard, UiSimProjectChip, UiStatus, UiStudioView, UiViewContent,
+    ProjectSyncPhase, SimCardState, UiAgentStatus, UiExampleCard, UiHomeView, UiLensCard,
+    UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNodeFace, UiNodeHeader, UiNodeTab,
+    UiNodeView, UiPackageCard, UiPaneView, UiSimCard, UiSimProjectChip, UiStatus, UiStudioView,
+    UiViewContent,
 };
 
 use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
@@ -44,7 +45,7 @@ fn studio_hero() -> Element {
             vec![readme_project_pane()],
             lpa_studio_core::UiConsoleView::empty(),
         )
-        .with_lens_card(Some(readme_lens_card())),
+        .with_lens_card(Some(UiLensCard::Sim(readme_lens_card()))),
         true,
         Vec::new(),
     )

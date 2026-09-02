@@ -105,6 +105,11 @@ pub struct StudioController {
     /// there is no device lens in the runtime pool and no device arm on any
     /// other op, by design (the anti-fifth-machine rule).
     devices: crate::DeviceRoster,
+    /// A `/device/<uid>` open that arrived before the board was ready (a
+    /// reload: the route asks for the lens while the granted port is still
+    /// identifying). Held until the board says hello, then attached from
+    /// the refresh tick; cleared by any close or another lens attach.
+    pending_device_lens: Option<String>,
     /// A granted-port sweep is due (boot, or a `navigator.serial` connect).
     /// Drained by the actor's device step so a hotplug storm costs one sweep.
     device_sweep_pending: bool,
@@ -283,6 +288,7 @@ impl StudioController {
         Self {
             sim_link: crate::SimLink::new(),
             devices: crate::DeviceRoster::new(device_roster_config()),
+            pending_device_lens: None,
             device_sweep_pending: false,
             pool: RuntimePool::new(),
             project: ProjectController::new(),
@@ -1393,12 +1399,7 @@ impl StudioController {
                 self.project.active_transient_example(),
                 self.project.transient_fork_generation(),
             )
-            .with_lens_card(
-                self.home_pool_evidence()
-                    .sim
-                    .as_ref()
-                    .map(|sim| self.overlay_card_ui(home_view_builder::sim_card(sim))),
-            )
+            .with_lens_card(self.lens_card())
             .with_session(self.session_control())
             .with_settings(self.settings.ui_view())
             .with_dirty(dirty)
@@ -1413,6 +1414,9 @@ impl StudioController {
     /// detached from is still the session this tab runs, and the control is
     /// what says so.
     fn session_control(&self) -> Option<crate::UiChromeSessionControl> {
+        if let Some(control) = self.device_session_control() {
+            return Some(control);
+        }
         let card = home_view_builder::sim_card(&self.home_pool_evidence().sim?);
         // Best-effort, and honestly absent when nothing is known: the
         // engine's rate once it publishes frames. The lamp extent the spike
@@ -1423,6 +1427,7 @@ impl StudioController {
             facts.push(format!("{} fps", fps.round() as i64));
         }
         Some(crate::UiChromeSessionControl {
+            kind: crate::UiChromeSessionKind::Sim,
             key: card.identity_key().to_string(),
             // The control renders the sim's board as a suffix, so the
             // name stays the kind.
@@ -1431,6 +1436,64 @@ impl StudioController {
             // project it runs.
             board: card.board_id.as_deref().map(crate::board_display_name),
             status: home_view_builder::chip_status(card.state),
+            stat_line: (!facts.is_empty()).then(|| facts.join(" · ")),
+        })
+    }
+
+    /// The LENS session's docked card (D43): the device the editor is open
+    /// on, projected by the roster exactly as the gallery projects it; else
+    /// the sim's live card.
+    fn lens_card(&self) -> Option<crate::UiLensCard> {
+        if let Some(attachment) = self
+            .pool
+            .device_session()
+            .and_then(crate::RuntimeSession::device_attachment)
+        {
+            return self
+                .device_roster_view()
+                .roster
+                .devices
+                .into_iter()
+                .find(|card| card.id == attachment.device)
+                .map(crate::UiLensCard::Device);
+        }
+        self.home_pool_evidence().sim.as_ref().map(|sim| {
+            crate::UiLensCard::Sim(self.overlay_card_ui(home_view_builder::sim_card(sim)))
+        })
+    }
+
+    /// The header control for a DEVICE lens session (round-2 M5): the
+    /// device's own name and board, its status from the roster's evidence
+    /// (the same fold the card renders — the control can never disagree
+    /// with the card), and the engine rate the lens client heard.
+    fn device_session_control(&self) -> Option<crate::UiChromeSessionControl> {
+        let session = self.pool.device_session()?;
+        let attachment = session.device_attachment()?;
+        let device = self.devices.roster().device(attachment.device);
+        let running = device.is_some_and(|device| {
+            device
+                .evidence
+                .loaded_projects()
+                .is_some_and(|loaded| !loaded.is_empty())
+        });
+        let status = match (session.is_connected(), running) {
+            (false, _) => crate::UiChromeSessionStatus::Attention,
+            (true, true) => crate::UiChromeSessionStatus::Run,
+            (true, false) => crate::UiChromeSessionStatus::Empty,
+        };
+        let mut facts: Vec<String> = Vec::new();
+        if let Some(fps) = session.engine_fps() {
+            facts.push(format!("{} fps", fps.round() as i64));
+        }
+        Some(crate::UiChromeSessionControl {
+            kind: crate::UiChromeSessionKind::Device,
+            key: format!("device:{}", attachment.uid),
+            name: attachment.name.clone(),
+            board: attachment
+                .board_id
+                .as_deref()
+                .map(crate::board_display_name),
+            status,
             stat_line: (!facts.is_empty()).then(|| facts.join(" · ")),
         })
     }
@@ -1799,6 +1862,7 @@ impl StudioController {
         Timer: Future<Output = ()>,
         Cancel: CancelSignal + ?Sized,
     {
+        self.try_pending_device_lens().await;
         if !self.project_is_loaded() || !self.has_lightplayer_state() {
             return Ok(None);
         }
@@ -2838,7 +2902,24 @@ impl StudioController {
             // A lens on ANOTHER device: give its wire back first.
             self.close_device_lens();
         }
-        let attachment = self.device_lens_attachment(uid)?;
+        let attachment = match self.device_lens_attachment(uid) {
+            Ok(attachment) => attachment,
+            // A known board that is not ready yet (a reload: the route
+            // asked while the port is still identifying) is an intent to
+            // hold, not a failure to report — the tick attaches it the
+            // moment the hello lands.
+            Err(error) if self.devices.device_for_key(uid).is_some() => {
+                self.pending_device_lens = Some(uid.to_string());
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Info,
+                    UiLogOrigin::Studio,
+                    format!("waiting for the board before opening it: {error}"),
+                ));
+                return Ok(UiNotices::new().with_notice(UiNotice::info("Waiting for the board")));
+            }
+            Err(error) => return Err(error),
+        };
+        self.pending_device_lens = None;
         emit_activity(
             &updates,
             UxActivityTarget::pane(ProjectController::NODE_ID),
@@ -2949,6 +3030,7 @@ impl StudioController {
     /// session, give the wire back so the roster's pump resumes. Quiet when
     /// there is none. The device keeps its card and its evidence.
     pub(crate) fn close_device_lens(&mut self) {
+        self.pending_device_lens = None;
         let Some(session) = self.pool.device_session() else {
             return;
         };
@@ -2999,6 +3081,29 @@ impl StudioController {
             "the board under the editor went away; the editor is closed".to_string(),
         ));
         self.close_device_lens();
+    }
+
+    /// Attach a held `/device/<uid>` intent once its board is ready. Runs
+    /// from the refresh tick (the one recurring async seam); a board that
+    /// is still not ready keeps the intent, one that vanished drops it.
+    async fn try_pending_device_lens(&mut self) {
+        let Some(uid) = self.pending_device_lens.clone() else {
+            return;
+        };
+        if self.devices.device_for_key(&uid).is_none() {
+            self.pending_device_lens = None;
+            return;
+        }
+        if self.device_lens_attachment(&uid).is_err() {
+            return;
+        }
+        if let Err(error) = self.open_device_lens(&uid, UxUpdateSink::noop()).await {
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                format!("could not open the board in the editor: {error}"),
+            ));
+        }
     }
 
     /// The storage dir a device lens's project sync must target: the dir
