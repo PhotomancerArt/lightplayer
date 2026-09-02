@@ -93,6 +93,17 @@ pub enum ProjectNodeStatusTone {
     Good,
     Warning,
     Error,
+    /// The RUNTIME failed a valid configuration (`NodeRuntimeStatus::Fault`)
+    /// — quarantined by crash recovery, a tick that returned an error, a
+    /// render trap.
+    ///
+    /// Wears the ERROR colour (see [`Self::ui_status_kind`]) because it IS a
+    /// failure and must read as one. It stays a tone of its own for the same
+    /// reason `Disabled` does: code downstream has to tell the two apart.
+    /// Here the consumer is the shader-diagnostic parser — a recovery or
+    /// fuel message is not a compile diagnostic, and feeding it to the
+    /// editor's error strip would point at a line that is not wrong.
+    Fault,
     /// The node's kind has no runtime on the device this project runs on
     /// ("Not on this device").
     ///
@@ -126,7 +137,7 @@ impl ProjectNodeStatusTone {
             Self::Neutral => UiStatusKind::Neutral,
             Self::Good => UiStatusKind::Good,
             Self::Warning => UiStatusKind::Warning,
-            Self::Error | Self::Disabled => UiStatusKind::Error,
+            Self::Error | Self::Fault | Self::Disabled => UiStatusKind::Error,
         }
     }
 

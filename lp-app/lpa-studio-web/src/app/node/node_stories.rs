@@ -6,9 +6,9 @@ use crate::app::module::module_fixtures::{
     fire_export, inline_module_export, module_card_with_export,
 };
 use crate::app::node::node_story_fixtures::{
-    debug_rows_node_view, error_node_view, failed_dirty_node_view, nested_dirty_node_view,
-    node_delete_pane_action, output_node_view, playlist_node_view, playlist_pending_edits,
-    unsaved_dirty_node_view, unsupported_node_view,
+    debug_rows_node_view, error_node_view, failed_dirty_node_view, fault_node_view,
+    nested_dirty_node_view, node_delete_pane_action, output_node_view, playlist_node_view,
+    playlist_pending_edits, unsaved_dirty_node_view, unsupported_node_view,
 };
 use crate::app::node::{NodeDetailPopover, NodeDirtyTint, NodePane};
 
@@ -214,6 +214,24 @@ pub(crate) fn output_debug_test_pattern_idle() -> Element {
 )]
 pub(crate) fn error_detail_popup() -> Element {
     let view = error_node_view();
+
+    rsx! {
+        div { class: "tw:flex tw:min-h-[320px] tw:justify-end",
+            NodeDetailPopover {
+                header: view.header,
+                pending_edits: vec![],
+                on_action: move |_| {},
+                initially_open: true,
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The node detail popup on a FAULTED node: the same error-red pill as a compile error, reading 'Fault', with the runtime's own reason underneath — here a compile the crash-recovery ledger refused after repeated crashes. The word is the affordance: an Error asks for an edit, a Fault asks for a retry or a clear, and the source in this node is fine."
+)]
+pub(crate) fn fault_detail_popup() -> Element {
+    let view = fault_node_view();
 
     rsx! {
         div { class: "tw:flex tw:min-h-[320px] tw:justify-end",

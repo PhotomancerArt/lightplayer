@@ -115,7 +115,23 @@ pub struct ShaderNode {
     /// The newest compile attempt's failure, if any. May coexist with a
     /// running `shader` — the status reports the error while the last good
     /// program keeps rendering.
+    ///
+    /// AUTHORING failures only (a GLSL diagnostic, a tier the backend
+    /// refuses): the fix is an edit, so this rides
+    /// [`NodeRuntimeStatus::Error`]. A compile the crash-recovery ledger
+    /// REFUSED is not an authoring failure and lives in
+    /// [`Self::compile_fault`] instead.
     compilation_error: Option<String>,
+    /// A compile the crash-recovery ledger DENIED (this node's compile path
+    /// went red after repeated crashes — typically an OOM at JIT time).
+    ///
+    /// Kept apart from [`Self::compilation_error`] because the two have
+    /// opposite affordances: an edit fixes a diagnostic and nothing fixes a
+    /// quarantine except clearing it. Reported as
+    /// [`NodeRuntimeStatus::Fault`], which is also what makes every output
+    /// of this project paint the fault pattern; cleared (and the compile
+    /// re-armed) by [`NodeRuntime::clear_fault`].
+    compile_fault: Option<String>,
     /// Consumed inputs whose binding failed to resolve this frame, with the
     /// resolve error — the shader keeps running on their authored defaults,
     /// and the status reports a warning instead of silently degrading (a
@@ -164,6 +180,7 @@ impl ShaderNode {
             visual_uniforms,
             shader: None,
             compilation_error: None,
+            compile_fault: None,
             input_resolve_failures: Vec::new(),
             black_fallback_frames: 0,
             needs_compile: true,
@@ -199,6 +216,22 @@ impl ShaderNode {
 
     pub fn compilation_error(&self) -> Option<&str> {
         self.compilation_error.as_deref()
+    }
+
+    /// A compile the crash-recovery ledger denied, if that is why this node
+    /// has no program.
+    pub fn compile_fault(&self) -> Option<&str> {
+        self.compile_fault.as_deref()
+    }
+
+    /// Why there is no runnable program, for the black-fallback log: the
+    /// denial if the ledger refused the compile, else the compile error,
+    /// else the compile simply has not happened yet.
+    fn compile_reason(&self) -> &str {
+        self.compile_fault
+            .as_deref()
+            .or(self.compilation_error.as_deref())
+            .unwrap_or("shader not compiled")
     }
 
     fn refresh_source(&mut self, source: AssetText) {
@@ -258,7 +291,11 @@ impl ShaderNode {
                     "[shader-node] compilation blocked (node={:?}): {denied}",
                     self.node_id
                 );
-                self.compilation_error = Some(format!("shader compile: {denied}"));
+                // A FAULT, not an error: the source is fine and no edit
+                // un-gates the path. `needs_compile` is cleared so the
+                // denial is not re-asked every frame, which is exactly why
+                // `clear_fault` has to re-arm it.
+                self.compile_fault = Some(format!("shader compile: {denied}"));
                 self.needs_compile = false;
                 return Ok(self.shader.is_some());
             }
@@ -268,6 +305,8 @@ impl ShaderNode {
         self.needs_compile = false;
         lp_perf::emit_begin!(lp_perf::EVENT_SHADER_COMPILE);
         self.compilation_error = None;
+        // The gate let this through, so whatever it denied before is over.
+        self.compile_fault = None;
         // The authored numeric mode picks which of the backend's two tier
         // answers applies; the backend states both (fidelity-tiers ADR). On a
         // CPU backend that is Q32 vs F32Cpu; on the GPU tier both answer
@@ -883,12 +922,26 @@ impl NodeRuntime for ShaderNode {
     }
 
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
+        // Fault first: a denied compile outranks anything an edit could fix,
+        // and it is the status the never-black policy keys on.
+        if let Some(fault) = &self.compile_fault {
+            return Some(NodeRuntimeStatus::Fault(fault.clone()));
+        }
         if let Some(error) = &self.compilation_error {
             return Some(NodeRuntimeStatus::Error(error.clone()));
         }
         // The shader still renders (on authored defaults), so a broken
         // input binding is a warning, not an error.
         input_resolve_warning(&self.input_resolve_failures).map(NodeRuntimeStatus::Warn)
+    }
+
+    fn clear_fault(&mut self) {
+        // Re-arm the ONE thing this node latched: the compile it stopped
+        // attempting when the ledger denied it. Authoring errors are left
+        // alone — clearing faults is not an edit.
+        if self.compile_fault.take().is_some() {
+            self.needs_compile = true;
+        }
     }
 
     fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
@@ -1476,9 +1529,7 @@ impl RenderNode for ShaderNode {
                     "[shader-node] rendering black fallback texture (node={:?}, frame {}): {}",
                     self.node_id,
                     self.black_fallback_frames,
-                    self.compilation_error
-                        .as_deref()
-                        .unwrap_or("shader not compiled")
+                    self.compile_reason()
                 );
             }
             ctx.graphics()
@@ -1525,9 +1576,7 @@ impl RenderNode for ShaderNode {
                     "[shader-node] sampling black fallback (node={:?}, frame {}): {}",
                     self.node_id,
                     self.black_fallback_frames,
-                    self.compilation_error
-                        .as_deref()
-                        .unwrap_or("shader not compiled")
+                    self.compile_reason()
                 );
             }
             ctx.graphics()
@@ -3148,10 +3197,18 @@ mod tests {
                 .expect("compile error reported")
                 .contains("test compile failure")
         );
+        // Error, NOT Fault: a GLSL diagnostic is fixed by an edit, and a node
+        // still rendering its last-good program must not breathe red over
+        // every output in the project — least of all in the studio's live
+        // editor, mid-keystroke.
         assert!(matches!(
             node.runtime_status(),
             Some(NodeRuntimeStatus::Error(_))
         ));
+        assert!(
+            node.compile_fault().is_none(),
+            "a compile failure is not a quarantine",
+        );
         assert!(
             graphics
                 .read_back(&texture)

@@ -25,9 +25,9 @@ pub mod shader_abi;
 
 pub use engine::error::Error;
 pub use engine::{
-    ButtonService, Engine, EngineError, EngineProjectReadSource, EngineServices, FrameNum,
-    FrameTime, OutputFlushError, ProjectLoadError, ProjectLoader, ProjectReadEventStreamError,
-    RadioService, RuntimeApplyResult,
+    ButtonService, Engine, EngineError, EngineProjectReadSource, EngineServices, FaultPresentation,
+    FrameNum, FrameTime, OutputFlushError, ProjectFault, ProjectLoadError, ProjectLoader,
+    ProjectReadEventStreamError, RadioService, RuntimeApplyResult,
 };
 pub use features::supported_features;
 // Graphics seam re-exports: the traits/handles live in `lp-gfx`; the
