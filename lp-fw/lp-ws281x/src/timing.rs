@@ -49,6 +49,9 @@ impl ColorOrder {
     ///
     /// Slots outside `0..3` are clamped to 0 rather than panicking — this runs
     /// on the interrupt path and the caller always passes a value in range.
+    // `always`: called from the refill path; at `opt-level = "z"` a plain
+    // `#[inline]` left an outlined copy in flash on the ESP32-C6 image.
+    #[inline(always)]
     pub const fn source_index(self, slot: usize) -> usize {
         let map: [u8; 3] = match self {
             ColorOrder::Rgb => [0, 1, 2],
