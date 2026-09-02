@@ -1103,6 +1103,53 @@ fn a_port_that_dies_under_the_lens_closes_the_editor_through_the_tap() {
     );
 }
 
+/// The dead-wire backstop: the browser can take minutes to report a USB
+/// loss, and until it does a lens pull just times out. Three failed pulls
+/// in a row close the editor and give the wire back; a success in between
+/// resets the count (a slow board is not a dead one).
+#[test]
+fn three_failed_pulls_in_a_row_close_the_lens_as_a_dead_wire() {
+    let device = empty_light_player("dev000000daqf6dvvr7");
+    let (mut bench, tasks) = identified(&device, "usb-lens-7");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench.open_lens(&uid).expect("opens");
+
+    bench.controller.record_passive_refresh_failure();
+    bench.controller.record_passive_refresh_failure();
+    bench.controller.record_passive_refresh_success();
+    bench.controller.record_passive_refresh_failure();
+    bench.controller.record_passive_refresh_failure();
+    assert!(
+        bench.lens_device_uid().is_some(),
+        "a success resets the streak"
+    );
+
+    bench.controller.record_passive_refresh_failure();
+    assert!(
+        bench.lens_device_uid().is_none(),
+        "three in a row is a dead wire"
+    );
+    assert!(bench.controller.runtime_pool_for_test().lens().is_none());
+    bench.step(&tasks);
+    assert_eq!(bench.view().devices.len(), 1, "the card stays");
+}
+
 /// An address the roster cannot serve yet is HELD, never refused: the
 /// gallery stays honest, nothing dead is installed, and closing the lens
 /// (leaving the route) lets the intent go.

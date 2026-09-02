@@ -41,7 +41,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceAction, DeviceActivityView, DeviceEscape, DeviceId, DeviceLoadedProject, DevicePushOp,
-    DeviceView, DevicesOp, PendingLinkView, PushSourceGroup, UiAction, UiExampleCard,
+    DeviceStatus, DeviceView, DevicesOp, PendingLinkView, PushSourceGroup, UiAction, UiExampleCard,
     UiPackageCard, UiStatus, device_escape_action, device_status_kind, flash_offer,
     pending_escape_action, push_offer,
 };
@@ -97,7 +97,11 @@ pub(crate) fn DeviceRosterCard(
     // route (the same road the project cards take): a plain click rides the
     // route listener, cmd/middle-click opens a tab natively, and the
     // address bar ends up saying where you are.
-    let open_href = match (&running, linked && idle, open_uid.as_deref()) {
+    // Only a READY board (identified, port open, idle) can be opened: an
+    // attached-but-closed one has no wire to lend, and offering Open there
+    // would hold an intent the user did not mean to file.
+    let ready = matches!(card.status, DeviceStatus::Ready);
+    let open_href = match (&running, ready && linked && idle, open_uid.as_deref()) {
         (Some(_), true, Some(uid)) => Some(format!("/device/{uid}")),
         _ => None,
     };

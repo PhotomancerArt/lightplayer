@@ -59,6 +59,13 @@ const SIM_CRASH_REBOOT_GUARD_SECS: f64 = 30.0;
 
 /// The device model's knobs for THIS build.
 ///
+/// How many passive pulls a device lens may fail back to back before the
+/// wire is declared dead and the lens closes (see
+/// [`StudioController::record_passive_refresh_failure`]). Three: one is a
+/// busy board, two is a slow one, three in a row at the device cadence is
+/// nobody home.
+const LENS_DEAD_WIRE_FAILURES: u32 = 3;
+
 /// `expected_proto` comes from `lpc-wire` and nowhere else: `lpa-devices`
 /// hardcodes no proto number on purpose, and a build that speaks proto N must
 /// never classify a proto-N device as incompatible because someone re-typed
@@ -1010,9 +1017,28 @@ impl StudioController {
     }
 
     /// See [`Self::record_passive_refresh_success`].
+    ///
+    /// The device lens's dead-wire backstop lives here: a board whose wire
+    /// is gone answers nothing, and the browser can take minutes to say so
+    /// (bench, 2026-09-02: 8.5 min from a hub power-cut to "The device has
+    /// been lost"); until then every pull merely times out and neither
+    /// tap fires. [`LENS_DEAD_WIRE_FAILURES`] pulls in a row with no answer
+    /// is a wire with nobody on it, so the lens closes honestly and the
+    /// gallery takes over.
     pub fn record_passive_refresh_failure(&mut self) {
-        if let Ok(session) = self.pool.lens_session_mut() {
-            session.record_refresh_failure();
+        let Ok(session) = self.pool.lens_session_mut() else {
+            return;
+        };
+        session.record_refresh_failure();
+        let dead = session.kind() == crate::RuntimeKind::Device
+            && session.consecutive_refresh_failures() >= LENS_DEAD_WIRE_FAILURES;
+        if dead {
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                "the board stopped answering the editor; the editor is closed".to_string(),
+            ));
+            self.close_device_lens();
         }
     }
 

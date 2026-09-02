@@ -140,6 +140,11 @@ pub struct RuntimeSession {
     /// actor singleton became per-session). Only the LENS session's
     /// advances — only the lens runs the fallible project pull.
     backoff: BackoffPolicy,
+    /// Passive pulls that failed back to back (reset by the first success).
+    /// A device lens reads this as its dead-wire backstop: the browser can
+    /// take minutes to notice a USB loss (bench, 2026-09-02: 8.5 min),
+    /// and until it does every pull just times out.
+    consecutive_refresh_failures: u32,
     /// When the last status heartbeat ran (injected-clock epoch seconds).
     /// `None` = never: the first heartbeat is immediately due.
     last_heartbeat_at: Option<f64>,
@@ -191,6 +196,7 @@ impl RuntimeSession {
             server_state: ServerState::Disconnected,
             requested_log_level: UiLogLevel::Info,
             backoff: BackoffPolicy::new(PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX),
+            consecutive_refresh_failures: 0,
             last_heartbeat_at: None,
             last_refresh_completed_at: None,
             sim_loaded_project: None,
@@ -461,10 +467,18 @@ impl RuntimeSession {
 
     pub(crate) fn record_refresh_success(&mut self) {
         self.backoff.record_success();
+        self.consecutive_refresh_failures = 0;
     }
 
     pub(crate) fn record_refresh_failure(&mut self) {
         self.backoff.record_failure();
+        self.consecutive_refresh_failures = self.consecutive_refresh_failures.saturating_add(1);
+    }
+
+    /// Passive pulls that failed back to back, for the device lens's
+    /// dead-wire backstop.
+    pub fn consecutive_refresh_failures(&self) -> u32 {
+        self.consecutive_refresh_failures
     }
 
     /// Whether a status heartbeat is due at `now` (injected-clock epoch
