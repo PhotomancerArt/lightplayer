@@ -41,6 +41,7 @@ use crate::products::visual::{
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
 use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
 
+use super::map_input_template::MapInputTemplates;
 use super::palette_bake_cache::{PaletteBake, PaletteBakeCache};
 use super::palette_eval::{
     PaletteCyclePosition, palette_cycle_gradients, palette_cycle_position, palette_frame_zero,
@@ -143,6 +144,10 @@ pub struct ShaderNode {
     /// ([`PaletteBakeCache`]). Rebuildable: dropped under memory pressure
     /// and re-baked on the next tick.
     palette_cache: PaletteBakeCache,
+    /// Frame-invariant half of this node's map uniforms, resolved once per
+    /// (uniform, declared shape) instead of per frame
+    /// ([`MapInputTemplates`]).
+    map_templates: MapInputTemplates,
     state: ShaderState,
 }
 
@@ -170,6 +175,7 @@ impl ShaderNode {
             compile_window_requested: false,
             compile_window: None,
             palette_cache: PaletteBakeCache::new(),
+            map_templates: MapInputTemplates::new(),
             state: ShaderState::new(VisualProduct::new(node_id, 0)),
         }
     }
@@ -447,8 +453,14 @@ impl ShaderNode {
                 }
                 continue;
             }
-            let (value, failure) =
-                resolve_or_default_input(ctx, name, slot, "visual shader", &mut timebase)?;
+            let (value, failure) = resolve_or_default_input(
+                ctx,
+                name,
+                slot,
+                "visual shader",
+                &mut timebase,
+                &mut self.map_templates,
+            )?;
             if let Some(failure) = failure {
                 failures.push((name.clone(), failure));
             }
@@ -2040,6 +2052,7 @@ pub(super) fn resolve_or_default_input(
     slot: &ShaderSlotDef,
     context: &str,
     timebase: &mut TimeProductCache,
+    templates: &mut MapInputTemplates,
 ) -> Result<(LpsValueF32, Option<String>), NodeError> {
     match *slot.kind.value() {
         ShaderSlotKind::Seconds => return Ok(resolve_seconds_input(ctx, timebase)),
@@ -2068,6 +2081,7 @@ pub(super) fn resolve_or_default_input(
         slot,
         production.as_ref().map(|production| production.data()),
         ctx.slot_shapes(),
+        Some(&mut *templates),
     );
     let value = match materialized {
         Ok(value) => value,
@@ -2080,7 +2094,7 @@ pub(super) fn resolve_or_default_input(
         // output down and leave the fixture black).
         Err(mismatch) if production.is_some() => {
             failure.get_or_insert_with(|| mismatch.to_string());
-            materialize_shader_input(name, slot, None, ctx.slot_shapes())
+            materialize_shader_input(name, slot, None, ctx.slot_shapes(), Some(templates))
                 .map_err(|e| NodeError::msg(format!("{context} input {name:?}: {e}")))?
         }
         Err(e) => return Err(NodeError::msg(format!("{context} input {name:?}: {e}"))),

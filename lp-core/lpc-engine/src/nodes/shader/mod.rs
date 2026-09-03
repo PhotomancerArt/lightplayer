@@ -1,6 +1,7 @@
 pub mod compute_materialize;
 pub mod compute_shader_node;
 pub mod compute_shader_state;
+pub mod map_input_template;
 pub mod palette_bake_cache;
 pub mod palette_eval;
 pub mod phasor_eval;
