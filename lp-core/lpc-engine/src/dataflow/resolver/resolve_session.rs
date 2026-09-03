@@ -92,6 +92,35 @@ impl<'a> EngineSession<'a> {
         self.resolve_id(host, id)
     }
 
+    /// Resolve the bus `channel` in `scope` at a compile-time-constant
+    /// channel name, building the [`ChannelName`] at most once per epoch.
+    pub fn resolve_static_bus<H: ResolveHost + ?Sized>(
+        &mut self,
+        host: &mut H,
+        scope: Option<crate::node::ScopeRef>,
+        channel: &'static str,
+    ) -> Result<Production, SessionResolveError> {
+        let id = self.resolver.intern_static_bus(scope, channel);
+        self.resolve_id(host, id)
+    }
+
+    /// The shared handle for a produced slot's path — see
+    /// [`Resolver::produced_slot_path`].
+    pub fn produced_slot_path(&mut self, slot: &SlotPath) -> Rc<SlotPath> {
+        self.resolver.produced_slot_path(slot)
+    }
+
+    /// The interned, shared key for `query` — see [`Resolver::intern_key`].
+    pub fn intern_key(&mut self, query: &QueryKey) -> Rc<QueryKey> {
+        self.resolver.intern_key(query)
+    }
+
+    /// How many times the graph has changed shape; see
+    /// [`Resolver::structure_epoch`].
+    pub fn structure_epoch(&self) -> u64 {
+        self.resolver.structure_epoch()
+    }
+
     /// Resolve an already-interned query, fetching its key from the intern
     /// table. Used by route following, where the id is all that was stored.
     fn resolve_id<H: ResolveHost + ?Sized>(

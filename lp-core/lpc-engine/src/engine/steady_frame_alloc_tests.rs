@@ -23,9 +23,14 @@ use lpc_model::{Revision, SlotPath};
 /// Measured 2026-09-02 (P2 of the zero-alloc-frames plan, then ratcheted in
 /// P4 after resolver clone hygiene: `resolve_id`'s `QueryKey` borrow,
 /// `Production`'s alloc-free `ProducedSlot` clone, and the borrowed
-/// `PanelWriterStore` lookup) with the resolver payload cache on. Ratcheted
-/// down as the engine's per-frame churn is removed.
-pub(crate) const STEADY_FRAME_ALLOC_BUDGET: u64 = 36;
+/// `PanelWriterStore` lookup, and again in P5 after the produced-slot path
+/// handles were interned) with the resolver payload cache on. Ratcheted down
+/// as the engine's per-frame churn is removed.
+///
+/// This graph builds on dummy nodes, not the real shader runtimes, so P5's
+/// authored-def key cache does not show here; its own oracle is
+/// `nodes::shader::shader_node::authored_sync_tests`.
+pub(crate) const STEADY_FRAME_ALLOC_BUDGET: u64 = 30;
 
 /// The richest graph the test builder offers: two shaders behind a selector,
 /// a bus channel driven by a third shader and read by a fixture, and an

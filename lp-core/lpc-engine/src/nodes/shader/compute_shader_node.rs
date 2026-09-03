@@ -25,12 +25,13 @@ use crate::node::{
 use crate::shader_abi::compute_desc_from_model_def;
 use lp_gfx::LpComputeShader;
 
+use super::authored_field_keys::AuthoredFieldKeys;
 use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
 use super::map_input_template::MapInputTemplates;
 use super::shader_node::{
     TimeProductCache, format_compile_stats, input_resolve_warning, note_input_resolve_failures,
-    resolve_or_default_input, sync_float_mode_pin, sync_shader_slot_def_from_authored,
+    resolve_or_default_input, sync_consumed_slots_from_authored, sync_float_mode_pin,
 };
 
 /// Runtime node for `kind = "shader/compute"` artifacts.
@@ -60,6 +61,9 @@ pub struct ComputeShaderNode {
     /// (uniform, declared shape) instead of per frame
     /// ([`MapInputTemplates`]).
     map_templates: MapInputTemplates,
+    /// The resolver keys this node's per-tick authored sync reads through
+    /// ([`AuthoredFieldKeys`]).
+    authored_keys: AuthoredFieldKeys,
     state: ComputeShaderState,
 }
 
@@ -84,6 +88,7 @@ impl ComputeShaderNode {
             compile_window_requested: false,
             compile_window: None,
             map_templates: MapInputTemplates::new(),
+            authored_keys: AuthoredFieldKeys::new(),
             state,
         }
     }
@@ -247,14 +252,23 @@ impl ComputeShaderNode {
         let mut values = Vec::with_capacity(self.def.consumed_slots.entries.len());
         let mut failures = Vec::new();
         let mut timebase = TimeProductCache::new();
-        for (name, slot) in &self.def.consumed_slots.entries {
+        let Self {
+            def,
+            map_templates,
+            authored_keys,
+            ..
+        } = self;
+        let epoch = ctx.structure_epoch();
+        for (name, slot) in &def.consumed_slots.entries {
+            let keys = authored_keys.uniform(name, epoch);
             let (value, failure) = resolve_or_default_input(
                 ctx,
                 name,
+                keys,
                 slot,
                 "compute shader",
                 &mut timebase,
-                &mut self.map_templates,
+                map_templates,
             )?;
             if let Some(failure) = failure {
                 failures.push((name.clone(), failure));
@@ -297,18 +311,18 @@ impl ComputeShaderNode {
         Ok(())
     }
 
-    fn sync_def_from_view(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    pub(super) fn sync_def_from_view(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<(), NodeError> {
         let mut compile_changed = false;
         compile_changed |= sync_float_mode_pin(ctx, &mut self.def.float_mode)?;
 
-        let consumed_keys: Vec<String> = self.def.consumed_slots.entries.keys().cloned().collect();
-        for key in consumed_keys {
-            let Some(slot) = self.def.consumed_slots.entries.get_mut(&key) else {
-                continue;
-            };
-            compile_changed |=
-                sync_shader_slot_def_from_authored(ctx, &alloc::format!("consumed[{key}]"), slot)?;
-        }
+        let Self {
+            def, authored_keys, ..
+        } = self;
+        compile_changed |=
+            sync_consumed_slots_from_authored(ctx, &mut def.consumed_slots, authored_keys)?;
 
         if compile_changed {
             self.needs_compile = true;
