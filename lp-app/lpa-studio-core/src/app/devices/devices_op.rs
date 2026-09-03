@@ -151,7 +151,7 @@ impl ControllerOp for DevicesOp {
                     "Factory reset this board?",
                     "Everything on its flash is erased — firmware, projects, settings. \
                      Its identity lives in silicon and survives; Studio keeps the entry.",
-                    "Erase everything",
+                    "Factory reset",
                 )
                 .inline(),
             ),

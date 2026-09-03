@@ -17,6 +17,8 @@
 //! | `name` (the user's) | `name` — the registry's user-facing truth |
 //! | `autoconnect` | `autoconnect` (additive) |
 //! | `last_seen` (millis) | `last_seen_at` (epoch seconds) |
+//! | `board_id` (learned, never cleared) | `board_id` (additive — the SAME field a provisioning-flow board pick also writes) |
+//! | `chip` (learned, never cleared) | `chip` (additive) |
 //!
 //! **`identity.endpoint` is deliberately NOT persisted.** A browser Web
 //! Serial endpoint id is minted per page load from a counter
@@ -65,7 +67,8 @@ pub fn registry_row_from_record(record: &DeviceRecord) -> Option<RegisteredDevic
             .map(|last| last.0 as f64 / 1_000.0)
             .unwrap_or_default(),
         association: None,
-        board_id: None,
+        board_id: record.board_id.clone(),
+        chip: record.chip.clone(),
         hardware_id: record
             .identity
             .mac
@@ -111,15 +114,13 @@ pub fn record_from_registry_row(row: &RegisteredDevice, fallback_device_id: u64)
         autoconnect: row.autoconnect,
         last_seen: (row.last_seen_at > 0.0)
             .then(|| Millis((row.last_seen_at * 1_000.0).round().max(0.0) as u64)),
-        // The model's own board_id/chip (device-model rebuild P1) are
-        // learned by the fold from a hello/banner within a session and are
-        // not sourced from the registry row today — `RegisteredDevice`'s
-        // own `board_id` above is a different, older provisioning-flow
-        // field this conversion does not touch. Wiring the two together
-        // (so identity survives a full app restart, not just a reopen) is
-        // follow-up work, not this change.
-        board_id: None,
-        chip: None,
+        // Device-card-v2 plan P2: the model's own board_id/chip now share
+        // the row's `board_id`/`chip` fields with the older
+        // provisioning-flow board pick, so identity survives a full app
+        // restart, not just a reopen — a row a session never re-learns
+        // still carries what an earlier one wrote.
+        board_id: row.board_id.clone(),
+        chip: row.chip.clone(),
     }
 }
 
@@ -139,8 +140,8 @@ mod tests {
             name: Some("Kitchen".to_string()),
             autoconnect: true,
             last_seen: Some(Millis(1_500)),
-            board_id: None,
-            chip: None,
+            board_id: Some("seeed/xiao-esp32-c6".to_string()),
+            chip: Some("esp32c6".to_string()),
         }
     }
 
@@ -158,6 +159,14 @@ mod tests {
         assert_eq!(back.name, original.name);
         assert!(back.autoconnect);
         assert_eq!(back.last_seen, original.last_seen);
+        assert_eq!(
+            back.board_id, original.board_id,
+            "the learned board id survives a full app restart"
+        );
+        assert_eq!(
+            back.chip, original.chip,
+            "the learned chip survives a full app restart"
+        );
         assert_eq!(
             back.identity.endpoint, None,
             "the endpoint is a per-page fingerprint, never persisted"
@@ -210,5 +219,10 @@ mod tests {
         assert_eq!(record.identity.mac, None);
         assert!(!record.autoconnect);
         assert_eq!(record.last_seen, Some(Millis(12_000)));
+        assert_eq!(
+            record.board_id, None,
+            "a row from before board id/chip existed loads with neither"
+        );
+        assert_eq!(record.chip, None);
     }
 }

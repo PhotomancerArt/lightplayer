@@ -20,7 +20,9 @@
 //! button that does nothing.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{DeviceAction, DeviceRosterView, DevicesOp, UiAction, UiHomeView};
+use lpa_studio_core::{
+    DeviceAction, DeviceRosterView, DevicesOp, UiAction, UiHomeView, split_roster,
+};
 
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::sim_card::SimCard;
@@ -32,7 +34,15 @@ use crate::core::ActionButton;
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn DevicesPage(home: UiHomeView, on_action: EventHandler<UiAction>) -> Element {
     let devices = home.devices.clone();
-    let remembered = home.remembered.clone();
+    // The names of boards the roster split as remembered (D7: an offline
+    // device is a quiet line, not a card). P2 only builds the split; P7
+    // wires its real tiles (Reconnect/Forget) into this page — this reads
+    // just the titles so the page keeps compiling meanwhile.
+    let remembered: Vec<String> = split_roster(&devices)
+        .remembered
+        .into_iter()
+        .map(|entry| entry.title)
+        .collect();
     // The registry's rows rehydrate into the roster, so the remembered list is
     // only worth showing when the roster has nothing — a store that has not
     // mounted yet, or rows the model could not key. Otherwise it would just

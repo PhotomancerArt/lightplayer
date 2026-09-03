@@ -220,6 +220,14 @@ rehydrated board keeps the identity line it already earned. The chip
 an app-layer concern, above this crate — see `docs/adr/2026-08-25-event-fold-device-model.md`
 and the device-card-v2 plan's D2.
 
+`DeviceView.firmware` carries the settled hello's raw firmware label
+verbatim (`HelloFacts::firmware`), `None` on any board that has not said
+hello this window. Unlike `board_id`/`chip` it is NOT record-backed — a
+window reset drops it, honestly, since firmware is a live report rather
+than a durable identity fact. The app-layer identity line (P2,
+`lpa-studio-core::device_identity_line`) reads it to render "fw …" or "no
+firmware".
+
 ## Validation
 
 ```bash

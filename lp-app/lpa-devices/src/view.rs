@@ -56,6 +56,12 @@ pub struct DeviceView {
     /// "a new project" entry is honestly disabled rather than guessing a
     /// pin map.
     pub board_id: Option<String>,
+    /// The firmware package/commit label a settled hello reported
+    /// (`HelloFacts::firmware`, e.g. `"fw-esp32c6 abc1234"`), verbatim.
+    /// `None` on any board that has not said hello this window — a blank
+    /// chip, a foreign one, or one merely quiet — which is exactly when the
+    /// identity line reads "no firmware" (device-card-v2 plan P2, D2).
+    pub firmware: Option<String>,
     /// The fold says this board wants firmware (blank, bootloader, foreign,
     /// or incompatible) — the face that offers a board pick + Flash.
     pub needs_firmware: bool,
@@ -274,6 +280,11 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
                     .as_ref()
                     .and_then(|record| record.board_id.clone())
             }),
+        firmware: device
+            .evidence
+            .classification
+            .hello()
+            .and_then(|hello| hello.firmware.clone()),
         needs_firmware: needs_firmware(&device.evidence.classification),
         degraded: degraded(device),
         // The mirror of the push condition, over the OTHER answer: a board

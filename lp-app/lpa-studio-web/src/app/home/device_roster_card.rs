@@ -42,8 +42,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceAction, DeviceActivityView, DeviceEscape, DeviceId, DeviceLoadedProject, DevicePushOp,
     DeviceStatus, DeviceView, DevicesOp, PendingLinkView, PushSourceGroup, UiAction, UiExampleCard,
-    UiPackageCard, UiStatus, device_escape_action, device_status_kind, flash_offer,
-    pending_escape_action, push_offer,
+    UiPackageCard, UiStatus, device_chip, device_escape_action, device_status_kind, flash_offer,
+    pending_escape_action, push_offer, reflash_choice,
 };
 
 use crate::base::icon::{NodeKindIcon, StudioIconName};
@@ -106,7 +106,7 @@ pub(crate) fn DeviceRosterCard(
     // the verb. Safe on a live board: the Flash activity parks a native-USB
     // chip in its ROM downloader first, and the merged image ends before
     // the lpfs partition, so the project and the efuse identity survive.
-    let reflash = reflash_choice(card.detected_chip.as_deref(), card.board_id.as_deref());
+    let reflash = reflash_choice(device_chip(&card).as_deref(), card.board_id.as_deref());
     // When the pick does NOT resolve (a chip with several boards and no
     // registered one — every board flashed before the hello carried its
     // board id), the verb opens the same picker the needs-firmware face
@@ -686,31 +686,6 @@ fn ActivityRow(activity: DeviceActivityView) -> Element {
     }
 }
 
-/// The board a RUNNING card re-flashes as, or `None` when the pick would be
-/// a guess: the registered board when the served catalog has it for the
-/// detected chip, else the chip's single fit, else nothing (the
-/// needs-firmware face owns the picker; this verb never shows one). A card
-/// with no detected chip gets no verb — the chip guard has nothing to check
-/// the pick against.
-fn reflash_choice(
-    detected_chip: Option<&str>,
-    registered_board: Option<&str>,
-) -> Option<lpa_studio_core::FlashBoardChoice> {
-    let chip = detected_chip?;
-    let offer = flash_offer(Some(chip));
-    offer
-        .candidates
-        .iter()
-        .find(|choice| Some(choice.board_id.as_str()) == registered_board)
-        .or_else(
-            || match (offer.preselect.as_deref(), offer.candidates.as_slice()) {
-                (Some(_), [only]) => Some(only),
-                _ => None,
-            },
-        )
-        .cloned()
-}
-
 fn card_class() -> &'static str {
     // `ux-armed-scope`: the card is the blast radius of its own armed
     // destructive chips — `:has(.ux-armed)` marks it (style.css).
@@ -782,43 +757,6 @@ mod tests {
     /// and it must be a SANCTIONED tone: the accent reckoning removed hue
     /// accents, so Attention is the one this state gets. A line in a colour
     /// nothing else uses is how a design language leaks.
-    /// The re-flash verb never guesses: the registered board wins, a lone
-    /// fit for the detected chip is the only other way in, and no chip
-    /// means no verb (the chip guard would have nothing to check). The
-    /// catalog carries TWO C6 boards, so a C6 with no registered board gets
-    /// the picker, not a pick.
-    #[test]
-    fn the_reflash_pick_is_the_registered_board_or_the_chips_only_fit() {
-        let registered = reflash_choice(Some("esp32c6"), Some("seeed/xiao-esp32-c6"))
-            .expect("the registered XIAO resolves against the served catalog");
-        assert_eq!(registered.board_id, "seeed/xiao-esp32-c6");
-        assert_eq!(registered.build_id, "esp32c6-4mb");
-        assert!(
-            registered.park_first,
-            "a native-USB chip parks in its downloader first"
-        );
-
-        // Without a registered board, the answer is exactly the offer's
-        // one-click preselect — never a pick from a list of several.
-        let offer = flash_offer(Some("esp32c6"));
-        let unregistered = reflash_choice(Some("esp32c6"), None);
-        assert_eq!(
-            unregistered.map(|choice| choice.board_id),
-            offer.preselect,
-            "no registered board: only a lone fit earns the pick",
-        );
-
-        // A registered board the chip cannot run falls back the same way,
-        // never to the mismatched registration.
-        let mismatched = reflash_choice(Some("esp32c6"), Some("dig-uno"));
-        assert_ne!(
-            mismatched.as_ref().map(|c| c.board_id.as_str()),
-            Some("dig-uno")
-        );
-
-        assert!(reflash_choice(None, Some("seeed/xiao-esp32-c6")).is_none());
-    }
-
     #[test]
     fn the_degraded_line_wears_the_same_tone_as_the_degraded_chip() {
         assert_eq!(

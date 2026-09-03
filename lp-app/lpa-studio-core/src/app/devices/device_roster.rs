@@ -17,16 +17,18 @@
 //! controller AFTER the fold — never inside it (invariant I7).
 
 use lpa_devices::event::{Command, Input};
+use lpa_devices::identity::DeviceId;
 use lpa_devices::journal::Scope;
 use lpa_devices::link::LinkId;
 use lpa_devices::record::DeviceRecord;
 use lpa_devices::roster::{Roster, RosterConfig};
 use lpa_devices::time::Millis;
-use lpa_devices::view::{RosterView, roster_view};
+use lpa_devices::view::{DeviceView, Escape, RosterView, roster_view};
 
 use crate::app::places::RegisteredDevice;
 
 use super::device_effects::{DeviceEffects, PendingWrites};
+use super::device_identity::device_identity_line;
 
 /// One journal line on its way to the device event log.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -66,6 +68,64 @@ impl Default for DeviceRosterView {
             transport_available: false,
             open_addresses: std::collections::BTreeMap::new(),
         }
+    }
+}
+
+/// The page's split of [`DeviceRosterView::roster`] into cards worth
+/// drawing and boards worth naming quietly underneath (D7: disconnect →
+/// disappear).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RosterSplit {
+    /// Every device the page draws as a card, in roster order.
+    pub connected: Vec<DeviceView>,
+    /// Boards Studio remembers but cannot currently see — the "N remembered
+    /// boards not connected" line's tiles.
+    pub remembered: Vec<RememberedView>,
+}
+
+/// One tile in the remembered line: enough to name the board and offer its
+/// two verbs, nothing else — an offline board draws no state zone, no
+/// terminal, no activity, because it has none of those live.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RememberedView {
+    pub id: DeviceId,
+    pub title: String,
+    /// The board's catalog display name, or its raw id, or `None` when the
+    /// board is not known at all yet — the same resolution the header's
+    /// identity line uses ([`device_identity_line`]).
+    pub board: Option<String>,
+    /// "last heard 12 s ago", when this session ever saw the board live.
+    /// `None` for a board rehydrated cold from the registry, which is
+    /// honest: nothing here has heard it this session.
+    pub last_seen_label: Option<String>,
+    /// Reconnect + Forget, straight off the view's own projection — never
+    /// re-derived, so the split can never offer an escape the model did not
+    /// grant (invariant I3).
+    pub escapes: Vec<Escape>,
+}
+
+/// Split a roster view into cards worth drawing and the quiet remembered
+/// line underneath (D7). Connected order is preserved; remembered devices
+/// keep the roster's own (last-seen-sorted) order too.
+pub fn split_roster(roster: &DeviceRosterView) -> RosterSplit {
+    let mut connected = Vec::new();
+    let mut remembered = Vec::new();
+    for device in &roster.roster.devices {
+        if device.status == lpa_devices::device::DeviceStatus::Offline {
+            remembered.push(RememberedView {
+                id: device.id,
+                title: device.title.clone(),
+                board: device_identity_line(device).board,
+                last_seen_label: device.freshness_label.clone(),
+                escapes: device.escapes.clone(),
+            });
+        } else {
+            connected.push(device.clone());
+        }
+    }
+    RosterSplit {
+        connected,
+        remembered,
     }
 }
 
@@ -385,5 +445,118 @@ mod tests {
             "device:3"
         );
         assert_eq!(scope_label(Scope::PendingLink(LinkId(1))), "pending-link:1");
+    }
+
+    fn offline_view(id: u64, title: &str, board_id: Option<&str>) -> DeviceView {
+        DeviceView {
+            id: DeviceId(id),
+            title: title.to_string(),
+            status: lpa_devices::device::DeviceStatus::Offline,
+            state_label: "Offline".to_string(),
+            detail: None,
+            freshness_label: Some("last heard 3 m ago".to_string()),
+            identity_label: Some(format!("dev{id}")),
+            detected_chip: None,
+            board_id: board_id.map(str::to_string),
+            firmware: None,
+            needs_firmware: false,
+            degraded: None,
+            loaded_project: lpa_devices::view::LoadedProject::Unknown,
+            can_receive_project: false,
+            can_remove_project: false,
+            activity: None,
+            last_outcome: None,
+            terminal: Vec::new(),
+            terminal_dropped: 0,
+            escapes: vec![Escape::Reconnect, Escape::Forget],
+        }
+    }
+
+    fn ready_view(id: u64, title: &str) -> DeviceView {
+        DeviceView {
+            id: DeviceId(id),
+            title: title.to_string(),
+            status: lpa_devices::device::DeviceStatus::Ready,
+            state_label: "Ready".to_string(),
+            detail: None,
+            freshness_label: None,
+            identity_label: None,
+            detected_chip: None,
+            board_id: None,
+            firmware: None,
+            needs_firmware: false,
+            degraded: None,
+            loaded_project: lpa_devices::view::LoadedProject::Empty,
+            can_receive_project: true,
+            can_remove_project: false,
+            activity: None,
+            last_outcome: None,
+            terminal: Vec::new(),
+            terminal_dropped: 0,
+            escapes: vec![Escape::Disconnect, Escape::Forget],
+        }
+    }
+
+    /// D7: an offline device is a remembered tile, not a card — carrying its
+    /// escapes verbatim (Reconnect + Forget, straight off the projection)
+    /// and its board resolved the same way the header's identity line
+    /// resolves one.
+    #[test]
+    fn split_roster_separates_offline_devices_into_remembered() {
+        let view = DeviceRosterView {
+            roster: RosterView {
+                devices: vec![
+                    ready_view(1, "Live board"),
+                    offline_view(2, "Porch sign", Some("seeed/xiao-esp32-c6")),
+                ],
+                pending: Vec::new(),
+            },
+            transport_available: true,
+            open_addresses: Default::default(),
+        };
+
+        let split = split_roster(&view);
+
+        assert_eq!(split.connected.len(), 1, "{split:?}");
+        assert_eq!(split.connected[0].title, "Live board");
+
+        assert_eq!(split.remembered.len(), 1, "{split:?}");
+        let remembered = &split.remembered[0];
+        assert_eq!(remembered.id, DeviceId(2));
+        assert_eq!(remembered.title, "Porch sign");
+        assert_eq!(
+            remembered.board.as_deref(),
+            Some("XIAO ESP32-C6"),
+            "the same catalog resolution as the identity line"
+        );
+        assert_eq!(
+            remembered.last_seen_label.as_deref(),
+            Some("last heard 3 m ago")
+        );
+        assert_eq!(remembered.escapes, vec![Escape::Reconnect, Escape::Forget]);
+    }
+
+    /// Roster order (last-seen-sorted) survives the split for the cards that
+    /// stay connected.
+    #[test]
+    fn split_roster_preserves_connected_order() {
+        let view = DeviceRosterView {
+            roster: RosterView {
+                devices: vec![ready_view(1, "A"), ready_view(2, "B"), ready_view(3, "C")],
+                pending: Vec::new(),
+            },
+            transport_available: true,
+            open_addresses: Default::default(),
+        };
+
+        let split = split_roster(&view);
+
+        let titles: Vec<&str> = split
+            .connected
+            .iter()
+            .map(|device| device.title.as_str())
+            .collect();
+        assert_eq!(titles, vec!["A", "B", "C"]);
+        assert!(split.remembered.is_empty());
     }
 }

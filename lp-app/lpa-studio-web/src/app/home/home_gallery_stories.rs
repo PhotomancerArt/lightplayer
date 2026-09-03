@@ -100,7 +100,6 @@ fn first_run() -> Element {
         projects: Vec::new(),
         examples: examples(),
         devices: Default::default(),
-        remembered: Vec::new(),
         library_available: true,
         opening: None,
         issue: None,
@@ -156,7 +155,6 @@ fn project_format_states() -> Element {
         projects,
         examples: examples(),
         devices: Default::default(),
-        remembered: Vec::new(),
         library_available: true,
         opening: None,
         issue: None,
@@ -175,7 +173,6 @@ fn populated() -> Element {
         projects: packages(),
         examples: examples(),
         devices: Default::default(),
-        remembered: Vec::new(),
         library_available: true,
         opening: None,
         issue: None,
@@ -198,7 +195,6 @@ fn project_open_in_another_tab() -> Element {
         projects,
         examples: examples(),
         devices: Default::default(),
-        remembered: Vec::new(),
         library_available: true,
         opening: None,
         issue: None,
@@ -217,7 +213,6 @@ fn opening_a_project() -> Element {
         projects: packages(),
         examples: examples(),
         devices: Default::default(),
-        remembered: Vec::new(),
         library_available: true,
         opening: None,
         issue: None,
@@ -447,7 +442,6 @@ fn sim_running_only() -> Element {
         projects,
         examples: examples(),
         devices: Default::default(),
-        remembered: Vec::new(),
         library_available: true,
         opening: None,
         issue: None,
@@ -463,7 +457,6 @@ fn sim_with_nothing_loaded() -> Element {
         projects: packages(),
         examples: examples(),
         devices: Default::default(),
-        remembered: Vec::new(),
         library_available: true,
         opening: None,
         issue: None,
@@ -471,7 +464,7 @@ fn sim_with_nothing_loaded() -> Element {
 }
 
 #[story(
-    description = "No transport (a browser without Web Serial, or a build without the provider): the Devices page says so rather than showing an empty roster, which would read as \"you have no devices\". The registry rows Studio still remembers are listed underneath."
+    description = "No transport (a browser without Web Serial, or a build without the provider): the Devices page says so rather than showing an empty roster, which would read as \"you have no devices\"."
 )]
 fn devices_page_without_a_transport() -> Element {
     gallery(UiHomeView {
@@ -479,10 +472,6 @@ fn devices_page_without_a_transport() -> Element {
         projects: packages(),
         examples: examples(),
         devices: DeviceRosterView::default(),
-        remembered: vec![
-            "Workbench ESP32".to_string(),
-            "Luna's porch sign".to_string(),
-        ],
         library_available: true,
         opening: None,
         issue: None,
@@ -498,7 +487,6 @@ fn devices_page_roster() -> Element {
         projects: packages(),
         examples: examples(),
         devices: roster_fixture(),
-        remembered: Vec::new(),
         library_available: true,
         opening: None,
         issue: None,
@@ -624,6 +612,7 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("dev000000daqf6dvvqz".to_string()),
                     detected_chip: Some("esp32".to_string()),
                     board_id: Some("dig-uno".to_string()),
+                    firmware: Some("fw-esp32v3 abc1234".to_string()),
                     needs_firmware: false,
                     degraded: None,
                     // The RUNNING face (M3): what the board itself reports,
@@ -655,6 +644,7 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("60:55:f9:0a:0b:0c".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: None,
+                    firmware: None,
                     needs_firmware: false,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
@@ -696,6 +686,7 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("dev000000000shelf01".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: None,
+                    firmware: None,
                     needs_firmware: true,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
@@ -728,6 +719,7 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("60:55:f9:0a:0b:0d".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: Some("seeed-xiao-esp32c6".to_string()),
+                    firmware: Some("fw-esp32c6 abc1234".to_string()),
                     needs_firmware: false,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Empty,
@@ -783,7 +775,6 @@ fn store_unavailable_with_issue() -> Element {
         projects: Vec::new(),
         examples: examples(),
         devices: Default::default(),
-        remembered: Vec::new(),
         library_available: false,
         opening: None,
         issue: Some(UiIssue::new("Failed to open serial port.")),

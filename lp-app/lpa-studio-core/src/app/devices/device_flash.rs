@@ -26,8 +26,16 @@
 //! - **Skip ALL naming**: the derived name is `"<board display_name> ·
 //!   <Mon D>"` with the ` 2`, ` 3` collision suffix, applied automatically
 //!   at flash time; `SetName` handles renames later.
+//!
+//! [`flash_offer`] and [`reflash_choice`] take a chip string, not a
+//! [`DeviceView`] — [`flash_offer_for`] is the honest call site: it reads
+//! the JOINED chip ([`device_identity::device_chip`]), which resolves a
+//! hello-only board's chip from its board id when the boot banner was never
+//! seen (device-card-v2 plan, P2's amendment).
 
 use lpa_devices::view::DeviceView;
+
+use super::device_identity::device_chip;
 
 /// One board the user can pick on the needs-firmware face.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -105,6 +113,43 @@ pub fn flash_offer(detected_chip: Option<&str>) -> FlashOffer {
         preselect,
         unavailable,
     }
+}
+
+/// [`flash_offer`], called with a view's JOINED chip rather than its raw
+/// `detected_chip` — the honest call site for the needs-firmware face and
+/// the pending-link face alike.
+pub fn flash_offer_for(view: &DeviceView) -> FlashOffer {
+    flash_offer(device_chip(view).as_deref())
+}
+
+/// The board a RUNNING card re-flashes as, or `None` when the pick would be
+/// a guess: the registered board when the served catalog has it for the
+/// joined chip, else the chip's single fit, else nothing (the
+/// needs-firmware face owns the picker; this verb never shows one). A card
+/// with no joined chip gets no verb — the chip guard has nothing to check
+/// the pick against.
+///
+/// `joined_chip` is [`device_chip`]'s answer, not the raw banner — a
+/// hello-only board (an already-running board the tab attached to, which
+/// never showed a boot banner) still resolves its re-flash pick from its
+/// board id this way.
+pub fn reflash_choice(
+    joined_chip: Option<&str>,
+    registered_board: Option<&str>,
+) -> Option<FlashBoardChoice> {
+    let chip = joined_chip?;
+    let offer = flash_offer(Some(chip));
+    offer
+        .candidates
+        .iter()
+        .find(|choice| Some(choice.board_id.as_str()) == registered_board)
+        .or_else(
+            || match (offer.preselect.as_deref(), offer.candidates.as_slice()) {
+                (Some(_), [only]) => Some(only),
+                _ => None,
+            },
+        )
+        .cloned()
 }
 
 /// The auto-derived device name: `"<board display_name> · <Mon D>"`, with
@@ -257,5 +302,100 @@ mod tests {
         assert_eq!(civil_from_days(11_016), (2000, 2, 29));
         // 2026-12-31.
         assert_eq!(civil_from_days(20_818), (2026, 12, 31));
+    }
+
+    /// The re-flash verb never guesses: the registered board wins, a lone
+    /// fit for the joined chip is the only other way in, and no chip means
+    /// no verb (the chip guard would have nothing to check). The catalog
+    /// carries TWO C6 boards, so a C6 with no registered board gets the
+    /// picker, not a pick.
+    ///
+    /// Moved from `lpa-studio-web`'s `device_roster_card.rs` (#500) — same
+    /// semantics, same test — per the device-card-v2 plan's P2 amendment.
+    #[test]
+    fn the_reflash_pick_is_the_registered_board_or_the_chips_only_fit() {
+        let registered = reflash_choice(Some("esp32c6"), Some("seeed/xiao-esp32-c6"))
+            .expect("the registered XIAO resolves against the served catalog");
+        assert_eq!(registered.board_id, "seeed/xiao-esp32-c6");
+        assert_eq!(registered.build_id, "esp32c6-4mb");
+        assert!(
+            registered.park_first,
+            "a native-USB chip parks in its downloader first"
+        );
+
+        // Without a registered board, the answer is exactly the offer's
+        // one-click preselect — never a pick from a list of several.
+        let offer = flash_offer(Some("esp32c6"));
+        let unregistered = reflash_choice(Some("esp32c6"), None);
+        assert_eq!(
+            unregistered.map(|choice| choice.board_id),
+            offer.preselect,
+            "no registered board: only a lone fit earns the pick",
+        );
+
+        // A registered board the chip cannot run falls back the same way,
+        // never to the mismatched registration.
+        let mismatched = reflash_choice(Some("esp32c6"), Some("dig-uno"));
+        assert_ne!(
+            mismatched.as_ref().map(|c| c.board_id.as_str()),
+            Some("dig-uno")
+        );
+
+        assert!(reflash_choice(None, Some("seeed/xiao-esp32-c6")).is_none());
+    }
+
+    /// The amendment's new case: a board seen only through its hello (no
+    /// boot banner, so `detected_chip` is `None`) still resolves its
+    /// re-flash pick, because the CALLER passes the joined chip
+    /// (`device_chip`, which reads the board id's catalog family) rather
+    /// than the raw banner field.
+    #[test]
+    fn a_hello_only_boards_reflash_pick_comes_from_its_board_id() {
+        use lpa_devices::device::DeviceStatus;
+        use lpa_devices::identity::DeviceId;
+        use lpa_devices::view::{DeviceView, Escape, LoadedProject};
+
+        let view = DeviceView {
+            id: DeviceId(1),
+            title: "Bench board".to_string(),
+            status: DeviceStatus::Ready,
+            state_label: "Ready".to_string(),
+            detail: None,
+            freshness_label: None,
+            identity_label: None,
+            // No boot banner: this board was already running when the tab
+            // attached, so the only chip fact is its hello's board id.
+            detected_chip: None,
+            board_id: Some("seeed/xiao-esp32-c6".to_string()),
+            firmware: Some("fw-esp32c6 abc1234".to_string()),
+            needs_firmware: false,
+            degraded: None,
+            loaded_project: LoadedProject::Empty,
+            can_receive_project: true,
+            can_remove_project: false,
+            activity: None,
+            last_outcome: None,
+            terminal: Vec::new(),
+            terminal_dropped: 0,
+            escapes: vec![Escape::Disconnect, Escape::Forget],
+        };
+
+        assert_eq!(
+            reflash_choice(device_chip(&view).as_deref(), view.board_id.as_deref())
+                .map(|choice| choice.board_id),
+            Some("seeed/xiao-esp32-c6".to_string()),
+            "a hello-only board resolves its own registered board, not just a lone fit"
+        );
+
+        // The same fixture, through the honest call site.
+        let offer = flash_offer_for(&view);
+        assert!(
+            !offer.candidates.is_empty(),
+            "the joined chip (esp32c6, from the board id) filters the offer: {offer:?}"
+        );
+        for candidate in &offer.candidates {
+            let board = lpa_boards::board_by_id(&candidate.board_id).expect("a real board");
+            assert_eq!(board.family, "esp32c6");
+        }
     }
 }
