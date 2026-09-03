@@ -37,7 +37,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    UiAction, UiAffordance, UiChromeSessionControl, UiChromeSessionStatus, UiPaneAction,
+    UiAction, UiAffordance, UiChromeSessionControl, UiChromeSessionKind, UiChromeSessionStatus,
+    UiPaneAction,
 };
 
 use crate::app::affordance::affordance_trigger_style;
@@ -98,7 +99,7 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
     // states worth announcing); a session with no project keeps the quiet
     // treatment rather than borrowing a status it does not have.
     let tone = style.map_or(IconMenuTone::Quiet, |style| style.tone);
-    let icon = style.map_or(kind_icon(), |style| style.icon);
+    let icon = style.map_or(kind_icon(session.kind), |style| style.icon);
     let label = control_label(&session, project.as_ref());
     // The save moment: the controller publishes Save/Revert on the editor's
     // `header_actions` exactly while persisted edits are pending, so their
@@ -109,13 +110,13 @@ pub fn SessionProjectControl(control: ChromeSessionControl) -> Element {
         .unwrap_or_default();
     let board = board_suffix(&session);
     let name = session.name.clone();
-    let kind_title = "This tab's session — the simulator";
+    let kind_title = kind_title(session.kind);
 
     let trigger = rsx! {
         // Device segment: kind glyph, D16 status dot, name, board suffix.
         span { class: SEGMENT_CLASS, title: "{kind_title}",
             span { class: kind_glyph_class(),
-                StudioIcon { name: kind_icon(), size: 12 }
+                StudioIcon { name: kind_icon(session.kind), size: 12 }
             }
             span { class: dot_class(session.status) }
             // The md fold: below the 900px cut the glyph and the dot carry
@@ -234,14 +235,14 @@ pub fn SessionPanel(
 ) -> Element {
     let run = run_word(&session);
     let stat_line = device_stat_line(&session);
-    let hint = session_hint();
+    let hint = session_hint(session.kind);
     rsx! {
         // Device zone: the muted band, so the panel's first read is "what
         // is running", not "what is edited".
         section { class: "tw:grid tw:gap-0.5 tw:bg-card-muted tw:px-3 tw:py-2",
             div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
                 span { class: kind_glyph_class(),
-                    StudioIcon { name: kind_icon(), size: 13 }
+                    StudioIcon { name: kind_icon(session.kind), size: 13 }
                 }
                 strong { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-sm tw:text-strong-foreground",
                     "{session.name}"
@@ -267,10 +268,21 @@ pub fn SessionPanel(
 }
 
 /// The session's kind glyph: the violet sim mark (the bound-family
-/// convention the sim card wears). The transport icons for hardware
-/// return with the rebuilt device model.
-fn kind_icon() -> StudioIconName {
-    StudioIconName::Simulator
+/// convention the sim card wears), or the USB mark for a board the editor
+/// is a lens on (round-2 M5).
+fn kind_icon(kind: UiChromeSessionKind) -> StudioIconName {
+    match kind {
+        UiChromeSessionKind::Sim => StudioIconName::Simulator,
+        UiChromeSessionKind::Device => StudioIconName::Usb,
+    }
+}
+
+/// The trigger's title for the kind segment.
+fn kind_title(kind: UiChromeSessionKind) -> &'static str {
+    match kind {
+        UiChromeSessionKind::Sim => "This tab's session — the simulator",
+        UiChromeSessionKind::Device => "This tab's session — the board the editor is open on",
+    }
 }
 
 fn kind_glyph_class() -> &'static str {
@@ -328,7 +340,10 @@ fn state_glyph_class(affordance: Option<UiAffordance>) -> &'static str {
 /// it simulates). Hardware never wore one — a board's own name IS the
 /// device name, and repeating it would read as two devices.
 fn board_suffix(session: &UiChromeSessionControl) -> Option<String> {
-    session.board.clone().filter(|board| !board.is_empty())
+    match session.kind {
+        UiChromeSessionKind::Sim => session.board.clone().filter(|board| !board.is_empty()),
+        UiChromeSessionKind::Device => None,
+    }
 }
 
 /// Save and Revert, picked out of the editor's `header_actions` by their
@@ -388,8 +403,15 @@ fn run_word(session: &UiChromeSessionControl) -> RunWord {
 /// The panel's footer line: the single-session policy said plainly, because
 /// the consequence of navigating away is otherwise invisible. The document
 /// is durable (the draft overlay persists) — the SESSION is what ends.
-fn session_hint() -> &'static str {
-    "This tab is the session — close it or navigate away to stop the simulator."
+fn session_hint(kind: UiChromeSessionKind) -> &'static str {
+    match kind {
+        UiChromeSessionKind::Sim => {
+            "This tab is the session — close it or navigate away to stop the simulator."
+        }
+        UiChromeSessionKind::Device => {
+            "This tab is the editor on the board — navigate away to close it; the board keeps running."
+        }
+    }
 }
 
 /// The trigger's accessible name and tooltip: both halves of what the
@@ -459,6 +481,7 @@ mod tests {
 
     fn session(board: Option<&str>) -> UiChromeSessionControl {
         UiChromeSessionControl {
+            kind: UiChromeSessionKind::Sim,
             key: "runtime-sim".to_string(),
             name: "Sim".to_string(),
             board: board.map(str::to_string),
@@ -533,7 +556,24 @@ mod tests {
     /// Leaving costs a stop; the hint has to say so.
     #[test]
     fn the_hint_names_what_leaving_actually_ends() {
-        assert!(session_hint().ends_with("stop the simulator."));
+        assert!(session_hint(UiChromeSessionKind::Sim).ends_with("stop the simulator."));
+        assert!(session_hint(UiChromeSessionKind::Device).ends_with("the board keeps running."));
+    }
+
+    /// A device lens wears the board's own name: no board suffix (it would
+    /// read as two devices), the USB glyph, and a hint that names the
+    /// editor, not the simulator.
+    #[test]
+    fn a_device_session_wears_its_own_name_and_the_usb_glyph() {
+        let device = UiChromeSessionControl {
+            kind: UiChromeSessionKind::Device,
+            name: "XIAO ESP32-C6 · Sep 1".to_string(),
+            board: Some("XIAO ESP32-C6".to_string()),
+            ..session(None)
+        };
+        assert_eq!(board_suffix(&device), None);
+        assert_eq!(kind_icon(device.kind), StudioIconName::Usb);
+        assert!(kind_title(device.kind).contains("board"));
     }
 
     /// The trigger is one button, so its accessible name carries both

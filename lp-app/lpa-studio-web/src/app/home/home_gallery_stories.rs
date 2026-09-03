@@ -536,6 +536,11 @@ fn devices_page_armed_confirm() -> Element {
 fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         transport_available: true,
+        // The running card has earned a registry row, so it has an editor
+        // address and the running face wears Open (round-2 M5).
+        open_addresses: [(1, "dev000000daqf6dvvqz".to_string())]
+            .into_iter()
+            .collect(),
         roster: RosterView {
             pending: vec![
                 PendingLinkView {

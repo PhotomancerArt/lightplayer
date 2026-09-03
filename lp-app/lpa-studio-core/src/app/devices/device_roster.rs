@@ -50,6 +50,10 @@ pub struct DeviceRosterView {
     /// build or a browser without Web Serial, and the page says so instead of
     /// showing an empty roster that looks like "no devices".
     pub transport_available: bool,
+    /// Each registered device's editor address (round-2 M5): the model's
+    /// handle → the registry uid `/device/<uid>` opens it by. A device
+    /// without a row (still identifying) has no honest address and no Open.
+    pub open_addresses: std::collections::BTreeMap<u64, String>,
 }
 
 impl Default for DeviceRosterView {
@@ -60,6 +64,7 @@ impl Default for DeviceRosterView {
                 pending: Vec::new(),
             },
             transport_available: false,
+            open_addresses: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -109,6 +114,33 @@ impl DeviceRoster {
 
     pub fn effects_mut(&mut self) -> &mut DeviceEffects {
         &mut self.effects
+    }
+
+    pub fn effects(&self) -> &DeviceEffects {
+        &self.effects
+    }
+
+    /// The registry uid a device's record lives under, when it has one — the
+    /// address the editor lens opens it by (round-2 M5).
+    pub fn key_for(&self, device: lpa_devices::DeviceId) -> Option<&str> {
+        self.keys.get(&device.0).map(String::as_str)
+    }
+
+    /// The device whose record lives under `key` (the `/device/<uid>`
+    /// address), when the roster holds it.
+    pub fn device_for_key(&self, key: &str) -> Option<&lpa_devices::Device> {
+        let id = self
+            .keys
+            .iter()
+            .find(|(_, uid)| uid.as_str() == key)
+            .map(|(id, _)| lpa_devices::DeviceId(*id))?;
+        self.roster.device(id)
+    }
+
+    /// Whether the model still routes this link — false once the port died
+    /// or was forgotten (the lens's unplug signal).
+    pub fn link_is_routable(&self, link: lpa_devices::LinkId) -> bool {
+        self.roster.link_info(link).is_some()
     }
 
     pub fn roster(&self) -> &Roster {
@@ -213,6 +245,7 @@ impl DeviceRoster {
         DeviceRosterView {
             roster: roster_view(&self.roster, now),
             transport_available: self.effects.is_wired(),
+            open_addresses: self.keys.clone(),
         }
     }
 

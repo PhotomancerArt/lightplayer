@@ -17,6 +17,13 @@
 //!
 //! Lines that are not `M!` frames (boot output, logs) are forwarded to the
 //! management event sink so the conversation's journal stays honest.
+//!
+//! The editor lens (round-2 M5) rides the same io, held open for as long as
+//! the lens is attached, with a **tap**: every drained line — frame or not —
+//! is handed to the caller verbatim before the io decodes it, so the device
+//! model's fold keeps receiving the evidence its paused pump would have.
+
+use std::rc::Rc;
 
 use async_trait::async_trait;
 use js_sys::{Function, Promise, Reflect};
@@ -60,6 +67,7 @@ pub async fn write_device_file(
         port_id,
         pending: Vec::new(),
         events: events.clone(),
+        tap: None,
     };
     let mut client = LpClient::new(io);
     let mut progress = progress_reporter(&events);
@@ -94,6 +102,7 @@ pub async fn remove_device_project(
         port_id,
         pending: Vec::new(),
         events: events.clone(),
+        tap: None,
     };
     let mut client = LpClient::new(io);
     let mut progress = progress_reporter(&events);
@@ -134,6 +143,7 @@ pub async fn push_device_project(
         port_id,
         pending: Vec::new(),
         events: events.clone(),
+        tap: None,
     };
     let mut client = LpClient::new(io);
     let mut progress = progress_reporter(&events);
@@ -148,6 +158,27 @@ pub async fn push_device_project(
     .map_err(|error| LinkError::other(format!("push failed: {error}")))
 }
 
+/// The editor lens's io over one port's raw line framing (round-2 M5).
+///
+/// Exactly the conversation io above, held open by the lens session's
+/// client instead of by one effect, with every drained line teed to `tap`
+/// before decoding. Non-frame lines are ALSO still reported through the
+/// management sink (`events`) for the lens session's own console. The port
+/// stays the model's: `close` is a no-op, and the effects layer's borrow
+/// release is what resumes the pump.
+pub fn lens_client_io(
+    port_id: u32,
+    tap: Rc<dyn Fn(LensTapLine)>,
+    events: LinkManagementEventSink,
+) -> Box<dyn ClientIo> {
+    Box::new(PortLineIo {
+        port_id,
+        pending: Vec::new(),
+        events,
+        tap: Some(tap),
+    })
+}
+
 /// `ClientIo` over one port's raw line framing.
 struct PortLineIo {
     port_id: u32,
@@ -155,6 +186,20 @@ struct PortLineIo {
     /// carry several).
     pending: Vec<WireServerMessage>,
     events: LinkManagementEventSink,
+    /// The lens tap: every drained line, verbatim, before decoding, and
+    /// every port error the JS controller reports. `None` for the one-shot
+    /// conversations (the paused pump has nothing to hear while an effect
+    /// runs; the fold waits for the end marker).
+    tap: Option<Rc<dyn Fn(LensTapLine)>>,
+}
+
+/// What the lens io tees: a line off the wire, or the controller's own
+/// error (the port died — unplug, revocation). Mirrors the studio's
+/// `LensTapEvent`; this crate stays independent of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LensTapLine {
+    Line(String),
+    PortError(String),
 }
 
 #[async_trait(?Send)]
@@ -164,7 +209,17 @@ impl ClientIo for PortLineIo {
             .map_err(|error| TransportError::Other(format!("encode failed: {error}")))?;
         browser_serial::write_line(self.port_id, &format!("M!{json}\n"))
             .await
-            .map_err(|error| TransportError::Other(error.to_string()))
+            .map_err(|error| {
+                // A write only fails when the port is gone or closed under
+                // us ("Serial port is not open." after an unplug — bench,
+                // 2026-09-02: the read pump ended silently and the write
+                // was the first thing to say so). The lens tap carries it
+                // so the fold hears the port die.
+                if let Some(tap) = &self.tap {
+                    tap(LensTapLine::PortError(error.to_string()));
+                }
+                TransportError::Other(error.to_string())
+            })
     }
 
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
@@ -173,7 +228,24 @@ impl ClientIo for PortLineIo {
             if !self.pending.is_empty() {
                 return Ok(self.pending.remove(0));
             }
+            if let Some(tap) = &self.tap {
+                // The controller's errors are the port dying underneath
+                // us (the pump's mark-gone rule); the lens hears them
+                // here because the pump is paused — and the conversation
+                // fails NOW rather than waiting out its budget on a port
+                // that is gone.
+                let errors = browser_serial::take_errors(self.port_id);
+                if let Some(first) = errors.first().cloned() {
+                    for error in errors {
+                        tap(LensTapLine::PortError(error));
+                    }
+                    return Err(TransportError::Other(first));
+                }
+            }
             for line in browser_serial::take_lines(self.port_id) {
+                if let Some(tap) = &self.tap {
+                    tap(LensTapLine::Line(line.clone()));
+                }
                 match line.strip_prefix("M!") {
                     Some(json) => match lpc_wire::json::from_str::<WireServerMessage>(json) {
                         Ok(message) => self.pending.push(message),

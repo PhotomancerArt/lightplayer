@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiNodeFace, UiPaneView, UiStudioView, UiViewContent};
+use lpa_studio_core::{UiAction, UiLensCard, UiNodeFace, UiPaneView, UiStudioView, UiViewContent};
 
 use crate::app::module::{PlayModeSurface, panel_gesture_actions};
 use crate::app::workbench::{WorkbenchFrame, WorkbenchHrefs, view_for_route};
@@ -178,14 +178,8 @@ pub fn StudioShell(
                     // control panel the gallery shows, docked as the
                     // editor's ONLY runtime surface. It is present
                     // whenever panes render (pinned in core by
-                    // `panes_never_render_without_a_lens_card`). The
-                    // retired step-stack device pane that used to
-                    // backstop this branch is gone.
-                    crate::app::home::sim_card::SimCard {
-                        pane: true,
-                        card: *card,
-                        on_action,
-                    }
+                    // `panes_never_render_without_a_lens_card`).
+                    LensCardPane { card: *card, on_action }
                 }
             }
         }
@@ -209,5 +203,31 @@ fn play_mode_face(
     match editor?.nodes.first()?.face.as_ref()? {
         UiNodeFace::Module(face) => Some(face.clone()),
         _ => None,
+    }
+}
+
+/// The docked lens card, by session kind (round-2 M5): the sim's grown
+/// card, or the roster's device card — the SAME `DeviceView` the gallery
+/// renders, with no picker lists (a board the editor is open on is running
+/// something; the empty face's picker belongs to the gallery).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn LensCardPane(card: UiLensCard, on_action: EventHandler<UiAction>) -> Element {
+    match card {
+        UiLensCard::Sim(card) => rsx! {
+            crate::app::home::sim_card::SimCard {
+                pane: true,
+                card,
+                on_action,
+            }
+        },
+        UiLensCard::Device(card) => rsx! {
+            crate::app::home::device_roster_card::DeviceRosterCard {
+                card,
+                projects: Vec::new(),
+                examples: Vec::new(),
+                on_action,
+            }
+        },
     }
 }

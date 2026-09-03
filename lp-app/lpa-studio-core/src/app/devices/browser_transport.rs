@@ -20,7 +20,7 @@ use lpa_link::{LinkEndpointId, LinkManagementEvent, LinkManagementEventSink, Lin
 
 use super::device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
-    DeviceTransportFuture, GrantedLink,
+    DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 
 /// Where the board runtime manifest lives on a device (read by the
@@ -258,5 +258,35 @@ impl DeviceTransport for BrowserSerialTransport {
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         })
+    }
+
+    fn lens_client_io(
+        &self,
+        info: LinkInfo,
+        tap: LensLineTap,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+        let endpoint = LinkEndpointId::new(info.endpoint.0);
+        // Console lines the lens io sees are ALREADY on their way to the
+        // fold through the tap (the card's terminal shows them); the
+        // management sink only needs to keep the io's own diagnostics
+        // (malformed frames) from vanishing.
+        let events = LinkManagementEventSink::new(|event| {
+            if let LinkManagementEvent::Log { message } = event {
+                log::debug!("lens io: {message}");
+            }
+        });
+        // The provider's tap vocabulary is its own (lpa-link stays
+        // independent of the studio's); the join is one match.
+        let tap: Rc<dyn Fn(lpa_link::providers::browser_serial_esp32::LensTapLine)> =
+            Rc::new(move |line| {
+                use lpa_link::providers::browser_serial_esp32::LensTapLine;
+                tap(match line {
+                    LensTapLine::Line(line) => LensTapEvent::Line(line),
+                    LensTapLine::PortError(error) => LensTapEvent::PortError(error),
+                })
+            });
+        self.provider
+            .lens_client_io(&endpoint, tap, events)
+            .map_err(|error| error.to_string())
     }
 }
