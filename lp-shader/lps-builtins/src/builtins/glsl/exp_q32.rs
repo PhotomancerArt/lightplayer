@@ -268,6 +268,130 @@ mod tests {
         );
     }
 
+    /// D1 candidate (NOT shipped — measurement only, see the plan's ship
+    /// gate): range-reduced `exp(x) = 2^k · exp(f)`, `k = round(x / ln 2)`,
+    /// `|f| ≤ ln2/2`, `exp(f)` by a degree-5 Maclaurin polynomial in Horner
+    /// form (truncation error < 2.5e-6, below one Q16.16 ulp). Same
+    /// saturation and underflow thresholds as the shipped series. Every
+    /// product is one 32×32→64 multiply, so it costs a fixed ~110 cycles on
+    /// the census (124 RV32 instructions, no calls, no divides).
+    fn exp_q32_candidate_range_reduced(x: i32) -> i32 {
+        if x == 0 {
+            return FIX16_ONE;
+        }
+        if x >= FIX16_MAX_EXP {
+            return i32::MAX;
+        }
+        if x <= FIX16_MIN_EXP {
+            return 0;
+        }
+        const INV_LN2_Q16: i64 = 94_548; // 1/ln2 · 2^16, rounded
+        const LN2_Q32: i64 = 2_977_044_472; // ln2 · 2^32, rounded
+        // k = round(x / ln2); f = x − k·ln2 in Q16.16 (reduced with a Q32 ln2
+        // so the reduction error stays well under one ulp of f).
+        let k = (((x as i64) * INV_LN2_Q16 + (1 << 31)) >> 32) as i32;
+        let f = ((((x as i64) << 16) - (k as i64) * LN2_Q32) >> 16) as i32;
+        // Horner: 1 + f(1 + f/2(1 + f/3(1 + f/4(1 + f/5)))) with Q16.16 products.
+        let q = |a: i32, b: i32| -> i32 { (((a as i64) * (b as i64)) >> 16) as i32 };
+        let mut p = FIX16_ONE + q(f, 13_107); // 1 + f/5
+        p = FIX16_ONE + q(q(f, p), 16_384); // 1 + f/4·p
+        p = FIX16_ONE + q(q(f, p), 21_845); // 1 + f/3·p
+        p = FIX16_ONE + q(q(f, p), 32_768); // 1 + f/2·p
+        p = FIX16_ONE + q(f, p); // 1 + f·p
+        let p = p as i64;
+        let scaled = if k >= 0 { p << k } else { p >> (-k) };
+        scaled.min(i32::MAX as i64) as i32
+    }
+
+    /// D1 measurement: accuracy of the shipped series and of the candidate
+    /// against `f64::exp`, over the whole series domain, in bands of |x|.
+    /// Prints the table under `--nocapture`; asserts only the candidate's own
+    /// bound so the numbers stay reproducible without gating anything.
+    #[test]
+    fn d1_candidate_accuracy_report() {
+        struct Band {
+            name: &'static str,
+            lo: f64,
+            hi: f64,
+            n: u64,
+            ship_max_ulp: f64,
+            ship_sum_ulp: f64,
+            ship_max_rel: f64,
+            cand_max_ulp: f64,
+            cand_sum_ulp: f64,
+            cand_max_rel: f64,
+        }
+        let mut bands = [
+            ("|x| < 1", 0.0, 1.0),
+            ("1 ≤ |x| < 4", 1.0, 4.0),
+            ("4 ≤ |x| < 8", 4.0, 8.0),
+            ("|x| ≥ 8", 8.0, 12.0),
+        ]
+        .map(|(name, lo, hi)| Band {
+            name,
+            lo,
+            hi,
+            n: 0,
+            ship_max_ulp: 0.0,
+            ship_sum_ulp: 0.0,
+            ship_max_rel: 0.0,
+            cand_max_ulp: 0.0,
+            cand_sum_ulp: 0.0,
+            cand_max_rel: 0.0,
+        });
+        for x in (FIX16_MIN_EXP + 1)..FIX16_MAX_EXP {
+            let xf = x as f64 / 65536.0;
+            let truth = xf.exp() * 65536.0;
+            if truth > i32::MAX as f64 {
+                continue; // both saturate by contract above ~10.397
+            }
+            let ship = __lps_exp_q32(x) as f64;
+            let cand = exp_q32_candidate_range_reduced(x) as f64;
+            let band = bands
+                .iter_mut()
+                .find(|b| xf.abs() >= b.lo && xf.abs() < b.hi)
+                .unwrap();
+            band.n += 1;
+            let (se, ce) = ((ship - truth).abs(), (cand - truth).abs());
+            band.ship_max_ulp = band.ship_max_ulp.max(se);
+            band.cand_max_ulp = band.cand_max_ulp.max(ce);
+            band.ship_sum_ulp += se;
+            band.cand_sum_ulp += ce;
+            // Relative error only where a Q16.16 ulp is below 2^-12 of the
+            // value (exp ≥ 1/16); below that the metric is ulp quantisation.
+            if truth >= 4096.0 {
+                band.ship_max_rel = band.ship_max_rel.max(se / truth);
+                band.cand_max_rel = band.cand_max_rel.max(ce / truth);
+            }
+        }
+        std::println!(
+            "\nD1 exp accuracy vs f64 (Q16.16 ulps; rel = max relative error where exp ≥ 1/16)"
+        );
+        std::println!(
+            "| band | inputs | shipped max ulp | shipped mean ulp | shipped max rel | candidate max ulp | candidate mean ulp | candidate max rel |"
+        );
+        std::println!("|---|---:|---:|---:|---:|---:|---:|---:|");
+        for b in &bands {
+            std::println!(
+                "| {} | {} | {:.0} | {:.2} | {:.2e} | {:.0} | {:.2} | {:.2e} |",
+                b.name,
+                b.n,
+                b.ship_max_ulp,
+                b.ship_sum_ulp / b.n as f64,
+                b.ship_max_rel,
+                b.cand_max_ulp,
+                b.cand_sum_ulp / b.n as f64,
+                b.cand_max_rel
+            );
+            assert!(
+                b.cand_max_rel < 1e-3,
+                "candidate relative error {:.2e} in band {}",
+                b.cand_max_rel,
+                b.name
+            );
+        }
+    }
+
     /// The implementation this file replaced (2026-09-02), kept verbatim as
     /// the oracle for the equivalence tests above, with private copies of the
     /// saturating i64 helpers it used so it does not depend on the refactored
