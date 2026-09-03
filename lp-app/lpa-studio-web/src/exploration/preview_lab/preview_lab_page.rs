@@ -156,7 +156,7 @@ pub fn PreviewLabPage() -> Element {
                 }
                 div { "wasm memory  {memory_line}  ·  js heap: {js_heap_line}" }
                 if !current.notes.is_empty() {
-                    div { class: "tw:text-warning-foreground",
+                    div { class: "tw:text-status-warning-foreground",
                         for note in current.notes.iter() {
                             div { "{note}" }
                         }
@@ -202,12 +202,12 @@ pub fn PreviewLabPage() -> Element {
                                     }
                                     div { "{stat_line}" }
                                     if let Some(reason) = tier_reason {
-                                        div { class: "tw:text-warning-foreground tw:break-words",
+                                        div { class: "tw:text-status-warning-foreground tw:break-words",
                                             "gpu→cpu: {reason}"
                                         }
                                     }
                                     if let Some(error) = error {
-                                        div { class: "tw:text-error-foreground tw:break-words", "{error}" }
+                                        div { class: "tw:text-status-error-foreground tw:break-words", "{error}" }
                                     }
                                 }
                             }

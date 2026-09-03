@@ -179,7 +179,9 @@ fn thumb_badge_class(badge: &ThumbPreviewBadge) -> &'static str {
     match badge {
         ThumbPreviewBadge::Gpu => "tw:border-border-strong tw:text-strong-foreground",
         ThumbPreviewBadge::Cpu { .. } => "tw:border-border-strong tw:text-muted-foreground",
-        ThumbPreviewBadge::Error { .. } => "tw:border-border-strong tw:text-error-foreground",
+        ThumbPreviewBadge::Error { .. } => {
+            "tw:border-border-strong tw:text-status-error-foreground"
+        }
     }
 }
 
