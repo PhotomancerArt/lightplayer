@@ -115,12 +115,5 @@ fn published_output_samples(rt: &LoadedProjectRuntime) -> Option<Vec<u16>> {
         .entries()
         .find_map(|entry| engine.runtime_output_sink_buffer_id(entry.id))?;
     let buffer = engine.runtime_buffers().get(buffer_id)?;
-    Some(
-        buffer
-            .value()
-            .bytes
-            .chunks_exact(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-            .collect(),
-    )
+    Some(buffer.value().samples16()?.to_vec())
 }

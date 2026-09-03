@@ -141,6 +141,10 @@ impl LpGraphics for TimingGraphics {
         self.inner.read_sample_out_into(out, dst)
     }
 
+    fn sample_out_data<'a>(&self, out: &'a SampleOutHandle) -> Result<&'a [u16], GfxError> {
+        self.inner.sample_out_data(out)
+    }
+
     fn read_sample_out(&self, out: &SampleOutHandle) -> Result<Vec<u16>, GfxError> {
         self.inner.read_sample_out(out)
     }

@@ -83,86 +83,119 @@ impl ResolvedMap2d {
 }
 
 /// Resolve a document into its ordered lamp list.
+///
+/// Built on [`resolve_into`]; the per-lamp `ResolvedLamp` rows (16 B each)
+/// are what the editor and tests want. A load path that only needs the
+/// positions should call `resolve_into` and skip them.
 pub fn resolve(doc: &Map2dDoc) -> Result<ResolvedMap2d, Map2dError> {
-    // The doc declares its lamp counts up front, so the lamp list is ONE
-    // exact-size allocation. Growing it push-by-push doubles capacity past
-    // the real need — at dome scale that is a device-killing contiguous ask
-    // (5,950 lamps: the 2048→4096-entry doubling asks 64 KiB mid-load, see
-    // docs/defects/2026-08-29-load-project-resets-instead-of-refusing.md).
-    // `shape_lamp_count` mirrors the resolver exactly (pinned by
-    // `shape_lamp_count_matches_the_resolver_for_every_kind`); for filled
-    // polygons it re-runs the lattice walk, which is editor-scale work.
+    let mut positions = Vec::new();
+    let mut spans = Vec::new();
+    resolve_into(doc, &mut positions, &mut spans)?;
+    let mut lamps = Vec::with_capacity(positions.len());
+    for span in &spans {
+        let first = span.start as usize;
+        for (offset, pos) in positions[first..first + span.count as usize]
+            .iter()
+            .enumerate()
+        {
+            lamps.push(ResolvedLamp {
+                index: span.start + offset as u32,
+                object: span.object,
+                pos: *pos,
+            });
+        }
+    }
+    debug_assert_eq!(lamps.len(), positions.len(), "spans cover every lamp");
+    Ok(ResolvedMap2d { lamps, spans })
+}
+
+/// Resolve a document into `positions` (doc space, wiring order) and `spans`,
+/// replacing their contents.
+///
+/// This is the resolver's streaming form: every shape writes straight into
+/// `positions`, so a load costs ONE exact-size 8 B/lamp buffer — the caller
+/// can fit it in place and keep it as the mapping. The `resolve` form's
+/// 16 B/lamp `ResolvedLamp` rows never exist here
+/// (docs/reports/2026-09-02-per-lamp-memory-table.md: at dome scale the rows
+/// were the load's largest single ask).
+///
+/// The doc declares its lamp counts up front, so `positions` is reserved to
+/// its exact size. Growing it push-by-push doubles capacity past the real
+/// need — at dome scale that is a device-killing contiguous ask (5,950 lamps:
+/// the 2048→4096-entry doubling asks 64 KiB mid-load, see
+/// docs/defects/2026-08-29-load-project-resets-instead-of-refusing.md).
+/// `shape_lamp_count` mirrors the resolver exactly (pinned by
+/// `shape_lamp_count_matches_the_resolver_for_every_kind`); for filled
+/// polygons it re-runs the lattice walk, which is editor-scale work.
+pub fn resolve_into(
+    doc: &Map2dDoc,
+    positions: &mut Vec<[f32; 2]>,
+    spans: &mut Vec<ObjectSpan>,
+) -> Result<(), Map2dError> {
     let total_lamps: usize = doc
         .objects
         .iter()
         .map(|object| shape_lamp_count(&object.shape) as usize)
         .sum();
-    let mut lamps = Vec::with_capacity(total_lamps);
-    let mut spans = Vec::new();
+    positions.clear();
+    positions.reserve_exact(total_lamps);
+    spans.clear();
+    let mut strands = Vec::new();
     for (object_index, object) in doc.objects.iter().enumerate() {
         let object_index = object_index as u32;
-        let start = lamps.len() as u32;
+        let start = positions.len() as u32;
         let invalid = |reason: &str| Map2dError::InvalidObject {
             object: object_index,
             name: object.name.clone(),
             reason: reason.to_string(),
         };
-        let ShapeLamps { positions, strands } = resolve_shape(&object.shape, &invalid)?;
-        for pos in positions {
-            let index = lamps.len() as u32;
-            lamps.push(ResolvedLamp {
-                index,
-                object: object_index,
-                pos,
-            });
-        }
+        strands.clear();
+        resolve_shape_into(&object.shape, &invalid, positions, &mut strands)?;
         // One span per strand, all naming this object. A plain shape has
         // exactly one; a repeat has one per instance.
         let mut strand_start = start;
-        for count in strands {
+        for count in &strands {
             spans.push(ObjectSpan {
                 object: object_index,
                 start: strand_start,
-                count,
+                count: *count,
             });
             strand_start += count;
         }
     }
     debug_assert_eq!(
-        lamps.len(),
+        positions.len(),
         total_lamps,
         "shape_lamp_count drifted from the resolver — the exact-size reserve is broken"
     );
-    Ok(ResolvedMap2d { lamps, spans })
+    Ok(())
 }
 
-/// What one shape resolves to: its lamp positions in wiring order, plus how
-/// those positions divide into physical strands.
-struct ShapeLamps {
-    positions: Vec<[f32; 2]>,
-    /// Lamp count of each strand, in wiring order; sums to `positions.len()`.
-    strands: Vec<u32>,
-}
-
-/// Resolve one shape, recursing through [`Map2dShape::Repeat`].
+/// Resolve one shape into `positions` (appending, wiring order) and its
+/// strand lengths into `strands`, recursing through [`Map2dShape::Repeat`].
 ///
 /// Every leaf shape is a single strand. Only `Repeat` multiplies them, and it
 /// does so by resolving its inner shape once and rotating the result, so a
 /// nested repeat's strand list is the outer count times the inner list.
-fn resolve_shape(
+fn resolve_shape_into(
     shape: &Map2dShape,
     invalid: &impl Fn(&str) -> Map2dError,
-) -> Result<ShapeLamps, Map2dError> {
-    let positions = match shape {
+    positions: &mut Vec<[f32; 2]>,
+    strands: &mut Vec<u32>,
+) -> Result<(), Map2dError> {
+    let leaf = match shape {
         Map2dShape::Grid(grid) => resolve_grid(grid, invalid)?,
         Map2dShape::Ring(ring) => resolve_ring(ring, invalid)?,
         Map2dShape::Path(path) => resolve_path(path, invalid)?,
         Map2dShape::Polygon(polygon) => resolve_polygon(polygon, invalid)?,
         Map2dShape::FilledPolygon(filled) => resolve_filled_polygon(filled, invalid)?,
-        Map2dShape::Repeat(repeat) => return resolve_repeat(repeat, invalid),
+        Map2dShape::Repeat(repeat) => {
+            return resolve_repeat_into(repeat, invalid, positions, strands);
+        }
     };
-    let strands = alloc::vec![positions.len() as u32];
-    Ok(ShapeLamps { positions, strands })
+    strands.push(leaf.len() as u32);
+    positions.extend_from_slice(&leaf);
+    Ok(())
 }
 
 /// `count` rotated copies of the inner shape, wired instance by instance.
@@ -172,24 +205,36 @@ fn resolve_shape(
 /// instance 0 comes out bit-identical to the unrotated inner shape because
 /// `sinf(0)`/`cosf(0)` are exact. All of instance 0's lamps precede all of
 /// instance 1's — instance `k` is physical strand `k`.
-fn resolve_repeat(
+///
+/// The inner shape is resolved once into its own (inner-sized) buffer and
+/// rotated `count` times straight into `positions`.
+fn resolve_repeat_into(
     repeat: &RepeatShape,
     invalid: &impl Fn(&str) -> Map2dError,
-) -> Result<ShapeLamps, Map2dError> {
+    positions: &mut Vec<[f32; 2]>,
+    strands: &mut Vec<u32>,
+) -> Result<(), Map2dError> {
     if repeat.count == 0 {
         return Err(invalid("repeat count must be at least 1"));
     }
-    let inner = resolve_shape(&repeat.shape, invalid)?;
-    let mut positions = Vec::with_capacity(inner.positions.len() * repeat.count as usize);
-    let mut strands = Vec::with_capacity(inner.strands.len() * repeat.count as usize);
+    let mut inner_positions = Vec::new();
+    let mut inner_strands = Vec::new();
+    resolve_shape_into(
+        &repeat.shape,
+        invalid,
+        &mut inner_positions,
+        &mut inner_strands,
+    )?;
+    positions.reserve(inner_positions.len() * repeat.count as usize);
+    strands.reserve(inner_strands.len() * repeat.count as usize);
     for instance in 0..repeat.count {
         let rotation = Rotation2d::about(repeat.center, repeat.instance_degrees(instance));
-        for position in &inner.positions {
+        for position in &inner_positions {
             positions.push(rotation.apply(*position));
         }
-        strands.extend_from_slice(&inner.strands);
+        strands.extend_from_slice(&inner_strands);
     }
-    Ok(ShapeLamps { positions, strands })
+    Ok(())
 }
 
 /// A rotation about a point, precomputed once and applied per point.
@@ -719,13 +764,24 @@ pub struct ObjectInstanceSpan {
 /// test against the resolver.
 #[must_use]
 pub fn object_instance_spans(doc: &Map2dDoc, resolved: &ResolvedMap2d) -> Vec<ObjectInstanceSpan> {
+    object_instance_spans_of(doc, &resolved.spans)
+}
+
+/// [`object_instance_spans`] from the span list alone — for a caller that
+/// already holds the spans (the engine's compact mapping carries them) and
+/// must not resolve the document a second time just to get them.
+#[must_use]
+pub fn object_instance_spans_of(
+    doc: &Map2dDoc,
+    resolved: &[ObjectSpan],
+) -> Vec<ObjectInstanceSpan> {
     let mut per_object_paths: Vec<Vec<Vec<u32>>> = Vec::with_capacity(doc.objects.len());
     for object in &doc.objects {
         per_object_paths.push(shape_instance_paths(&object.shape));
     }
     let mut cursor = alloc::vec![0usize; doc.objects.len()];
-    let mut spans = Vec::with_capacity(resolved.spans.len());
-    for span in &resolved.spans {
+    let mut spans = Vec::with_capacity(resolved.len());
+    for span in resolved {
         let object = span.object as usize;
         let instances = per_object_paths
             .get(object)
@@ -1975,6 +2031,53 @@ mod tests {
             ..Map2dDoc::new()
         };
         resolve(&doc).unwrap()
+    }
+
+    /// The streaming resolver is the resolver: same positions, same spans,
+    /// lamp for lamp, through a nested repeat (one strand per instance,
+    /// instances in order) followed by a plain object.
+    #[test]
+    fn resolve_into_agrees_with_resolve_lamp_for_lamp() {
+        let doc = Map2dDoc {
+            objects: vec![
+                object(Map2dShape::Repeat(RepeatShape {
+                    shape: Box::new(Map2dShape::Repeat(RepeatShape {
+                        shape: Box::new(Map2dShape::Path(square_corner_path())),
+                        center: [60.0, 30.0],
+                        count: 2,
+                    })),
+                    center: [0.0, 0.0],
+                    count: 3,
+                })),
+                object(Map2dShape::Ring(button_rings())),
+            ],
+            ..Map2dDoc::new()
+        };
+        let resolved = resolve(&doc).unwrap();
+        let mut positions = vec![[9.0, 9.0]];
+        let mut spans = vec![ObjectSpan {
+            object: 7,
+            start: 7,
+            count: 7,
+        }];
+        resolve_into(&doc, &mut positions, &mut spans).unwrap();
+
+        assert_eq!(positions.len(), resolved.lamps.len());
+        for (lamp, pos) in resolved.lamps.iter().zip(&positions) {
+            assert_eq!(lamp.pos, *pos, "lamp {}", lamp.index);
+        }
+        assert_eq!(spans, resolved.spans);
+        // 3 × 2 repeat instances = 6 strands, then the ring object's one.
+        assert_eq!(spans.len(), 7);
+        assert_eq!(
+            positions.capacity(),
+            positions.len(),
+            "the exact-size reserve is the point"
+        );
+        assert_eq!(
+            object_instance_spans_of(&doc, &spans),
+            object_instance_spans(&doc, &resolved)
+        );
     }
 
     fn object(shape: Map2dShape) -> Map2dObject {

@@ -25,8 +25,19 @@ use lpc_shared::output::{OutputDriverOptions, OutputFormat, OutputPortHandle, Ou
 /// Output syscalls will be added later if needed.
 pub struct SyscallOutputProvider {
     hardware_system: Rc<HardwareSystem>,
-    ports: RefCell<BTreeMap<OutputPortHandle, Box<dyn Ws281xOutput>>>,
+    ports: RefCell<BTreeMap<OutputPortHandle, EmuPort>>,
     next_handle: RefCell<u32>,
+}
+
+/// One open port: its virtual output and the 8-bit frame it renders into.
+///
+/// The frame buffer is kept per port, like the ESP32 provider's
+/// `PortState.frame`, so a steady-state write allocates nothing — a fresh
+/// 3 B/lamp `Vec` per write was the emulator's whole steady `frame`
+/// transient, which the device never paid.
+struct EmuPort {
+    output: Box<dyn Ws281xOutput>,
+    frame: Vec<u8>,
 }
 
 impl SyscallOutputProvider {
@@ -73,7 +84,13 @@ impl OutputProvider for SyscallOutputProvider {
         let handle_id = *self.next_handle.borrow();
         *self.next_handle.borrow_mut() += 1;
         let handle = OutputPortHandle::new(handle_id as i32);
-        self.ports.borrow_mut().insert(handle, output);
+        self.ports.borrow_mut().insert(
+            handle,
+            EmuPort {
+                output,
+                frame: Vec::with_capacity(byte_count as usize),
+            },
+        );
 
         println!(
             "[output] open: endpoint={}, bytes={}, format={:?}, handle={:?}",
@@ -85,14 +102,13 @@ impl OutputProvider for SyscallOutputProvider {
 
     fn write(&self, handle: OutputPortHandle, data: &[u16]) -> Result<(), OutputError> {
         let mut ports = self.ports.borrow_mut();
-        let output = ports
+        let port = ports
             .get_mut(&handle)
             .ok_or_else(|| OutputError::InvalidHandle {
                 handle: handle.as_i32(),
             })?;
-        let mut raw = Vec::with_capacity(data.len());
-        render_rgb8(data, &mut raw);
-        output.write(&raw)?;
+        render_rgb8(data, &mut port.frame);
+        port.output.write(&port.frame)?;
         println!("[output] write: handle={:?}, len={}", handle, data.len());
         Ok(())
     }

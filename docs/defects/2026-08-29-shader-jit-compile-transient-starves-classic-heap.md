@@ -92,6 +92,13 @@ PR #497)** — the "Next" list above, answered:
   load. Further zook savings are a backend question.
 - *Streaming/budget fix:* not needed at this size; the ceiling tests pin
   the shape instead (xt sentinel 37 KB, px corpus 112 KB host).
+- *The residents the compile runs on top of* are now tabulated per owner
+  and per lamp (`docs/reports/2026-09-02-per-lamp-memory-table.md`, plan
+  `2026-09-02-2154-per-lamp-memory-table`): zook's first-frame residents
+  went from 49 to 29 B/lamp device-side (the sample-out scratch copy and
+  the output node's two extra copies of every sample removed) and the
+  load peak from 32 to 8 B/lamp — 30 KB more headroom on the classic at
+  the moment this compile runs. Silicon bracket still owed.
 
 The other three findings stand: the compile still runs post-load with
 the project resident; exhaustion, not fragmentation, was the failure

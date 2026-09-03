@@ -99,9 +99,17 @@ Three separable steps, cheapest first:
    memory-pressure drop invalidates both atomically; a rewrite-only-on-key
    test pins both behaviours. Measured: frame retained −1,928 B at 241 LEDs
    (exactly 8 B/LED).
-2. **Render straight into the runtime buffer** (−6 B/LED). Requires the control
-   render target contract (`ControlRenderTarget { samples: &'a mut [u16] }`) to
-   admit a byte-backed target, which touches every control node.
+2. ~~**Render straight into the runtime buffer** (−6 B/LED).~~ **PAID DOWN
+   2026-09-02** (plan `2026-09-02-2154-per-lamp-memory-table`): the runtime
+   buffer stores output channels as `u16` (`RuntimeBufferData::Samples16`),
+   the output node takes that storage for the frame and hands it back at
+   publish, and the flush borrows it — `control_samples`, the LE byte copy,
+   and the flush-side decode (`flush_samples`, the "third leg") are all gone:
+   −12 B/LED resident per output and two copies per frame, with the control
+   render target contract untouched. The same pass removed a copy this entry
+   never counted: `FixtureNode::sampled_scratch`, an 8 B/LED CPU copy of the
+   RGBA16 sample-out refilled every frame, replaced by an in-place borrow
+   (`LpGraphics::sample_out_data`).
 3. ~~**Pack the resolved point list** (−17 B/LED).~~ **PAID DOWN for
    document-sourced fixtures 2026-08-04** (M6, branch
    `claude/m6-compact-mappings-f98a49`): the split held exactly as framed —
@@ -134,6 +142,17 @@ Three separable steps, cheapest first:
 - **2026-08-02** — 13 B/LED of the 89.5 paid down in #285 (conditional
   `DisplayPipeline` buffers, 9; `direct_points` right-sizing, 4). The three
   steps above are what remains.
+- **2026-09-02** — measured per owner at two lamp counts on the host and on
+  the emulator (`docs/reports/2026-09-02-per-lamp-memory-table.md`): before,
+  49 B/LED device-side engine residents (+8 mapping at load, +6–21 classic
+  `DisplayPipeline`); after step 2 + the sample-out borrow, 29 B/LED
+  (mapping 8, direct channels 4, sample points 8, sample target 8, output
+  samples 6, 8-bit frame 3 — every one a home, no copies). Load peak 32 →
+  8 B/LED: the map2d resolver streams into the carrier's own buffer and the
+  loader no longer resolves the document twice. zook emulator `frame`
+  retained 82,864 → 52,864 B; the classic reads ≈43 B/LED all-in with
+  interpolation off. The remaining lamp-scaled copy is the classic's
+  `DisplayPipeline.current` (6 B/LED, +12 with interpolation).
 - **2026-08-03** — step 1 paid down in PR #303 (−8 B/LED resident, −8 B/LED
   per-frame transient churn). Step 2 is deferred while PR #301's P2 rewrites
   the flush path it would touch; the u16→u8 copy it targets gained a third

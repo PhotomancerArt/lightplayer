@@ -33,6 +33,9 @@ struct PortState {
     format: OutputFormat,
     output: Box<dyn Ws281xOutput>,
     data: Vec<u16>,
+    /// The 8-bit frame the port renders into, kept across writes like the
+    /// ESP32 provider's `PortState.frame` (no per-write allocation).
+    raw: Vec<u8>,
 }
 
 /// Internal state for memory provider (wrapped in RefCell for interior mutability)
@@ -181,6 +184,7 @@ impl OutputProvider for MemoryOutputProvider {
             format,
             output,
             data: vec![0u16; u16_count],
+            raw: Vec::with_capacity(u16_count),
         };
 
         // Store state
@@ -218,9 +222,8 @@ impl OutputProvider for MemoryOutputProvider {
             });
         }
 
-        let mut raw = Vec::with_capacity(port_state.data.len());
-        render_rgb8(data, port_state.data.len(), &mut raw);
-        port_state.output.write(&raw)?;
+        render_rgb8(data, port_state.data.len(), &mut port_state.raw);
+        port_state.output.write(&port_state.raw)?;
 
         // Store data
         let len = port_state.data.len();

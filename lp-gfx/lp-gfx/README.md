@@ -17,7 +17,10 @@ engine (`lpc-engine`) and shader execution backends.
   (`TextureData`); `create_texture` / `write_texture` /
   `write_sample_points` / `read_sample_out` move bytes the other way. The
   contract is "bytes come back", regardless of where a backend keeps its
-  textures resident.
+  textures resident. The one exception is the sample-out: every backend
+  keeps it host-visible, so `sample_out_data` borrows it in place and a
+  frame path reads its samples without a copy (the fixture node's per-frame
+  read is that borrow — no 8 B/lamp scratch).
 - **`ShaderCompileOptions`** with an explicit `ShaderSemantics` tier
   (`Q32 | F32Gpu`) and **`GfxError`**.
 

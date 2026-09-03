@@ -181,6 +181,10 @@ impl LpGraphics for CountingGraphics {
         self.inner.read_sample_out_into(out, dst)
     }
 
+    fn sample_out_data<'a>(&self, out: &'a SampleOutHandle) -> Result<&'a [u16], GfxError> {
+        self.inner.sample_out_data(out)
+    }
+
     fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {
         self.inner.clear_sample_out(out)
     }
