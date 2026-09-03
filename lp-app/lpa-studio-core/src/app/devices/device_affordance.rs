@@ -25,7 +25,10 @@ pub fn device_status_kind(status: DeviceStatus) -> UiStatusKind {
         // Not an error: a board that is plugged in and has not been asked
         // anything is fine, and one that is unplugged is not a fault.
         DeviceStatus::Attached | DeviceStatus::Offline => UiStatusKind::Neutral,
-        DeviceStatus::NeedsAttention => UiStatusKind::Attention,
+        // A running board with a faulted node or a non-green recovery
+        // state: the same tone as a board that needs firmware, because it
+        // wants the same thing — a person to look at it.
+        DeviceStatus::Degraded | DeviceStatus::NeedsAttention => UiStatusKind::Attention,
         DeviceStatus::NotResponding => UiStatusKind::Warning,
     }
 }
@@ -79,6 +82,16 @@ mod tests {
         assert_eq!(
             device_status_kind(DeviceStatus::NotResponding),
             UiStatusKind::Warning
+        );
+        assert_eq!(
+            device_status_kind(DeviceStatus::Degraded),
+            UiStatusKind::Attention,
+            "a degraded board must not wear the Ready tone"
+        );
+        assert_ne!(
+            device_status_kind(DeviceStatus::Degraded),
+            device_status_kind(DeviceStatus::Ready),
+            "the whole point of Degraded is that it does not read as Ready"
         );
     }
 

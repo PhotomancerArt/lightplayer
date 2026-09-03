@@ -41,6 +41,16 @@ use crate::link::{LinkCommand, LinkId};
 use crate::record::DeviceRecord;
 use crate::roster::ModelCtx;
 use crate::time::Millis;
+use crate::wire::ClientFrame;
+
+/// Correlation ids for the two frames [`Action::ClearFaults`] sends.
+///
+/// Constants rather than a counter because nothing correlates them: the fold
+/// reads a frame's BODY, and every activity already restarts its own ids at
+/// 1 (see `IdentifyActivity::ask`). A number that only ever appears in a
+/// journal line earns no state on the device.
+const CLEAR_FAULTS_REQUEST_ID: u32 = 1;
+const CLEAR_FAULTS_REREAD_REQUEST_ID: u32 = 2;
 
 /// One known device.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -503,6 +513,42 @@ impl Device {
                 commands.extend(self.spawn_identify(now, ctx));
                 commands
             }
+            Action::ClearFaults { .. } => {
+                // A direct gesture like ResetBoard, and for the same reason:
+                // there is nothing to supervise. The device answers and then
+                // does NOTHING — no reboot, no re-load — because the cleared
+                // ledger takes effect on its own next tick. An activity that
+                // owns the port would have its correlation walked over, so
+                // this is refused while one runs (I5), and with no link there
+                // is nobody to ask.
+                if self.activity.is_some() {
+                    return Vec::new();
+                }
+                let Some(link) = self.link() else {
+                    return Vec::new();
+                };
+                // Asked for, not waited for: the loaded-project report is
+                // what carries each project's fault verdict, and a card that
+                // kept saying Degraded for a whole heartbeat period after
+                // the user cleared it would read as a verb that did nothing.
+                // The answer is honest either way — a failure that is still
+                // there faults again on the next tick and the following
+                // heartbeat re-degrades the card.
+                vec![
+                    Command::Link {
+                        link,
+                        command: LinkCommand::SendFrame(ClientFrame::clear_faults(
+                            CLEAR_FAULTS_REQUEST_ID,
+                        )),
+                    },
+                    Command::Link {
+                        link,
+                        command: LinkCommand::SendFrame(ClientFrame::list_loaded(
+                            CLEAR_FAULTS_REREAD_REQUEST_ID,
+                        )),
+                    },
+                ]
+            }
             Action::RemoveProject { .. } => {
                 // Clearing a board implies staying connected to put
                 // something else on it — the empty face is the next stop.
@@ -844,6 +890,14 @@ pub enum DeviceStatus {
     Busy,
     /// Identified as a usable LightPlayer.
     Ready,
+    /// A usable LightPlayer that is running something BROKEN: a node in
+    /// fault, or a crash-recovery state it reported as not green.
+    ///
+    /// Still a running board — the loaded-project face stays `Running` —
+    /// but "Ready" over a show that is painting the fault pattern is the
+    /// lie this status exists to stop (2026-09-01 bench: two days of
+    /// "Running" over a black strip).
+    Degraded,
     /// Identified as something else: blank, bootloader, foreign,
     /// incompatible.
     NeedsAttention,
@@ -870,10 +924,16 @@ impl Device {
         // they are actionable exactly as stored, listening or not.
         match &self.evidence.classification {
             Classification::LightPlayer { .. } => {
-                if self.evidence.presence.is_open() {
-                    DeviceStatus::Ready
-                } else {
-                    DeviceStatus::Attached
+                if !self.evidence.presence.is_open() {
+                    return DeviceStatus::Attached;
+                }
+                // Degradation is a refinement of Ready, never of a verdict
+                // that already asks for action: a board we are not
+                // listening to has nothing current to say about its own
+                // health, and a blank chip has no project to fault.
+                match self.evidence.is_degraded() {
+                    true => DeviceStatus::Degraded,
+                    false => DeviceStatus::Ready,
                 }
             }
             Classification::Incompatible { .. }

@@ -126,6 +126,25 @@ pub enum Action {
     ResetBoard {
         device: DeviceId,
     },
+    /// Forget what the board is holding against itself: clear its
+    /// crash-recovery ledger and re-arm every node that faulted.
+    ///
+    /// A verb rather than something the board does for itself, because a
+    /// quarantine has no expiry: two crashes on one path disable it until
+    /// the recovery region is invalidated, which only a power cycle does.
+    /// [`Self::ResetBoard`] is not that — a software reset demotes red to
+    /// yellow for ONE retry, and a failure that is still there re-gates on
+    /// the first crash. So the board that quarantined its only shader kept
+    /// rendering black with every log healthy (2026-09-01 bench), and the
+    /// only fix in the field was walking to the USB cable.
+    ///
+    /// This is the honest retry: it clears the accusation, it fixes
+    /// nothing, and if the failure recurs the card degrades again within a
+    /// heartbeat. Direct, like [`Self::ResetBoard`] — one request, no
+    /// activity, nothing to wait for on the board.
+    ClearFaults {
+        device: DeviceId,
+    },
     /// Factory reset: wipe the board's flash entirely (firmware, projects,
     /// everything stored). Identity survives by design — it lives in the
     /// efuse (ADR 2026-08-04) — so the entry and its registry row stay, and
@@ -169,6 +188,7 @@ impl Action {
             | Self::Erase { device }
             | Self::RemoveProject { device }
             | Self::ResetBoard { device }
+            | Self::ClearFaults { device }
             | Self::SetName { device, .. }
             | Self::SetAutoconnect { device, .. } => Some(*device),
             Self::AddFromUsb

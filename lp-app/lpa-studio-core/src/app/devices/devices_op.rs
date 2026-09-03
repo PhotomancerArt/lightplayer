@@ -131,6 +131,15 @@ impl ControllerOp for DevicesOp {
                 "Reboot the board (a hardware reset) and identify what starts up.",
                 ActionPriority::Secondary,
             ),
+            // No confirmation: it takes nothing away. The worst case is a
+            // crash the ledger records again — which is what the second
+            // sentence promises rather than hides.
+            Action::ClearFaults { .. } => ActionMeta::new(
+                "Clear faults",
+                "Forget the crash ledger and retry the quarantined nodes. \
+                 If the fault recurs the card degrades again.",
+                ActionPriority::Secondary,
+            ),
             Action::Erase { .. } => ActionMeta::new(
                 "Factory reset",
                 "Erase the firmware and everything stored on this board.",
@@ -239,6 +248,8 @@ mod tests {
                 device,
                 enabled: true,
             },
+            Action::ResetBoard { device },
+            Action::ClearFaults { device },
         ] {
             let op = DevicesOp(action.clone());
             assert!(
@@ -247,6 +258,28 @@ mod tests {
             );
             assert_eq!(op.action_class(), ActionClass::Recovery, "{action:?}");
         }
+    }
+
+    /// Clear faults asks nothing and threatens nothing: it takes no
+    /// project, no firmware and no record away, and the worst case — the
+    /// fault comes straight back — is what its own description promises.
+    /// A confirm here would train people to click through the ones that
+    /// matter.
+    #[test]
+    fn clearing_faults_is_reversible_and_asks_nothing() {
+        let meta = DevicesOp(Action::ClearFaults {
+            device: DeviceId(1),
+        })
+        .default_action_meta();
+        assert_eq!(meta.label, "Clear faults");
+        assert!(!meta.destructive);
+        assert!(meta.confirmation.is_none());
+        assert_eq!(meta.priority, ActionPriority::Secondary);
+        assert!(
+            meta.summary.contains("degrades again"),
+            "the honest outcome is part of the offer: {}",
+            meta.summary
+        );
     }
 
     /// The two irreversible ones ask first. Forget is reachable everywhere by

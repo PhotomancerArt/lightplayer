@@ -4889,7 +4889,12 @@ mod tests {
         rt.tree()
             .entries()
             .filter_map(|entry| match entry.status.value() {
-                NodeRuntimeStatus::Error(message) => Some(format!("{:?}: {message}", entry.path)),
+                // Faults count: a shader the recovery ledger quarantined or a
+                // tick that trapped hides behind the same black fallback an
+                // authoring error does.
+                NodeRuntimeStatus::Error(message) | NodeRuntimeStatus::Fault(message) => {
+                    Some(format!("{:?}: {message}", entry.path))
+                }
                 _ => None,
             })
             .collect()

@@ -2,7 +2,7 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use lp_collection::VecMap;
 
 use lpc_model::{
@@ -10,7 +10,7 @@ use lpc_model::{
     SlotPathSegment, SlotShapeRegistry, SlotShapeRegistryError, Slotted, TreePath, ValueSlot,
 };
 use lpc_registry::ProjectRegistry;
-use lpc_wire::{WireChildKind, WireSlotIndex};
+use lpc_wire::{NodeRuntimeStatus, WireChildKind, WireSlotIndex};
 use lps_shared::LpsValueF32;
 
 use crate::dataflow::binding::{
@@ -37,6 +37,7 @@ pub(crate) struct EngineTestBuilder {
     fixture_records: VecMap<String, RecordedValue>,
     output_records: VecMap<String, RecordedValue>,
     selectors: VecMap<String, Arc<AtomicU32>>,
+    failing: VecMap<String, Arc<AtomicBool>>,
 }
 
 pub(crate) struct EngineTestHarness {
@@ -47,6 +48,7 @@ pub(crate) struct EngineTestHarness {
     fixture_records: VecMap<String, RecordedValue>,
     output_records: VecMap<String, RecordedValue>,
     selectors: VecMap<String, Arc<AtomicU32>>,
+    failing: VecMap<String, Arc<AtomicBool>>,
 }
 
 pub(crate) struct OutputSpec {
@@ -76,7 +78,35 @@ impl EngineTestBuilder {
             fixture_records: VecMap::new(),
             output_records: VecMap::new(),
             selectors: VecMap::new(),
+            failing: VecMap::new(),
         }
+    }
+
+    /// A producer whose `produce` returns `Err` while its switch is on —
+    /// the engine's tick-failure site, which is also where a crash-recovery
+    /// denial arrives (`catch_node_panic_framed` hands back an `Err`).
+    /// Toggle it through [`EngineTestHarness::set_failing`].
+    pub(crate) fn failing_producer(mut self, label: &str, slot: OutputSpec, message: &str) -> Self {
+        let failing = Arc::new(AtomicBool::new(true));
+        let node = FailingProducerNode::new(
+            slot.path,
+            slot.value,
+            String::from(message),
+            Arc::clone(&failing),
+        );
+        self.attach_node(label, "shader", Box::new(node));
+        self.failing.insert(String::from(label), failing);
+        self
+    }
+
+    /// A consumer that TOLERATES a failed resolve and reports its own
+    /// status, the way `FixtureNode` reports `input_error` and renders
+    /// unlit. Without it every producer-fault test would also fault its
+    /// consumer, and keeping the two statuses distinct is the point.
+    pub(crate) fn tolerant_fixture(mut self, label: &str, status: NodeRuntimeStatus) -> Self {
+        let node = TolerantFixtureNode::new(default_demand_input_path(), status);
+        self.attach_node(label, "fixture", Box::new(node));
+        self
     }
 
     pub(crate) fn shader(mut self, label: &str, slot: OutputSpec) -> Self {
@@ -187,6 +217,7 @@ impl EngineTestBuilder {
             fixture_records: self.fixture_records,
             output_records: self.output_records,
             selectors: self.selectors,
+            failing: self.failing,
         }
     }
 
@@ -312,6 +343,25 @@ impl EngineTestHarness {
 
     pub(crate) fn tick(&mut self, delta_ms: u32) -> Result<(), super::EngineError> {
         self.engine.tick(&self.registry, delta_ms)
+    }
+
+    /// Turn a [`EngineTestBuilder::failing_producer`]'s failure on or off.
+    pub(crate) fn set_failing(&self, label: &str, failing: bool) {
+        self.failing
+            .get(label)
+            .expect("failing producer label")
+            .store(failing, Ordering::Relaxed);
+    }
+
+    /// The runtime status the tree currently carries for `label`.
+    pub(crate) fn status(&self, label: &str) -> NodeRuntimeStatus {
+        self.engine
+            .tree()
+            .get(self.node(label))
+            .expect("test node entry")
+            .status
+            .value()
+            .clone()
     }
 }
 
@@ -484,6 +534,104 @@ impl NodeRuntime for DummyShaderNode {
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
         DummyShaderState::register_runtime_state_shape(registry).map(|_| ())
+    }
+}
+
+/// See [`EngineTestBuilder::failing_producer`].
+pub(crate) struct FailingProducerNode {
+    state: DummyShaderState,
+    message: String,
+    failing: Arc<AtomicBool>,
+}
+
+impl FailingProducerNode {
+    fn new(slot: SlotPath, value: LpsValueF32, message: String, failing: Arc<AtomicBool>) -> Self {
+        let mut outputs = VecMap::new();
+        outputs.insert(output_key(&slot), ValueSlot::new(f32_value(value)));
+        Self {
+            state: DummyShaderState {
+                outputs: MapSlot::with_version(Revision::new(0), outputs),
+            },
+            message,
+            failing,
+        }
+    }
+}
+
+impl NodeRuntime for FailingProducerNode {
+    fn produce(
+        &mut self,
+        _slot: &SlotPath,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
+        if self.failing.load(Ordering::Relaxed) {
+            return Err(NodeError::msg(self.message.clone()));
+        }
+        for output in self.state.outputs.entries.values_mut() {
+            output.set_with_version(ctx.revision(), *output.value());
+        }
+        Ok(ProduceResult::Produced)
+    }
+
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
+        Ok(())
+    }
+
+    fn handle_memory_pressure(
+        &mut self,
+        _level: PressureLevel,
+        _ctx: &mut MemPressureCtx,
+    ) -> Result<(), NodeError> {
+        Ok(())
+    }
+
+    fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
+        Some(&self.state)
+    }
+
+    fn register_runtime_state_shapes(
+        &self,
+        registry: &mut SlotShapeRegistry,
+    ) -> Result<(), SlotShapeRegistryError> {
+        DummyShaderState::register_runtime_state_shape(registry).map(|_| ())
+    }
+}
+
+/// See [`EngineTestBuilder::tolerant_fixture`].
+pub(crate) struct TolerantFixtureNode {
+    slot: SlotPath,
+    status: NodeRuntimeStatus,
+}
+
+impl TolerantFixtureNode {
+    fn new(slot: SlotPath, status: NodeRuntimeStatus) -> Self {
+        Self { slot, status }
+    }
+}
+
+impl NodeRuntime for TolerantFixtureNode {
+    fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        let _ = ctx.resolve(&QueryKey::ConsumedSlot {
+            node: ctx.node_id(),
+            slot: self.slot.clone(),
+        });
+        Ok(())
+    }
+
+    fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
+        Some(self.status.clone())
+    }
+
+    fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
+        Ok(())
+    }
+
+    fn handle_memory_pressure(
+        &mut self,
+        _level: PressureLevel,
+        _ctx: &mut MemPressureCtx,
+    ) -> Result<(), NodeError> {
+        Ok(())
     }
 }
 

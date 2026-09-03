@@ -23,6 +23,7 @@ use crate::identity::DeviceId;
 use crate::link::LinkId;
 use crate::roster::{PendingLink, Roster};
 use crate::time::{Millis, describe_age_ms};
+use crate::wire::{ProjectFaultFacts, RecoveryFacts, RecoveryLevelFacts, RecoveryPathFacts};
 
 /// Everything the device surface needs to draw itself.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -58,6 +59,15 @@ pub struct DeviceView {
     /// The fold says this board wants firmware (blank, bootloader, foreign,
     /// or incompatible) — the face that offers a board pick + Flash.
     pub needs_firmware: bool,
+    /// ONE line naming why a running board is not running well: a node in
+    /// fault, or a recovery state the device reported as not green.
+    ///
+    /// It rides UNDER the running face rather than replacing it — a
+    /// degraded board is still running, and a card that dropped the project
+    /// name would answer "what is on it?" with a complaint. `None` = the
+    /// board reported nothing wrong, which on an embedder that reports no
+    /// recovery at all means only "no fault", never "healthy".
+    pub degraded: Option<String>,
     /// What the board says it is running. The empty face and the running
     /// face are the two answers; [`LoadedProject::Unknown`] is the third,
     /// and it offers neither rather than guessing.
@@ -222,13 +232,31 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         detail: detail(device),
         freshness_label: freshness_label(device, now),
         identity_label: device.identity.strongest_label(),
-        detected_chip: device.evidence.detected_chip().map(str::to_string),
+        // A boot banner names the chip for a board seen booting; a board
+        // that was already running when the tab attached never shows one,
+        // but its hello names the firmware PACKAGE ("fw-esp32c6 abc1234"),
+        // which is the chip by another name (G1 2026-09-02: the re-flash
+        // verb on a running card never appeared without this).
+        detected_chip: device
+            .evidence
+            .detected_chip()
+            .map(str::to_string)
+            .or_else(|| {
+                device
+                    .evidence
+                    .classification
+                    .hello()
+                    .and_then(|hello| hello.firmware.as_deref())
+                    .and_then(chip_from_firmware_label)
+                    .map(str::to_string)
+            }),
         board_id: device
             .evidence
             .classification
             .hello()
             .and_then(|hello| hello.board_id.clone()),
         needs_firmware: needs_firmware(&device.evidence.classification),
+        degraded: degraded(device),
         // The mirror of the push condition, over the OTHER answer: a board
         // that reported something running, on an open port, idle.
         can_remove_project: matches!(loaded, LoadedProject::Running { .. })
@@ -275,6 +303,20 @@ fn needs_firmware(classification: &Classification) -> bool {
     )
 }
 
+/// The chip family a firmware label ("fw-esp32c6 abc1234") was built for,
+/// in the catalog's family vocabulary — the classic's package is `fw-esp32v3`
+/// and its family is plain `esp32`. Unknown packages answer nothing rather
+/// than a guess.
+fn chip_from_firmware_label(label: &str) -> Option<&'static str> {
+    let package = label.split_whitespace().next()?;
+    match package {
+        "fw-esp32c6" => Some("esp32c6"),
+        "fw-esp32s3" => Some("esp32s3"),
+        "fw-esp32v3" => Some("esp32"),
+        _ => None,
+    }
+}
+
 /// What this board is running, from its own report.
 ///
 /// Only a LightPlayer gets an answer: a blank chip's silence is not an empty
@@ -293,6 +335,78 @@ fn loaded_project(device: &Device) -> LoadedProject {
             label: first.label().to_string(),
         },
     }
+}
+
+/// The ONE line that says why a running board is not running well.
+///
+/// Deterministic by construction — same evidence, same words, in the same
+/// order — because it sits on a card that redraws every heartbeat, and a
+/// line that reshuffled its clauses would read as new news every second.
+///
+/// Only a LightPlayer on an OPEN port gets one: degradation is a live
+/// report, and repeating the last thing a board said before we stopped
+/// listening would age into a lie.
+fn degraded(device: &Device) -> Option<String> {
+    let evidence = &device.evidence;
+    if !evidence.classification.is_light_player() || !evidence.presence.is_open() {
+        return None;
+    }
+    let recovery = evidence
+        .recovery()
+        .filter(|recovery| recovery.is_degraded());
+    // The fault leads when there is one: it names the node, which is the
+    // actionable half. Recovery is the device-wide backdrop, and a fault
+    // raised BY the ledger already quotes it in its own message.
+    let line = evidence
+        .project_fault()
+        .and_then(fault_line)
+        .or_else(|| recovery.map(recovery_line))?;
+    Some(line)
+}
+
+/// "Degraded: node /x faulted — <why>", plus a count when several are.
+fn fault_line(fault: &ProjectFaultFacts) -> Option<String> {
+    let (path, message) = fault.nodes.first()?;
+    let mut line = format!("Degraded: node {path} faulted — {message}");
+    let others = fault.nodes.len().saturating_sub(1);
+    if others > 0 {
+        line.push_str(&format!(" (+{others} more)"));
+    }
+    Some(line)
+}
+
+/// The device-wide recovery state in one sentence.
+fn recovery_line(recovery: &RecoveryFacts) -> String {
+    let gated: Vec<&RecoveryPathFacts> = recovery.gated().collect();
+    let mut line = match recovery.level {
+        RecoveryLevelFacts::Red => match gated.as_slice() {
+            [] => "Recovery red: a path is disabled after repeated crashes".to_string(),
+            [only] => format!(
+                "Recovery red: {} disabled after repeated crashes",
+                only.label
+            ),
+            [first, ..] => format!(
+                "Recovery red: {} paths disabled (first: {})",
+                gated.len(),
+                first.label
+            ),
+        },
+        RecoveryLevelFacts::Yellow => match recovery.paths.len() {
+            1 => "Recovery yellow: 1 watched path".to_string(),
+            watched => format!("Recovery yellow: {watched} watched paths"),
+        },
+        // Green and still here means safe mode is the whole story.
+        RecoveryLevelFacts::Green => {
+            "Safe mode: project auto-load skipped after repeated incomplete boots".to_string()
+        }
+    };
+    if let Some(crash) = &recovery.last_crash {
+        line.push_str(&format!(" (last crash: {crash})"));
+    }
+    if recovery.safe_mode && recovery.level != RecoveryLevelFacts::Green {
+        line.push_str(" · safe mode");
+    }
+    line
 }
 
 /// Project one pending link.
@@ -348,6 +462,7 @@ fn state_label(device: &Device, status: DeviceStatus) -> String {
         // listened to. On the bench it read as a fault (G1, 2026-08-31).
         DeviceStatus::Attached => "Attached — not listening".to_string(),
         DeviceStatus::Ready => "Ready".to_string(),
+        DeviceStatus::Degraded => "Degraded".to_string(),
         DeviceStatus::NotResponding => "Not responding".to_string(),
         DeviceStatus::NeedsAttention => classification_label(&device.evidence.classification),
     }
@@ -404,6 +519,27 @@ fn outcome_view(outcome: &ActivityOutcome) -> OutcomeView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A running board attached mid-stream shows no boot banner; its hello's
+    /// firmware label is the chip by another name, in the catalog's family
+    /// vocabulary. Unknown packages answer nothing.
+    #[test]
+    fn the_firmware_label_names_the_chip_family() {
+        assert_eq!(
+            chip_from_firmware_label("fw-esp32c6 abc1234"),
+            Some("esp32c6")
+        );
+        assert_eq!(
+            chip_from_firmware_label("fw-esp32s3 abc1234 (dirty)"),
+            Some("esp32s3")
+        );
+        assert_eq!(
+            chip_from_firmware_label("fw-esp32v3 abc1234"),
+            Some("esp32")
+        );
+        assert_eq!(chip_from_firmware_label("fw-host abc1234"), None);
+        assert_eq!(chip_from_firmware_label(""), None);
+    }
     use crate::identity::IdentityChain;
 
     #[test]

@@ -10,7 +10,7 @@ use crate::dataflow::resolver::{
     Production, ProductionSource, QueryKey, ResolveError, TickResolver,
 };
 use crate::dataflow::timebase::PhasorKey;
-use crate::engine::{ButtonService, RadioService};
+use crate::engine::{ButtonService, FaultPresentation, RadioService};
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
@@ -127,6 +127,16 @@ pub struct TickContext<'r> {
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
     frame_time_seconds: f32,
+    /// Frame time the project's continuous fault began at, as derived at the
+    /// END of the previous tick (`Engine::project_fault`). `None` = no node
+    /// is in `Fault`. Read by outputs to decide whether to paint the fault
+    /// pattern; the one-frame lag is why this can be a plain value rather
+    /// than a query into a tree that is mid-walk.
+    project_fault_since_seconds: Option<f32>,
+    /// How many nodes were in `Fault` at that derivation — the N in the
+    /// output's own "showing fault pattern" status.
+    project_fault_node_count: u32,
+    fault_presentation: FaultPresentation,
 }
 
 impl<'r> TickContext<'r> {
@@ -184,11 +194,49 @@ impl<'r> TickContext<'r> {
             button_service,
             radio_service,
             frame_time_seconds,
+            project_fault_since_seconds: None,
+            project_fault_node_count: 0,
+            fault_presentation: FaultPresentation::default(),
         }
+    }
+
+    /// Attach the previous tick's project-fault verdict and the engine's
+    /// presentation knob.
+    ///
+    /// A builder step rather than a constructor argument because almost no
+    /// caller cares: only [`crate::nodes::OutputNode`] reads these, and
+    /// every context built outside `Engine::tick_nodes` (tests, probes)
+    /// honestly has no verdict to state.
+    pub fn with_project_fault(
+        mut self,
+        since_seconds: Option<f32>,
+        node_count: u32,
+        presentation: FaultPresentation,
+    ) -> Self {
+        self.project_fault_since_seconds = since_seconds;
+        self.project_fault_node_count = node_count;
+        self.fault_presentation = presentation;
+        self
     }
 
     pub fn node_id(&self) -> NodeId {
         self.node_id
+    }
+
+    /// Frame time the project's continuous fault began at, or `None` when
+    /// no node is in `Fault`. Compare against [`Self::time_seconds`].
+    pub fn project_fault_since_seconds(&self) -> Option<f32> {
+        self.project_fault_since_seconds
+    }
+
+    /// How many nodes are in `Fault` (0 when [`Self::project_fault_since_seconds`] is `None`).
+    pub fn project_fault_node_count(&self) -> u32 {
+        self.project_fault_node_count
+    }
+
+    /// What this engine wants outputs to do while the project is faulted.
+    pub fn fault_presentation(&self) -> FaultPresentation {
+        self.fault_presentation
     }
 
     pub fn revision(&self) -> Revision {
