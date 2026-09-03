@@ -1,25 +1,25 @@
 {
   "comment": "Measured heap-budget record — a ratchet, not a target. These are what the projects cost TODAY on the RV32 emulator, not what any product may use. Per project and profile mode; steady-render records only the frame window. Regenerate with `just heap-budget-baseline`; see docs/heap-budget-gate.md.",
   "recorded": "2026-09-02",
-  "commit": "5c9f9475b",
+  "commit": "10c7e73b1",
   "projects": {
     "examples/basic": {
       "modes": {
         "startup": {
           "windows": {
             "project-load": {
-              "transient": 41210,
-              "retained": 36192,
+              "transient": 41328,
+              "retained": 36406,
               "largest_alloc": 4365,
-              "alloc_count": 3687,
-              "alloc_bytes": 238716
+              "alloc_count": 3689,
+              "alloc_bytes": 238930
             },
             "frame": {
-              "transient": 97966,
-              "retained": 45368,
+              "transient": 98384,
+              "retained": 45786,
               "largest_alloc": 20480,
-              "alloc_count": 3194,
-              "alloc_bytes": 290282
+              "alloc_count": 3166,
+              "alloc_bytes": 285423
             },
             "shader-compile": {
               "transient": 47716,
@@ -40,11 +40,11 @@
         "steady-render": {
           "windows": {
             "frame": {
-              "transient": 1962,
-              "retained": 1239,
+              "transient": 1539,
+              "retained": 816,
               "largest_alloc": 723,
-              "alloc_count": 412,
-              "alloc_bytes": 11611
+              "alloc_count": 205,
+              "alloc_bytes": 6752
             }
           }
         }
@@ -55,18 +55,18 @@
         "startup": {
           "windows": {
             "project-load": {
-              "transient": 46637,
-              "retained": 43101,
+              "transient": 46787,
+              "retained": 43347,
               "largest_alloc": 3584,
-              "alloc_count": 4591,
-              "alloc_bytes": 283138
+              "alloc_count": 4584,
+              "alloc_bytes": 283056
             },
             "frame": {
-              "transient": 96430,
-              "retained": 43289,
+              "transient": 97665,
+              "retained": 44524,
               "largest_alloc": 20480,
-              "alloc_count": 7158,
-              "alloc_bytes": 375840
+              "alloc_count": 6694,
+              "alloc_bytes": 358754
             },
             "shader-compile": {
               "transient": 32987,
@@ -87,11 +87,11 @@
         "steady-render": {
           "windows": {
             "frame": {
-              "transient": 19590,
-              "retained": 12566,
+              "transient": 19168,
+              "retained": 12144,
               "largest_alloc": 560,
-              "alloc_count": 1092,
-              "alloc_bytes": 46985
+              "alloc_count": 637,
+              "alloc_bytes": 30227
             }
           }
         }
