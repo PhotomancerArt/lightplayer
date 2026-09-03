@@ -327,7 +327,11 @@ Tailwind utilities in their Dioxus markup, using the existing `tw:` prefix while
 legacy `ux-*` classes still exist. Theme values are defined as Studio CSS
 variables in `src/style.css` and exposed to Tailwind from `tailwind.css` with
 semantic names such as `background`, `card`, `border`, `muted-foreground`,
-`accent`, and `status-warning-bg`.
+and `status-warning-bg`. A utility built on a token the theme does not
+define (`tw:bg-panel`) generates no rule at all and the element silently
+falls through to transparent; `just lint-tw-utilities` (part of
+`just check-lint`) checks every `tw:` token in `src/` against the generated
+stylesheet.
 
 Use direct utility strings for simple static styling. Use small Rust helper
 functions for repeated stateful variants such as status tones, action priority,
