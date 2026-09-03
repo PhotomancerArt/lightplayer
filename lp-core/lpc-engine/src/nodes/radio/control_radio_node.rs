@@ -31,6 +31,8 @@ pub struct ControlRadioNode {
     recent_sent: Vec<ControlMessageKey>,
     recent_received: Vec<ControlMessageKey>,
     receive_buffer: Vec<RadioMessage>,
+    /// This node's produced-slot path, parsed once rather than per publish.
+    output_path: SlotPath,
 }
 
 impl ControlRadioNode {
@@ -44,6 +46,7 @@ impl ControlRadioNode {
             recent_sent: Vec::new(),
             recent_received: Vec::new(),
             receive_buffer: Vec::new(),
+            output_path: control_radio_output_path(),
         }
     }
 
@@ -187,7 +190,7 @@ impl ControlRadioNode {
         accepted: VecMap<u32, ControlMessage>,
     ) -> Result<(), NodeError> {
         self.state.output = MapSlot::with_version(ctx.revision(), accepted);
-        ctx.publish_runtime_slot(&self.state, control_radio_output_path())
+        ctx.publish_runtime_slot(&self.state, &self.output_path)
     }
 
     fn current_frame_output(&self, revision: lpc_model::Revision) -> VecMap<u32, ControlMessage> {

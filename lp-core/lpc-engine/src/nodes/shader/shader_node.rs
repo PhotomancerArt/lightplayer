@@ -41,6 +41,8 @@ use crate::products::visual::{
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
 use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
 
+use super::authored_field_keys::{AuthoredField, AuthoredFieldKeys, UniformFieldKeys};
+use super::map_input_template::MapInputTemplates;
 use super::palette_bake_cache::{PaletteBake, PaletteBakeCache};
 use super::palette_eval::{
     PaletteCyclePosition, palette_cycle_gradients, palette_cycle_position, palette_frame_zero,
@@ -51,6 +53,8 @@ use super::shader_input_materialize::materialize_shader_input;
 
 /// The well-known channel a scope's timebase lives on.
 const TIME_CHANNEL: &str = "time";
+/// The authored representation pin, read through the option's `some` branch.
+const FLOAT_MODE_PIN_PATH: &str = "float_mode.some";
 /// Default max semantic errors forwarded from the GLSL to LPIR front end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
@@ -159,6 +163,14 @@ pub struct ShaderNode {
     /// ([`PaletteBakeCache`]). Rebuildable: dropped under memory pressure
     /// and re-baked on the next tick.
     palette_cache: PaletteBakeCache,
+    /// Frame-invariant half of this node's map uniforms, resolved once per
+    /// (uniform, declared shape) instead of per frame
+    /// ([`MapInputTemplates`]).
+    map_templates: MapInputTemplates,
+    /// The resolver keys this node's per-tick authored sync reads through,
+    /// built once per (uniform, field) instead of per frame
+    /// ([`AuthoredFieldKeys`]).
+    authored_keys: AuthoredFieldKeys,
     state: ShaderState,
 }
 
@@ -187,6 +199,8 @@ impl ShaderNode {
             compile_window_requested: false,
             compile_window: None,
             palette_cache: PaletteBakeCache::new(),
+            map_templates: MapInputTemplates::new(),
+            authored_keys: AuthoredFieldKeys::new(),
             state: ShaderState::new(VisualProduct::new(node_id, 0)),
         }
     }
@@ -388,7 +402,8 @@ impl ShaderNode {
     /// `FixtureNode` reads `power.some` by path), and absent is now the
     /// common case — every unpinned shader.
     fn update_config_from_view(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        let next_float_mode = try_read_authored_value::<FloatMode>(ctx, "float_mode.some")?;
+        let next_float_mode =
+            try_read_static_authored_value::<FloatMode>(ctx, FLOAT_MODE_PIN_PATH)?;
         if self.float_mode != next_float_mode {
             self.float_mode = next_float_mode;
             self.needs_compile = true;
@@ -417,29 +432,33 @@ impl ShaderNode {
     /// [`Self::update_consumed_slots_from_view`] brings the authored
     /// values in on the same tick.
     fn reconcile_consumed_keys(&mut self, ctx: &mut TickContext<'_>) -> bool {
-        let Some(authored) = try_read_authored_consumed_keys(ctx) else {
+        // Read through the resolved map rather than copying its key set into
+        // a `Vec<String>`: this runs every tick for an answer that changes
+        // only on an authoring gesture, and the copy was one allocation per
+        // uniform per frame.
+        let Ok(production) = ctx.resolve_static_consumed("consumed") else {
+            return false;
+        };
+        let lpc_model::SlotData::Map(authored) = production.data() else {
             return false;
         };
         let mut changed = false;
-        for key in &authored {
-            if self.consumed_slots.entries.get(key).is_none() {
+        for key in authored.entries.keys() {
+            let lpc_model::SlotMapKey::String(name) = key else {
+                continue;
+            };
+            if self.consumed_slots.entries.get(name).is_none() {
                 self.consumed_slots
                     .entries
-                    .insert(key.clone(), ShaderSlotDef::default());
+                    .insert(name.clone(), ShaderSlotDef::default());
                 changed = true;
             }
         }
-        let stale: Vec<String> = self
-            .consumed_slots
+        let before = self.consumed_slots.entries.len();
+        self.consumed_slots
             .entries
-            .keys()
-            .filter(|key| !authored.contains(key))
-            .cloned()
-            .collect();
-        for key in stale {
-            self.consumed_slots.entries.remove(&key);
-            changed = true;
-        }
+            .retain(|name, _| authored_map_has(authored, name));
+        changed |= self.consumed_slots.entries.len() != before;
         changed
     }
 
@@ -448,14 +467,12 @@ impl ShaderNode {
         ctx: &mut TickContext<'_>,
     ) -> Result<(), NodeError> {
         let mut compile_changed = self.reconcile_consumed_keys(ctx);
-        let keys: Vec<String> = self.consumed_slots.entries.keys().cloned().collect();
-        for key in keys {
-            let Some(slot) = self.consumed_slots.entries.get_mut(&key) else {
-                continue;
-            };
-            compile_changed |=
-                sync_shader_slot_def_from_authored(ctx, &alloc::format!("consumed[{key}]"), slot)?;
-        }
+        let Self {
+            consumed_slots,
+            authored_keys,
+            ..
+        } = self;
+        compile_changed |= sync_consumed_slots_from_authored(ctx, consumed_slots, authored_keys)?;
         if compile_changed {
             self.needs_compile = true;
             self.compilation_error = None;
@@ -463,18 +480,36 @@ impl ShaderNode {
         Ok(())
     }
 
+    /// Re-resolve every uniform's value for this tick.
+    ///
+    /// Written into the existing [`Self::visual_uniforms`] rather than into
+    /// a fresh `Vec`: the names are the same strings frame after frame, and
+    /// rebuilding the list cloned every one of them per frame. The cursor
+    /// plus the closing `truncate` keeps a uniform that stops contributing
+    /// (a palette whose strip cannot be baked) from leaving a stale entry
+    /// behind.
     fn update_visual_uniforms(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        let mut uniforms = Vec::new();
+        let Self {
+            consumed_slots,
+            palette_cache,
+            map_templates,
+            authored_keys,
+            visual_uniforms,
+            ..
+        } = self;
         let mut failures = Vec::new();
         let mut timebase = TimeProductCache::new();
-        let palette_slots = palette_slot_count(&self.consumed_slots);
-        for (name, slot) in &self.consumed_slots.entries {
+        let epoch = ctx.structure_epoch();
+        let palette_slots = palette_slot_count(consumed_slots);
+        let mut emitted = 0usize;
+        for (name, slot) in &consumed_slots.entries {
+            let keys = authored_keys.uniform(name, epoch);
             // Palette uniforms are textures, not values: they resolve to a
             // gradient config, bake to a strip, and bind as a sampler. The
             // value path below has no shape that could carry one.
             if slot.kind.value().is_texture() {
                 let (value, failure) =
-                    resolve_palette_input(ctx, name, slot, &mut self.palette_cache, palette_slots);
+                    resolve_palette_input(ctx, name, keys, slot, palette_cache, palette_slots);
                 if let Some(failure) = failure {
                     failures.push((name.clone(), failure));
                 }
@@ -482,18 +517,25 @@ impl ShaderNode {
                 // rather than a wrong one; the render path's frame-zero bake
                 // is what keeps the uniform set complete.
                 if let Some(value) = value {
-                    uniforms.push((name.clone(), value));
+                    set_uniform_at(visual_uniforms, &mut emitted, name, value);
                 }
                 continue;
             }
-            let (value, failure) =
-                resolve_or_default_input(ctx, name, slot, "visual shader", &mut timebase)?;
+            let (value, failure) = resolve_or_default_input(
+                ctx,
+                name,
+                keys,
+                slot,
+                "visual shader",
+                &mut timebase,
+                map_templates,
+            )?;
             if let Some(failure) = failure {
                 failures.push((name.clone(), failure));
             }
-            uniforms.push((name.clone(), value));
+            set_uniform_at(visual_uniforms, &mut emitted, name, value);
         }
-        self.visual_uniforms = uniforms;
+        visual_uniforms.truncate(emitted);
         note_input_resolve_failures(
             &mut self.input_resolve_failures,
             failures,
@@ -1042,31 +1084,34 @@ pub(super) fn format_compile_stats(
 ///   claiming a wire the binding table does not have.
 pub(super) fn sync_shader_slot_def_from_authored(
     ctx: &mut TickContext<'_>,
-    base_path: &str,
+    uniform: &str,
+    keys: &mut UniformFieldKeys,
     slot: &mut ShaderSlotDef,
 ) -> Result<bool, NodeError> {
     let mut changed = false;
-    let Some(kind) = try_read_authored_value(ctx, &alloc::format!("{base_path}.kind"))? else {
+    let Some(kind) = try_read_authored_field(ctx, keys, uniform, AuthoredField::Kind)? else {
         return Ok(false);
     };
     changed |= set_slot_if_changed(&mut slot.kind, kind);
-    let Some(value) =
-        try_read_authored_value::<ShaderValueShapeRef>(ctx, &alloc::format!("{base_path}.value"))?
+    let Some(value_changed) = sync_value_shape_from_authored(ctx, keys, uniform, &mut slot.value)?
     else {
         return Ok(changed);
     };
-    changed |= set_slot_if_changed(&mut slot.value, value);
+    changed |= value_changed;
     // `key` and `mapping` describe map STORAGE — `materialize_map_input`
     // is the only reader, and a value slot never reaches it. Probing them
     // on a value slot would ask the resolver for two paths that cannot
     // exist, and every distinct query key it is handed persists a route
     // entry across frames (ADR 2026-07-31), so the dead probes would cost
-    // resident bytes on every project forever.
+    // resident bytes on every project forever. The same gate keeps the key
+    // cache from building a key for a path this slot never reads.
     let is_map = matches!(slot.kind.value(), ShaderSlotKind::Map);
     if is_map {
-        changed |= sync_optional_value_from_authored::<ShaderMapKeyDef>(
+        changed |= sync_optional_field_from_authored::<ShaderMapKeyDef>(
             ctx,
-            &alloc::format!("{base_path}.key.some"),
+            keys,
+            uniform,
+            AuthoredField::KeySome,
             &mut slot.key,
         )?;
     }
@@ -1074,9 +1119,11 @@ pub(super) fn sync_shader_slot_def_from_authored(
     // `key` above. A live len edit changes the generated declaration, so it
     // folds into `changed` and recompiles.
     if matches!(slot.kind.value(), ShaderSlotKind::Buffer) {
-        changed |= sync_optional_value_from_authored::<u32>(
+        changed |= sync_optional_field_from_authored::<u32>(
             ctx,
-            &alloc::format!("{base_path}.len.some"),
+            keys,
+            uniform,
+            AuthoredField::LenSome,
             &mut slot.len,
         )?;
     }
@@ -1088,9 +1135,11 @@ pub(super) fn sync_shader_slot_def_from_authored(
     // probing `.phasor.some` on a non-phasor slot would persist a dead
     // resolver route entry per slot forever (ADR 2026-07-31).
     if matches!(slot.kind.value(), ShaderSlotKind::Phasor) {
-        changed |= sync_optional_value_from_authored::<PhasorConfig>(
+        changed |= sync_optional_field_from_authored::<PhasorConfig>(
             ctx,
-            &alloc::format!("{base_path}.phasor.some"),
+            keys,
+            uniform,
+            AuthoredField::PhasorSome,
             &mut slot.phasor,
         )?;
     }
@@ -1102,15 +1151,19 @@ pub(super) fn sync_shader_slot_def_from_authored(
     // JIT-recompile the shader on every frame of a color-picker drag, for a
     // spec that is byte-identical before and after.
     if matches!(slot.kind.value(), ShaderSlotKind::Palette) {
-        sync_optional_value_from_authored::<GradientConfig>(
+        sync_optional_field_from_authored::<GradientConfig>(
             ctx,
-            &alloc::format!("{base_path}.gradient.some"),
+            keys,
+            uniform,
+            AuthoredField::GradientSome,
             &mut slot.gradient,
         )?;
     }
-    changed |= sync_optional_value_from_authored::<f32>(
+    changed |= sync_optional_field_from_authored::<f32>(
         ctx,
-        &alloc::format!("{base_path}.default.some"),
+        keys,
+        uniform,
+        AuthoredField::DefaultSome,
         &mut slot.default,
     )?;
     // `min` and `max` deliberately keep the update-only shape: they belong
@@ -1123,14 +1176,14 @@ pub(super) fn sync_shader_slot_def_from_authored(
     // gets a newly authored range from the authored `.def` root regardless.
     if let Some(min) = slot.min.data.as_mut() {
         if let Some(value) =
-            try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.min.some"))?
+            try_read_authored_field::<f32>(ctx, keys, uniform, AuthoredField::MinSome)?
         {
             changed |= set_slot_if_changed(min, value);
         }
     }
     if let Some(max) = slot.max.data.as_mut() {
         if let Some(value) =
-            try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.max.some"))?
+            try_read_authored_field::<f32>(ctx, keys, uniform, AuthoredField::MaxSome)?
         {
             changed |= set_slot_if_changed(max, value);
         }
@@ -1142,9 +1195,11 @@ pub(super) fn sync_shader_slot_def_from_authored(
     // then sync onto the placeholder exactly as they would onto a loaded
     // record.
     if is_map && slot.mapping.data.is_none() {
-        if let Some(kind) = try_read_authored_value::<ShaderSlotMappingKind>(
+        if let Some(kind) = try_read_authored_field::<ShaderSlotMappingKind>(
             ctx,
-            &alloc::format!("{base_path}.mapping.some.kind"),
+            keys,
+            uniform,
+            AuthoredField::MappingKind,
         )? {
             let mut mapping = ShaderSlotMappingDef::default();
             mapping.kind.set(kind);
@@ -1153,39 +1208,41 @@ pub(super) fn sync_shader_slot_def_from_authored(
         }
     }
     if let Some(mapping) = slot.mapping.data.as_mut() {
-        if let Some(value) = try_read_authored_value::<ShaderSlotMappingKind>(
+        if let Some(value) = try_read_authored_field::<ShaderSlotMappingKind>(
             ctx,
-            &alloc::format!("{base_path}.mapping.some.kind"),
+            keys,
+            uniform,
+            AuthoredField::MappingKind,
         )? {
             changed |= set_slot_if_changed(&mut mapping.kind, value);
         }
         if let Some(value) =
-            try_read_authored_value::<u32>(ctx, &alloc::format!("{base_path}.mapping.some.len"))?
+            try_read_authored_field::<u32>(ctx, keys, uniform, AuthoredField::MappingLen)?
         {
             changed |= set_slot_if_changed(&mut mapping.len, value);
         }
-        if let Some(value) =
-            try_read_authored_value::<String>(ctx, &alloc::format!("{base_path}.mapping.some.key"))?
-        {
-            changed |= set_slot_if_changed(&mut mapping.key, value);
-        }
-        if let Some(value) = try_read_authored_value::<u32>(
+        changed |= sync_authored_string_field(
             ctx,
-            &alloc::format!("{base_path}.mapping.some.empty_key"),
-        )? {
+            keys,
+            uniform,
+            AuthoredField::MappingKey,
+            &mut mapping.key,
+        )?;
+        if let Some(value) =
+            try_read_authored_field::<u32>(ctx, keys, uniform, AuthoredField::MappingEmptyKey)?
+        {
             changed |= set_slot_if_changed(&mut mapping.empty_key, value);
         }
     }
-    if let Some(value) =
-        try_read_authored_value::<String>(ctx, &alloc::format!("{base_path}.label"))?
-    {
-        changed |= set_slot_if_changed(&mut slot.label, value);
-    }
-    if let Some(value) =
-        try_read_authored_value::<String>(ctx, &alloc::format!("{base_path}.description"))?
-    {
-        changed |= set_slot_if_changed(&mut slot.description, value);
-    }
+    changed |=
+        sync_authored_string_field(ctx, keys, uniform, AuthoredField::Label, &mut slot.label)?;
+    changed |= sync_authored_string_field(
+        ctx,
+        keys,
+        uniform,
+        AuthoredField::Description,
+        &mut slot.description,
+    )?;
     Ok(changed)
 }
 
@@ -1245,21 +1302,18 @@ fn runtime_projection_shape(
 /// value is always a full factored cell — an unresolvable payload field
 /// reads as its behavior-preserving default (plain extrude-x).
 fn try_read_authored_space_answer_2(ctx: &mut TickContext<'_>) -> Option<Option<CellProjection>> {
-    // The variant name is copied out before the payload reads: the
-    // resolved production borrows the context the other reads need.
-    let variant = {
-        let production = ctx
-            .resolve(&QueryKey::ConsumedSlot {
-                node: ctx.node_id(),
-                slot: SlotPath::parse("space.OneD.in_2d").expect("static path"),
-            })
-            .ok()?;
-        let lpc_model::SlotData::Enum(answer) = production.data() else {
-            return None;
-        };
-        alloc::string::String::from(answer.variant.as_str())
+    // The variant is *tested* inside the block rather than copied out of
+    // it: the production is a local, and dropping it before the payload
+    // reads is all the context borrow needs. Copying the name out was a
+    // `String` per node per frame for a comparison against a literal.
+    let is_project = {
+        let production = ctx.resolve_static_consumed("space.OneD.in_2d").ok()?;
+        matches!(
+            production.data(),
+            lpc_model::SlotData::Enum(answer) if answer.variant.as_str() == "Project"
+        )
     };
-    if variant != "Project" {
+    if !is_project {
         return None;
     }
     Some(Some(CellProjection {
@@ -1277,10 +1331,7 @@ fn try_read_authored_shape(
     path: &'static str,
 ) -> crate::products::visual::ProjectionShape {
     use crate::products::visual::ProjectionShape as Runtime;
-    let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
-        node: ctx.node_id(),
-        slot: SlotPath::parse(path).expect("static path"),
-    }) else {
+    let Ok(production) = ctx.resolve_static_consumed(path) else {
         return Runtime::ExtrudeX;
     };
     let lpc_model::SlotData::Enum(shape) = production.data() else {
@@ -1303,10 +1354,7 @@ fn try_read_authored_mode(
     path: &'static str,
     on_ident: &'static str,
 ) -> bool {
-    let Ok(production) = ctx.resolve(&QueryKey::ConsumedSlot {
-        node: ctx.node_id(),
-        slot: SlotPath::parse(path).expect("static path"),
-    }) else {
+    let Ok(production) = ctx.resolve_static_consumed(path) else {
         return false;
     };
     let lpc_model::SlotData::Enum(mode) = production.data() else {
@@ -1320,12 +1368,7 @@ fn try_read_authored_mode(
 /// query does not resolve or the slot is not an enum (unit fakes without
 /// authored defs) — the loaded declaration then stands.
 fn try_read_authored_space(ctx: &mut TickContext<'_>) -> Option<ShaderEntrySpace> {
-    let production = ctx
-        .resolve(&QueryKey::ConsumedSlot {
-            node: ctx.node_id(),
-            slot: SlotPath::parse("space").expect("static path"),
-        })
-        .ok()?;
+    let production = ctx.resolve_static_consumed("space").ok()?;
     let lpc_model::SlotData::Enum(declaration) = production.data() else {
         return None;
     };
@@ -1336,42 +1379,55 @@ fn try_read_authored_space(ctx: &mut TickContext<'_>) -> Option<ShaderEntrySpace
     }
 }
 
-/// The authored `consumed` map's string key set, read through the same
-/// overlay-aware view as the per-field sync. `None` when the query does
-/// not resolve or the path is not a map (unit fakes without authored
-/// defs) — the runtime key set is then left as loaded.
-fn try_read_authored_consumed_keys(ctx: &mut TickContext<'_>) -> Option<Vec<String>> {
-    let production = ctx
-        .resolve(&QueryKey::ConsumedSlot {
-            node: ctx.node_id(),
-            slot: SlotPath::parse("consumed").expect("static path"),
-        })
-        .ok()?;
-    let lpc_model::SlotData::Map(map) = production.data() else {
-        return None;
-    };
-    Some(
-        map.entries
-            .keys()
-            .filter_map(|key| match key {
-                lpc_model::SlotMapKey::String(name) => Some(name.clone()),
-                _ => None,
-            })
-            .collect(),
-    )
+/// Whether the authored `consumed` map has a string-keyed entry `name`.
+///
+/// Borrowed rather than collected: the key set is compared against the
+/// runtime's on every tick, and a `Vec<String>` of authored names was one
+/// allocation per uniform per frame for a set that changes only when an
+/// overlay adds or removes a record.
+fn authored_map_has(map: &lpc_model::SlotMapDyn, name: &str) -> bool {
+    map.entries.keys().any(|key| match key {
+        lpc_model::SlotMapKey::String(authored) => authored == name,
+        _ => false,
+    })
 }
 
-fn try_read_authored_value<T: lpc_model::FromLpValue>(
+/// Sync every consumed uniform's def from the authored view, through the
+/// node's per-uniform key cache.
+///
+/// Shared by both shader node runtimes. Walks the runtime key set in place
+/// (no `Vec<String>` copy of the names per frame) and prunes key sets for
+/// uniforms the runtime no longer has, so [`AuthoredFieldKeys`] tracks the
+/// uniform count across live add/remove gestures instead of growing.
+pub(super) fn sync_consumed_slots_from_authored(
     ctx: &mut TickContext<'_>,
-    path: &str,
+    consumed_slots: &mut MapSlot<String, ShaderSlotDef>,
+    authored_keys: &mut AuthoredFieldKeys,
+) -> Result<bool, NodeError> {
+    let epoch = ctx.structure_epoch();
+    let mut changed = false;
+    for (name, slot) in consumed_slots.entries.iter_mut() {
+        let keys = authored_keys.uniform(name, epoch);
+        changed |= sync_shader_slot_def_from_authored(ctx, name, keys, slot)?;
+    }
+    if authored_keys.len() > consumed_slots.entries.len() {
+        authored_keys.retain_uniforms(|name| consumed_slots.entries.contains_key(name));
+    }
+    Ok(changed)
+}
+
+/// Read one of this node's authored slots at a compile-time-constant path.
+///
+/// The path is interned per structural epoch by pointer
+/// ([`TickContext::resolve_static_consumed`]), so a per-tick read parses and
+/// allocates nothing. `None` means the query did not resolve, which every
+/// caller reads as "the authored side says nothing; leave the loaded value
+/// standing".
+fn try_read_static_authored_value<T: lpc_model::FromLpValue>(
+    ctx: &mut TickContext<'_>,
+    path: &'static str,
 ) -> Result<Option<T>, NodeError> {
-    let slot = SlotPath::parse(path).map_err(|e| {
-        NodeError::msg(alloc::format!("invalid authored shader path {path:?}: {e}"))
-    })?;
-    let production = match ctx.resolve(&QueryKey::ConsumedSlot {
-        node: ctx.node_id(),
-        slot,
-    }) {
+    let production = match ctx.resolve_static_consumed(path) {
         Ok(production) => production,
         Err(_) => return Ok(None),
     };
@@ -1381,6 +1437,109 @@ fn try_read_authored_value<T: lpc_model::FromLpValue>(
     T::from_lp_value(value.value())
         .map(Some)
         .map_err(|e| NodeError::msg(alloc::format!("shader path {path:?}: {e}")))
+}
+
+/// Read one authored field of one consumed uniform through its cached key.
+///
+/// The key is built on first use and kept for the life of the uniform
+/// ([`AuthoredFieldKeys`]); the steady-state read is an intern lookup and a
+/// cache hit, with no `format!` and no `SlotPath::parse`.
+fn try_read_authored_field<T: lpc_model::FromLpValue>(
+    ctx: &mut TickContext<'_>,
+    keys: &mut UniformFieldKeys,
+    uniform: &str,
+    field: AuthoredField,
+) -> Result<Option<T>, NodeError> {
+    let key = keys.key(ctx, uniform, field)?;
+    let production = match ctx.resolve(key) {
+        Ok(production) => production,
+        Err(_) => return Ok(None),
+    };
+    let value = production
+        .value_leaf()
+        .ok_or_else(|| NodeError::msg("resolved shader path is not a value"))?;
+    T::from_lp_value(value.value()).map(Some).map_err(|e| {
+        NodeError::msg(alloc::format!(
+            "shader path {:?}: {e}",
+            field.path_for(uniform)
+        ))
+    })
+}
+
+/// Sync the uniform's declared value shape from the authored view.
+///
+/// `Ok(None)` means the path did not resolve — the caller stops the sync
+/// there, exactly as the generic read's `None` did.
+///
+/// A [`ShaderValueShapeRef`] is a `String` newtype, so the generic read
+/// would allocate the shape name for every uniform on every frame only for
+/// [`set_slot_if_changed`] to compare it away. The resolved string is
+/// compared in place first; the conversion (and with it the empty-name
+/// rejection the model owns) runs only when it actually differs.
+fn sync_value_shape_from_authored(
+    ctx: &mut TickContext<'_>,
+    keys: &mut UniformFieldKeys,
+    uniform: &str,
+    slot: &mut ValueSlot<ShaderValueShapeRef>,
+) -> Result<Option<bool>, NodeError> {
+    let key = keys.key(ctx, uniform, AuthoredField::Value)?;
+    let Ok(production) = ctx.resolve(key) else {
+        return Ok(None);
+    };
+    let value = production
+        .value_leaf()
+        .ok_or_else(|| NodeError::msg("resolved shader path is not a value"))?;
+    if let lpc_model::LpValue::String(next) = value.value()
+        && !next.is_empty()
+        && slot.value().as_str() == next
+    {
+        return Ok(Some(false));
+    }
+    let next = ShaderValueShapeRef::from_lp_value(value.value()).map_err(|e| {
+        NodeError::msg(alloc::format!(
+            "shader path {:?}: {e}",
+            AuthoredField::Value.path_for(uniform)
+        ))
+    })?;
+    slot.set(next);
+    Ok(Some(true))
+}
+
+/// Sync one authored **string** field onto the runtime slot, allocating only
+/// when the text actually differs.
+///
+/// The generic path would build a `String` per read per frame — `label` and
+/// `description` alone are two per uniform — and then throw it away inside
+/// [`set_slot_if_changed`]. Comparing the resolved `LpValue::String` in
+/// place first makes the steady state allocation-free while keeping the
+/// semantics identical: an authored edit still lands on the next tick, and
+/// an unresolvable path still leaves the loaded value standing.
+fn sync_authored_string_field(
+    ctx: &mut TickContext<'_>,
+    keys: &mut UniformFieldKeys,
+    uniform: &str,
+    field: AuthoredField,
+    slot: &mut ValueSlot<String>,
+) -> Result<bool, NodeError> {
+    let key = keys.key(ctx, uniform, field)?;
+    let Ok(production) = ctx.resolve(key) else {
+        return Ok(false);
+    };
+    let value = production
+        .value_leaf()
+        .ok_or_else(|| NodeError::msg("resolved shader path is not a value"))?;
+    let lpc_model::LpValue::String(next) = value.value() else {
+        return Err(NodeError::msg(alloc::format!(
+            "shader path {:?}: expected String, got {:?}",
+            field.path_for(uniform),
+            value.value()
+        )));
+    };
+    if slot.value() == next {
+        return Ok(false);
+    }
+    slot.set(next.clone());
+    Ok(true)
 }
 
 /// Sync one optional authored field onto the runtime slot def, CREATING
@@ -1396,15 +1555,17 @@ fn try_read_authored_value<T: lpc_model::FromLpValue>(
 ///
 /// Absence on the authored side stays "leave as loaded": a host with no
 /// authored def (a unit fake) must not have its fields wiped.
-fn sync_optional_value_from_authored<T>(
+fn sync_optional_field_from_authored<T>(
     ctx: &mut TickContext<'_>,
-    path: &str,
+    keys: &mut UniformFieldKeys,
+    uniform: &str,
+    field: AuthoredField,
     slot: &mut OptionSlot<ValueSlot<T>>,
 ) -> Result<bool, NodeError>
 where
     T: lpc_model::FromLpValue + PartialEq,
 {
-    let Some(value) = try_read_authored_value::<T>(ctx, path)? else {
+    let Some(value) = try_read_authored_field::<T>(ctx, keys, uniform, field)? else {
         return Ok(false);
     };
     Ok(match slot.data.as_mut() {
@@ -1418,7 +1579,7 @@ where
 
 /// Re-read the authored `float_mode` pin onto a runtime def copy.
 ///
-/// Unlike [`sync_optional_value_from_authored`], this CLEARS the option when
+/// Unlike [`sync_optional_field_from_authored`], this CLEARS the option when
 /// the authored side has no pin. Clearing is the point: unpinning is a real
 /// authoring gesture (back to Auto), and an option sync that could only ever
 /// set would make the pin one-way — pinned Float would keep compiling as
@@ -1429,7 +1590,7 @@ pub(super) fn sync_float_mode_pin(
     ctx: &mut TickContext<'_>,
     slot: &mut OptionSlot<ValueSlot<FloatMode>>,
 ) -> Result<bool, NodeError> {
-    let next = try_read_authored_value::<FloatMode>(ctx, "float_mode.some")?;
+    let next = try_read_static_authored_value::<FloatMode>(ctx, FLOAT_MODE_PIN_PATH)?;
     let current = slot.data.as_ref().map(|value| *value.value());
     if current == next {
         return Ok(false);
@@ -1677,6 +1838,32 @@ fn default_uniforms(slots: &MapSlot<String, ShaderSlotDef>) -> Vec<VisualUniform
         .collect()
 }
 
+/// Write one resolved uniform into the node's uniform list at `index`,
+/// advancing it.
+///
+/// Reuses the entry already there — including its name buffer — so a steady
+/// frame allocates nothing for a uniform set that has not changed shape. A
+/// name only differs when the key set itself moved, and then the existing
+/// `String`'s capacity is rewritten rather than a new one allocated.
+fn set_uniform_at(
+    uniforms: &mut Vec<VisualUniform>,
+    index: &mut usize,
+    name: &str,
+    value: LpsValueF32,
+) {
+    match uniforms.get_mut(*index) {
+        Some(entry) => {
+            if entry.0 != name {
+                entry.0.clear();
+                entry.0.push_str(name);
+            }
+            entry.1 = value;
+        }
+        None => uniforms.push((String::from(name), value)),
+    }
+    *index += 1;
+}
+
 /// How many of this node's uniforms are palettes.
 ///
 /// Sets the bake cache's capacity, and short-circuits the whole palette path
@@ -1776,11 +1963,13 @@ impl TimeProductCache {
 /// drive the phasors inside it, and an unscoped read would silently pick some
 /// other scope's writer (or refuse as ambiguous).
 fn resolve_time_product(ctx: &mut TickContext<'_>) -> Result<TimeProduct, String> {
-    let query = QueryKey::Bus {
-        scope: ctx.bus_read_scope(),
-        channel: lpc_model::ChannelName(String::from(TIME_CHANNEL)),
-    };
-    let production = ctx.resolve(&query).map_err(|e| e.message)?;
+    // The channel name is a literal, so the key is interned per
+    // (scope, name) per structural epoch rather than built — a
+    // `ChannelName(String)` per node per frame otherwise.
+    let scope = ctx.bus_read_scope();
+    let production = ctx
+        .resolve_static_bus(scope, TIME_CHANNEL)
+        .map_err(|e| e.message)?;
     let value = production
         .value_leaf()
         .ok_or_else(|| String::from("bus:time is not a value"))?;
@@ -1815,12 +2004,13 @@ fn resolve_seconds_input(
 fn resolve_phasor_input(
     ctx: &mut TickContext<'_>,
     name: &str,
+    keys: &mut UniformFieldKeys,
     slot: &ShaderSlotDef,
     timebase: &mut TimeProductCache,
 ) -> Result<(LpsValueF32, Option<String>), NodeError> {
-    let slot_path = SlotPath::parse(name)
-        .map_err(|e| NodeError::msg(format!("invalid phasor slot {name:?}: {e}")))?;
-    let (config, key, mut failure) = resolve_phasor_config(ctx, &slot_path, slot);
+    let own = keys.key(ctx, name, AuthoredField::Own)?;
+    let slot_path = consumed_slot_path(own)?;
+    let (config, key, mut failure) = resolve_phasor_config(ctx, own, slot_path, slot);
     let shaped_default = LpsValueF32::F32(phasor_frame_zero(&config));
 
     let product = match timebase.get(ctx) {
@@ -1831,7 +2021,7 @@ fn resolve_phasor_input(
         }
     };
     let reader_node = ctx.node_id();
-    match ctx.time_product_phasor(product, &key, &config, (reader_node, &slot_path)) {
+    match ctx.time_product_phasor(product, &key, &config, (reader_node, slot_path)) {
         Ok((phase, _cycle)) => Ok((LpsValueF32::F32(shape_phasor(&config, phase)), failure)),
         Err(error) => {
             failure.get_or_insert_with(|| error.to_string());
@@ -1857,22 +2047,19 @@ fn resolve_phasor_input(
 /// one field sharing has to be about.
 fn resolve_phasor_config(
     ctx: &mut TickContext<'_>,
+    own_key: &QueryKey,
     slot_path: &SlotPath,
     slot: &ShaderSlotDef,
 ) -> (PhasorConfig, PhasorKey, Option<String>) {
-    let private = PhasorKey::Private {
-        node: ctx.node_id(),
-        slot: slot_path.clone(),
-    };
     let Some((scope, channel)) = ctx.consumed_slot_bus_provenance(slot_path) else {
-        return (slot.phasor_config(), private, None);
-    };
-    let query = QueryKey::ConsumedSlot {
-        node: ctx.node_id(),
-        slot: slot_path.clone(),
+        return (
+            slot.phasor_config(),
+            private_phasor_key(ctx, slot_path),
+            None,
+        );
     };
     let driven = ctx
-        .resolve(&query)
+        .resolve(own_key)
         .map_err(|e| e.message)
         .and_then(|production| {
             production
@@ -1897,7 +2084,37 @@ fn resolve_phasor_config(
         // and keep running on the slot-local shaping. Falling back to the
         // shared key would attach this node to an integrator whose rate it
         // cannot see.
-        Err(message) => (slot.phasor_config(), private, Some(message)),
+        Err(message) => (
+            slot.phasor_config(),
+            private_phasor_key(ctx, slot_path),
+            Some(message),
+        ),
+    }
+}
+
+/// This node's slot-local integrator identity for `slot_path`.
+///
+/// Built where it is needed rather than up front: the key owns its path, so
+/// a shared (channel-driven) uniform should not pay for the copy a private
+/// one needs.
+fn private_phasor_key(ctx: &TickContext<'_>, slot_path: &SlotPath) -> PhasorKey {
+    PhasorKey::Private {
+        node: ctx.node_id(),
+        slot: slot_path.clone(),
+    }
+}
+
+/// The slot path inside a [`QueryKey::ConsumedSlot`].
+///
+/// The per-uniform key cache is the one owner of a uniform's parsed path;
+/// callers that need the path itself (phasor identity, timebase witness
+/// data) borrow it back out of the key rather than re-parsing the name.
+fn consumed_slot_path(key: &QueryKey) -> Result<&SlotPath, NodeError> {
+    match key {
+        QueryKey::ConsumedSlot { slot, .. } => Ok(slot),
+        other => Err(NodeError::msg(format!(
+            "shader uniform key is not a consumed slot: {other:?}"
+        ))),
     }
 }
 
@@ -1912,16 +2129,21 @@ fn resolve_phasor_config(
 fn resolve_palette_input(
     ctx: &mut TickContext<'_>,
     name: &str,
+    keys: &mut UniformFieldKeys,
     slot: &ShaderSlotDef,
     cache: &mut PaletteBakeCache,
     palette_slots: usize,
 ) -> (Option<LpsValueF32>, Option<String>) {
-    let slot_path = match SlotPath::parse(name) {
+    let own = match keys.key(ctx, name, AuthoredField::Own) {
+        Ok(key) => key,
+        Err(e) => return (None, Some(format!("invalid palette slot {name:?}: {e}"))),
+    };
+    let slot_path = match consumed_slot_path(own) {
         Ok(path) => path,
         Err(e) => return (None, Some(format!("invalid palette slot {name:?}: {e}"))),
     };
-    let (config, key, mut failure) = resolve_gradient_config(ctx, &slot_path, slot);
-    let position = palette_cycle_position_for(ctx, &config, &key, &slot_path, &mut failure);
+    let (config, key, mut failure) = resolve_gradient_config(ctx, own, slot_path, slot);
+    let position = palette_cycle_position_for(ctx, &config, &key, slot_path, &mut failure);
 
     let Some((from, to)) = palette_cycle_gradients(&config, position) else {
         failure.get_or_insert_with(|| String::from("palette config has no gradients"));
@@ -2023,22 +2245,19 @@ fn palette_cycle_position_for(
 /// together.
 fn resolve_gradient_config(
     ctx: &mut TickContext<'_>,
+    own_key: &QueryKey,
     slot_path: &SlotPath,
     slot: &ShaderSlotDef,
 ) -> (GradientConfig, PhasorKey, Option<String>) {
-    let private = PhasorKey::Private {
-        node: ctx.node_id(),
-        slot: slot_path.clone(),
-    };
     let Some((scope, channel)) = ctx.consumed_slot_bus_provenance(slot_path) else {
-        return (slot.gradient_config(), private, None);
-    };
-    let query = QueryKey::ConsumedSlot {
-        node: ctx.node_id(),
-        slot: slot_path.clone(),
+        return (
+            slot.gradient_config(),
+            private_phasor_key(ctx, slot_path),
+            None,
+        );
     };
     let driven = ctx
-        .resolve(&query)
+        .resolve(own_key)
         .map_err(|e| e.message)
         .and_then(|production| {
             production
@@ -2055,7 +2274,11 @@ fn resolve_gradient_config(
         // report it and keep baking the slot-local palette. Taking the shared
         // key anyway would attach this node to an integrator whose set it
         // cannot see.
-        Err(message) => (slot.gradient_config(), private, Some(message)),
+        Err(message) => (
+            slot.gradient_config(),
+            private_phasor_key(ctx, slot_path),
+            Some(message),
+        ),
     }
 }
 
@@ -2086,13 +2309,15 @@ fn resolve_gradient_config(
 pub(super) fn resolve_or_default_input(
     ctx: &mut TickContext<'_>,
     name: &str,
+    keys: &mut UniformFieldKeys,
     slot: &ShaderSlotDef,
     context: &str,
     timebase: &mut TimeProductCache,
+    templates: &mut MapInputTemplates,
 ) -> Result<(LpsValueF32, Option<String>), NodeError> {
     match *slot.kind.value() {
         ShaderSlotKind::Seconds => return Ok(resolve_seconds_input(ctx, timebase)),
-        ShaderSlotKind::Phasor => return resolve_phasor_input(ctx, name, slot, timebase),
+        ShaderSlotKind::Phasor => return resolve_phasor_input(ctx, name, keys, slot, timebase),
         // A palette never reaches here from the visual shader node — it takes
         // the bake path before this function is called, and the compute node
         // has no palette support yet. The materialize helper below refuses it
@@ -2102,12 +2327,10 @@ pub(super) fn resolve_or_default_input(
         | ShaderSlotKind::Buffer
         | ShaderSlotKind::Palette => {}
     }
-    let slot_path = SlotPath::parse(name)
-        .map_err(|e| NodeError::msg(format!("invalid {context} consumed slot {name:?}: {e}")))?;
-    let (production, mut failure) = match ctx.resolve(&QueryKey::ConsumedSlot {
-        node: ctx.node_id(),
-        slot: slot_path,
-    }) {
+    // The uniform's own consumed-slot key comes from the same per-uniform
+    // cache the def sync reads through, so the value read parses nothing.
+    let own = keys.key(ctx, name, AuthoredField::Own)?;
+    let (production, mut failure) = match ctx.resolve(own) {
         Ok(production) => (Some(production), None),
         Err(e) if unwritten_channel_at_rest(slot, &e) => (None, None),
         Err(e) => (None, Some(e.message)),
@@ -2117,6 +2340,7 @@ pub(super) fn resolve_or_default_input(
         slot,
         production.as_ref().map(|production| production.data()),
         ctx.slot_shapes(),
+        Some(&mut *templates),
     );
     let value = match materialized {
         Ok(value) => value,
@@ -2129,7 +2353,7 @@ pub(super) fn resolve_or_default_input(
         // output down and leave the fixture black).
         Err(mismatch) if production.is_some() => {
             failure.get_or_insert_with(|| mismatch.to_string());
-            materialize_shader_input(name, slot, None, ctx.slot_shapes())
+            materialize_shader_input(name, slot, None, ctx.slot_shapes(), Some(templates))
                 .map_err(|e| NodeError::msg(format!("{context} input {name:?}: {e}")))?
         }
         Err(e) => return Err(NodeError::msg(format!("{context} input {name:?}: {e}"))),
@@ -2168,7 +2392,7 @@ pub(super) fn resolve_or_default_input(
 /// The kind is the whole test on purpose. "Declares its own `default`" would
 /// be the truer statement of intent, but it is not observable here: the
 /// authored side's absent `default` option reads as `0.0` through
-/// [`sync_optional_value_from_authored`], which then *creates* the runtime
+/// [`sync_optional_field_from_authored`], which then *creates* the runtime
 /// option, so every value slot carries a default by the time this runs.
 /// Consequence worth naming: a typo'd channel on a **value** input is now
 /// silent, diagnosed by its panel control reading "default" rather than by a
@@ -3484,15 +3708,22 @@ mod tests {
                 return Err(ResolveError::new("PinResolver: unexpected query"));
             };
             let path = slot.to_string();
-            if path == "space" || path == "space.OneD.in_2d" {
-                // The space sync shares this resolver; refuse it like any
-                // other unresolved slot so the loaded declaration stands.
-                return Err(ResolveError::new("space slot not faked here"));
+            panic!("PinResolver: unexpected dynamic query {path:?}");
+        }
+
+        /// The config sync reads every one of its paths as a constant, so
+        /// this — not [`Self::resolve`] — is where the fake answers.
+        fn resolve_static_consumed(
+            &mut self,
+            _node: NodeId,
+            path: &'static str,
+        ) -> Result<Production, ResolveError> {
+            if path != FLOAT_MODE_PIN_PATH {
+                // The space and consumed-key syncs share this resolver;
+                // refuse them like any other unresolved slot so the loaded
+                // declaration stands.
+                return Err(ResolveError::new("slot not faked here"));
             }
-            assert_eq!(
-                path, "float_mode.some",
-                "the pin sync must read the option payload, never the option itself"
-            );
             let Some(pin) = self.pin else {
                 return Err(ResolveError::new("option slot is none"));
             };
@@ -3500,14 +3731,6 @@ mod tests {
                 lpc_model::WithRevision::new(Revision::new(1), pin.to_lp_value()),
                 ProductionSource::Default,
             ))
-        }
-
-        fn resolve_static_consumed(
-            &mut self,
-            _node: NodeId,
-            _path: &'static str,
-        ) -> Result<Production, ResolveError> {
-            Err(ResolveError::new("PinResolver: unused"))
         }
 
         fn publish_produced_slot(
@@ -3828,6 +4051,635 @@ mod tests {
                 .expect("counting stub renders into lpvm-backed targets");
             buffer.data_mut().fill(self.0);
             Ok(())
+        }
+    }
+}
+
+/// The authored-def sync's cost and its invalidation contract.
+///
+/// The sync re-reads every authored field of every uniform on every tick so
+/// that a live authoring edit lands on the next frame. These tests pin both
+/// halves of that bargain: the steady state (an unchanged def) must allocate
+/// nothing, and every edit must still land — memory
+/// `resolver-persistent-resolution`: a cache whose invalidation is wrong
+/// fails SILENTLY, so the edits are tests, not comments.
+#[cfg(test)]
+mod authored_sync_tests {
+    use super::*;
+    use crate::dataflow::resolver::{Production, ProductionSource, ResolveError, TickResolver};
+    use crate::test_alloc_counter::measure;
+    use lpc_model::{
+        ArtifactLocation, AssetContentType, LpValue, MapSlot, Revision, SlotData, SlotMapDyn,
+        SlotMapKey, SlotShapeRegistry, WithRevision,
+    };
+
+    /// The whole point of the key cache: a second tick over an unchanged
+    /// authored def must not allocate at all — no `format!` of an authored
+    /// path, no `SlotPath::parse`, no `String` conversion of a `label` that
+    /// is then compared away.
+    #[test]
+    fn a_steady_authored_def_sync_allocates_nothing() {
+        let mut node = node_with_two_value_uniforms();
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+        let (_, churn) = measure(|| sync_once(&mut node, &mut resolver, &shapes, 2));
+
+        std::eprintln!("steady authored sync: {churn:?}");
+        assert_eq!(
+            churn.allocs, 0,
+            "a steady authored-def sync must allocate nothing, made {} requests ({} B)",
+            churn.allocs, churn.bytes
+        );
+    }
+
+    /// The same guarantee for the value pass the visual node runs right
+    /// after the def sync: the uniform list is rewritten in place rather
+    /// than rebuilt, so the uniform NAMES are not cloned per frame either.
+    #[test]
+    fn a_steady_uniform_pass_allocates_nothing() {
+        let mut node = node_with_two_value_uniforms();
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+        node.update_visual_uniforms(&mut tick(&mut resolver, &shapes, 1))
+            .expect("warm-up uniforms");
+
+        let (_, churn) = measure(|| {
+            node.update_visual_uniforms(&mut tick(&mut resolver, &shapes, 2))
+                .expect("uniforms")
+        });
+
+        std::eprintln!("steady uniform pass: {churn:?}");
+        assert_eq!(churn.allocs, 0, "{churn:?}");
+        assert_eq!(node.visual_uniforms.len(), 2);
+    }
+
+    /// A uniform the author adds mid-run is synced on the next tick: its
+    /// keys are built on the spot and resolve.
+    #[test]
+    fn a_uniform_added_mid_run_is_synced_on_the_next_tick() {
+        let mut node = node_with_two_value_uniforms();
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+
+        resolver.add_uniform("sparks", "Sparks");
+        sync_once(&mut node, &mut resolver, &shapes, 2);
+
+        let added = node
+            .consumed_slots
+            .entries
+            .get("sparks")
+            .expect("the added uniform must reach the runtime def");
+        assert_eq!(added.label.value(), "Sparks");
+        assert_eq!(node.authored_keys.len(), 3);
+        assert!(node.needs_compile, "a new uniform changes the GLSL header");
+    }
+
+    /// A uniform the author removes mid-run drops its key set — the cache
+    /// tracks the uniform count instead of growing across live edits.
+    #[test]
+    fn a_uniform_removed_mid_run_drops_its_keys() {
+        let mut node = node_with_two_value_uniforms();
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+        assert_eq!(node.authored_keys.len(), 2);
+
+        resolver.remove_uniform("tail");
+        sync_once(&mut node, &mut resolver, &shapes, 2);
+
+        assert!(node.consumed_slots.entries.get("tail").is_none());
+        assert_eq!(
+            node.authored_keys.len(),
+            1,
+            "a removed uniform must not leave its keys behind"
+        );
+    }
+
+    /// A live `label` edit lands through the borrow-compare path — the one
+    /// that only allocates when the text actually differs.
+    #[test]
+    fn an_edited_label_lands_on_the_next_tick() {
+        let mut node = node_with_two_value_uniforms();
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+        assert_eq!(node.consumed_slots.entries["reach"].label.value(), "Reach");
+
+        resolver.set(
+            "consumed[reach].label",
+            LpValue::String(String::from("Span")),
+        );
+        sync_once(&mut node, &mut resolver, &shapes, 2);
+
+        assert_eq!(node.consumed_slots.entries["reach"].label.value(), "Span");
+    }
+
+    /// A live `min` edit lands through the pre-built key. `min` keeps the
+    /// update-only shape on purpose (see the sync's doc comment), so this
+    /// covers the option that already exists.
+    #[test]
+    fn an_edited_min_lands_on_the_next_tick() {
+        let mut node = node_with_two_value_uniforms();
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+
+        resolver.set("consumed[reach].min.some", LpValue::F32(0.25));
+        sync_once(&mut node, &mut resolver, &shapes, 2);
+
+        let min = node.consumed_slots.entries["reach"]
+            .min
+            .data
+            .as_ref()
+            .expect("min stays present");
+        assert_eq!(*min.value(), 0.25);
+    }
+
+    /// "Creation is the point" — an option the runtime does not have yet is
+    /// CREATED when the author adds one, through the same cached key.
+    #[test]
+    fn an_absent_default_created_mid_run_lands_on_the_next_tick() {
+        let mut node = node_with_two_value_uniforms();
+        node.consumed_slots
+            .entries
+            .get_mut("reach")
+            .expect("reach")
+            .default = OptionSlot::none();
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+
+        let default = node.consumed_slots.entries["reach"]
+            .default
+            .data
+            .as_ref()
+            .expect("an authored default must CREATE the runtime option");
+        assert_eq!(*default.value(), 0.5);
+    }
+
+    /// "Leave as loaded is the point" for the other direction: an authored
+    /// path that stops resolving does not wipe the runtime value.
+    #[test]
+    fn an_authored_field_that_stops_resolving_leaves_the_loaded_value() {
+        let mut node = node_with_two_value_uniforms();
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+
+        resolver.forget("consumed[reach].label");
+        sync_once(&mut node, &mut resolver, &shapes, 2);
+
+        assert_eq!(node.consumed_slots.entries["reach"].label.value(), "Reach");
+    }
+
+    /// A structural epoch drops the cached keys (they were shared with the
+    /// intern table, which clears) and the very next tick rebuilds them and
+    /// syncs exactly as before.
+    #[test]
+    fn a_structural_epoch_change_rebuilds_the_keys_and_still_syncs() {
+        let mut node = node_with_two_value_uniforms();
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+
+        resolver.epoch += 1;
+        resolver.set(
+            "consumed[reach].label",
+            LpValue::String(String::from("Span")),
+        );
+        sync_once(&mut node, &mut resolver, &shapes, 2);
+
+        assert_eq!(node.consumed_slots.entries["reach"].label.value(), "Span");
+        assert_eq!(node.authored_keys.len(), 2);
+    }
+
+    /// Keys are built only for the fields the sync actually reads.
+    ///
+    /// Not an optimisation detail: probing `.key.some` or `.mapping.some.*`
+    /// on a value slot would persist a resolver route entry per slot for the
+    /// life of the project (ADR 2026-07-31), which is what the gates in
+    /// `sync_shader_slot_def_from_authored` exist to prevent. A cache that
+    /// pre-built every path would put the paths themselves in RAM too.
+    #[test]
+    fn a_value_uniform_builds_no_keys_for_map_storage_fields() {
+        let mut node = node_with_two_value_uniforms();
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+        node.update_visual_uniforms(&mut tick(&mut resolver, &shapes, 1))
+            .expect("uniforms");
+
+        assert_eq!(
+            node.authored_keys.built_for("reach"),
+            // own, kind, value, default.some, min.some, label, description
+            Some(7),
+            "a value uniform must not build keys for map/buffer/phasor storage"
+        );
+    }
+
+    /// The compute node runs the same sync through the same shared helpers,
+    /// and it is the node the emulator profile attributes most of the churn
+    /// to — so it gets its own steady-state assertion rather than riding on
+    /// the visual node's.
+    #[test]
+    fn a_steady_compute_def_sync_allocates_nothing() {
+        use super::super::compute_shader_node::ComputeShaderNode;
+
+        let mut consumed_slots = MapSlot::default();
+        consumed_slots.entries.insert(
+            String::from("reach"),
+            ShaderSlotDef::value_f32("Reach", "how far", 0.5, Some(0.0)),
+        );
+        consumed_slots.entries.insert(
+            String::from("tail"),
+            ShaderSlotDef::value_f32("Tail", "how long", 0.5, Some(0.0)),
+        );
+        let def = lpc_model::ComputeShaderDef {
+            consumed_slots,
+            ..lpc_model::ComputeShaderDef::default()
+        };
+        let mut node = ComputeShaderNode::new(
+            NodeId::new(1),
+            def,
+            String::from("void tick() {}"),
+            Revision::new(1),
+        );
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+
+        node.sync_def_from_view(&mut tick(&mut resolver, &shapes, 1))
+            .expect("warm-up sync");
+        let (_, churn) = measure(|| {
+            node.sync_def_from_view(&mut tick(&mut resolver, &shapes, 2))
+                .expect("sync")
+        });
+
+        std::eprintln!("steady compute def sync: {churn:?}");
+        assert_eq!(churn.allocs, 0, "{churn:?}");
+    }
+
+    /// The `time` channel key is memoized per (scope, name), so a node in a
+    /// module scope still reads ITS scope's timebase — the scoped semantics
+    /// `resolve_time_product` documents.
+    #[test]
+    fn the_time_channel_resolves_the_readers_own_scope() {
+        for scope in [
+            None,
+            Some(crate::node::ScopeRef::Module {
+                owner: NodeId::new(7),
+            }),
+        ] {
+            let mut resolver = TimebaseResolver { scope };
+            let shapes = SlotShapeRegistry::default();
+            let mut ctx = tick_with(&mut resolver, &shapes);
+
+            let product = resolve_time_product(&mut ctx).expect("time product");
+
+            assert_eq!(product, TimeProduct::new(NodeId::new(7), 0));
+        }
+    }
+
+    fn tick_with<'r>(
+        resolver: &'r mut TimebaseResolver,
+        shapes: &'r SlotShapeRegistry,
+    ) -> TickContext<'r> {
+        TickContext::new(NodeId::new(1), Revision::new(1), resolver, shapes)
+    }
+
+    /// Answers `bus:time` only for the scope it claims the reader is in.
+    struct TimebaseResolver {
+        scope: Option<crate::node::ScopeRef>,
+    }
+
+    impl TickResolver for TimebaseResolver {
+        fn resolve(&mut self, query: &QueryKey) -> Result<Production, ResolveError> {
+            let QueryKey::Bus { scope, channel } = query else {
+                return Err(ResolveError::new("timebase fake: unexpected query"));
+            };
+            if *scope != self.scope || channel.0 != TIME_CHANNEL {
+                return Err(ResolveError::new("timebase fake: wrong scope or channel"));
+            }
+            Ok(Production::leaf(
+                WithRevision::new(
+                    Revision::new(1),
+                    LpValue::Product(lpc_model::ProductRef::Time(TimeProduct::new(
+                        NodeId::new(7),
+                        0,
+                    ))),
+                ),
+                ProductionSource::Default,
+            ))
+        }
+
+        fn node_scope(&self, _node: NodeId) -> Option<crate::node::ScopeRef> {
+            self.scope
+        }
+
+        fn resolve_static_consumed(
+            &mut self,
+            _node: NodeId,
+            _path: &'static str,
+        ) -> Result<Production, ResolveError> {
+            Err(ResolveError::new("timebase fake: unused"))
+        }
+
+        fn publish_produced_slot(
+            &mut self,
+            _node: NodeId,
+            _slot: SlotPath,
+            _production: Production,
+        ) -> Result<(), ResolveError> {
+            Err(ResolveError::new("timebase fake: unused"))
+        }
+
+        fn render_texture(
+            &mut self,
+            _product: VisualProduct,
+            _request: &RenderTextureRequest,
+        ) -> Result<TextureRenderProduct, ResolveError> {
+            Err(ResolveError::new("timebase fake: unused"))
+        }
+
+        fn render_control(
+            &mut self,
+            _product: crate::products::control::ControlProduct,
+            _request: &crate::products::control::ControlRenderRequest,
+            _target: crate::products::control::ControlRenderTarget<'_>,
+        ) -> Result<crate::products::control::ControlLayout, ResolveError> {
+            Err(ResolveError::new("timebase fake: unused"))
+        }
+
+        fn runtime_buffer_mut(
+            &mut self,
+            _id: crate::resource::RuntimeBufferId,
+            _frame: Revision,
+        ) -> Result<&mut crate::resource::RuntimeBuffer, ResolveError> {
+            Err(ResolveError::new("timebase fake: unused"))
+        }
+    }
+
+    fn sync_once(
+        node: &mut ShaderNode,
+        resolver: &mut AuthoredDefResolver,
+        shapes: &SlotShapeRegistry,
+        revision: i64,
+    ) {
+        let mut ctx = tick(resolver, shapes, revision);
+        node.update_config_from_view(&mut ctx).expect("config sync");
+        node.update_consumed_slots_from_view(&mut ctx)
+            .expect("consumed sync");
+    }
+
+    fn tick<'r>(
+        resolver: &'r mut AuthoredDefResolver,
+        shapes: &'r SlotShapeRegistry,
+        revision: i64,
+    ) -> TickContext<'r> {
+        TickContext::new(NodeId::new(1), Revision::new(revision), resolver, shapes)
+    }
+
+    fn node_with_two_value_uniforms() -> ShaderNode {
+        let mut consumed_slots = MapSlot::default();
+        consumed_slots.entries.insert(
+            String::from("reach"),
+            ShaderSlotDef::value_f32("Reach", "how far", 0.5, Some(0.0)),
+        );
+        consumed_slots.entries.insert(
+            String::from("tail"),
+            ShaderSlotDef::value_f32("Tail", "how long", 0.5, Some(0.0)),
+        );
+        let def = ShaderDef {
+            consumed_slots,
+            ..ShaderDef::default()
+        };
+        ShaderNode::new(
+            NodeId::new(1),
+            def,
+            AssetText {
+                location: AssetLocation::artifact(ArtifactLocation::file("/shader.glsl")),
+                content_type: AssetContentType::ShaderSource,
+                revision: Revision::new(1),
+                text: String::from("vec4 render_2d(vec2 p) { return vec4(0.0); }"),
+                diagnostic_name: String::from("/shader.glsl"),
+            },
+        )
+    }
+
+    fn authored_view() -> AuthoredDefResolver {
+        let mut view = AuthoredDefResolver {
+            fields: Vec::new(),
+            uniforms: Vec::new(),
+            statics: Vec::new(),
+            epoch: 0,
+        };
+        // Everything the config sync reads by constant path, so that a
+        // steady tick takes only resolved routes — the shape a loaded
+        // project actually has.
+        view.set_static(
+            FLOAT_MODE_PIN_PATH,
+            Production::leaf(
+                WithRevision::new(Revision::new(1), LpValue::String(String::from("fixed"))),
+                ProductionSource::Default,
+            ),
+        );
+        view.set_static("space", enum_production("OneD"));
+        view.set_static("space.OneD.in_2d", enum_production("Project"));
+        view.set_static(
+            "space.OneD.in_2d.Project.shape",
+            enum_production("ExtrudeX"),
+        );
+        view.set_static("space.OneD.in_2d.Project.mirror", enum_production("Normal"));
+        view.set_static("space.OneD.in_2d.Project.flip", enum_production("Normal"));
+        view.add_uniform("reach", "Reach");
+        view.add_uniform("tail", "Tail");
+        view
+    }
+
+    fn enum_production(variant: &str) -> Production {
+        Production::new(
+            SlotData::Enum(lpc_model::SlotEnum::with_version(
+                Revision::new(1),
+                lpc_model::SlotName::parse(variant).expect("test variant"),
+                SlotData::Unit {
+                    revision: Revision::new(1),
+                },
+            )),
+            ProductionSource::Default,
+        )
+    }
+
+    /// A [`TickResolver`] that answers a shader node's authored def the way
+    /// the engine's overlay-aware view does.
+    ///
+    /// Two properties matter for the allocation test: a repeat read must not
+    /// allocate (paths are compared, never formatted; a [`Production`] holds
+    /// its data behind an `Rc`), and the fake must refuse an unauthored path
+    /// the way the real resolver refuses one.
+    struct AuthoredDefResolver {
+        fields: Vec<(SlotPath, Production)>,
+        uniforms: Vec<String>,
+        /// Answers for the constant paths the config sync reads. Held as
+        /// productions, not rebuilt per read: a refusal costs a
+        /// [`ResolveError`] message, which would put the FAKE's allocations
+        /// into the node's measurement.
+        statics: Vec<(&'static str, Production)>,
+        epoch: u64,
+    }
+
+    impl AuthoredDefResolver {
+        fn add_uniform(&mut self, name: &str, label: &str) {
+            self.uniforms.push(String::from(name));
+            self.set(name, LpValue::F32(0.25));
+            self.set(
+                &alloc::format!("consumed[{name}].kind"),
+                LpValue::String(String::from("value")),
+            );
+            self.set(
+                &alloc::format!("consumed[{name}].value"),
+                LpValue::String(String::from("f32")),
+            );
+            self.set(
+                &alloc::format!("consumed[{name}].default.some"),
+                LpValue::F32(0.5),
+            );
+            self.set(
+                &alloc::format!("consumed[{name}].min.some"),
+                LpValue::F32(0.0),
+            );
+            self.set(
+                &alloc::format!("consumed[{name}].label"),
+                LpValue::String(String::from(label)),
+            );
+            self.set(
+                &alloc::format!("consumed[{name}].description"),
+                LpValue::String(String::from("described")),
+            );
+            self.rebuild_consumed_map();
+        }
+
+        fn remove_uniform(&mut self, name: &str) {
+            self.uniforms.retain(|held| held != name);
+            let prefix = alloc::format!("consumed[{name}]");
+            self.fields.retain(|(path, _)| {
+                let held = path.to_string();
+                held != name && !held.starts_with(&prefix)
+            });
+            self.rebuild_consumed_map();
+        }
+
+        fn set(&mut self, path: &str, value: LpValue) {
+            let path = SlotPath::parse(path).expect("test authored path");
+            let production = Production::leaf(
+                WithRevision::new(Revision::new(1), value),
+                ProductionSource::Default,
+            );
+            match self.fields.iter_mut().find(|(held, _)| *held == path) {
+                Some(entry) => entry.1 = production,
+                None => self.fields.push((path, production)),
+            }
+        }
+
+        fn set_static(&mut self, path: &'static str, production: Production) {
+            match self.statics.iter_mut().find(|(held, _)| *held == path) {
+                Some(entry) => entry.1 = production,
+                None => self.statics.push((path, production)),
+            }
+        }
+
+        fn forget(&mut self, path: &str) {
+            let path = SlotPath::parse(path).expect("test authored path");
+            self.fields.retain(|(held, _)| *held != path);
+        }
+
+        /// Rebuild the `consumed` map production held for the key-set read.
+        ///
+        /// Held rather than built per read so the allocation test measures
+        /// the node, not the fake: the real resolver answers that query from
+        /// its cache, where a [`Production`] clone is a pair of `Rc` bumps.
+        fn rebuild_consumed_map(&mut self) {
+            let mut entries = lp_collection::VecMap::new();
+            for name in &self.uniforms {
+                entries.insert(
+                    SlotMapKey::String(name.clone()),
+                    SlotData::Unit {
+                        revision: Revision::new(1),
+                    },
+                );
+            }
+            let consumed = Production::new(
+                SlotData::Map(SlotMapDyn::with_revision(Revision::new(1), entries)),
+                ProductionSource::Default,
+            );
+            self.set_static("consumed", consumed);
+        }
+    }
+
+    impl TickResolver for AuthoredDefResolver {
+        fn resolve(&mut self, query: &QueryKey) -> Result<Production, ResolveError> {
+            let QueryKey::ConsumedSlot { slot, .. } = query else {
+                return Err(ResolveError::new("authored fake: unexpected query"));
+            };
+            self.fields
+                .iter()
+                .find(|(held, _)| held == slot)
+                .map(|(_, production)| production.clone())
+                .ok_or_else(|| ResolveError::new("authored fake: unresolved slot"))
+        }
+
+        fn resolve_static_consumed(
+            &mut self,
+            _node: NodeId,
+            path: &'static str,
+        ) -> Result<Production, ResolveError> {
+            match self.statics.iter().find(|(held, _)| *held == path) {
+                Some((_, production)) => Ok(production.clone()),
+                None => Err(ResolveError::new("authored fake: unresolved static slot")),
+            }
+        }
+
+        fn structure_epoch(&self) -> u64 {
+            self.epoch
+        }
+
+        fn publish_produced_slot(
+            &mut self,
+            _node: NodeId,
+            _slot: SlotPath,
+            _production: Production,
+        ) -> Result<(), ResolveError> {
+            Err(ResolveError::new("authored fake: unused"))
+        }
+
+        fn render_texture(
+            &mut self,
+            _product: VisualProduct,
+            _request: &RenderTextureRequest,
+        ) -> Result<TextureRenderProduct, ResolveError> {
+            Err(ResolveError::new("authored fake: unused"))
+        }
+
+        fn render_control(
+            &mut self,
+            _product: crate::products::control::ControlProduct,
+            _request: &crate::products::control::ControlRenderRequest,
+            _target: crate::products::control::ControlRenderTarget<'_>,
+        ) -> Result<crate::products::control::ControlLayout, ResolveError> {
+            Err(ResolveError::new("authored fake: unused"))
+        }
+
+        fn runtime_buffer_mut(
+            &mut self,
+            _id: crate::resource::RuntimeBufferId,
+            _frame: Revision,
+        ) -> Result<&mut crate::resource::RuntimeBuffer, ResolveError> {
+            Err(ResolveError::new("authored fake: unused"))
         }
     }
 }

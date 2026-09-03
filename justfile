@@ -1462,7 +1462,8 @@ _fw-size-check name chip flash_size elf partition margin doc:
     fi
 
 # Heap-budget ratchet: per-window heap deltas (project-load, shader-compile,
-# frame, …) measured on the RV32 emulator vs the checked-in measured record
+# frame, …) and per-frame allocation churn (a steady-render pass) measured on
+# the RV32 emulator vs the checked-in measured record
 # (scripts/heap-budget-record.json). A ratchet, not a ceiling — fails on any
 # growth beyond the margin; an intentional increase re-baselines explicitly
 # with `just heap-budget-baseline` so the growth lands in the PR diff.

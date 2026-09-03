@@ -261,23 +261,61 @@ impl<'r> TickContext<'r> {
         self.resolver.resolve_static_consumed(node, path)
     }
 
+    /// Resolve a bus channel named by a constant, for this node's read
+    /// scope or another.
+    ///
+    /// Prefer this to building a [`QueryKey::Bus`] when the channel name is
+    /// a literal: the [`lpc_model::ChannelName`] is built once per
+    /// (scope, name) per structural epoch instead of per read.
+    pub fn resolve_static_bus(
+        &mut self,
+        scope: Option<ScopeRef>,
+        channel: &'static str,
+    ) -> Result<Production, ResolveError> {
+        self.resolver.resolve_static_bus(scope, channel)
+    }
+
+    /// The shared, interned form of `query` — for a node that keeps the keys
+    /// it reads every tick instead of rebuilding them.
+    ///
+    /// The returned key stays valid forever (a [`QueryKey`] is not epoch
+    /// scoped, unlike a `QueryId`); what [`Self::structure_epoch`] is for is
+    /// noticing that the intern table dropped its half, so the holder can
+    /// re-share rather than keep a private copy alive.
+    pub fn intern_key(&mut self, query: &QueryKey) -> Rc<QueryKey> {
+        self.resolver.intern_key(query)
+    }
+
+    /// How many times the graph has changed shape. Only equality across two
+    /// observations is meaningful.
+    pub fn structure_epoch(&self) -> u64 {
+        self.resolver.structure_epoch()
+    }
+
+    /// Publish one of this node's runtime state slots for the current frame.
+    ///
+    /// `slot` is borrowed: a node publishes the same path every frame, so
+    /// the caller keeps it and the provenance handle is interned
+    /// ([`crate::dataflow::resolver::TickResolver::produced_slot_path`])
+    /// rather than deep-copied per publish.
     pub fn publish_runtime_slot(
         &mut self,
         state_root: &dyn SlotAccess,
-        slot: SlotPath,
+        slot: &SlotPath,
     ) -> Result<(), NodeError> {
-        let (data, shape) = lookup_slot_data_and_shape(state_root, self.slot_shapes, &slot)
+        let (data, shape) = lookup_slot_data_and_shape(state_root, self.slot_shapes, slot)
             .map_err(|e| NodeError::msg(alloc::format!("runtime slot lookup {slot}: {e}")))?;
         let snapshot = lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes);
+        let path = self.resolver.produced_slot_path(slot);
         let production = Production::new(
             snapshot,
             ProductionSource::ProducedSlot {
                 node: self.node_id,
-                slot: slot.clone(),
+                slot: path,
             },
         );
         self.resolver
-            .publish_produced_slot(self.node_id, slot, production)
+            .publish_produced_slot(self.node_id, slot.clone(), production)
             .map_err(|e| NodeError::msg(alloc::format!("publish runtime slot: {}", e.message)))
     }
 
@@ -1190,8 +1228,7 @@ mod tests {
         };
         let slot = SlotPath::parse("value").expect("value slot");
 
-        ctx.publish_runtime_slot(&state, slot.clone())
-            .expect("publish");
+        ctx.publish_runtime_slot(&state, &slot).expect("publish");
         let production = ctx
             .resolve(&QueryKey::ProducedSlot { node, slot })
             .expect("resolve published slot");

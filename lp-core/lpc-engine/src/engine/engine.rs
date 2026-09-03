@@ -1412,7 +1412,9 @@ impl EngineResolveHost<'_> {
             product,
             ProductionSource::ProducedSlot {
                 node,
-                slot: slot.clone(),
+                // Interned rather than freshly copied: this runs once per
+                // produced slot per frame.
+                slot: session.produced_slot_path(slot),
             },
         ))
     }

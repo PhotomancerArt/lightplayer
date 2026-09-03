@@ -9,7 +9,10 @@
 
 use alloc::string::String;
 
-use crate::{LpType, ShaderSlotDef, ShaderSlotKind, SlotShapeLookup, SlotShapeRegistry};
+use crate::{
+    LpType, ShaderSlotDef, ShaderSlotKind, SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
+    SlotValueShapeView, StaticLpType,
+};
 
 /// Memory guardrails for one shader's declared slot interface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,23 +108,52 @@ pub fn slot_bytes_estimate(slot: &ShaderSlotDef, registry: &SlotShapeRegistry) -
     }
 }
 
+/// Bytes one element of a map slot declares.
+///
+/// The registered shape is measured **through its borrowed view**. Owning it
+/// first (`ty_owned()`) deep-copied the whole `LpType` — every field name of a
+/// struct element — and this runs on the per-frame materialize path, once per
+/// map uniform per frame, purely to add up some constants.
 fn element_bytes_estimate(slot: &ShaderSlotDef, registry: &SlotShapeRegistry) -> u64 {
-    let ty = match slot.value.value().as_lp_type() {
-        Some(ty) => ty,
-        None => {
-            let id = crate::SlotShapeId::from_static_name(slot.value.value().as_str());
-            match registry
-                .get_shape(id)
-                .and_then(|shape| shape.value_shape().map(|shape| shape.ty_owned()))
-            {
-                Some(ty) => ty,
-                // Unknown shape: the budget is not the place to diagnose it
-                // — header gen / desc build refuse it by name.
-                None => return 0,
-            }
-        }
-    };
-    lp_type_bytes_estimate(&ty)
+    if let Some(ty) = slot.value.value().as_lp_type() {
+        return lp_type_bytes_estimate(&ty);
+    }
+    let id = crate::SlotShapeId::from_static_name(slot.value.value().as_str());
+    match registry.get_shape(id).and_then(SlotShapeView::value_shape) {
+        Some(SlotValueShapeView::Static(shape)) => static_lp_type_bytes_estimate(shape.ty),
+        Some(SlotValueShapeView::Dynamic(shape)) => lp_type_bytes_estimate(&shape.ty),
+        // Unknown shape: the budget is not the place to diagnose it
+        // — header gen / desc build refuse it by name.
+        None => 0,
+    }
+}
+
+/// [`lp_type_bytes_estimate`] over the `'static` mirror of `LpType`. The two
+/// must agree: a shape registered statically and the same shape registered
+/// dynamically declare the same bytes.
+fn static_lp_type_bytes_estimate(ty: StaticLpType) -> u64 {
+    match ty {
+        StaticLpType::I32 | StaticLpType::U32 | StaticLpType::F32 | StaticLpType::Bool => 4,
+        StaticLpType::Vec2 | StaticLpType::IVec2 | StaticLpType::UVec2 | StaticLpType::BVec2 => 8,
+        StaticLpType::Vec3 | StaticLpType::IVec3 | StaticLpType::UVec3 | StaticLpType::BVec3 => 12,
+        StaticLpType::Vec4 | StaticLpType::IVec4 | StaticLpType::UVec4 | StaticLpType::BVec4 => 16,
+        StaticLpType::Mat2x2 => 16,
+        StaticLpType::Mat3x3 => 36,
+        StaticLpType::Mat4x4 => 64,
+        StaticLpType::Buffer { elem, len } => u64::from(len) * u64::from(elem.word_stride()) * 4,
+        StaticLpType::Array(element, len) => static_lp_type_bytes_estimate(*element) * (len as u64),
+        StaticLpType::Struct { fields, .. } => fields
+            .iter()
+            .map(|field| static_lp_type_bytes_estimate(field.ty))
+            .sum(),
+        // Not shader-declarable data; contributes nothing here.
+        StaticLpType::Any
+        | StaticLpType::String
+        | StaticLpType::List(_)
+        | StaticLpType::Enum { .. }
+        | StaticLpType::Resource
+        | StaticLpType::Product(_) => 0,
+    }
 }
 
 fn lp_type_bytes_estimate(ty: &LpType) -> u64 {
@@ -172,6 +204,31 @@ mod tests {
 
         assert_eq!(err.slot, "emitters".to_string());
         assert!(err.bytes > u64::from(err.budget));
+    }
+
+    /// The static and dynamic estimators must agree, or a shape's declared
+    /// bytes would depend on how it happened to be registered. Measuring the
+    /// static path through the borrowed view (rather than owning the type
+    /// first) is what makes the per-frame materialize path allocation-free.
+    #[test]
+    fn static_and_dynamic_registrations_estimate_the_same_bytes() {
+        let slot = ShaderSlotDef::map_u32_native(
+            "lp::fluid::Emitter",
+            ShaderSlotMappingDef::sentinel(4, "id", 0),
+        );
+        let statically_registered = crate::SlotShapeRegistry::default();
+        let id = crate::SlotShapeId::from_static_name(slot.value.value().as_str());
+        let owned_ty = SlotShapeLookup::get_shape(&statically_registered, id)
+            .and_then(SlotShapeView::value_shape)
+            .expect("emitter shape")
+            .ty_owned();
+        let mut dynamically_registered = statically_registered.clone();
+        dynamically_registered.replace_shape(id, crate::SlotShape::value(owned_ty));
+
+        assert_eq!(
+            slot_bytes_estimate(&slot, &statically_registered),
+            slot_bytes_estimate(&slot, &dynamically_registered)
+        );
     }
 
     #[test]
