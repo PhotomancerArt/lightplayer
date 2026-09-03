@@ -650,8 +650,15 @@ impl Engine {
         // while they run.
         lpc_shared::backtrace::set_oom_context("engine: tick");
         lp_perf::emit_begin!(lp_perf::EVENT_FRAME);
-        let result = (|| {
-            self.tick_nodes(registry, delta_ms)?;
+        // The walk's outcome and the flush are SEPARATE: a failed walk still
+        // flushes whatever the outputs published this frame. The frame where
+        // an output's own render fails is exactly the frame it paints the
+        // fault pattern (never-black), and until 2026-09-02 that buffer never
+        // reached the wall — the `?` here returned before the flush, so the
+        // sim (which reads the published buffer) breathed red while the LEDs
+        // stayed dark (G1 bench, docs/adr/2026-09-02-fault-is-never-black.md).
+        let walk = self.tick_nodes(registry, delta_ms);
+        let flushed = {
             let revision = self.revision;
             self.refresh_output_sink_configs(registry);
             let buffers = &self.runtime_buffers;
@@ -659,9 +666,9 @@ impl Engine {
                 .flush_dirty_output_sinks(revision, buffers)
                 .map_err(|e| EngineError::OutputFlush {
                     message: alloc::format!("{e}"),
-                })?;
-            Ok(())
-        })();
+                })
+        };
+        let result = walk.and(flushed);
         lp_perf::emit_end!(lp_perf::EVENT_FRAME);
         lpc_shared::backtrace::clear_oom_context();
         result
@@ -790,12 +797,18 @@ impl Engine {
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
 
-        let walk = (|| {
-            for &root in &self.demand_roots {
-                consume_tree_node(&mut session, &mut host, root)?;
+        // Every demand root gets its turn: one output failing must not take
+        // its siblings dark for the frame (they would keep a stale buffer on
+        // the wall, and under a project fault they must paint the pattern
+        // themselves). The FIRST error is the frame's verdict, as before.
+        let mut walk: Result<(), EngineError> = Ok(());
+        for &root in &self.demand_roots {
+            if let Err(error) = consume_tree_node(&mut session, &mut host, root)
+                && walk.is_ok()
+            {
+                walk = Err(error);
             }
-            Ok(())
-        })();
+        }
 
         // End-of-tick timebase maintenance, deliberately OUTSIDE the `?`
         // path above: a node erroring mid-walk must not stall the store's

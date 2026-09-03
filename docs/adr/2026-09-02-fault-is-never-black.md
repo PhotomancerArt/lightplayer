@@ -174,9 +174,16 @@ That is the intended, honest outcome, not a bug to chase.
 
 - A compile `Error` with no last-good program still renders black (status
   `Error`; the card names it). `Error ≠ Fault` by design — see §2.
-- A faulting OUTPUT root aborts the remaining demand roots that tick
-  (pre-existing `?` in `tick_nodes`, `engine.rs` ~:709) — one broken output
-  can still take others dark that frame. Not addressed here.
+- ~~A faulting OUTPUT root aborts the remaining demand roots that tick~~ —
+  closed at G1 (2026-09-02): `tick_nodes` now consumes every demand root and
+  returns the first error afterwards, and `Engine::tick` flushes the dirty
+  output sinks whether or not the walk failed. The bench found the second
+  half: the frame an output's own render fails is the frame it paints the
+  pattern, and the `?` before the flush meant the sim (which reads the
+  published buffer) breathed red while the LEDs stayed dark. Pinned by
+  `lpa-server/tests/fault_pattern_reaches_the_wall.rs` (asserts on the
+  bytes the provider was handed) and
+  `a_failing_demand_root_does_not_stop_the_roots_after_it`.
 - An output that has never established an extent (`control_samples` empty)
   has nothing to paint; `apply_fault_pattern` returns `false` for it.
 - Render-time authoring errors ("missing uniform field") read as `Fault`

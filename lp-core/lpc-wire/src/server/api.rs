@@ -266,16 +266,20 @@ impl FaultedNodeWire {
     }
 }
 
-/// Truncate to at most `cap` bytes without splitting a char.
+/// Truncate to at most `cap` bytes without splitting a char, and SAY so:
+/// a cut message ends in `…` so a card never reads "exceeded 10" for
+/// "exceeded 100000 iterations" (G1 bench, 2026-09-02).
 fn truncate_on_char_boundary(mut text: String, cap: usize) -> String {
+    const ELLIPSIS: &str = "…";
     if text.len() <= cap {
         return text;
     }
-    let mut end = cap;
+    let mut end = cap.saturating_sub(ELLIPSIS.len());
     while end > 0 && !text.is_char_boundary(end) {
         end -= 1;
     }
     text.truncate(end);
+    text.push_str(ELLIPSIS);
     text
 }
 

@@ -110,6 +110,13 @@ is the red pattern). Heartbeat/mirror: `heartbeat_project_fault.rs`
 `DeviceStatus::Degraded` projection. Hardware: the C6 + Meteor
 re-quarantine walk at this plan's G1 gate.
 
+G1 bench (2026-09-02) added the wall-level pin the engine-level tests could not
+be: `lp-app/lpa-server/tests/fault_pattern_reaches_the_wall.rs` reads the bytes
+the OUTPUT PROVIDER was handed — the first walk showed `fault-demo` red in the
+sim and dark on the C6, because `Engine::tick` returned on the failed walk before
+flushing the sinks. The sim reads the published buffer, the wall reads the flush;
+a fault pattern must be proven at the flush.
+
 **Lesson** — A status enum or a mirror struct that conflates "this thing
 failed" with "this thing is fine but empty" (or "a heartbeat arrived" with
 "the content is real") will eventually present a genuinely-running, honestly-

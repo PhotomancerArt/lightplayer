@@ -306,9 +306,15 @@ mod ser_write_json_tests {
         assert_eq!(fault.nodes.len(), crate::server::FAULT_NODES_CAP);
         for node in &fault.nodes {
             assert!(node.message.len() <= crate::server::FAULT_MESSAGE_CAP_BYTES);
-            // A boundary-safe truncation leaves valid UTF-8 whose char
-            // count is exactly half the byte count for this 2-byte char.
-            assert_eq!(node.message.chars().count() * 2, node.message.len());
+            // A cut message SAYS it was cut (G1 bench: "exceeded 10" read as a
+            // lie for "exceeded 100000 iterations"), and what precedes the
+            // mark is valid UTF-8 whose char count is exactly half the byte
+            // count for this 2-byte char.
+            let body = node
+                .message
+                .strip_suffix('…')
+                .expect("a capped message ends in an ellipsis");
+            assert_eq!(body.chars().count() * 2, body.len());
         }
     }
 

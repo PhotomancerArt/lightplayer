@@ -198,3 +198,49 @@ fn the_presentation_knob_defaults_to_pattern_and_is_settable() {
     h.engine.set_fault_presentation(FaultPresentation::Black);
     assert_eq!(h.engine.fault_presentation(), FaultPresentation::Black);
 }
+
+/// One output failing must not take its siblings dark for the frame (G1
+/// bench, 2026-09-02): the walk used to stop at the first failing demand
+/// root, so every later output kept a stale buffer — and under a project
+/// fault never got to paint the pattern itself. Now every root gets its
+/// turn and the FIRST error is still the frame's verdict.
+#[test]
+fn a_failing_demand_root_does_not_stop_the_roots_after_it() {
+    let mut h = EngineTestBuilder::new()
+        .failing_producer(
+            "broken_shader",
+            output("outputs[0]", 0.5),
+            "intentional produce failure",
+        )
+        .fixture("broken_fixture")
+        .bind_demand_input(
+            "broken_fixture",
+            produced_slot("broken_shader", "outputs[0]"),
+        )
+        .shader("healthy_shader", output("outputs[0]", 0.25))
+        .fixture("healthy_fixture")
+        .bind_demand_input(
+            "healthy_fixture",
+            produced_slot("healthy_shader", "outputs[0]"),
+        )
+        .demand_root("broken_fixture")
+        .demand_root("healthy_fixture")
+        .build();
+
+    let result = h.tick(16);
+    assert!(result.is_err(), "the broken root still fails the frame");
+    assert_eq!(
+        h.shader_ticks("healthy_shader"),
+        1,
+        "the healthy root after the broken one was still consumed this frame",
+    );
+    assert!(
+        matches!(h.status("broken_shader"), NodeRuntimeStatus::Fault(_)),
+        "the broken producer faulted: {:?}",
+        h.status("broken_shader"),
+    );
+    assert!(
+        h.engine.project_fault().is_some(),
+        "and the project verdict stands for the next frame's paint",
+    );
+}
