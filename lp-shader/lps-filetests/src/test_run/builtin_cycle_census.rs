@@ -144,8 +144,14 @@ impl Census {
             .compiled
             .get_function_signature(name)
             .with_context(|| format!("census function `{name}` missing from module signature"))?;
-        let value =
-            execution::execute_function(&mut inst, self.target, gfn, name, args, CycleModel::Esp32C6)?;
+        let value = execution::execute_function(
+            &mut inst,
+            self.target,
+            gfn,
+            name,
+            args,
+            CycleModel::Esp32C6,
+        )?;
         let cycles = inst
             .last_guest_cycle_count()
             .with_context(|| format!("no guest cycle count after `{name}`"))?;
@@ -273,6 +279,10 @@ mod tests {
             LpsValueF32::F32(v) => assert!((v - 2.0).abs() < 1e-3, "sqrt(4) = {v}"),
             other => panic!("unexpected return {other:?}"),
         }
-        assert!(cycles > census.overhead1, "sqrt call ({cycles}) must cost more than the wrapper ({})", census.overhead1);
+        assert!(
+            cycles > census.overhead1,
+            "sqrt call ({cycles}) must cost more than the wrapper ({})",
+            census.overhead1
+        );
     }
 }
