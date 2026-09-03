@@ -22,12 +22,14 @@ mod place;
 mod scalar;
 mod shape;
 mod symbols;
+mod type_table;
 mod typeck;
 mod types;
 mod typing;
 
-pub(crate) use arena::{ExprId, ExprList, HirArena, PlaceId, TypeId};
+pub(crate) use arena::{ExprId, ExprList, PlaceId};
 use array_size::{ArraySizeConsts, eval_array_size_expr};
+pub(crate) use type_table::{HirView, TypeId, TypeTable, TypedArena};
 // The builtin checks double as the test-only ground truth for the
 // editor-facing [`crate::builtin_inventory`] (its drift tests tie the
 // inventory to them).
@@ -84,6 +86,9 @@ struct HirBuildFunctionState<'src> {
     global_inits: Vec<GlobalInit<'src>>,
     functions_sigs: Vec<FunctionSig>,
     imports: ImportRegistry,
+    /// The module's type table: every function, global const and signature
+    /// interns into it (see `type_table`).
+    types: TypeTable,
     globals: VecMap<String, GlobalConst>,
     body_map: VecMap<String, ParsedFunctionBody<'src>>,
     functions: Vec<HirFunction>,
@@ -136,6 +141,7 @@ impl<'src> HirBuildJob<'src> {
                 let functions_sigs =
                     build_function_sigs(&self.index, &structs, &array_size_consts)?;
                 let mut imports = ImportRegistry::default();
+                let mut types = TypeTable::default();
                 let globals = build_global_consts(
                     self.source,
                     &tokens,
@@ -146,6 +152,7 @@ impl<'src> HirBuildJob<'src> {
                     &structs,
                     &array_size_consts,
                     &mut imports,
+                    &mut types,
                     &self.options.texture_specs,
                     const_init_cache,
                 )?;
@@ -159,6 +166,7 @@ impl<'src> HirBuildJob<'src> {
                     global_inits,
                     functions_sigs,
                     imports,
+                    types,
                     globals,
                     body_map: function_body_map(bodies),
                     functions: Vec::new(),
@@ -187,6 +195,7 @@ impl<'src> HirBuildJob<'src> {
                     &state.structs,
                     &state.array_size_consts,
                     &mut state.imports,
+                    &mut state.types,
                     &self.options.texture_specs,
                 )? {
                     state.has_shader_init = true;
@@ -223,9 +232,10 @@ impl<'src> HirBuildJob<'src> {
             &state.array_size_consts,
             &mut state.imports,
             &self.options.texture_specs,
+            &mut state.types,
         );
-        let mut body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
-        let (return_ty, params) = intern_signature(&mut body.arena, sig);
+        let body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
+        let (return_ty, params) = intern_signature(&mut state.types, sig);
         state.functions.push(HirFunction {
             name: sig.name.clone(),
             return_ty,
@@ -240,6 +250,7 @@ impl HirBuildFunctionState<'_> {
     fn finish(self, options: &CompileOptions) -> HirModule {
         HirModule {
             functions: self.functions,
+            types: self.types,
             meta: LpsModuleSig {
                 functions: module_function_sigs(self.functions_sigs, self.has_shader_init),
                 uniforms_type: self.uniforms_type,
@@ -292,14 +303,14 @@ fn module_function_sigs(sigs: Vec<FunctionSig>, has_shader_init: bool) -> Vec<Lp
     meta
 }
 
-/// A function's signature types as ids into its own arena's type table.
-fn intern_signature(arena: &mut HirArena, sig: &FunctionSig) -> (TypeId, Vec<HirFunctionParam>) {
-    let return_ty = arena.intern(sig.return_ty.clone());
+/// A function's signature types as ids into the module's type table.
+fn intern_signature(types: &mut TypeTable, sig: &FunctionSig) -> (TypeId, Vec<HirFunctionParam>) {
+    let return_ty = types.intern(sig.return_ty.clone());
     let params = sig
         .params
         .iter()
         .map(|p| HirFunctionParam {
-            ty: arena.intern(p.ty.clone()),
+            ty: types.intern(p.ty.clone()),
             qualifier: p.qualifier,
         })
         .collect();
@@ -331,6 +342,7 @@ pub fn build_hir<'src>(
     )?;
     let functions_sigs = build_function_sigs(index, &structs, &array_size_consts)?;
     let mut imports = ImportRegistry::default();
+    let mut types = TypeTable::default();
     let globals = build_global_consts(
         source,
         tokens,
@@ -341,6 +353,7 @@ pub fn build_hir<'src>(
         &structs,
         &array_size_consts,
         &mut imports,
+        &mut types,
         &options.texture_specs,
         const_init_cache,
     )?;
@@ -378,9 +391,10 @@ pub fn build_hir<'src>(
             &array_size_consts,
             &mut imports,
             &options.texture_specs,
+            &mut types,
         );
-        let mut body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
-        let (return_ty, params) = intern_signature(&mut body.arena, sig);
+        let body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
+        let (return_ty, params) = intern_signature(&mut types, sig);
         functions.push(HirFunction {
             name: sig.name.clone(),
             return_ty,
@@ -398,6 +412,7 @@ pub fn build_hir<'src>(
         &structs,
         &array_size_consts,
         &mut imports,
+        &mut types,
         &options.texture_specs,
     )? {
         function_meta.push(LpsFnSig {
@@ -411,6 +426,7 @@ pub fn build_hir<'src>(
 
     Ok(HirModule {
         functions,
+        types,
         meta: LpsModuleSig {
             functions: function_meta,
             uniforms_type,
@@ -618,7 +634,7 @@ fn infer_array_constructor_type(
     span: Span,
     base: LpsType,
     lens: &[Option<u32>],
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     args: &[ExprId],
 ) -> Result<LpsType, Diagnostic> {
     let Some((first_len, rest_lens)) = lens.split_first() else {
@@ -940,6 +956,7 @@ fn build_global_consts<'src>(
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
     imports: &mut ImportRegistry,
+    types: &mut TypeTable,
     texture_specs: &VecMap<String, lps_shared::TextureBindingSpec>,
     mut const_init_cache: Vec<Option<ParsedExpr<'src>>>,
 ) -> Result<VecMap<String, GlobalConst>, Diagnostic> {
@@ -968,13 +985,14 @@ fn build_global_consts<'src>(
             array_size_consts,
             imports,
             texture_specs,
+            types,
         );
         let expr = ctx.type_expr(&parsed)?;
         let expr = ctx.coerce_expr(expr, &ty)?;
         globals.insert(
             konst.name.clone(),
             GlobalConst {
-                arena: core::mem::take(&mut ctx.arena),
+                arena: ctx.arena.take_arena(),
                 expr,
             },
         );
@@ -995,6 +1013,7 @@ fn synthesize_shader_init(
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
     imports: &mut ImportRegistry,
+    types: &mut TypeTable,
     texture_specs: &VecMap<String, lps_shared::TextureBindingSpec>,
 ) -> Result<Option<HirFunction>, Diagnostic> {
     if inits.is_empty() {
@@ -1015,6 +1034,7 @@ fn synthesize_shader_init(
         array_size_consts,
         imports,
         texture_specs,
+        types,
     );
     let mut statements = Vec::new();
     for init in inits {
@@ -1035,8 +1055,9 @@ fn synthesize_shader_init(
         statements.push(HirStmt::Expr(assign));
     }
     let locals = core::mem::take(&mut ctx.locals);
-    let mut arena = core::mem::take(&mut ctx.arena);
-    let (return_ty, params) = intern_signature(&mut arena, &sig);
+    let arena = ctx.arena.take_arena();
+    drop(ctx);
+    let (return_ty, params) = intern_signature(types, &sig);
     Ok(Some(HirFunction {
         name: sig.name.clone(),
         return_ty,

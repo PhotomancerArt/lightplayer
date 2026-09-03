@@ -5,9 +5,10 @@ use lps_shared::LpsType;
 
 use crate::{Diagnostic, Span};
 
-use super::arena::{ExprId, TypeId};
+use super::arena::ExprId;
 use super::scalar::{scalar_base_type, scalar_lane_count};
 use super::shape::struct_field;
+use super::type_table::TypeId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(
@@ -298,7 +299,7 @@ mod tests {
     use lps_shared::StructMember;
 
     use super::*;
-    use crate::hir::{HirArena, HirExprKind};
+    use crate::hir::{HirExprKind, TypeTable, TypedArena};
 
     #[test]
     fn place_struct_field_keeps_lane_and_byte_metadata() {
@@ -352,7 +353,8 @@ mod tests {
             element: Box::new(LpsType::Vec3),
             len: 2,
         };
-        let mut arena = HirArena::default();
+        let mut types = TypeTable::default();
+        let mut arena = TypedArena::new(&mut types);
         let mut place = local_place(0, ty);
         let index = int_expr(&mut arena, 1);
         place.push_index(index, Span::new(0, 1)).unwrap();
@@ -364,7 +366,7 @@ mod tests {
         HirPlace::local(local, ty)
     }
 
-    fn int_expr(arena: &mut HirArena, value: i32) -> ExprId {
+    fn int_expr(arena: &mut TypedArena<'_>, value: i32) -> ExprId {
         arena.push_expr(
             Span::new(0, 1),
             LpsType::Int,

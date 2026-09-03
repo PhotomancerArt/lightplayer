@@ -48,14 +48,18 @@ fn trace_file(
 #[test]
 fn filetest_corpus_frontend_peaks() {
     // Ceiling: measured 2026-09-02 over the corpus; see the planning notes
-    // (2026-09-02-0817-hir-per-node-copies-corpus). Set at ~1.4× the largest
-    // file's peak, rounded up to a KB. Raise deliberately, never casually.
-    // Largest: struct/deep-nested.glsl at 183,997 B after F1 (299,934 B
-    // after F9, 324,030 B after F3, 361,128 B after F4, 382,991 B before)
-    // — a 5.3 KB file of three-level nested structs; what remains is each
-    // function's type table holding its own copy of the module's structs
-    // (module-wide interning is the deferred follow-up).
-    const FRONTEND_CEILING_BYTES: usize = 252 * 1024;
+    // (2026-09-02-0817-hir-per-node-copies-corpus, then
+    // 2026-09-02-1930-glsl-names-spans-type-interning). Set at ~1.4× the
+    // largest file's peak, rounded up to a KB. Raise deliberately, never
+    // casually. Largest: operators/incdec-matrix-element.glsl at 137,575 B
+    // (build-hir; a 10 KB file of matrix element inc/dec statements). Before
+    // the module-wide type table (ADR 2026-09-02-glsl-module-wide-type-table)
+    // it was struct/deep-nested.glsl at 183,997 B — a 5.3 KB file of
+    // three-level nested structs whose 17 per-function type tables each held
+    // the module's structs; one table per module brought it to 105,845 B
+    // (299,934 B after F9, 324,030 B after F3, 361,128 B after F4,
+    // 382,991 B before any of them).
+    const FRONTEND_CEILING_BYTES: usize = 189 * 1024;
 
     let dir = filetests_dir();
     let target = Target::from_name("rv32lpn.q32").expect("lps-glsl device target");

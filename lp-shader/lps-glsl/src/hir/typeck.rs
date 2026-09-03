@@ -17,6 +17,7 @@ use super::array_size::ArraySizeConsts;
 use super::const_fold::{fold_binary, fold_builtin_call, fold_glsl_import_call, fold_unary};
 use super::function::{FunctionSig, GlobalConst, ImportRegistry};
 use super::place::{AccessMode, HirPlace, PlaceRoot, PlaceSegment};
+use super::type_table::{TypeTable, TypedArena};
 use super::types::StructTypes;
 use super::types::{
     GlobalInfo, HirExprKind, HirFunctionBody, HirLocal, HirOutArg, HirParam, HirStmt,
@@ -52,7 +53,7 @@ pub(super) struct TypeCtx<'a> {
     imports: &'a mut ImportRegistry,
     texture_specs: &'a VecMap<String, TextureBindingSpec>,
     pub(super) locals: Vec<HirLocal>,
-    pub(super) arena: HirArena,
+    pub(super) arena: TypedArena<'a>,
     scopes: Vec<VecMap<String, usize>>,
     loop_depth: usize,
 }
@@ -68,6 +69,7 @@ impl<'a> TypeCtx<'a> {
         array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
         texture_specs: &'a VecMap<String, TextureBindingSpec>,
+        types: &'a mut TypeTable,
     ) -> Self {
         Self {
             params: &function.params,
@@ -80,7 +82,7 @@ impl<'a> TypeCtx<'a> {
             imports,
             texture_specs,
             locals: Vec::new(),
-            arena: HirArena::default(),
+            arena: TypedArena::new(types),
             scopes: alloc::vec![VecMap::new()],
             loop_depth: 0,
         }
@@ -95,6 +97,7 @@ impl<'a> TypeCtx<'a> {
         array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
         texture_specs: &'a VecMap<String, TextureBindingSpec>,
+        types: &'a mut TypeTable,
     ) -> Self {
         Self {
             params: &[],
@@ -107,7 +110,7 @@ impl<'a> TypeCtx<'a> {
             imports,
             texture_specs,
             locals: Vec::new(),
-            arena: HirArena::default(),
+            arena: TypedArena::new(types),
             scopes: alloc::vec![VecMap::new()],
             loop_depth: 0,
         }
@@ -122,7 +125,7 @@ impl<'a> TypeCtx<'a> {
         Ok(HirFunctionBody {
             locals: core::mem::take(&mut self.locals),
             statements,
-            arena: core::mem::take(&mut self.arena),
+            arena: self.arena.take_arena(),
         })
     }
 
@@ -1382,8 +1385,8 @@ impl<'a> TypeCtx<'a> {
     }
 
     fn clone_expr_from(&mut self, source: &HirArena, expr: ExprId) -> ExprId {
-        let source_expr = source.expr(expr);
-        let kind = match source_expr.kind {
+        let source_expr = source.node(expr);
+        let kind = match &source_expr.kind {
             HirExprKind::Constructor { args } => {
                 let args = self.clone_expr_list_from(source, *args);
                 HirExprKind::Constructor { args }
@@ -1477,7 +1480,7 @@ impl<'a> TypeCtx<'a> {
             kind => kind.clone(),
         };
         self.arena
-            .push_expr(source_expr.span, source_expr.ty.clone(), kind)
+            .push_expr_typed(source_expr.span, source_expr.ty, kind)
     }
 
     fn clone_expr_list_from(&mut self, source: &HirArena, list: ExprList) -> ExprList {
@@ -1503,7 +1506,7 @@ impl<'a> TypeCtx<'a> {
     }
 
     fn clone_place_from(&mut self, source: &HirArena, place: PlaceId) -> PlaceId {
-        let record = source.place(place);
+        let record = source.place_record(place);
         let mut segments = Vec::with_capacity(source.place_segments(place).len());
         for segment in source.place_segments(place) {
             segments.push(match *segment {
@@ -1513,11 +1516,8 @@ impl<'a> TypeCtx<'a> {
                 other => other,
             });
         }
-        self.arena.push_place(HirPlace {
-            root: record.root.clone(),
-            segments,
-            ty: record.ty.clone(),
-        })
+        self.arena
+            .push_place_typed(record.root.clone(), segments, record.ty)
     }
 
     fn one_lanes_expr(&mut self, span: Span, ty: &LpsType) -> Result<ExprId, Diagnostic> {
