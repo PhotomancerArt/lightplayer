@@ -15,8 +15,12 @@
    §1 is the mechanics — four ways to blur a ring, three of which fail
    the same way: `filter` runs before `mask`, so a masked pseudo cuts the
    blur off hard at its box. §2 is the intensity ladder; 0.85 was ruled
-   "much too strong", 0.28 "about right". Aurora ground verbatim from
-   src/style.css :root.
+   "much too strong", 0.28 "about right". §3 (2026-09-03) is the
+   mouse-out settle: the angle must not snap back to 0deg under the
+   fade. Ruled: b3 (host flag, spin outlives the hover by the fade)
+   ships on `.ux-spectrum-cta`; b1 (pause, never remove) is the family
+   rule on `.ux-ir-ring`, which has no fade to hide a snap under today.
+   Aurora ground verbatim from src/style.css :root.
    ===================================================================== */
 :root {
   color-scheme: dark;
@@ -75,6 +79,134 @@ button { display: inline-flex; min-height: 36px; align-items: center; justify-co
     var(--b, 7px) var(--b, 7px), var(--b, 7px) calc(100% - var(--b, 7px)),
     calc(100% - var(--b, 7px)) calc(100% - var(--b, 7px)), calc(100% - var(--b, 7px)) var(--b, 7px), var(--b, 7px) var(--b, 7px));
 }
+
+/* =====================================================================
+   §3 — settle on mouse-out (2026-09-03). The shipped halo snaps: on
+   mouse-out the hover rule (and its `animation`) goes away, so the
+   registered `--ux-ir-angle` falls back to its initial 0deg in one frame
+   while the pseudo is still fading out — a visible jump in the rainbow
+   at the brightest moment of the fade. Every column below is the shipped
+   ring + halo (.62 / .28, 5px band, 11px blur); only the mouse-out
+   handling differs. `.pin` stands in for :hover so a script can time it.
+   ===================================================================== */
+.s { position: relative; border-color: transparent; background: transparent; color: var(--strong); }
+.s::before {
+  content: ""; position: absolute; inset: -1px; z-index: 3; border-radius: inherit; padding: 1px;
+  background: conic-gradient(from var(--ux-ir-angle), var(--spectrum), #5fe08b);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;
+  opacity: .62; pointer-events: none; transition: opacity .3s;
+}
+.s::after {
+  content: ""; position: absolute; inset: -5px; z-index: 2; border-radius: inherit;
+  background: conic-gradient(from var(--ux-ir-angle), var(--spectrum), #5fe08b);
+  clip-path: polygon(evenodd,
+    -40px -40px, calc(100% + 40px) -40px, calc(100% + 40px) calc(100% + 40px), -40px calc(100% + 40px), -40px -40px,
+    5px 5px, 5px calc(100% - 5px), calc(100% - 5px) calc(100% - 5px), calc(100% - 5px) 5px, 5px 5px);
+  filter: blur(11px); opacity: 0; transform: scale(.94); pointer-events: none;
+  transition: opacity .45s ease, transform .45s ease;
+}
+.s:hover::before, .s.pin::before { opacity: 1; }
+.s:hover::after,  .s.pin::after  { opacity: .28; transform: scale(1); }
+
+/* §3·0 — today (shipped): the spin lives on the hover rule only. Mouse-out
+   removes it → the angle is 0deg on the next frame. SNAPS. */
+.s0:hover::before, .s0.pin::before, .s0:hover::after, .s0.pin::after { animation: ux-ir-spin 3.2s linear infinite; }
+
+/* §3·a — transition the angle home. A registered property interpolates,
+   and per css-transitions the before-change style carries the animated
+   value, so removing the animation starts a transition θ → 0deg. But
+   0deg is BEHIND: the rainbow whips backwards by up to a full turn in
+   .45s (median 180°, ~400°/s against the 112°/s spin). REVERSE WHIRL —
+   on paper. MEASURED (Chrome 148, probeDet): no CSSTransition is created
+   at all; the angle is 0deg on the very next style, same as today.
+   Chrome compares the pre-animation base styles when deciding whether to
+   start a transition, so an animation's removal never seeds one. DEAD. */
+.sa::before { transition: opacity .3s, --ux-ir-angle .45s ease; }
+.sa::after  { transition: opacity .45s ease, transform .45s ease, --ux-ir-angle .45s ease; }
+.sa:hover::before, .sa.pin::before, .sa:hover::after, .sa.pin::after { animation: ux-ir-spin 3.2s linear infinite; }
+
+/* §3·a2 — transition the angle home FORWARD. Rest at 360deg (paints the
+   same as 0deg), explicit from/to keyframes so the spin still starts at
+   0deg, and an ease-out transition θ → 360deg on mouse-out: always the
+   spin's own direction, but the run home is 0–360° in a fixed .9s, so it
+   is a random-length flourish — sometimes nothing, sometimes a full
+   turn at 3× the hover speed. Hover-enter pins the transition to 0s so
+   the 360→0 handover to the animation can't itself transition. MEASURED:
+   same as §3·a — no transition seeds from the animated value; snaps to
+   360deg (paints as 0deg). DEAD for the same reason. */
+@keyframes ux-ir-spin-full { from { --ux-ir-angle: 0deg; } to { --ux-ir-angle: 360deg; } }
+.sa2::before { --ux-ir-angle: 360deg; transition: opacity .3s, --ux-ir-angle .9s cubic-bezier(0,0,.2,1); }
+.sa2::after  { --ux-ir-angle: 360deg; transition: opacity .45s ease, transform .45s ease, --ux-ir-angle .9s cubic-bezier(0,0,.2,1); }
+.sa2:hover::before, .sa2.pin::before { animation: ux-ir-spin-full 3.2s linear infinite; transition: opacity .3s, --ux-ir-angle 0s; }
+.sa2:hover::after,  .sa2.pin::after  { animation: ux-ir-spin-full 3.2s linear infinite; transition: opacity .45s ease, transform .45s ease, --ux-ir-angle 0s; }
+
+/* §3·b1 — pause, don't remove. The animation is always declared, paused
+   at rest (a paused animation is never ticked — no idle cost, and at
+   time 0 it holds 0deg, so the rest paint is byte-identical to today).
+   Hover runs it; mouse-out pauses it where it stands. No positional jump,
+   but the rainbow STOPS DEAD at the brightest moment and then fades. */
+.sb1::before, .sb1::after { animation: ux-ir-spin 3.2s linear infinite paused; }
+.sb1:hover::before, .sb1.pin::before, .sb1:hover::after, .sb1.pin::after { animation-play-state: running; }
+
+/* §3·b2 — pause AFTER the fade. b1 plus a `--ux-ir-hot` flag on the
+   pseudo: instant 0→1 on hover, and on mouse-out a step-end transition
+   HOLDS 1 for the fade's length before flipping to 0. `animation-play-
+   state: if(style(--ux-ir-hot: 1): running; else: paused)` (CSS if(),
+   Chrome 137+) keeps the spin turning through the whole fade and stops
+   it only once the halo is dark and the ring is back at rest. Where
+   if() is unsupported the declaration drops at parse and the line above
+   it keeps `paused` → degrades to b1 exactly. MEASURED (Chrome 148,
+   CSS.supports says yes): the `--ux-ir-hot` CSSTransition exists and
+   holds 1 for the whole window, but `animation-play-state` computes
+   `paused` throughout — if(style()) sees the cascaded flag, not the
+   transitioned one. Degrades to b1 in practice. */
+
+/* §3·b3 — pause after the fade, flag on the HOST. Same step-end hold,
+   but `--ux-ir-hot` lives on the button and the pseudos read it through
+   `@container style(--ux-ir-hot: 1)` (Chrome 111+; every element is a
+   style container, and a pseudo queries its originating element).
+   Costs the host its `transition` list — fine for `.ux-spectrum-cta`,
+   which owns its host look; not for `.ux-ir-ring`, which rides on
+   arbitrary hosts. */
+.sb3 { --ux-ir-hot: 0; transition: --ux-ir-hot var(--hold, .5s) step-end; }
+.sb3:hover, .sb3.pin { --ux-ir-hot: 1; transition: --ux-ir-hot 0s; }
+.sb3::before, .sb3::after { animation: ux-ir-spin 3.2s linear infinite paused; }
+.sb3:hover::before, .sb3.pin::before, .sb3:hover::after, .sb3.pin::after { animation-play-state: running; }
+@container style(--ux-ir-hot: 1) {
+  .sb3::before, .sb3::after { animation-play-state: running; }
+}
+@property --ux-ir-hot { syntax: "<integer>"; initial-value: 0; inherits: false; }
+.sb2::before, .sb2::after {
+  animation: ux-ir-spin 3.2s linear infinite paused;
+  animation-play-state: if(style(--ux-ir-hot: 1): running; else: paused);
+}
+.sb2::before { transition: opacity .3s, --ux-ir-hot var(--hold, .5s) step-end; }
+.sb2::after  { transition: opacity .45s ease, transform .45s ease, --ux-ir-hot var(--hold, .5s) step-end; }
+.sb2:hover::before, .sb2.pin::before { --ux-ir-hot: 1; animation-play-state: running; transition: opacity .3s, --ux-ir-hot 0s; }
+.sb2:hover::after,  .sb2.pin::after  { --ux-ir-hot: 1; animation-play-state: running; transition: opacity .45s ease, transform .45s ease, --ux-ir-hot 0s; }
+
+/* §3·c — accept the snap, shorten the fade-OUT (.15s; grow-in unchanged).
+   The snap happens at t=0 of the fade-out, when the halo is at full .28 —
+   a shorter tail hides nothing, it just cuts the glow off sooner. */
+.sc::before { transition: opacity .15s; }
+.sc::after  { transition: opacity .15s ease, transform .15s ease; }
+.sc:hover::before, .sc.pin::before { animation: ux-ir-spin 3.2s linear infinite; transition: opacity .3s; }
+.sc:hover::after,  .sc.pin::after  { animation: ux-ir-spin 3.2s linear infinite; transition: opacity .45s ease, transform .45s ease; }
+
+/* Reduced motion: no spin anywhere, the gradient rests at its initial
+   angle. The b-variants declare the animation on the BASE pseudo, so the
+   base selectors must be in this block too (the shipped block only lists
+   the hover selectors). The a-variants' angle transitions never fire here
+   because the angle never moves. */
+@media (prefers-reduced-motion: reduce) {
+  .s::before, .s::after, .s:hover::before, .s.pin::before, .s:hover::after, .s.pin::after { animation: none; }
+}
+
+.s3 .col { width: 230px; }
+.s3 code { font: 11px/1.4 ui-monospace, Menlo, monospace; color: var(--shell-dim); white-space: pre; text-align: center; min-height: 2.8em; }
+.s3 code.hot { color: var(--shell-tx); }
+body.solo > :not(.s3) { display: none; }
+#probe { font: 11px/1.5 ui-monospace, Menlo, monospace; color: var(--shell-mut); white-space: pre-wrap; margin: 18px 0 0; }
 </style>
 </head>
 <body>
@@ -96,5 +228,131 @@ button { display: inline-flex; min-height: 36px; align-items: center; justify-co
   <div class="col"><h3>.38 · 6px · 10px</h3><button class="cta halo v-clip pin" style="--o:.38;--b:6px;--r:10px">⚡ It's plugged in</button></div>
   <div class="col"><h3>.28 · 5px · 11px</h3><button class="cta halo v-clip pin" style="--o:.28;--b:5px;--r:11px">⚡ It's plugged in</button><p class="ruled">ruled "about right" — shipped</p></div>
 </div>
+
+<section class="s3">
+<h2>§3 · settle on mouse-out — the angle must not snap under the fade</h2>
+<p class="hint">Hover, then leave, and watch the rainbow during the fade-out. The shipped halo (0) jumps to 0° the moment the pointer leaves. Each column changes only the mouse-out handling; the readout under each button is the live <code style="display:inline;min-height:0">--ux-ir-angle</code> of the halo and its opacity, so a mid-fade screenshot carries its own numbers. Script drivers, frame-free (the Browser pane's timeline is frozen while hidden): <code style="display:inline;min-height:0">probeDet()</code> pins every column, seeks the spins to 1.3s, releases, then seeks the fade-out transitions to fixed offsets and reads angle, opacity and each spin's play-state; <code style="display:inline;min-height:0">freezeHover()</code> / <code style="display:inline;min-height:0">freezeDet(ms)</code> park the row at hover or <em>ms</em> into the fade for a screenshot; <code style="display:inline;min-height:0">thaw()</code> resumes.</p>
+<div class="row">
+  <div class="col"><h3>0 · today (shipped)</h3><button class="s s0" data-v="0 today">⚡ It's plugged in</button><code></code><p>animation on the hover rule only → angle snaps to 0° under the fade</p></div>
+  <div class="col"><h3>a · transition home (0°)</h3><button class="s sa" data-v="a home-0">⚡ It's plugged in</button><code></code><p>registered property eases θ→0° in .45s — backwards, on paper; measured: no transition starts, it snaps</p></div>
+  <div class="col"><h3>a2 · transition home (360°)</h3><button class="s sa2" data-v="a2 home-360">⚡ It's plugged in</button><code></code><p>rest at 360°, ease-out forward — on paper; measured: snaps to 360°</p></div>
+  <div class="col"><h3>b1 · pause</h3><button class="s sb1" data-v="b1 pause">⚡ It's plugged in</button><code></code><p class="ruled">animation always declared, paused at rest — stops dead where it stands, then fades. Family rule; shipped on .ux-ir-ring</p></div>
+  <div class="col"><h3>b2 · pause after the fade</h3><button class="s sb2" data-v="b2 pause-after-fade">⚡ It's plugged in</button><code></code><p>a step-end hot flag on the pseudo + if(style()) — measured: if() never sees the transitioned flag; = b1</p></div>
+  <div class="col"><h3>b2 · long hold (1.2s)</h3><button class="s sb2" style="--hold:1.2s" data-v="b2 hold-1.2s">⚡ It's plugged in</button><code></code><p>same, = b1 in practice</p></div>
+  <div class="col"><h3>b3 · flag on the host</h3><button class="s sb3" data-v="b3 host-flag">⚡ It's plugged in</button><code></code><p class="ruled">same hold, read via @container style() from the button — keeps turning through the fade, pauses once dark. Shipped on .ux-spectrum-cta</p></div>
+  <div class="col"><h3>b3 · long hold (1.2s)</h3><button class="s sb3" style="--hold:1.2s" data-v="b3 hold-1.2s">⚡ It's plugged in</button><code></code><p>the ring keeps turning a beat after the light is gone</p></div>
+  <div class="col"><h3>c · shorter fade-out</h3><button class="s sc" data-v="c fade-.15s">⚡ It's plugged in</button><code></code><p>.15s out — the snap still lands at full brightness</p></div>
+</div>
+<pre id="probe"></pre>
+<script>
+(() => {
+  const btns = [...document.querySelectorAll('.s3 .s')];
+  const ang = (el, ps) => parseFloat(getComputedStyle(el, ps).getPropertyValue('--ux-ir-angle')) || 0;
+  const opa = (el, ps) => parseFloat(getComputedStyle(el, ps).opacity);
+  // live readout
+  const tick = () => {
+    for (const b of btns) {
+      const c = b.nextElementSibling;
+      c.textContent = `ring ${ang(b,'::before').toFixed(0).padStart(3)}° · ${opa(b,'::before').toFixed(2)}\nhalo ${ang(b,'::after').toFixed(0).padStart(3)}° · ${opa(b,'::after').toFixed(2)}`;
+      c.classList.toggle('hot', opa(b,'::after') > 0.005);
+    }
+    requestAnimationFrame(tick);
+  };
+  tick();
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const frames = n => new Promise(r => { const f = k => k ? requestAnimationFrame(() => f(k-1)) : r(); f(n); });
+  // Pin every column for `hoverMs`, release together, sample each frame for `tailMs`.
+  window.runProbe = async (hoverMs = 1300, tailMs = 900) => {
+    const out = { ua: navigator.userAgent.match(/Chrome\/[\d.]+/)?.[0], reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+      ifSupported: CSS.supports('animation-play-state', 'if(style(--x: 1): running; else: paused)'), rows: [] };
+    btns.forEach(b => b.classList.add('pin'));
+    const t0 = performance.now();
+    const during = btns.map(() => []);
+    while (performance.now() - t0 < hoverMs) { await frames(1); btns.forEach((b,i) => during[i].push(ang(b,'::after'))); }
+    const atLeave = btns.map(b => ({ ring: ang(b,'::before'), halo: ang(b,'::after') }));
+    btns.forEach(b => b.classList.remove('pin'));
+    const t1 = performance.now();
+    const tail = btns.map(() => []);
+    while (performance.now() - t1 < tailMs) { await frames(1); btns.forEach((b,i) => tail[i].push({ t: Math.round(performance.now()-t1), ring: ang(b,'::before'), halo: ang(b,'::after'), rO: opa(b,'::before'), hO: opa(b,'::after') })); }
+    btns.forEach((b, i) => {
+      const d = during[i], s = tail[i];
+      const hoverDeg = d[d.length-1] - d[0];
+      let maxJump = 0, jumpAt = null;
+      let prev = atLeave[i].halo;
+      for (const x of s) { const j = Math.abs(x.halo - prev); if (j > maxJump) { maxJump = j; jumpAt = x.t; } prev = x.halo; }
+      const at = ms => s.find(x => x.t >= ms) || s[s.length-1];
+      const lockstep = Math.max(...s.map(x => Math.abs(x.ring - x.halo)));
+      out.rows.push({ v: b.dataset.v, hoverSpinDeg: +hoverDeg.toFixed(0), leaveDeg: +atLeave[i].halo.toFixed(0),
+        maxFrameJumpDeg: +maxJump.toFixed(0), jumpAtMs: jumpAt,
+        deg150: +at(150).halo.toFixed(0), deg300: +at(300).halo.toFixed(0), deg600: +at(600).halo.toFixed(0), degEnd: +s[s.length-1].halo.toFixed(0),
+        haloOpacity150: +at(150).hO.toFixed(2), ringOpacity150: +at(150).rO.toFixed(2), ringHaloMaxDiffDeg: +lockstep.toFixed(1) });
+    });
+    document.getElementById('probe').textContent = JSON.stringify(out, null, 1);
+    return out;
+  };
+  // Deterministic drivers — no frames needed (a hidden Browser pane gets none):
+  // the Web Animations API sets every CSSAnimation/CSSTransition's currentTime
+  // directly, then getComputedStyle reads the exact style at that instant.
+  const flush = () => btns.forEach(b => void getComputedStyle(b, '::after').opacity);
+  const kind = a => a.constructor.name; // CSSAnimation | CSSTransition
+  const snap = (b) => ({ ring: +ang(b,'::before').toFixed(1), halo: +ang(b,'::after').toFixed(1), rO: +opa(b,'::before').toFixed(2), hO: +opa(b,'::after').toFixed(2) });
+  // Freeze the whole row at `t` ms after mouse-out (hover held `hoverMs`). Exact for
+  // every variant except b2's spin, whose CSS-driven play-state can't advance without
+  // frames — its CSSAnimation is advanced by min(t, hold) by hand to show the intended
+  // frame; probeDet() proves the real play-state behaviour.
+  window.freezeDet = (t = 150, hoverMs = 1300) => {
+    btns.forEach(b => b.classList.add('pin')); flush();
+    document.getAnimations().forEach(a => { a.pause(); a.currentTime = hoverMs; });
+    const atLeave = btns.map(snap);
+    btns.forEach(b => b.classList.remove('pin')); flush();
+    document.getAnimations().forEach(a => { a.pause(); if (kind(a) === 'CSSTransition') a.currentTime = t; });
+    btns.forEach(b => { if (b.classList.contains('sb2') || b.classList.contains('sb3')) { const hold = parseFloat(getComputedStyle(b).getPropertyValue('--hold')) * 1000 || 500;
+      b.getAnimations({ subtree: true }).filter(a => kind(a) === 'CSSAnimation').forEach(a => a.currentTime = hoverMs + Math.min(t, hold)); } });
+    return btns.map((b, i) => `${b.dataset.v}: leave ${atLeave[i].halo}° → +${t}ms ${JSON.stringify(snap(b))}`);
+  };
+  window.freezeHover = (hoverMs = 1300) => {
+    btns.forEach(b => b.classList.add('pin')); flush();
+    document.getAnimations().forEach(a => { a.pause(); a.currentTime = hoverMs; });
+    return btns.map(b => `${b.dataset.v}: ${JSON.stringify(snap(b))}`);
+  };
+  // Proof by seeking: the document timeline is FROZEN while the Browser pane is
+  // hidden (no rendering opportunities → no time), so the probe seeks every
+  // CSSAnimation/CSSTransition to fixed offsets instead of waiting. Hover held
+  // `hoverMs`, then at each point after the leave: the fade-out transitions sit at
+  // `t`, and the b-variants' CSSAnimations are left to their CSS play-state, which
+  // is read back as r(unning)/p(aused) per pseudo — that is the b2 claim under test.
+  window.probeDet = (hoverMs = 1300, points = [0, 16, 150, 300, 450, 520, 700, 1300]) => {
+    const out = { ua: navigator.userAgent.match(/Chrome\/[\d.]+/)?.[0], reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+      ifSupported: CSS.supports('animation-play-state', 'if(style(--x: 1): running; else: paused)'), rows: [] };
+    btns.forEach(b => b.classList.add('pin')); flush();
+    document.getAnimations().forEach(a => { a.currentTime = hoverMs; });
+    flush();
+    const atLeave = btns.map(snap);
+    btns.forEach(b => b.classList.remove('pin')); flush();
+    const first = btns.map(b => ({ ...snap(b), spin: b.getAnimations({ subtree: true }).filter(a => kind(a) === 'CSSAnimation').map(a => a.playState[0]).join('') || '-' }));
+    const samples = btns.map(() => []);
+    for (const t of points) {
+      document.getAnimations().forEach(a => { if (kind(a) === 'CSSTransition') { a.pause(); a.currentTime = t; } });
+      flush();
+      btns.forEach((b, i) => { const anims = b.getAnimations({ subtree: true }).filter(a => kind(a) === 'CSSAnimation');
+        samples[i].push({ t, ...snap(b), spin: anims.length ? anims.map(a => a.playState[0]).join('') : '-' }); });
+    }
+    btns.forEach((b, i) => {
+      const s = samples[i];
+      out.rows.push({ v: b.dataset.v, leave: atLeave[i].halo, afterLeave: first[i].halo, jumpAtLeave: +(first[i].halo - atLeave[i].halo).toFixed(1), spinAtLeave: first[i].spin,
+        tail: s.map(x => `${x.t}:${x.halo}°/${x.hO}/${x.spin}`).join(' '), ringHaloDiff: Math.max(...s.map(x => Math.abs(x.ring - x.halo))) });
+    });
+    document.getElementById('probe').textContent = JSON.stringify(out, null, 1);
+    return out;
+  };
+  window.thaw = () => { btns.forEach(b => b.classList.remove('pin')); document.getAnimations().forEach(a => a.play()); };
+  const q = new URLSearchParams(location.search);
+  if (q.has('solo')) document.body.classList.add('solo');
+  // ?freeze=hover|<ms> parks the row synchronously at load (no timers, so it
+  // also works under `chrome --headless --screenshot`).
+  if (q.has('freeze')) { const f = q.get('freeze'); f === 'hover' ? freezeHover() : freezeDet(+f); }
+})();
+</script>
+</section>
 </body>
 </html>
