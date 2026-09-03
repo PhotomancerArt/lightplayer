@@ -1,10 +1,14 @@
 ---
-status: open
+status: open                # silicon re-measure pending; host + emulator attribution done 2026-09-02
 found: 2026-08-29
 area: shader GLSL→JIT compile transient vs the classic's ~186 KB arena
+class: arena-retained-transient
 related:
   - 2026-08-29-load-project-resets-instead-of-refusing.md
+  - 2026-09-01-hir-place-clones-exhaust-c6-heap-at-compute-compile.md
   - ../adr/2026-08-28-project-reads-bounded-streamed-refusable.md
+  - ../../lp-shader/lpvm-native/tests/xt_compile_peak_memory.rs
+  - ../../lp-core/lpc-engine/tests/example_shader_compile_peak_memory.rs
 ---
 # Shader JIT compile transient eats >100 KB and OOM-resets zook on the classic
 
@@ -53,3 +57,43 @@ should say so.
 **Repro** — `loadProject /projects/zook-dome` on a classic with
 `examples/zook-dome` installed; watch `[mem]`/`[JIT]`/OOM lines at
 921600 baud. 3/3 on this bench (two resets, then red-gated).
+
+**Measured (2026-09-02, host tracking-allocator probes + RV32 emulator;
+PR #497)** — the "Next" list above, answered:
+
+- *Which pass holds the peak?* The frontend's HIR build, for every
+  shader in the corpus but two tiny ones. Zook's whole GLSL → Xtensa
+  compile peaked at **46,369 B host** on the `#495` tree (`lpvm-native`'s
+  `xt_compile_peak_memory` sentinel), of which 23,444 B was the transient
+  of typing `render_2d` on top of a resident token tape (9.5 KB), parsed
+  bodies (8.7 KB) and the HIR itself at 184 B per expression.
+- *Device-width:* the RV32 emulator (`lp-cli profile --collect alloc
+  --mode startup examples/zook-dome`) measured the `shader-compile` window
+  at **23,757 B transient, 4,990 B retained** — host/device ratio 1.95×,
+  the same ratio as basic (1.94×) and meteor (1.94×). The ">100 KB"
+  figure in the shape above is not what the compiler costs today: either
+  it predates the sample-out/read-back fixes (#474/#475) or it folded the
+  JIT link and the first frame's residents into the compile bracket. The
+  premise "the classic cannot run authored GLSL at zook scale" no longer
+  holds on the numbers; what is still owed is a silicon `[mem] shader
+  compile before/after` bracket on a classic, which is why this stays
+  `open`.
+- *What shrank it further:* the per-node-copies plan
+  (`2026-09-02-0817-hir-per-node-copies-corpus`) took zook to **30,788 B
+  host** (the peak is now the backend's `lower` pass for `render_2d`,
+  no longer the frontend) and the xt sentinel to 26,971 B: token tape
+  dropped after the header step, 16-byte place segments in one arena
+  list, 56-byte HIR expressions (import ids, arena writeback lists,
+  compact swizzles, boxed texture operands, a per-function type table).
+  On the emulator the window only moved 23,757 → **22,858 B**: zook's
+  peak is now the backend's `lower` pass, whose structures carry few
+  pointers, so the frontend's ~1.9× host/device ratio no longer applies
+  and ~23 KB is the backend's own transient — against ~126 KB free after
+  load. Further zook savings are a backend question.
+- *Streaming/budget fix:* not needed at this size; the ceiling tests pin
+  the shape instead (xt sentinel 37 KB, px corpus 112 KB host).
+
+The other three findings stand: the compile still runs post-load with
+the project resident; exhaustion, not fragmentation, was the failure
+shape; and a red-gated compile still renders as black with no node
+error (see `2026-09-01-2026-fault-is-never-black`).

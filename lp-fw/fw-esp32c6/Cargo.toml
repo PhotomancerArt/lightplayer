@@ -109,6 +109,7 @@ esp-rtos = { version = "0.3.0", features = ["embassy", "log-04"] }
 esp-radio = { version = "0.18.0", optional = true, features = ["esp-now", "log-04", "unstable", "wifi"] }
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32c6", "jtag-serial", "log-04"] }
 esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
+critical-section = "1"
 
 fw-core = { path = "../fw-core", default-features = false }
 fw-esp32-common = { path = "../fw-esp32-common" }
@@ -116,7 +117,13 @@ fw-checks = { path = "../fw-checks", default-features = false, features = ["chec
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 # The portable WS281x driver core. `default-features = false` drops its host
 # `mock` backend (and the `alloc` it needs) — firmware brings its own `RmtHw`.
-lp-ws281x = { path = "../lp-ws281x", default-features = false }
+# `isr-in-ram`: the refill path lives in `.rwtext` (IRAM). Single-core, so not
+# the cross-core cache-stall case the feature was written for — but on this
+# chip the refill deadline is a 24-word half (~30 µs) and the P4 matrix
+# (2026-08-01) already measured one refill per frame at 21-23 words of entry
+# delay with the service path in flash: the cold-cache miss chain on the first
+# refill of every frame was the whole margin. See `output/rmt/c6_rmt.rs`.
+lp-ws281x = { path = "../lp-ws281x", default-features = false, features = ["isr-in-ram"] }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
 lp-shader = { path = "../../lp-shader/lp-shader", default-features = false, optional = true }
 lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, features = [

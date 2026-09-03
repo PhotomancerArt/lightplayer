@@ -11,8 +11,9 @@ use lps_shared::{LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec};
 
 use crate::body::{BinaryOp, UnaryOp};
 use crate::hir::{
-    ExprId, ExprList, HirArena, HirExprKind, HirFunction, HirModule, HirStmt, ImportKey, PlaceId,
-    scalar_base_type, scalar_ir_types, scalar_lane_count,
+    ExprId, ExprList, GlobalInfo, HirArena, HirExprKind, HirFunction, HirModule, HirStmt,
+    ImportInfo, ImportKey, PlaceId, UniformInfo, scalar_base_type, scalar_ir_types,
+    scalar_lane_count,
 };
 use crate::{Diagnostic, Span};
 
@@ -38,7 +39,8 @@ pub struct LoweredModule {
 
 pub fn lower_hir(module: HirModule) -> Result<LoweredModule, Diagnostic> {
     let mut mb = ModuleBuilder::new();
-    let mut import_map = VecMap::new();
+    // Import `i` of the module is callee `i` of this map (`ImportId`).
+    let mut import_map = Vec::with_capacity(module.imports.len());
     for import in &module.imports {
         let callee = mb.add_import(ImportDecl {
             module_name: import.module_name.clone(),
@@ -49,7 +51,7 @@ pub fn lower_hir(module: HirModule) -> Result<LoweredModule, Diagnostic> {
             needs_vmctx: matches!(import.key, ImportKey::Vm { .. }),
             sret: import.sret,
         });
-        import_map.insert(import.key.clone(), callee);
+        import_map.push(callee);
     }
 
     for function in &module.functions {
@@ -82,22 +84,25 @@ pub fn lower_hir(module: HirModule) -> Result<LoweredModule, Diagnostic> {
 fn lower_function(
     function: &HirFunction,
     module: &HirModule,
-    import_map: &VecMap<ImportKey, CalleeRef>,
+    import_map: &[CalleeRef],
 ) -> Result<lpir::IrFunction, Diagnostic> {
-    let return_types = scalar_ir_types(&function.return_ty)?;
+    let types = &function.body.arena;
+    let return_ty = types.ty(function.return_ty);
+    let return_types = scalar_ir_types(return_ty)?;
     let mut fb = FunctionBuilder::new(&function.name, &return_types);
     let mut params = Vec::new();
     for param in &function.params {
+        let param_ty = types.ty(param.ty);
         let lanes = if matches!(param.qualifier, ParamQualifier::Out | ParamQualifier::InOut) {
             Lanes::one(fb.add_param(IrType::Pointer))
         } else {
-            scalar_ir_types(&param.ty)?
+            scalar_ir_types(param_ty)?
                 .into_iter()
                 .map(|ty| fb.add_param(ty))
                 .collect()
         };
         params.push(LowerValue {
-            ty: param.ty.clone(),
+            ty: param_ty.clone(),
             lanes,
         });
     }
@@ -108,7 +113,10 @@ fn lower_function(
     });
     let mut locals = Vec::new();
     for local in &function.body.locals {
-        locals.push(local_storage(&mut fb, local.ty.clone())?);
+        locals.push(local_storage(
+            &mut fb,
+            function.body.arena.ty(local.ty).clone(),
+        )?);
     }
     let mut ctx = LowerCtx {
         fb,
@@ -117,12 +125,15 @@ fn lower_function(
         locals,
         arena: &function.body.arena,
         import_map,
+        imports: &module.imports,
+        uniforms: &module.uniforms,
+        globals: &module.globals,
         param_qualifiers: function.params.iter().map(|p| p.qualifier).collect(),
         texture_specs: &module.texture_specs,
         texel_fetch_bounds: module.texel_fetch_bounds,
     };
     lower_statements(&mut ctx, &function.body.statements)?;
-    if function.return_ty == LpsType::Void {
+    if *return_ty == LpsType::Void {
         ctx.fb.push_return(&[]);
     }
     Ok(ctx.fb.finish())
@@ -134,7 +145,14 @@ struct LowerCtx<'a> {
     params: Vec<LowerValue>,
     locals: Vec<LocalStorage>,
     arena: &'a HirArena,
-    import_map: &'a VecMap<ImportKey, CalleeRef>,
+    import_map: &'a [CalleeRef],
+    /// The module's imports, indexed by `ImportId` (their key says which
+    /// ABI the call takes).
+    imports: &'a [ImportInfo],
+    /// Root types for uniform/global places, which carry only their name
+    /// and byte offset (see `hir::place::HirPlace`).
+    uniforms: &'a VecMap<String, UniformInfo>,
+    globals: &'a VecMap<String, GlobalInfo>,
     param_qualifiers: Vec<ParamQualifier>,
     texture_specs: &'a VecMap<String, TextureBindingSpec>,
     texel_fetch_bounds: lpir::TexelFetchBoundsMode,
@@ -430,7 +448,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
         }
         HirExprKind::Swizzle { base, lanes } => {
             let base = lower_expr(ctx, *base)?;
-            let out = lanes.iter().map(|i| base.lanes[*i]).collect::<Lanes>();
+            let out = lanes.iter().map(|i| base.lanes[i]).collect::<Lanes>();
             Ok(LowerValue {
                 ty: expr.ty.clone(),
                 lanes: out,
@@ -450,7 +468,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             expr.span,
             *kind,
             ctx.arena.expr_list(*args),
-            writebacks,
+            ctx.arena.writebacks(*writebacks),
             &expr.ty,
         ),
         HirExprKind::UserCall {
@@ -458,12 +476,17 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             args,
             writebacks,
         } => {
+            let writebacks = ctx.arena.writebacks(*writebacks);
             let mut writeback_slots = Vec::new();
             let mut arg_lanes = Lanes::one(ctx.vmctx);
             for (arg_index, arg) in ctx.arena.expr_list(*args).iter().copied().enumerate() {
-                if let Some(writeback) = writebacks.iter().find(|w| w.arg_index == arg_index) {
+                if let Some(writeback) = writebacks
+                    .iter()
+                    .find(|w| w.arg_index as usize == arg_index)
+                {
+                    let writeback_ty = &ctx.arena.place(writeback.target).ty;
                     let (_slot, addr) =
-                        alloc_slot_addr(ctx, flat_value_byte_size(&writeback.ty), IrType::Pointer);
+                        alloc_slot_addr(ctx, flat_value_byte_size(writeback_ty), IrType::Pointer);
                     if writeback.copy_in {
                         let value = lower_expr(ctx, arg)?;
                         store_value_to_addr(ctx, expr.span, addr, &value)?;
@@ -484,7 +507,8 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
                 &results,
             );
             for (writeback, addr) in writeback_slots {
-                let value = load_value_from_addr(ctx, expr.span, addr, &writeback.ty)?;
+                let writeback_ty = ctx.arena.place(writeback.target).ty.clone();
+                let value = load_value_from_addr(ctx, expr.span, addr, &writeback_ty)?;
                 assign_target(ctx, expr.span, writeback.target, value)?;
             }
             Ok(LowerValue {
@@ -493,13 +517,14 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             })
         }
         HirExprKind::ImportCall { import, args, out } => {
-            let callee = *ctx.import_map.get(import).ok_or_else(|| {
+            let callee = *ctx.import_map.get(import.index()).ok_or_else(|| {
                 Diagnostic::error(expr.span, format!("missing import for {import:?}"))
             })?;
+            let key = &ctx.imports[import.index()].key;
             if let Some(out) = out {
                 return lower_import_call_with_out(ctx, expr.span, callee, args, out, &expr.ty);
             }
-            if matches!(import, ImportKey::Glsl { .. }) && scalar_lane_count(&expr.ty) > 1 {
+            if matches!(key, ImportKey::Glsl { .. }) && scalar_lane_count(&expr.ty) > 1 {
                 let args = ctx
                     .arena
                     .expr_list(*args)
@@ -522,7 +547,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
                 });
             }
             let mut arg_lanes = Lanes::new();
-            if matches!(import, ImportKey::Vm { .. }) {
+            if matches!(key, ImportKey::Vm { .. }) {
                 arg_lanes.push(ctx.vmctx);
             }
             for arg in ctx.arena.expr_list(*args).iter().copied() {
@@ -547,7 +572,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
             sampler,
             coord,
             import,
-        } => lower_texture_sample(ctx, expr.span, sampler, *coord, import),
+        } => lower_texture_sample(ctx, expr.span, sampler, *coord, *import),
         HirExprKind::Unary { op, expr: inner } => {
             let inner = lower_expr(ctx, *inner)?;
             match (op, inner.ty.clone()) {
@@ -707,8 +732,8 @@ fn expr_list_needs_lazy_eval(arena: &HirArena, list: ExprList) -> bool {
 }
 
 fn place_needs_lazy_eval(arena: &HirArena, place: PlaceId) -> bool {
-    arena.place(place).segments.iter().any(|seg| match seg {
-        crate::hir::PlaceSegment::Index { index, .. } => expr_needs_lazy_eval(arena, *index),
+    arena.place_segments(place).iter().any(|seg| match seg {
+        crate::hir::PlaceSegment::Index { index } => expr_needs_lazy_eval(arena, *index),
         _ => false,
     })
 }
@@ -813,14 +838,24 @@ fn lower_import_call_with_out(
     out: &crate::hir::HirOutArg,
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
-    let out_lanes = scalar_lane_count(&out.ty);
+    let out_ty = match ctx.locals.get(out.local as usize) {
+        Some(LocalStorage::Flat(value)) => value.ty.clone(),
+        Some(LocalStorage::Slot { ty, .. }) => ty.clone(),
+        None => {
+            return Err(Diagnostic::error(
+                span,
+                "lpfn out argument local out of range",
+            ));
+        }
+    };
+    let out_lanes = scalar_lane_count(&out_ty);
     let (_slot, addr) = alloc_slot_addr(ctx, out_lanes as u32 * 4, IrType::I32);
 
     let mut arg_lanes = Lanes::new();
     let mut value_arg = 0usize;
     let args = ctx.arena.expr_list(*args);
     for arg_index in 0..(args.len() + 1) {
-        if arg_index == out.arg_index {
+        if arg_index == out.arg_index as usize {
             arg_lanes.push(addr);
         } else {
             let arg = args.get(value_arg).copied().ok_or_else(|| {
@@ -847,14 +882,28 @@ fn lower_import_call_with_out(
         });
         lanes.push(tmp);
     }
-    let out_value = LowerValue {
-        ty: out.ty.clone(),
-        lanes,
-    };
-    store_local(ctx, span, out.local, &out_value)?;
+    let out_value = LowerValue { ty: out_ty, lanes };
+    store_local(ctx, span, out.local as usize, &out_value)?;
 
     Ok(LowerValue {
         ty: result_ty.clone(),
         lanes: results,
     })
+}
+
+#[cfg(test)]
+mod size_tests {
+    extern crate std;
+    /// Lowering-side node sizes for the memory probes (see
+    /// `hir::arena::size_tests`).
+    #[test]
+    fn lower_node_sizes_print() {
+        use core::mem::size_of;
+        std::println!("LowerValue     {:>4} B", size_of::<super::LowerValue>());
+        std::println!("Lanes          {:>4} B", size_of::<super::Lanes>());
+        std::println!(
+            "LocalStorage   {:>4} B",
+            size_of::<super::storage::LocalStorage>()
+        );
+    }
 }

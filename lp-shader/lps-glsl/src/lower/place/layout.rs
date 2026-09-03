@@ -1,11 +1,11 @@
-use crate::hir::{HirExpr, HirExprKind};
+use crate::hir::{HirExprKind, HirExprRef};
 
 const RULES: lps_shared::LayoutRules = lps_shared::LayoutRules::Std430;
 
-pub(super) fn constant_index(expr: &HirExpr) -> Option<usize> {
+pub(super) fn constant_index(expr: HirExprRef<'_>) -> Option<usize> {
     match expr.kind {
-        HirExprKind::IntLiteral(value) => usize::try_from(value).ok(),
-        HirExprKind::UIntLiteral(value) => usize::try_from(value).ok(),
+        HirExprKind::IntLiteral(value) => usize::try_from(*value).ok(),
+        HirExprKind::UIntLiteral(value) => usize::try_from(*value).ok(),
         _ => None,
     }
 }
@@ -83,24 +83,24 @@ mod tests {
 
     #[test]
     fn constant_index_rejects_negative_values() {
-        let expr = HirExpr {
+        let expr = HirExprRef {
             span: Span::new(0, 1),
-            ty: LpsType::Int,
-            kind: HirExprKind::IntLiteral(-1),
+            ty: &LpsType::Int,
+            kind: &HirExprKind::IntLiteral(-1),
         };
 
-        assert_eq!(constant_index(&expr), None);
+        assert_eq!(constant_index(expr), None);
     }
 
     #[test]
     fn constant_index_accepts_uint_values() {
-        let expr = HirExpr {
+        let expr = HirExprRef {
             span: Span::new(0, 1),
-            ty: LpsType::UInt,
-            kind: HirExprKind::UIntLiteral(3),
+            ty: &LpsType::UInt,
+            kind: &HirExprKind::UIntLiteral(3),
         };
 
-        assert_eq!(constant_index(&expr), Some(3));
+        assert_eq!(constant_index(expr), Some(3));
     }
 
     #[test]

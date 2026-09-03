@@ -46,7 +46,7 @@ impl<T> ChunkedVec<T> {
     /// ⚠️ **A power of two, not `CHUNK_BYTES / size_of::<T>()`.** The last chunk
     /// is a `Vec` grown by pushing, and `RawVec` doubles from
     /// `MIN_NON_ZERO_CAP`, so its capacity only ever lands on 4, 8, 16, … — it
-    /// cannot stop at 10. Deriving 10 for a 96-byte `HirExpr` therefore bought a
+    /// cannot stop at 10. Deriving 10 for a (then) 96-byte `HirExpr` therefore bought a
     /// chunk whose *capacity* reached 16, i.e. a **1,536-byte allocation against
     /// a 1,024-byte bound**, which is the same class of mistake as counting
     /// elements in the first place. Rounding down to a power of two makes the
@@ -59,7 +59,7 @@ impl<T> ChunkedVec<T> {
     /// One residual: `RawVec`'s minimum non-zero capacity is 4 for elements of
     /// 1,024 bytes or less, so for an element between `CHUNK_BYTES / 4` and
     /// `CHUNK_BYTES` the first allocation is 4 elements no matter what this
-    /// says. Nothing in this workspace is in that band (`HirExpr` 96 B,
+    /// says. Nothing in this workspace is in that band (`HirExpr` 56 B,
     /// `LpirOp` 20 B), and the alternative — `Vec::with_capacity` per chunk —
     /// costs a full chunk up front for every short-lived `ChunkedVec`.
     pub(crate) const CHUNK_SIZE: usize = {

@@ -28,6 +28,8 @@ extern crate std;
 pub mod backtrace;
 pub mod error;
 pub mod fps;
+// Heap checkpoint logging (`[mem]` lines) and the process-wide stats hook.
+pub mod memory;
 pub mod stats;
 pub mod util; // Temporarily enabled for Texture
 

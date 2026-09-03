@@ -85,6 +85,8 @@ pub use fw_esp32_common::logger;
 mod output;
 mod recovery;
 mod serial;
+#[cfg(not(fw_harness))]
+mod stack_probe;
 #[cfg(all(any(feature = "stress_s2", feature = "stress_s3"), not(fw_harness)))]
 mod stress;
 #[cfg(not(fw_harness))]
@@ -168,6 +170,9 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// stays absent).
 #[cfg(not(fw_harness))]
 fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
+    // Piggybacks on the heartbeat cadence: one scan of the main stack per
+    // second, a log line only when the mark grows.
+    stack_probe::log_if_grown("heartbeat");
     esp32_memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::server::MemoryStats {
         free_bytes,
         used_bytes,
@@ -223,7 +228,13 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     esp_println::println!("[INIT] Initializing board...");
     let (sw_int, timg0, rmt_peripheral, usb_device, _gpio18, flash, _gpio4, _gpio20, wifi, rwdt) =
         init_board();
-    esp_println::println!("[INIT] Board initialized, starting runtime...");
+    // Paint the main stack before anything deep runs, so the heartbeat's
+    // high-water report measures the whole app (see `stack_probe`).
+    stack_probe::paint();
+    esp_println::println!(
+        "[INIT] Board initialized, starting runtime... (main stack {} B)",
+        stack_probe::total_bytes()
+    );
 
     // Crash recovery: analyze the previous run (reset reason + persistent
     // breadcrumb region) before anything crash-prone runs, then arm the
