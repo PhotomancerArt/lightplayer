@@ -224,11 +224,50 @@ impl ProjectManager {
     pub fn list_loaded_projects(&self) -> Vec<lpc_wire::server::LoadedProject> {
         self.projects
             .iter()
+            .map(|(handle, project)| {
+                lpc_wire::server::LoadedProject::new(*handle, project.path().to_path_buf())
+            })
+            .collect()
+    }
+
+    /// The same list, each entry carrying its engine's project-fault
+    /// verdict — what a heartbeat reports so a card never says "Running"
+    /// over a show that is painting the fault pattern.
+    ///
+    /// Separate from [`Self::list_loaded_projects`] on purpose: that one is
+    /// called per FRAME (`LpServer::advance_frame`), and a faulted project
+    /// would then clone its status strings 40+ times a second on a device
+    /// whose heap is exactly what the fault is usually about. The heartbeat
+    /// asks once a second.
+    pub fn list_loaded_projects_with_faults(&self) -> Vec<lpc_wire::server::LoadedProject> {
+        self.projects
+            .iter()
             .map(|(handle, project)| lpc_wire::server::LoadedProject {
                 handle: *handle,
                 path: project.path().to_path_buf(),
+                fault: project.engine().project_fault().map(|fault| {
+                    lpc_wire::server::ProjectFaultWire::new(
+                        // Frame seconds → whole ms of the same clock.
+                        (fault.since_seconds.max(0.0) * 1000.0) as u64,
+                        fault.nodes.iter().cloned(),
+                    )
+                }),
             })
             .collect()
+    }
+
+    /// Re-arm every loaded engine's faulted nodes
+    /// ([`lpc_engine::Engine::clear_faults`]) — the engine half of the
+    /// `ClearFaults` request.
+    ///
+    /// Every loaded project, not the one a handle names: a fault is a
+    /// device-level condition (the recovery ledger it usually comes from
+    /// has no idea which project a path belonged to), and the verb the user
+    /// pressed is on the DEVICE card.
+    pub fn clear_faults(&mut self) {
+        for project in self.projects.values_mut() {
+            project.engine_mut().clear_faults();
+        }
     }
 
     /// List all available projects on the filesystem

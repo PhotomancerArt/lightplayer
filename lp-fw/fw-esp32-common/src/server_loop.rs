@@ -190,8 +190,10 @@ pub async fn run_server_loop<T: ServerTransport>(
         // link-loss numbers matter most, and suppressing the heartbeat there
         // made a busy device doubly invisible.
         if current_time.saturating_sub(heartbeat_last_sent) >= HEARTBEAT_INTERVAL_MS {
-            // Get loaded projects from server
-            let loaded_projects = server.project_manager().list_loaded_projects();
+            // Get loaded projects from server, each carrying its fault
+            // verdict — the heartbeat is where "this board is degraded"
+            // reaches a card, so it asks the faulting variant.
+            let loaded_projects = server.project_manager().list_loaded_projects_with_faults();
 
             let fps_current = fps_tracker
                 .instantaneous_fps(frame_count, current_time, startup_time)

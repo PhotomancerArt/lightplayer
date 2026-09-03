@@ -112,6 +112,32 @@ pub(crate) fn error_node_view() -> UiNodeView {
     view
 }
 
+/// A node the RUNTIME failed: its compile was denied by crash recovery
+/// after repeated crashes (`NodeRuntimeStatus::Fault`), which the controller
+/// maps to the ERROR tone wearing the word "Fault".
+///
+/// The word is the whole point of the fixture. Error and Fault look
+/// identical — same red, same pill — and mean opposite things to the person
+/// reading them: an Error asks for an edit, a Fault asks for a retry, more
+/// memory, or a bug report. Nothing in the source is wrong, so the shader
+/// asset is deliberately CLEAN here, unlike `error_node_view`.
+pub(crate) fn fault_node_view() -> UiNodeView {
+    UiNodeView::new(
+        UiNodeHeader::new("blast", "Shader", "/show/playlist/blast")
+            .with_source("blast.glsl")
+            .with_status(UiStatus::error("Fault"))
+            .with_summary("runtime failure")
+            .with_detail(
+                "shader compile: recovery: shader compile 'glsl' (disabled after 2 crashes)",
+            ),
+        vec![UiNodeTab::main(vec![UiNodeSection::ConfigSlots(vec![
+            UiConfigSlot::value("shader", "Shader", UiSlotValue::string("blast.glsl"))
+                .with_state(UiSlotFieldState::editable()),
+        ])])],
+    )
+    .with_node_id("shader-blast")
+}
+
 /// The node-header batch-revert pane action the controller supplies while a
 /// node's subtree summary is dirty (same "revert" icon token as the project
 /// header's Revert-to-saved).

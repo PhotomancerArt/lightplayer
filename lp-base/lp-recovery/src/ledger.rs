@@ -99,6 +99,31 @@ impl Ledger {
         // neither count nor forgive.
     }
 
+    /// Forget every accusation this ledger holds: all path entries and the
+    /// consecutive-incomplete-boot count go back to a fresh-region state.
+    ///
+    /// The user's "clear faults" verb (`ClientRequest::ClearFaults`), and
+    /// nothing else — a boot never calls this. Power-on used to be the only
+    /// way to lift a quarantine, which meant a board that had disabled a
+    /// node kept rendering black until somebody could reach its USB cable.
+    ///
+    /// It clears BLAME only. The crash record, the boot count and the
+    /// generation live outside the ledger and are deliberately left alone:
+    /// the next heartbeat still says what the last crash was, with
+    /// `boots_ago` intact. Forgiving a path is not the same as pretending
+    /// the crash never happened — history is not blame.
+    ///
+    /// A failure that is still there simply re-accuses: the retried path
+    /// crashes, goes yellow, and a second crash re-gates it. That is the
+    /// honest outcome, and the reason clearing needs no argument about why
+    /// the path was gated.
+    pub(crate) fn clear(&mut self) {
+        for entry in &mut self.entries {
+            entry.clear();
+        }
+        self.consecutive_incomplete_boots = 0;
+    }
+
     /// Whether this boot should skip crash-prone work (project auto-load).
     pub fn safe_mode(&self) -> bool {
         self.consecutive_incomplete_boots >= INCOMPLETE_BOOTS_TO_SAFE_MODE
@@ -389,6 +414,43 @@ mod tests {
         ledger.on_boot(false, ResetCause::SoftwareReset);
         ledger.on_boot(false, ResetCause::UserReset);
         assert_eq!(ledger.consecutive_incomplete_boots(), 1);
+    }
+
+    #[test]
+    fn clear_forgets_every_accusation_and_the_boot_loop_count() {
+        let mut ledger = Ledger::EMPTY;
+        let gated = path(&[A, B, C]);
+        ledger.record_crash(&gated, &names());
+        ledger.record_crash(&gated, &names());
+        ledger.record_crash(&path(&[A, F]), &names());
+        ledger.on_boot(false, ResetCause::WatchdogReset);
+        ledger.on_boot(false, ResetCause::WatchdogReset);
+        assert_eq!(ledger.device_level(), RecoveryLevel::Yellow);
+        assert!(ledger.safe_mode());
+
+        ledger.clear();
+
+        assert_eq!(ledger.device_level(), RecoveryLevel::Green);
+        assert!(ledger.entries().iter().all(PathEntry::is_empty));
+        assert!(ledger.check_enter(&gated).is_none(), "the gate is lifted");
+        assert!(!ledger.safe_mode());
+        assert_eq!(ledger.consecutive_incomplete_boots(), 0);
+    }
+
+    /// Clearing forgives; it does not immunize. A path that crashes again
+    /// walks the same yellow → red ladder from the start.
+    #[test]
+    fn a_cleared_path_can_be_gated_again() {
+        let mut ledger = Ledger::EMPTY;
+        let p = path(&[A, C]);
+        ledger.record_crash(&p, &names());
+        ledger.record_crash(&p, &names());
+        ledger.clear();
+
+        ledger.record_crash(&p, &names());
+        assert!(ledger.check_enter(&p).is_none(), "one crash is only yellow");
+        ledger.record_crash(&p, &names());
+        assert!(ledger.check_enter(&p).is_some(), "the second re-gates it");
     }
 
     #[test]

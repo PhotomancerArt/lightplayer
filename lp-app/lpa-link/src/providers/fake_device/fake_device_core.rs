@@ -694,10 +694,8 @@ impl FakeDeviceCore {
                 };
                 self.loaded_projects
                     .retain(|loaded| loaded.handle != *handle);
-                self.loaded_projects.push(lpc_wire::server::LoadedProject {
-                    handle: *handle,
-                    path,
-                });
+                self.loaded_projects
+                    .push(lpc_wire::server::LoadedProject::new(*handle, path));
             }
             lpc_wire::ServerMsgBody::StopAllProjects => self.loaded_projects.clear(),
             _ => {}

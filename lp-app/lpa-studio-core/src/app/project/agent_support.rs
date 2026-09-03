@@ -50,27 +50,38 @@ pub struct AgentEngineStatus {
     pub verdict: EngineVerdict,
 }
 
-/// Map one node status view to the agent-facing verdict. Error tones parse
-/// through [`UiShaderError`] (one prefix-strip implementation for the error
-/// strip AND the agent); warnings stay `Ok` with their text; neutral states
-/// (pending/created) are `Unknown`.
+/// Map one node status view to the agent-facing verdict. The failed tones
+/// (Error and Fault) parse through [`UiShaderError`] (one prefix-strip
+/// implementation for the error strip AND the agent); warnings stay `Ok`
+/// with their text; neutral states (pending/created) are `Unknown`.
 pub(crate) fn engine_verdict(status: &ProjectNodeStatusView) -> EngineVerdict {
     match status.tone {
-        ProjectNodeStatusTone::Error => match status.detail.as_deref() {
-            Some(detail) => {
-                let parsed = UiShaderError::parse(detail);
-                EngineVerdict {
-                    status: EngineStatusKind::Error,
-                    message: Some(parsed.message),
-                    line_col: parsed.line_col,
+        // Fault rides the same arm as Error on purpose. What must never
+        // happen to a fault message is being SHOWN as a source diagnostic in
+        // the editor's error strip — that gate lives on the tone, in
+        // `ProjectController::asset_editor`. Here the parse only strips the
+        // engine's `shader render: render:` prefix chain and reads a
+        // rustc-style location IF the text carries one; a recovery or fuel
+        // message carries none, so it comes back with `line_col: None` and
+        // its own words. The agent still needs the strip, because a render
+        // failure the agent CAN fix (a missing uniform) arrives as a Fault.
+        ProjectNodeStatusTone::Error | ProjectNodeStatusTone::Fault => {
+            match status.detail.as_deref() {
+                Some(detail) => {
+                    let parsed = UiShaderError::parse(detail);
+                    EngineVerdict {
+                        status: EngineStatusKind::Error,
+                        message: Some(parsed.message),
+                        line_col: parsed.line_col,
+                    }
                 }
+                None => EngineVerdict {
+                    status: EngineStatusKind::Error,
+                    message: Some(status.label.clone()),
+                    line_col: None,
+                },
             }
-            None => EngineVerdict {
-                status: EngineStatusKind::Error,
-                message: Some(status.label.clone()),
-                line_col: None,
-            },
-        },
+        }
         ProjectNodeStatusTone::Good | ProjectNodeStatusTone::Warning => EngineVerdict {
             status: EngineStatusKind::Ok,
             message: status.detail.clone(),

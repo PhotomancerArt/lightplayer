@@ -76,4 +76,169 @@ fn framed_wrapper_gates_and_tracks() {
     .unwrap();
     assert_eq!(nested, "compiled");
     assert_eq!(lp_recovery::snapshot().unwrap().stack_depth, 0);
+
+    denied_shader_compile_is_a_fault();
 }
+
+/// A DENIED shader compile is a Fault, not an Error.
+///
+/// This is the bench case in miniature: the compile crashed (an OOM at JIT
+/// time), the ledger gated the path, and the node then has no program and
+/// renders black forever. The status has to say FAULT so the outputs paint
+/// the pattern instead of the wall going quietly dark.
+///
+/// Runs inside the single test above — it shares the installed global and
+/// depends on the red ledger the steps before it built.
+#[cfg(feature = "node-shader")]
+fn denied_shader_compile_is_a_fault() {
+    use std::sync::Arc;
+
+    use lpc_engine::node::{NodeRuntime, RenderContext};
+    use lpc_engine::nodes::ShaderNode;
+    use lpc_engine::products::visual::{
+        ConsumerPolicy, RenderTextureRequest, VisualProduct, VisualSpace,
+    };
+    use lpc_model::{
+        ArtifactLocation, AssetContentType, AssetLocation, NodeId, NodeRuntimeStatus, Revision,
+        ShaderDef,
+    };
+    use lpc_registry::AssetText;
+
+    // Drive the shader node's own compile path red at the depth the node
+    // enters it (top level here, since the render is called directly).
+    for _ in 0..2 {
+        let _ = catch_node_panic_framed(FrameKind::ShaderCompile, "glsl", || {
+            lp_recovery::stage_crash(CrashCause::Panic, &"simulated compile OOM", None, &[], None);
+            lp_recovery::record_recovered_crash();
+            Err::<(), _>(NodeError::msg("panic: simulated compile OOM"))
+        });
+    }
+
+    let graphics = Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+        lp_shader::ShaderFrontend::LpsGlsl,
+    ));
+    let node_id = NodeId::new(1);
+    let mut node = ShaderNode::new(
+        node_id,
+        ShaderDef::default(),
+        AssetText {
+            location: AssetLocation::artifact(ArtifactLocation::file("/shader.glsl")),
+            content_type: AssetContentType::ShaderSource,
+            revision: Revision::new(1),
+            text: String::from("void render_2d(vec2 p) { lp_color = vec4(1.0); }"),
+            diagnostic_name: String::from("/shader.glsl"),
+        },
+    );
+    // The engine opens compile windows during tick; stand in for it.
+    node.open_compile_window(Revision::new(1));
+    let mut ctx = RenderContext::new(node_id, Revision::new(1), Some(graphics.clone()), None, 0.0);
+    let request = RenderTextureRequest {
+        width: 4,
+        height: 4,
+        format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+        time_seconds: 0.0,
+        space: VisualSpace::TwoD,
+        policy: ConsumerPolicy::default(),
+    };
+    let mut texture =
+        lp_gfx::LpGraphics::create_render_target(graphics.as_ref(), 4, 4).expect("render target");
+    let product = VisualProduct::new(node_id, 0);
+
+    lpc_engine::node::RenderNode::render_texture_into(
+        &mut node,
+        product,
+        &request,
+        &mut texture,
+        &mut ctx,
+    )
+    .expect("a denied compile still renders (black), it does not error the frame");
+
+    match node.runtime_status() {
+        Some(NodeRuntimeStatus::Fault(message)) => assert!(
+            message.contains("recovery"),
+            "the fault names the denial: {message}"
+        ),
+        other => panic!("a denied compile must be a Fault, got {other:?}"),
+    }
+    assert!(
+        node.compilation_error().is_none(),
+        "a quarantine is not a diagnostic — nothing for the editor's error strip to point at",
+    );
+
+    // `clear_fault` re-arms the compile: the node ATTEMPTS again, and since
+    // the ledger is still red it faults again — honestly, rather than
+    // sitting on a latch nothing would ever clear.
+    node.clear_fault();
+    assert!(node.compile_fault().is_none(), "the latch is released");
+    assert_eq!(
+        node.runtime_status(),
+        None,
+        "and with nothing else wrong the node reports clean until it retries"
+    );
+
+    lpc_engine::node::RenderNode::render_texture_into(
+        &mut node,
+        product,
+        &request,
+        &mut texture,
+        &mut ctx,
+    )
+    .expect("retry render");
+    assert!(
+        matches!(node.runtime_status(), Some(NodeRuntimeStatus::Fault(_))),
+        "the retry re-entered the gate (proving needs_compile was re-armed) and was denied again",
+    );
+
+    // --- P3: the verb that ends the quarantine ---------------------------
+    // Both halves are needed and this is where that is provable: the node
+    // above was ALREADY re-armed by `clear_fault` and still faulted,
+    // because the ledger was still denying the frame. Clearing the ledger
+    // is what lets the compile through.
+    assert!(
+        lp_recovery::clear_ledger(),
+        "an installed global reports the clear"
+    );
+    assert_eq!(
+        lp_recovery::snapshot().unwrap().level,
+        RecoveryLevel::Green,
+        "every accusation is forgotten, not just the compile's"
+    );
+
+    node.clear_fault();
+    lpc_engine::node::RenderNode::render_texture_into(
+        &mut node,
+        product,
+        &request,
+        &mut texture,
+        &mut ctx,
+    )
+    .expect("render after the clear");
+    // The compile RAN this time — it got past the gate and reached the
+    // backend, which rejected this fixture's deliberately bogus source. The
+    // status flipping from Fault to Error is the whole taxonomy in one
+    // assertion: the runtime is no longer refusing the work, and what is
+    // left is an authoring problem with a diagnostic to point at.
+    match node.runtime_status() {
+        Some(NodeRuntimeStatus::Error(message)) => assert!(
+            message.contains("shader compile"),
+            "the compile reached the backend: {message}"
+        ),
+        other => panic!("expected a compile Error once the gate lifted, got {other:?}"),
+    }
+    assert!(
+        node.compilation_error().is_some(),
+        "and it is a diagnostic again, unlike the quarantine"
+    );
+
+    // The path the FIRST steps of this test gated is admitted again too:
+    // clearing is device-wide, exactly like the power cycle it replaces.
+    let ran = catch_node_panic_framed(FrameKind::NodeRender, "nodes/crashy", || {
+        Ok::<_, NodeError>("ran")
+    })
+    .expect("the previously gated node path is admitted again");
+    assert_eq!(ran, "ran");
+}
+
+/// Without the shader node kind there is no compile to deny.
+#[cfg(not(feature = "node-shader"))]
+fn denied_shader_compile_is_a_fault() {}

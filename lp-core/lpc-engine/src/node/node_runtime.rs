@@ -168,6 +168,21 @@ pub trait NodeRuntime {
         None
     }
 
+    /// Re-arm whatever this node latched when the RUNTIME failed it, so the
+    /// next tick attempts the work again.
+    ///
+    /// Called by [`crate::Engine::clear_faults`] on every alive node. A
+    /// no-op for nodes that latch nothing: a node whose fault was a failed
+    /// tick simply ticks again next frame, and the engine re-derives the
+    /// truth either way. The hook exists for the latches that would
+    /// otherwise never retry — a shader whose compile the recovery ledger
+    /// denied cleared `needs_compile` and would sit dark forever.
+    ///
+    /// This clears the node's own latch only. Whatever DENIED the work
+    /// (the recovery ledger) is cleared by the caller, or the retry is
+    /// denied again and the node re-faults honestly.
+    fn clear_fault(&mut self) {}
+
     /// Node-owned runtime state exposed as a slot root.
     ///
     /// Nodes without public runtime state return `None`; they do not publish a

@@ -18,6 +18,11 @@ mod output_flush_tests;
 #[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
 mod output_frame_probe_tests;
 mod project_apply;
+mod project_fault;
+// The never-black policy's oracle: what faults a project, what must not,
+// and how the verdict clears.
+#[cfg(test)]
+mod project_fault_tests;
 mod project_loader;
 mod project_read_nodes;
 mod project_read_probes;
@@ -61,6 +66,7 @@ pub use frame_num::FrameNum;
 pub use frame_time::FrameTime;
 pub use loaded_project_runtime::LoadedProjectRuntime;
 pub use project_apply::RuntimeApplyResult;
+pub use project_fault::{FaultPresentation, ProjectFault};
 pub use project_loader::{ProjectLoadError, ProjectLoader};
 pub use project_read_stream::{EngineProjectReadSource, ProjectReadEventStreamError};
 pub use project_runtime_index::ProjectRuntimeIndex;

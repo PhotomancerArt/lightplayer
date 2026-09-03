@@ -161,9 +161,12 @@ fn node_failure_message(delta: &WireTreeDelta) -> Option<String> {
         WireTreeDelta::ChildrenChanged { .. } => return None,
     };
     match status {
-        NodeRuntimeStatus::Error(message) | NodeRuntimeStatus::InitError(message) => {
-            Some(message.clone())
-        }
+        // A fault ends the wait like an error does: the upload landed, but
+        // the node it landed on is not running and no amount of waiting
+        // changes that.
+        NodeRuntimeStatus::Error(message)
+        | NodeRuntimeStatus::InitError(message)
+        | NodeRuntimeStatus::Fault(message) => Some(message.clone()),
         // Unsupported is not a failure of the upload: the project loaded,
         // this build just has no runtime for that kind.
         NodeRuntimeStatus::Created

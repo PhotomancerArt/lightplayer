@@ -48,6 +48,7 @@ use lpa_studio_core::{
 
 use crate::base::icon::{NodeKindIcon, StudioIconName};
 use crate::base::option_cards::{OptionCard, OptionCards};
+use crate::core::quiet_action_class;
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip};
 
 /// One device card.
@@ -92,6 +93,31 @@ pub(crate) fn DeviceRosterCard(
     // port, which is the same condition the model's own spawns check.
     let linked = card.escapes.contains(&DeviceEscape::Disconnect);
     let idle = card.activity.is_none();
+    // The one condition Clear faults turns on. The status is the derived
+    // headline — a board is Degraded exactly when it reported a faulted node
+    // or a non-green recovery state — so the verb appears with the attention
+    // chip and the line under "Running …", and leaves with them.
+    let degraded = card.status == DeviceStatus::Degraded;
+    // Re-flash on a RUNNING board (G1 2026-09-02: the only road to newer
+    // firmware was Factory reset, which "causes issues sometimes"). The
+    // pick is not the user's here — it is the board this card is registered
+    // as, resolved against the served catalog for the detected chip; when
+    // the registry has no board, a chip with exactly one fit still earns
+    // the verb. Safe on a live board: the Flash activity parks a native-USB
+    // chip in its ROM downloader first, and the merged image ends before
+    // the lpfs partition, so the project and the efuse identity survive.
+    let reflash = reflash_choice(card.detected_chip.as_deref(), card.board_id.as_deref());
+    // When the pick does NOT resolve (a chip with several boards and no
+    // registered one — every board flashed before the hello carried its
+    // board id), the verb opens the same picker the needs-firmware face
+    // uses, inline, instead of guessing. Local UI state: nothing the model
+    // needs to know until a board is actually picked.
+    let mut reflash_picker_open = use_signal(|| false);
+    let offer_reflash_picker =
+        reflash.is_none() && card.detected_chip.is_some() && card.status == DeviceStatus::Ready
+            || reflash.is_none()
+                && card.detected_chip.is_some()
+                && card.status == DeviceStatus::Degraded;
     // The running face's ONE verb: Open — the editor as a lens on this
     // board. Opening is NAVIGATION, so it is a real `<a>` to the device
     // route (the same road the project cards take): a plain click rides the
@@ -99,8 +125,11 @@ pub(crate) fn DeviceRosterCard(
     // address bar ends up saying where you are.
     // Only a READY board (identified, port open, idle) can be opened: an
     // attached-but-closed one has no wire to lend, and offering Open there
-    // would hold an intent the user did not mean to file.
-    let ready = matches!(card.status, DeviceStatus::Ready);
+    // would hold an intent the user did not mean to file. Degraded is a
+    // refinement of Ready (the port is open, the show is running, one node
+    // faulted) — the editor is exactly where a faulted board wants to be
+    // opened, so it keeps the verb.
+    let ready = matches!(card.status, DeviceStatus::Ready | DeviceStatus::Degraded);
     let open_href = match (&running, ready && linked && idle, open_uid.as_deref()) {
         (Some(_), true, Some(uid)) => Some(format!("/device/{uid}")),
         _ => None,
@@ -147,6 +176,14 @@ pub(crate) fn DeviceRosterCard(
                                 }
                             }
                         }
+                        // Directly under the running face, never instead of
+                        // it: a degraded board IS still running, and the
+                        // project name is the first thing anyone looks for.
+                        // The attention tone matches the status chip the
+                        // same state wears.
+                        if let Some(degraded) = card.degraded.clone() {
+                            p { class: degraded_line_class(), "{degraded}" }
+                        }
                         if let Some(detail) = card.detail.clone() {
                             p { class: detail_class(), "{detail}" }
                         }
@@ -178,6 +215,15 @@ pub(crate) fn DeviceRosterCard(
 
                     if offer_push {
                         EmptyFace { card: card.clone(), projects, examples, on_action }
+                    }
+                    // The re-flash picker a running board opened from its
+                    // Flash firmware verb (see `offer_reflash_picker`).
+                    if offer_reflash_picker && idle && linked && reflash_picker_open() {
+                        FlashFace {
+                            device,
+                            detected_chip: card.detected_chip.clone(),
+                            on_action,
+                        }
                     }
                 }
 
@@ -217,6 +263,52 @@ pub(crate) fn DeviceRosterCard(
                         running: false,
                         variant: ActionButtonVariant::Quiet,
                         on_action,
+                    }
+                }
+                // Only on a board that has SAID it is degraded: a verb to
+                // forget faults offered over a healthy card would invite a
+                // gesture with nothing to do, and would keep inviting it.
+                if degraded && idle && linked {
+                    ActionButton {
+                        key: "{\"clear-faults\"}",
+                        action: DevicesOp::action_for(DeviceAction::ClearFaults { device }),
+                        running: false,
+                        variant: ActionButtonVariant::Quiet,
+                        on_action,
+                    }
+                }
+                // Flash the served firmware over a running board. Offered
+                // only when the pick resolves without asking (see `reflash`);
+                // a board with no resolvable pick gets the needs-firmware
+                // face's picker, never a guess.
+                if let Some(choice) = reflash.clone()
+                    && idle
+                    && linked
+                    && !offer_flash
+                {
+                    ActionButton {
+                        key: "{\"flash-firmware\"}",
+                        action: DevicesOp::action_for(DeviceAction::Flash {
+                            device,
+                            board_id: choice.board_id.clone(),
+                            build_id: choice.build_id.clone(),
+                            park_first: choice.park_first,
+                        }),
+                        running: false,
+                        variant: ActionButtonVariant::Quiet,
+                        on_action,
+                    }
+                }
+                if offer_reflash_picker && idle && linked && !offer_flash {
+                    button {
+                        class: quiet_action_class(),
+                        r#type: "button",
+                        title: "Write the firmware this Studio serves onto the board; the project and identity stay.",
+                        onclick: move |_| {
+                            let open = reflash_picker_open();
+                            reflash_picker_open.set(!open);
+                        },
+                        if reflash_picker_open() { "Cancel flash" } else { "Flash firmware" }
                     }
                 }
                 if idle && linked {
@@ -590,6 +682,31 @@ fn ActivityRow(activity: DeviceActivityView) -> Element {
     }
 }
 
+/// The board a RUNNING card re-flashes as, or `None` when the pick would be
+/// a guess: the registered board when the served catalog has it for the
+/// detected chip, else the chip's single fit, else nothing (the
+/// needs-firmware face owns the picker; this verb never shows one). A card
+/// with no detected chip gets no verb — the chip guard has nothing to check
+/// the pick against.
+fn reflash_choice(
+    detected_chip: Option<&str>,
+    registered_board: Option<&str>,
+) -> Option<lpa_studio_core::FlashBoardChoice> {
+    let chip = detected_chip?;
+    let offer = flash_offer(Some(chip));
+    offer
+        .candidates
+        .iter()
+        .find(|choice| Some(choice.board_id.as_str()) == registered_board)
+        .or_else(
+            || match (offer.preselect.as_deref(), offer.candidates.as_slice()) {
+                (Some(_), [only]) => Some(only),
+                _ => None,
+            },
+        )
+        .cloned()
+}
+
 fn card_class() -> &'static str {
     // `ux-armed-scope`: the card is the blast radius of its own armed
     // destructive chips — `:has(.ux-armed)` marks it (style.css).
@@ -631,6 +748,11 @@ fn quiet_line_class() -> &'static str {
     "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-subtle-foreground"
 }
 
+/// The degradation line: the Attention tone the status chip already wears
+/// for this state, semibold because it is the reason the chip changed.
+fn degraded_line_class() -> &'static str {
+    "tw:m-0 tw:text-xs tw:leading-relaxed tw:font-semibold tw:text-status-attention-foreground"
+}
 fn failure_line_class() -> &'static str {
     "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-status-error-foreground"
 }
@@ -645,4 +767,68 @@ fn note_class() -> &'static str {
 
 fn disabled_button_class() -> &'static str {
     "tw:inline-flex tw:w-fit tw:cursor-not-allowed tw:items-center tw:rounded-md tw:border tw:border-border tw:px-2.5 tw:py-1 tw:text-xs tw:font-semibold tw:text-subtle-foreground tw:opacity-60"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lpa_studio_core::UiStatusKind;
+
+    /// The degradation line must wear the tone its own status chip wears,
+    /// and it must be a SANCTIONED tone: the accent reckoning removed hue
+    /// accents, so Attention is the one this state gets. A line in a colour
+    /// nothing else uses is how a design language leaks.
+    /// The re-flash verb never guesses: the registered board wins, a lone
+    /// fit for the detected chip is the only other way in, and no chip
+    /// means no verb (the chip guard would have nothing to check). The
+    /// catalog carries TWO C6 boards, so a C6 with no registered board gets
+    /// the picker, not a pick.
+    #[test]
+    fn the_reflash_pick_is_the_registered_board_or_the_chips_only_fit() {
+        let registered = reflash_choice(Some("esp32c6"), Some("seeed/xiao-esp32-c6"))
+            .expect("the registered XIAO resolves against the served catalog");
+        assert_eq!(registered.board_id, "seeed/xiao-esp32-c6");
+        assert_eq!(registered.build_id, "esp32c6-4mb");
+        assert!(
+            registered.park_first,
+            "a native-USB chip parks in its downloader first"
+        );
+
+        // Without a registered board, the answer is exactly the offer's
+        // one-click preselect — never a pick from a list of several.
+        let offer = flash_offer(Some("esp32c6"));
+        let unregistered = reflash_choice(Some("esp32c6"), None);
+        assert_eq!(
+            unregistered.map(|choice| choice.board_id),
+            offer.preselect,
+            "no registered board: only a lone fit earns the pick",
+        );
+
+        // A registered board the chip cannot run falls back the same way,
+        // never to the mismatched registration.
+        let mismatched = reflash_choice(Some("esp32c6"), Some("dig-uno"));
+        assert_ne!(
+            mismatched.as_ref().map(|c| c.board_id.as_str()),
+            Some("dig-uno")
+        );
+
+        assert!(reflash_choice(None, Some("seeed/xiao-esp32-c6")).is_none());
+    }
+
+    #[test]
+    fn the_degraded_line_wears_the_same_tone_as_the_degraded_chip() {
+        assert_eq!(
+            device_status_kind(lpa_studio_core::DeviceStatus::Degraded),
+            UiStatusKind::Attention,
+        );
+        assert!(
+            degraded_line_class().contains("tw:text-status-attention-foreground"),
+            "{}",
+            degraded_line_class()
+        );
+        // Not the muted detail voice, and not the error voice either: an
+        // error line is for a failed OUTCOME, and this board is running.
+        assert_ne!(degraded_line_class(), detail_class());
+        assert_ne!(degraded_line_class(), failure_line_class());
+    }
 }

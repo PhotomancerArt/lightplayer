@@ -5,7 +5,7 @@
 //! | `lpc_wire::WireServerMessage` | [`ServerFrame`] |
 //! |---|---|
 //! | `ServerMsgBody::Hello` | [`ServerFrameBody::Hello`](lpa_devices::wire::ServerFrameBody::Hello) with [`HelloFacts`] |
-//! | `ServerMsgBody::Heartbeat` at id 0 | [`ServerFrameBody::Heartbeat`](lpa_devices::wire::ServerFrameBody::Heartbeat), loaded-project report included |
+//! | `ServerMsgBody::Heartbeat` at id 0 | [`ServerFrameBody::Heartbeat`](lpa_devices::wire::ServerFrameBody::Heartbeat): loaded-project report (with each project's fault) and recovery state included |
 //! | `ServerMsgBody::ListLoadedProjects` | [`ServerFrameBody::Loaded`](lpa_devices::wire::ServerFrameBody::Loaded) |
 //! | everything else | [`ServerFrameBody::Other`](lpa_devices::wire::ServerFrameBody::Other) with a stable label |
 //!
@@ -18,8 +18,13 @@
 //!
 //! # Why frames are labelled rather than mirrored
 //!
-//! The model needs four facts from a frame (is it a hello, what proto does it
-//! claim, what identity does it carry, was it *some* frame from a live peer).
+//! The model needs a few facts from a frame (is it a hello, what proto does
+//! it claim, what identity does it carry, what is it running and is that
+//! running WELL, was it *some* frame from a live peer). It was four until
+//! the fault policy: `recovery` and the per-project fault were dropped here
+//! with the rest of the status blocks, and the card said "Running" over a
+//! quarantined show for two days (2026-09-01 bench). What decides a FACE is
+//! mirrored; what merely reads well in a diagnostics panel is not.
 //! [`ServerFrameBody::Other`](lpa_devices::wire::ServerFrameBody::Other)'s label exists so a journal reads honestly, not
 //! so the model can act on it — anything that wants a real response body goes
 //! through `lpa-client`, above this seam.
@@ -28,7 +33,8 @@ use lpa_devices::identity::{DeviceUid, EndpointKey, MacAddress, PeerIdentity};
 use lpa_devices::link::{LinkInfo, UsbIds};
 use lpa_devices::roster::RosterConfig;
 use lpa_devices::wire::{
-    ClientFrame, ClientFrameBody, HelloFacts, LoadedProjectFacts, ServerFrame,
+    ClientFrame, ClientFrameBody, HelloFacts, LoadedProjectFacts, ProjectFaultFacts, RecoveryFacts,
+    RecoveryLevelFacts, RecoveryPathFacts, ServerFrame,
 };
 use lpc_wire::{
     ClientMessage, ClientRequest, ServerHello, ServerMsgBody, WIRE_PROTO_VERSION, WireServerMessage,
@@ -93,10 +99,12 @@ pub fn server_frame(message: &WireServerMessage) -> ServerFrame {
         ServerMsgBody::Heartbeat {
             identity,
             loaded_projects,
+            recovery,
             ..
-        } if message.id == 0 => ServerFrame::heartbeat_with_loaded(
+        } if message.id == 0 => ServerFrame::heartbeat_report(
             identity.as_ref().map(heartbeat_identity),
-            loaded_projects.iter().map(loaded_project_facts).collect(),
+            Some(loaded_projects.iter().map(loaded_project_facts).collect()),
+            recovery.as_ref().map(recovery_facts),
         ),
         // The one non-hello RESPONSE body the mirror decodes rather than
         // labels: whether a board has a project on it is what the empty and
@@ -110,11 +118,62 @@ pub fn server_frame(message: &WireServerMessage) -> ServerFrame {
 }
 
 /// One loaded-project report, as the fold reads it: the storage path and
-/// nothing else. The wire handle is a per-session number with no meaning to
-/// the model, and the library's own name for a project is a JOIN the app
-/// makes — never a fact the device is asked to remember.
+/// the project's fault verdict. The wire handle is a per-session number
+/// with no meaning to the model, and the library's own name for a project
+/// is a JOIN the app makes — never a fact the device is asked to remember.
+///
+/// `since_ms` is dropped: it is the DEVICE's frame clock, and this side has
+/// nothing to subtract it from. How long a card has looked degraded is a
+/// freshness question, and the fold already owns freshness.
 fn loaded_project_facts(project: &lpc_wire::server::LoadedProject) -> LoadedProjectFacts {
-    LoadedProjectFacts::new(project.path.as_str())
+    match &project.fault {
+        None => LoadedProjectFacts::new(project.path.as_str()),
+        Some(fault) => LoadedProjectFacts::faulted(
+            project.path.as_str(),
+            ProjectFaultFacts::new(
+                fault
+                    .nodes
+                    .iter()
+                    .map(|node| (node.path.clone(), node.message.clone()))
+                    .collect(),
+            ),
+        ),
+    }
+}
+
+/// The device's crash-recovery state, in the model's vocabulary.
+///
+/// This used to be dropped with the rest of the heartbeat's status blocks,
+/// and the device card said "Running" over a quarantined show for two days
+/// (2026-09-01 bench). The reset reason, boot count and output clamp stay
+/// dropped: they belong to a diagnostics surface, not to the one line a
+/// card can spare.
+fn recovery_facts(recovery: &lpc_wire::server::RecoveryStatus) -> RecoveryFacts {
+    RecoveryFacts {
+        level: match recovery.level {
+            lpc_wire::server::RecoveryLevelWire::Green => RecoveryLevelFacts::Green,
+            lpc_wire::server::RecoveryLevelWire::Yellow => RecoveryLevelFacts::Yellow,
+            lpc_wire::server::RecoveryLevelWire::Red => RecoveryLevelFacts::Red,
+        },
+        safe_mode: recovery.safe_mode,
+        paths: recovery
+            .paths
+            .iter()
+            .map(|path| RecoveryPathFacts {
+                label: path.path.clone(),
+                // The ledger's own word for "disabled"; anything else it
+                // reports is a path merely under watch.
+                gated: path.state.eq_ignore_ascii_case("red"),
+            })
+            .collect(),
+        // Phrased once, here, so every consumer says it the same way. The
+        // path is the ledger's truncated leaf label — a display string,
+        // never a key back to a node.
+        last_crash: recovery
+            .last_crash
+            .as_ref()
+            .map(|crash| format!("{} at {}", crash.cause, crash.path)),
+    }
 }
 
 /// The hello facts the fold reads, from the full wire hello.
@@ -192,6 +251,7 @@ fn body_label(body: &ServerMsgBody) -> &'static str {
         ServerMsgBody::StopAllProjects => "StopAllProjects",
         ServerMsgBody::SetLogLevel => "SetLogLevel",
         ServerMsgBody::Reboot => "Reboot",
+        ServerMsgBody::ClearFaults { .. } => "ClearFaults",
         ServerMsgBody::Log { .. } => "Log",
         ServerMsgBody::Heartbeat { .. } => "Heartbeat",
         ServerMsgBody::Error { .. } => "Error",
@@ -212,6 +272,12 @@ pub fn client_message(frame: &ClientFrame) -> Result<ClientMessage, String> {
         // know the variant answers an error instead of going quiet.
         ClientFrameBody::Reboot => ClientRequest::Reboot,
         ClientFrameBody::ListLoadedProjects => ClientRequest::ListLoadedProjects,
+        // Nothing to wait for on the far side: the device acks and the
+        // cleared state takes effect on its next tick. The ack itself is
+        // labelled, not mirrored — whether the ledger existed to clear is a
+        // diagnostic, and the card re-derives from the loaded report that
+        // follows this frame.
+        ClientFrameBody::ClearFaults => ClientRequest::ClearFaults,
         ClientFrameBody::Opaque { label } => {
             return Err(format!(
                 "lpa-link cannot forward an opaque request ({label}): coarse effects go \
@@ -332,6 +398,77 @@ mod tests {
         assert_eq!(identity.uid, None);
     }
 
+    /// The degradation half of the mirror: what the adapter used to throw
+    /// away is what the card lied with (2026-09-01 bench). Driven from a
+    /// real frame line so the decode and the map are both under test.
+    #[test]
+    fn a_heartbeat_carries_recovery_and_the_project_fault_into_the_mirror() {
+        let line = r#"{"id":0,"msg":{"heartbeat":{
+            "fps":{"avg":43.0,"sdev":0.0,"min":43.0,"max":43.0},
+            "frame_count":700,
+            "loaded_projects":[{"handle":1,"path":"/projects/meteor","fault":{
+                "sinceMs":12000,
+                "nodes":[{"path":"/meteor.show/s","message":"recovery: node 'nodes/meteor' (disabled after 3 crashes)"}]}}],
+            "uptime_ms":20000,
+            "recovery":{"level":"red","resetReason":"power-on","bootCount":4,"safeMode":false,
+                "lastCrash":{"cause":"oom","path":"node:nodes/meteor","message":"","bootsAgo":1},
+                "paths":[{"path":"node:nodes/meteor","state":"red","crashCount":3},
+                         {"path":"node:nodes/sparkle","state":"yellow","crashCount":1}]}
+        }}}"#;
+
+        let frame = decode_server_frame(line).expect("the frame decodes");
+
+        let ServerFrameBody::Heartbeat {
+            loaded, recovery, ..
+        } = &frame.body
+        else {
+            panic!("expected a heartbeat, got {:?}", frame.body);
+        };
+        let fault = loaded.as_ref().expect("loaded report")[0]
+            .fault
+            .as_ref()
+            .expect("the project's fault reached the mirror");
+        assert_eq!(fault.nodes[0].0, "/meteor.show/s");
+        assert!(fault.nodes[0].1.contains("disabled after 3 crashes"));
+
+        let recovery = recovery.as_ref().expect("recovery reached the mirror");
+        assert_eq!(recovery.level, RecoveryLevelFacts::Red);
+        assert!(!recovery.safe_mode);
+        assert!(recovery.is_degraded());
+        // Only the RED entry is gated; the yellow one is under watch, and
+        // collapsing the two would over-claim what the ledger did.
+        let gated: Vec<&str> = recovery.gated().map(|path| path.label.as_str()).collect();
+        assert_eq!(gated, ["node:nodes/meteor"]);
+        assert_eq!(recovery.paths.len(), 2);
+        assert_eq!(
+            recovery.last_crash.as_deref(),
+            Some("oom at node:nodes/meteor")
+        );
+    }
+
+    /// The absence rule: a device that says nothing about recovery is not
+    /// green, and a project with no fault reports none.
+    #[test]
+    fn a_heartbeat_without_recovery_or_a_fault_mirrors_nothing() {
+        let line = r#"{"id":0,"msg":{"heartbeat":{
+            "fps":{"avg":60.0,"sdev":0.0,"min":60.0,"max":60.0},
+            "frame_count":10,
+            "loaded_projects":[{"handle":1,"path":"/projects/porch"}],
+            "uptime_ms":1000
+        }}}"#;
+
+        let frame = decode_server_frame(line).expect("the frame decodes");
+
+        let ServerFrameBody::Heartbeat {
+            loaded, recovery, ..
+        } = &frame.body
+        else {
+            panic!("heartbeat");
+        };
+        assert!(recovery.is_none(), "silence is not green");
+        assert!(loaded.as_ref().expect("loaded report")[0].fault.is_none());
+    }
+
     #[test]
     fn every_other_response_is_live_peer_evidence_with_an_honest_label() {
         let frame = server_frame(&WireServerMessage::new(4, ServerMsgBody::StopAllProjects));
@@ -380,6 +517,38 @@ mod tests {
             lpc_wire::json::from_str(line.trim_start_matches("M!").trim_end()).expect("decode");
         assert_eq!(decoded.id, 5);
         assert!(matches!(decoded.msg, ClientRequest::Reboot));
+    }
+
+    #[test]
+    fn a_clear_faults_request_round_trips_to_the_line_a_device_answers() {
+        let line = encode_client_frame(&ClientFrame::clear_faults(6)).expect("encode");
+
+        let decoded: ClientMessage =
+            lpc_wire::json::from_str(line.trim_start_matches("M!").trim_end()).expect("decode");
+        assert_eq!(decoded.id, 6);
+        assert!(matches!(decoded.msg, ClientRequest::ClearFaults));
+    }
+
+    /// The ack is LABELLED, not mirrored: whether the device had a ledger
+    /// to forget is a diagnostic, and the card re-derives from the loaded
+    /// report that follows. The label still has to be honest, because a
+    /// journal is what explains a card that did not change.
+    #[test]
+    fn the_clear_faults_ack_arrives_as_a_named_frame() {
+        let frame = server_frame(&WireServerMessage::new(
+            6,
+            ServerMsgBody::ClearFaults {
+                ledger_cleared: true,
+            },
+        ));
+
+        assert_eq!(frame.request_id, 6);
+        assert_eq!(
+            frame.body,
+            lpa_devices::wire::ServerFrameBody::Other {
+                label: "ClearFaults".to_string()
+            }
+        );
     }
 
     #[test]

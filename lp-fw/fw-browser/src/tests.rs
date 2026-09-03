@@ -352,13 +352,17 @@ fn infinite_loop_shader_reports_fuel_error_and_keeps_ticking() {
         .map(|entry| (entry.path.to_string(), entry.status.clone()))
         .expect("shader node present");
     match &shader_status {
-        NodeRuntimeStatus::Error(message) => {
+        // A fuel trap is a RUNTIME failure of a valid shader (the source
+        // compiled), so it rides `Fault`, not `Error` — that is what makes
+        // every output of the project paint the fault pattern instead of
+        // going black.
+        NodeRuntimeStatus::Fault(message) => {
             assert!(
                 message.contains("fuel exhausted"),
-                "{shader_path}: node error must name fuel: {message}"
+                "{shader_path}: node fault must name fuel: {message}"
             );
         }
-        other => panic!("{shader_path}: expected fuel node error, got {other:?}"),
+        other => panic!("{shader_path}: expected fuel node fault, got {other:?}"),
     }
 
     // The sim survives: the frame counter keeps advancing after the trap.

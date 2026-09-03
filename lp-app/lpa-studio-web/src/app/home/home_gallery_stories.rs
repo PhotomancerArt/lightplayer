@@ -530,6 +530,47 @@ fn devices_page_armed_confirm() -> Element {
     }
 }
 
+#[story(
+    description = "Running vs Degraded, side by side (a fault is never black, 2026-09-02). Left: the healthy running card. Right: the SAME board reporting a faulted node — the chip drops from Ready to Degraded in the attention tone, and one line under \"Running …\" names the node and the runtime's own reason. The running face is deliberately kept: a degraded board is still running, and dropping the project name would answer \"what is on it?\" with a complaint. This is the card that lied for two days while a quarantined shader rendered black (2026-09-01 bench). The degraded card also carries one extra verb in the actions row — Clear faults, beside Reset — which forgets the board\'s crash ledger and re-arms the faulted nodes; the healthy card does not offer it, because there would be nothing for it to do."
+)]
+fn devices_page_degraded_card() -> Element {
+    let healthy = roster_fixture().roster.devices.remove(0);
+    let degraded = degraded_card_fixture();
+    rsx! {
+        div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
+            DeviceRosterCard {
+                card: healthy,
+                projects: vec![],
+                examples: vec![],
+                on_action: |_| {},
+            }
+            DeviceRosterCard {
+                card: degraded,
+                projects: vec![],
+                examples: vec![],
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+/// The running card of `roster_fixture`, as it reads once the board reports
+/// a faulted node — the bench case, with the ledger's own denial as the
+/// runtime's reason.
+fn degraded_card_fixture() -> DeviceView {
+    let mut card = roster_fixture().roster.devices.remove(0);
+    card.status = DeviceStatus::Degraded;
+    card.state_label = "Degraded".to_string();
+    card.degraded = Some(
+        "Degraded: node /studio.show/s faulted — recovery: node 'nodes/meteor' \
+         (disabled after 3 crashes)"
+            .to_string(),
+    );
+    card.terminal_lines
+        .push("[WARN] recovery: node 'nodes/meteor' disabled after 3 crashes".to_string());
+    card
+}
+
 /// A roster covering the four states this milestone can reach: a fresh plug
 /// still identifying, a settled LightPlayer, one mid-activity, and a blank
 /// chip whose only honest verb is round 2\'s.
@@ -578,9 +619,10 @@ fn roster_fixture() -> DeviceRosterView {
                     detail: Some("LightPlayer · dig-uno".to_string()),
                     freshness_label: Some("last heard 3 s ago".to_string()),
                     identity_label: Some("dev000000daqf6dvvqz".to_string()),
-                    detected_chip: None,
+                    detected_chip: Some("esp32".to_string()),
                     board_id: Some("dig-uno".to_string()),
                     needs_firmware: false,
+                    degraded: None,
                     // The RUNNING face (M3): what the board itself reports,
                     // named by the storage dir it runs from.
                     loaded_project: DeviceLoadedProject::Running {
@@ -610,6 +652,7 @@ fn roster_fixture() -> DeviceRosterView {
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: None,
                     needs_firmware: false,
+                    degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     // Busy: one activity per device, so no second verb.
                     can_receive_project: false,
@@ -649,6 +692,7 @@ fn roster_fixture() -> DeviceRosterView {
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: None,
                     needs_firmware: true,
+                    degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     can_receive_project: false,
                     can_remove_project: false,
@@ -679,6 +723,7 @@ fn roster_fixture() -> DeviceRosterView {
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: Some("seeed-xiao-esp32c6".to_string()),
                     needs_firmware: false,
+                    degraded: None,
                     loaded_project: DeviceLoadedProject::Empty,
                     can_receive_project: true,
                     // Nothing on it to remove — the empty face's picker is
