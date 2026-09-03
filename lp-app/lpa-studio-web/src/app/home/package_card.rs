@@ -249,17 +249,7 @@ pub(crate) fn PackageCardMenu(
     let duplicate = home_action(HomeOp::DuplicatePackage {
         uid: card.uid.clone(),
     });
-    let delete = home_action(HomeOp::DeletePackage {
-        uid: card.uid.clone(),
-    })
-    .with_confirmation(ActionConfirmation::new(
-        "Delete project",
-        format!(
-            "Delete \"{}\" and its history from your library?",
-            card.slug
-        ),
-        "Delete",
-    ));
+    let delete = delete_package_action(&card);
 
     // "New project from this…" (module authoring unit, P5): only a
     // PATTERN project has an export to build a project around, so the row
@@ -555,6 +545,30 @@ pub(crate) fn home_action(op: HomeOp) -> UiAction {
     UiAction::from_op(ControllerId::new(HOME_NODE_ID), op)
 }
 
+/// The card menu's Delete action, wearing its confirmation.
+///
+/// INLINE (the armed two-click confirm), never the native dialog: a
+/// `window.confirm` that is suppressed — automation-driven browsers
+/// auto-dismiss it with `false` — makes the row a silent no-op (defect,
+/// 2026-08-31: the Delete row "did nothing"), and the armed row is the
+/// destructive-confirm language everywhere else (device Forget/Dismiss).
+fn delete_package_action(card: &UiPackageCard) -> UiAction {
+    home_action(HomeOp::DeletePackage {
+        uid: card.uid.clone(),
+    })
+    .with_confirmation(
+        ActionConfirmation::new(
+            "Delete project",
+            format!(
+                "Delete \"{}\" and its history from your library?",
+                card.slug
+            ),
+            "Delete",
+        )
+        .inline(),
+    )
+}
+
 /// The glass bar's compact ⋯ trigger: a 20px quiet icon button (the
 /// stock 32px icon-menu square overwhelms the slim footer). Resets UA
 /// button chrome itself — Tailwind preflight is not loaded.
@@ -723,6 +737,25 @@ mod tests {
         ] {
             assert!(!resting.contains("ux-ir-ring-on"), "{resting}");
         }
+    }
+
+    #[test]
+    fn delete_confirms_inline_so_no_native_dialog_can_swallow_it() {
+        // The armed two-click confirm runs entirely in the row; the native
+        // `window.confirm` path silently no-ops wherever the browser
+        // suppresses dialogs (2026-08-31 defect: the Delete row did
+        // nothing in an automation-driven session).
+        let delete = delete_package_action(&card(false));
+        let meta = delete.meta();
+        assert!(meta.destructive, "delete wears the danger dress");
+        let confirmation = meta.confirmation.as_ref().expect("delete always asks");
+        assert!(confirmation.inline, "armed confirm, never window.confirm");
+        assert_eq!(confirmation.confirm_label, "Delete");
+        assert!(
+            confirmation.message.contains("2026-07-09-1421-basic"),
+            "the confirmation names the project: {}",
+            confirmation.message
+        );
     }
 
     #[test]
