@@ -193,13 +193,72 @@ mod tests {
         );
         assert_eq!(link.largest_alloc, 0);
 
+        // Per-opening churn: each window opened once here, so the per-opening
+        // maxima equal the totals; the link window made no requests at all.
+        assert_eq!(compile.max_allocs_per_opening, 2);
+        assert_eq!(compile.max_bytes_per_opening, 150);
+        assert_eq!(link.max_allocs_per_opening, 0);
+        assert_eq!(link.max_bytes_per_opening, 0);
+
         let body = report.render_body_without_header();
         assert!(body.contains("--- Windows (by perf event) ---"), "{body}");
         assert!(body.contains("shader-compile"), "{body}");
         assert!(
-            body.contains("budget: transient 142 B, retained 142 B, largest alloc 100 B"),
+            body.contains(
+                "budget: transient 142 B, retained 142 B, largest alloc 100 B, allocs/opening 2, bytes/opening 150 B"
+            ),
             "{body}"
         );
+    }
+
+    /// A repeated window (`frame`) ratchets on its WORST opening, not on the
+    /// sum: the sum scales with how many frames the gate captured, the worst
+    /// opening is a property of the workload.
+    #[test]
+    fn per_opening_figures_take_the_worst_opening_not_the_sum() {
+        use std::io::Write as _;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let meta_path = dir.path().join("meta.json");
+        std::fs::write(
+            &meta_path,
+            r#"{ "collectors": { "alloc": { "heap_start": 0, "heap_size": 1024 } }, "symbols": [] }"#,
+        )
+        .expect("write meta");
+
+        let trace_path = dir.path().join("heap-trace.jsonl");
+        let mut f = std::fs::File::create(&trace_path).expect("create trace");
+        for line in [
+            // Opening 1: three requests (two allocs + a realloc) = 8+8+24 B.
+            r#"{"t":"P","name":"frame","kind":"B","cycle":1,"ic":1}"#,
+            r#"{"t":"A","ptr":16,"sz":8,"ic":2,"frames":[],"free":0}"#,
+            r#"{"t":"A","ptr":32,"sz":8,"ic":3,"frames":[],"free":0}"#,
+            r#"{"t":"R","ptr":48,"sz":24,"old_ptr":32,"old_sz":8,"ic":4,"frames":[],"free":0}"#,
+            r#"{"t":"D","ptr":16,"sz":8,"ic":5,"frames":[],"free":0}"#,
+            r#"{"t":"D","ptr":48,"sz":24,"ic":6,"frames":[],"free":0}"#,
+            r#"{"t":"P","name":"frame","kind":"E","cycle":7,"ic":7}"#,
+            // Opening 2: one request of 100 B — fewer requests, more bytes.
+            r#"{"t":"P","name":"frame","kind":"B","cycle":8,"ic":8}"#,
+            r#"{"t":"A","ptr":64,"sz":100,"ic":9,"frames":[],"free":0}"#,
+            r#"{"t":"D","ptr":64,"sz":100,"ic":10,"frames":[],"free":0}"#,
+            r#"{"t":"P","name":"frame","kind":"E","cycle":11,"ic":11}"#,
+            // Opening 3: only frees nothing — zero requests.
+            r#"{"t":"P","name":"frame","kind":"B","cycle":12,"ic":12}"#,
+            r#"{"t":"P","name":"frame","kind":"E","cycle":13,"ic":13}"#,
+        ] {
+            writeln!(f, "{line}").expect("write line");
+        }
+        drop(f);
+
+        let budget = super::heap_budget(&trace_path, &meta_path).expect("budget");
+        assert_eq!(budget.len(), 1);
+        let w = &budget[0];
+        assert_eq!(w.name, "frame");
+        assert_eq!(w.open_count, 3);
+        assert_eq!(w.alloc_count, 3, "worst opening by requests is the first");
+        assert_eq!(w.alloc_bytes, 100, "worst opening by bytes is the second");
+        assert_eq!(w.transient, 100, "peak live above open, worst opening");
+        assert_eq!(w.retained, 0, "every opening frees what it took");
     }
 
     #[test]
@@ -236,6 +295,8 @@ mod tests {
         assert_eq!(w.transient, 142);
         assert_eq!(w.retained, 142);
         assert_eq!(w.largest_alloc, 100);
+        assert_eq!(w.alloc_count, 2);
+        assert_eq!(w.alloc_bytes, 150);
     }
 
     #[test]
@@ -486,6 +547,14 @@ pub struct WindowBudget {
     pub retained: u64,
     /// Largest single allocation request seen inside the window.
     pub largest_alloc: u32,
+    /// Allocation requests (allocs + reallocs) inside ONE opening of the
+    /// window, maximised across openings — the worst frame, not the sum over
+    /// however many frames the gate happened to capture.
+    pub alloc_count: u64,
+    /// Bytes requested inside one opening, maximised across openings. Churn,
+    /// not residency: a steady frame that allocates and frees the same 25 KB
+    /// every time costs nothing in `retained` and everything here.
+    pub alloc_bytes: u64,
 }
 
 /// Replay the trace and return per-window budget figures in first-open order.
@@ -500,6 +569,8 @@ pub fn heap_budget(trace_path: &Path, meta_path: &Path) -> io::Result<Vec<Window
             transient: w.transient,
             retained: w.retained.max(0) as u64,
             largest_alloc: w.largest_alloc,
+            alloc_count: w.max_allocs_per_opening,
+            alloc_bytes: w.max_bytes_per_opening,
         })
         .collect())
 }
@@ -563,9 +634,35 @@ struct WindowStats {
     retained: i64,
     /// Largest single allocation request seen inside the window.
     largest_alloc: u32,
+    /// Requests (allocs + reallocs) and bytes inside the CURRENT opening;
+    /// reset when the window opens.
+    opening_allocs: u64,
+    opening_bytes: u64,
+    /// The worst opening seen — the per-frame allocation ratchet figures.
+    max_allocs_per_opening: u64,
+    max_bytes_per_opening: u64,
 }
 
 impl WindowStats {
+    /// Called when the window opens: the per-opening counters start over.
+    fn open(&mut self, live_bytes: u64) {
+        self.open_count += 1;
+        self.live_at_open = live_bytes;
+        self.peak_live = self.peak_live.max(live_bytes);
+        self.opening_allocs = 0;
+        self.opening_bytes = 0;
+    }
+
+    /// Note one allocation request (alloc or realloc) of `sz` bytes inside
+    /// this window.
+    fn record_request(&mut self, sz: u32) {
+        self.opening_allocs += 1;
+        self.opening_bytes += sz as u64;
+        if sz > self.largest_alloc {
+            self.largest_alloc = sz;
+        }
+    }
+
     /// Note the current live-byte total while this window is open.
     fn observe_live(&mut self, live_bytes: u64) {
         if live_bytes > self.peak_live {
@@ -585,6 +682,8 @@ impl WindowStats {
         if retained > self.retained {
             self.retained = retained;
         }
+        self.max_allocs_per_opening = self.max_allocs_per_opening.max(self.opening_allocs);
+        self.max_bytes_per_opening = self.max_bytes_per_opening.max(self.opening_bytes);
     }
 
     fn record_site(&mut self, frames: &[u32], sz: u32, resolver: &SymbolResolver) {
@@ -785,9 +884,7 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
                     win.alloc_count += 1;
                     win.bytes_allocated += event.sz as u64;
                     win.record_site(&event.frames, event.sz, &resolver);
-                    if event.sz > win.largest_alloc {
-                        win.largest_alloc = event.sz;
-                    }
+                    win.record_request(event.sz);
                 }
                 live_bytes += event.sz as u64;
                 for &w in &active {
@@ -824,9 +921,7 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
                     win.bytes_allocated += event.sz as u64;
                     win.bytes_freed += old_sz as u64;
                     win.record_site(&event.frames, event.sz, &resolver);
-                    if event.sz > win.largest_alloc {
-                        win.largest_alloc = event.sz;
-                    }
+                    win.record_request(event.sz);
                 }
                 if let Some(prev) = live.remove(&old_ptr) {
                     live_bytes = live_bytes.saturating_sub(prev.size as u64);
@@ -861,10 +956,7 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
                                 windows.len() - 1
                             }
                         };
-                        let win = &mut windows[idx].1;
-                        win.open_count += 1;
-                        win.live_at_open = live_bytes;
-                        win.peak_live = win.peak_live.max(live_bytes);
+                        windows[idx].1.open(live_bytes);
                         active.push(idx);
                     }
                     Some("E") => {
@@ -988,14 +1080,18 @@ impl AllocReport {
                 fmt_num(win.realloc_count),
             )
             .unwrap();
-            // The budget line. `bytes` above is churn; these three are what a
-            // memory budget is actually made of.
+            // The budget line. `bytes` above is churn summed over every
+            // opening; the first three figures are what a memory budget is
+            // made of, and the last two are the worst single opening's churn
+            // — the per-frame allocation ratchet.
             writeln!(
                 out,
-                "    budget: transient {} B, retained {} B, largest alloc {} B",
+                "    budget: transient {} B, retained {} B, largest alloc {} B, allocs/opening {}, bytes/opening {} B",
                 fmt_num(win.transient),
                 fmt_num(win.retained.max(0) as u64),
                 fmt_num(win.largest_alloc as u64),
+                fmt_num(win.max_allocs_per_opening),
+                fmt_num(win.max_bytes_per_opening),
             )
             .unwrap();
             let mut sites: Vec<_> = win.site_stats.iter().collect();
