@@ -1253,7 +1253,7 @@ impl EngineResolveHost<'_> {
             product,
             ProductionSource::ProducedSlot {
                 node,
-                slot: slot.clone(),
+                slot: Rc::new(slot.clone()),
             },
         ))
     }

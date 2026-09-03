@@ -99,10 +99,12 @@ impl<'a> EngineSession<'a> {
         host: &mut H,
         id: QueryId,
     ) -> Result<Production, SessionResolveError> {
-        let key =
-            self.resolver.intern().key(id).cloned().ok_or_else(|| {
-                SessionResolveError::other("route referenced an unknown query id")
-            })?;
+        let key = self
+            .resolver
+            .intern()
+            .key(id)
+            .map(Rc::clone)
+            .ok_or_else(|| SessionResolveError::other("route referenced an unknown query id"))?;
         self.resolve_interned(host, id, &key)
     }
 
@@ -460,6 +462,20 @@ impl<'a> EngineSession<'a> {
     }
 }
 
+/// Take `input`'s `SlotData` out of its `Rc`, cloning only if another owner
+/// (typically the resolver cache) still holds it.
+///
+/// `merge_maps_by_key` and `collect_fragments` own their `Production`
+/// inputs outright (`Vec<Production>`, not `&[Production]`), so this is
+/// usually a plain unwrap; the clone is the fallback for the common case
+/// where the same production is also cached and read again next frame.
+fn take_slot_data(input: Production) -> SlotData {
+    match Rc::try_unwrap(input.data) {
+        Ok(data) => data,
+        Err(shared) => (*shared).clone(),
+    }
+}
+
 /// Present a fragment receiver's inputs as an **ordered** map, index-keyed.
 ///
 /// Nothing is combined and nothing can collide: the key is the input's
@@ -474,7 +490,7 @@ fn collect_fragments(
     let mut keys_revision = Revision::default();
     let mut entries = VecMap::new();
     for (index, input) in inputs.into_iter().enumerate() {
-        let SlotData::Value(value) = input.data().clone() else {
+        let SlotData::Value(value) = take_slot_data(input) else {
             return Err(SessionResolveError::other(format!(
                 "fragment merge expected a leaf input for {query:?}"
             )));
@@ -496,7 +512,7 @@ fn merge_maps_by_key(
     let mut keys_revision = Revision::default();
     let mut entries = VecMap::new();
     for input in inputs {
-        let SlotData::Map(map) = input.data().clone() else {
+        let SlotData::Map(map) = take_slot_data(input) else {
             return Err(SessionResolveError::other(format!(
                 "merge by key expected map input for {query:?}"
             )));
@@ -667,7 +683,7 @@ mod tests {
                         WithRevision::new(session.revision(), LpsValueF32::F32(42.0)),
                         ProductionSource::ProducedSlot {
                             node: *node,
-                            slot: slot.clone(),
+                            slot: Rc::new(slot.clone()),
                         },
                     )?)
                 }
@@ -963,7 +979,7 @@ mod tests {
                 map_data(session.revision(), entries),
                 ProductionSource::ProducedSlot {
                     node: *node,
-                    slot: path("emitters"),
+                    slot: Rc::new(path("emitters")),
                 },
             ))
         }
@@ -1088,6 +1104,49 @@ mod tests {
         )));
     }
 
+    /// `merge_maps_by_key`/`collect_fragments` own their inputs outright, so
+    /// `take_slot_data` tries `Rc::try_unwrap` before falling back to a
+    /// clone. When nothing else holds the `Rc` (no cache entry survives the
+    /// call) that avoids cloning the map's `VecMap`; when another handle
+    /// does survive — as the resolver cache does for the rest of the frame —
+    /// it must still fall back correctly rather than losing data.
+    #[test]
+    fn merge_maps_by_key_take_slot_data_skips_clone_when_unshared() {
+        use crate::test_alloc_counter::measure;
+
+        let query = QueryKey::Bus {
+            scope: None,
+            channel: ch("x"),
+        };
+        let trace = ResolveTrace::new(ResolveLogLevel::Off);
+        let mut pairs = VecMap::new();
+        pairs.insert(1, 10);
+
+        let owned = Production::new(
+            map_data(Revision::new(1), pairs.clone()),
+            ProductionSource::Merged,
+        );
+        let mut owned_inputs = Vec::new();
+        owned_inputs.push(owned);
+        let (owned_result, owned_alloc) =
+            measure(|| merge_maps_by_key(owned_inputs, &query, &trace).expect("merge"));
+        assert_eq!(map_u32(owned_result.data(), 1), 10);
+
+        let shared = Production::new(map_data(Revision::new(1), pairs), ProductionSource::Merged);
+        let _kept_alive = Rc::clone(&shared.data);
+        let mut shared_inputs = Vec::new();
+        shared_inputs.push(shared);
+        let (shared_result, shared_alloc) =
+            measure(|| merge_maps_by_key(shared_inputs, &query, &trace).expect("merge"));
+        assert_eq!(map_u32(shared_result.data(), 1), 10);
+
+        assert!(
+            shared_alloc.allocs > owned_alloc.allocs,
+            "a surviving Rc handle should cost at least the map clone the \
+             owned path skips: shared={shared_alloc:?} owned={owned_alloc:?}"
+        );
+    }
+
     #[test]
     fn consumed_slot_merge_by_key_expands_bus_providers() {
         let mut resolver = Resolver::new();
@@ -1167,7 +1226,7 @@ mod tests {
                 WithRevision::new(session.revision(), LpsValueF32::F32(node.0 as f32)),
                 ProductionSource::ProducedSlot {
                     node: *node,
-                    slot: slot.clone(),
+                    slot: Rc::new(slot.clone()),
                 },
             )?)
         }
@@ -1385,7 +1444,7 @@ mod tests {
                         WithRevision::new(session.revision(), LpsValueF32::F32(0.5)),
                         ProductionSource::ProducedSlot {
                             node: *node,
-                            slot: slot.clone(),
+                            slot: Rc::new(slot.clone()),
                         },
                     )?)
                 }

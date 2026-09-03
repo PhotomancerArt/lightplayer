@@ -195,7 +195,7 @@ mod tests {
     fn producer_source() -> ProductionSource {
         ProductionSource::ProducedSlot {
             node: NodeId::new(0),
-            slot: SlotPath::parse("out").expect("path"),
+            slot: Rc::new(SlotPath::parse("out").expect("path")),
         }
     }
 

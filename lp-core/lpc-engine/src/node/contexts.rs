@@ -225,7 +225,7 @@ impl<'r> TickContext<'r> {
             snapshot,
             ProductionSource::ProducedSlot {
                 node: self.node_id,
-                slot: slot.clone(),
+                slot: Rc::new(slot.clone()),
             },
         );
         self.resolver
