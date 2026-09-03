@@ -90,6 +90,9 @@ code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
 .cnotes .meter { font-family:var(--mono); font-size:10.5px; color:var(--shell-dim); }
 .cnotes .meter.bad { color:#ffc7c7; }
 .cnotes .meter.ok { color:#7be0b2; }
+.cnotes .hm { font-family:var(--mono); font-size:10.5px; color:var(--shell-dim); display:block; margin-bottom:3px; }
+.cnotes .hm b { color:#7be0b2; font-weight:600; }
+.cnotes .hm b.diff { color:#f0b97a; }
 .stage { position:relative; border-radius:12px; border:1px solid var(--shell-bd); background:var(--bg); color:var(--tx);
   padding:16px; font-size:13px; font-family:var(--font); }
 .stage.narrow { padding:12px; }
@@ -109,10 +112,7 @@ code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
 .card.armed-scope.is-armed { border-color:var(--st-error-bd); box-shadow:inset 0 0 0 1px var(--st-error-bd); }
 .dim { transition:opacity .25s, filter .25s; display:grid; gap:10px; }
 .card.is-armed .dim { opacity:.4; filter:saturate(.3); }
-/* the project section arms on its own: only the project dims, the card keeps its ring off */
-.card.is-armed-project .proj .dimp { opacity:.4; filter:saturate(.3); }
-.card.is-armed-project .proj { border-color:var(--st-error-bd); box-shadow:inset 0 0 0 1px var(--st-error-bd); }
-.dimp { transition:opacity .25s, filter .25s; display:grid; gap:8px; }
+.dimp { display:grid; gap:8px; }
 .card, .dim, .zone, .card > *, .dim > *, .zone > *, .facerow > *, .popwrap, header > *, .head > * { min-width:0; }
 .head h3 { flex:1; }
 .head .chip { flex:none; }
@@ -135,13 +135,19 @@ code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
   background:var(--surface); font:10px var(--mono); color:var(--subtle); white-space:nowrap; }
 .tag.chipname { color:var(--muted); }
 
-/* the project section: a framed sub-panel inside the state zone */
-.proj { display:grid; gap:8px; padding:8px; border-radius:7px; border:1px solid var(--bd-mut); background:var(--surface);
-  transition:border-color .25s, box-shadow .25s; }
-.proj .plabel { display:flex; align-items:center; gap:6px; font:9.5px var(--mono); text-transform:uppercase; letter-spacing:.13em; color:var(--dim); }
-.proj .plabel .spring { flex:1; }
-.proj .verbs { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+/* the project part of the state zone: no frame — one box, separators only (gate 2). Every row has a
+   FIXED height so a board event can never move the card: state line (17) + bar slot (4) + preview (120) +
+   meta line (17) + verb row (30). */
+.proj { display:grid; gap:8px; }
+.proj .verbs { display:flex; align-items:center; gap:6px; height:30px; min-width:0; }
 .proj .verbs .spring { flex:1; }
+.proj .verbs .facerow { flex:1; flex-wrap:nowrap; }
+.oneline { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; height:17px; line-height:17px; }
+.barslot { height:4px; border-radius:999px; background:transparent; overflow:hidden; }
+.barslot > i { display:block; height:100%; border-radius:999px; background:var(--st-working-tx); }
+.barslot.on { background:var(--raised); }
+.barslot > i.sweep { width:35%; animation:sweep 1.2s ease-in-out infinite; }
+.playmeta { height:17px; }
 
 /* buttons */
 .btn { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px;
@@ -211,7 +217,7 @@ footer.actions .spring { flex:1; }
 .facerow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0; }
 .facerow .lead { font-size:11.5px; color:var(--muted); flex:none; }
 .picker { display:inline-flex; align-items:center; gap:7px; height:30px; padding:0 9px 0 6px; border-radius:6px; border:1px solid var(--bd);
-  background:var(--raised); color:var(--tx); font-size:12px; font-weight:600; cursor:pointer; min-width:0; flex:1 1 170px; }
+  background:var(--raised); color:var(--tx); font-size:12px; font-weight:600; cursor:pointer; min-width:0; flex:1 1 120px; }
 .picker:hover { border-color:var(--bd-strong); }
 .picker .sw { width:22px; height:16px; border-radius:3px; flex:none; background:linear-gradient(135deg,#ff5d5d,#ffab4a 40%,#5fe08b); }
 .picker .sw.board { background:var(--raised-strong); border:1px solid var(--bd-strong); }
@@ -339,10 +345,11 @@ footer.actions .spring { flex:1; }
 
 <h2><span class="n">1</span> The converged card, across its states</h2>
 <p class="sub">
-  One renderer, every state at once, at a three-up gallery width. Header: title · status · <b>board · chip · MAC · fw</b>. State zone: the
-  <b>project section</b> — preview slot with the honest pill, what is running, and the project verbs — or, with nothing loaded, the empty face
-  (gallery picker + one verb); needs-firmware carries the board pick instead. Activities ride above the section. Terminal: T1. Footer: the
-  four device verbs. Arm “Remove project” above: only the project section previews its loss; arm “Forget” and the whole card does.
+  One renderer, every state at once, at a three-up gallery width. Header: title · status · <b>board · chip · MAC · fw</b>. State zone, one
+  box with separators: state line · bar slot · preview · meta · verb row, <b>every row a fixed height</b>, so a board event (a heartbeat, a
+  fault, a lost link) can never move the card — the readout under each card measures it. The verb row carries Open + Remove project, or the
+  gallery trigger + Put it on the board, or the board pick + Flash. Terminal: T1. Footer: the four device verbs. Arming any destructive chip
+  marks the whole card.
 </p>
 <div class="conceptrow states" id="s1"></div>
 
@@ -418,7 +425,7 @@ function device(st) {
     case 'firmware': d.face = 'flash'; d.status = 'Needs firmware'; d.kind = 'attention'; d.detail = 'Blank flash — needs firmware'; d.play = 'none'; d.fw = null; break;
     case 'flashing': d.status = 'Flashing'; d.kind = 'working'; d.activity = {label:'Flashing firmware', pct:62}; d.escapes = ['Cancel']; d.play = 'none'; d.face = 'flash'; d.fw = null; d.detail = 'Blank flash — needs firmware'; break;
     case 'pushing': d.status = 'Sending'; d.kind = 'working'; d.activity = {label:'Sending the project', pct:null}; d.escapes = ['Cancel']; d.play = 'none'; d.face = 'empty'; break;
-    case 'quiet': d.project = NAMES.project(l); d.face = 'running'; d.status = 'Not responding'; d.kind = 'warning'; d.freshness = 'quiet — last heard 12 s ago'; d.play = 'stale'; d.escapes = ['Retry','Reconnect…','Disconnect']; break;
+    case 'quiet': d.project = NAMES.project(l); d.face = 'running'; d.status = 'Not responding'; d.kind = 'warning'; d.freshness = 'quiet — last heard 12 s ago'; d.play = 'stale'; d.escapes = ['Retry','Disconnect']; break;
   }
   return d;
 }
@@ -511,39 +518,39 @@ function armchipProd(label, key) {
   return `<button class="btn quiet armchip ${on?'on':''}" data-arm="${key}"><span class="pre"><span>Confirm&nbsp;</span></span>${label}</button>`;
 }
 
-/* the project section — the piece ruled at gate 1 */
+/* the project part — flat, fixed rows (gate 2) */
+function stateLine(d) {
+  if (d.activity) return `${d.activity.label}${d.activity.pct!=null?` · ${d.activity.pct}%`:''}`;
+  if (d.faultline) return d.faultline;
+  if (d.freshness) return d.freshness;
+  return d.detail;
+}
 function projectSection(d, popId) {
   const fpsline = d.play==='live'||d.play==='fault' ? `${d.fps} fps from device` : d.play==='stale' ? `<span style="color:var(--st-attention-tx)">no frames for 12 s</span>` : '';
+  let meta, verbs;
   if (d.face === 'running') {
     const open = idle(d) && d.state!=='quiet' ? CTA('Open','sm') : '';
     const clear = d.state==='degraded' ? `<button class="btn outline sm">Clear faults</button>` : '';
-    return `<div class="proj"><div class="dimp">
-      <div class="plabel">Project<span class="spring"></span>${d.state==='quiet'?'<span style="color:var(--st-attention-tx)">last known</span>':''}</div>
-      ${play(d)}
-      <div class="playmeta"><span class="name">${esc(d.project)}</span><span class="spring"></span><span class="fps">${fpsline}</span></div>
-      ${d.faultline?`<p class="fail">${esc(d.faultline)}</p>`:''}
-      </div>
-      <div class="verbs">${clear}${open}<span class="spring"></span>${armchipReserve('Remove project','remove','Confirm remove')}</div>
-    </div>`;
-  }
-  if (d.face === 'empty') {
+    meta = `<span class="name">${esc(d.project)}</span><span class="spring"></span><span class="fps">${fpsline}</span>`;
+    verbs = `${clear}${open}<span class="spring"></span>${armchipReserve('Remove project','remove','Confirm remove')}`;
+  } else if (d.face === 'empty') {
     const pick = S.picks.push || {t:'Meteor', g:'example'};
-    const verbs = d.activity ? '' : `<div class="popwrap"><div class="facerow"><span class="lead">Put on it</span>
+    meta = `<span class="name" style="color:var(--subtle);font-weight:500">Nothing loaded</span>`;
+    verbs = d.activity ? '' : `<div class="popwrap" style="flex:1"><div class="facerow"><span class="lead">Put on it</span>
         <button class="picker" onclick="togglePop('${popId}')"><span class="sw"></span><span class="lbl">${esc(pick.t)}</span><span class="grp">${pick.g}</span><span class="car">▾</span></button>
         ${CTA('Put it on the board','sm')}</div>${popGallery(popId)}</div>`;
-    return `<div class="proj"><div class="dimp">
-      <div class="plabel">Project<span class="spring"></span><span>nothing loaded</span></div>
-      ${play(d)}
-      </div>${verbs}</div>`;
+  } else {
+    meta = `<span class="name" style="color:var(--subtle);font-weight:500">No firmware</span>`;
+    verbs = d.activity ? '' : boardFace(popId, S.showAll, false);
   }
-  if (d.face === 'flash') {
-    const verbs = d.activity ? '' : boardFace(popId, S.showAll, true);
-    return `<div class="proj"><div class="dimp">
-      <div class="plabel">Firmware<span class="spring"></span><span>none</span></div>
+  const fault = !!d.faultline;
+  return `<div class="proj">
+      <p class="${fault?'fail':'quiet'} oneline" title="${esc(stateLine(d))}">${esc(stateLine(d))}</p>
+      <div class="barslot ${d.activity?'on':''}">${d.activity?(d.activity.pct!=null?`<i style="width:${d.activity.pct}%"></i>`:`<i class="sweep"></i>`):''}</div>
       ${play(d)}
-      </div>${verbs}</div>`;
-  }
-  return '';
+      <div class="playmeta">${meta}</div>
+      <div class="verbs">${verbs}</div>
+    </div>`;
 }
 function footer(d) {
   return `<footer class="actions">${d.escapes.map(e=>plain(e)).join('')}${idle(d)?plain('Reset'):''}${idle(d)?armchipReserve('Factory reset','erase','Confirm reset'):''}${armchipReserve('Forget','forget','Confirm forget')}</footer>`;
@@ -573,15 +580,11 @@ function termCurrent(ls, h) {
 
 /* the converged card */
 function card(d, popId) {
-  const armedCard = S.armed==='forget' || S.armed==='erase';
-  const armedProject = S.armed==='remove';
-  return `<article class="card armed-scope ${armedCard?'is-armed':''} ${armedProject?'is-armed-project':''}" data-state="${d.state}">
+  const armedCard = !!S.armed;
+  return `<article class="card armed-scope ${armedCard?'is-armed':''}" data-state="${d.state}">
     <div class="dim">
       ${header(d)}
       <section class="zone">
-        ${d.face==='running'?'':`<p class="detail">${esc(d.detail)}</p>`}
-        ${d.freshness?`<p class="quiet">${esc(d.freshness)}</p>`:''}
-        ${activity(d)}
         ${projectSection(d, popId)}
       </section>
       <section class="zone">${termTyped(lines(d.state),{h:150})}</section>
@@ -591,13 +594,13 @@ function card(d, popId) {
 }
 const STATE_LABEL = {running:'Running', empty:'Nothing loaded', firmware:'Needs firmware', flashing:'Flashing', pushing:'Sending a project', degraded:'Degraded (#496)', quiet:'Not responding'};
 const STATE_NOTE = {
-  running:'The project section is the card\'s picture. Open is the one Primary; Remove project sits right, armed in place.',
-  empty:'Same section, empty face: the gallery trigger + one verb. The preview says honestly there is nothing to draw.',
-  firmware:'The section becomes a firmware section: board pick (chip-filtered) + Flash. Nothing else is offered.',
-  flashing:'The activity rides above the section; its verbs stand down. Cancel is the footer\'s escape.',
-  pushing:'Push in flight: the empty face\'s verbs stand down while the bar runs; the terminal narrates.',
-  degraded:'The #496 state: fault pill on the picture, the fault line, Clear faults beside Open.',
-  quiet:'Last known picture wears the stale pill; Open is withheld; Retry / Reconnect join the footer. Unplugging removes the card entirely (§5).',
+  running:'The state zone is one box: state line · bar slot · preview · meta · verbs, every row a fixed height. Open is the one Primary; Remove project sits right and, armed, marks the whole card (ruling 2).',
+  empty:'Same rows, empty face: the verb row holds the gallery trigger + one verb at the same 30px. The preview says honestly there is nothing to draw.',
+  firmware:'Same rows again: board pick (chip-filtered) + Flash in the verb row; the filter explanation lives in the popover, not on the card.',
+  flashing:'The activity takes the state line and lights the bar slot; the verb row is kept empty at its height. Cancel is the footer\'s escape.',
+  pushing:'Push in flight: same as flashing on the empty face — the card does not move while the bar runs; the terminal narrates.',
+  degraded:'The #496 state: the fault takes the state line (one line, ellipsised, full text on hover and in the terminal), fault pill on the picture, Clear faults beside Open.',
+  quiet:'Freshness takes the state line; last known picture wears the stale pill; Open is withheld; Retry joins the footer (Reconnect moved to the remembered line — a gone link is a gone card). The only state whose footer can wrap.',
 };
 function concept(name, thesis, stageHtml, notes, style='') {
   const stage = stageHtml.startsWith('<div class="stage') ? stageHtml : `<div class="stage">${stageHtml}</div>`;
@@ -605,7 +608,12 @@ function concept(name, thesis, stageHtml, notes, style='') {
     ${stage}${notes?`<div class="cnotes">${notes}</div>`:''}</div>`;
 }
 function renderS1() {
-  document.getElementById('s1').innerHTML = STATE_ORDER.map(st => concept(STATE_LABEL[st], '', card(device(st), 'pop-'+st), STATE_NOTE[st])).join('');
+  document.getElementById('s1').innerHTML = STATE_ORDER.map(st => concept(STATE_LABEL[st], '', card(device(st), 'pop-'+st), `<span class="hm" data-hm="${st}"></span>` + STATE_NOTE[st])).join('');
+}
+function measureCards() {
+  const hs = {}; document.querySelectorAll('#s1 .card').forEach(c => hs[c.dataset.state] = c.offsetHeight);
+  const ref = hs.running;
+  document.querySelectorAll('[data-hm]').forEach(m => { const h = hs[m.dataset.hm]; const d = h - ref; m.innerHTML = `card ${h}px · ${d===0?'<b>same as Running</b>':`<b class="diff">${d>0?'+':''}${d}px vs Running</b>`}`; });
 }
 
 /* §2 footers measured */
@@ -671,7 +679,7 @@ function popGallery(id) {
 function boardFace(popId, showAll, inProject=false) {
   const pick = S.picks.board || BOARDS[0];
   const cands = showAll ? BOARDS : BOARDS.filter(b=>b.fam==='esp32c6');
-  return `<div class="popwrap"><div class="facerow"><span class="lead">Board</span>
+  return `<div class="popwrap" style="flex:1"><div class="facerow"><span class="lead">Board</span>
     <button class="picker" onclick="togglePop('${popId}')"><span class="sw board"></span><span class="lbl">${esc(pick.t)}</span><span class="grp">${pick.fam}</span><span class="car">▾</span></button>
     ${CTA('Flash firmware','sm')}</div>
     ${inProject?`<p class="quiet" style="font-size:10.5px">Two boards match the detected <b style="color:var(--muted)">esp32c6</b>. The pick is checked against the chip before anything is written.</p>`:''}
@@ -726,7 +734,7 @@ function renderS5() {
   const pendingFw = `<article class="card" style="min-height:0"><div class="dim">
     <header style="display:grid;gap:5px"><div class="head"><h3>USB serial · /dev/cu.usbmodem2101</h3><span class="chip attention">Needs firmware</span></div><p class="idline">esp32c6 · no identity until flashed</p></header>
     <section class="zone"><p class="detail">New device found — blank flash. Flashing it is how you keep it.</p>
-      <div class="proj"><div class="plabel">Firmware<span class="spring"></span><span>none</span></div>${boardFace('pop-b5', false, true)}</div>
+      <div class="verbs" style="display:flex;align-items:center;gap:6px;height:30px">${boardFace('pop-b5', false, false)}</div>
       <div class="term" style="height:90px"><p class="rom">ESP-ROM:esp32c6-20220919</p><p class="rom">invalid header: 0xffffffff<span class="rep">×4</span></p><p class="studio">Blank flash — the chip named itself in the boot banner</p></div></section>
     </div><footer class="actions">${plain('Reset')}${armchipReserve('Dismiss','dismiss','Confirm dismiss')}</footer></article>`;
   const add = `<div class="addcard"><div class="ico">⌁</div><p><b style="color:var(--strong)">Connect a LightPlayer board to control it.</b></p><p>Plug it in over USB, then pick its port.</p><button class="btn outline">It's plugged in</button></div>`;
@@ -774,7 +782,7 @@ function loop(now) { const t = now/1000; LIVE.forEach(c => { const m = c.dataset
    controls + wiring
    ===================================================================== */
 function pinTerminals() { document.querySelectorAll('.term:not(.current)').forEach(t => { t.scrollTop = t.scrollHeight; }); }
-function renderAll() { renderS1(); renderS2(); renderS3(); renderS4(); renderS5(); mountCanvases(); measure(); syncControls(); pinTerminals(); }
+function renderAll() { renderS1(); renderS2(); renderS3(); renderS4(); renderS5(); mountCanvases(); measure(); measureCards(); syncControls(); pinTerminals(); }
 function syncControls() {
   document.getElementById('tLong').classList.toggle('active', S.long);
   document.getElementById('tLib').classList.toggle('active', S.lib==='big');
@@ -795,7 +803,7 @@ let armTimer = null;
 function setArmed(key) {
   S.armed = S.armed===key ? null : key; clearTimeout(armTimer);
   document.querySelectorAll('[data-arm]').forEach(el => el.classList.toggle('on', el.dataset.arm===S.armed));
-  document.querySelectorAll('.armed-scope').forEach(c => { c.classList.toggle('is-armed', S.armed==='forget'||S.armed==='erase'); c.classList.toggle('is-armed-project', S.armed==='remove'); });
+  document.querySelectorAll('.armed-scope').forEach(c => c.classList.toggle('is-armed', !!S.armed));
   syncControls(); requestAnimationFrame(measure);
   if (S.armed) armTimer = setTimeout(() => setArmed(S.armed), 4000);
 }
@@ -811,9 +819,9 @@ window.addEventListener('resize', () => requestAnimationFrame(() => { document.q
 
 document.getElementById('lean').innerHTML = `<b>Round 2 lean.</b> This IS the card: header (title · status · board · chip · MAC · fw), state zone with the
   <b>project section</b> (preview + running/empty/firmware face + project verbs), T1 terminal with cap/repeat/fold processing, footer of four
-  device verbs as reserve chips. Open questions for gate 2 are in chat: the section's frame (framed sub-panel as drawn, or flat?), whether
-  Remove project should arm the section only (as drawn) or the whole card, and whether the remembered-boards line is the right home for
-  Forget-while-unplugged.`;
+  device verbs as reserve chips. <b>Gate 2 (2026-09-02):</b> box-in-box killed — one box, separators only; every state-zone row has a fixed
+  height so board events never move the card (the readouts under §1 prove which states match Running); Remove project marks the whole card;
+  the remembered line keeps Forget for absent boards; activities keep the section visible with verbs withdrawn ("I'll need to feel it").`;
 document.getElementById('rejected').innerHTML = `<b>Rejected at gate 1 (2026-09-02)</b><ul>
   <li><b>B · Split</b> — thumb beside the text; shorter, but the picture is what makes it feel real. A wins; a <b>collapsed</b> reading stays a future want (network devices, many boards).</li>
   <li><b>C · Instrument</b> — slot footer ellipsises to “Disco…” at gallery width; a density mode at best.</li>
