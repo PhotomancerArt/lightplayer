@@ -28,6 +28,22 @@ pub struct DeviceRecord {
     pub name: Option<String>,
     pub autoconnect: bool,
     pub last_seen: Option<Millis>,
+    /// The board this firmware said it was built for, from a hello's
+    /// hardware facts (`HelloFacts::board_id`). `#[serde(default)]` so a
+    /// registry row written before this field existed still loads.
+    ///
+    /// Learned, never guessed: `record_snapshot` only ever writes a `Some`
+    /// it was handed, and a later fold with nothing to say leaves the
+    /// stored value alone — a window reset (a reopened port, a reboot)
+    /// forgets what the CURRENT observation window knows, but the record
+    /// must not forget what it already learned. See
+    /// [`crate::device::Device::record_snapshot`].
+    #[serde(default)]
+    pub board_id: Option<String>,
+    /// The chip family read off a boot banner (`Evidence::detected_chip`).
+    /// Same never-cleared-by-a-later-None rule as [`Self::board_id`].
+    #[serde(default)]
+    pub chip: Option<String>,
 }
 
 impl DeviceRecord {
@@ -38,6 +54,8 @@ impl DeviceRecord {
             name: None,
             autoconnect: false,
             last_seen: None,
+            board_id: None,
+            chip: None,
         }
     }
 
@@ -78,5 +96,30 @@ mod tests {
 
         let anonymous = DeviceRecord::new(DeviceId(2), IdentityChain::default());
         assert_eq!(anonymous.title(), "Unnamed device");
+    }
+
+    /// A registry row written before `board_id`/`chip` existed must still
+    /// load — the persisted-format rule (AGENTS.md): additive
+    /// `#[serde(default)]` fields, no version bump, old rows still parse.
+    #[test]
+    fn a_legacy_record_without_board_id_or_chip_deserialises() {
+        let json = r#"{
+            "device": 1,
+            "identity": {
+                "endpoint": null,
+                "mac": null,
+                "uid": "dev000000daqf6dvvqz",
+                "name": null
+            },
+            "name": "Kitchen",
+            "autoconnect": false,
+            "last_seen": null
+        }"#;
+
+        let record: DeviceRecord = serde_json::from_str(json).expect("legacy row parses");
+
+        assert_eq!(record.board_id, None);
+        assert_eq!(record.chip, None);
+        assert_eq!(record.name.as_deref(), Some("Kitchen"));
     }
 }

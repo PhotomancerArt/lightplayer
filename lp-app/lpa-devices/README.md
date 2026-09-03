@@ -143,11 +143,82 @@ programmatic sweep. Both go through the same runner.
 | `view.rs` | The projection and the escape invariant |
 | `link.rs` | The transport contract `lpa-link` implements |
 | `wire.rs` | Minimal mirror of the wire facts the fold reads |
+| `record.rs` | Persisted identity + prefs snapshot (name, autoconnect, last seen, board id, chip) |
 | `replay.rs` | The fixture harness |
 
 Tests live at the bottom of each file (repo convention); the scenario
 suite and the property tests are `tests/scenarios.rs` and
 `tests/properties.rs`, which drive the public surface only.
+
+## The terminal panel
+
+`Evidence` keeps a typed log of everything worth showing on a card's
+terminal — raw serial lines, decoded wire frames and Studio's own activity
+narration, in the order they happened, surviving the reopen a flash's
+reconnect ladder performs (a window reset restarts *classification*, never
+the log). `DeviceView.terminal: Vec<TerminalLine>` is the projection of it:
+
+```rust
+pub struct TerminalLine { pub kind: TerminalKind, pub text: String, pub repeats: u32 }
+
+pub enum TerminalKind { Rom, Board, Wire, Studio, Outcome, Failure, Recovery }
+```
+
+- **Kind** says who produced the line, for the renderer's colour: `Rom` is
+  the ROM bootloader's own chatter (`ESP-ROM:`, `rst:`, `boot:`, an
+  `invalid header` boot loop, …, mirroring `chip_from_boot_line`'s
+  signatures); `Board` is anything else the running server printed;
+  `Recovery` is a `[RECOVERY]`-prefixed line from the crash ledger; `Wire`
+  is a decoded frame (below); `Studio` is the model's own narration
+  (an activity starting, or its progress label — no more `"— … —"`
+  dressing, since the kind now carries that); `Outcome`/`Failure` is how an
+  activity ended.
+- **Cap and drop.** The log is bounded at 200 lines; past that the oldest
+  is dropped and counted in `Evidence::terminal_dropped` /
+  `DeviceView.terminal_dropped`, which is never reset (`output` itself
+  survives a window reset for the same reason — see its doc — so a counter
+  that reset with the window would undercount right after the reconnect
+  ladder that made it matter).
+- **Repeat collapse.** `push_output` collapses a consecutive identical
+  `(kind, text)` pair into the previous line's `repeats` count instead of
+  dropping it — this is what keeps a percent-ticking flash label or an
+  unchanging heartbeat from filling the panel with two hundred copies of
+  the same line.
+- **Wire frames reach the panel.** `LinkEvent::Frame` used not to be pushed
+  at all, which is why a heartbeat was invisible even though it is the
+  clearest proof of life a board sends. Every frame decodes to one line via
+  `TerminalKind::Wire`:
+  - `Hello` → `hello · proto {n} · {board_id or "?"} · {firmware or "?"}`.
+  - `Heartbeat` → `heartbeat · {project label|idle}`, plus
+    ` · FAULT {label}` when the first loaded project carries a fault or the
+    recovery facts are degraded. Deliberately excludes uptime, a frame
+    counter, or any other fact that changes on every healthy tick — this
+    mirror crate carries no fps/heap facts on `LoadedProjectFacts` or
+    `RecoveryFacts` today (see `wire.rs`'s module doc on why the mirror
+    stays small), and even if it did, anything that always changes would
+    turn every heartbeat into a new line instead of one collapsing with a
+    repeat count.
+  - `Loaded` → `loaded · {n} project(s)`, names joined by `, `.
+  - `Other` → the label, verbatim.
+
+## Board id and chip: learned, never cleared
+
+`DeviceRecord` gains `board_id: Option<String>` and `chip: Option<String>`
+(both `#[serde(default)]`, so a registry row written before they existed
+still loads). `Device::record_snapshot` learns `board_id` from a settled
+hello's `HelloFacts::board_id` and `chip` from `Evidence::detected_chip`
+(the boot-banner reader) — the same shape `last_seen` already uses: a new
+`Some` overwrites, a `None` leaves the stored value alone. This matters
+because a window reset (a reopen, a reboot) clears the *current*
+observation window's hello and boot banner — that is what "non-sticky
+verdicts" means — but the record's job is to remember what was already
+learned, not to re-derive it every time. `DeviceView.board_id` and
+`DeviceView.detected_chip` fall back to the record when the current window
+has nothing of its own to say, so an attached-but-closed or freshly
+rehydrated board keeps the identity line it already earned. The chip
+*family* join (a board id or a firmware package name → a catalog entry) is
+an app-layer concern, above this crate — see `docs/adr/2026-08-25-event-fold-device-model.md`
+and the device-card-v2 plan's D2.
 
 ## Validation
 

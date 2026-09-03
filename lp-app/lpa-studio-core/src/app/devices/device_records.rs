@@ -111,6 +111,15 @@ pub fn record_from_registry_row(row: &RegisteredDevice, fallback_device_id: u64)
         autoconnect: row.autoconnect,
         last_seen: (row.last_seen_at > 0.0)
             .then(|| Millis((row.last_seen_at * 1_000.0).round().max(0.0) as u64)),
+        // The model's own board_id/chip (device-model rebuild P1) are
+        // learned by the fold from a hello/banner within a session and are
+        // not sourced from the registry row today — `RegisteredDevice`'s
+        // own `board_id` above is a different, older provisioning-flow
+        // field this conversion does not touch. Wiring the two together
+        // (so identity survives a full app restart, not just a reopen) is
+        // follow-up work, not this change.
+        board_id: None,
+        chip: None,
     }
 }
 
@@ -130,6 +139,8 @@ mod tests {
             name: Some("Kitchen".to_string()),
             autoconnect: true,
             last_seen: Some(Millis(1_500)),
+            board_id: None,
+            chip: None,
         }
     }
 

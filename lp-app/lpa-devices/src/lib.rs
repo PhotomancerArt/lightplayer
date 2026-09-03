@@ -58,7 +58,10 @@ pub mod wire;
 pub use activity::{ActivityCell, ActivityKind, ActivityOutcome, CancelPhase, PushActivity};
 pub use device::{Device, DeviceStatus};
 pub use event::{Action, ActivityMarker, Command, EffectId, EffectRequest, Event, Input};
-pub use evidence::{Classification, Evidence, Freshness, IncompatibleReason, Liveness, Presence};
+pub use evidence::{
+    Classification, Evidence, Freshness, IncompatibleReason, Liveness, Presence, TerminalKind,
+    TerminalLine,
+};
 pub use identity::{DeviceId, DeviceUid, EndpointKey, IdentityChain, MacAddress, PeerIdentity};
 pub use intent::{ConnectionIntent, Intent};
 pub use journal::{Journal, JournalEntry, JournalNote, Scope};

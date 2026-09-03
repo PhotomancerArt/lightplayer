@@ -168,7 +168,8 @@ pub use lpa_devices::{
     Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,
     EndpointKey as DeviceEndpointKey, Event as DeviceEvent, Input as DeviceInput,
     LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo, Millis as DeviceMillis,
-    RosterConfig as DeviceRosterConfig,
+    RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
+    TerminalLine as DeviceTerminalLine,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";

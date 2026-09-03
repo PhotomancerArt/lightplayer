@@ -22,8 +22,8 @@ use lpa_studio_core::{
 use lpa_studio_core::UiAction;
 use lpa_studio_core::{
     DeviceActivityKind, DeviceActivityView, DeviceEscape, DeviceId, DeviceLinkId,
-    DeviceLoadedProject, DeviceRosterView, DeviceStatus, DeviceView, OutcomeView, PendingLinkView,
-    RosterView,
+    DeviceLoadedProject, DeviceRosterView, DeviceStatus, DeviceTerminalKind, DeviceTerminalLine,
+    DeviceView, OutcomeView, PendingLinkView, RosterView,
 };
 
 use crate::app::home::card_thumb::CardThumb;
@@ -506,7 +506,7 @@ fn devices_page_roster() -> Element {
 }
 
 #[story(
-    description = "The armed destructive chip, idle beside armed (2K+, devices-treatments spike gate 2026-08-31): first click turns Forget into 'Confirm Forget' — the prefix column opens, red ramps in, and the card previews its own removal (body dimmed and desaturated behind a red inset ring via :has(); the footer keeps full contrast). Blur or the 4s window stands down. Captured with the story-only armed_preview hook; the knock and the quiet drain track are motion and do not capture."
+    description = "The armed destructive chip, idle beside armed (2K+, devices-treatments spike gate 2026-08-31; RESERVE width from the device-card-v2 spike §2, 2026-09-02): the chip renders both 'Forget' and 'Confirm Forget' in one grid cell, so it is already as wide as its armed reading and the first click changes text and tone WITHOUT moving the chip or its neighbours — compare the two footers, the chips sit at the same width. Red ramps in and the card previews its own removal (body dimmed and desaturated behind a red inset ring via :has(); the footer keeps full contrast). Blur or the 4s window stands down. Captured with the story-only armed_preview hook; the knock and the quiet drain track are motion and do not capture."
 )]
 fn devices_page_armed_confirm() -> Element {
     let idle = roster_fixture().roster.devices.remove(0);
@@ -566,8 +566,11 @@ fn degraded_card_fixture() -> DeviceView {
          (disabled after 3 crashes)"
             .to_string(),
     );
-    card.terminal_lines
-        .push("[WARN] recovery: node 'nodes/meteor' disabled after 3 crashes".to_string());
+    card.terminal.push(DeviceTerminalLine {
+        kind: DeviceTerminalKind::Recovery,
+        text: "[WARN] recovery: node 'nodes/meteor' disabled after 3 crashes".to_string(),
+        repeats: 1,
+    });
     card
 }
 
@@ -634,11 +637,12 @@ fn roster_fixture() -> DeviceRosterView {
                     can_remove_project: true,
                     activity: None,
                     last_outcome: None,
-                    terminal_lines: vec![
-                        "ESP-ROM:esp32c6-20220919".to_string(),
-                        "[INIT] fw-esp32 initialized, starting server loop".to_string(),
-                        "[INIT] loaded /projects/2026-07-09-1421-porch-sign".to_string(),
-                    ],
+                    terminal: device_story_terminal_lines(&[
+                        "ESP-ROM:esp32c6-20220919",
+                        "[INIT] fw-esp32 initialized, starting server loop",
+                        "[INIT] loaded /projects/2026-07-09-1421-porch-sign",
+                    ]),
+                    terminal_dropped: 0,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
                 DeviceView {
@@ -668,12 +672,13 @@ fn roster_fixture() -> DeviceRosterView {
                     // Mid-activity: the bar is in the state zone above and
                     // the narration is here, which is the whole point of the
                     // terminal panel.
-                    terminal_lines: vec![
-                        "— Identifying —".to_string(),
-                        "ESP-ROM:esp32c6-20220919".to_string(),
-                        "SPIWP:0xee".to_string(),
-                        "mode:DIO, clock div:2".to_string(),
-                    ],
+                    terminal: device_story_terminal_lines(&[
+                        "— Identifying —",
+                        "ESP-ROM:esp32c6-20220919",
+                        "SPIWP:0xee",
+                        "mode:DIO, clock div:2",
+                    ]),
+                    terminal_dropped: 0,
                     // Cancel FIRST: a running activity\'s way out leads.
                     escapes: vec![
                         DeviceEscape::Cancel,
@@ -703,11 +708,12 @@ fn roster_fixture() -> DeviceRosterView {
                     }),
                     // The blank-flash boot loop, which is what "needs
                     // firmware" is actually made of.
-                    terminal_lines: vec![
-                        "ESP-ROM:esp32c6-20220919".to_string(),
-                        "invalid header: 0xffffffff".to_string(),
-                        "invalid header: 0xffffffff".to_string(),
-                    ],
+                    terminal: device_story_terminal_lines(&[
+                        "ESP-ROM:esp32c6-20220919",
+                        "invalid header: 0xffffffff",
+                        "invalid header: 0xffffffff",
+                    ]),
+                    terminal_dropped: 0,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
                 // The EMPTY face (M3): a LightPlayer that has SAID it has
@@ -737,20 +743,37 @@ fn roster_fixture() -> DeviceRosterView {
                     // A flash's narration, kept across the reconnect
                     // ladder's reopen — the log the bench had to read in the
                     // browser console.
-                    terminal_lines: vec![
-                        "— Flashing firmware —".to_string(),
-                        "Connecting to the chip".to_string(),
-                        "Writing firmware".to_string(),
-                        "Waiting for the board to come back (1/5)".to_string(),
-                        "ESP-ROM:esp32c6-20220919".to_string(),
-                        "[INIT] fw-esp32 initialized, starting server loop".to_string(),
-                        "firmware installed — seeed-xiao-esp32c6".to_string(),
-                    ],
+                    terminal: device_story_terminal_lines(&[
+                        "— Flashing firmware —",
+                        "Connecting to the chip",
+                        "Writing firmware",
+                        "Waiting for the board to come back (1/5)",
+                        "ESP-ROM:esp32c6-20220919",
+                        "[INIT] fw-esp32 initialized, starting server loop",
+                        "firmware installed — seeed-xiao-esp32c6",
+                    ]),
+                    terminal_dropped: 0,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
             ],
         },
     }
+}
+
+/// Story fixtures predate typed terminal lines (P1 of the device-card-v2
+/// plan); this wraps the old flat text list in [`DeviceTerminalLine`] with
+/// a uniform kind so the fixtures compile unchanged in substance. Real
+/// per-line typing (and the renderer that reads it) is P5 — these stories
+/// cover the library/explore pages, not the terminal panel itself.
+fn device_story_terminal_lines(lines: &[&str]) -> Vec<DeviceTerminalLine> {
+    lines
+        .iter()
+        .map(|text| DeviceTerminalLine {
+            kind: DeviceTerminalKind::Board,
+            text: (*text).to_string(),
+            repeats: 1,
+        })
+        .collect()
 }
 
 #[story]

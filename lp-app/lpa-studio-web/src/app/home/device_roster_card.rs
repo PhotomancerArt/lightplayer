@@ -232,7 +232,11 @@ pub(crate) fn DeviceRosterCard(
                 // that comes and goes is a panel that resizes the card,
                 // which is the churn the four zones exist to stop.
                 if linked {
-                    TerminalPanel { lines: card.terminal_lines.clone() }
+                    // P1 typed the model's terminal lines (kind, text,
+                    // repeats); rendering the type richly (colour, repeat
+                    // badges, wire-frame decoding) is P5 — for now the panel
+                    // reads only the text, same as before.
+                    TerminalPanel { lines: card.terminal.iter().map(|line| line.text.clone()).collect() }
                 }
             }
 

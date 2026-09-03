@@ -1245,7 +1245,11 @@ fn the_terminal_panel_keeps_boot_lines_and_effect_narration_across_a_reopen() {
     replay.step(Millis(600), Step::opened(1));
     replay.step(Millis(700), Step::line(1, "fw-esp32 initialized"));
 
-    let lines = replay.view().devices[0].terminal_lines.clone();
+    let lines: Vec<String> = replay.view().devices[0]
+        .terminal
+        .iter()
+        .map(|line| line.text.clone())
+        .collect();
     assert!(
         lines.iter().any(|line| line.contains("ESP-ROM:esp32c6")),
         "boot output survives the reopen: {lines:?}"

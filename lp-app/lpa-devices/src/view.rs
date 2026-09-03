@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::activity::{ActivityKind, ActivityOutcome, CancelPhase};
 use crate::device::{Device, DeviceStatus};
-use crate::evidence::{Classification, IncompatibleReason, Liveness};
+use crate::evidence::{Classification, IncompatibleReason, Liveness, TerminalLine};
 use crate::identity::DeviceId;
 use crate::link::LinkId;
 use crate::roster::{PendingLink, Roster};
@@ -84,11 +84,15 @@ pub struct DeviceView {
     pub activity: Option<ActivityView>,
     /// Survives disconnect; cleared when a new activity supersedes it.
     pub last_outcome: Option<OutcomeView>,
-    /// The card's terminal panel: what the board said and what Studio did
-    /// to it, oldest first. Serial lines and activity narration interleaved,
-    /// because that is the order they happened in — a flash's progress used
-    /// to be visible only in the browser console (G1 bench, 2026-08-31).
-    pub terminal_lines: Vec<String>,
+    /// The card's terminal panel: what the board said, what the wire
+    /// carried and what Studio did to it, oldest first. Serial lines,
+    /// decoded wire frames and activity narration interleaved, because that
+    /// is the order they happened in — a flash's progress used to be
+    /// visible only in the browser console (G1 bench, 2026-08-31).
+    pub terminal: Vec<TerminalLine>,
+    /// How many lines have fallen off the front of [`Self::terminal`] to
+    /// keep it bounded — the panel's honest "…and N more" count.
+    pub terminal_dropped: u32,
     /// Never empty (invariant I3).
     pub escapes: Vec<Escape>,
 }
@@ -236,7 +240,10 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         // that was already running when the tab attached never shows one,
         // but its hello names the firmware PACKAGE ("fw-esp32c6 abc1234"),
         // which is the chip by another name (G1 2026-09-02: the re-flash
-        // verb on a running card never appeared without this).
+        // verb on a running card never appeared without this). Falling back
+        // to the record last is what keeps an attached-but-closed or
+        // freshly rehydrated board wearing the identity line it already
+        // earned, rather than going blank the moment the window resets.
         detected_chip: device
             .evidence
             .detected_chip()
@@ -249,12 +256,24 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
                     .and_then(|hello| hello.firmware.as_deref())
                     .and_then(chip_from_firmware_label)
                     .map(str::to_string)
+            })
+            .or_else(|| {
+                device
+                    .record
+                    .as_ref()
+                    .and_then(|record| record.chip.clone())
             }),
         board_id: device
             .evidence
             .classification
             .hello()
-            .and_then(|hello| hello.board_id.clone()),
+            .and_then(|hello| hello.board_id.clone())
+            .or_else(|| {
+                device
+                    .record
+                    .as_ref()
+                    .and_then(|record| record.board_id.clone())
+            }),
         needs_firmware: needs_firmware(&device.evidence.classification),
         degraded: degraded(device),
         // The mirror of the push condition, over the OTHER answer: a board
@@ -273,11 +292,8 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             && device.activity.is_none(),
         activity,
         last_outcome: device.evidence.last_outcome.as_ref().map(outcome_view),
-        terminal_lines: device
-            .evidence
-            .recent_output()
-            .map(str::to_string)
-            .collect(),
+        terminal: device.evidence.recent_output().cloned().collect(),
+        terminal_dropped: device.evidence.terminal_dropped(),
         escapes,
     }
 }
