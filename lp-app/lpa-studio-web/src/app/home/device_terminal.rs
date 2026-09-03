@@ -37,14 +37,17 @@
 //! time they scrolled — read on every `onscroll`. Two triggers keep the
 //! scroll position honest, both funnelling through `scroll_to_bottom`:
 //!
-//! - `onmounted` fires the scroll immediately once the element exists —
-//!   this is what actually satisfies "pinned on load" for a screen that
-//!   never re-renders after its first paint (a story, a card that opens
-//!   once and sits idle).
+//! - `onmounted` fires the scroll once the element exists, and again on a
+//!   short ladder of ticks (`PIN_RETRY_DELAYS_MS`) — the element has no
+//!   height limit until the stylesheet applies, so the very first write is
+//!   a no-op; this is what actually satisfies "pinned on load" for a
+//!   screen that never re-renders after its first paint (a story, a card
+//!   that opens once and sits idle).
 //! - `use_after_render` re-checks `pinned` on every later render (a render
 //!   triggered by new lines arriving, most commonly) and repeats the
-//!   scroll — this is `core::log_list::LogList`'s own autoscroll primitive,
-//!   reused rather than adding a second pinning mechanism to the crate.
+//!   scroll — the same shape as `core::log_list::LogList`'s autoscroll,
+//!   but writing `scrollTop` on the DOM element directly (see
+//!   `scroll_to_bottom` for why).
 //!
 //! `use_after_render` alone is not enough: its callback runs as part of the
 //! render pass, before `onmounted` has necessarily fired for a
@@ -69,12 +72,15 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use dioxus::prelude::dioxus_core::use_after_render;
 use dioxus::prelude::*;
-use dioxus::{html::geometry::PixelsVector2D, prelude::dioxus_core::use_after_render};
 use lpa_studio_core::{DeviceTerminalKind, DeviceTerminalLine};
 
 /// How close to the bottom still counts as pinned.
 const PIN_THRESHOLD_PX: f64 = 4.0;
+/// The mount-time pin ladder — see [`scroll_to_bottom`] for why one write
+/// at mount is not enough.
+const PIN_RETRY_DELAYS_MS: [u32; 4] = [0, 50, 250, 1000];
 
 /// A line renders folded once it is longer than this (spike parity).
 const FOLD_AT_CHARS: usize = 160;
@@ -302,16 +308,31 @@ fn is_pinned_to_bottom(scroll_top: f64, scroll_height: i32, client_height: i32) 
     f64::from(scroll_height) - scroll_top - f64::from(client_height) <= PIN_THRESHOLD_PX
 }
 
-/// Scroll `element` to its full height. Fire-and-forget, like every
-/// best-effort browser-edge call in this crate: a `get_scroll_size`/`scroll`
-/// rejection just means one paint stays unpinned, not a hard failure.
+/// Scroll `element` to its full height, through the DOM element itself,
+/// now and again on a short ladder of ticks.
+///
+/// The ladder is the whole fix for "unpinned on load" (P7's CDP check):
+/// at `onmounted` — and still at a 0 ms tick — the box has NO height limit
+/// yet (`clientHeight == scrollHeight`, thousands of px) because the
+/// stylesheet carrying `h-40` has not applied to the fresh node, so
+/// `scrollTop = scrollHeight` is a no-op. By ~50 ms the class lands, the
+/// box is 160 px tall, and the same write pins it. Later ticks cover a
+/// slow first paint. Writes past the first are idempotent while pinned:
+/// `scrollTop` clamps to the maximum.
+///
+/// Synchronous `web_sys` writes rather than Dioxus's async
+/// `get_scroll_size` + `scroll` round trip (`core::log_list::LogList`'s
+/// shape): the round trip never landed on this panel in headless capture.
 fn scroll_to_bottom(element: Rc<MountedData>) {
+    let Some(element) = element.downcast::<web_sys::Element>().cloned() else {
+        return;
+    };
+    element.set_scroll_top(element.scroll_height());
     spawn(async move {
-        let Ok(scroll_size) = element.get_scroll_size().await else {
-            return;
-        };
-        let coordinates = PixelsVector2D::new(0.0, scroll_size.height);
-        let _ = element.scroll(coordinates, ScrollBehavior::Instant).await;
+        for delay in PIN_RETRY_DELAYS_MS {
+            gloo_timers::future::TimeoutFuture::new(delay).await;
+            element.set_scroll_top(element.scroll_height());
+        }
     });
 }
 

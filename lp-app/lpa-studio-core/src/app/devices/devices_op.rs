@@ -159,7 +159,7 @@ impl ControllerOp for DevicesOp {
             // what the confirm has to say: the library copy is a different
             // object and this does not touch it.
             Action::RemoveProject { .. } => ActionMeta::new(
-                "Remove project",
+                "Remove",
                 "Stop what this board is running and delete it from the board.",
                 ActionPriority::Tertiary,
             )
@@ -170,7 +170,7 @@ impl ControllerOp for DevicesOp {
                     "The board stops running it and the project is deleted from the \
                      board's storage. The firmware stays, and your copy in the \
                      library is untouched.",
-                    "Remove project",
+                    "Remove",
                 )
                 .inline(),
             ),

@@ -18,36 +18,54 @@
 //! Setup, flashing and pushing are round 2. Where they belong, the page says
 //! so and disables the control rather than hiding it or, worse, offering a
 //! button that does nothing.
+//!
+//! # Disconnect → disappear (D7, AC9)
+//!
+//! An unplugged board is NOT a card. [`split_roster`] divides the roster's
+//! own projection at [`DeviceStatus::Offline`]: the connected devices are
+//! cards in the grid, and everything Studio remembers but cannot currently
+//! see collapses into one quiet line beneath it — "N remembered boards not
+//! connected · show" — whose expanded tiles carry the two verbs an absent
+//! board can honestly offer (Reconnect, Forget). The grid therefore only
+//! ever holds boards that are actually there, which is what makes plugging
+//! one in read as arrival rather than as a status change on a card that was
+//! already sitting there greyed out.
+//!
+//! The toggle is page-local UI state on purpose: whether a fold is open is
+//! not something the device model knows or should learn.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceAction, DeviceRosterView, DevicesOp, UiAction, UiHomeView, split_roster,
+    DeviceAction, DeviceEscape, DeviceRosterView, DevicesOp, RememberedView, UiAction, UiHomeView,
+    device_escape_action, split_roster,
 };
 
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::sim_card::SimCard;
 use crate::app::home::{device_grid_class, section_title_class};
-use crate::core::ActionButton;
+use crate::core::{ActionButton, ActionButtonVariant};
 
 /// The runtime roster page (roadmap M4's gallery top, re-homed).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn DevicesPage(home: UiHomeView, on_action: EventHandler<UiAction>) -> Element {
+pub fn DevicesPage(
+    home: UiHomeView,
+    /// Story-only: render the remembered line already expanded. A static
+    /// capture cannot click the toggle, and the tiles are the half of D7
+    /// worth reviewing. Real surfaces never set this — the line opens
+    /// closed and stays where the user leaves it.
+    #[props(default)]
+    remembered_open: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
     let devices = home.devices.clone();
-    // The names of boards the roster split as remembered (D7: an offline
-    // device is a quiet line, not a card). P2 only builds the split; P7
-    // wires its real tiles (Reconnect/Forget) into this page — this reads
-    // just the titles so the page keeps compiling meanwhile.
-    let remembered: Vec<String> = split_roster(&devices)
-        .remembered
-        .into_iter()
-        .map(|entry| entry.title)
-        .collect();
-    // The registry's rows rehydrate into the roster, so the remembered list is
-    // only worth showing when the roster has nothing — a store that has not
-    // mounted yet, or rows the model could not key. Otherwise it would just
-    // repeat the cards above it.
-    let show_remembered = devices.roster.devices.is_empty() && !remembered.is_empty();
+    // D7: the grid draws the boards that are HERE; the ones Studio only
+    // remembers become the quiet line under it. The split is the model's
+    // own projection filtered by status — the page invents no membership of
+    // its own.
+    let split = split_roster(&devices);
+    let connected = split.connected;
+    let remembered = split.remembered;
 
     rsx! {
         div { class: "tw:grid tw:content-start tw:gap-7",
@@ -90,7 +108,7 @@ pub fn DevicesPage(home: UiHomeView, on_action: EventHandler<UiAction>) -> Eleme
                                 on_action,
                             }
                         }
-                        for card in devices.roster.devices.iter().cloned() {
+                        for card in connected.iter().cloned() {
                             DeviceRosterCard {
                                 key: "device-{card.id.0}",
                                 // The running face's Open needs the
@@ -113,8 +131,14 @@ pub fn DevicesPage(home: UiHomeView, on_action: EventHandler<UiAction>) -> Eleme
                     }
                 }
 
-                if show_remembered {
-                    RememberedList { names: remembered }
+                // The boards Studio knows and cannot see. One line, always
+                // below the grid, never a card (D7).
+                if !remembered.is_empty() {
+                    RememberedLine {
+                        remembered,
+                        initially_open: remembered_open,
+                        on_action,
+                    }
                 }
             }
         }
@@ -171,25 +195,159 @@ fn UnavailableNote() -> Element {
     }
 }
 
-/// Registry rows the roster has not rehydrated (no store mounted yet).
+/// The quiet line under the grid: the boards Studio remembers but cannot
+/// currently see (D7, AC9).
+///
+/// It is a LINE, not a section: an absent board has nothing to report, and
+/// giving it a card would put four boards' worth of grey furniture in front
+/// of the one that is actually plugged in. Opening it is a page-local
+/// decision (`use_signal`) — the model has no opinion about folds.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn RememberedList(names: Vec<String>) -> Element {
+fn RememberedLine(
+    remembered: Vec<RememberedView>,
+    /// Story-only: start expanded (see [`DevicesPage`]).
+    #[props(default)]
+    initially_open: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let mut open = use_signal(|| initially_open);
+    let count = remembered.len();
+
     rsx! {
-        div { class: "tw:grid tw:gap-1",
-            p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
-                "Remembered"
+        div { class: "tw:grid tw:gap-3",
+            p { class: "tw:m-0 tw:flex tw:flex-wrap tw:items-center tw:gap-2 tw:text-xs tw:text-dim-foreground",
+                span { "{remembered_line_text(count)}" }
+                button {
+                    class: remembered_toggle_class(),
+                    r#type: "button",
+                    title: "Show the boards Studio remembers but cannot see",
+                    onclick: move |_| {
+                        let was = open();
+                        open.set(!was);
+                    },
+                    if open() { "hide" } else { "show" }
+                }
+                span { class: "tw:flex-1" }
+                // Why they are kept at all, said once rather than on every
+                // tile: Forget is the only thing that removes a board, and
+                // this is where it lives.
+                span { "Studio keeps their names; Forget lives here." }
             }
-            ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-0.5 tw:p-0",
-                for name in names.iter() {
-                    li { key: "{name}",
-                        class: "tw:m-0 tw:font-mono tw:text-xs tw:text-muted-foreground",
-                        "{name}"
+            if open() {
+                div { class: device_grid_class(),
+                    for entry in remembered.iter().cloned() {
+                        RememberedTile {
+                            key: "remembered-{entry.id.0}",
+                            entry,
+                            on_action,
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/// One remembered board: dashed, dimmed, and honest about the fact that
+/// nothing here is live.
+///
+/// The tile carries the same 120px preview slot the cards do so the row
+/// reads as the same family — with the "last seen" sentence in it, because
+/// there IS no picture: the feed is a later milestone, and a board that is
+/// not connected would have nothing to feed it anyway.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> Element {
+    let device = entry.id;
+    let meta = remembered_meta_text(&entry);
+
+    rsx! {
+        div { class: remembered_tile_class(),
+            div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:gap-2",
+                h3 {
+                    class: "tw:m-0 tw:min-w-0 tw:truncate tw:text-sm tw:font-bold tw:text-strong-foreground",
+                    title: "{entry.title}",
+                    "{entry.title}"
+                }
+                div { class: "ux-play-frame ux-play-frame-slot",
+                    div { class: "ux-play-empty",
+                        p { class: "tw:m-0", "{remembered_preview_sentence(&entry)}" }
+                    }
+                }
+                p {
+                    class: "tw:m-0 tw:truncate tw:font-mono tw:text-[0.68rem] tw:text-subtle-foreground",
+                    title: "{meta}",
+                    "{meta}"
+                }
+            }
+            // Every escape the projection granted, rendered — the renderer
+            // half of invariant I3, exactly as on a card. Reconnect is the
+            // tile's one call to action (a grant can die on a replug), so
+            // it wears the Outline voice; Forget keeps its inline confirm.
+            div { class: "tw:mt-auto tw:flex tw:flex-wrap tw:items-center tw:gap-2 tw:whitespace-nowrap",
+                for escape in entry.escapes.iter().copied() {
+                    ActionButton {
+                        key: "{escape:?}",
+                        action: device_escape_action(escape, device),
+                        running: false,
+                        variant: remembered_escape_variant(escape),
+                        on_action,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// "2 remembered boards not connected" — the line's own sentence, singular
+/// when there is one of them.
+fn remembered_line_text(count: usize) -> String {
+    match count {
+        1 => "1 remembered board not connected".to_string(),
+        other => format!("{other} remembered boards not connected"),
+    }
+}
+
+/// The tile's second line: the board it is, and when Studio last heard it.
+fn remembered_meta_text(entry: &RememberedView) -> String {
+    match (entry.board.as_deref(), entry.last_seen_label.as_deref()) {
+        (Some(board), Some(last)) => format!("{board} · {last}"),
+        (Some(board), None) => board.to_string(),
+        (None, Some(last)) => last.to_string(),
+        (None, None) => "not heard this session".to_string(),
+    }
+}
+
+/// The preview slot's sentence for an absent board (AC10's honesty rule on
+/// a tile): never a stale picture presented as current, and never an empty
+/// box either.
+fn remembered_preview_sentence(entry: &RememberedView) -> String {
+    match entry.last_seen_label.as_deref() {
+        Some(last) => format!("Not connected — {last}."),
+        None => "Not connected — Studio has not heard this board.".to_string(),
+    }
+}
+
+/// Reconnect is the tile's call to action and wears the Outline voice; the
+/// rest (Forget, and anything the projection adds later) stay quiet chips.
+fn remembered_escape_variant(escape: DeviceEscape) -> ActionButtonVariant {
+    match escape {
+        DeviceEscape::Reconnect => ActionButtonVariant::Outline,
+        _ => ActionButtonVariant::Quiet,
+    }
+}
+
+/// The show/hide control: a text affordance, not a button-looking button —
+/// the line is chrome, and a chip here would compete with the cards above.
+fn remembered_toggle_class() -> &'static str {
+    "ux-focus-ring tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-xs tw:text-subtle-foreground tw:underline tw:decoration-dotted"
+}
+
+/// A remembered tile: dashed and dimmed, the same width as a card in the
+/// grid but with only the rows an absent board can fill.
+fn remembered_tile_class() -> &'static str {
+    "tw:flex tw:flex-col tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border tw:bg-card tw:p-4 tw:opacity-75"
 }
 
 fn note_class() -> &'static str {
@@ -201,7 +359,8 @@ fn note_class() -> &'static str {
 ///
 /// Keeping it here rather than in a test module means the page's own claims
 /// ("identifying", "no devices yet") are asserted against the same values the
-/// components read.
+/// components read — including D7's: an offline board is NOT a card, so it
+/// is not a line here either. It is counted by the remembered line instead.
 #[cfg_attr(
     not(test),
     allow(
@@ -213,8 +372,13 @@ pub(crate) fn devices_page_lines(devices: &DeviceRosterView) -> Vec<String> {
     if !devices.transport_available {
         return vec!["This browser can't talk to USB devices".to_string()];
     }
-    if devices.roster.devices.is_empty() && devices.roster.pending.is_empty() {
-        return vec!["No devices yet".to_string()];
+    let split = split_roster(devices);
+    if split.connected.is_empty() && devices.roster.pending.is_empty() {
+        let mut lines = vec!["No devices yet".to_string()];
+        if !split.remembered.is_empty() {
+            lines.push(remembered_line_text(split.remembered.len()));
+        }
+        return lines;
     }
     devices
         .roster
@@ -222,19 +386,19 @@ pub(crate) fn devices_page_lines(devices: &DeviceRosterView) -> Vec<String> {
         .iter()
         .map(|pending| format!("{} — {}", pending.title, pending.state_label))
         .chain(
-            devices
-                .roster
-                .devices
+            split
+                .connected
                 .iter()
                 .map(|card| format!("{} — {}", card.title, card.state_label)),
         )
+        .chain((!split.remembered.is_empty()).then(|| remembered_line_text(split.remembered.len())))
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpa_studio_core::{DeviceRosterConfig, DeviceView, RosterView};
+    use lpa_studio_core::{DeviceRosterConfig, DeviceStatus, DeviceView, RosterView};
 
     fn view(roster: RosterView, transport_available: bool) -> DeviceRosterView {
         DeviceRosterView {
@@ -273,7 +437,10 @@ mod tests {
     }
 
     /// A fresh plug is an "identifying…" entry BEFORE it is a card — and it
-    /// is listed first, because it is what the user is looking at.
+    /// is listed first, because it is what the user is looking at. The
+    /// registry row rehydrated beside it is COLD (nothing has heard it this
+    /// session), so under D7 it is not a card at all: it is counted by the
+    /// remembered line under the grid.
     #[test]
     fn a_pending_link_reads_as_identifying_and_comes_first() {
         let mut roster = lpa_studio_core::DeviceRoster::new(DeviceRosterConfig::default());
@@ -294,7 +461,33 @@ mod tests {
 
         assert_eq!(lines.len(), 2, "{lines:?}");
         assert!(lines[0].contains("identifying"), "{lines:?}");
-        assert!(lines[1].contains("Porch sign"), "{lines:?}");
+        assert_eq!(lines[1], "1 remembered board not connected", "{lines:?}");
+    }
+
+    /// The remembered board keeps its NAME — the whole point of remembering
+    /// one (AC9: replugging brings the card back with its name).
+    #[test]
+    fn a_cold_registry_row_keeps_its_name_on_the_remembered_line() {
+        let mut roster = lpa_studio_core::DeviceRoster::new(DeviceRosterConfig::default());
+        roster.load_records(&[lpa_studio_core::app::places::RegisteredDevice {
+            uid: "dev0000000000000001".to_string(),
+            name: "Porch sign".to_string(),
+            ..Default::default()
+        }]);
+
+        let split = split_roster(&view(
+            roster.view(lpa_studio_core::DeviceMillis(0)).roster,
+            true,
+        ));
+
+        assert!(split.connected.is_empty(), "{split:?}");
+        assert_eq!(split.remembered.len(), 1, "{split:?}");
+        assert_eq!(split.remembered[0].title, "Porch sign");
+        assert!(
+            split.remembered[0].escapes.contains(&DeviceEscape::Forget),
+            "{:?}",
+            split.remembered[0],
+        );
     }
 
     /// Every card offers a way out, in every state — the renderer's half of
@@ -312,6 +505,168 @@ mod tests {
 
         for card in cards {
             assert!(!card.escapes.is_empty(), "{card:?}");
+        }
+    }
+
+    /// The line's own sentence (D7): singular when one board is missing,
+    /// plural otherwise — a "1 remembered boards" line is the kind of thing
+    /// that makes a UI feel unfinished.
+    #[test]
+    fn the_remembered_line_counts_boards_in_its_own_words() {
+        assert_eq!(remembered_line_text(1), "1 remembered board not connected");
+        assert_eq!(remembered_line_text(2), "2 remembered boards not connected");
+        assert_eq!(
+            remembered_line_text(11),
+            "11 remembered boards not connected"
+        );
+    }
+
+    /// A tile says the board it is and when Studio last heard it — and
+    /// never invents either half.
+    #[test]
+    fn a_remembered_tile_names_the_board_and_when_it_was_heard() {
+        let mut entry = remembered_fixture();
+        assert_eq!(
+            remembered_meta_text(&entry),
+            "seeed-xiao-esp32c6 · last heard 4 min ago"
+        );
+
+        entry.last_seen_label = None;
+        assert_eq!(remembered_meta_text(&entry), "seeed-xiao-esp32c6");
+
+        entry.board = None;
+        assert_eq!(remembered_meta_text(&entry), "not heard this session");
+    }
+
+    /// AC10 on a tile: the preview slot never shows a picture that is not
+    /// there, and never sits blank either.
+    #[test]
+    fn a_remembered_tile_says_why_there_is_no_picture() {
+        let mut entry = remembered_fixture();
+        assert_eq!(
+            remembered_preview_sentence(&entry),
+            "Not connected — last heard 4 min ago."
+        );
+
+        entry.last_seen_label = None;
+        assert_eq!(
+            remembered_preview_sentence(&entry),
+            "Not connected — Studio has not heard this board."
+        );
+    }
+
+    /// D7: an offline board leaves the grid entirely and is counted by the
+    /// line instead — the page cannot draw a card for a board that is not
+    /// there.
+    #[test]
+    fn an_offline_board_leaves_the_grid_for_the_remembered_line() {
+        let online = DeviceView {
+            id: lpa_studio_core::DeviceId(1),
+            status: DeviceStatus::Ready,
+            title: "Bench C6".to_string(),
+            state_label: "Ready".to_string(),
+            ..bare_card()
+        };
+        let offline = DeviceView {
+            id: lpa_studio_core::DeviceId(2),
+            status: DeviceStatus::Offline,
+            title: "Porch sign".to_string(),
+            state_label: "Not connected".to_string(),
+            ..bare_card()
+        };
+
+        let lines = devices_page_lines(&view(
+            RosterView {
+                devices: vec![online, offline],
+                pending: Vec::new(),
+            },
+            true,
+        ));
+
+        assert_eq!(
+            lines,
+            vec![
+                "Bench C6 — Ready".to_string(),
+                "1 remembered board not connected".to_string(),
+            ],
+        );
+    }
+
+    /// A roster of nothing BUT remembered boards still invites a port — the
+    /// grid is empty, and the line sits under it.
+    #[test]
+    fn only_remembered_boards_still_invites_a_port() {
+        let offline = DeviceView {
+            id: lpa_studio_core::DeviceId(2),
+            status: DeviceStatus::Offline,
+            title: "Porch sign".to_string(),
+            state_label: "Not connected".to_string(),
+            ..bare_card()
+        };
+
+        let lines = devices_page_lines(&view(
+            RosterView {
+                devices: vec![offline],
+                pending: Vec::new(),
+            },
+            true,
+        ));
+
+        assert_eq!(
+            lines,
+            vec![
+                "No devices yet".to_string(),
+                "1 remembered board not connected".to_string(),
+            ],
+        );
+    }
+
+    /// Reconnect is the tile's call to action; Forget stays a quiet chip
+    /// with its own inline confirm.
+    #[test]
+    fn reconnect_is_the_tiles_one_outline_verb() {
+        assert_eq!(
+            remembered_escape_variant(DeviceEscape::Reconnect),
+            ActionButtonVariant::Outline,
+        );
+        assert_eq!(
+            remembered_escape_variant(DeviceEscape::Forget),
+            ActionButtonVariant::Quiet,
+        );
+    }
+
+    fn remembered_fixture() -> RememberedView {
+        RememberedView {
+            id: lpa_studio_core::DeviceId(7),
+            title: "Porch sign".to_string(),
+            board: Some("seeed-xiao-esp32c6".to_string()),
+            last_seen_label: Some("last heard 4 min ago".to_string()),
+            escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
+        }
+    }
+
+    fn bare_card() -> DeviceView {
+        DeviceView {
+            id: lpa_studio_core::DeviceId(1),
+            title: String::new(),
+            status: DeviceStatus::Ready,
+            state_label: String::new(),
+            detail: None,
+            freshness_label: None,
+            identity_label: None,
+            detected_chip: None,
+            board_id: None,
+            firmware: None,
+            needs_firmware: false,
+            degraded: None,
+            loaded_project: lpa_studio_core::DeviceLoadedProject::Unknown,
+            can_receive_project: false,
+            can_remove_project: false,
+            activity: None,
+            last_outcome: None,
+            terminal: Vec::new(),
+            terminal_dropped: 0,
+            escapes: vec![DeviceEscape::Forget],
         }
     }
 

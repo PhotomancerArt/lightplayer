@@ -109,6 +109,12 @@ pub(crate) fn DeviceRosterCard(
     /// surfaces never set this.
     #[props(default)]
     armed_preview: bool,
+    /// Story-only, the same hook for the OTHER destructive chip: Remove
+    /// project in the verb row (D8 — it marks the whole card exactly as
+    /// Forget does, and the two live in different zones, so a capture that
+    /// proves the marking needs both). Real surfaces never set this.
+    #[props(default)]
+    armed_remove_preview: bool,
     /// The device's editor address (`/device/<uid>`), when it is
     /// registered — the running face's Open (round-2 M5). `None` for a
     /// board that has not earned a registry row yet: no honest address, no
@@ -320,6 +326,7 @@ pub(crate) fn DeviceRosterCard(
                                 action: DevicesOp::action_for(DeviceAction::RemoveProject { device }),
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
+                                armed_preview: armed_remove_preview,
                                 on_action,
                             }
                         }
