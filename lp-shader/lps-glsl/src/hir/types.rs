@@ -5,13 +5,17 @@ use lp_collection::VecMap;
 
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec};
 
-use super::arena::{ExprId, ExprList, HirArena, PlaceId, TypeId, WritebackList};
+use super::arena::{ExprId, ExprList, HirArena, PlaceId, WritebackList};
+use super::type_table::{TypeId, TypeTable};
 use crate::Span;
 use crate::body::{BinaryOp, IncDecOp, UnaryOp};
 
 #[derive(Debug, Clone)]
 pub struct HirModule {
     pub functions: Vec<HirFunction>,
+    /// The one type table every function's arena, every signature and
+    /// every global const refers into.
+    pub types: TypeTable,
     pub meta: LpsModuleSig,
     pub uniforms: VecMap<String, UniformInfo>,
     pub globals: VecMap<String, GlobalInfo>,
@@ -113,10 +117,10 @@ pub enum ImportKey {
     Texture { name: String, argc: usize },
 }
 
-/// A typed function. Its return and parameter types are ids into its own
-/// body's type table (`body.arena`): the signature table the build keeps
-/// owns the types once, and the module signature takes them over at the
-/// end; the HIR only refers to them.
+/// A typed function. Its return and parameter types are ids into the
+/// module's type table ([`HirModule::types`]): the signature table the
+/// build keeps owns the types once, and the module signature takes them
+/// over at the end; the HIR only refers to them.
 #[derive(Debug, Clone)]
 pub struct HirFunction {
     pub name: String,
@@ -146,8 +150,8 @@ pub struct HirFunctionBody {
     pub arena: HirArena,
 }
 
-/// A function local. Its type is an id into the function arena's type
-/// table, like every expression's: a struct-typed local shares the
+/// A function local. Its type is an id into the module's type table, like
+/// every expression's: a struct-typed local shares the
 /// struct with the expressions that read it.
 #[derive(Debug, Clone)]
 pub struct HirLocal {
@@ -194,7 +198,7 @@ pub enum HirStmt {
 }
 
 /// One typed expression as the arena stores it. The type is an id into
-/// the arena's type table ([`HirArena::intern`]): every expression of the
+/// the module's type table ([`TypeTable::intern`]): every expression of the
 /// same type shares one `LpsType`, so a struct-typed expression costs four
 /// bytes, not a clone of the struct (member names included) per node.
 #[derive(Debug, Clone)]

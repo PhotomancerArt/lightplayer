@@ -53,10 +53,10 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
                         max: 61.0,
                     },
                     frame_count,
-                    loaded_projects: vec![LoadedProject {
-                        handle: lpc_wire::WireProjectHandle::new(1),
-                        path: "projects/test".as_path_buf(),
-                    }],
+                    loaded_projects: vec![LoadedProject::new(
+                        lpc_wire::WireProjectHandle::new(1),
+                        "projects/test".as_path_buf(),
+                    )],
                     uptime_ms: frame_count * 1000,
                     memory: Some(MemoryStats {
                         free_bytes: esp_alloc::HEAP.free() as u32,

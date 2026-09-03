@@ -1,55 +1,61 @@
-use alloc::string::String;
+use alloc::borrow::Cow;
 use alloc::vec::Vec;
 
 use crate::Span;
 
+/// A parsed function body. Every name in it borrows the shader source
+/// (`'src`): the parser never copies an identifier, and the body stage
+/// allocates per node, not per name. The two composed spellings —
+/// a declaration type with an array suffix after the name (`float x[3]`)
+/// and an array constructor (`float[3](..)`) — are the only owned strings,
+/// held in a [`Cow`] that stays borrowed everywhere else.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ParsedFunctionBody {
-    pub statements: Vec<ParsedStmt>,
+pub struct ParsedFunctionBody<'src> {
+    pub statements: Vec<ParsedStmt<'src>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ParsedStmt {
+pub enum ParsedStmt<'src> {
     Let {
         is_const: bool,
-        ty: String,
-        name: String,
-        init: Option<ParsedExpr>,
+        ty: Cow<'src, str>,
+        name: &'src str,
+        init: Option<ParsedExpr<'src>>,
         span: Span,
     },
     LetGroup {
         is_const: bool,
-        ty: String,
-        declarations: Vec<ParsedLetDecl>,
+        ty: Cow<'src, str>,
+        declarations: Vec<ParsedLetDecl<'src>>,
         span: Span,
     },
     Assign {
-        name: String,
+        name: &'src str,
         op: AssignOp,
-        value: ParsedExpr,
+        value: ParsedExpr<'src>,
         span: Span,
     },
     If {
-        condition: ParsedExpr,
-        accept: Vec<ParsedStmt>,
-        reject: Vec<ParsedStmt>,
+        condition: ParsedExpr<'src>,
+        accept: Vec<ParsedStmt<'src>>,
+        reject: Vec<ParsedStmt<'src>>,
         span: Span,
     },
     For {
-        init: Vec<ParsedStmt>,
-        condition: Option<ParsedExpr>,
-        continuing: Vec<ParsedStmt>,
-        body: Vec<ParsedStmt>,
+        init: Vec<ParsedStmt<'src>>,
+        condition: Option<ParsedExpr<'src>>,
+        continuing: Vec<ParsedStmt<'src>>,
+        body: Vec<ParsedStmt<'src>>,
         span: Span,
     },
     While {
-        condition: ParsedExpr,
-        body: Vec<ParsedStmt>,
+        condition: ParsedExpr<'src>,
+        body: Vec<ParsedStmt<'src>>,
         span: Span,
     },
     DoWhile {
-        body: Vec<ParsedStmt>,
-        condition: ParsedExpr,
+        body: Vec<ParsedStmt<'src>>,
+        condition: ParsedExpr<'src>,
         span: Span,
     },
     Break {
@@ -59,82 +65,82 @@ pub enum ParsedStmt {
         span: Span,
     },
     Block {
-        statements: Vec<ParsedStmt>,
+        statements: Vec<ParsedStmt<'src>>,
         span: Span,
     },
     Empty {
         span: Span,
     },
     Expr {
-        expr: ParsedExpr,
+        expr: ParsedExpr<'src>,
         span: Span,
     },
     Return {
-        expr: Option<ParsedExpr>,
+        expr: Option<ParsedExpr<'src>>,
         span: Span,
     },
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ParsedLetDecl {
-    pub ty: String,
-    pub name: String,
-    pub init: Option<ParsedExpr>,
+pub struct ParsedLetDecl<'src> {
+    pub ty: Cow<'src, str>,
+    pub name: &'src str,
+    pub init: Option<ParsedExpr<'src>>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ParsedExpr {
+pub struct ParsedExpr<'src> {
     pub span: Span,
-    pub kind: ParsedExprKind,
+    pub kind: ParsedExprKind<'src>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ParsedExprKind {
+pub enum ParsedExprKind<'src> {
     BoolLiteral(bool),
     FloatLiteral(f32),
     IntLiteral(i32),
     UIntLiteral(u32),
-    Name(String),
+    Name(&'src str),
     Call {
-        name: String,
-        args: Vec<ParsedExpr>,
+        name: Cow<'src, str>,
+        args: Vec<ParsedExpr<'src>>,
     },
     InitList {
-        elements: Vec<ParsedExpr>,
+        elements: Vec<ParsedExpr<'src>>,
     },
     Swizzle {
-        base: alloc::boxed::Box<ParsedExpr>,
-        fields: String,
+        base: alloc::boxed::Box<ParsedExpr<'src>>,
+        fields: &'src str,
     },
     Length {
-        base: alloc::boxed::Box<ParsedExpr>,
+        base: alloc::boxed::Box<ParsedExpr<'src>>,
     },
     Index {
-        base: alloc::boxed::Box<ParsedExpr>,
-        index: alloc::boxed::Box<ParsedExpr>,
+        base: alloc::boxed::Box<ParsedExpr<'src>>,
+        index: alloc::boxed::Box<ParsedExpr<'src>>,
     },
     Unary {
         op: UnaryOp,
-        expr: alloc::boxed::Box<ParsedExpr>,
+        expr: alloc::boxed::Box<ParsedExpr<'src>>,
     },
     Binary {
         op: BinaryOp,
-        lhs: alloc::boxed::Box<ParsedExpr>,
-        rhs: alloc::boxed::Box<ParsedExpr>,
+        lhs: alloc::boxed::Box<ParsedExpr<'src>>,
+        rhs: alloc::boxed::Box<ParsedExpr<'src>>,
     },
     Conditional {
-        condition: alloc::boxed::Box<ParsedExpr>,
-        accept: alloc::boxed::Box<ParsedExpr>,
-        reject: alloc::boxed::Box<ParsedExpr>,
+        condition: alloc::boxed::Box<ParsedExpr<'src>>,
+        accept: alloc::boxed::Box<ParsedExpr<'src>>,
+        reject: alloc::boxed::Box<ParsedExpr<'src>>,
     },
     Assign {
-        target: alloc::boxed::Box<ParsedExpr>,
+        target: alloc::boxed::Box<ParsedExpr<'src>>,
         op: AssignOp,
-        value: alloc::boxed::Box<ParsedExpr>,
+        value: alloc::boxed::Box<ParsedExpr<'src>>,
     },
     IncDec {
-        target: alloc::boxed::Box<ParsedExpr>,
+        target: alloc::boxed::Box<ParsedExpr<'src>>,
         op: IncDecOp,
         prefix: bool,
     },

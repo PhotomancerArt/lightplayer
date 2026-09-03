@@ -11,7 +11,7 @@ use lps_shared::{LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec};
 
 use crate::body::{BinaryOp, UnaryOp};
 use crate::hir::{
-    ExprId, ExprList, GlobalInfo, HirArena, HirExprKind, HirFunction, HirModule, HirStmt,
+    ExprId, ExprList, GlobalInfo, HirExprKind, HirFunction, HirModule, HirStmt, HirView,
     ImportInfo, ImportKey, PlaceId, UniformInfo, scalar_base_type, scalar_ir_types,
     scalar_lane_count,
 };
@@ -86,7 +86,7 @@ fn lower_function(
     module: &HirModule,
     import_map: &[CalleeRef],
 ) -> Result<lpir::IrFunction, Diagnostic> {
-    let types = &function.body.arena;
+    let types = &module.types;
     let return_ty = types.ty(function.return_ty);
     let return_types = scalar_ir_types(return_ty)?;
     let mut fb = FunctionBuilder::new(&function.name, &return_types);
@@ -113,17 +113,17 @@ fn lower_function(
     });
     let mut locals = Vec::new();
     for local in &function.body.locals {
-        locals.push(local_storage(
-            &mut fb,
-            function.body.arena.ty(local.ty).clone(),
-        )?);
+        locals.push(local_storage(&mut fb, types.ty(local.ty).clone())?);
     }
     let mut ctx = LowerCtx {
         fb,
         vmctx,
         params,
         locals,
-        arena: &function.body.arena,
+        arena: HirView {
+            arena: &function.body.arena,
+            types,
+        },
         import_map,
         imports: &module.imports,
         uniforms: &module.uniforms,
@@ -144,7 +144,7 @@ struct LowerCtx<'a> {
     vmctx: VReg,
     params: Vec<LowerValue>,
     locals: Vec<LocalStorage>,
-    arena: &'a HirArena,
+    arena: HirView<'a>,
     import_map: &'a [CalleeRef],
     /// The module's imports, indexed by `ImportId` (their key says which
     /// ABI the call takes).
@@ -666,7 +666,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
 /// wasm). GLSL `&&` / `||` / `?:` only evaluate the operands the spec says
 /// they evaluate; operands for which this returns false are safe to keep on
 /// the branchless eager path (`iand` / `ior` / `select`).
-fn expr_needs_lazy_eval(arena: &HirArena, expr: ExprId) -> bool {
+fn expr_needs_lazy_eval(arena: HirView<'_>, expr: ExprId) -> bool {
     let e = arena.expr(expr);
     match &e.kind {
         HirExprKind::BoolLiteral(_)
@@ -724,14 +724,14 @@ fn expr_needs_lazy_eval(arena: &HirArena, expr: ExprId) -> bool {
     }
 }
 
-fn expr_list_needs_lazy_eval(arena: &HirArena, list: ExprList) -> bool {
+fn expr_list_needs_lazy_eval(arena: HirView<'_>, list: ExprList) -> bool {
     arena
         .expr_list(list)
         .iter()
         .any(|arg| expr_needs_lazy_eval(arena, *arg))
 }
 
-fn place_needs_lazy_eval(arena: &HirArena, place: PlaceId) -> bool {
+fn place_needs_lazy_eval(arena: HirView<'_>, place: PlaceId) -> bool {
     arena.place_segments(place).iter().any(|seg| match seg {
         crate::hir::PlaceSegment::Index { index } => expr_needs_lazy_eval(arena, *index),
         _ => false,

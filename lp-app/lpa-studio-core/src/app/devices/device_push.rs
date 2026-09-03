@@ -259,6 +259,7 @@ mod tests {
             detected_chip: None,
             board_id: board_id.map(str::to_string),
             needs_firmware: false,
+            degraded: None,
             loaded_project: LoadedProject::Empty,
             can_receive_project: true,
             can_remove_project: false,

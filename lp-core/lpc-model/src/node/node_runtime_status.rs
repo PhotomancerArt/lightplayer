@@ -15,8 +15,20 @@ pub enum NodeRuntimeStatus {
     Ok,
     /// Running with a warning.
     Warn(String),
-    /// Cannot run.
+    /// Cannot run. The authored configuration is wrong or incomplete and
+    /// the fix is an EDIT: an unbound fixture input, a mapping that will
+    /// not parse, a GLSL compile diagnostic, an output identity collision.
     Error(String),
+    /// Running, but the RUNTIME failed it: the authored configuration was
+    /// valid and something outside the author's edit broke — quarantined by
+    /// crash recovery, a tick that returned an error, a compile the ledger
+    /// refused after an OOM crash, a render trap. The fix is a retry, a
+    /// clear-faults, more memory, or a bug report — never an edit.
+    ///
+    /// Outputs of a project with any node in this state paint the fault
+    /// pattern (never black); [`Self::Error`] and [`Self::Warn`] do not.
+    /// See docs/adr/2026-09-02-fault-is-never-black.md (written in P4).
+    Fault(String),
     /// The node's kind has no runtime compiled into this build; a
     /// placeholder is attached in its place. The message names the kind.
     ///
@@ -58,5 +70,23 @@ mod tests {
         assert!(json.contains("Unsupported"), "{json}");
         let back: NodeRuntimeStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(back, status);
+    }
+
+    /// Same contract for `Fault`: a client decides whether to paint the
+    /// fault pattern and whether to offer "clear faults" from the VARIANT,
+    /// so it must survive the wire without string sniffing — and it must
+    /// never collapse into `Error`, whose fix is an edit.
+    #[test]
+    fn fault_round_trips_as_its_own_variant() {
+        let status = NodeRuntimeStatus::Fault("produce: tick failed: recovery: …".into());
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("Fault"), "{json}");
+        let back: NodeRuntimeStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, status);
+        assert_ne!(
+            status,
+            NodeRuntimeStatus::Error("produce: tick failed: recovery: …".into()),
+            "a runtime failure is not an authoring error: same message, different status"
+        );
     }
 }

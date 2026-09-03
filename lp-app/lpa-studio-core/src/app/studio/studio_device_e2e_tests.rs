@@ -878,6 +878,68 @@ fn opening_the_lens_borrows_the_wire_and_the_card_keeps_folding() {
     assert_eq!(bench.view().devices.len(), 1, "the card never left");
 }
 
+/// The lens reads the board's BUILD off its own wire at attach (M5
+/// follow-up): the fold's hello mirror carries no features by design, so the
+/// add-node picker's "Not on this device" gate only engages once the lens's
+/// client has asked the board itself. Before the open, nothing is gated.
+#[test]
+fn opening_the_lens_reads_the_board_build_for_the_picker_gate() {
+    let device = empty_light_player("dev000000daqf6dvvr2");
+    let (mut bench, tasks) = identified(&device, "usb-lens-build");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let uid = bench.registry()[0].uid.clone();
+    assert!(
+        bench
+            .controller
+            .project_for_test()
+            .lens_device_features_for_test()
+            .is_none(),
+        "no lens, no gate: the picker offers everything"
+    );
+
+    bench.open_lens(&uid).expect("opens");
+    let pool = bench.controller.runtime_pool_for_test();
+    let session = pool.device_session().expect("a device session");
+    let reported = session
+        .device_features()
+        .expect("the attach read the board's build off the wire");
+    // The fake runs a REAL host `LpServer`, so what it reports is the
+    // engine's own compiled-in feature set (plus whatever the server derives
+    // from its hardware), not a scripted list.
+    assert!(!reported.is_empty(), "a real build reports its features");
+    for feature in lpc_engine::features::supported_features() {
+        assert!(
+            reported.contains(&feature),
+            "the board's build carries {feature:?}: {reported:?}"
+        );
+    }
+    assert_eq!(
+        bench
+            .controller
+            .project_for_test()
+            .lens_device_features_for_test(),
+        Some(reported),
+        "the project controller gates the picker on what the board said"
+    );
+
+    // Close: the gate lifts with the lens.
+    bench.detach_lens();
+    assert!(
+        bench
+            .controller
+            .project_for_test()
+            .lens_device_features_for_test()
+            .is_none(),
+        "no lens, no gate"
+    );
+}
+
 /// Unplug mid-lens (G2 row 3): the board's departure is card evidence AND
 /// the end of the lens session — no refresh needed, nothing held.
 #[test]

@@ -10,6 +10,16 @@
 #![no_std]
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
+
+/// The test binary counts allocations so a steady frame's churn is a unit
+/// test (`engine::steady_frame_alloc_tests`), not an emulator run.
+#[cfg(test)]
+pub(crate) mod test_alloc_counter;
+#[cfg(test)]
+#[global_allocator]
+static TEST_ALLOC: test_alloc_counter::CountingAlloc = test_alloc_counter::CountingAlloc;
 
 pub mod color;
 pub mod dataflow;
@@ -25,9 +35,9 @@ pub mod shader_abi;
 
 pub use engine::error::Error;
 pub use engine::{
-    ButtonService, Engine, EngineError, EngineProjectReadSource, EngineServices, FrameNum,
-    FrameTime, OutputFlushError, ProjectLoadError, ProjectLoader, ProjectReadEventStreamError,
-    RadioService, RuntimeApplyResult,
+    ButtonService, Engine, EngineError, EngineProjectReadSource, EngineServices, FaultPresentation,
+    FrameNum, FrameTime, OutputFlushError, ProjectFault, ProjectLoadError, ProjectLoader,
+    ProjectReadEventStreamError, RadioService, RuntimeApplyResult,
 };
 pub use features::supported_features;
 // Graphics seam re-exports: the traits/handles live in `lp-gfx`; the

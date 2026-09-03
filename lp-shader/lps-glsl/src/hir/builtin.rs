@@ -3,12 +3,13 @@ use lps_shared::LpsType;
 
 use crate::{Diagnostic, Span};
 
-use super::arena::{ExprId, ExprList, HirArena};
+use super::arena::{ExprId, ExprList};
 use super::coerce::{
     coerce_arithmetic_pair, coerce_comparison_pair, coerce_expr, coerce_selection_pair,
     vector_dominant_type,
 };
 use super::scalar::{scalar_base_type, scalar_lane_count};
+use super::type_table::TypedArena;
 use super::types::BuiltinKind;
 
 pub(crate) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
@@ -105,7 +106,7 @@ pub(crate) fn is_glsl_import(name: &str) -> bool {
 }
 
 pub(super) fn type_glsl_import_args(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     name: &str,
     args: ExprList,
@@ -179,7 +180,7 @@ pub(super) fn type_glsl_import_args(
 }
 
 pub(super) fn type_builtin_args(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     kind: BuiltinKind,
     args: ExprList,
@@ -310,13 +311,16 @@ pub(crate) fn check_builtin_arity(
     Ok(())
 }
 
-fn type_passthrough(arena: &HirArena, args: ExprList) -> Result<(ExprList, LpsType), Diagnostic> {
+fn type_passthrough(
+    arena: &TypedArena<'_>,
+    args: ExprList,
+) -> Result<(ExprList, LpsType), Diagnostic> {
     let ty = arena.expr_ty(arena.expr_list(args)[0]).clone();
     Ok((args, ty))
 }
 
 fn type_integer_lane_builtin(
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -331,7 +335,7 @@ fn type_integer_lane_builtin(
 }
 
 fn type_bitfield_extract(
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -354,7 +358,7 @@ fn type_bitfield_extract(
 }
 
 fn type_bitfield_insert(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -379,7 +383,7 @@ fn type_bitfield_insert(
 }
 
 fn type_float_lane_builtin(
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -391,7 +395,7 @@ fn type_float_lane_builtin(
 }
 
 fn type_sign_builtin(
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -411,7 +415,7 @@ fn type_sign_builtin(
 }
 
 fn type_float_predicate_builtin(
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -433,7 +437,7 @@ fn type_float_predicate_builtin(
 }
 
 fn type_length_or_normalize(
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     span: Span,
     kind: BuiltinKind,
     args: ExprList,
@@ -451,7 +455,7 @@ fn type_length_or_normalize(
 }
 
 fn type_matrix_builtin(
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     span: Span,
     kind: BuiltinKind,
     args: ExprList,
@@ -475,7 +479,7 @@ fn type_matrix_builtin(
 }
 
 fn type_cross_builtin(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -486,7 +490,7 @@ fn type_cross_builtin(
 }
 
 fn type_distance_or_dot(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -499,7 +503,7 @@ fn type_distance_or_dot(
 }
 
 fn type_all_or_any(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -513,7 +517,7 @@ fn type_all_or_any(
 }
 
 fn type_not_builtin(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -526,7 +530,7 @@ fn type_not_builtin(
 }
 
 fn type_arithmetic_pair_builtin(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -536,7 +540,7 @@ fn type_arithmetic_pair_builtin(
 }
 
 fn type_matrix_comp_mult(
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -553,7 +557,7 @@ fn type_matrix_comp_mult(
 }
 
 fn type_outer_product(
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -592,7 +596,7 @@ fn type_outer_product(
 }
 
 fn type_relational_builtin(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -602,7 +606,7 @@ fn type_relational_builtin(
 }
 
 fn type_clamp_or_smoothstep(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -624,7 +628,7 @@ fn type_clamp_or_smoothstep(
 }
 
 fn type_step_builtin(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -643,7 +647,7 @@ fn type_step_builtin(
 }
 
 fn type_fma_builtin(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -660,7 +664,7 @@ fn type_fma_builtin(
 }
 
 fn type_mix_builtin(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprList, LpsType), Diagnostic> {
@@ -677,14 +681,18 @@ fn type_mix_builtin(
     Ok((arena.push_expr_list([x, y, a]), ty))
 }
 
-fn one_arg(arena: &HirArena, span: Span, args: ExprList) -> Result<ExprId, Diagnostic> {
+fn one_arg(arena: &TypedArena<'_>, span: Span, args: ExprList) -> Result<ExprId, Diagnostic> {
     match arena.expr_list(args) {
         [arg] => Ok(*arg),
         _ => Err(Diagnostic::error(span, "expected one argument")),
     }
 }
 
-fn two_args(arena: &HirArena, span: Span, args: ExprList) -> Result<(ExprId, ExprId), Diagnostic> {
+fn two_args(
+    arena: &TypedArena<'_>,
+    span: Span,
+    args: ExprList,
+) -> Result<(ExprId, ExprId), Diagnostic> {
     match arena.expr_list(args) {
         [a, b] => Ok((*a, *b)),
         _ => Err(Diagnostic::error(span, "expected two arguments")),
@@ -692,7 +700,7 @@ fn two_args(arena: &HirArena, span: Span, args: ExprList) -> Result<(ExprId, Exp
 }
 
 fn three_args(
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprId, ExprId, ExprId), Diagnostic> {
@@ -703,7 +711,7 @@ fn three_args(
 }
 
 fn four_args(
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     span: Span,
     args: ExprList,
 ) -> Result<(ExprId, ExprId, ExprId, ExprId), Diagnostic> {

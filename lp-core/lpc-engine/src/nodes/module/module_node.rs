@@ -40,6 +40,9 @@ use super::ModuleMirrorState;
 pub struct ModuleNode {
     /// The scoped demand key for this module's own `visual.out`.
     channel: QueryKey,
+    /// This node's produced-slot path, parsed once. `produce` publishes it
+    /// every frame; parsing it there allocated per frame for a constant.
+    output_path: SlotPath,
     /// The scope's current visual producer, refreshed each `produce`.
     mirrored: Option<VisualProduct>,
     state: ModuleMirrorState,
@@ -52,6 +55,7 @@ impl ModuleNode {
                 scope: Some(ScopeRef::Module { owner: node_id }),
                 channel: ChannelName(String::from(lpc_model::PRIMARY_VISUAL_CHANNEL)),
             },
+            output_path: Self::output_path(),
             mirrored: None,
             state: ModuleMirrorState {
                 output: VisualProductSlot::new(VisualProduct::new(node_id, 0)),
@@ -97,7 +101,7 @@ impl NodeRuntime for ModuleNode {
         self.state
             .output
             .set_with_version(ctx.revision(), *self.state.output.value());
-        ctx.publish_runtime_slot(&self.state, Self::output_path())?;
+        ctx.publish_runtime_slot(&self.state, &self.output_path)?;
         Ok(ProduceResult::Produced)
     }
 

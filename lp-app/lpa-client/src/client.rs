@@ -133,6 +133,15 @@ where
         }
     }
 
+    /// Allocate request ids from `first` upward instead of from 1 — for a
+    /// client taking over a wire whose previous owner's replies may still
+    /// be in flight (see [`ProtocolSession::starting_at`]).
+    #[must_use]
+    pub fn with_request_ids_from(mut self, first: u64) -> Self {
+        self.protocol = ProtocolSession::starting_at(first);
+        self
+    }
+
     /// Bound every single-response request with a total deadline.
     #[must_use]
     pub fn with_request_deadline(mut self, deadline: RequestDeadline) -> Self {
@@ -222,7 +231,8 @@ where
                         events.push(event);
                     }
                 }
-                ResponseDisposition::StaleAbandoned { response_id } => {
+                ResponseDisposition::StaleAbandoned { response_id }
+                | ResponseDisposition::PriorOwner { response_id } => {
                     events.push(ClientEvent::StaleResponseDropped { response_id });
                 }
                 ResponseDisposition::Uncorrelated {

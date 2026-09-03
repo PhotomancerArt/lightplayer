@@ -3,7 +3,8 @@ use lps_shared::LpsType;
 use crate::Span;
 use crate::body::{BinaryOp, UnaryOp};
 
-use super::arena::{ExprId, HirArena};
+use super::arena::ExprId;
+use super::type_table::TypedArena;
 use super::types::{BuiltinKind, HirExprKind, HirExprRef};
 
 /// A constant-folded expression, owned, ready for `HirArena::push_expr`.
@@ -43,7 +44,7 @@ pub(super) fn fold_binary(
 pub(super) fn fold_builtin_call(
     span: Span,
     kind: BuiltinKind,
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     args: &[ExprId],
     result_ty: &LpsType,
 ) -> Option<Folded> {
@@ -97,7 +98,7 @@ pub(super) fn fold_builtin_call(
 pub(super) fn fold_glsl_import_call(
     span: Span,
     name: &str,
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     args: &[ExprId],
     result_ty: &LpsType,
 ) -> Option<Folded> {
@@ -260,7 +261,7 @@ fn fold_bool_binary(
     Some(bool_literal(span, value))
 }
 
-fn float_arg(arena: &HirArena, args: &[ExprId], index: usize) -> Option<f32> {
+fn float_arg(arena: &TypedArena<'_>, args: &[ExprId], index: usize) -> Option<f32> {
     let arg = arena.expr(*args.get(index)?);
     if let HirExprKind::FloatLiteral(value) = &arg.kind {
         Some(*value)

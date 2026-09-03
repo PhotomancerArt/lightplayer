@@ -729,6 +729,11 @@ fn boot_firmware() -> FirmwareApp {
     // The chip's own permanent identity (efuse): the factory MAC and the
     // silicon revision. The server cannot derive either.
     server.set_hardware_identity(chip_identity());
+    // The board this firmware is running as, from the loaded manifest — the
+    // catalog key a card needs to re-flash or wire a new project for it.
+    server.set_board_id(Some(alloc::string::String::from(
+        hardware_registry.manifest().board_id(),
+    )));
     // The board manifest's measured LED envelope (a SOFT limit — evidence,
     // never a refusal), and the per-wire telemetry collector the heartbeat
     // polls. Both are this embedder's to provide: only it holds the manifest

@@ -331,19 +331,20 @@ fn profile_shader(input: &CompilerInput) -> Summary {
 ///   figure of the largest example.
 #[test]
 fn example_shader_compile_peaks() {
-    // Compute: meteor/sim at 58,147 B after F1 (types interned per
-    // function: 56 B `HirExpr`; 67,331 B after F9, 84,547 B after F3,
-    // 100,096 B after F4, 116,392 B before any of them, 317,600 B before
-    // #495).
-    const COMPUTE_CEILING_BYTES: usize = 80 * 1024;
+    // Compute: meteor/sim at 57,470 B after the AST stopped copying names
+    // out of the source (58,147 B after F1 — types interned per function,
+    // 56 B `HirExpr`; 67,331 B after F9, 84,547 B after F3, 100,096 B
+    // after F4, 116,392 B before any of them, 317,600 B before #495).
+    const COMPUTE_CEILING_BYTES: usize = 79 * 1024;
     // Px ceilings: measured 2026-09-02 on the whole example corpus; see the
     // planning notes (2026-09-02-0817-hir-per-node-copies-corpus) for the
     // table. Set at ~1.4× the largest example's peak, rounded up to a KB.
-    // Largest overall px peak: basic/shader.glsl at 81,362 B after F1
-    // (86,645 B after F9, 121,470 B after F3, 124,133 B after F4,
-    // 150,317 B before; frontend build-hir); largest Xtensa backend peak:
-    // fyeah-*/blast.glsl at 53,882 B (backend emit).
-    const PX_CEILING_BYTES: usize = 112 * 1024;
+    // Largest overall px peak: basic/shader.glsl at 80,331 B after the
+    // AST stopped copying names (81,362 B after F1, 86,645 B after F9,
+    // 121,470 B after F3, 124,133 B after F4, 150,317 B before; frontend
+    // build-hir); largest Xtensa backend peak: fyeah-*/blast.glsl at
+    // 53,882 B (backend emit).
+    const PX_CEILING_BYTES: usize = 110 * 1024;
     const PX_XT_CEILING_BYTES: usize = 74 * 1024;
 
     let mut rows: Vec<Summary> = Vec::new();

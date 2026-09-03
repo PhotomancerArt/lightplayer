@@ -54,6 +54,30 @@ pub struct PlaylistNode {
     /// running transition adds no per-tick heap churn (the tick-alloc rule
     /// from defect 2026-08-29-flash-write-wedges-under-zook-playback).
     crossfade_scratch: CrossfadeScratch,
+    /// The four produced-slot paths this node publishes every `produce`,
+    /// parsed once. Parsing them per frame was four `SlotPath`s built and
+    /// dropped per tick for constants.
+    published_paths: PublishedPaths,
+}
+
+/// The runtime state paths a [`PlaylistNode`] publishes each frame.
+struct PublishedPaths {
+    entry_time: SlotPath,
+    entry_progress: SlotPath,
+    active_entry: SlotPath,
+    output: SlotPath,
+}
+
+impl PublishedPaths {
+    fn new() -> Self {
+        Self {
+            entry_time: SlotPath::parse("entry_time").expect("playlist entry_time path"),
+            entry_progress: SlotPath::parse("entry_progress")
+                .expect("playlist entry_progress path"),
+            active_entry: SlotPath::parse("active_entry").expect("playlist active_entry path"),
+            output: SlotPath::parse("output").expect("playlist output path"),
+        }
+    }
 }
 
 /// The crossfade sample path's persistent blend buffer (`4 × point count`
@@ -91,6 +115,7 @@ impl PlaylistNode {
             last_seen_triggers: VecMap::new(),
             pending_activate: None,
             crossfade_scratch: CrossfadeScratch::default(),
+            published_paths: PublishedPaths::new(),
         }
     }
 
@@ -196,10 +221,10 @@ impl NodeRuntime for PlaylistNode {
         self.state
             .active_entry
             .set_with_version(ctx.revision(), self.current_entry);
-        ctx.publish_runtime_slot(&self.state, SlotPath::parse("entry_time").unwrap())?;
-        ctx.publish_runtime_slot(&self.state, SlotPath::parse("entry_progress").unwrap())?;
-        ctx.publish_runtime_slot(&self.state, SlotPath::parse("active_entry").unwrap())?;
-        ctx.publish_runtime_slot(&self.state, SlotPath::parse("output").unwrap())?;
+        ctx.publish_runtime_slot(&self.state, &self.published_paths.entry_time)?;
+        ctx.publish_runtime_slot(&self.state, &self.published_paths.entry_progress)?;
+        ctx.publish_runtime_slot(&self.state, &self.published_paths.active_entry)?;
+        ctx.publish_runtime_slot(&self.state, &self.published_paths.output)?;
 
         self.active_product = Some(resolve_entry_product(
             ctx,

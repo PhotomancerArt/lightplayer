@@ -68,5 +68,6 @@ pub use roster::{PendingLink, Roster, RosterConfig};
 pub use time::{Millis, TimerId};
 pub use view::{DeviceView, Escape, LoadedProject, RosterView};
 pub use wire::{
-    ClientFrame, ClientFrameBody, HelloFacts, LoadedProjectFacts, ServerFrame, ServerFrameBody,
+    ClientFrame, ClientFrameBody, HelloFacts, LoadedProjectFacts, ProjectFaultFacts, RecoveryFacts,
+    RecoveryLevelFacts, RecoveryPathFacts, ServerFrame, ServerFrameBody,
 };

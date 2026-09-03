@@ -196,12 +196,13 @@ mod ser_write_json_tests {
         // Bytes from firmware built before `link` / the MemoryStats
         // fragmentation fields existed: the additive fields must decode as
         // absent (the additive-FIELD rule the wire posture depends on).
-        let old = r#"{"id":0,"msg":{"heartbeat":{"fps":{"avg":60.0,"sdev":1.0,"min":58.0,"max":62.0},"frame_count":7,"loaded_projects":[],"uptime_ms":5000,"memory":{"freeBytes":1,"usedBytes":2,"totalBytes":3}}}}"#;
+        let old = r#"{"id":0,"msg":{"heartbeat":{"fps":{"avg":60.0,"sdev":1.0,"min":58.0,"max":62.0},"frame_count":7,"loaded_projects":[{"handle":1,"path":"/projects/demo"}],"uptime_ms":5000,"memory":{"freeBytes":1,"usedBytes":2,"totalBytes":3}}}}"#;
         let msg: ServerMessage = from_str(old).expect("old heartbeat decodes");
         let ServerMsgBody::Heartbeat {
             memory,
             link,
             identity,
+            loaded_projects,
             ..
         } = msg.msg
         else {
@@ -212,6 +213,133 @@ mod ser_write_json_tests {
         let memory = memory.expect("memory present");
         assert!(memory.largest_free_block.is_none());
         assert!(memory.oom_retry_saves.is_none());
+        // The fault policy's additive field: firmware that predates it says
+        // nothing, and absent must decode as "no fault reported" rather
+        // than failing the whole frame.
+        let [project] = loaded_projects.as_slice() else {
+            panic!("expected one loaded project");
+        };
+        assert!(
+            project.fault.is_none(),
+            "fault absent on pre-fault-policy frames"
+        );
+    }
+
+    #[test]
+    fn a_heartbeat_carrying_a_project_fault_decodes() {
+        // The other half of the additive guard: a fault-reporting frame
+        // decodes into the record the device card reads.
+        let json = r#"{"id":0,"msg":{"heartbeat":{"fps":{"avg":43.0,"sdev":1.0,"min":42.0,"max":44.0},"frame_count":7,"loaded_projects":[{"handle":1,"path":"/projects/meteor","fault":{"sinceMs":12000,"nodes":[{"path":"/studio.show/s","message":"recovery: node 'nodes/meteor' (disabled after 3 crashes)"}]}}],"uptime_ms":5000}}}"#;
+        let msg: ServerMessage = from_str(json).expect("fault heartbeat decodes");
+        let ServerMsgBody::Heartbeat {
+            loaded_projects, ..
+        } = msg.msg
+        else {
+            panic!("expected heartbeat");
+        };
+        let fault = loaded_projects[0]
+            .fault
+            .as_ref()
+            .expect("fault present on the reporting frame");
+        assert_eq!(fault.since_ms, 12_000);
+        assert_eq!(fault.nodes.len(), 1);
+        assert_eq!(fault.nodes[0].path, "/studio.show/s");
+        assert!(fault.nodes[0].message.contains("disabled after 3 crashes"));
+    }
+
+    #[test]
+    fn a_faulted_loaded_project_round_trips_through_ser_write_json() {
+        // The C6 writes heartbeats with ser-write-json; a fault that only
+        // survived serde_json would never reach a card.
+        let msg = ServerMessage::new(
+            0,
+            ServerMsgBody::Heartbeat {
+                fps: SampleStats {
+                    avg: 43.0,
+                    sdev: 1.0,
+                    min: 42.0,
+                    max: 44.0,
+                },
+                frame_count: 7,
+                loaded_projects: vec![LoadedProject {
+                    handle: WireProjectHandle::new(1),
+                    path: "projects/meteor".as_path_buf(),
+                    fault: Some(crate::server::ProjectFaultWire::new(
+                        12_000,
+                        [(
+                            "/studio.show/s".to_string(),
+                            "recovery: node 'nodes/meteor' (disabled after 3 crashes)".to_string(),
+                        )],
+                    )),
+                }],
+                uptime_ms: 5000,
+                memory: None,
+                recovery: None,
+                outputs: None,
+                link: None,
+                identity: None,
+            },
+        );
+
+        let json = serialize_with_ser_write_json(&msg).expect("ser-write-json serialize");
+        let decoded: ServerMessage = from_str(&json).expect("from_str(ser-write-json output)");
+        let ServerMsgBody::Heartbeat {
+            loaded_projects, ..
+        } = decoded.msg
+        else {
+            panic!("expected heartbeat");
+        };
+        let fault = loaded_projects[0].fault.as_ref().expect("fault survived");
+        assert_eq!(fault.since_ms, 12_000);
+        assert_eq!(fault.nodes[0].path, "/studio.show/s");
+    }
+
+    #[test]
+    fn a_long_fault_message_is_capped_on_a_char_boundary() {
+        // The C6 rebuilds these strings every heartbeat out of engine
+        // status text that carries no length promise.
+        let long = "é".repeat(200);
+        let fault = crate::server::ProjectFaultWire::new(
+            0,
+            core::iter::repeat_n(("/n".to_string(), long), crate::server::FAULT_NODES_CAP + 3),
+        );
+        assert_eq!(fault.nodes.len(), crate::server::FAULT_NODES_CAP);
+        for node in &fault.nodes {
+            assert!(node.message.len() <= crate::server::FAULT_MESSAGE_CAP_BYTES);
+            // A cut message SAYS it was cut (G1 bench: "exceeded 10" read as a
+            // lie for "exceeded 100000 iterations"), and what precedes the
+            // mark is valid UTF-8 whose char count is exactly half the byte
+            // count for this 2-byte char.
+            let body = node
+                .message
+                .strip_suffix('…')
+                .expect("a capped message ends in an ellipsis");
+            assert_eq!(body.chars().count() * 2, body.len());
+        }
+    }
+
+    /// The ack the device writes with its own serializer, not the host's:
+    /// `ledger_cleared` is the only thing it carries and the only thing the
+    /// client reads, so a boolean that failed to survive the firmware's
+    /// encoder would be silent.
+    #[test]
+    fn ser_write_json_clear_faults_ack_round_trips() {
+        for ledger_cleared in [true, false] {
+            let msg = ServerMessage::new(7, ServerMsgBody::ClearFaults { ledger_cleared });
+
+            let json = serialize_with_ser_write_json(&msg).expect("ser-write-json serialize");
+            let deserialized: ServerMessage = from_str(&json).expect("decode the ack");
+
+            assert_eq!(deserialized.id, 7);
+            match deserialized.msg {
+                ServerMsgBody::ClearFaults {
+                    ledger_cleared: got,
+                } => {
+                    assert_eq!(got, ledger_cleared, "{json}");
+                }
+                other => panic!("expected the ClearFaults ack, got {other:?}"),
+            }
+        }
     }
 
     #[test]
@@ -226,10 +354,10 @@ mod ser_write_json_tests {
                     max: 62.0,
                 },
                 frame_count: 1000,
-                loaded_projects: vec![LoadedProject {
-                    handle: WireProjectHandle::new(1),
-                    path: "projects/test".as_path_buf(),
-                }],
+                loaded_projects: vec![LoadedProject::new(
+                    WireProjectHandle::new(1),
+                    "projects/test".as_path_buf(),
+                )],
                 uptime_ms: 5000,
                 memory: Some(MemoryStats {
                     free_bytes: 100000,

@@ -482,6 +482,11 @@ impl ProjectController {
     }
 
     #[cfg(test)]
+    pub(crate) fn lens_device_features_for_test(&self) -> Option<&[lpc_model::LpFeature]> {
+        self.lens_device_features.as_deref()
+    }
+
+    #[cfg(test)]
     pub(crate) fn runtime_storage_id_for_test(&self) -> &str {
         &self.runtime_storage_id
     }

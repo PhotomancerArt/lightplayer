@@ -36,6 +36,13 @@ lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, feat
     "node-playlist",
     "node-clock",
     "node-shader",
+    # The resolver keeps resolved payloads across frames, as the reference
+    # target does (`fw-esp32c6` and `fw-esp32s3` enable it; only the classic
+    # `fw-esp32v3` runs decisions-only to save arena). fw-emu is the profiler's
+    # and the heap-budget gate's firmware, so it models the C6 configuration;
+    # the classic's cache-off frame cost is NOT what those figures measure.
+    # See docs/heap-budget-gate.md ("Fidelity limits").
+    "resolver-payload-cache",
 ] }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false }
 hashbrown = { workspace = true }

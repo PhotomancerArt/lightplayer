@@ -120,7 +120,10 @@ fn materialize_map_slot(
         )));
     };
 
-    let mut entries = VecMap::new();
+    // One conversion per produced item is inherent; the map's spine is not.
+    // Sized for the full array so a frame that fills every slot never grows
+    // it, and the sentinel-skipped entries just leave slack.
+    let mut entries = VecMap::with_capacity(items.len());
     for item in items.iter() {
         let key = extract_key(slot_name, key_field, key_def.value(), item)?;
         if key == SlotMapKey::U32(empty_key) {

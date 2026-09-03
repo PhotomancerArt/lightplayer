@@ -1,4 +1,4 @@
-use alloc::string::ToString;
+use alloc::borrow::Cow;
 use alloc::vec::Vec;
 
 use crate::index::StructDecl;
@@ -9,7 +9,10 @@ use super::BodyParser;
 use super::ty::token_text_is_type_name;
 
 impl<'src, 'tok> BodyParser<'src, 'tok> {
-    pub(super) fn parse_expr(&mut self, min_binding_power: u8) -> Result<ParsedExpr, Diagnostic> {
+    pub(super) fn parse_expr(
+        &mut self,
+        min_binding_power: u8,
+    ) -> Result<ParsedExpr<'src>, Diagnostic> {
         let mut lhs = self.parse_prefix()?;
         loop {
             if let Some(op) = self.current_assign_op() {
@@ -72,7 +75,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         Ok(lhs)
     }
 
-    pub(super) fn parse_prefix(&mut self) -> Result<ParsedExpr, Diagnostic> {
+    pub(super) fn parse_prefix(&mut self) -> Result<ParsedExpr<'src>, Diagnostic> {
         if self.at_punct("++") || self.at_punct("--") {
             let op_tok = self.bump();
             let op = if op_tok.lexeme(self.source) == "++" {
@@ -138,12 +141,12 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         self.parse_postfix()
     }
 
-    pub(super) fn parse_postfix(&mut self) -> Result<ParsedExpr, Diagnostic> {
+    pub(super) fn parse_postfix(&mut self) -> Result<ParsedExpr<'src>, Diagnostic> {
         let mut expr = self.parse_primary()?;
         loop {
             if self.at_punct(".") {
                 self.bump();
-                let fields = self.expect_identifier_like()?.to_string();
+                let fields = self.expect_identifier_like()?;
                 if fields == "length" && self.at_punct("(") {
                     self.bump();
                     let end = self.expect_punct(")")?.span.end;
@@ -245,7 +248,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         Ok(expr)
     }
 
-    pub(super) fn parse_primary(&mut self) -> Result<ParsedExpr, Diagnostic> {
+    pub(super) fn parse_primary(&mut self) -> Result<ParsedExpr<'src>, Diagnostic> {
         let tok = self.bump();
         match tok.kind {
             TokenKind::FloatLiteral => {
@@ -279,7 +282,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                 })
             }
             TokenKind::Identifier | TokenKind::Keyword(_) => {
-                let name = tok.lexeme(self.source).to_string();
+                let name = tok.lexeme(self.source);
                 if name == "true" || name == "false" {
                     return Ok(ParsedExpr {
                         span: tok.span,
@@ -302,7 +305,10 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                     let end = self.expect_punct(")")?.span.end;
                     return Ok(ParsedExpr {
                         span: Span::new(tok.span.start, end),
-                        kind: ParsedExprKind::Call { name, args },
+                        kind: ParsedExprKind::Call {
+                            name: Cow::Borrowed(name),
+                            args,
+                        },
                     });
                 }
                 Ok(ParsedExpr {
@@ -346,8 +352,8 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
 
     fn try_parse_array_constructor_name(
         &mut self,
-        expr: &ParsedExpr,
-    ) -> Result<Option<alloc::string::String>, Diagnostic> {
+        expr: &ParsedExpr<'src>,
+    ) -> Result<Option<Cow<'src, str>>, Diagnostic> {
         let ParsedExprKind::Name(base_name) = &expr.kind else {
             return Ok(None);
         };
@@ -355,7 +361,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             return Ok(None);
         }
         let checkpoint = self.pos;
-        let mut name = base_name.clone();
+        let mut name = alloc::string::String::from(*base_name);
         while self.at_punct("[") {
             let start = self.expect_punct("[")?.span.start;
             if !self.at_punct("]") {
@@ -373,7 +379,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             name.push_str(&self.source[start..end]);
         }
         if self.at_punct("(") {
-            Ok(Some(name))
+            Ok(Some(Cow::Owned(name)))
         } else {
             self.pos = checkpoint;
             Ok(None)
@@ -427,7 +433,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
     }
 }
 
-pub(super) fn is_assignment_target(expr: &ParsedExpr) -> bool {
+pub(super) fn is_assignment_target(expr: &ParsedExpr<'_>) -> bool {
     matches!(
         expr.kind,
         ParsedExprKind::Name(_) | ParsedExprKind::Swizzle { .. } | ParsedExprKind::Index { .. }
@@ -439,11 +445,11 @@ fn parse_i32_literal(text: &str) -> Result<i32, core::num::ParseIntError> {
         .or_else(|_| text.parse::<u32>().map(|value| value as i32))
 }
 
-pub(super) fn array_constructor_name(
-    expr: &ParsedExpr,
+pub(super) fn array_constructor_name<'src>(
+    expr: &ParsedExpr<'src>,
     source: &str,
     struct_names: &[StructDecl],
-) -> Option<alloc::string::String> {
+) -> Option<Cow<'src, str>> {
     let ParsedExprKind::Index { base, index } = &expr.kind else {
         return None;
     };
@@ -453,18 +459,18 @@ pub(super) fn array_constructor_name(
     if !token_text_is_type_name(base_name, struct_names) {
         return None;
     }
-    Some(alloc::format!(
+    Some(Cow::Owned(alloc::format!(
         "{}[{}]",
         base_name,
         index.span_text(source).trim_end_matches(['u', 'U'])
-    ))
+    )))
 }
 
 trait SpanText {
     fn span_text<'a>(&self, source: &'a str) -> &'a str;
 }
 
-impl SpanText for ParsedExpr {
+impl SpanText for ParsedExpr<'_> {
     fn span_text<'a>(&self, source: &'a str) -> &'a str {
         source.get(self.span.start..self.span.end).unwrap_or("")
     }

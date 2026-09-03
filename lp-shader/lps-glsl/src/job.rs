@@ -60,7 +60,7 @@ pub struct CompileJob<'src> {
     options: CompileOptions,
     tokens: Option<alloc::vec::Vec<crate::Token>>,
     index: Option<TopLevelIndex>,
-    bodies: Option<Vec<(String, ParsedFunctionBody)>>,
+    bodies: Option<Vec<(String, ParsedFunctionBody<'src>)>>,
     hir_job: Option<HirBuildJob<'src>>,
     hir: Option<HirModule>,
     stage: CompileStage,
