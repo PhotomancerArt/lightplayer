@@ -27,7 +27,9 @@ use lpa_studio_core::{
 };
 
 use crate::app::home::card_thumb::CardThumb;
+use crate::app::home::device_pick_popover::{BoardPickPopover, ChipSource, ProjectPickPopover};
 use crate::app::home::device_roster_card::DeviceRosterCard;
+use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
 use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
 
@@ -800,6 +802,239 @@ fn GalleryPages(
             DevicesPage { home: home.clone(), on_action }
             ProjectsPage { home: home.clone(), now_secs, on_action }
             ExplorePage { home: Some(home), on_action }
+        }
+    }
+}
+
+/// P5 (device-card-v2 plan): the terminal renderer alone, fed the shape
+/// [`Evidence::fold`] actually produces — a capped, typed, repeat-collapsed
+/// tail plus a drop count — rather than raw board chatter. `TERMINAL_CAP`
+/// in `lpa-devices` is 200; this fixture stands in for 250 raw lines
+/// having arrived (200 kept, 50 dropped), mixing every
+/// [`DeviceTerminalKind`], a single ×6 repeat, several decoded wire
+/// summaries and one 400-character line to exercise the fold control.
+#[story(
+    description = "The terminal renderer alone (P5): natural oldest-first order, typed colours, a ×6 repeat badge, a 400-char line folded to 120 chars + a click-to-expand control, wire rows tagged and coloured live-blue, and the dropped-lines notice for the 50 lines the 200-line cap pushed out. Pinned to the bottom on load."
+)]
+fn device_terminal_processed() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            article { class: "ux-armed-scope tw:flex tw:w-[340px] tw:flex-col tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-panel",
+                header { class: "tw:grid tw:min-w-0 tw:gap-1.5 tw:px-4 tw:pt-4 tw:pb-3",
+                    h3 { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground",
+                        "Terminal — processed tail"
+                    }
+                }
+                DeviceTerminal {
+                    lines: device_terminal_story_lines(),
+                    dropped: 50,
+                    height_class: "tw:h-40",
+                }
+            }
+        }
+    }
+}
+
+/// A 400-character line — long enough to trip the fold at 160 and show a
+/// realistic "the panel used to just eat this" block-plan dump.
+fn device_terminal_story_long_line() -> String {
+    let prefix = "Esp32C6RmtWs281xDriver: block plan published: outputs=[{pin:2,px:300,fmt:grb},{pin:3,px:300,fmt:grb}] clock=pll_f80m/1 lut=gamma-2.2-8bit dither=temporal-4 frame_us=23100 margin_words=3 — this is the kind of line that used to eat the panel — ";
+    let filler_len = 400_usize.saturating_sub(prefix.chars().count());
+    format!("{prefix}{}", "…".repeat(filler_len))
+}
+
+/// 200 typed lines (the model's `TERMINAL_CAP`) mixing every
+/// [`DeviceTerminalKind`], the ×6 repeat, the 400-char fold line, and a
+/// run of decoded wire heartbeats.
+fn device_terminal_story_lines() -> Vec<DeviceTerminalLine> {
+    let mut lines = vec![
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Rom,
+            text: "ESP-ROM:esp32c6-20220919".to_string(),
+            repeats: 1,
+        },
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Rom,
+            text: "Build:Sep 19 2022".to_string(),
+            repeats: 1,
+        },
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Rom,
+            text: "rst:0x1 (POWERON),boot:0x2c (SPI_FAST_FLASH_BOOT)".to_string(),
+            repeats: 1,
+        },
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Board,
+            text: "[INIT] fw-esp32 initialized, starting server loop".to_string(),
+            repeats: 1,
+        },
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Wire,
+            text: "hello · proto 1 · seeed-xiao-esp32c6 · fw 2026.09.01".to_string(),
+            repeats: 1,
+        },
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Studio,
+            text: "Sending meteor · 14 files · 38 KB".to_string(),
+            repeats: 1,
+        },
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Wire,
+            text: "ack · /projects/meteor/project.json".to_string(),
+            repeats: 1,
+        },
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Outcome,
+            text: "Sent Meteor in 2.1 s".to_string(),
+            repeats: 1,
+        },
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Board,
+            text: "Boot: auto-loaded project meteor".to_string(),
+            repeats: 1,
+        },
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Board,
+            text: device_terminal_story_long_line(),
+            repeats: 1,
+        },
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Recovery,
+            text: "Esp32OutputProvider::flush: handle=2: RMT channel busy (retrying)".to_string(),
+            repeats: 6,
+        },
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Recovery,
+            text: "[RECOVERY] node /studio.show/s: crash 2/2 (OOM at compute compile, 250 B short of 300000 B)"
+                .to_string(),
+            repeats: 1,
+        },
+        DeviceTerminalLine {
+            kind: DeviceTerminalKind::Failure,
+            text: "[RECOVERY] node /studio.show/s disabled after 2 crashes — black fallback → fault pattern"
+                .to_string(),
+            repeats: 1,
+        },
+    ];
+
+    // Fill the rest of the 200-line cap with decoded wire heartbeats, the
+    // bulk of what a running board actually says.
+    let heartbeats_needed = 200_usize.saturating_sub(lines.len());
+    for index in 0..heartbeats_needed {
+        lines.push(DeviceTerminalLine {
+            kind: DeviceTerminalKind::Wire,
+            text: format!(
+                "heartbeat · 43 fps · heap {} KB · meteor · up {} s",
+                110 - (index % 8),
+                41 + index * 5
+            ),
+            repeats: 1,
+        });
+    }
+
+    lines
+}
+
+/// The empty face's card, as a board with a real catalog id and a library
+/// big enough to have made the old inline picker taller than the card
+/// (P6's whole reason for existing).
+fn pick_popover_card() -> DeviceView {
+    let mut card = roster_fixture().roster.devices.remove(3);
+    // A catalogued board id, so the New tab has its starter card to show
+    // rather than the "can't tell which board this is" reason.
+    card.board_id = Some("seeed/xiao-esp32-c6".to_string());
+    card
+}
+
+/// Forty saved projects: the library size the inline picker could not hold.
+fn pick_popover_library() -> Vec<UiPackageCard> {
+    let names = [
+        "porch-sign",
+        "meteor",
+        "shelf-glow",
+        "kitchen-strip",
+        "dome-test",
+        "logo-sign",
+        "aurora",
+        "candle",
+        "spiral",
+        "rainfall",
+    ];
+    (0..40)
+        .map(|index| UiPackageCard {
+            uid: format!("prj{index:022}"),
+            kind: "Module".to_string(),
+            project_kind: "General".to_string(),
+            exports: Vec::new(),
+            slug: format!(
+                "2026-08-{:02}-{:04}-{}",
+                (index % 28) + 1,
+                900 + index * 7,
+                names[index as usize % names.len()],
+            ),
+            last_saved_at: Some(STORY_NOW - f64::from(index) * 3600.0),
+            provenance: None,
+            on_device: None,
+            open_elsewhere: false,
+            running_in_sim: false,
+            target: None,
+            health: PackageHealth::Ready,
+        })
+        .collect()
+}
+
+/// Six bundled examples, so the Examples tab is a grid rather than a row.
+fn pick_popover_examples() -> Vec<UiExampleCard> {
+    [
+        "Basic",
+        "Meteor",
+        "Plasma",
+        "Rainbow",
+        "Logo sign",
+        "Candle",
+    ]
+    .into_iter()
+    .map(|name| UiExampleCard {
+        id: format!("examples/{}", name.to_lowercase().replace(' ', "-")),
+        name: name.to_string(),
+        kind: "Module".to_string(),
+    })
+    .collect()
+}
+
+#[story(
+    description = "The gallery pick popover, open (P6, AC8). The card's verb row holds ONE 30px control — the trigger — and the options live in a panel in the browser's top layer, so a library of forty projects can no longer make the card taller than the viewport (the reflow rule, AC2). Tabs are the three sources core's push_offer already groups, with their counts; the search box filters titles client-side; the cards are the gallery's own thumbs with their provenance, and a picked one wears the app-wide selection grammar (spectrum ring + wash + check). Picking closes the panel and updates the trigger — nothing is journaled until the CTA beside it dispatches the Push."
+)]
+fn device_pick_popover_open() -> Element {
+    rsx! {
+        section { class: "tw:min-h-[520px] tw:w-[420px] tw:p-4",
+            div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
+                ProjectPickPopover {
+                    card: pick_popover_card(),
+                    projects: pick_popover_library(),
+                    examples: pick_popover_examples(),
+                    initially_open: true,
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The board pick popover, open and filtered (P6, AC4). The chip the boot banner named narrows the served catalog, and the panel SAYS so — which chip, which source answered it, how many boards fit — with \"show all\" as the escape; the flash preflight's chip guard, not the filter, is what makes a wrong pick fail safely, which is what the foot line is for. Each tile carries the board's name, its manufacturer and flash, and its family, marked green only where it matches the detected chip. Two C6 boards fit, so nothing is preselected and the Flash verb waits: the pin map is written to the device, so the card never guesses."
+)]
+fn device_board_pick_open() -> Element {
+    rsx! {
+        section { class: "tw:min-h-[420px] tw:w-[420px] tw:p-4",
+            div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
+                BoardPickPopover {
+                    device: DeviceId(3),
+                    chip: Some(("esp32c6".to_string(), ChipSource::BootBanner)),
+                    initially_open: true,
+                    on_action: |_| {},
+                }
+            }
         }
     }
 }

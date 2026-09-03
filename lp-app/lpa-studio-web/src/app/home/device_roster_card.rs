@@ -52,12 +52,20 @@
 //!
 //! # Where the verbs live (AC6)
 //!
-//! - **The verb row** holds the project verbs: `Open` and `Clear faults` on a
-//!   running board, `Remove project` on the right; the picker trigger plus
-//!   one CTA on the empty and needs-firmware faces. During an activity it is
-//!   empty at its height — the escape is the footer's.
-//! - **The footer** holds the device verbs: every escape the DTO carries,
-//!   then `Reset`, `Flash firmware` (the re-flash, #500) and `Factory reset`.
+//! - **The verb row** holds every verb that can need a PICKER, plus the
+//!   project verbs: `Open`, `Clear faults` and the re-flash `Flash firmware`
+//!   on a running board, `Remove project` on the right; the picker trigger
+//!   plus one CTA on the empty and needs-firmware faces. During an activity
+//!   it is empty at its height — the escape is the footer's.
+//! - **The footer** holds the device verbs that never ask anything: every
+//!   escape the DTO carries, then `Reset`, `Factory reset` and `Forget`.
+//!
+//! The re-flash verb came UP out of the footer (P6) for one reason: on a
+//! chip with several fitting boards it has to ask which, and a picker may
+//! only open from the verb row — a panel under the footer would change the
+//! card's height, which AC2 forbids. Its unresolved case is therefore the
+//! same chip re-dressed as [`BoardPickPopover`]'s trigger, and picking a
+//! board flashes it.
 //!
 //! Arming any destructive chip marks the whole card (`.ux-armed-scope:has()`
 //! in style.css, D8). Arming dims what the card SAYS (`ux-armed-dim` on the
@@ -77,13 +85,16 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceAction, DeviceActivityView, DeviceEscape, DeviceLoadedProject, DevicePushOp,
-    DeviceStatus, DeviceView, DevicesOp, PendingLinkView, UiAction, UiExampleCard, UiPackageCard,
-    UiStatus, device_chip, device_escape_action, device_identity_line, device_status_kind,
-    flash_offer, flash_offer_for, pending_escape_action, push_offer, reflash_choice,
+    DeviceAction, DeviceActivityView, DeviceEscape, DeviceLoadedProject, DeviceStatus, DeviceView,
+    DevicesOp, PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiStatus, device_chip,
+    device_escape_action, device_identity_line, device_status_kind, pending_escape_action,
+    reflash_choice,
 };
 
-use crate::core::quiet_action_class;
+use super::device_pick_popover::{
+    BoardPickMode, BoardPickPopover, ChipSource, ProjectPickPopover, joined_chip,
+};
+use super::device_terminal::DeviceTerminal;
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip};
 
 /// One device card.
@@ -141,18 +152,17 @@ pub(crate) fn DeviceRosterCard(
     // verb. Safe on a live board: the Flash activity parks a native-USB
     // chip in its ROM downloader first, and the merged image ends before
     // the lpfs partition, so the project and the efuse identity survive.
+    let chip = joined_chip(&card);
     let reflash = reflash_choice(device_chip(&card).as_deref(), card.board_id.as_deref());
     // When the pick does NOT resolve (a chip with several boards and no
     // registered one — every board flashed before the hello carried its
-    // board id), the verb opens the board picker IN THE VERB ROW instead of
-    // guessing. The verb row is the only place a picker may appear: it is a
-    // fixed 30px, so opening one cannot change the card's height. Local UI
-    // state — nothing the model needs to know until a board is picked.
-    let mut reflash_picker_open = use_signal(|| false);
+    // board id), the SAME quiet chip becomes the board popover's trigger
+    // instead of guessing, and picking a board flashes it. The popover's
+    // panel floats in the top layer, so opening it cannot change the card's
+    // height — which is why the verb could come up out of the footer at all.
     let offer_reflash_picker = reflash.is_none()
-        && card.detected_chip.is_some()
+        && chip.is_some()
         && matches!(card.status, DeviceStatus::Ready | DeviceStatus::Degraded);
-    let reflash_picking = offer_reflash_picker && idle && linked && reflash_picker_open();
     // The running face's ONE Primary: Open — the editor as a lens on this
     // board. Opening is NAVIGATION, so it is a real `<a>` to the device
     // route (the same road the project cards take): a plain click rides the
@@ -242,10 +252,10 @@ pub(crate) fn DeviceRosterCard(
                     if card.activity.is_some() {
                         // D9: the row is kept at its height and withdrawn.
                         // Cancel is the footer's escape.
-                    } else if offer_flash || reflash_picking {
-                        BoardPickRow { card: card.clone(), on_action }
+                    } else if offer_flash {
+                        BoardPickPopover { device, chip: chip.clone(), on_action }
                     } else if offer_push {
-                        ProjectPickRow { card: card.clone(), projects, examples, on_action }
+                        ProjectPickPopover { card: card.clone(), projects, examples, on_action }
                     } else {
                         if let Some(href) = open_href.clone() {
                             a {
@@ -264,6 +274,38 @@ pub(crate) fn DeviceRosterCard(
                                 action: DevicesOp::action_for(DeviceAction::ClearFaults { device }),
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
+                        }
+                        // Re-flash (#500) lives HERE, not in the footer: it
+                        // is the one device verb that needs a picker, and
+                        // the verb row is the only place a picker may
+                        // appear. A resolved pick dispatches Flash straight
+                        // away; an unresolved one turns the same chip into
+                        // the board popover's trigger.
+                        if let Some(choice) = reflash.clone()
+                            && idle
+                            && linked
+                            && !offer_flash
+                        {
+                            ActionButton {
+                                key: "{\"flash-firmware\"}",
+                                action: DevicesOp::action_for(DeviceAction::Flash {
+                                    device,
+                                    board_id: choice.board_id.clone(),
+                                    build_id: choice.build_id.clone(),
+                                    park_first: choice.park_first,
+                                }),
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
+                        }
+                        if offer_reflash_picker && idle && linked && !offer_flash {
+                            BoardPickPopover {
+                                device,
+                                chip: chip.clone(),
+                                mode: BoardPickMode::Verb,
                                 on_action,
                             }
                         }
@@ -290,13 +332,10 @@ pub(crate) fn DeviceRosterCard(
             // comes and goes is a panel that resizes the card, which is the
             // churn the fixed rows exist to stop.
             if linked {
-                // P1 typed the model's terminal lines (kind, text, repeats);
-                // rendering the type richly (colour, repeat badges,
-                // wire-frame decoding) is P5 — for now the panel reads only
-                // the text, same as before.
-                TerminalPanel {
-                    lines: card.terminal.iter().map(|line| line.text.clone()).collect(),
-                    height: "tw:h-40",
+                DeviceTerminal {
+                    lines: card.terminal.clone(),
+                    dropped: card.terminal_dropped,
+                    height_class: "tw:h-40",
                 }
             }
 
@@ -317,6 +356,10 @@ pub(crate) fn DeviceRosterCard(
                         on_action,
                     }
                 }
+                // The two device verbs that never ask a question. The
+                // re-flash, which does, moved up into the verb row (P6) —
+                // its picker could not open from here without changing the
+                // card's height.
                 if idle && linked {
                     ActionButton {
                         key: "{\"reset-board\"}",
@@ -326,41 +369,6 @@ pub(crate) fn DeviceRosterCard(
                         on_action,
                     }
                 }
-                // Flash the served firmware over a running board. Offered
-                // only when the pick resolves without asking (see `reflash`);
-                // a board with no resolvable pick gets the picker in the
-                // VERB ROW, never a guess and never a panel below the
-                // footer (which would change the card's height).
-                if let Some(choice) = reflash.clone()
-                    && idle
-                    && linked
-                    && !offer_flash
-                {
-                    ActionButton {
-                        key: "{\"flash-firmware\"}",
-                        action: DevicesOp::action_for(DeviceAction::Flash {
-                            device,
-                            board_id: choice.board_id.clone(),
-                            build_id: choice.build_id.clone(),
-                            park_first: choice.park_first,
-                        }),
-                        running: false,
-                        variant: ActionButtonVariant::Quiet,
-                        on_action,
-                    }
-                }
-                if offer_reflash_picker && idle && linked && !offer_flash {
-                    button {
-                        class: quiet_action_class(),
-                        r#type: "button",
-                        title: "Write the firmware this Studio serves onto the board; the project and identity stay.",
-                        onclick: move |_| {
-                            let open = reflash_picker_open();
-                            reflash_picker_open.set(!open);
-                        },
-                        if reflash_picker_open() { "Cancel flash" } else { "Flash firmware" }
-                    }
-                }
                 if idle && linked {
                     ActionButton {
                         key: "{\"factory-reset\"}",
@@ -368,44 +376,6 @@ pub(crate) fn DeviceRosterCard(
                         running: false,
                         variant: ActionButtonVariant::Quiet,
                         on_action,
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// The terminal zone: what the board said and what Studio did to it.
-///
-/// Deliberately dumb and deliberately FIXED-HEIGHT. It renders the fold's
-/// own tail verbatim, and its height never depends on how much there is —
-/// an empty board and a mid-flash board occupy exactly the same space,
-/// which is what keeps the card still while an activity runs.
-///
-/// The lines are rendered NEWEST FIRST into a `column-reverse` box, which
-/// paints them oldest-top / newest-bottom and pins the scroll to the bottom
-/// on its own. That is the whole reason for the reversal: a live log that
-/// showed its first ten lines forever would answer the wrong question, and
-/// scrolling it from here would mean owning scroll state the card has no
-/// business keeping.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn TerminalPanel(
-    lines: Vec<String>,
-    /// The panel's fixed height class — `tw:h-40` on a device card, the
-    /// shorter `tw:h-24` on a pending link, which has far less to say.
-    height: &'static str,
-) -> Element {
-    rsx! {
-        section { class: zone_class(false),
-            div { class: "ux-armed-dim tw:grid tw:min-w-0",
-                div { class: "{terminal_class()} {height}",
-                    if lines.is_empty() {
-                        p { class: "tw:m-0 tw:opacity-60", "Nothing from this board yet." }
-                    } else {
-                        for (index , line) in lines.iter().enumerate().rev() {
-                            p { key: "{index}", class: "tw:m-0 tw:whitespace-pre-wrap tw:break-all", "{line}" }
-                        }
                     }
                 }
             }
@@ -474,7 +444,17 @@ pub(crate) fn PendingLinkCard(
                 }
                 div { class: verb_row_class(),
                     if pending.needs_firmware {
-                        PendingBoardPickRow { pending: pending.clone(), on_action }
+                        // The same popover the device card's firmware face
+                        // wears: a blank chip's only chip fact is its ROM
+                        // boot banner.
+                        BoardPickPopover {
+                            device: pending.device,
+                            chip: pending
+                                .detected_chip
+                                .clone()
+                                .map(|chip| (chip, ChipSource::BootBanner)),
+                            on_action,
+                        }
                     } else if pending.can_adopt {
                         // A blank chip may never identify itself, so a user
                         // gesture must be able to keep it. On a
@@ -490,7 +470,7 @@ pub(crate) fn PendingLinkCard(
                 }
             }
 
-            TerminalPanel { lines: Vec::new(), height: "tw:h-24" }
+            DeviceTerminal { lines: Vec::new(), dropped: 0, height_class: "tw:h-24" }
 
             footer { class: actions_zone_class(),
                 for escape in pending.escapes.iter().copied() {
@@ -520,201 +500,13 @@ pub(crate) fn PendingLinkCard(
     }
 }
 
-/// The needs-firmware verb row: the board pick + ONE primary verb, on one
-/// 30px line.
-///
-/// The pick is ephemeral UI state; picking journals nothing. The decision is
-/// journaled by the Flash ACTION it parameterizes — board id and resolved
-/// build id ride the gesture into the model, and there is no wizard state
-/// anywhere (the card ruling).
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn BoardPickRow(card: DeviceView, on_action: EventHandler<UiAction>) -> Element {
-    let device = card.id;
-    let offer = flash_offer_for(&card);
-
-    if let Some(unavailable) = offer.unavailable {
-        return rsx! {
-            p { class: row_note_class(), title: "{unavailable}", "{unavailable}" }
-        };
-    }
-
-    let choice = offer.preselect.as_deref().and_then(|id| {
-        offer
-            .candidates
-            .iter()
-            .find(|candidate| candidate.board_id == id)
-            .cloned()
-    });
-
-    rsx! {
-        PickerTrigger {
-            label: choice
-                .as_ref()
-                .map(|choice| choice.title.clone())
-                .unwrap_or_else(|| format!("{} boards fit", offer.candidates.len())),
-            hint: "Picking a board is the gallery popover — landing next.".to_string(),
-        }
-        match choice {
-            Some(choice) => rsx! {
-                RowCta {
-                    action: DevicesOp::action_for(DeviceAction::Flash {
-                        device,
-                        board_id: choice.board_id.clone(),
-                        build_id: choice.build_id.clone(),
-                        park_first: choice.park_first,
-                    }),
-                    on_action,
-                }
-            },
-            // No pick resolved (several candidates): the verb waits,
-            // honestly disabled, rather than guessing a board — the pin map
-            // is written to the device.
-            None => rsx! {
-                RowCtaDisabled {
-                    label: "Flash firmware".to_string(),
-                    hint: "Pick the board first — the pin map is written to the device.".to_string(),
-                }
-            },
-        }
-    }
-}
-
-/// The same row on a pending link, whose verdict settled at needs-firmware:
-/// flashing it is the gesture that adopts it.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PendingBoardPickRow(pending: PendingLinkView, on_action: EventHandler<UiAction>) -> Element {
-    let device = pending.device;
-    let offer = flash_offer(pending.detected_chip.as_deref());
-
-    if let Some(unavailable) = offer.unavailable {
-        return rsx! {
-            p { class: row_note_class(), title: "{unavailable}", "{unavailable}" }
-        };
-    }
-
-    let choice = offer.preselect.as_deref().and_then(|id| {
-        offer
-            .candidates
-            .iter()
-            .find(|candidate| candidate.board_id == id)
-            .cloned()
-    });
-
-    rsx! {
-        PickerTrigger {
-            label: choice
-                .as_ref()
-                .map(|choice| choice.title.clone())
-                .unwrap_or_else(|| format!("{} boards fit", offer.candidates.len())),
-            hint: "Picking a board is the gallery popover — landing next.".to_string(),
-        }
-        match choice {
-            Some(choice) => rsx! {
-                RowCta {
-                    action: DevicesOp::action_for(DeviceAction::Flash {
-                        device,
-                        board_id: choice.board_id.clone(),
-                        build_id: choice.build_id.clone(),
-                        park_first: choice.park_first,
-                    }),
-                    on_action,
-                }
-            },
-            None => rsx! {
-                RowCtaDisabled {
-                    label: "Flash firmware".to_string(),
-                    hint: "Pick the board first — the pin map is written to the device.".to_string(),
-                }
-            },
-        }
-    }
-}
-
-/// The empty face's verb row: the project pick + ONE primary verb.
-///
-/// The pick is ephemeral UI state, exactly like the board pick: nothing is
-/// journaled until the verb is pressed, and the op it dispatches carries the
-/// chosen source. A retry after a failure is the same row, still here, still
-/// picked — which is what "in place" means.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProjectPickRow(
-    card: DeviceView,
-    projects: Vec<UiPackageCard>,
-    examples: Vec<UiExampleCard>,
-    on_action: EventHandler<UiAction>,
-) -> Element {
-    let device = card.id;
-    let offer = push_offer(&card, &projects, &examples);
-
-    if let Some(unavailable) = offer.unavailable {
-        return rsx! {
-            p { class: row_note_class(), title: "{unavailable}", "{unavailable}" }
-        };
-    }
-
-    let chosen = offer.preselect.as_deref().and_then(|key| {
-        offer
-            .choices
-            .iter()
-            .find(|choice| choice.key == key)
-            .cloned()
-    });
-
-    rsx! {
-        PickerTrigger {
-            label: chosen
-                .as_ref()
-                .map(|choice| format!("{} · {}", choice.group.label(), choice.title))
-                .unwrap_or_else(|| format!("{} to choose from", offer.choices.len())),
-            hint: "Picking a project is the gallery popover — landing next.".to_string(),
-        }
-        match chosen.map(|choice| choice.source) {
-            Some(source) => rsx! {
-                RowCta { action: DevicePushOp::action_for(device, source.clone()), on_action }
-            },
-            None => rsx! {
-                RowCtaDisabled {
-                    label: "Put it on the board".to_string(),
-                    hint: "Pick what to put on the board first.".to_string(),
-                }
-            },
-        }
-    }
-}
-
-/// The picker TRIGGER, standing in for the gallery popover until it lands.
-///
-/// It shows the pick the offer resolved (or how many there are to choose
-/// from) and says outright that choosing is not wired yet, rather than
-/// pretending: a control that looks live and does nothing is worse than one
-/// that says so. Its shape — a bordered chip with a truncating label and a
-/// caret, filling the row's free width — is the shape the popover's trigger
-/// keeps, so wiring it changes behaviour and not layout.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PickerTrigger(label: String, hint: String) -> Element {
-    rsx! {
-        button {
-            class: picker_trigger_class(),
-            r#type: "button",
-            disabled: true,
-            title: "{hint}",
-            span { class: "tw:min-w-0 tw:truncate", "{label}" }
-            span { class: "tw:flex-none tw:opacity-60", "▾" }
-        }
-    }
-}
-
 /// The verb row's Primary: the same standing spectrum ring the running
 /// face's Open wears, sized to the fixed 30px row. It reads its label and
 /// its explanation off the action's own meta, so the action model stays the
 /// single source for both.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn RowCta(action: UiAction, on_action: EventHandler<UiAction>) -> Element {
+pub(super) fn RowCta(action: UiAction, on_action: EventHandler<UiAction>) -> Element {
     let meta = action.meta().clone();
     let dispatch = action.clone();
 
@@ -733,7 +525,7 @@ fn RowCta(action: UiAction, on_action: EventHandler<UiAction>) -> Element {
 /// the button says what it is waiting for instead of guessing.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn RowCtaDisabled(label: String, hint: String) -> Element {
+pub(super) fn RowCtaDisabled(label: String, hint: String) -> Element {
     rsx! {
         button {
             class: row_cta_disabled_class(),
@@ -817,7 +609,7 @@ fn preview_sentence(card: &DeviceView) -> String {
 /// `ux-armed-scope`: the card is the blast radius of its own armed
 /// destructive chips — `:has(.ux-armed)` marks it (style.css).
 fn card_class() -> &'static str {
-    "ux-armed-scope tw:flex tw:flex-col tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-panel"
+    "ux-armed-scope tw:flex tw:flex-col tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card"
 }
 
 /// One zone (D3): its own horizontal padding, and — for every zone but the
@@ -861,7 +653,7 @@ fn fault_line_class() -> &'static str {
 /// either way, which is the point.
 fn progress_slot_class(lit: bool) -> &'static str {
     if lit {
-        "tw:h-1 tw:overflow-hidden tw:rounded-pill tw:bg-subtle-bg"
+        "tw:h-1 tw:overflow-hidden tw:rounded-pill tw:bg-card-subtle"
     } else {
         "tw:h-1 tw:overflow-hidden tw:rounded-pill tw:bg-transparent"
     }
@@ -871,9 +663,9 @@ fn progress_slot_class(lit: bool) -> &'static str {
 /// an activity that cannot say how far along it is.
 fn progress_fill_class(percent: Option<u8>) -> &'static str {
     match percent {
-        Some(_) => "tw:h-full tw:rounded-pill tw:bg-accent",
+        Some(_) => "tw:h-full tw:rounded-pill tw:bg-status-working-foreground",
         None => {
-            "tw:h-full tw:w-[35%] tw:rounded-pill tw:bg-accent [animation:ux-progress-sweep_1.2s_ease-in-out_infinite]"
+            "tw:h-full tw:w-[35%] tw:rounded-pill tw:bg-status-working-foreground [animation:ux-progress-sweep_1.2s_ease-in-out_infinite]"
         }
     }
 }
@@ -925,24 +717,9 @@ fn row_cta_disabled_class() -> &'static str {
     "tw:inline-flex tw:h-[26px] tw:flex-none tw:cursor-not-allowed tw:items-center tw:rounded-md tw:border tw:border-border tw:bg-transparent tw:px-3 tw:text-xs tw:font-semibold tw:text-subtle-foreground tw:opacity-60"
 }
 
-/// The picker trigger's chip: takes the row's free width, truncates its
-/// label, and keeps the caret that says it opens something.
-fn picker_trigger_class() -> &'static str {
-    "tw:inline-flex tw:h-[26px] tw:min-w-0 tw:flex-1 tw:cursor-not-allowed tw:items-center tw:gap-1.5 tw:rounded-md tw:border tw:border-border tw:bg-transparent tw:px-2 tw:text-xs tw:font-semibold tw:text-muted-foreground tw:opacity-70"
-}
-
 /// A pick row with nothing to offer says why, on the row's one line.
-fn row_note_class() -> &'static str {
+pub(super) fn row_note_class() -> &'static str {
     "tw:m-0 tw:min-w-0 tw:flex-1 tw:truncate tw:text-xs tw:leading-[30px] tw:text-subtle-foreground"
-}
-
-/// The terminal panel itself. A fixed height with `overflow-y-auto` is what
-/// makes the box immune to its own contents, and `flex-col-reverse` is what
-/// keeps it showing the newest line — see [`TerminalPanel`] for why the rows
-/// are fed in reverse. The height class is the caller's (device cards get
-/// `h-40`, pending links `h-24`).
-fn terminal_class() -> &'static str {
-    "tw:flex tw:flex-col-reverse tw:overflow-y-auto tw:overflow-x-hidden tw:rounded-md tw:border tw:border-border tw:bg-subtle-bg tw:px-2 tw:py-1.5 tw:font-mono tw:text-[0.68rem] tw:leading-[1.35] tw:text-subtle-foreground"
 }
 
 fn mono_line_class() -> &'static str {
