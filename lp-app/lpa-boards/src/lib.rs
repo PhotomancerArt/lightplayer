@@ -47,6 +47,6 @@ pub use firmware_join::{
     compatible_builds_for, feature_summary, is_served, no_build_reason, no_build_reason_for,
     node_kind_label, provisioning_build, provisioning_build_id, served_build_ids,
 };
-pub use geometry::{DiagramMode, DiagramOptions, PinSwatch, WiredConnection};
+pub use geometry::{DiagramMode, DiagramOptions, PinSwatch, WiredConnection, fit_scale};
 pub use runtime_manifests::{RUNTIME_MANIFEST_SOURCES, runtime_manifest_json};
 pub use usb_bridge::{DriverGuidance, DriverNeedLevel, HostOs, UsbBridge};

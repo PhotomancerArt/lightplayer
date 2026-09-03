@@ -41,6 +41,27 @@
 //! flash preflight's chip guard is what makes a wrong pick fail safely, and
 //! offers the way back. The filter is convenience; the guard is the safety.
 //!
+//! # The board's own picture (P10)
+//!
+//! A board tile used to be three lines of text, which asked the user to pick
+//! hardware by reading part numbers — the one thing they cannot check against
+//! the thing in their hand. `lpa-boards` already draws every catalog board
+//! from its display sidecar (the boards page shows the same drawings full
+//! size), so the tile leads with that drawing and the trigger's swatch
+//! carries the picked board's. The rendering is the same one metadata source
+//! and the same renderer: nothing here is hand-drawn or board-specific.
+//!
+//! Boards are portrait and differ in height by three to one, so the tiles ask
+//! [`BoardDiagram`] to FIT a box rather than passing a scale — one multiplier
+//! would make the S3 devkit three times the XIAO. They also ask for it TURNED:
+//! a devkit standing upright in a 145px band is a 20px sliver in a field of
+//! air, and on its side the same board fills the band, so the drawing is the
+//! tile's face rather than a mark on it. The quinled pair are nearly square
+//! and gain nothing from the turn; they are turned anyway, because one
+//! orientation across the grid beats a few pixels on two tiles. Labels are
+//! off: pin names at this size would be a grey smear (and would be sideways),
+//! and the pick is between silhouettes.
+//!
 //! # Keyboard
 //!
 //! [`PopoverButton`] gives Escape-to-close, a dismissing backdrop, and focus
@@ -48,6 +69,7 @@
 //! panel — noted as a follow-up, deliberately outside P6's scope.
 
 use dioxus::prelude::*;
+use lpa_boards::{BoardDiagram, DiagramMode};
 use lpa_studio_core::{
     DeviceAction, DeviceId, DevicePushOp, DeviceView, DevicesOp, FlashBoardChoice, PreviewSource,
     PushOffer, PushSource, PushSourceChoice, PushSourceGroup, UiAction, UiExampleCard,
@@ -526,7 +548,9 @@ pub(crate) fn BoardPickPopover(
                     class: pick_trigger_class().to_string(),
                     open_class: pick_trigger_class().to_string(),
                     trigger: rsx! {
-                        span { class: board_swatch_class(), aria_hidden: "true" }
+                        BoardSwatch {
+                            board_id: chosen.as_ref().map(|choice| choice.board_id.clone()),
+                        }
                         span { class: trigger_label_class(), "{board_trigger_label(&chosen, offer.candidates.len())}" }
                         if let Some(family) = chosen.as_ref().and_then(|choice| board_family(&choice.board_id)) {
                             span { class: trigger_tag_class(), "{family}" }
@@ -623,6 +647,7 @@ fn BoardPickPanel(
                                             StudioIcon { name: StudioIconName::StepComplete, size: 10 }
                                         }
                                     }
+                                    BoardFigure { board_id: candidate.board_id.clone() }
                                     span { class: board_tile_title_class(), "{candidate.title}" }
                                     span { class: board_tile_sub_class(), "{candidate.blurb}" }
                                     if let Some(family) = family {
@@ -775,6 +800,57 @@ fn ProjectSwatch(seed: String, poster: Option<String>) -> Element {
     }
 }
 
+/// The tile's face: the board as `lpa-boards` draws it, fitted to the tile's
+/// figure band.
+///
+/// A board the catalog cannot draw still gets a tile — the flash offer is
+/// built from the firmware join, not from the display sidecars, so the two
+/// lists could in principle disagree — and the band holds its place empty
+/// rather than collapsing, which would make one tile shorter than its
+/// neighbours for a reason the user cannot see.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn BoardFigure(board_id: String) -> Element {
+    rsx! {
+        span { class: board_figure_class(), aria_hidden: "true",
+            if let Some(board) = lpa_boards::board_by_id(&board_id) {
+                BoardDiagram {
+                    board: board.clone(),
+                    mode: DiagramMode::Plain,
+                    labels: false,
+                    landscape: true,
+                    fit: (BOARD_FIGURE_W, BOARD_FIGURE_H),
+                }
+            }
+        }
+    }
+}
+
+/// The board pick's swatch on the trigger: the picked board at the project
+/// swatch's own 22×16, on the raised chip that stands in for it before a
+/// pick is made. Turned like the tiles, so the board lies along the swatch's
+/// long axis instead of standing as a 5px thread down it: what the swatch
+/// carries is the silhouette — a long devkit against a stub of a XIAO — with
+/// the trigger's label there for the name.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn BoardSwatch(board_id: Option<String>) -> Element {
+    let board = board_id.as_deref().and_then(lpa_boards::board_by_id);
+    rsx! {
+        span { class: board_swatch_class(), aria_hidden: "true",
+            if let Some(board) = board {
+                BoardDiagram {
+                    board: board.clone(),
+                    mode: DiagramMode::Plain,
+                    labels: false,
+                    landscape: true,
+                    fit: (BOARD_SWATCH_W, BOARD_SWATCH_H),
+                }
+            }
+        }
+    }
+}
+
 /// The verb row's slot for a picker trigger: a GRID so [`PopoverButton`]'s
 /// own inline-grid wrapper stretches into it, and `flex-1` so the trigger
 /// takes the row's free width while the CTA keeps its own. (The palette
@@ -804,11 +880,33 @@ fn trigger_caret_class() -> &'static str {
     "tw:flex-none tw:text-[10px] tw:text-subtle-foreground"
 }
 
-/// The board pick's swatch: no picture exists for a board, so it is the
-/// raised chip the spike drew rather than a fake thumb.
+/// The board pick's swatch: the spike's raised chip, now a FRAME the picked
+/// board is drawn inside (`place-items-center`, so an unpicked trigger is the
+/// bare chip and nothing shifts when a pick fills it).
 fn board_swatch_class() -> &'static str {
-    "tw:block tw:h-4 tw:w-[22px] tw:flex-none tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-raised-strong"
+    "tw:grid tw:h-4 tw:w-[22px] tw:flex-none tw:place-items-center tw:overflow-hidden tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-raised-strong"
 }
+
+/// The swatch's drawing box, inside its 22×16 chip and its 1px border.
+const BOARD_SWATCH_W: f32 = 20.0;
+const BOARD_SWATCH_H: f32 = 14.0;
+
+/// The tile's figure band: 56px, the project pick cards' own thumb height, on
+/// the terminal ground the boards page draws its figures on. A FIXED height,
+/// so eight boards that differ three to one in drawing height still line their
+/// names up on one row — and, with the boards turned on their side, one the
+/// drawing fills rather than rattles around in.
+fn board_figure_class() -> &'static str {
+    "tw:mb-1 tw:grid tw:h-14 tw:min-w-0 tw:place-items-center tw:overflow-hidden tw:rounded-xs tw:bg-terminal"
+}
+
+/// The figure band's drawing box: the NARROWEST tile the grid can make (its
+/// 150px minimum, less the border and `p-2`) rather than the one the 520px
+/// panel usually gives, because the band clips and a wider box would crop the
+/// board's ends at a viewport-clamped width. With the drawing turned it is
+/// the width that binds for every board but the near-square quinled pair.
+const BOARD_FIGURE_W: f32 = 132.0;
+const BOARD_FIGURE_H: f32 = 56.0;
 
 /// The gallery panel: the spike's 520px, never past the viewport.
 ///
@@ -820,9 +918,11 @@ fn board_swatch_class() -> &'static str {
 /// `overflow-hidden` clips the sentence in half.
 const GALLERY_POPUP_CLASS: &str = "tw:grid tw:w-[520px] tw:max-w-[calc(100vw-80px)] tw:min-w-0 tw:overflow-hidden tw:whitespace-normal tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 
-/// The board panel: narrower, because a board tile is text only. Same
-/// `whitespace-normal` reset as the gallery, for the same inherited reason.
-const BOARD_POPUP_CLASS: &str = "tw:grid tw:w-[440px] tw:max-w-[calc(100vw-80px)] tw:min-w-0 tw:overflow-hidden tw:whitespace-normal tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
+/// The board panel: the gallery's own 520px since the tiles carry drawings
+/// (at 440 the grid fell to two columns, so the eight served boards of
+/// show-all became a four-row scroll). Same `whitespace-normal` reset as the
+/// gallery, for the same inherited reason.
+const BOARD_POPUP_CLASS: &str = "tw:grid tw:w-[520px] tw:max-w-[calc(100vw-80px)] tw:min-w-0 tw:overflow-hidden tw:whitespace-normal tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 
 fn panel_top_class() -> &'static str {
     "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:border-b tw:border-border-muted tw:px-2.5 tw:py-2"
@@ -1029,6 +1129,30 @@ mod tests {
             assert!(!plain.contains("tw:bg-selection-bg"), "{plain}");
         }
         assert!(OPTION_CARD_CHECK_CLASS.contains("tw:absolute"));
+    }
+
+    /// Every board the flash offer can put on a tile is one the catalog can
+    /// DRAW, and both drawing boxes fit inside the frames that hold them —
+    /// the figure band is a fixed height, so the tiles' names stay on one row
+    /// however tall the board is.
+    #[test]
+    fn every_offered_board_has_a_drawing_that_fits_its_frame() {
+        let offered = flash_offer(None).candidates;
+        assert!(offered.len() > 1, "the catalog serves several boards");
+        for candidate in &offered {
+            assert!(
+                lpa_boards::board_by_id(&candidate.board_id).is_some(),
+                "{} has no display sidecar to draw",
+                candidate.board_id,
+            );
+        }
+        // The swatch draws inside a 22×16 chip with a 1px border; the figure
+        // band inside a 56px row.
+        assert!(BOARD_SWATCH_W <= 20.0 && BOARD_SWATCH_H <= 14.0);
+        assert_eq!(BOARD_FIGURE_H, 56.0);
+        assert!(board_figure_class().contains("tw:h-14"));
+        assert!(board_swatch_class().contains("tw:h-4"));
+        assert!(board_swatch_class().contains("tw:w-[22px]"));
     }
 
     /// The family tag is green only where it means something.

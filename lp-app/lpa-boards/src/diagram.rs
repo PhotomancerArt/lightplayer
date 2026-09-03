@@ -12,7 +12,7 @@ use crate::callout::BoardCallout;
 use crate::display_manifest::BoardDisplayFile;
 use crate::geometry::{
     BoardLayout, CellBody, CellLayout, DiagramMode, DiagramOptions, PinSwatch, RowLabel,
-    WiredConnection, pad_css_suffix,
+    WiredConnection, fitted_box, pad_css_suffix,
 };
 
 /// Callout label size, matching `.lpb-anat-label`'s `font-size`. The
@@ -62,6 +62,29 @@ pub fn BoardDiagram(
     #[props(default)] mode: DiagramMode,
     #[props(default = 13.0)] u: f32,
     #[props(default = 1.0)] scale: f32,
+    /// Fit the whole drawing into a `(width, height)` box of CSS pixels,
+    /// aspect preserved — the thumbnail contract (see
+    /// [`fitted_box`](crate::geometry::fitted_box), which `landscape` shares).
+    /// Supersedes `scale`.
+    ///
+    /// A caller that wants one uniform thumbnail across boards cannot get
+    /// there with `scale`: boards differ in drawing height by three to one,
+    /// so a single multiplier makes the S3 devkit three times the XIAO. The
+    /// fit is derived from the layout the renderer is about to draw, margins
+    /// and callouts included, which is the only place that size is known.
+    #[props(default = None)]
+    fit: Option<(f32, f32)>,
+    /// Draw the board on its side — a quarter turn clockwise, with the
+    /// rendered box turned with it.
+    ///
+    /// For thumbnails only. Boards are portrait at roughly 1:3, so upright in
+    /// a wide band a devkit is a sliver in a field of air; on its side it
+    /// fills the band, which is the difference between a picker the user can
+    /// pick from and one they read part numbers off. It turns the whole
+    /// drawing, TEXT INCLUDED, so it is wrong for any diagram carrying pin
+    /// labels or callouts.
+    #[props(default = false)]
+    landscape: bool,
     #[props(default = true)] labels: bool,
     #[props(default)] wired: Vec<WiredConnection>,
     #[props(default)] swatches: Vec<PinSwatch>,
@@ -113,8 +136,32 @@ pub fn BoardDiagram(
         vw + margin.left + margin.right,
         vh + margin.top + margin.bottom,
     );
-    let width = (vw * scale).round();
-    let height = (vh * scale).round();
+    // `fit` supersedes `scale`; either way the rendered box turns with the
+    // drawing, so a landscape thumbnail reserves landscape space.
+    let (_, fitted_w, fitted_h) = match fit {
+        Some((box_w, box_h)) => fitted_box(vw, vh, box_w, box_h, landscape),
+        None => match landscape {
+            true => (scale, vh * scale, vw * scale),
+            false => (scale, vw * scale, vh * scale),
+        },
+    };
+    let width = fitted_w.round();
+    let height = fitted_h.round();
+
+    // A quarter turn clockwise sends (x, y) to (-y, x), so the drawing's own
+    // box lands at [-(vy+vh), -vy] × [vx, vx+vw]; the translate walks it back
+    // to the origin of a viewBox whose axes are swapped with it. Done here in
+    // SVG rather than as a CSS transform on the element, because CSS would
+    // rotate the painted pixels while leaving the layout box portrait — the
+    // band would still reserve a sliver's width and the board would spill out
+    // of both its ends.
+    let (view_box, turn) = match landscape {
+        true => (
+            format!("0 0 {vh} {vw}"),
+            Some(format!("translate({} {}) rotate(90)", vy + vh, -vx)),
+        ),
+        false => (format!("{vx} {vy} {vw} {vh}"), None),
+    };
 
     let board_w = layout.board_w;
     let board_h = layout.board_h;
@@ -141,218 +188,220 @@ pub fn BoardDiagram(
     rsx! {
         svg {
             class: "lpb-diagram",
-            view_box: "{vx} {vy} {vw} {vh}",
+            view_box: "{view_box}",
             width: "{width}",
             height: "{height}",
             xmlns: "http://www.w3.org/2000/svg",
+            g { transform: turn,
 
-            // ---- pcb ----------------------------------------------------
-            rect {
-                class: "lpb-pcb",
-                x: "0",
-                y: "0",
-                width: "{board_w}",
-                height: "{board_h}",
-                rx: "7",
-            }
-            for (hx, hy) in [
-                (8.0, 8.0),
-                (board_w - 8.0, 8.0),
-                (8.0, board_h - 8.0),
-                (board_w - 8.0, board_h - 8.0),
-            ] {
-                circle { class: "lpb-hole", cx: "{hx}", cy: "{hy}", r: "2.6" }
-            }
-
-            // ---- module -------------------------------------------------
-            if module.antenna {
+                // ---- pcb ----------------------------------------------------
                 rect {
-                    class: "lpb-antenna",
+                    class: "lpb-pcb",
+                    x: "0",
+                    y: "0",
+                    width: "{board_w}",
+                    height: "{board_h}",
+                    rx: "7",
+                }
+                for (hx, hy) in [
+                    (8.0, 8.0),
+                    (board_w - 8.0, 8.0),
+                    (8.0, board_h - 8.0),
+                    (board_w - 8.0, board_h - 8.0),
+                ] {
+                    circle { class: "lpb-hole", cx: "{hx}", cy: "{hy}", r: "2.6" }
+                }
+
+                // ---- module -------------------------------------------------
+                if module.antenna {
+                    rect {
+                        class: "lpb-antenna",
+                        x: "{module.x}",
+                        y: "{module.y}",
+                        width: "{module.w}",
+                        height: "12",
+                    }
+                }
+                if let Some(zigzag) = antenna_zigzag {
+                    path { class: "lpb-antenna-zigzag", d: "{zigzag}" }
+                }
+                rect {
+                    class: "lpb-module",
                     x: "{module.x}",
-                    y: "{module.y}",
+                    y: "{module_y}",
                     width: "{module.w}",
-                    height: "12",
-                }
-            }
-            if let Some(zigzag) = antenna_zigzag {
-                path { class: "lpb-antenna-zigzag", d: "{zigzag}" }
-            }
-            rect {
-                class: "lpb-module",
-                x: "{module.x}",
-                y: "{module_y}",
-                width: "{module.w}",
-                height: "{module_h}",
-                rx: "2",
-            }
-            text {
-                class: "lpb-module-label",
-                x: "{module.x + module.w / 2.0}",
-                y: "{module_y + module_h / 2.0 + 3.0}",
-                text_anchor: "middle",
-                style: "font-size: {module_font}px",
-                "{module.label}"
-            }
-
-            // ---- fixed hardware -----------------------------------------
-            for usb in layout.usb.iter() {
-                rect {
-                    class: "lpb-usb",
-                    x: "{usb.rect.x}",
-                    y: "{usb.rect.y}",
-                    width: "{usb.rect.w}",
-                    height: "{usb.rect.h}",
-                    rx: "3",
-                }
-                if let Some(caption) = &usb.caption {
-                    text {
-                        class: "lpb-silk",
-                        x: "{caption.x}",
-                        y: "{caption.y}",
-                        text_anchor: "middle",
-                        "{caption.text}"
-                    }
-                }
-            }
-            // Buttons come from the LAYOUT (M2b): callouts anchor to the
-            // same coordinates, which only holds if one place computes them.
-            for button in layout.buttons.iter() {
-                rect {
-                    class: "lpb-button",
-                    x: "{button.rect.x}",
-                    y: "{button.rect.y}",
-                    width: "{button.rect.w}",
-                    height: "{button.rect.h}",
+                    height: "{module_h}",
                     rx: "2",
                 }
-                circle {
-                    class: "lpb-button-cap",
-                    cx: "{button.center.0}",
-                    cy: "{button.center.1}",
-                    r: "{button.cap_radius}",
+                text {
+                    class: "lpb-module-label",
+                    x: "{module.x + module.w / 2.0}",
+                    y: "{module_y + module_h / 2.0 + 3.0}",
+                    text_anchor: "middle",
+                    style: "font-size: {module_font}px",
+                    "{module.label}"
                 }
-                if let Some(caption) = &button.caption {
-                    text {
-                        class: "lpb-silk",
-                        x: "{caption.x}",
-                        y: "{caption.y}",
-                        text_anchor: if caption.start_anchored { "start" } else { "end" },
-                        "{caption.text}"
-                    }
-                }
-            }
-            if let Some(rgb) = &hw.rgb {
-                rect {
-                    class: "lpb-rgb",
-                    x: "{rgb.x - 4.0}",
-                    y: "{rgb.y - 4.0}",
-                    width: "8",
-                    height: "8",
-                    rx: "1.5",
-                }
-                circle { class: "lpb-rgb-die", cx: "{rgb.x}", cy: "{rgb.y}", r: "2" }
-            }
-            for terminal in layout.terminals.iter() {
-                rect {
-                    class: "lpb-terminal",
-                    x: "{terminal.rect.x}",
-                    y: "{terminal.rect.y}",
-                    width: "{terminal.rect.w}",
-                    height: "{terminal.rect.h}",
-                    rx: "2",
-                }
-                circle {
-                    class: "lpb-screw",
-                    cx: "{terminal.screw_center.0}",
-                    cy: "{terminal.screw_center.1}",
-                    r: "{terminal.screw_radius}",
-                }
-                if let Some(label) = &terminal.label {
-                    text {
-                        class: "lpb-silk",
-                        x: "{label.x}",
-                        y: "{label.y}",
-                        text_anchor: "middle",
-                        "{label.text}"
-                    }
-                }
-            }
 
-            // ---- rails --------------------------------------------------
-            for row in layout.rail_rows() {
-                rect {
-                    class: "lpb-pad lpb-pad--{pad_css_suffix(row.role)}",
-                    x: "{row.pad.x}",
-                    y: "{row.pad.y}",
-                    width: "{row.pad.w}",
-                    height: "{row.pad.h}",
-                    rx: "1.4",
+                // ---- fixed hardware -----------------------------------------
+                for usb in layout.usb.iter() {
+                    rect {
+                        class: "lpb-usb",
+                        x: "{usb.rect.x}",
+                        y: "{usb.rect.y}",
+                        width: "{usb.rect.w}",
+                        height: "{usb.rect.h}",
+                        rx: "3",
+                    }
+                    if let Some(caption) = &usb.caption {
+                        text {
+                            class: "lpb-silk",
+                            x: "{caption.x}",
+                            y: "{caption.y}",
+                            text_anchor: "middle",
+                            "{caption.text}"
+                        }
+                    }
                 }
-                // Screw-terminal pins carry the same screw head the top-edge
-                // terminal blocks use, so "this is a screw terminal" reads
-                // identically everywhere.
-                if row.pad_style == crate::display_manifest::PadStyle::Screw {
+                // Buttons come from the LAYOUT (M2b): callouts anchor to the
+                // same coordinates, which only holds if one place computes them.
+                for button in layout.buttons.iter() {
+                    rect {
+                        class: "lpb-button",
+                        x: "{button.rect.x}",
+                        y: "{button.rect.y}",
+                        width: "{button.rect.w}",
+                        height: "{button.rect.h}",
+                        rx: "2",
+                    }
+                    circle {
+                        class: "lpb-button-cap",
+                        cx: "{button.center.0}",
+                        cy: "{button.center.1}",
+                        r: "{button.cap_radius}",
+                    }
+                    if let Some(caption) = &button.caption {
+                        text {
+                            class: "lpb-silk",
+                            x: "{caption.x}",
+                            y: "{caption.y}",
+                            text_anchor: if caption.start_anchored { "start" } else { "end" },
+                            "{caption.text}"
+                        }
+                    }
+                }
+                if let Some(rgb) = &hw.rgb {
+                    rect {
+                        class: "lpb-rgb",
+                        x: "{rgb.x - 4.0}",
+                        y: "{rgb.y - 4.0}",
+                        width: "8",
+                        height: "8",
+                        rx: "1.5",
+                    }
+                    circle { class: "lpb-rgb-die", cx: "{rgb.x}", cy: "{rgb.y}", r: "2" }
+                }
+                for terminal in layout.terminals.iter() {
+                    rect {
+                        class: "lpb-terminal",
+                        x: "{terminal.rect.x}",
+                        y: "{terminal.rect.y}",
+                        width: "{terminal.rect.w}",
+                        height: "{terminal.rect.h}",
+                        rx: "2",
+                    }
                     circle {
                         class: "lpb-screw",
-                        cx: "{row.pad.center().0}",
-                        cy: "{row.pad.center().1}",
-                        r: "{row.pad.w * 0.34}",
+                        cx: "{terminal.screw_center.0}",
+                        cy: "{terminal.screw_center.1}",
+                        r: "{terminal.screw_radius}",
+                    }
+                    if let Some(label) = &terminal.label {
+                        text {
+                            class: "lpb-silk",
+                            x: "{label.x}",
+                            y: "{label.y}",
+                            text_anchor: "middle",
+                            "{label.text}"
+                        }
                     }
                 }
-                if let Some(label) = &row.label {
-                    PinLabel { label: label.clone() }
-                }
-                CellRow { cells: row.cells.clone(), font: layout.font, gpio: row.gpio }
-            }
 
-            // ---- band + leaders -----------------------------------------
-            for row in layout.band.iter() {
-                if !row.cells.is_empty() {
-                    path {
-                        class: "lpb-leader",
-                        d: "M {row.leader[0].0} {row.leader[0].1} L {row.leader[1].0} {row.leader[1].1} L {row.leader[2].0} {row.leader[2].1}",
+                // ---- rails --------------------------------------------------
+                for row in layout.rail_rows() {
+                    rect {
+                        class: "lpb-pad lpb-pad--{pad_css_suffix(row.role)}",
+                        x: "{row.pad.x}",
+                        y: "{row.pad.y}",
+                        width: "{row.pad.w}",
+                        height: "{row.pad.h}",
+                        rx: "1.4",
+                    }
+                    // Screw-terminal pins carry the same screw head the top-edge
+                    // terminal blocks use, so "this is a screw terminal" reads
+                    // identically everywhere.
+                    if row.pad_style == crate::display_manifest::PadStyle::Screw {
+                        circle {
+                            class: "lpb-screw",
+                            cx: "{row.pad.center().0}",
+                            cy: "{row.pad.center().1}",
+                            r: "{row.pad.w * 0.34}",
+                        }
+                    }
+                    if let Some(label) = &row.label {
+                        PinLabel { label: label.clone() }
                     }
                     CellRow { cells: row.cells.clone(), font: layout.font, gpio: row.gpio }
                 }
-            }
 
-            // Callouts sit under any story overlay, above the board. Bolder
-            // than the anatomy annotation they grew out of: an instruction
-            // someone follows at the desk has to win against the pin rows
-            // behind it, so the leader is solid and ends in an arrowhead
-            // rather than fading into a dot.
-            for callout in placed.iter() {
-                {
-                    // The head points along the lead, toward the feature.
-                    let (ax, ay) = callout.anchor;
-                    let dir = if callout.start_anchored { 1.0 } else { -1.0 };
-                    let base = ax + dir * ARROW_LEN;
-                    let head = format!(
-                        "M {ax} {ay} L {base} {} L {base} {} Z",
-                        ay - ARROW_HALF_W,
-                        ay + ARROW_HALF_W
-                    );
-                    rsx! {
+                // ---- band + leaders -----------------------------------------
+                for row in layout.band.iter() {
+                    if !row.cells.is_empty() {
                         path {
-                            class: "lpb-callout-line",
-                            d: "M {callout.label.0} {callout.label.1 - 2.5} L {base} {ay}",
+                            class: "lpb-leader",
+                            d: "M {row.leader[0].0} {row.leader[0].1} L {row.leader[1].0} {row.leader[1].1} L {row.leader[2].0} {row.leader[2].1}",
                         }
-                        path { class: "lpb-callout-head", d: "{head}" }
-                        text {
-                            class: "lpb-callout-label",
-                            x: "{callout.label.0}",
-                            y: "{callout.label.1}",
-                            text_anchor: if callout.start_anchored { "start" } else { "end" },
-                            if let Some(step) = callout.step {
-                                tspan { class: "lpb-callout-step", "Step {step}. " }
+                        CellRow { cells: row.cells.clone(), font: layout.font, gpio: row.gpio }
+                    }
+                }
+
+                // Callouts sit under any story overlay, above the board. Bolder
+                // than the anatomy annotation they grew out of: an instruction
+                // someone follows at the desk has to win against the pin rows
+                // behind it, so the leader is solid and ends in an arrowhead
+                // rather than fading into a dot.
+                for callout in placed.iter() {
+                    {
+                        // The head points along the lead, toward the feature.
+                        let (ax, ay) = callout.anchor;
+                        let dir = if callout.start_anchored { 1.0 } else { -1.0 };
+                        let base = ax + dir * ARROW_LEN;
+                        let head = format!(
+                            "M {ax} {ay} L {base} {} L {base} {} Z",
+                            ay - ARROW_HALF_W,
+                            ay + ARROW_HALF_W
+                        );
+                        rsx! {
+                            path {
+                                class: "lpb-callout-line",
+                                d: "M {callout.label.0} {callout.label.1 - 2.5} L {base} {ay}",
                             }
-                            "{callout.text}"
+                            path { class: "lpb-callout-head", d: "{head}" }
+                            text {
+                                class: "lpb-callout-label",
+                                x: "{callout.label.0}",
+                                y: "{callout.label.1}",
+                                text_anchor: if callout.start_anchored { "start" } else { "end" },
+                                if let Some(step) = callout.step {
+                                    tspan { class: "lpb-callout-step", "Step {step}. " }
+                                }
+                                "{callout.text}"
+                            }
                         }
                     }
                 }
-            }
-            if let Some(overlay) = overlay {
-                {overlay}
+                if let Some(overlay) = overlay {
+                    {overlay}
+                }
             }
         }
     }
