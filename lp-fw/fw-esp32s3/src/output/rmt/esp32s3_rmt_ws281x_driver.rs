@@ -88,6 +88,10 @@ struct ChannelSlot {
     tx: Option<Channel<'static, Blocking, Tx>>,
     /// Held by an open [`Esp32S3RmtWs281xOutput`].
     in_use: bool,
+    /// The GPIO the transmitter's output signal is routed to, once an open
+    /// has bound one. A rebind is skipped when the pad is unchanged — see
+    /// `bind_channel` for the esp-hal guard-order hazard this avoids.
+    bound_gpio: Option<u8>,
 }
 
 /// The channels, shared between the driver and every output it hands out.
@@ -269,8 +273,24 @@ impl Esp32S3RmtWs281xDriver {
         // can exist while this one does. `gpio` was checked against the chip's
         // pin list by `gpio_number`, so the panicking branch of `steal` is
         // unreachable.
-        let pin = unsafe { AnyPin::steal(gpio) };
-        slot.tx = Some(tx.with_pin(pin));
+        //
+        // Bound ONCE per pad. esp-hal 1.1.1's `Channel::with_pin` assigns the
+        // new pin guard and only then drops the old one, and a guard's drop
+        // disconnects its GPIO from the peripheral output. Rebinding the SAME
+        // GPIO (every wire re-load after an unload: remove → push, push over a
+        // running project) therefore connected the pad and immediately
+        // disconnected it again — the transmitter ran, frames completed, no
+        // error was ever raised, and the strip held its last frame until a
+        // reboot. A different GPIO is the case `with_pin` handles correctly:
+        // connect the new pad, release the old one.
+        // (docs/defects/2026-09-02-same-gpio-rebind-disconnects-the-pad.md)
+        if slot.bound_gpio == Some(gpio) {
+            slot.tx = Some(tx);
+        } else {
+            let pin = unsafe { AnyPin::steal(gpio) };
+            slot.tx = Some(tx.with_pin(pin));
+            slot.bound_gpio = Some(gpio);
+        }
 
         // Leave the window all-STOP until the first frame prefills it, so a
         // spurious start can only transmit nothing.
@@ -552,6 +572,7 @@ fn adopt_channel(
                 rmt_channel: ch,
                 tx: Some(tx),
                 in_use: false,
+                bound_gpio: None,
             })
         }
         Err(error) => {
