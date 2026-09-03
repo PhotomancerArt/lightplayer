@@ -655,9 +655,9 @@ fn ActivityRow(activity: DeviceActivityView) -> Element {
         None => String::new(),
     };
     let bar_class = match percent {
-        Some(_) => "tw:h-full tw:rounded-pill tw:bg-accent",
+        Some(_) => "tw:h-full tw:rounded-pill tw:bg-status-working-foreground",
         None => {
-            "tw:h-full tw:w-[35%] tw:rounded-pill tw:bg-accent [animation:ux-progress-sweep_1.2s_ease-in-out_infinite]"
+            "tw:h-full tw:w-[35%] tw:rounded-pill tw:bg-status-working-foreground [animation:ux-progress-sweep_1.2s_ease-in-out_infinite]"
         }
     };
     // A requested cancel is a STATE, not the absence of one: the activity is
@@ -675,7 +675,7 @@ fn ActivityRow(activity: DeviceActivityView) -> Element {
     rsx! {
         div { class: "tw:grid tw:gap-1",
             p { class: quiet_line_class(), "{label}" }
-            div { class: "tw:h-1.5 tw:overflow-hidden tw:rounded-pill tw:bg-subtle-bg",
+            div { class: "tw:h-1.5 tw:overflow-hidden tw:rounded-pill tw:bg-track",
                 div { class: bar_class, style: bar_style }
             }
         }
@@ -710,7 +710,7 @@ fn reflash_choice(
 fn card_class() -> &'static str {
     // `ux-armed-scope`: the card is the blast radius of its own armed
     // destructive chips — `:has(.ux-armed)` marks it (style.css).
-    "ux-armed-scope tw:grid tw:content-start tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-panel tw:p-4"
+    "ux-armed-scope tw:grid tw:content-start tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-4"
 }
 
 /// One zone below the header: a rule above it, and room to breathe. The
@@ -731,7 +731,7 @@ fn actions_zone_class() -> &'static str {
 /// `flex-col-reverse` is what keeps it showing the newest line — see
 /// [`TerminalPanel`] for why the rows are fed in reverse.
 fn terminal_class() -> &'static str {
-    "tw:flex tw:h-40 tw:flex-col-reverse tw:overflow-y-auto tw:overflow-x-hidden tw:rounded-md tw:border tw:border-border tw:bg-subtle-bg tw:px-2 tw:py-1.5 tw:font-mono tw:text-[0.68rem] tw:leading-[1.35] tw:text-subtle-foreground"
+    "tw:flex tw:h-40 tw:flex-col-reverse tw:overflow-y-auto tw:overflow-x-hidden tw:rounded-md tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1.5 tw:font-mono tw:text-[0.68rem] tw:leading-[1.35] tw:text-subtle-foreground"
 }
 
 /// The running face's Open link: the Primary voice (the standing spectrum
