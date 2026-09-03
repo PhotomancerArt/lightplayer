@@ -331,6 +331,44 @@ fn per_lamp_memory_table() {
         by_label("dome-scale-2x"),
     );
 
+    // The per-lamp ratchets. Measured 2026-09-02 after the copy removals
+    // (docs/reports/2026-09-02-per-lamp-memory-table.md): load 8.0 B/lamp
+    // resident and 8.0 transient (one exact-size positions buffer, fitted in
+    // place); tick 1 21.7 B/lamp (direct channels 4, output samples 6, the
+    // host provider's u16 copy 6 + 8-bit frame 3 + ws281x data 3 — the two
+    // wasmtime-memory sample buffers are outside this allocator). Ceilings
+    // sit ~1.4× above; lower them with every fix, never raise them.
+    let slope_of = |a: (&Fixture, &[Phase]), b: (&Fixture, &[Phase]), phase: &str| -> (f64, f64) {
+        let find = |p: &[Phase]| {
+            *p.iter()
+                .find(|p| p.label.starts_with(phase))
+                .unwrap_or_else(|| panic!("phase {phase} recorded"))
+        };
+        let (pa, pb) = (find(a.1), find(b.1));
+        (
+            slope((a.0.lamps, pa.resident()), (b.0.lamps, pb.resident())),
+            slope(
+                (a.0.lamps, pa.transient() as i64),
+                (b.0.lamps, pb.transient() as i64),
+            ),
+        )
+    };
+    for pair in [("zook", "zook-2x"), ("dome-scale", "dome-scale-2x")] {
+        let (load_resident, load_transient) =
+            slope_of(by_label(pair.0), by_label(pair.1), "load project");
+        let (tick1_resident, _) = slope_of(by_label(pair.0), by_label(pair.1), "tick 1");
+        assert!(
+            load_resident <= 12.5 && load_transient <= 12.5,
+            "{}: load costs {load_resident:.1} B/lamp resident, {load_transient:.1} transient (ceiling 12.5)",
+            pair.0
+        );
+        assert!(
+            tick1_resident <= 30.5,
+            "{}: tick 1 costs {tick1_resident:.1} B/lamp resident (ceiling 30.5)",
+            pair.0
+        );
+    }
+
     // Dropping the first engine leaves a process-global residue (the JIT
     // runtime's once-cells, interned tables — ~95 KB host, paid once); every
     // later fixture must return to within a small margin of that floor, or a

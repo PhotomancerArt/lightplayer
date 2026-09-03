@@ -99,9 +99,14 @@ to keep `Map2dShape` small.
 
 `resolve(doc)` produces the ordered lamp list — doc-space positions plus
 derived DMX-style addresses (auto-flow at 170 RGB lamps/universe; wiring
-order is primary, addresses are always derived from it). `fit_points` maps
-doc space into a fixture render target without stretching; an optional
-`canvas` field (e.g. an imported SVG viewBox) overrides the framed region.
+order is primary, addresses are always derived from it). `resolve_into` is
+its streaming form: positions and spans into caller-owned buffers, one
+exact-size 8 B/lamp allocation and no per-lamp rows — what the engine loads
+through, since at dome scale the rows were the load's largest single ask.
+`fit_points` maps doc space into a fixture render target without
+stretching (`fit_points_in_place` does it on the caller's buffer); an
+optional `canvas` field (e.g. an imported SVG viewBox) overrides the framed
+region.
 `import::svg_to_doc` converts the strict Illustrator-friendly SVG subset
 (`path:N,count:N` groups) into a document — import is a one-time conversion,
 not a runtime source of truth. CLI form:

@@ -165,6 +165,68 @@ per-node cost excluded):
 | P4 map2d resolve streams into the compact carrier | −16 to −24 load peak | −24,000 to −36,000 |
 | P4 fw-emu per-port write buffer | −3 per port per frame (emulator transient) | −900 per port |
 
-## After
+## After (2026-09-02, branch of PR #503 merged with main at 34ff04f8d)
 
-_Filled in by P5._
+What changed: `FixtureNode::sampled_scratch` gone (the sample-out is
+borrowed in place, `LpGraphics::sample_out_data`); `OutputNode::control_samples`
+and `EngineServices::flush_samples` gone (the runtime buffer stores `u16`
+samples, the node takes that storage for the frame, the flush borrows it);
+the map2d resolver streams into the carrier's own buffer and is fitted in
+place; the loader and the fixture's asset refresh no longer resolve the
+document a second time for object spans; the emulator and host output
+providers keep a per-port 8-bit frame buffer.
+
+**Host slopes (B/lamp):**
+
+| Phase | before (zook / dome) | after (zook / dome) | Δ |
+|---|---:|---:|---:|
+| load resident | 8.02 / 8.92 | 8.02 / 8.92 | 0 (the mapping is the home) |
+| load transient | 32.16 / 32.33 | 8.01 / 8.92 | **−24** (rows, positions copy, fitted copy gone) |
+| tick 1 resident | 38.78 / 39.39 | 21.72 / 22.42 | **−17** (−8 scratch, −12 output copies, +3 provider frame now resident) |
+| steady tick transient | 3 per port | ~0 per lamp (989 B flat on zook and zook-2x) | the per-write Vec is gone |
+
+Host phases after (bytes): zook load 49,500 R / 63,924 T (was 82,942 T);
+tick 1 66,881 R (was 91,681); small-dome load 164,079 T (was 229,618),
+tick 1 164,782 R (was 244,624); dome-scale load 252,131 T (was 763,964),
+tick 1 539,543 R (was 922,637); dome-scale-2x tick 1 1,046,515 R (was
+1,813,211).
+
+**Device width (RV32 emulator), zook:**
+
+| mode / window | before | after |
+|---|---|---|
+| startup project-load | 73,886 T / 41,313 R / largest 24,000 | 46,154 T / 41,273 R / largest 12,000 |
+| startup frame (×2) | 136,652 T / 82,864 R | 106,652 T / **52,864 R** (−30,000 = 20 B/lamp) |
+| steady-render frame | 2,720 T / 485 R | 2,720 T / 485 R (resolver churn; the write buffer was not in it) |
+
+`examples/basic` (241 lamps) `frame.retained` 30,007 → 26,042; the
+heap-budget record now carries zook (both modes) — see
+`scripts/heap-budget-record.json` for the merged-tree figures the gate holds.
+
+**small-dome** still halts the 320 K guest in its first frame, but later:
+the load transient dropped 208,665 → 127,714 (largest ask 95,200 → 47,600)
+with the load's *retained* 119 KB unchanged, and the first tick now gets past
+its sample buffers and dies on the **35,700 B** ask (= 6 × 5,950) of
+`ProductScratch.rendered` — the whole-product render a *patched* fixture
+pays every frame so its runs can be copied out. That per-frame copy, not
+this plan's residents, is what small-dome needs next. Not in the record.
+
+**Merged-tree record** (`scripts/heap-budget-record.json`, main at
+34ff04f8d with #500's payload cache ON in `fw-emu`): zook startup
+project-load 46,288 T / 41,663 R / largest 12,000; frame 114,808 T /
+61,020 R (the cache's payload table is resident now — #500 priced it at
++8 KB on basic); steady-render frame 1,200 T / 896 R / 175 allocs / 5,826 B.
+
+**The owner table after** (device-side, Direct sampling): mapping 8 (load)
++ direct channels 4 + sample points 8 + sample target 8 + output samples 6
++ 8-bit frame 3 = **37 B/lamp**, every row a home; the classic adds
+`DisplayPipeline.current` 6 (+12 with interpolation, +3 dither). Before:
+57. Against the 186,368 B arena, zook's per-lamp residents are 55,500 B
+(was 85,500 B) with interpolation off.
+
+**Still per-lamp and per-frame, out of this plan's scope:** a patched
+fixture's whole-product render (`ProductScratch.rendered`, 6 B/lamp of
+every patched product, every frame — small-dome's 35,700 B largest ask in
+its frame window); the classic's `DisplayPipeline` copies; the playlist
+crossfade's two per-frame sample-outs; `direct_channels` (identity for a
+plain map2d fixture — a 4 B/lamp candidate).

@@ -70,9 +70,23 @@ measurement fails (the instrument or the instrumented path broke).
 
 To add a project, add its key under `projects` (an empty object is enough)
 and run `just heap-budget-baseline`; the baseline reads the project list from
-the record. Recorded today: `examples/basic` (the smallest real project) and
+the record. Recorded today: `examples/basic` (the smallest real project),
 `examples/meteor` (a compute-shader project with a struct-valued map slot —
-the per-frame churn case).
+the per-frame churn case) and `examples/zook-dome` (1,500 lamps on four
+strips — the per-lamp case, and the classic ESP32's target envelope).
+
+### Reading a figure per lamp
+
+The record holds bytes, not bytes per lamp. For a per-lamp reading divide a
+figure by the project's lamp count: zook's `frame.retained` ÷ 1,500 is the
+engine's resident cost per lamp on the device (plus 8 B/lamp of mapping
+that lands in `project-load`). Which struct owns each of those bytes, and
+what the classic adds on top (its `DisplayPipeline` buffers), is measured
+per owner in `docs/reports/2026-09-02-per-lamp-memory-table.md`; the host
+probe `lp-core/lpc-engine/tests/per_lamp_memory_table.rs` pins the slopes.
+`examples/small-dome` (6,310 lamps) is not in the record: it halts the 320 K
+guest in its first frame, by about the sample buffers it still has to
+allocate at that point (a 47,600 B ask with ~18 KB free).
 
 ## Ratchet, not ceiling
 
@@ -128,6 +142,14 @@ A harness that overstates its fidelity is worse than none. This gate does
   price is the payload table itself — turning the cache on moved
   `examples/basic` `frame.retained` by the bytes the table costs, in the record
   diff — which is the byte number that debt entry asked for.
+- **The emulator's hardware manifest.** `fw-emu` runs the permissive
+  256-resource board profile; the classic's manifest has 34. Every port
+  open re-enumerates the manifest (`endpoints()`), so the first frame's
+  *transient* carries ~30 KB of open-path churn (a `Vec<HwEndpoint>` grown
+  by push, one status string per resource) and a 36,864 B `Vec<HwResource>`
+  sits live for the whole run — neither exists at that size on a device.
+  The `frame.retained` and per-lamp figures transfer; the first-frame
+  `frame.transient` overstates the device.
 - **Stack usage.** Neither RV32 nor Xtensa stack consumption is modeled at
   all.
 - **The JIT code region.** The emulator covers the heap;

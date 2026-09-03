@@ -52,6 +52,7 @@ use crate::nodes::FluidNode;
 use crate::nodes::OutputNode;
 #[cfg(feature = "node-texture")]
 use crate::nodes::TextureNode;
+#[cfg(feature = "node-fixture")]
 use crate::nodes::fixture::mapping::map2d::object_spans_of;
 #[cfg(feature = "node-fixture")]
 use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
