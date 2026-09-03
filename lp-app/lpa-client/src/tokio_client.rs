@@ -190,7 +190,8 @@ impl TokioLpClient {
                         events.push(event);
                     }
                 }
-                ResponseDisposition::StaleAbandoned { response_id } => {
+                ResponseDisposition::StaleAbandoned { response_id }
+                | ResponseDisposition::PriorOwner { response_id } => {
                     events.push(ClientEvent::StaleResponseDropped { response_id });
                 }
                 ResponseDisposition::Uncorrelated {
