@@ -413,6 +413,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // The chip's own permanent identity (efuse): the factory MAC and the
     // silicon revision. The server cannot derive either.
     server.set_hardware_identity(chip_identity());
+    // The board this firmware is running as, from the loaded manifest — the
+    // catalog key a card needs to re-flash or wire a new project for it.
+    server.set_board_id(Some(alloc::string::String::from(
+        hardware_registry.manifest().board_id(),
+    )));
     server.set_reboot_hook(Some(Rc::new(reboot_now)));
     // The one feature the server cannot see: whether the shader engine
     // linked into THIS image does native f32 math (`float-f32` is a fact of

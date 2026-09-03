@@ -106,6 +106,17 @@ pub(crate) fn DeviceRosterCard(
     // chip in its ROM downloader first, and the merged image ends before
     // the lpfs partition, so the project and the efuse identity survive.
     let reflash = reflash_choice(card.detected_chip.as_deref(), card.board_id.as_deref());
+    // When the pick does NOT resolve (a chip with several boards and no
+    // registered one — every board flashed before the hello carried its
+    // board id), the verb opens the same picker the needs-firmware face
+    // uses, inline, instead of guessing. Local UI state: nothing the model
+    // needs to know until a board is actually picked.
+    let mut reflash_picker_open = use_signal(|| false);
+    let offer_reflash_picker =
+        reflash.is_none() && card.detected_chip.is_some() && card.status == DeviceStatus::Ready
+            || reflash.is_none()
+                && card.detected_chip.is_some()
+                && card.status == DeviceStatus::Degraded;
     // The running face's ONE verb: Open — the editor as a lens on this
     // board. Opening is NAVIGATION, so it is a real `<a>` to the device
     // route (the same road the project cards take): a plain click rides the
@@ -204,6 +215,15 @@ pub(crate) fn DeviceRosterCard(
                     if offer_push {
                         EmptyFace { card: card.clone(), projects, examples, on_action }
                     }
+                    // The re-flash picker a running board opened from its
+                    // Flash firmware verb (see `offer_reflash_picker`).
+                    if offer_reflash_picker && idle && linked && reflash_picker_open() {
+                        FlashFace {
+                            device,
+                            detected_chip: card.detected_chip.clone(),
+                            on_action,
+                        }
+                    }
                 }
 
                 // ── zone 3: terminal ────────────────────────────────────
@@ -276,6 +296,18 @@ pub(crate) fn DeviceRosterCard(
                         running: false,
                         variant: ActionButtonVariant::Quiet,
                         on_action,
+                    }
+                }
+                if offer_reflash_picker && idle && linked && !offer_flash {
+                    button {
+                        class: quiet_button_class(),
+                        r#type: "button",
+                        title: "Write the firmware this Studio serves onto the board; the project and identity stay.",
+                        onclick: move |_| {
+                            let open = reflash_picker_open();
+                            reflash_picker_open.set(!open);
+                        },
+                        if reflash_picker_open() { "Cancel flash" } else { "Flash firmware" }
                     }
                 }
                 if idle && linked {
@@ -732,6 +764,12 @@ fn note_class() -> &'static str {
     "tw:grid tw:gap-2 tw:rounded-md tw:border tw:border-dashed tw:border-border tw:px-3 tw:py-2.5 tw:text-xs tw:leading-relaxed tw:text-subtle-foreground"
 }
 
+/// The quiet verb dress for a LOCAL toggle (no `UiAction` behind it): the
+/// disabled dress without the disabled half.
+fn quiet_button_class() -> &'static str {
+    "tw:inline-flex tw:w-fit tw:cursor-pointer tw:items-center tw:rounded-md tw:border tw:border-border tw:px-2.5 tw:py-1 tw:text-xs tw:font-semibold tw:text-subtle-foreground tw:hover:text-foreground"
+}
+
 fn disabled_button_class() -> &'static str {
     "tw:inline-flex tw:w-fit tw:cursor-not-allowed tw:items-center tw:rounded-md tw:border tw:border-border tw:px-2.5 tw:py-1 tw:text-xs tw:font-semibold tw:text-subtle-foreground tw:opacity-60"
 }
@@ -747,12 +785,14 @@ mod tests {
     /// nothing else uses is how a design language leaks.
     /// The re-flash verb never guesses: the registered board wins, a lone
     /// fit for the detected chip is the only other way in, and no chip
-    /// means no verb (the chip guard would have nothing to check).
+    /// means no verb (the chip guard would have nothing to check). The
+    /// catalog carries TWO C6 boards, so a C6 with no registered board gets
+    /// the picker, not a pick.
     #[test]
     fn the_reflash_pick_is_the_registered_board_or_the_chips_only_fit() {
-        let registered = reflash_choice(Some("esp32c6"), Some("seeed-xiao-esp32c6"))
+        let registered = reflash_choice(Some("esp32c6"), Some("seeed/xiao-esp32-c6"))
             .expect("the registered XIAO resolves against the served catalog");
-        assert_eq!(registered.board_id, "seeed-xiao-esp32c6");
+        assert_eq!(registered.board_id, "seeed/xiao-esp32-c6");
         assert_eq!(registered.build_id, "esp32c6-4mb");
         assert!(
             registered.park_first,
@@ -766,7 +806,7 @@ mod tests {
         assert_eq!(
             unregistered.map(|choice| choice.board_id),
             offer.preselect,
-            "no registered board: only a lone fit earns the verb",
+            "no registered board: only a lone fit earns the pick",
         );
 
         // A registered board the chip cannot run falls back the same way,
@@ -777,7 +817,7 @@ mod tests {
             Some("dig-uno")
         );
 
-        assert!(reflash_choice(None, Some("seeed-xiao-esp32c6")).is_none());
+        assert!(reflash_choice(None, Some("seeed/xiao-esp32-c6")).is_none());
     }
 
     #[test]

@@ -232,7 +232,24 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         detail: detail(device),
         freshness_label: freshness_label(device, now),
         identity_label: device.identity.strongest_label(),
-        detected_chip: device.evidence.detected_chip().map(str::to_string),
+        // A boot banner names the chip for a board seen booting; a board
+        // that was already running when the tab attached never shows one,
+        // but its hello names the firmware PACKAGE ("fw-esp32c6 abc1234"),
+        // which is the chip by another name (G1 2026-09-02: the re-flash
+        // verb on a running card never appeared without this).
+        detected_chip: device
+            .evidence
+            .detected_chip()
+            .map(str::to_string)
+            .or_else(|| {
+                device
+                    .evidence
+                    .classification
+                    .hello()
+                    .and_then(|hello| hello.firmware.as_deref())
+                    .and_then(chip_from_firmware_label)
+                    .map(str::to_string)
+            }),
         board_id: device
             .evidence
             .classification
@@ -284,6 +301,20 @@ fn needs_firmware(classification: &Classification) -> bool {
             | Classification::Incompatible { .. }
             | Classification::Quiet { .. }
     )
+}
+
+/// The chip family a firmware label ("fw-esp32c6 abc1234") was built for,
+/// in the catalog's family vocabulary — the classic's package is `fw-esp32v3`
+/// and its family is plain `esp32`. Unknown packages answer nothing rather
+/// than a guess.
+fn chip_from_firmware_label(label: &str) -> Option<&'static str> {
+    let package = label.split_whitespace().next()?;
+    match package {
+        "fw-esp32c6" => Some("esp32c6"),
+        "fw-esp32s3" => Some("esp32s3"),
+        "fw-esp32v3" => Some("esp32"),
+        _ => None,
+    }
 }
 
 /// What this board is running, from its own report.
@@ -488,6 +519,27 @@ fn outcome_view(outcome: &ActivityOutcome) -> OutcomeView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A running board attached mid-stream shows no boot banner; its hello's
+    /// firmware label is the chip by another name, in the catalog's family
+    /// vocabulary. Unknown packages answer nothing.
+    #[test]
+    fn the_firmware_label_names_the_chip_family() {
+        assert_eq!(
+            chip_from_firmware_label("fw-esp32c6 abc1234"),
+            Some("esp32c6")
+        );
+        assert_eq!(
+            chip_from_firmware_label("fw-esp32s3 abc1234 (dirty)"),
+            Some("esp32s3")
+        );
+        assert_eq!(
+            chip_from_firmware_label("fw-esp32v3 abc1234"),
+            Some("esp32")
+        );
+        assert_eq!(chip_from_firmware_label("fw-host abc1234"), None);
+        assert_eq!(chip_from_firmware_label(""), None);
+    }
     use crate::identity::IdentityChain;
 
     #[test]

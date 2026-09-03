@@ -291,9 +291,8 @@ impl LpServer {
         let hardware = lpc_wire::HardwareFacts {
             radio: radio_service.is_some(),
             button: button_service.is_some(),
-            // Nothing on the device writes a board identity yet; the field
-            // becomes populatable when provisioning writes `/hardware.json`
-            // (board-selection roadmap M5).
+            // Stamped by the embedder from its loaded hardware manifest
+            // (`set_board_id`); host, browser and CLI servers hold none.
             board_id: None,
             // The measured LED envelope lands through
             // `set_total_led_budget` — only the embedder holds the board
@@ -384,6 +383,16 @@ impl LpServer {
     /// posture as [`Self::set_hardware_identity`]).
     pub fn set_total_led_budget(&mut self, budget: Option<u32>) {
         self.hello.hardware.total_led_budget = budget;
+    }
+
+    /// Stamp the board manifest's id (`vendor/product`, the catalog key)
+    /// into the hello — same posture as [`Self::set_total_led_budget`]:
+    /// only the embedder holds the manifest. A card that knows the board
+    /// can re-flash it and wire a new project for it without guessing
+    /// (G1 2026-09-02: neither the hello nor the registry named the board,
+    /// so a running board had no road to newer firmware but Factory reset).
+    pub fn set_board_id(&mut self, board_id: Option<alloc::string::String>) {
+        self.hello.hardware.board_id = board_id;
     }
 
     pub fn set_hardware_identity(&mut self, identity: lpc_wire::HardwareIdentity) {

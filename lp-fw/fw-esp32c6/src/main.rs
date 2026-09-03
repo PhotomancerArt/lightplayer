@@ -436,6 +436,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // silicon revision, and — the C6 has an 802.15.4 radio — its EUI-64.
     // The server cannot derive any of it.
     server.set_hardware_identity(chip_identity());
+    // The board this firmware is running as, from the loaded manifest — the
+    // catalog key a card needs to re-flash or wire a new project for it.
+    server.set_board_id(Some(alloc::string::String::from(
+        hardware_registry.manifest().board_id(),
+    )));
     server.set_reboot_hook(Some(Rc::new(reboot_now)));
     esp_println::println!("[INIT] LpServer created");
 
