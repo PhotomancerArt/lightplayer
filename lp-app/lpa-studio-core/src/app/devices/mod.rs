@@ -59,7 +59,7 @@ pub use device_push::{
     DevicePushOp, PushOffer, PushSource, PushSourceChoice, PushSourceGroup,
     first_bundled_example_id, push_offer,
 };
-pub use device_records::{record_from_registry_row, registry_row_from_record};
+pub use device_records::{auto_record_name, record_from_registry_row, registry_row_from_record};
 pub use device_roster::{
     DeviceRoster, DeviceRosterView, JournalLine, RememberedView, RosterSplit, split_roster,
 };

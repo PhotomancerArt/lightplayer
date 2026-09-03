@@ -82,6 +82,50 @@ pub fn registry_row_from_record(record: &DeviceRecord) -> Option<RegisteredDevic
     })
 }
 
+/// The name a registered board should be given when it has none — or `None`
+/// when it already has one, or when there is nothing honest to name it after.
+///
+/// **A registered LightPlayer never shows a bare MAC or uid as its title**
+/// (G1, 2026-09-03: the bench C6 sat on the devices page called
+/// `60:55:f9:0a:0b:0c`). [`DeviceRecord::title`] falls back to the strongest
+/// identity binding when neither the user nor the device supplied a name,
+/// and until now only the FLASH gesture ever minted one
+/// ([`derive_flash_name`](crate::app::devices::derive_flash_name)) — so a
+/// board that arrived already flashed (the bench board, every board flashed
+/// from the CLI, every row written before the auto-name existed) had nothing
+/// to give it a name and wore its MAC forever.
+///
+/// Three conditions, all of them "we actually know this":
+///
+/// 1. No name of its own — neither the user's ([`DeviceRecord::name`]) nor
+///    the one the firmware provisioned ([`IdentityChain::name`]). A name is
+///    never overwritten; a rename via `SetName` always wins afterwards.
+/// 2. A registry key ([`registry_key`]): a board with neither uid nor MAC is
+///    not remembered at all, and naming something unrememberable would put a
+///    name on a card that cannot come back.
+/// 3. A known board id — the name is "<board display name> · <Mon D>", so a
+///    board that has not said what it is has nothing to be named after. The
+///    catalog's display name when the id resolves, the raw id otherwise
+///    (the same fallback the header's identity line makes).
+///
+/// `taken` is the names already in use, so two boards named on the same day
+/// get "… · Sep 3" and "… · Sep 3 2" rather than one name twice.
+pub fn auto_record_name(
+    record: &DeviceRecord,
+    epoch_secs: f64,
+    taken: &[String],
+) -> Option<String> {
+    if record.name.is_some() || record.identity.name.is_some() {
+        return None;
+    }
+    registry_key(&record.identity)?;
+    let board_id = record.board_id.as_deref()?;
+    let display = lpa_boards::board_by_id(board_id)
+        .map(|board| board.display_name.clone())
+        .unwrap_or_else(|| board_id.to_string());
+    Some(super::derive_flash_name(&display, epoch_secs, taken))
+}
+
 /// One registry row as a model record, for `Roster::load_records` at boot.
 ///
 /// `fallback_device_id` is used when the row predates the model (no
@@ -189,6 +233,98 @@ mod tests {
         assert_eq!(
             back.identity.mac,
             Some(MacAddress("60:55:f9:0a:0b:0c".to_string()))
+        );
+    }
+
+    /// Epoch seconds inside 2026-09-03, the day of the G1 walk that found
+    /// the bench board wearing its MAC.
+    const SEP_3_2026: f64 = 1_788_436_800.0;
+
+    /// The rule: a board that hello'd, earned a row and has no name of its
+    /// own is named after the board it says it is, and the day it turned up.
+    #[test]
+    fn a_registered_board_with_no_name_is_named_after_its_board_and_the_day() {
+        let mut record = record();
+        record.name = None;
+        record.identity.name = None;
+        record.board_id = Some("seeed/xiao-esp32-c6".to_string());
+
+        assert_eq!(
+            auto_record_name(&record, SEP_3_2026, &[]).as_deref(),
+            Some("XIAO ESP32-C6 · Sep 3"),
+            "the catalog's display name, not the raw board id"
+        );
+    }
+
+    /// Two boards of the same kind on the same day are told apart by the
+    /// collision suffix rather than sharing a name.
+    #[test]
+    fn a_second_board_on_the_same_day_takes_the_collision_suffix() {
+        let mut record = record();
+        record.name = None;
+        record.identity.name = None;
+        record.board_id = Some("seeed/xiao-esp32-c6".to_string());
+        let taken = vec!["XIAO ESP32-C6 · Sep 3".to_string()];
+
+        assert_eq!(
+            auto_record_name(&record, SEP_3_2026, &taken).as_deref(),
+            Some("XIAO ESP32-C6 · Sep 3 2")
+        );
+    }
+
+    /// A name is never overwritten — not the user's, and not the one the
+    /// firmware provisioned. Renaming a board out from under someone is the
+    /// one thing an auto-name must never do.
+    #[test]
+    fn a_named_board_is_left_alone() {
+        let named = record();
+        assert_eq!(named.name.as_deref(), Some("Kitchen"));
+        assert_eq!(auto_record_name(&named, SEP_3_2026, &[]), None);
+
+        let mut provisioned = record();
+        provisioned.name = None;
+        assert_eq!(
+            provisioned.identity.name.as_deref(),
+            Some("Bench board"),
+            "the device calls itself something"
+        );
+        assert_eq!(auto_record_name(&provisioned, SEP_3_2026, &[]), None);
+    }
+
+    /// Nothing is named after a guess: a board that has not said what it is,
+    /// and a board with no honest registry key, both stay as they are.
+    #[test]
+    fn a_board_with_nothing_to_name_it_after_is_not_named() {
+        let mut unknown_board = record();
+        unknown_board.name = None;
+        unknown_board.identity.name = None;
+        unknown_board.board_id = None;
+        assert_eq!(auto_record_name(&unknown_board, SEP_3_2026, &[]), None);
+
+        let mut anonymous = record();
+        anonymous.name = None;
+        anonymous.identity.name = None;
+        anonymous.identity.uid = None;
+        anonymous.identity.mac = None;
+        assert_eq!(
+            auto_record_name(&anonymous, SEP_3_2026, &[]),
+            None,
+            "a board with no registry key is not remembered, so it is not named"
+        );
+    }
+
+    /// A board id the served catalog does not carry still names the board:
+    /// an id worth showing beats a MAC, which is what the rule is for.
+    #[test]
+    fn an_unknown_board_id_names_the_board_verbatim() {
+        let mut record = record();
+        record.name = None;
+        record.identity.name = None;
+        record.board_id = Some("someone/prototype-9".to_string());
+
+        assert_eq!(
+            auto_record_name(&record, SEP_3_2026, &[]).as_deref(),
+            Some("someone/prototype-9 · Sep 3")
         );
     }
 

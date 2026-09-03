@@ -22,13 +22,18 @@
 //!    (`dropped`); this renderer folds anything still over 160 characters
 //!    behind a click-to-expand and shows the drop count as the first row.
 //!
-//! # One box (D3)
+//! # One box, and flush inside it (D3; G1 2026-09-03)
 //!
-//! The terminal is the zone's content directly on the card's
-//! `bg-terminal` ground — no inner rounded/bordered sub-panel. The old
-//! `terminal_class()` in `device_roster_card.rs` drew its own box inside
-//! the zone's box; that is exactly the nesting the card's "one box" rule
-//! (AC1) forbids, so this component drops it.
+//! The terminal is content directly on the card's `bg-terminal` ground — no
+//! inner rounded/bordered sub-panel. The old `terminal_class()` in
+//! `device_roster_card.rs` drew its own box inside the zone's box; that is
+//! exactly the nesting the card's "one box" rule (AC1) forbids, so this
+//! component drops it.
+//!
+//! G1 took that one step further: the ground has to reach the card's own
+//! edges. So this block carries neither zone padding nor a hairline — it is
+//! the last block of the card's FIRMWARE zone, which owns the separator
+//! above the pair (see [`ZONE_CLASS`]).
 //!
 //! # Pinning
 //!
@@ -233,12 +238,19 @@ fn TerminalRow(
     }
 }
 
-/// The zone treatment (full-bleed hairline + own padding), copied verbatim
-/// from `device_roster_card.rs`'s `zone_class(false)` — that function is
-/// private and this file must not edit its module, so the literal is
-/// duplicated rather than imported. Keep the two in sync by hand.
-const ZONE_CLASS: &str =
-    "tw:grid tw:min-w-0 tw:gap-2 tw:border-t tw:border-border-strong tw:px-4 tw:py-3";
+/// The terminal's block: NO padding and NO hairline of its own (G1
+/// 2026-09-03, P9).
+///
+/// The terminal is the last block of the card's FIRMWARE zone — the same
+/// subject, said twice: what firmware is on this board, and what that
+/// firmware is saying. So the zone above it owns the separator, and there is
+/// deliberately none between the firmware's verb row and this ground.
+///
+/// No padding either, because the ground is meant to reach the card's own
+/// edges: a dark band across the card rather than a dark panel sitting
+/// inside a lighter one. The reading inset lives on the ground itself
+/// ([`TERMINAL_CLASS`]'s `px-2 py-1.5`), so text never touches the edge.
+const ZONE_CLASS: &str = "tw:grid tw:min-w-0";
 
 /// The terminal ground itself. Deliberately no border/rounded/background
 /// sub-frame (see the module doc's "One box" section) — just the card's own
@@ -397,6 +409,22 @@ mod tests {
         assert!(is_pinned_to_bottom(96.0, 260, 160));
         // 5px shy is not.
         assert!(!is_pinned_to_bottom(95.0, 260, 160));
+    }
+
+    /// FLUSH (G1 2026-09-03): the ground reaches the card's edges, so the
+    /// block carries no padding and no hairline of its own — the firmware
+    /// zone above owns the separator — and the ground itself keeps only the
+    /// small reading inset that stops text touching the edge.
+    #[test]
+    fn the_terminal_is_flush_with_the_cards_edges() {
+        assert!(!ZONE_CLASS.contains("px-"), "{ZONE_CLASS}");
+        assert!(!ZONE_CLASS.contains("py-"), "{ZONE_CLASS}");
+        assert!(!ZONE_CLASS.contains("border"), "{ZONE_CLASS}");
+        // No frame of its own either: the ground is the card's, undecorated.
+        assert!(!TERMINAL_CLASS.contains("rounded"), "{TERMINAL_CLASS}");
+        assert!(!TERMINAL_CLASS.contains("border"), "{TERMINAL_CLASS}");
+        assert!(TERMINAL_CLASS.contains("tw:px-2"), "{TERMINAL_CLASS}");
+        assert!(TERMINAL_CLASS.contains("tw:py-1.5"), "{TERMINAL_CLASS}");
     }
 
     #[test]

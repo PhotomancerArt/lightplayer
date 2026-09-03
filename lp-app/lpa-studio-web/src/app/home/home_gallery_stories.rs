@@ -481,14 +481,14 @@ fn devices_page_without_a_transport() -> Element {
 }
 
 #[story(
-    description = "The Devices page under D7 (disconnect → disappear, AC9): the grid holds only boards that are actually THERE — a pending link still identifying, the two connected cards, and the add slot at the insertion point. The board Studio remembers but cannot see is not a card at all: it is the one quiet line under the grid, counted and collapsed, with 'show' as the way in. That line is where Forget lives for an absent board, which is why an unplugged board can still be removed without plugging it back in. Compare with devices_page_remembered_open."
+    description = "The Devices page under D7 (disconnect → disappear, AC9), with the cards in their four-zone reading (P9): each card is header · PROJECT (preview, the project name or \"Nothing loaded\", its verbs) · FIRMWARE (\"<firmware> · <board>\", Flash firmware … Factory reset, with the terminal flush edge to edge underneath as the same zone's second half) · DEVICE (freshness, Reset · Disconnect … Forget), with no labels anywhere — a zone is known by what it says and what it offers. The pending link wears the same grammar minus the project zone, which it has nothing to fill. The grid holds only boards that are actually THERE — a pending link still identifying, the two connected cards, and the add slot at the insertion point. The board Studio remembers but cannot see is not a card at all: it is the one quiet line under the grid, counted and collapsed, with 'show' as the way in. That line is where Forget lives for an absent board, which is why an unplugged board can still be removed without plugging it back in. Compare with devices_page_remembered_open."
 )]
 fn devices_page_roster() -> Element {
     devices_page_story(false)
 }
 
 #[story(
-    description = "The same page with the remembered line expanded (D7, AC9). Each absent board is a dashed, dimmed tile at card width: its name, the 120px preview slot saying WHY there is no picture (not connected, and when it was last heard — never a stale frame passed off as current), the board id · last-seen meta, and the two verbs an absent board can honestly offer — Reconnect in the outline voice (some bridges' port grants do not survive a replug) and Forget as a reserve-width inline confirm. The tiles are deliberately not cards: an offline board has no state zone, no terminal and no activity, because it has none of those."
+    description = "The same page with the remembered line expanded (D7, AC9). Each absent board is a dashed, dimmed tile at card width: its name, the 120px preview slot saying WHY there is no picture (not connected, and when it was last heard — never a stale frame passed off as current), the board id · last-seen meta, and the two verbs an absent board can honestly offer — Reconnect in the outline voice (some bridges' port grants do not survive a replug) and Forget as a reserve-width inline confirm. The tiles are deliberately not cards: an offline board has no project, firmware, terminal or device zone to fill, because it has none of those facts to hand."
 )]
 fn devices_page_remembered_open() -> Element {
     devices_page_story(true)
@@ -514,7 +514,7 @@ fn devices_page_story(remembered_open: bool) -> Element {
 }
 
 #[story(
-    description = "AC2, the height rule, as a measurement: the six device states in 400px columns — running, nothing loaded, needs firmware, flashing at 62%, sending (indeterminate), and degraded. Every row of the state zone is FIXED (state line 17px · progress slot 4px · preview slot 120px · meta line 17px · verb row 30px), so all six MUST measure the same height above the footer — G1 read 503px in every one of them, at every width from 320px to 560px — and a board event (a heartbeat, a fault, a lost link, a new terminal line) can therefore never move a card, nor a flash make the gallery jump. What changes between them is what the rows SAY: the state line's ruled priority (activity → fault → freshness → detail), the progress slot lit or unlit, the preview slot's honest sentence, and which verbs the row holds. During an activity the verb row is kept at its height and withdrawn (D9) — the way out is the footer's Cancel, which is also why the two activity cards' footers are one chip row shorter than the idle ones. Laid out three rows of two rather than six across so every state fits the captured sheet; the height readings are taken with the columns forced to 400px and 320px."
+    description = "The card's four zones and the height rule (AC2), as a measurement: the six device states in 400px columns — running, nothing loaded, needs firmware, flashing at 62%, sending (indeterminate), and degraded. Under the header (title · status chip · board · chip · MAC · firmware) the card is divided by SUBJECT, with no labels: PROJECT (preview slot 120px · info line 17px · bar 4px · verbs 30px) says what is on the board and offers Open · Clear faults … the pick + Put it on the board … Remove; FIRMWARE (info 17px · bar 4px · verbs 30px, then the terminal) reads \"<firmware> · <board>\" or \"Blank flash — needs firmware\", holds Flash firmware … Factory reset, and carries the terminal as its second half — one zone, no hairline between the verb row and the log, and the dark ground running flush to both card edges rather than sitting in a padded well (the pair is one section so a later milestone can put it behind one curtain); DEVICE (info 17px · verbs 30px) carries the freshness line and Reset · Retry · Disconnect … Forget. An activity narrates in the zone whose subject it changes, lights THAT zone's bar and puts its Cancel in THAT zone's verb row: compare Flashing (firmware bar lit, the firmware line counting percent) with Sending (project bar sweeping, the project line narrating). Every row exists in every state, so all six cards MUST measure the same height, and a board event — a heartbeat, a fault, a lost link, a new terminal line — can never move a card nor make the gallery jump while a flash runs. Laid out three rows of two rather than six across so every state fits the captured sheet."
 )]
 fn devices_card_states() -> Element {
     let states = card_state_fixtures();
@@ -544,7 +544,7 @@ fn devices_card_states() -> Element {
 }
 
 #[story(
-    description = "The quiet state: a board whose port is open and which has stopped saying anything (NotResponding). It is deliberately undramatic — the chip reads Not responding in the neutral tone, the state line carries the honest staleness rather than an invented failure, and the way out is Retry (re-run identification, no replug needed) beside Disconnect and Forget. Nothing is claimed about what is loaded: the board has not said, so the meta line stays empty and the preview slot says the feed has nothing to show."
+    description = "The quiet state: a board whose port is open and which has stopped saying anything (NotResponding). It is deliberately undramatic — the chip reads Not responding in the neutral tone, and the DEVICE zone's info line carries the honest staleness (\"last heard 4 min ago\") rather than an invented failure, with the way out beside it: Reset · Retry (re-run identification, no replug needed) · Disconnect … Forget. Nothing is claimed about what is loaded: the board has not said, so the PROJECT zone's info line stays empty at its height and the preview slot says the feed has nothing to show. The FIRMWARE zone still names the firmware and board the record remembers — going quiet does not unlearn what the board already said."
 )]
 fn devices_card_not_responding() -> Element {
     rsx! {
@@ -562,7 +562,7 @@ fn devices_card_not_responding() -> Element {
 }
 
 #[story(
-    description = "The armed destructive chips, idle beside both armed states (2K+, devices-treatments spike gate 2026-08-31; RESERVE width from the device-card-v2 spike §2, 2026-09-02). The chip renders both 'Forget' and 'Confirm Forget' in one grid cell, so it is already as wide as its armed reading and the first click changes text and tone WITHOUT moving the chip or its neighbours — compare the footers, the chips sit at the same width and the card's height is unchanged. Middle: Forget armed in the footer. Right: Remove project armed in the state zone's verb row — D8, the OTHER destructive chip, which marks the whole card exactly as Forget does. Arming dims what the card SAYS (header, the four upper rows, the terminal) and never what it OFFERS: the verb row and the footer keep full contrast, so the chip that is asking stays legible. Blur or the 4s window stands down. Captured with the story-only armed_preview hooks; the knock and the quiet drain track are motion and do not capture."
+    description = "The armed destructive chips, idle beside both armed states (2K+, devices-treatments spike gate 2026-08-31; RESERVE width from the device-card-v2 spike §2, 2026-09-02). The chip renders both 'Forget' and 'Confirm Forget' in one grid cell, so it is already as wide as its armed reading and the first click changes text and tone WITHOUT moving the chip or its neighbours — compare the footers, the chips sit at the same width and the card's height is unchanged. Middle: Forget armed in the DEVICE zone. Right: Remove armed in the PROJECT zone's verb row — D8, the OTHER destructive chip, which marks the whole card exactly as Forget does, and the two now sit in different zones, which is why a capture that proves the marking needs both. Arming dims what the card SAYS (the header and every zone's info line, the preview and the terminal) and never what it OFFERS: every verb row keeps full contrast, so the chip that is asking stays legible. Blur or the 4s window stands down. Captured with the story-only armed_preview hooks; the knock and the quiet drain track are motion and do not capture."
 )]
 fn devices_card_armed() -> Element {
     let card = armed_card_fixture();
@@ -595,7 +595,7 @@ fn devices_card_armed() -> Element {
 }
 
 #[story(
-    description = "Running vs Degraded, side by side (a fault is never black, 2026-09-02). Left: the healthy running card. Right: the SAME board reporting a faulted node — the chip drops from Ready to Degraded in the attention tone, and one line under \"Running …\" names the node and the runtime's own reason. The running face is deliberately kept: a degraded board is still running, and dropping the project name would answer \"what is on it?\" with a complaint. This is the card that lied for two days while a quarantined shader rendered black (2026-09-01 bench). The degraded card also carries one extra verb in the actions row — Clear faults, beside Reset — which forgets the board\'s crash ledger and re-arms the faulted nodes; the healthy card does not offer it, because there would be nothing for it to do."
+    description = "Running vs Degraded, side by side (a fault is never black, 2026-09-02). Left: the healthy running card. Right: the SAME board reporting a faulted node — the chip drops from Ready to Degraded in the attention tone, and the PROJECT zone's info line takes the attention tone to name the node and the runtime's own reason, in the row that otherwise holds the project name (one line, the full text on hover). The running face is deliberately kept: a degraded board is still running, which is why Open stays and the fault reads as a line rather than as a new state. This is the card that lied for two days while a quarantined shader rendered black (2026-09-01 bench). The degraded card also carries one extra verb, in the same zone as the fault it answers — Clear faults, beside Open — which forgets the board's crash ledger and re-arms the faulted nodes; the healthy card does not offer it, because there would be nothing for it to do."
 )]
 fn devices_page_degraded_card() -> Element {
     let healthy = roster_fixture().roster.devices.remove(0);
@@ -683,11 +683,11 @@ fn roster_fixture() -> DeviceRosterView {
                     title: "Luna\'s porch sign".to_string(),
                     status: DeviceStatus::Ready,
                     state_label: "Ready".to_string(),
-                    detail: Some("LightPlayer · dig-uno".to_string()),
+                    detail: Some("LightPlayer · quinled/dig-uno".to_string()),
                     freshness_label: Some("last heard 3 s ago".to_string()),
                     identity_label: Some("dev000000daqf6dvvqz".to_string()),
                     detected_chip: Some("esp32".to_string()),
-                    board_id: Some("dig-uno".to_string()),
+                    board_id: Some("quinled/dig-uno".to_string()),
                     firmware: Some("fw-esp32v3 abc1234".to_string()),
                     needs_firmware: false,
                     degraded: None,
@@ -719,7 +719,7 @@ fn roster_fixture() -> DeviceRosterView {
                         ),
                         story_line(
                             DeviceTerminalKind::Wire,
-                            "hello · proto 1 · dig-uno · fw-esp32v3 abc1234",
+                            "hello · proto 1 · quinled/dig-uno · fw-esp32v3 abc1234",
                         ),
                         story_line(DeviceTerminalKind::Studio, "Opened the port"),
                         story_line(DeviceTerminalKind::Outcome, "Identified in 0.4 s"),
@@ -744,7 +744,7 @@ fn roster_fixture() -> DeviceRosterView {
                     // A board Studio has met before: the record kept its
                     // board id and firmware label, so the identity line
                     // still names them while the re-identify runs.
-                    board_id: Some("seeed-xiao-esp32c6".to_string()),
+                    board_id: Some("seeed/xiao-esp32-c6".to_string()),
                     firmware: Some("fw-esp32c6 abc1234".to_string()),
                     needs_firmware: false,
                     degraded: None,
@@ -826,11 +826,11 @@ fn roster_fixture() -> DeviceRosterView {
                     title: "Seeed XIAO ESP32-C6 · Aug 30".to_string(),
                     status: DeviceStatus::Ready,
                     state_label: "Ready".to_string(),
-                    detail: Some("LightPlayer · seeed-xiao-esp32c6".to_string()),
+                    detail: Some("LightPlayer · seeed/xiao-esp32-c6".to_string()),
                     freshness_label: Some("last heard just now".to_string()),
                     identity_label: Some("60:55:f9:0a:0b:0d".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
-                    board_id: Some("seeed-xiao-esp32c6".to_string()),
+                    board_id: Some("seeed/xiao-esp32-c6".to_string()),
                     firmware: Some("fw-esp32c6 abc1234".to_string()),
                     needs_firmware: false,
                     degraded: None,
@@ -841,7 +841,7 @@ fn roster_fixture() -> DeviceRosterView {
                     can_remove_project: false,
                     activity: None,
                     last_outcome: Some(OutcomeView {
-                        summary: "firmware installed — seeed-xiao-esp32c6".to_string(),
+                        summary: "firmware installed — seeed/xiao-esp32-c6".to_string(),
                         ok: true,
                     }),
                     // A flash's narration, kept across the reconnect
@@ -862,12 +862,12 @@ fn roster_fixture() -> DeviceRosterView {
                         ),
                         story_line(
                             DeviceTerminalKind::Wire,
-                            "hello · proto 1 · seeed-xiao-esp32c6 · fw-esp32c6 abc1234",
+                            "hello · proto 1 · seeed/xiao-esp32-c6 · fw-esp32c6 abc1234",
                         ),
                         story_line(DeviceTerminalKind::Wire, "loaded · 0 projects"),
                         story_line(
                             DeviceTerminalKind::Outcome,
-                            "firmware installed — seeed-xiao-esp32c6",
+                            "firmware installed — seeed/xiao-esp32-c6",
                         ),
                     ],
                     terminal_dropped: 0,
@@ -885,7 +885,7 @@ fn roster_fixture() -> DeviceRosterView {
                     freshness_label: Some("last heard 6 min ago".to_string()),
                     identity_label: Some("dev000000000garage1".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
-                    board_id: Some("seeed-xiao-esp32c6".to_string()),
+                    board_id: Some("seeed/xiao-esp32-c6".to_string()),
                     firmware: Some("fw-esp32c6 abc1234".to_string()),
                     needs_firmware: false,
                     degraded: None,
@@ -1149,7 +1149,7 @@ fn device_terminal_story_lines() -> Vec<DeviceTerminalLine> {
         },
         DeviceTerminalLine {
             kind: DeviceTerminalKind::Wire,
-            text: "hello · proto 1 · seeed-xiao-esp32c6 · fw 2026.09.01".to_string(),
+            text: "hello · proto 1 · seeed/xiao-esp32-c6 · fw 2026.09.01".to_string(),
             repeats: 1,
         },
         DeviceTerminalLine {
@@ -1301,7 +1301,7 @@ fn device_pick_popover_open() -> Element {
 }
 
 #[story(
-    description = "The board pick popover, open and filtered (P6, AC4). The chip the boot banner named narrows the served catalog, and the panel SAYS so — which chip, which source answered it, how many boards fit — with \"show all\" as the escape; the flash preflight's chip guard, not the filter, is what makes a wrong pick fail safely, which is what the foot line is for. Each tile carries the board's name, its manufacturer and flash, and its family, marked green only where it matches the detected chip. Two C6 boards fit, so nothing is preselected and the Flash verb waits: the pin map is written to the device, so the card never guesses."
+    description = "The board pick popover, open and filtered (P6, AC4; renderings P10). The chip the boot banner named narrows the served catalog, and the panel SAYS so — which chip, which source answered it, how many boards fit — with \"show all\" as the escape; the flash preflight's chip guard, not the filter, is what makes a wrong pick fail safely, which is what the foot line is for. Each tile now LEADS with the board as lpa-boards draws it — the same sidecar and the same renderer the boards page uses, turned a quarter turn and fitted to a 56px band, so a devkit lies along the band instead of standing in it as a sliver and tiles of a three-to-one height range still line their names up — over the name, its manufacturer and flash, and its family, marked green only where it matches the detected chip. The trigger's swatch carries the picked board's own silhouette. Two C6 boards fit, so nothing is preselected and the Flash verb waits: the pin map is written to the device, so the card never guesses."
 )]
 fn device_board_pick_open() -> Element {
     rsx! {
