@@ -48,6 +48,7 @@ use lpa_studio_core::{
 
 use crate::base::icon::{NodeKindIcon, StudioIconName};
 use crate::base::option_cards::{OptionCard, OptionCards};
+use crate::core::quiet_action_class;
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip};
 
 /// One device card.
@@ -300,7 +301,7 @@ pub(crate) fn DeviceRosterCard(
                 }
                 if offer_reflash_picker && idle && linked && !offer_flash {
                     button {
-                        class: quiet_button_class(),
+                        class: quiet_action_class(),
                         r#type: "button",
                         title: "Write the firmware this Studio serves onto the board; the project and identity stay.",
                         onclick: move |_| {
@@ -762,12 +763,6 @@ fn mono_line_class() -> &'static str {
 
 fn note_class() -> &'static str {
     "tw:grid tw:gap-2 tw:rounded-md tw:border tw:border-dashed tw:border-border tw:px-3 tw:py-2.5 tw:text-xs tw:leading-relaxed tw:text-subtle-foreground"
-}
-
-/// The quiet verb dress for a LOCAL toggle (no `UiAction` behind it): the
-/// disabled dress without the disabled half.
-fn quiet_button_class() -> &'static str {
-    "tw:inline-flex tw:w-fit tw:cursor-pointer tw:items-center tw:rounded-md tw:border tw:border-border tw:px-2.5 tw:py-1 tw:text-xs tw:font-semibold tw:text-subtle-foreground tw:hover:text-foreground"
 }
 
 fn disabled_button_class() -> &'static str {
