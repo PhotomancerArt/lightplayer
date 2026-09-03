@@ -92,6 +92,38 @@ Note what the feature does **not** cover: `lps-builtin-ids` is a separate crate
 the compiler always links, and its generated name/lookup tables grow with every
 `BuiltinId` variant regardless of this flag.
 
+## Cycle census and bit-identity proofs
+
+Two instruments exist for the hot Q32 math builtins
+(`docs/reports/2026-09-02-q32-builtins-cycles.md`):
+
+- **Cycle census** — cycles per call on the RV32 emulator (`CycleModel::Esp32C6`)
+  for `exp`, `sqrt`, `inversesqrt`, `sin`, `cos`, `/`, `mod`, wrapper overhead
+  subtracted. Lives in `lps-filetests` (`src/test_run/builtin_cycle_census.rs`):
+
+  ```bash
+  scripts/build-builtins.sh
+  cargo test -p lps-filetests --release builtin_cycle_census -- --ignored --nocapture
+  # LP_CENSUS_DETAIL=1 prints every (input → cycles) sample
+  ```
+
+  The census runs on the filetests image (`opt-level=1`); the profiler and the
+  device compile this crate at `opt-level=3`, so use it to rank and to measure
+  deltas, and `lp-cli profile function` for absolute numbers on a workload.
+
+- **Bit-identity proofs** — `exp_q32.rs` and `fsqrt_q32.rs` keep their former
+  implementation as a test-only reference and prove the shipped code equal for
+  every `i32` input. The exhaustive proofs are `#[ignore]` (seconds in release);
+  sampled versions run in the default suite:
+
+  ```bash
+  cargo test -p lps-builtins --release exhaustive -- --ignored --nocapture
+  ```
+
+  A Q32 builtin rewrite that is not bit-identical is an accuracy decision:
+  ADR + re-blessed expectations on every Q32 filetest target
+  (`docs/design/q32.md`).
+
 ## Wiring into the compiler
 
 Builtin **IDs** and **ABI tables** are not edited by hand. Run
