@@ -2761,8 +2761,8 @@ mod tests {
             .get(id)
             .expect("runtime buffer")
             .value()
-            .bytes
-            .clone()
+            .bytes()
+            .into_owned()
     }
 
     fn loaded_basic_runtime() -> LoadedProjectRuntime {

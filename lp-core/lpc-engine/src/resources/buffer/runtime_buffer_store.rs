@@ -219,11 +219,11 @@ mod tests {
         let buffer = store
             .get_mut_mark_updated(id, Revision::new(7))
             .expect("existing buffer");
-        buffer.bytes.push(2);
+        buffer.bytes_mut().expect("raw bytes").push(2);
 
         let got = store.get(id).expect("still present");
         assert_eq!(got.changed_at(), Revision::new(7));
-        assert_eq!(got.value().bytes, vec![1, 2]);
+        assert_eq!(got.value().bytes().as_ref(), &[1, 2]);
     }
 
     #[test]
@@ -294,6 +294,6 @@ mod tests {
 
         assert_eq!(removed, vec![owned]);
         assert!(store.get(owned).is_none());
-        assert_eq!(store.get(other).unwrap().value().bytes, vec![2]);
+        assert_eq!(store.get(other).unwrap().value().bytes().as_ref(), &[2]);
     }
 }

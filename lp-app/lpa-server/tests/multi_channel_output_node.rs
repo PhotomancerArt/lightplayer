@@ -161,16 +161,14 @@ fn published_control_samples(server: &mut LpServer) -> Vec<u16> {
         .next()
         .expect("the project's one output node registers a sink buffer");
 
-    let bytes = &engine
+    engine
         .runtime_buffers()
         .get(sink)
         .expect("sink buffer")
         .value()
-        .bytes;
-    bytes
-        .chunks_exact(2)
-        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-        .collect()
+        .samples16()
+        .expect("output channels are u16 samples")
+        .to_vec()
 }
 
 fn load_penta_strands() -> (LpServer, Rc<RefCell<MemoryOutputProvider>>) {

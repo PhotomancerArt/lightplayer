@@ -130,7 +130,7 @@ fn runtime_buffer_summary(
         revision,
         kind: WireResourceKindSummary::RuntimeBuffer(runtime_buffer_kind(&buffer.kind)),
         metadata: runtime_buffer_metadata_summary(&buffer.metadata),
-        byte_length_hint: Some(buffer.bytes.len() as u64),
+        byte_length_hint: Some(buffer.byte_len() as u64),
         availability: WireResourceAvailability::Available,
     }
 }
@@ -144,7 +144,7 @@ fn runtime_buffer_payload(
         resource_ref: ResourceRef::runtime_buffer(id),
         revision,
         metadata: runtime_buffer_metadata_payload(&buffer.metadata),
-        bytes: buffer.bytes.clone(),
+        bytes: buffer.bytes().into_owned(),
     }
 }
 
