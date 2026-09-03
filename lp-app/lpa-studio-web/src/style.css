@@ -5922,7 +5922,8 @@ select:focus-visible {
 
 /* The glow bump: the ring's OWN light. The halo is the same conic as the
    ring (same `--ux-ir-angle`, same spin, so the two turn in lockstep),
-   painted as a 7px band just outside the button and blurred; it fades and
+   painted as a 6px band just outside the button and blurred, at 0.38 —
+   ruled "much too strong" at 0.85, a whisper of light not a stage; it fades and
    grows in over 450ms instead of popping. Geometry is the whole trick:
    `filter` runs before `mask`, so a mask would cut the blur off hard at
    the box (the first spike pass), and `mask-clip: no-clip` parses in
@@ -5936,7 +5937,7 @@ select:focus-visible {
 .ux-spectrum-cta::after {
     content: "";
     position: absolute;
-    inset: -7px;
+    inset: -6px;
     z-index: 2;
     border-radius: inherit;
     background: conic-gradient(from var(--ux-ir-angle), var(--studio-spectrum), #5fe08b);
@@ -5947,13 +5948,13 @@ select:focus-visible {
         calc(100% + 40px) calc(100% + 40px),
         -40px calc(100% + 40px),
         -40px -40px,
-        7px 7px,
-        7px calc(100% - 7px),
-        calc(100% - 7px) calc(100% - 7px),
-        calc(100% - 7px) 7px,
-        7px 7px
+        6px 6px,
+        6px calc(100% - 6px),
+        calc(100% - 6px) calc(100% - 6px),
+        calc(100% - 6px) 6px,
+        6px 6px
     );
-    filter: blur(9px);
+    filter: blur(10px);
     opacity: 0;
     transform: scale(0.94);
     pointer-events: none;
@@ -5963,7 +5964,7 @@ select:focus-visible {
 }
 
 .ux-spectrum-cta:hover:not(:disabled)::after {
-    opacity: 0.85;
+    opacity: 0.38;
     transform: scale(1);
     animation: ux-ir-spin 3.2s linear infinite;
 }
