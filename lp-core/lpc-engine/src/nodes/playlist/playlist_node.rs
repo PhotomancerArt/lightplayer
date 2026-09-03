@@ -56,12 +56,11 @@ pub struct PlaylistNode {
     crossfade_scratch: CrossfadeScratch,
 }
 
-/// The crossfade sample path's persistent buffers (each `4 × point count`
-/// `u16`s while a transition runs).
+/// The crossfade sample path's persistent blend buffer (`4 × point count`
+/// `u16`s while a transition runs). The two inputs are read in place from
+/// their sample-outs (`LpGraphics::sample_out_data`), not copied here.
 #[derive(Default)]
 struct CrossfadeScratch {
-    previous: Vec<u16>,
-    active: Vec<u16>,
     blended: Vec<u16>,
 }
 
@@ -455,28 +454,17 @@ impl RenderNode for PlaylistNode {
         let channel_len = point_count as usize * 4;
         let scratch = &mut self.crossfade_scratch;
         ensure_scratch_len(
-            &mut scratch.previous,
-            channel_len,
-            "playlist previous samples",
-        )?;
-        ensure_scratch_len(&mut scratch.active, channel_len, "playlist active samples")?;
-        ensure_scratch_len(
             &mut scratch.blended,
             channel_len,
             "playlist blended samples",
         )?;
-        graphics
-            .read_sample_out_into(&previous_samples, &mut scratch.previous)
+        let previous_data = graphics
+            .sample_out_data(&previous_samples)
             .map_err(err_ctx("playlist previous sample read"))?;
-        graphics
-            .read_sample_out_into(&active_samples, &mut scratch.active)
+        let active_data = graphics
+            .sample_out_data(&active_samples)
             .map_err(err_ctx("playlist active sample read"))?;
-        blend_rgba16_samples(
-            &scratch.previous,
-            &scratch.active,
-            alpha,
-            &mut scratch.blended,
-        )?;
+        blend_rgba16_samples(previous_data, active_data, alpha, &mut scratch.blended)?;
         graphics
             .write_sample_out(target.samples, &scratch.blended)
             .map_err(err_ctx("playlist crossfade sample write"))

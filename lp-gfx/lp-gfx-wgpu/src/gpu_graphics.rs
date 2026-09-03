@@ -440,6 +440,10 @@ impl LpGraphics for GpuGraphics {
         Ok(())
     }
 
+    fn sample_out_data<'a>(&self, out: &'a SampleOutHandle) -> Result<&'a [u16], GfxError> {
+        Ok(&sample_out(out)?.0)
+    }
+
     fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {
         sample_out_mut(out)?.0.fill(0);
         Ok(())
@@ -1112,10 +1116,19 @@ void tick() {
             graphics.read_sample_out(&out).expect("read"),
             vec![5, 6, 7, 8]
         );
+        // The in-place borrow sees the same samples as the copying read.
+        assert_eq!(
+            graphics.sample_out_data(&out).expect("borrow"),
+            &[5, 6, 7, 8]
+        );
         graphics.clear_sample_out(&mut out).expect("clear");
         assert_eq!(
             graphics.read_sample_out(&out).expect("read"),
             vec![0, 0, 0, 0]
+        );
+        assert_eq!(
+            graphics.sample_out_data(&out).expect("borrow"),
+            &[0, 0, 0, 0]
         );
     }
 }

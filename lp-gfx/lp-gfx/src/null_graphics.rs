@@ -208,6 +208,10 @@ impl LpGraphics for NullGraphics {
         Err(unsupported("read sample outputs back"))
     }
 
+    fn sample_out_data<'a>(&self, _out: &'a SampleOutHandle) -> Result<&'a [u16], GfxError> {
+        Err(unsupported("borrow sample outputs"))
+    }
+
     fn clear_sample_out(&self, _out: &mut SampleOutHandle) -> Result<(), GfxError> {
         Err(unsupported("clear a sample-output buffer"))
     }

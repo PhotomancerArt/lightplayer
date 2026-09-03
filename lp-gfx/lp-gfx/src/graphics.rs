@@ -262,6 +262,21 @@ pub trait LpGraphics: Send + Sync {
     /// `docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.md`.
     fn read_sample_out_into(&self, out: &SampleOutHandle, dst: &mut [u16]) -> Result<(), GfxError>;
 
+    /// Borrow all `count × 4` RGBA16 channels of `out` in place.
+    ///
+    /// Every backend keeps the sample-out host-visible (the CPU backend's
+    /// buffer is in engine memory the host addresses directly; the GPU
+    /// backend's is a CPU-side `Vec`), so a frame path that only *reads* the
+    /// samples needs no copy at all — neither the per-tick memcpy of
+    /// [`Self::read_sample_out_into`] nor the 8 B/lamp scratch it lands in
+    /// (`docs/reports/2026-09-02-per-lamp-memory-table.md`). The slice borrows
+    /// the handle, not the backend: the backing lives inside the handle until
+    /// drop.
+    ///
+    /// [`Self::read_sample_out_into`] stays for callers that need their own
+    /// copy to keep across ticks.
+    fn sample_out_data<'a>(&self, out: &'a SampleOutHandle) -> Result<&'a [u16], GfxError>;
+
     /// Read all `count × 4` RGBA16 channels back as a fresh `Vec`.
     ///
     /// Allocates per call — a convenience for tests and tooling only.
