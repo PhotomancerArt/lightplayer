@@ -2987,12 +2987,16 @@ impl StudioController {
             }
         }
         self.pool.set_lens(id);
-        match self.attach_lens(id, updates).await {
+        let opened = match self.read_device_build(id).await {
+            Ok(()) => self.attach_lens(id, updates).await,
+            Err(error) => Err(error),
+        };
+        match opened {
             Ok(notices) => Ok(notices),
             Err(error) => {
-                // The board answered hello but not the attach conversation:
-                // no lens, no session, the wire goes back — the card says
-                // the rest.
+                // The board answered the fold's hello but not the lens's
+                // conversation (its own hello, or the attach): no lens, no
+                // session, the wire goes back — the card says the rest.
                 self.push_log(UiLogDraft::new(
                     UiLogLevel::Warn,
                     UiLogOrigin::Studio,
@@ -3042,9 +3046,10 @@ impl StudioController {
             uid: uid.to_string(),
             name: device.title(),
             board_id: hello.board_id.clone(),
-            // The hello the fold mirrors carries no build features; until
-            // the attach conversation reads them off the wire, the add-node
-            // picker offers everything (the same as the sim).
+            // The hello the fold mirrors carries no build features; the
+            // attach reads them off the lens's own wire (`read_device_build`)
+            // before the editor lands. Until then the picker offers
+            // everything (the same as the sim).
             features: None,
         })
     }
@@ -3151,6 +3156,25 @@ impl StudioController {
     /// uploads and older pushes, and saving from the wrong dir silently
     /// skipped the library save — 2026-07-26). Nothing loaded → the push
     /// fallback, so a later push and the sync agree.
+    /// Read the lens device's build off its own wire and record it on the
+    /// session's attachment, so [`Self::sync_lens_probe_policy`] can hand
+    /// the add-node picker its "Not on this device" gate. The fold's hello
+    /// mirror carries no build features by design; the lens's client asks
+    /// the board directly, once, at attach.
+    async fn read_device_build(&mut self, id: crate::RuntimeId) -> Result<(), UiError> {
+        let session = self.pool.session_mut(id).ok_or_else(|| {
+            UiError::MissingSession("runtime session is not attached".to_string())
+        })?;
+        let hello = session.client_mut()?.hello().await;
+        let logs = session.take_pending_logs();
+        self.record_session_logs(id, logs);
+        let hello = hello?;
+        if let Some(session) = self.pool.session_mut(id) {
+            session.set_device_features(hello.build.features);
+        }
+        Ok(())
+    }
+
     async fn discover_device_storage_id(
         &mut self,
         id: crate::RuntimeId,
@@ -4179,6 +4203,9 @@ impl StudioController {
         }
         self.project.reset();
         self.pool.detach_lens();
+        // No lens: probe policy and the picker gate follow it out at once,
+        // not at the next dispatch.
+        self.sync_lens_probe_policy();
     }
 
     /// Attach the editor lens to session `id` and rebuild the mirror
@@ -4215,6 +4242,10 @@ impl StudioController {
             }
         };
         self.project.set_runtime_storage_id(storage_id);
+        // The connect sequence builds the first view of this lens; the
+        // picker's gate (and probe policy) must already know the runtime
+        // it is on — the per-dispatch sync ran before this op moved the lens.
+        self.sync_lens_probe_policy();
         self.connect_running_project(updates).await
     }
 

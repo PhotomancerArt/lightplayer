@@ -241,6 +241,15 @@ impl RuntimeSession {
         self.device_attachment()?.features.as_deref()
     }
 
+    /// Record the build features the lens device's hello reported (read
+    /// off the wire at attach). A no-op on a sim session, which has no
+    /// device build to gate on.
+    pub fn set_device_features(&mut self, features: Vec<lpc_model::LpFeature>) {
+        if let RuntimePayload::Device(device) = &mut self.payload {
+            device.features = Some(features);
+        }
+    }
+
     /// Tear the session apart into its attachment (teardown: the wire
     /// client and per-session state drop here).
     pub fn into_payload(self) -> RuntimePayload {
