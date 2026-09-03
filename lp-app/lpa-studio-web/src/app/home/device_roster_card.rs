@@ -401,7 +401,10 @@ pub(crate) fn DeviceRosterCard(
                         span { class: "tw:min-w-0 tw:flex-1" }
                         // The other firmware verb: wipe the flash back to a
                         // blank chip. It asks nothing, so it needs no picker.
-                        if idle && linked {
+                        // Not on a board that already IS blank (G2 prep: the
+                        // pick trigger needs that row's width, and erasing a
+                        // blank flash does nothing).
+                        if idle && linked && !offer_flash {
                             ActionButton {
                                 key: "{\"factory-reset\"}",
                                 action: DevicesOp::action_for(DeviceAction::Erase { device }),
