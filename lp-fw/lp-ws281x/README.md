@@ -282,6 +282,23 @@ The core uses `core::sync::atomic` directly (including `fetch_add`), which all
 three target chips support natively. A CAS-less target would need
 `portable-atomic`, as `xt-runner-core` does.
 
+### Every firmware deployment: `isr-in-ram`
+
+Enable the `isr-in-ram` feature on every chip, single-core included — the
+rule is that the full interrupt-handler path goes in RAM unless it costs a
+lot of RAM, and this one costs about 1 KB. The feature is off by default only
+because host builds have no `.rwtext` section. Single-core was once assumed
+to tolerate a flash-resident service path; the ESP32-C6 refuted that
+(2026-09-02, 24-word halves under the meteor example: 99.7 % of frames
+truncated with the path in flash, 0.25 % with it in RAM, refill work
+15.6 → 5.7 words), because the render loop owns the cache and the path is
+cold on each frame's first refills. The feature is necessary, not
+sufficient: the backend's `RmtHw` methods must be `#[inline(always)]`
+(plain `#[inline]` is ignored at `opt-level = "z"`), the hot path must not
+go through closures (a closure does not inherit its caller's section), and
+placement is verified with `llvm-nm` on the image, never by reading
+attributes.
+
 ### Cross-core deployment
 
 Thread context and the interrupt handler may run on different cores —

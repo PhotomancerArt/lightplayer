@@ -155,6 +155,16 @@ pub struct ChannelStats {
     /// Distribution of per-service entry delay, bucketed exactly like
     /// [`Self::lag_hist`]; see [`LAG_BUCKETS`].
     pub entry_delay_hist: [u32; LAG_BUCKETS],
+    /// The bit cursor at the most recent guard trip — *where* the last
+    /// truncated frame died, in bits from the start of the frame. `0` until
+    /// the first trip.
+    ///
+    /// A trip count says frames are truncating; this says at which refill.
+    /// A value that sits on one number frame after frame (72 bits on a
+    /// 24-word half: prefill plus exactly one serviced refill) names a
+    /// deterministic late service rather than random load, and points at the
+    /// refill that is late. Cheap: one relaxed store on the trip path.
+    pub trip_bits_last: usize,
 }
 
 impl ChannelStats {
@@ -264,6 +274,8 @@ pub struct ChannelState {
     pub(crate) lag_hist: [AtomicU32; LAG_BUCKETS],
     pub(crate) entry_delay_max: AtomicI32,
     pub(crate) entry_delay_hist: [AtomicU32; LAG_BUCKETS],
+    /// See [`ChannelStats::trip_bits_last`].
+    pub(crate) trip_bits_last: AtomicUsize,
 }
 
 impl ChannelState {
@@ -293,6 +305,7 @@ impl ChannelState {
             lag_hist: [const { AtomicU32::new(0) }; LAG_BUCKETS],
             entry_delay_max: AtomicI32::new(0),
             entry_delay_hist: [const { AtomicU32::new(0) }; LAG_BUCKETS],
+            trip_bits_last: AtomicUsize::new(0),
         }
     }
 
@@ -528,6 +541,7 @@ impl ChannelState {
             lag_hist,
             entry_delay_max: self.entry_delay_max.load(Relaxed),
             entry_delay_hist,
+            trip_bits_last: self.trip_bits_last.load(Relaxed),
         }
     }
 
@@ -547,6 +561,7 @@ impl ChannelState {
         for cell in self.entry_delay_hist.iter() {
             cell.store(0, Relaxed);
         }
+        self.trip_bits_last.store(0, Relaxed);
     }
 }
 

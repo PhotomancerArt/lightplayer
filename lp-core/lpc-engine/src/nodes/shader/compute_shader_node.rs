@@ -181,10 +181,17 @@ impl ComputeShaderNode {
         // "before" line is the headroom the compile had to work with.
         lpc_shared::memory::log_global_memory_checkpoint("compute shader compile before");
         lpc_shared::backtrace::set_oom_context("compute shader node: compile");
+        // Perf window around the compile, the same `shader-compile` event
+        // the px node emits: the emulator's heap-budget gate (`lp-cli
+        // profile --collect alloc`) reports the transient per window, and
+        // without this bracket a compute compile's transient landed in
+        // `frame`, invisible as a compile cost.
+        lp_perf::emit_begin!(lp_perf::EVENT_SHADER_COMPILE);
         // Terminal on every target — see the sibling comment in `shader_node.rs`.
         let compile_result = graphics
             .compile_compute_shader(desc)
             .map_err(|error| format!("{error}"));
+        lp_perf::emit_end!(lp_perf::EVENT_SHADER_COMPILE);
         lpc_shared::backtrace::clear_oom_context();
         lpc_shared::memory::log_global_memory_checkpoint("compute shader compile after");
         let compile_elapsed_ms = compile_start_ms.and_then(|start| ctx.elapsed_ms(start));

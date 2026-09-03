@@ -12,8 +12,9 @@ pub(in crate::lower) fn try_assign_place_direct(
     target: PlaceId,
     value: &LowerValue,
 ) -> Result<bool, Diagnostic> {
+    let segments = ctx.arena.place_segments(target);
     let target = ctx.arena.place(target);
-    let Some(place) = lower_place(ctx, span, &target.root, &target.segments)? else {
+    let Some(place) = lower_place(ctx, span, &target.root, segments)? else {
         return Ok(false);
     };
     match place {

@@ -106,3 +106,13 @@ pub use rt_emu::{NativeEmuEngine, NativeEmuInstance, NativeEmuModule};
 pub use rt_jit::{
     BuiltinTable, NativeJitDirectCall, NativeJitEngine, NativeJitInstance, NativeJitModule,
 };
+
+/// Whether this build carries the `debug` feature's register-allocator
+/// trace (`regalloc::debug_facade`): every allocation decision then
+/// records a formatted `TraceEntry`, tens of kilobytes per function that
+/// no device build ever allocates. Host memory probes read this to know
+/// whether their backend figures mean anything — a workspace-wide `cargo
+/// test` unifies the feature in from `lps-filetests`.
+pub const fn regalloc_trace_enabled() -> bool {
+    cfg!(feature = "debug")
+}

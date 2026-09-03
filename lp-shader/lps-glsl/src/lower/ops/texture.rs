@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use lpir::{IrType, LpirOp, TexelFetchBoundsMode, VReg};
 use lps_shared::{TextureFilter, TextureShapeHint, TextureStorageFormat, TextureWrap};
 
-use crate::hir::{ExprId, HirTextureOperand, ImportKey};
+use crate::hir::{ExprId, HirTextureOperand, ImportId};
 use crate::{Diagnostic, Span};
 
 use super::super::{Lanes, LowerCtx, LowerValue, lower_expr};
@@ -70,7 +70,7 @@ pub(in crate::lower) fn lower_texture_sample(
     span: Span,
     sampler: &HirTextureOperand,
     coord: ExprId,
-    import: &ImportKey,
+    import: ImportId,
 ) -> Result<LowerValue, Diagnostic> {
     let spec = *ctx
         .texture_specs
@@ -85,7 +85,7 @@ pub(in crate::lower) fn lower_texture_sample(
                 ),
             )
         })?;
-    let callee = *ctx.import_map.get(import).ok_or_else(|| {
+    let callee = *ctx.import_map.get(import.index()).ok_or_else(|| {
         Diagnostic::error(
             span,
             alloc::format!("missing texture import for {import:?}"),

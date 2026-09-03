@@ -8,7 +8,8 @@ related:
   - ../adr/2026-09-02-esp32c6-ram-split.md
   - 2026-08-29-shader-jit-compile-transient-starves-classic-heap.md
   - 2026-08-31-c6-rmt-ws281x-dark.md
-  - ../../lp-core/lpc-engine/tests/meteor_compute_compile_peak_memory.rs
+  - ../../lp-core/lpc-engine/tests/example_shader_compile_peak_memory.rs
+  - ../../lp-shader/lps-filetests/tests/compile_peak_memory_corpus.rs
   - ../../lp-shader/lpvm-native/tests/xt_compile_peak_memory.rs
 ---
 # HIR place clones exhaust the C6 heap compiling meteor's compute shader
@@ -116,17 +117,42 @@ steady state). The heap figures above are from that final layout
 (325,536 B total).
 
 **Regression coverage** —
-`lp-core/lpc-engine/tests/meteor_compute_compile_peak_memory.rs::compute_shader_compile_peaks`
-runs every checked-in example's compute shaders (events, fluid, meteor)
-through the device pipeline under the tracking allocator, prints the
-comparison, and pins each transient peak under 160 KB host (≈1.4× the
-fixed meteor measurement, half the unfixed one). One `#[test]` on
+`lp-core/lpc-engine/tests/example_shader_compile_peak_memory.rs::example_shader_compile_peaks`
+(grown from the meteor-only probe on 2026-09-02) runs every checked-in
+example's shaders — compute through the node's own `compute_glsl_source`
+seam, header included; px through `px_compile_inputs` (palette texture
+specs + entry space), the two synth wrappers and the backend for both
+device ISAs — under the tracking allocator, prints one ranked table, and
+pins each transient peak under a ceiling (compute 80 KB host, px 112 KB,
+Xtensa backend 74 KB after the follow-up below). One `#[test]` on
 purpose: the allocator counters are process-wide, and two tests in the
-binary measured each other's allocations on CI's parallel threads. It
-composes the compiler input through the node's own `compute_glsl_source`
-seam, header included, so it compiles what the device compiles. The
-lps-glsl/lp-shader suites (151 tests) cover the lowering rewrites; the
-filetest corpora cover the emitted IR.
+binary measured each other's allocations on CI's parallel threads.
+`lps-filetests/tests/compile_peak_memory_corpus.rs` sweeps the whole
+filetest corpus (802 files) through the frontend the same way. The
+lps-glsl/lp-shader suites cover the lowering rewrites; the filetest
+corpora cover the emitted IR.
+
+**Recurrence (2026-09-02, the same class, every other node kind)** —
+the corpus sweep asked whether more of "a copy per node of something that
+has exactly one home" remained, and it did, on every node kind except the
+place root this entry fixed: `HirExpr.ty`, `HirLocal.ty`, each function's
+`params`/`return_ty`, and `PlaceSegment::Field { name: String, ty }`
+each owned a full `LpsType` — a struct clone, member names and all, when
+the value was struct-typed — and `HirExpr` was 184 B host because a call
+node carried its import key's `String`s inline. The filetest
+`struct/deep-nested.glsl` (5.3 KB of three-level nested structs) cloned
+its `Point` member vector 4,380 times and held 320 KB of HIR; nothing
+that shape is in the examples yet, but the language allows it and the C6
+does not. The follow-up plan (`2026-09-02-0817-hir-per-node-copies-corpus`,
+PR #497) dropped the token tape after the header step, shrank a place
+segment to 16 bytes in one arena list, took `HirExpr` to 56 B, and gave
+each function one type table that expressions, places, locals and the
+signature index into. Meteor's sim compile: 116,392 → 58,147 B host
+(60 → ~30 KB device); basic 150,317 → 81,362; deep-nested 382,991 →
+183,997. What deep-nested still holds is one copy of the module's
+structs *per function's* table — module-wide interning is the open
+follow-up. The lesson generalises the one above: **a node stores an
+id; the thing with one home stores the value.**
 
 **Lesson** — an arena is a lifetime decision, not a container: anything
 pushed into it lives until the pass ends, so a recursive builder that

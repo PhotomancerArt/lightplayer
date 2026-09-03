@@ -50,13 +50,14 @@ pub(in crate::lower) fn read_assign_target(
     span: Span,
     target: PlaceId,
 ) -> Result<LowerValue, Diagnostic> {
+    let segments = ctx.arena.place_segments(target);
     let place = ctx.arena.place(target);
-    if place.segments.is_empty() {
+    if segments.is_empty() {
         return root_value(ctx, span, &place.root);
     }
     if let Some(value) = try_read_place_direct(ctx, span, target)? {
         return Ok(value);
     }
     let value = root_value(ctx, span, &place.root)?;
-    read_segments(ctx, span, value, &place.segments)
+    read_segments(ctx, span, value, segments)
 }

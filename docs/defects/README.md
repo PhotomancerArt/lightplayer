@@ -180,6 +180,11 @@ genuinely fits none of these, and define it here in one line.
   added anywhere in the pipeline (a deferred queue, a render-cycle
   bounce) turns it routine. The fix shape is a queue of everything still
   in flight, never a bigger window on a single slot.
+- **`deadline-margin-by-accident`** — a real-time deadline is met only by
+  incidental margin (cache warmth, a light workload, a small image) rather
+  than by construction, so unrelated growth elsewhere crosses it silently
+  and the failure is quantised at one specific deadline, every time. The
+  fix is placement or budget, verified by measurement, not by attributes.
 - **`arena-retained-transient`** — a value that is transient by intent
   (an intermediate of a recursive build, a type copied "for convenience"
   onto every node) is pushed into an arena whose lifetime is the whole
@@ -384,7 +389,9 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | unbounded-restatement | 2026-07-28 | [tick-error-restated-every-frame](2026-07-28-tick-error-restated-every-frame.md) | fixed | lpa-server (advance_frame) |
 | unsynchronized-shared-artifact | 2026-07-29 | [builtins-elf-uplift-race](2026-07-29-builtins-elf-uplift-race.md) | fixed | justfile `test` + lpvm-cranelift/build.rs |
 | missing-coverage | 2026-07-29 | [uniform-struct-array-runtime-index](2026-07-29-uniform-struct-array-runtime-index.md) | fixed | examples/effects/meteor + lps-frontend lowering |
-| arena-retained-transient | 2026-09-01 | [hir-place-clones-exhaust-c6-heap-at-compute-compile](2026-09-01-hir-place-clones-exhaust-c6-heap-at-compute-compile.md) | fixed | lps-glsl hir/typeck + hir/place + lower/place; lpc-engine shader nodes ([mem] bracket) |
+| arena-retained-transient | 2026-08-29 | [shader-jit-compile-transient-starves-classic-heap](2026-08-29-shader-jit-compile-transient-starves-classic-heap.md) | open (host + emulator attribution done 2026-09-02; silicon re-measure pending) | lps-glsl HIR build transient vs the classic's arena; probes `xt_compile_peak_memory`, `example_shader_compile_peak_memory` |
+| arena-retained-transient | 2026-09-01 | [hir-place-clones-exhaust-c6-heap-at-compute-compile](2026-09-01-hir-place-clones-exhaust-c6-heap-at-compute-compile.md) | fixed (recurrence 2026-09-02 on every other node kind — fixed, PR #497; module-wide interning open) | lps-glsl hir/typeck + hir/place + lower/place; lpc-engine shader nodes ([mem] bracket) |
+| deadline-margin-by-accident | 2026-09-02 | [c6-ws281x-first-three-leds-then-stale](2026-09-02-c6-ws281x-first-three-leds-then-stale.md) | fixed | fw-esp32c6 output/rmt + lp-ws281x refill path placement |
 | untested-path | 2026-09-02 | [studio-flasher-cannot-recover-a-boot-looping-c6](2026-09-02-studio-flasher-cannot-recover-a-boot-looping-c6.md) | **open** | lpa-studio-web device card flash flow (esptool-js ladder) |
 
 ## Predecessor: `docs/bugs/`

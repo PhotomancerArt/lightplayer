@@ -125,7 +125,7 @@ use core::sync::atomic::AtomicU32;
 use core::sync::atomic::AtomicUsize;
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release, SeqCst};
 
-use crate::hw::RmtHw;
+use crate::hw::{RamWindow, RmtHw};
 use crate::pulse::STOP_WORD;
 use crate::state::{ChannelState, ChannelStats, BITS_PER_PIXEL, BYTES_PER_PIXEL};
 use crate::timing::{ChannelTiming, PulseCodes, TimingError};
@@ -660,8 +660,10 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         // guard word instead of on the frame's own STOP fill: a refill arrived
         // too late. The frame is still reported complete — the caller gets a
         // truncated frame and a counter, not an error.
-        if state.bit_cursor.load(Acquire) < state.total_bits.load(Relaxed) {
+        let cursor = state.bit_cursor.load(Acquire);
+        if cursor < state.total_bits.load(Relaxed) {
             state.guard_trips.fetch_add(1, Relaxed);
+            state.trip_bits_last.store(cursor, Relaxed);
         }
         state.frames.fetch_add(1, Relaxed);
         state.frame_complete.store(true, Release);
@@ -785,22 +787,10 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         let mut cursor = state.bit_cursor.load(Acquire);
         let mut word = start;
 
-        // One store, either shape. The raw path keeps a bounds check — one
-        // register compare, not the per-word plan lookup — so a bug here
-        // still cannot scribble outside the window `ram_window` promised.
-        let put = |word: usize, value: u32| match window {
-            Some(w) => {
-                if word < w.words {
-                    // SAFETY: `RamWindow`'s contract — `base` addresses
-                    // `w.words` writable MMIO words for the driver's
-                    // lifetime, and `word` was just bounds-checked. Volatile:
-                    // the transmitter reads this memory behind the compiler's
-                    // back.
-                    unsafe { w.base.add(word).write_volatile(value) };
-                }
-            }
-            None => self.hw.write_ram(ch, word, value),
-        };
+        // Every store below goes through [`put_word`] directly. Not a closure:
+        // a closure is its own codegen item, does not inherit this function's
+        // `.rwtext` placement, and at `opt-level = "z"` even a one-line
+        // wrapper was outlined into flash on the ESP32-C6 — one call per word.
 
         // Byte address of the cursor position, then tracked incrementally:
         // `pixel_base + source[slot]` replaces the per-word divisions of the
@@ -831,7 +821,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
                 0
             };
             while mask != 0 && word < end && cursor < total {
-                put(word, codes.bit(byte & mask != 0));
+                put_word(&self.hw, ch, window, word, codes.bit(byte & mask != 0));
                 word += 1;
                 cursor += 1;
                 mask >>= 1;
@@ -859,17 +849,40 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
                 // first word of the next half.
                 return FillResult::More;
             }
-            put(word, codes.latch);
+            put_word(&self.hw, ch, window, word, codes.latch);
             word += 1;
             state.latch_written.store(true, Relaxed);
             result = FillResult::Tail;
         }
 
         while word < end {
-            put(word, STOP_WORD);
+            put_word(&self.hw, ch, window, word, STOP_WORD);
             word += 1;
         }
         result
+    }
+}
+
+/// Store one RMT word for [`Ws281xDriver::fill_half`], through the hoisted
+/// window when the backend offers one.
+///
+/// The raw path keeps a bounds check — one register compare, not the per-word
+/// plan lookup — so a bug here still cannot scribble outside the window
+/// `ram_window` promised. `always`-inlined so it lands inside the caller's
+/// IRAM section under `isr-in-ram`.
+#[inline(always)]
+fn put_word<H: RmtHw>(hw: &H, ch: u8, window: Option<RamWindow>, word: usize, value: u32) {
+    match window {
+        Some(w) => {
+            if word < w.words {
+                // SAFETY: `RamWindow`'s contract — `base` addresses `w.words`
+                // writable MMIO words for the driver's lifetime, and `word`
+                // was just bounds-checked. Volatile: the transmitter reads
+                // this memory behind the compiler's back.
+                unsafe { w.base.add(word).write_volatile(value) };
+            }
+        }
+        None => hw.write_ram(ch, word, value),
     }
 }
 
