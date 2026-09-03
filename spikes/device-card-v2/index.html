@@ -98,7 +98,9 @@ code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
 .card.armed-scope { transition:border-color .25s, box-shadow .25s; }
 .card.armed-scope.is-armed { border-color:var(--st-error-bd); box-shadow:inset 0 0 0 1px var(--st-error-bd); }
 .dim { transition:opacity .25s, filter .25s; display:grid; gap:10px; }
-.card, .dim, .zone, .card > *, .dim > *, .zone > *, .facerow > *, .popwrap { min-width:0; }
+.card, .dim, .zone, .card > *, .dim > *, .zone > *, .facerow > *, .popwrap, header > *, .head > * { min-width:0; }
+.head h3 { flex:1; }
+.head .chip { flex:none; }
 .pop.right { left:auto; right:0; }
 .card.is-armed .dim { opacity:.4; filter:saturate(.3); }
 .card h3 { margin:0; font-size:13.5px; font-weight:700; color:var(--strong); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -627,7 +629,7 @@ function termTicker(ls, id) {
   return `<div class="ticker" onclick="toggleSheet('${id}')"><span class="line ${last[0]}">${esc(txt)}</span><span class="n">${ls.length} lines ▴</span></div>
     <div class="sheet" id="${id}">${termTyped(ls,{h:260})}</div>`;
 }
-window.toggleSheet = id => document.getElementById(id).classList.toggle('open');
+window.toggleSheet = id => { document.getElementById(id).classList.toggle('open'); pinTerminals(); };
 
 /* action chips */
 function armchipProd(label, key) {
@@ -828,8 +830,8 @@ function pickerFace(kind, popId) {
     ${CTA('Put it on the board','sm')}</div>${kind==='P1'?popGallery(popId):popPalette(popId)}</div>`;
 }
 window.togglePop = id => { const el = document.getElementById(id); const open = el.classList.contains('open'); document.querySelectorAll('.pop.open').forEach(p=>p.classList.remove('open')); if (!open) el.classList.add('open'); };
-window.pick = (t, g) => { S.picks.push = {t, g}; renderS4(); renderS1(); };
-window.pickBoard = i => { S.picks.board = BOARDS[i]; renderS4(); renderS1(); };
+window.pick = (t, g) => { S.picks.push = {t, g}; renderS4(); renderS1(); pinTerminals(); };
+window.pickBoard = i => { S.picks.board = BOARDS[i]; renderS4(); renderS1(); pinTerminals(); };
 function popGallery(id) {
   const mine = S.lib==='big' ? MINE_BIG : MINE_SMALL;
   const tab = S.tab || 'ex';
@@ -947,7 +949,8 @@ function tick(now) {
 /* =====================================================================
    controls + wiring
    ===================================================================== */
-function renderAll() { renderS1(); renderS2(); renderS3(); renderS4(); renderS5(); measure(); syncControls(); }
+function pinTerminals() { document.querySelectorAll('.term.typed').forEach(t => { t.scrollTop = t.scrollHeight; }); }
+function renderAll() { renderS1(); renderS2(); renderS3(); renderS4(); renderS5(); measure(); syncControls(); pinTerminals(); }
 function syncControls() {
   document.querySelectorAll('#stateBtns button').forEach(b => b.classList.toggle('active', b.dataset.state===S.state));
   document.getElementById('tLong').classList.toggle('active', S.long);
