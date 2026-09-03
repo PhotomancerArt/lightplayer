@@ -554,6 +554,15 @@ label:has(> input:not(:disabled)) {
     margin-inline: auto;
 }
 
+/* The device card's fixed preview SLOT (device-card-v2 spike §1, gate
+   2026-09-02): the same frame at the card's own fixed row height. A
+   modifier rather than a utility because the height is a RULE — it is what
+   makes a device card's height independent of what the board is doing, so
+   it belongs with the frame it constrains, not at one call site. */
+.ux-play-frame-slot {
+    height: 120px;
+}
+
 /* Offline / not-responding: the last frame is still the truth about what
    the board was doing, so it stays — desaturated and dimmed, the card
    grammar's "last known, not current". */
