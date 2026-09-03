@@ -5933,8 +5933,8 @@ select:focus-visible {
    spill outward untouched while the interior stays clean — the button's
    background is transparent, so the interior MUST be cut, not covered.
    The square hole meets the ring's rounded corner with a ≤1px sliver of
-   missing glow, invisible under the blur. Design record: this branch's
-   spike (scratch) — see the PR. */
+   missing glow, invisible under the blur. Design record:
+   spikes/spectrum-halo/index.html (§1 mechanics, §2 intensity ladder). */
 .ux-spectrum-cta::after {
     content: "";
     position: absolute;
