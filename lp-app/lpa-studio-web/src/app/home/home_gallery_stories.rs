@@ -619,7 +619,7 @@ fn roster_fixture() -> DeviceRosterView {
                     detail: Some("LightPlayer · dig-uno".to_string()),
                     freshness_label: Some("last heard 3 s ago".to_string()),
                     identity_label: Some("dev000000daqf6dvvqz".to_string()),
-                    detected_chip: None,
+                    detected_chip: Some("esp32".to_string()),
                     board_id: Some("dig-uno".to_string()),
                     needs_firmware: false,
                     degraded: None,
