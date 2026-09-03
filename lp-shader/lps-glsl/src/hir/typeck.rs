@@ -17,6 +17,7 @@ use super::array_size::ArraySizeConsts;
 use super::const_fold::{fold_binary, fold_builtin_call, fold_glsl_import_call, fold_unary};
 use super::function::{FunctionSig, GlobalConst, ImportRegistry};
 use super::place::{AccessMode, HirPlace, PlaceRoot, PlaceSegment};
+use super::type_table::{TypeTable, TypedArena};
 use super::types::StructTypes;
 use super::types::{
     GlobalInfo, HirExprKind, HirFunctionBody, HirLocal, HirOutArg, HirParam, HirStmt,
@@ -52,7 +53,7 @@ pub(super) struct TypeCtx<'a> {
     imports: &'a mut ImportRegistry,
     texture_specs: &'a VecMap<String, TextureBindingSpec>,
     pub(super) locals: Vec<HirLocal>,
-    pub(super) arena: HirArena,
+    pub(super) arena: TypedArena<'a>,
     scopes: Vec<VecMap<String, usize>>,
     loop_depth: usize,
 }
@@ -68,6 +69,7 @@ impl<'a> TypeCtx<'a> {
         array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
         texture_specs: &'a VecMap<String, TextureBindingSpec>,
+        types: &'a mut TypeTable,
     ) -> Self {
         Self {
             params: &function.params,
@@ -80,7 +82,7 @@ impl<'a> TypeCtx<'a> {
             imports,
             texture_specs,
             locals: Vec::new(),
-            arena: HirArena::default(),
+            arena: TypedArena::new(types),
             scopes: alloc::vec![VecMap::new()],
             loop_depth: 0,
         }
@@ -95,6 +97,7 @@ impl<'a> TypeCtx<'a> {
         array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
         texture_specs: &'a VecMap<String, TextureBindingSpec>,
+        types: &'a mut TypeTable,
     ) -> Self {
         Self {
             params: &[],
@@ -107,7 +110,7 @@ impl<'a> TypeCtx<'a> {
             imports,
             texture_specs,
             locals: Vec::new(),
-            arena: HirArena::default(),
+            arena: TypedArena::new(types),
             scopes: alloc::vec![VecMap::new()],
             loop_depth: 0,
         }
@@ -115,20 +118,20 @@ impl<'a> TypeCtx<'a> {
 
     pub(super) fn type_block(
         &mut self,
-        parsed: &[ParsedStmt],
+        parsed: &[ParsedStmt<'_>],
         return_ty: &LpsType,
     ) -> Result<HirFunctionBody, Diagnostic> {
         let statements = self.type_statements(parsed, return_ty)?;
         Ok(HirFunctionBody {
             locals: core::mem::take(&mut self.locals),
             statements,
-            arena: core::mem::take(&mut self.arena),
+            arena: self.arena.take_arena(),
         })
     }
 
     fn type_statements(
         &mut self,
-        parsed: &[ParsedStmt],
+        parsed: &[ParsedStmt<'_>],
         return_ty: &LpsType,
     ) -> Result<Vec<HirStmt>, Diagnostic> {
         let mut statements = Vec::new();
@@ -140,7 +143,7 @@ impl<'a> TypeCtx<'a> {
 
     fn type_stmt(
         &mut self,
-        stmt: &ParsedStmt,
+        stmt: &ParsedStmt<'_>,
         return_ty: &LpsType,
     ) -> Result<Vec<HirStmt>, Diagnostic> {
         match stmt {
@@ -160,13 +163,13 @@ impl<'a> TypeCtx<'a> {
                 let ty = self.arena.expr_type_id(init);
                 let local = self.locals.len();
                 self.locals.push(HirLocal {
-                    name: name.clone(),
+                    name: String::from(*name),
                     ty,
                 });
                 self.scopes
                     .last_mut()
                     .expect("type scope")
-                    .insert(name.clone(), local);
+                    .insert(String::from(*name), local);
                 Ok(alloc::vec![HirStmt::Let { local, init }])
             }
             ParsedStmt::LetGroup { declarations, .. } => {
@@ -181,13 +184,13 @@ impl<'a> TypeCtx<'a> {
                     let ty = self.arena.expr_type_id(init);
                     let local = self.locals.len();
                     self.locals.push(HirLocal {
-                        name: declaration.name.clone(),
+                        name: String::from(declaration.name),
                         ty,
                     });
                     self.scopes
                         .last_mut()
                         .expect("type scope")
-                        .insert(declaration.name.clone(), local);
+                        .insert(String::from(declaration.name), local);
                     statements.push(HirStmt::Let { local, init });
                 }
                 Ok(statements)
@@ -200,7 +203,7 @@ impl<'a> TypeCtx<'a> {
             } => {
                 let target = self.type_assign_target(&ParsedExpr {
                     span: *span,
-                    kind: ParsedExprKind::Name(name.clone()),
+                    kind: ParsedExprKind::Name(name),
                 })?;
                 let value = self.type_assign_value(*span, &target, *op, value)?;
                 let ty = self.arena.expr_type_id(value);
@@ -333,7 +336,7 @@ impl<'a> TypeCtx<'a> {
         }
     }
 
-    pub(super) fn type_expr(&mut self, expr: &ParsedExpr) -> Result<ExprId, Diagnostic> {
+    pub(super) fn type_expr(&mut self, expr: &ParsedExpr<'_>) -> Result<ExprId, Diagnostic> {
         match &expr.kind {
             ParsedExprKind::BoolLiteral(v) => {
                 Ok(self
@@ -562,7 +565,7 @@ impl<'a> TypeCtx<'a> {
         &mut self,
         span: Span,
         name: &str,
-        args: &[ParsedExpr],
+        args: &[ParsedExpr<'_>],
     ) -> Result<ExprId, Diagnostic> {
         let args = self.type_expr_args(args)?;
         let target_ty = self.type_constructor_target(name, span, args)?;
@@ -576,7 +579,7 @@ impl<'a> TypeCtx<'a> {
         &mut self,
         span: Span,
         name: &str,
-        args: &[ParsedExpr],
+        args: &[ParsedExpr<'_>],
     ) -> Result<ExprId, Diagnostic> {
         if let Some((function, sig)) = self
             .functions
@@ -719,7 +722,7 @@ impl<'a> TypeCtx<'a> {
         ))
     }
 
-    fn type_expr_args(&mut self, args: &[ParsedExpr]) -> Result<ExprList, Diagnostic> {
+    fn type_expr_args(&mut self, args: &[ParsedExpr<'_>]) -> Result<ExprList, Diagnostic> {
         let mut typed = Vec::with_capacity(args.len());
         for arg in args {
             typed.push(self.type_expr(arg)?);
@@ -730,7 +733,7 @@ impl<'a> TypeCtx<'a> {
     fn type_texel_fetch_call(
         &mut self,
         span: Span,
-        args: &[ParsedExpr],
+        args: &[ParsedExpr<'_>],
     ) -> Result<ExprId, Diagnostic> {
         if args.len() != 3 {
             return Err(Diagnostic::error(span, "texelFetch expects 3 arguments"));
@@ -756,7 +759,11 @@ impl<'a> TypeCtx<'a> {
         ))
     }
 
-    fn type_texture_call(&mut self, span: Span, args: &[ParsedExpr]) -> Result<ExprId, Diagnostic> {
+    fn type_texture_call(
+        &mut self,
+        span: Span,
+        args: &[ParsedExpr<'_>],
+    ) -> Result<ExprId, Diagnostic> {
         if args.len() != 2 {
             return Err(Diagnostic::error(
                 span,
@@ -817,7 +824,7 @@ impl<'a> TypeCtx<'a> {
 
     fn type_texture_operand(
         &mut self,
-        expr: &ParsedExpr,
+        expr: &ParsedExpr<'_>,
         fn_name: &str,
     ) -> Result<HirTextureOperand, Diagnostic> {
         let place = self.type_place(expr, AccessMode::Read)?;
@@ -956,8 +963,8 @@ impl<'a> TypeCtx<'a> {
         &mut self,
         span: Span,
         op: BinaryOp,
-        lhs: &ParsedExpr,
-        rhs: &ParsedExpr,
+        lhs: &ParsedExpr<'_>,
+        rhs: &ParsedExpr<'_>,
     ) -> Result<ExprId, Diagnostic> {
         let parsed_lhs = lhs;
         let parsed_rhs = rhs;
@@ -1051,9 +1058,9 @@ impl<'a> TypeCtx<'a> {
     fn type_conditional(
         &mut self,
         span: Span,
-        condition: &ParsedExpr,
-        accept: &ParsedExpr,
-        reject: &ParsedExpr,
+        condition: &ParsedExpr<'_>,
+        accept: &ParsedExpr<'_>,
+        reject: &ParsedExpr<'_>,
     ) -> Result<ExprId, Diagnostic> {
         let condition = self.type_expr(condition)?;
         let condition = self.coerce_expr(condition, &LpsType::Bool)?;
@@ -1085,7 +1092,7 @@ impl<'a> TypeCtx<'a> {
         span: Span,
         target: &PlaceId,
         op: AssignOp,
-        value: &ParsedExpr,
+        value: &ParsedExpr<'_>,
     ) -> Result<ExprId, Diagnostic> {
         let ty = self.arena.place(*target).ty.clone();
         let value = self.type_expr(value)?;
@@ -1107,12 +1114,19 @@ impl<'a> TypeCtx<'a> {
         self.coerce_expr(value, &ty)
     }
 
-    pub(super) fn type_assign_target(&mut self, expr: &ParsedExpr) -> Result<PlaceId, Diagnostic> {
+    pub(super) fn type_assign_target(
+        &mut self,
+        expr: &ParsedExpr<'_>,
+    ) -> Result<PlaceId, Diagnostic> {
         let place = self.type_place(expr, AccessMode::Write)?;
         Ok(place)
     }
 
-    fn type_place(&mut self, expr: &ParsedExpr, mode: AccessMode) -> Result<PlaceId, Diagnostic> {
+    fn type_place(
+        &mut self,
+        expr: &ParsedExpr<'_>,
+        mode: AccessMode,
+    ) -> Result<PlaceId, Diagnostic> {
         let place = self.build_place(expr, mode)?;
         Ok(self.arena.push_place(place))
     }
@@ -1127,7 +1141,11 @@ impl<'a> TypeCtx<'a> {
     /// times held ~3N copies of its whole type (member names included) for
     /// the entire HIR build. On the ESP32-C6 that was the meteor sim
     /// compile: 40 references to `meteors[i].field` exhausted a 300 KB heap.
-    fn build_place(&mut self, expr: &ParsedExpr, mode: AccessMode) -> Result<HirPlace, Diagnostic> {
+    fn build_place(
+        &mut self,
+        expr: &ParsedExpr<'_>,
+        mode: AccessMode,
+    ) -> Result<HirPlace, Diagnostic> {
         match &expr.kind {
             ParsedExprKind::Name(name) => {
                 let place = self.type_name_place(expr.span, name)?;
@@ -1166,7 +1184,7 @@ impl<'a> TypeCtx<'a> {
     /// only avoids the discarded diagnostic. Roots that do resolve still go
     /// through `type_place` unchanged, so real errors keep their text and
     /// order.
-    fn roots_in_a_place(&self, expr: &ParsedExpr) -> bool {
+    fn roots_in_a_place(&self, expr: &ParsedExpr<'_>) -> bool {
         match &expr.kind {
             ParsedExprKind::Name(name) => self.is_place_name(name),
             ParsedExprKind::Swizzle { base, .. } | ParsedExprKind::Index { base, .. } => {
@@ -1234,7 +1252,7 @@ impl<'a> TypeCtx<'a> {
         &mut self,
         name: &str,
         span: Span,
-        init: &ParsedExpr,
+        init: &ParsedExpr<'_>,
     ) -> Result<ExprId, Diagnostic> {
         if matches!(init.kind, ParsedExprKind::InitList { .. }) {
             let ty = self.type_init_list_decl_ty(name, span, init)?;
@@ -1249,7 +1267,7 @@ impl<'a> TypeCtx<'a> {
         &self,
         name: &str,
         span: Span,
-        init: &ParsedExpr,
+        init: &ParsedExpr<'_>,
     ) -> Result<LpsType, Diagnostic> {
         if let Some((base_name, lens)) = parse_array_type_name(name, self.array_size_consts) {
             let base = scalar_or_struct_type_name_to_lps(base_name, span, self.structs)?;
@@ -1261,7 +1279,7 @@ impl<'a> TypeCtx<'a> {
 
     fn type_init_list(
         &mut self,
-        init: &ParsedExpr,
+        init: &ParsedExpr<'_>,
         target: &LpsType,
     ) -> Result<ExprId, Diagnostic> {
         let ParsedExprKind::InitList { elements } = &init.kind else {
@@ -1367,8 +1385,8 @@ impl<'a> TypeCtx<'a> {
     }
 
     fn clone_expr_from(&mut self, source: &HirArena, expr: ExprId) -> ExprId {
-        let source_expr = source.expr(expr);
-        let kind = match source_expr.kind {
+        let source_expr = source.node(expr);
+        let kind = match &source_expr.kind {
             HirExprKind::Constructor { args } => {
                 let args = self.clone_expr_list_from(source, *args);
                 HirExprKind::Constructor { args }
@@ -1462,7 +1480,7 @@ impl<'a> TypeCtx<'a> {
             kind => kind.clone(),
         };
         self.arena
-            .push_expr(source_expr.span, source_expr.ty.clone(), kind)
+            .push_expr_typed(source_expr.span, source_expr.ty, kind)
     }
 
     fn clone_expr_list_from(&mut self, source: &HirArena, list: ExprList) -> ExprList {
@@ -1488,7 +1506,7 @@ impl<'a> TypeCtx<'a> {
     }
 
     fn clone_place_from(&mut self, source: &HirArena, place: PlaceId) -> PlaceId {
-        let record = source.place(place);
+        let record = source.place_record(place);
         let mut segments = Vec::with_capacity(source.place_segments(place).len());
         for segment in source.place_segments(place) {
             segments.push(match *segment {
@@ -1498,11 +1516,8 @@ impl<'a> TypeCtx<'a> {
                 other => other,
             });
         }
-        self.arena.push_place(HirPlace {
-            root: record.root.clone(),
-            segments,
-            ty: record.ty.clone(),
-        })
+        self.arena
+            .push_place_typed(record.root.clone(), segments, record.ty)
     }
 
     fn one_lanes_expr(&mut self, span: Span, ty: &LpsType) -> Result<ExprId, Diagnostic> {
@@ -1591,11 +1606,11 @@ fn psrdnoise_param_types(glsl_params: &[&str]) -> Vec<lpir::IrType> {
     param_types
 }
 
-fn same_nonzero_const_expr_tree(lhs: &ParsedExpr, rhs: &ParsedExpr) -> bool {
+fn same_nonzero_const_expr_tree(lhs: &ParsedExpr<'_>, rhs: &ParsedExpr<'_>) -> bool {
     const_expr_tree_nonzero(lhs) && const_expr_tree_eq(lhs, rhs)
 }
 
-fn const_expr_tree_eq(lhs: &ParsedExpr, rhs: &ParsedExpr) -> bool {
+fn const_expr_tree_eq(lhs: &ParsedExpr<'_>, rhs: &ParsedExpr<'_>) -> bool {
     match (&lhs.kind, &rhs.kind) {
         (ParsedExprKind::BoolLiteral(a), ParsedExprKind::BoolLiteral(b)) => a == b,
         (ParsedExprKind::FloatLiteral(a), ParsedExprKind::FloatLiteral(b)) => a == b,
@@ -1631,7 +1646,7 @@ fn const_expr_tree_eq(lhs: &ParsedExpr, rhs: &ParsedExpr) -> bool {
     }
 }
 
-fn const_expr_tree_nonzero(expr: &ParsedExpr) -> bool {
+fn const_expr_tree_nonzero(expr: &ParsedExpr<'_>) -> bool {
     match &expr.kind {
         ParsedExprKind::FloatLiteral(value) => *value != 0.0,
         ParsedExprKind::IntLiteral(value) => *value != 0,

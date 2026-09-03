@@ -53,9 +53,16 @@ corpus, frontend only). The rules those numbers came from:
 
 - **A node stores an id; the thing with one home stores the value.** Every
   expression, place, local and function signature refers to its type through
-  a per-function type table (`HirArena::intern`, `TypeId`); a call refers
+  the module's type table (`HirModule.types`, `TypeTable::intern`, `TypeId`
+  — one table per compile, shared by every function, global const and
+  signature; ADR `2026-09-02-glsl-module-wide-type-table`); a call refers
   to its import by `ImportId`; a field projection carries its member index.
   Nothing in the HIR owns an `LpsType`, a `String` or a `Vec` per node.
+- **Names are borrows of the source.** The parsed body (`ParsedExpr<'src>`)
+  holds `&'src str` identifiers and `Cow<'src, str>` type/call names (owned
+  only for the composed array spellings); the source outlives the job, so
+  the body stage allocates per node, never per name. What that stage costs
+  is the nodes: one boxed 64-byte `ParsedExpr` per child.
 - **The arena is a lifetime, not a container.** Anything pushed into it lives
   until the function lowers, so builders push only finished nodes
   (`TypeCtx::build_place`), and per-node lists (writebacks, place segments)
