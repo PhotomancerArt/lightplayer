@@ -44,8 +44,8 @@ use crate::app::library::{LibraryStore, MemoryLibraryHost};
 use crate::app::places::DeviceRegistry;
 use crate::{
     DeviceAction, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceInput,
-    DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink,
-    StudioController, UiAction,
+    DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink, LensLineTap,
+    LensTapEvent, ProjectController, ProjectOp, StudioController, UiAction,
 };
 
 /// Wall-clock ceiling on a `run_until`. Generous: the fake boots a real host
@@ -176,6 +176,17 @@ impl DeviceTransport for ScriptedTransport {
         self.granted.set(false);
         self.revoked.borrow_mut().push(info.endpoint.0);
         Box::pin(core::future::ready(Ok(())))
+    }
+
+    fn lens_client_io(
+        &self,
+        _info: lpa_devices::LinkInfo,
+        tap: LensLineTap,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+        // The real io over the fake's real `M!` wire, teed: what the lens
+        // e2e rows prove is that the fold keeps folding while the client
+        // owns the port.
+        Ok(Box::new(FakeDeviceIo::new(&self.device).with_tap(tap)))
     }
 
     fn run_effect(
@@ -335,6 +346,11 @@ struct FakeDeviceIo {
     partial: String,
     /// Frames decoded but not yet handed out.
     pending: VecDeque<lpc_wire::WireServerMessage>,
+    /// The lens tap (M5): every whole line, verbatim, before decoding.
+    tap: Option<LensLineTap>,
+    /// The wire died (an unplug script): every read from here on is EOF,
+    /// so receive fails fast instead of waiting out its budget.
+    dead: Option<String>,
 }
 
 impl FakeDeviceIo {
@@ -343,14 +359,35 @@ impl FakeDeviceIo {
             stream: lpa_link::providers::fake_device::FakeDeviceByteStream::new(device.clone()),
             partial: String::new(),
             pending: VecDeque::new(),
+            tap: None,
+            dead: None,
         }
+    }
+
+    fn with_tap(mut self, tap: LensLineTap) -> Self {
+        self.tap = Some(tap);
+        self
     }
 
     /// Drain whatever the wire has right now into [`Self::pending`].
     fn drain(&mut self) {
         let mut buf = [0u8; 8192];
         loop {
-            let read = read_available(&mut self.stream, &mut buf);
+            let read = match read_available_checked(&mut self.stream, &mut buf) {
+                Ok(read) => read,
+                // The wire died under the lens (an unplug script): the
+                // tap carries it, exactly as the browser io reports the
+                // controller's error.
+                Err(error) => {
+                    if self.dead.is_none() {
+                        if let Some(tap) = &self.tap {
+                            tap(LensTapEvent::PortError(error.clone()));
+                        }
+                        self.dead = Some(error);
+                    }
+                    return;
+                }
+            };
             if read == 0 {
                 return;
             }
@@ -359,6 +396,9 @@ impl FakeDeviceIo {
             while let Some(newline) = self.partial.find('\n') {
                 let line: String = self.partial.drain(..=newline).collect();
                 let line = line.trim_end_matches(['\n', '\r']);
+                if let Some(tap) = &self.tap {
+                    tap(LensTapEvent::Line(line.to_string()));
+                }
                 let Some(json) = line.strip_prefix("M!") else {
                     continue;
                 };
@@ -378,7 +418,14 @@ impl lpa_client::ClientIo for FakeDeviceIo {
             .map_err(|error| lpc_wire::TransportError::Other(format!("encode failed: {error}")))?;
         self.stream
             .write_all(format!("M!{json}\n").as_bytes())
-            .map_err(|error| lpc_wire::TransportError::Other(error.to_string()))
+            .map_err(|error| {
+                // Mirror of the browser io: a failed write is the port
+                // dying under the lens.
+                if let Some(tap) = &self.tap {
+                    tap(LensTapEvent::PortError(error.to_string()));
+                }
+                lpc_wire::TransportError::Other(error.to_string())
+            })
     }
 
     async fn receive(&mut self) -> Result<lpc_wire::WireServerMessage, lpc_wire::TransportError> {
@@ -387,6 +434,9 @@ impl lpa_client::ClientIo for FakeDeviceIo {
             self.drain();
             if let Some(message) = self.pending.pop_front() {
                 return Ok(message);
+            }
+            if let Some(error) = &self.dead {
+                return Err(lpc_wire::TransportError::Other(error.clone()));
             }
             if std::time::Instant::now() >= deadline {
                 return Err(lpc_wire::TransportError::Other(
@@ -664,6 +714,34 @@ impl DeviceBench {
         drive(self.controller.dispatch(action)).expect("a push gesture never fails loudly");
     }
 
+    /// The running face's Open (round-2 M5), through the ordinary action
+    /// path: the editor becomes a lens on the device registered as `uid`.
+    fn open_lens(&mut self, uid: &str) -> Result<(), crate::UiError> {
+        let action = UiAction::from_op(
+            crate::RuntimeOp::NODE_ID,
+            crate::RuntimeOp::OpenDeviceLens {
+                uid: uid.to_string(),
+            },
+        );
+        drive(self.controller.dispatch(action)).map(|_| ())
+    }
+
+    /// The editor's detach (the ⇲ / close-editor gesture): for a device
+    /// lens, that is also the wire going back.
+    fn detach_lens(&mut self) {
+        let action = UiAction::from_op(ProjectController::NODE_ID, ProjectOp::DetachLens);
+        drive(self.controller.dispatch(action)).expect("detach never fails loudly");
+    }
+
+    /// The device lens session, when one is installed.
+    fn lens_device_uid(&self) -> Option<String> {
+        self.controller
+            .runtime_pool_for_test()
+            .device_session()
+            .and_then(crate::RuntimeSession::device_attachment)
+            .map(|attachment| attachment.uid.clone())
+    }
+
     fn registry(&self) -> Vec<crate::app::places::RegisteredDevice> {
         DeviceRegistry::new(self.store.fs_handle())
             .list()
@@ -674,6 +752,450 @@ impl DeviceBench {
     fn library(&self) -> Vec<crate::app::library::PackageSummary> {
         self.store.list().expect("the library reads back")
     }
+}
+
+/// M5's walk, host half: Open on the running face borrows the board's
+/// wire for the editor, the pool gets a DEVICE session the lens is on, the
+/// mirror connects to the project the board runs, and — the design core —
+/// the card keeps folding evidence off the tapped wire while the client
+/// owns it. Closing the editor gives the wire back and the pump resumes.
+#[test]
+fn opening_the_lens_borrows_the_wire_and_the_card_keeps_folding() {
+    let device = empty_light_player("dev000000daqf6dvvr1");
+    let (mut bench, tasks) = identified(&device, "usb-lens-1");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    assert!(
+        bench.view().devices[0]
+            .last_outcome
+            .as_ref()
+            .is_some_and(|o| o.ok)
+    );
+    let uid = bench.registry()[0].uid.clone();
+
+    // Open: the wire changes hands and the editor lands on the board.
+    bench
+        .open_lens(&uid)
+        .expect("the running board opens in the editor");
+    assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
+    let pool = bench.controller.runtime_pool_for_test();
+    let session = pool.device_session().expect("a device session");
+    assert_eq!(
+        pool.lens(),
+        Some(session.id()),
+        "the editor is the lens on it"
+    );
+    assert!(session.is_connected(), "the wire client is up");
+    assert_eq!(session.kind(), crate::RuntimeKind::Device);
+    let link = session.device_attachment().expect("attachment").link;
+    assert!(
+        bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .lens_holds_wire(link),
+        "the lens holds the borrow"
+    );
+    assert_eq!(
+        bench
+            .controller
+            .project_for_test()
+            .runtime_storage_id_for_test(),
+        "studio",
+        "library sync targets the dir the board actually serves"
+    );
+
+    // The tap: the fold keeps hearing the board through the lens's io. A
+    // lens pull drains the wire, and the heartbeat it drains lands as
+    // evidence — freshness advances without the pump.
+    let before = bench.controller.devices_for_test().roster().devices()[0]
+        .evidence
+        .freshness
+        .last_heard;
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    loop {
+        // A lens pull is what drains the wire; the heartbeat it drains is
+        // teed into the fold on the way through.
+        let refresh = UiAction::from_op(ProjectController::NODE_ID, ProjectOp::RefreshProject);
+        let _ = drive(bench.controller.dispatch(refresh));
+        bench.step(&tasks);
+        let heard = bench.controller.devices_for_test().roster().devices()[0]
+            .evidence
+            .freshness
+            .last_heard;
+        if heard > before {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the tapped wire never reached the fold: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        bench.view().devices[0].activity.is_none(),
+        "no activity ran; the card just kept listening: {:?}",
+        bench.view().devices[0]
+    );
+
+    // Close: the session goes, the wire comes back, the card stays.
+    bench.detach_lens();
+    assert!(
+        bench.lens_device_uid().is_none(),
+        "the device session is gone"
+    );
+    assert!(bench.controller.runtime_pool_for_test().lens().is_none());
+    assert!(
+        !bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .lens_holds_wire(link),
+        "the wire is the roster's again"
+    );
+    bench.run_until(&tasks, "the pump to hear the board again", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    assert_eq!(bench.view().devices.len(), 1, "the card never left");
+}
+
+/// Unplug mid-lens (G2 row 3): the board's departure is card evidence AND
+/// the end of the lens session — no refresh needed, nothing held.
+#[test]
+fn unplugging_mid_lens_closes_the_editor_and_leaves_an_honest_card() {
+    let device = empty_light_player("dev000000daqf6dvvr2");
+    let (mut bench, tasks) = identified(&device, "usb-lens-2");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench.open_lens(&uid).expect("opens");
+    assert!(bench.lens_device_uid().is_some());
+
+    // Unplugged under the lens: the browser drops the grant and fires
+    // disconnect; the departure sweep stops routing the link.
+    bench.granted.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the lens to close on the departure", |bench| {
+        bench.lens_device_uid().is_none()
+    });
+    assert!(bench.controller.runtime_pool_for_test().lens().is_none());
+    let card = &bench.view().devices[0];
+    assert!(
+        card.escapes.contains(&lpa_devices::Escape::Reconnect)
+            || card.escapes.contains(&lpa_devices::Escape::Forget),
+        "the card offers a way back: {card:?}"
+    );
+}
+
+/// One wire, one owner: a card verb that needs the board's wire while the
+/// editor is a lens on it closes the editor first, then RUNS — the card's
+/// verbs always work; the editor is what yields.
+#[test]
+fn a_card_verb_on_the_lens_device_closes_the_editor_and_then_runs() {
+    let device = empty_light_player("dev000000daqf6dvvr4");
+    let (mut bench, tasks) = identified(&device, "usb-lens-4");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench.open_lens(&uid).expect("opens");
+    let link = bench
+        .controller
+        .runtime_pool_for_test()
+        .device_session()
+        .and_then(crate::RuntimeSession::device_attachment)
+        .expect("attachment")
+        .link;
+
+    // A rename never touches the wire: the editor stays.
+    bench.gesture(DeviceAction::SetName {
+        device: card.id,
+        name: "porch board".to_string(),
+    });
+    assert!(
+        bench.lens_device_uid().is_some(),
+        "a rename leaves the lens alone"
+    );
+
+    // Remove project needs the wire: the editor yields, the verb runs.
+    bench.gesture(DeviceAction::RemoveProject { device: card.id });
+    assert!(bench.lens_device_uid().is_none(), "the lens closed first");
+    assert!(
+        !bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .lens_holds_wire(link),
+        "the wire went back before the gesture folded"
+    );
+    bench.run_until(&tasks, "the removal to finish", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && card.loaded_project == lpa_devices::view::LoadedProject::Empty
+        })
+    });
+}
+
+/// The reload row (D37, reload = re-derivation): `/device/<uid>` asks for
+/// the lens BEFORE the roster knows the board — rows still loading, port
+/// still identifying. The intent is held, the gallery stays honest, and
+/// the tick attaches the lens the moment the board says hello.
+#[test]
+fn an_open_asked_before_the_board_is_ready_attaches_once_it_says_hello() {
+    let device = empty_light_player("dev000000daqf6dvvr5");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-lens-5");
+    // The registry knows this board from a previous sitting; its row is
+    // what a `/device/<uid>` address names. (Identify it once to earn the
+    // row, then reboot the bench the way a reload would: fresh roster,
+    // same registry, same granted port.)
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    let uid = bench.registry()[0].uid.clone();
+    let device_id = bench.view().devices[0].id;
+    bench.gesture(DeviceAction::Disconnect { device: device_id });
+    bench.run_until(&tasks, "the port to close", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label.starts_with("Attached"))
+    });
+
+    // The address arrives while the board is NOT ready: held, not refused.
+    bench
+        .open_lens(&uid)
+        .expect("an early open is an intent, never an error");
+    assert!(bench.lens_device_uid().is_none(), "nothing attached yet");
+
+    // The board comes back (the connect the sweep would perform) and says
+    // hello; the tick attaches the held lens.
+    let device_id = bench.view().devices[0].id;
+    bench.gesture(DeviceAction::Connect { device: device_id });
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    loop {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        if bench.lens_device_uid().as_deref() == Some(uid.as_str()) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held lens never attached: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        bench.controller.runtime_pool_for_test().lens().is_some(),
+        true,
+        "the editor is the lens on the board"
+    );
+}
+
+/// Unplug under the lens with NO hotplug event (the pump is paused, so the
+/// only witness is the lens io itself): the io's port error rides the tap,
+/// the fold hears error + close, and the lens drops — the road the walk
+/// found missing when the departure sweep did not fire.
+#[test]
+fn a_port_that_dies_under_the_lens_closes_the_editor_through_the_tap() {
+    let device = empty_light_player("dev000000daqf6dvvr6");
+    let (mut bench, tasks) = identified(&device, "usb-lens-6");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench.open_lens(&uid).expect("opens");
+    assert!(bench.lens_device_uid().is_some());
+
+    // The wire dies now: every read from here on is EOF. No hotplug edge
+    // is delivered — the grant stays "held" as far as the sweep knows.
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none()
+            .with_disconnect_after_bytes(device.served_bytes()),
+    );
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    loop {
+        // A lens pull is what touches the wire and meets the EOF.
+        let refresh = UiAction::from_op(ProjectController::NODE_ID, ProjectOp::RefreshProject);
+        let _ = drive(bench.controller.dispatch(refresh));
+        bench.step(&tasks);
+        if bench.lens_device_uid().is_none() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the dead wire never closed the lens: {:?}",
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(bench.controller.runtime_pool_for_test().lens().is_none());
+    // A dead port is a departure: the board reads Offline, never
+    // "attached but closed" with no way back.
+    bench.run_until(&tasks, "the departure to reach the card", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Offline")
+    });
+    assert_eq!(bench.view().devices.len(), 1, "the card stays");
+
+    // The replug: the wire works again, the connect edge sweeps the grant
+    // back in, the board re-identifies onto its own card and Open returns.
+    device.set_failure_plan(lpa_link::providers::fake_device::FakeFailurePlan::none());
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    bench.run_until(&tasks, "the replug to identify itself", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench
+        .open_lens(&uid)
+        .expect("the replugged board opens again");
+    assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
+}
+
+/// The dead-wire backstop: the browser can take minutes to report a USB
+/// loss, and until it does a lens pull just times out. Three failed pulls
+/// in a row close the editor and give the wire back; a success in between
+/// resets the count (a slow board is not a dead one).
+#[test]
+fn three_failed_pulls_in_a_row_close_the_lens_as_a_dead_wire() {
+    let device = empty_light_player("dev000000daqf6dvvr7");
+    let (mut bench, tasks) = identified(&device, "usb-lens-7");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench.open_lens(&uid).expect("opens");
+
+    bench.controller.record_passive_refresh_failure();
+    bench.controller.record_passive_refresh_failure();
+    bench.controller.record_passive_refresh_success();
+    bench.controller.record_passive_refresh_failure();
+    bench.controller.record_passive_refresh_failure();
+    assert!(
+        bench.lens_device_uid().is_some(),
+        "a success resets the streak"
+    );
+
+    bench.controller.record_passive_refresh_failure();
+    assert!(
+        bench.lens_device_uid().is_none(),
+        "three in a row is a dead wire"
+    );
+    assert!(bench.controller.runtime_pool_for_test().lens().is_none());
+    bench.step(&tasks);
+    assert_eq!(bench.view().devices.len(), 1, "the card stays");
+}
+
+/// An address the roster cannot serve yet is HELD, never refused: the
+/// gallery stays honest, nothing dead is installed, and closing the lens
+/// (leaving the route) lets the intent go.
+#[test]
+fn opening_a_lens_on_an_unknown_board_is_held_not_refused() {
+    let device = empty_light_player("dev000000daqf6dvvr3");
+    let (mut bench, _tasks) = identified(&device, "usb-lens-3");
+    bench
+        .open_lens("devnobody")
+        .expect("an address the roster cannot serve yet is an intent");
+    assert!(bench.lens_device_uid().is_none());
+    assert!(bench.controller.runtime_pool_for_test().lens().is_none());
+    drive(bench.controller.try_pending_device_lens());
+    assert!(
+        bench.lens_device_uid().is_none(),
+        "still nothing to attach to"
+    );
+
+    // Leaving the route clears the intent.
+    let close = UiAction::from_op(crate::RuntimeOp::NODE_ID, crate::RuntimeOp::CloseDeviceLens);
+    drive(bench.controller.dispatch(close)).expect("close is quiet with nothing open");
+    assert!(bench.controller.runtime_pool_for_test().lens().is_none());
 }
 
 fn memory_store(clock: Rc<Cell<f64>>) -> LibraryStore {
@@ -728,6 +1250,18 @@ fn read_available(
 ) -> usize {
     use lpa_link::stream::DeviceByteStream;
     stream.read_available(buf).expect("the fake is alive")
+}
+
+/// The lens io's read: a dead wire is an answer (the port-error tap), not a
+/// panic — an unplug script ends the read path with `Closed`.
+fn read_available_checked(
+    stream: &mut lpa_link::providers::fake_device::FakeDeviceByteStream,
+    buf: &mut [u8],
+) -> Result<usize, String> {
+    use lpa_link::stream::DeviceByteStream;
+    stream
+        .read_available(buf)
+        .map_err(|error| format!("Serial port disconnected: {error:?}"))
 }
 
 /// A LightPlayer board with a stamped identity and a MAC — the everyday case.
@@ -1746,8 +2280,6 @@ fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes
 /// unplug, replug, and the board comes back on its own card, identified.
 #[test]
 fn a_board_unplugged_with_its_port_closed_departs_and_a_replug_brings_it_back() {
-    use crate::app::studio::studio_command::DeviceHotplug;
-
     let device = light_player("dev_replug");
     let (mut bench, tasks) = DeviceBench::granted(&device, "usb-replug-1");
     bench.run_until(&tasks, "the board to identify", |bench| {
@@ -1778,7 +2310,7 @@ fn a_board_unplugged_with_its_port_closed_departs_and_a_replug_brings_it_back() 
     bench.granted.set(false);
     bench
         .controller
-        .note_device_hotplug(DeviceHotplug::Disconnected);
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
     bench.run_until(&tasks, "the departure to reach the card", |bench| {
         bench
             .view()
@@ -1797,7 +2329,7 @@ fn a_board_unplugged_with_its_port_closed_departs_and_a_replug_brings_it_back() 
     bench.granted.set(true);
     bench
         .controller
-        .note_device_hotplug(DeviceHotplug::Connected);
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
     bench.run_until(&tasks, "the replug to identify itself", |bench| {
         bench
             .view()
@@ -1821,8 +2353,6 @@ fn a_board_unplugged_with_its_port_closed_departs_and_a_replug_brings_it_back() 
 /// took out a board that was simply idle.
 #[test]
 fn an_unrelated_disconnect_leaves_a_still_granted_port_alone() {
-    use crate::app::studio::studio_command::DeviceHotplug;
-
     let device = light_player("dev_bystander");
     let (mut bench, tasks) = DeviceBench::granted(&device, "usb-bystander-1");
     bench.run_until(&tasks, "the board to identify", |bench| {
@@ -1845,7 +2375,7 @@ fn an_unrelated_disconnect_leaves_a_still_granted_port_alone() {
     // Something else was unplugged: our grant is still there.
     bench
         .controller
-        .note_device_hotplug(DeviceHotplug::Disconnected);
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
     for _ in 0..400 {
         bench.step(&tasks);
     }

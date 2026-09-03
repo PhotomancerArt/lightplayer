@@ -88,6 +88,17 @@ const MAX_SWEEP_LINKS: usize = 8;
 /// Naming the holder makes every release a no-op unless it is the holder's.
 type BorrowToken = Rc<Cell<Option<EffectId>>>;
 
+/// The borrow holder the editor LENS signs as (round-2 M5).
+///
+/// A lens is not an activity — it has no reducer, no deadline, no end
+/// marker — but it holds the wire exactly the way a coarse effect does:
+/// exclusively, with the pump paused, announced to the fold as a
+/// [`Event::LinkBorrow`]. Signing the token with an id the model never
+/// mints keeps every guarded release honest: an activity's late completion
+/// cannot hand away the lens's wire, and the lens cannot release an
+/// activity's.
+pub const LENS_EFFECT_ID: EffectId = EffectId(u64::MAX);
+
 /// Records the effects layer was asked to write, drained by the roster
 /// sub-controller — which owns the library host and can await it.
 #[derive(Debug, Default)]
@@ -245,9 +256,119 @@ impl DeviceEffects {
         self.sink = Some(Rc::new(sink));
     }
 
+    /// The platform timer factory, shared: the lens session's wire client
+    /// builds its request deadlines from the SAME clock device waits run
+    /// on, so a lens pull and a device timer cannot drift onto two clocks.
+    pub fn timer_factory(&self) -> Option<Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>> {
+        self.timer.clone()
+    }
+
     /// Whether the seams a real device needs are all installed.
     pub fn is_wired(&self) -> bool {
         self.transport.is_some() && self.spawn.is_some() && self.sink.is_some()
+    }
+
+    /// Hand a link's wire to the editor lens (round-2 M5): pause the pump
+    /// by taking the borrow as [`LENS_EFFECT_ID`], tell the fold, and build
+    /// the `lpa-client` io the lens session's wire client will speak
+    /// through. Every line that io drains comes back through the tap as
+    /// the very `LinkEvent` the pump would have produced, so the device's
+    /// evidence keeps folding while the editor owns the port.
+    ///
+    /// Refused — honestly, with the reason — when the port is gone or an
+    /// activity already holds the wire; the model never sees a half-borrow.
+    pub fn attach_lens_wire(
+        &mut self,
+        link: LinkId,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+        let (Some(transport), Some(sink)) = (self.transport.clone(), self.sink.clone()) else {
+            return Err("the device transport is not installed".to_string());
+        };
+        let Some(slot) = self.links.get(&link) else {
+            return Err("the port is gone".to_string());
+        };
+        if let Some(holder) = slot.borrowed.get() {
+            return Err(match holder == LENS_EFFECT_ID {
+                true => "the editor already holds this board's wire".to_string(),
+                false => {
+                    "an activity is using this board's wire; wait for it to finish".to_string()
+                }
+            });
+        }
+        let info = slot.info.clone();
+        let borrowed = Rc::clone(&slot.borrowed);
+        let tap: super::device_transport::LensLineTap = {
+            let sink = Rc::clone(&sink);
+            Rc::new(move |event: super::device_transport::LensTapEvent| {
+                use super::device_transport::LensTapEvent;
+                match event {
+                    LensTapEvent::Line(line) => sink(Input::link(
+                        link,
+                        lpa_link::device_link::demux::demux_line(&line),
+                    )),
+                    // The pump's mark-gone rule, replayed for the lens: a
+                    // port error means the port died underneath us, so the
+                    // fold hears the error, the close — and the DEPARTURE.
+                    // A dead port's controller cannot be reused (a replug
+                    // is a new port object), so the link leaves the roster
+                    // now; the connect edge's sweep attaches the board
+                    // afresh, and it re-identifies onto its own card. Left
+                    // attached-but-closed, the card would offer no way to
+                    // re-open it (bench, 2026-09-02).
+                    LensTapEvent::PortError(message) => {
+                        sink(Input::link(
+                            link,
+                            lpa_devices::link::LinkEvent::Error(message.clone()),
+                        ));
+                        sink(Input::link(
+                            link,
+                            lpa_devices::link::LinkEvent::Closed { reason: message },
+                        ));
+                        sink(Input::Event(Event::LinkDetached { link }));
+                    }
+                }
+            })
+        };
+        borrowed.set(Some(LENS_EFFECT_ID));
+        sink(Input::Event(Event::LinkBorrow { link, held: true }));
+        match transport.lens_client_io(info, tap) {
+            Ok(io) => {
+                log::debug!("the editor lens holds {link:?}; the pump is paused");
+                Ok(io)
+            }
+            Err(message) => {
+                // Nothing took the wire after all: give it straight back so
+                // the fold's freshness resumes with no gap.
+                if release_borrow(&borrowed, LENS_EFFECT_ID) {
+                    sink(Input::Event(Event::LinkBorrow { link, held: false }));
+                }
+                Err(message)
+            }
+        }
+    }
+
+    /// Give a lens-held wire back: the pump resumes on its next tick and
+    /// the fold hears the release. A no-op for a port that is gone (unplug
+    /// mid-lens — the detach evidence is already on the queue) and for a
+    /// wire the lens does not hold.
+    pub fn release_lens_wire(&mut self, link: LinkId) {
+        let Some(slot) = self.links.get(&link) else {
+            return;
+        };
+        if !release_borrow(&slot.borrowed, LENS_EFFECT_ID) {
+            return;
+        }
+        log::debug!("the editor lens released {link:?}; the pump resumes");
+        if let Some(sink) = &self.sink {
+            sink(Input::Event(Event::LinkBorrow { link, held: false }));
+        }
+    }
+
+    /// Whether the editor lens currently holds this link's wire.
+    pub fn lens_holds_wire(&self, link: LinkId) -> bool {
+        self.links
+            .get(&link)
+            .is_some_and(|slot| slot.borrowed.get() == Some(LENS_EFFECT_ID))
     }
 
     /// Record writes to perform, taken by the roster sub-controller.
@@ -369,6 +490,22 @@ impl DeviceEffects {
             ));
             return;
         };
+        if slot.borrowed.get() == Some(LENS_EFFECT_ID) {
+            // The editor owns this wire for as long as its lens is on the
+            // board; a coarse effect cannot borrow it out from under the
+            // session's client. The activity ends with the reason on the
+            // card instead of two readers splitting the frames.
+            sink(effect_ended(
+                device,
+                effect_id,
+                kind,
+                ActivityOutcome::Failed {
+                    message: "the editor is open on this board — close it before running this"
+                        .to_string(),
+                },
+            ));
+            return;
+        }
         let info = slot.info.clone();
         let borrowed = Rc::clone(&slot.borrowed);
         let payload = matches!(effect, EffectRequest::Push)
@@ -724,13 +861,37 @@ fn spawn_pump(
             while borrowed.get().is_none() {
                 let next = strong.borrow_mut().poll_event();
                 let Some(event) = next else { break };
+                // The browser controller's own death notices ("The device
+                // has been lost", "Serial port disconnected") are a
+                // departure, not a closed port: the port object is gone
+                // and only a replug brings a new one. The departure sweep
+                // is meant to say so from `getPorts()`, but it did not on
+                // two hub power-cuts (2026-09-02), so the pump says it
+                // from the error itself.
+                let departed = matches!(
+                    &event,
+                    lpa_devices::link::LinkEvent::Error(message) if port_is_gone(message)
+                );
                 sink(Input::link(link, event));
+                if departed {
+                    sink(Input::Event(Event::LinkDetached { link }));
+                    break;
+                }
             }
             drop(strong);
             let sleep = (timer.borrow_mut())(LINK_POLL_INTERVAL);
             sleep.await;
         }
     }));
+}
+
+/// Whether a link error is the platform saying the port itself is gone —
+/// the browser controller's signatures for an unplug or a revoked port.
+fn port_is_gone(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("device has been lost")
+        || message.contains("serial port disconnected")
+        || message.contains("serial port is not open")
 }
 
 /// Release a wire borrow, but only if `effect_id` is the one holding it.
@@ -822,6 +983,9 @@ fn resolve_effect_call(
 
 #[cfg(test)]
 mod tests {
+    use super::super::device_transport::{
+        DeviceEffectFacts, DeviceEffectProgress, DeviceTransportFuture, LensLineTap, LensTapEvent,
+    };
     use super::*;
     use lpa_devices::identity::DeviceId;
     use lpa_devices::record::DeviceRecord;
@@ -936,6 +1100,258 @@ mod tests {
         effects.apply(vec![Command::DeleteRecord(DeviceId(1))]);
 
         assert!(effects.staged_pushes.is_empty());
+    }
+
+    // -----------------------------------------------------------------
+    // The lens wire handover (round-2 M5)
+    // -----------------------------------------------------------------
+
+    /// A link that answers nothing: the handover tests care about the
+    /// borrow and the fold, not the wire.
+    struct QuietLink(LinkInfo);
+
+    impl Link for QuietLink {
+        fn info(&self) -> &LinkInfo {
+            &self.0
+        }
+        fn submit(&mut self, _command: LinkCommand) {}
+        fn poll_event(&mut self) -> Option<lpa_devices::link::LinkEvent> {
+            None
+        }
+    }
+
+    /// A transport whose lens io is a recording stub; `refuse` makes the
+    /// build fail so the give-back-on-failure path is exercised.
+    struct LensStubTransport {
+        refuse: bool,
+        taps: Rc<RefCell<Vec<LensLineTap>>>,
+    }
+
+    struct NoIo;
+
+    #[async_trait::async_trait(?Send)]
+    impl lpa_client::ClientIo for NoIo {
+        async fn send(
+            &mut self,
+            _msg: lpc_wire::ClientMessage,
+        ) -> Result<(), lpc_wire::TransportError> {
+            Ok(())
+        }
+        async fn receive(
+            &mut self,
+        ) -> Result<lpc_wire::WireServerMessage, lpc_wire::TransportError> {
+            Err(lpc_wire::TransportError::Other("stub".to_string()))
+        }
+        async fn close(&mut self) -> Result<(), lpc_wire::TransportError> {
+            Ok(())
+        }
+    }
+
+    impl DeviceTransport for LensStubTransport {
+        fn label(&self) -> &'static str {
+            "lens stub"
+        }
+        fn run_effect(
+            &self,
+            _info: LinkInfo,
+            _call: DeviceEffectCall,
+            _progress: DeviceEffectProgress,
+        ) -> DeviceTransportFuture<Result<DeviceEffectFacts, String>> {
+            Box::pin(core::future::ready(Ok(DeviceEffectFacts::default())))
+        }
+        fn discover_granted(&self) -> DeviceTransportFuture<Result<Vec<GrantedLink>, String>> {
+            Box::pin(core::future::ready(Ok(Vec::new())))
+        }
+        fn request_grant(&self) -> DeviceTransportFuture<Result<Option<GrantedLink>, String>> {
+            Box::pin(core::future::ready(Ok(None)))
+        }
+        fn revoke_grant(&self, _info: LinkInfo) -> DeviceTransportFuture<Result<(), String>> {
+            Box::pin(core::future::ready(Ok(())))
+        }
+        fn lens_client_io(
+            &self,
+            _info: LinkInfo,
+            tap: LensLineTap,
+        ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+            if self.refuse {
+                return Err("no port for you".to_string());
+            }
+            self.taps.borrow_mut().push(tap);
+            Ok(Box::new(NoIo))
+        }
+    }
+
+    /// An effects layer with one routable link and a recording sink.
+    fn lens_bench(
+        refuse: bool,
+    ) -> (
+        DeviceEffects,
+        Rc<RefCell<Vec<Input>>>,
+        Rc<RefCell<Vec<LensLineTap>>>,
+    ) {
+        let mut effects = DeviceEffects::new();
+        let taps = Rc::new(RefCell::new(Vec::new()));
+        effects.set_transport(Rc::new(LensStubTransport {
+            refuse,
+            taps: Rc::clone(&taps),
+        }));
+        let inputs = Rc::new(RefCell::new(Vec::new()));
+        let sink_inputs = Rc::clone(&inputs);
+        effects.set_input_sink(move |input| sink_inputs.borrow_mut().push(input));
+        effects.set_spawner(|_future| {});
+        effects.links.insert(
+            LinkId(1),
+            LinkSlot {
+                info: LinkInfo::default(),
+                link: Rc::new(RefCell::new(Box::new(QuietLink(LinkInfo::default())))),
+                borrowed: Rc::new(Cell::new(None)),
+            },
+        );
+        (effects, inputs, taps)
+    }
+
+    fn borrow_events(inputs: &Rc<RefCell<Vec<Input>>>) -> Vec<bool> {
+        inputs
+            .borrow()
+            .iter()
+            .filter_map(|input| match input {
+                Input::Event(Event::LinkBorrow { held, .. }) => Some(*held),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Attaching the lens pauses the pump (the borrow), tells the fold, and
+    /// hands back an io; releasing does the reverse. The token is the
+    /// lens's own, so an activity's guarded release cannot touch it.
+    #[test]
+    fn the_lens_borrows_the_wire_and_gives_it_back_through_the_fold() {
+        let (mut effects, inputs, _taps) = lens_bench(false);
+
+        effects
+            .attach_lens_wire(LinkId(1))
+            .expect("the lens gets its io");
+        assert!(effects.lens_holds_wire(LinkId(1)));
+        assert_eq!(borrow_events(&inputs), vec![true]);
+
+        // A second attach refuses honestly; the borrow is untouched.
+        let Err(again) = effects.attach_lens_wire(LinkId(1)) else {
+            panic!("a second attach must refuse");
+        };
+        assert!(again.contains("already holds"), "{again}");
+        assert_eq!(borrow_events(&inputs), vec![true]);
+
+        // An activity's release with its OWN id is a no-op on the lens's
+        // wire (the guard that keeps stragglers honest).
+        effects.abandon_effect(LinkId(1), EffectId(7));
+        assert!(effects.lens_holds_wire(LinkId(1)));
+
+        effects.release_lens_wire(LinkId(1));
+        assert!(!effects.lens_holds_wire(LinkId(1)));
+        assert_eq!(borrow_events(&inputs), vec![true, false]);
+
+        // Releasing twice is quiet.
+        effects.release_lens_wire(LinkId(1));
+        assert_eq!(borrow_events(&inputs), vec![true, false]);
+    }
+
+    /// Every line the lens io drains reaches the fold as the event the
+    /// pump would have produced — a frame stays a frame, console output
+    /// stays a line — so the card never notices the handover.
+    #[test]
+    fn tapped_lines_reach_the_fold_as_link_events() {
+        use lpa_devices::link::LinkEvent;
+        use lpa_devices::wire::ServerFrameBody;
+        let (mut effects, inputs, taps) = lens_bench(false);
+        effects.attach_lens_wire(LinkId(1)).expect("io");
+        let tap = Rc::clone(&taps.borrow()[0]);
+
+        tap(LensTapEvent::Line("[INFO] boot line".to_string()));
+        tap(LensTapEvent::Line(
+            "M!{\"id\":0,\"msg\":\"unloadProject\"}".to_string(),
+        ));
+        tap(LensTapEvent::PortError(
+            "Serial port disconnected.".to_string(),
+        ));
+
+        let events: Vec<Input> = inputs
+            .borrow()
+            .iter()
+            .filter(|input| matches!(input, Input::Event(Event::Link { .. })))
+            .cloned()
+            .collect();
+        assert_eq!(events.len(), 4, "{events:?}");
+        assert!(
+            inputs.borrow().iter().any(|input| matches!(
+                input,
+                Input::Event(Event::LinkDetached { link: LinkId(1) })
+            )),
+            "a dead port is a departure: {:?}",
+            inputs.borrow()
+        );
+        assert!(matches!(
+            &events[0],
+            Input::Event(Event::Link { link: LinkId(1), event: LinkEvent::Line(line) }) if line == "[INFO] boot line"
+        ));
+        assert!(matches!(
+            &events[1],
+            Input::Event(Event::Link { link: LinkId(1), event: LinkEvent::Frame(frame) })
+                if matches!(frame.body, ServerFrameBody::Other { .. })
+        ));
+        // A port error is the pump's mark-gone rule: error, then close.
+        assert!(matches!(
+            &events[2],
+            Input::Event(Event::Link { link: LinkId(1), event: LinkEvent::Error(message) })
+                if message.contains("disconnected")
+        ));
+        assert!(matches!(
+            &events[3],
+            Input::Event(Event::Link { link: LinkId(1), event: LinkEvent::Closed { reason } })
+                if reason.contains("disconnected")
+        ));
+    }
+
+    /// A transport that cannot build the io leaves no half-borrow behind:
+    /// the pump resumes and the fold hears both edges.
+    #[test]
+    fn a_refused_lens_io_gives_the_wire_straight_back() {
+        let (mut effects, inputs, _taps) = lens_bench(true);
+
+        let Err(error) = effects.attach_lens_wire(LinkId(1)) else {
+            panic!("a refused io must surface");
+        };
+        assert!(error.contains("no port"), "{error}");
+        assert!(!effects.lens_holds_wire(LinkId(1)));
+        assert_eq!(borrow_events(&inputs), vec![true, false]);
+    }
+
+    /// A coarse effect cannot take the wire out from under the lens: the
+    /// activity ends with the reason, and the borrow stays the lens's.
+    #[test]
+    fn an_effect_on_a_lens_held_wire_ends_honestly() {
+        let (mut effects, inputs, _taps) = lens_bench(false);
+        effects.attach_lens_wire(LinkId(1)).expect("io");
+
+        effects.run_effect(
+            DeviceId(1),
+            LinkId(1),
+            EffectId(3),
+            EffectRequest::Flash {
+                build_id: "esp32c6-4mb".to_string(),
+                board_id: "seeed-xiao-esp32c6".to_string(),
+            },
+        );
+
+        assert!(effects.lens_holds_wire(LinkId(1)));
+        let ended = inputs.borrow().iter().any(|input| matches!(
+            input,
+            Input::Event(Event::ActivityMarker {
+                effect: Some(EffectId(3)),
+                marker: ActivityMarker::Ended { outcome: ActivityOutcome::Failed { message }, .. },
+                ..
+            }) if message.contains("editor is open")
+        ));
+        assert!(ended, "{:?}", inputs.borrow());
     }
 
     /// Without a transport nothing is attempted — a host build and a browser

@@ -552,6 +552,22 @@ impl BrowserSerialEsp32Provider {
         .await
     }
 
+    /// A long-lived `lpa-client` io over an endpoint's open port for the
+    /// editor lens (round-2 M5), with every drained line teed to `tap`.
+    ///
+    /// ⚠️ Same exclusive-borrow rule as [`Self::write_device_file`], held
+    /// for the lens's lifetime: the model's link pump for this endpoint must
+    /// stay paused until the lens gives the wire back.
+    pub fn lens_client_io(
+        &self,
+        endpoint_id: &LinkEndpointId,
+        tap: std::rc::Rc<dyn Fn(super::port_client_io::LensTapLine)>,
+        events: LinkManagementEventSink,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, LinkError> {
+        let port_id = self.endpoint_port_id(endpoint_id)?;
+        Ok(super::port_client_io::lens_client_io(port_id, tap, events))
+    }
+
     /// Take the loaded project off the device over the app protocol (the
     /// card's "Remove project"): ask what it runs from, stop it, delete that
     /// dir. The firmware is untouched, so the board comes back on the empty

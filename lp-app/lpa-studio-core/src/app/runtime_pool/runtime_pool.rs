@@ -1,21 +1,22 @@
 //! The keyed collection of runtime sessions plus the editor lens.
 //!
-//! ⚠️ Reduced to the SIM's needs by M2 of the device-model rebuild: the
-//! DEVICE arm (four device sessions, the per-endpoint replace, the
-//! kind-aware capacity policy, the id-targeted device seam and the
-//! in-flight-operation refusal) went with the old device flows. The
-//! rebuilt device model owns its own session collection; the pool keeps
-//! the shape the sim uses — a keyed map plus the editor lens — so the sim
-//! path is untouched (vision R1).
+//! Single-session web policy: the tab runs ONE runtime session — the sim,
+//! or a device the editor is a lens on (round-2 M5). The pool keeps the
+//! shape both use — a keyed map plus the editor lens — and the capacity
+//! policy is a number, kind-agnostic: a device lens replaces the sim and
+//! vice versa. The old device arm's per-endpoint replace and in-flight-
+//! operation refusal did not come back: the `lpa-devices` roster owns
+//! device identity and activities now, and the pool only holds the lens's
+//! handle on one of them.
 
 use std::collections::BTreeMap;
 
 use crate::{RuntimeId, RuntimeSession, UiError};
 
-use super::runtime_session::SimAttachment;
+use super::runtime_session::{RuntimeKind, RuntimePayload};
 
-/// How many SIM sessions the pool admits at once (MVP policy; "+ new
-/// simulator" raises this number, not the shape).
+/// How many sessions the pool admits at once (single-session web policy;
+/// "+ new simulator" raises this number, not the shape).
 pub const SIM_SESSION_CAPACITY: usize = 1;
 
 /// The studio's runtime sessions, keyed by [`RuntimeId`], plus the lens.
@@ -52,7 +53,7 @@ impl RuntimePool {
     /// (an empty pool, a detached editor, or a replace that just evicted
     /// the lens session — the replacement inherits the lens). Flows that
     /// deliberately move the editor call [`RuntimePool::set_lens`].
-    pub fn install(&mut self, payload: SimAttachment) -> RuntimeId {
+    pub fn install(&mut self, payload: RuntimePayload) -> RuntimeId {
         let mut existing: Vec<RuntimeId> = self.sessions.keys().copied().collect();
         // Evict oldest-first until the newcomer fits under the capacity.
         while existing.len() + 1 > SIM_SESSION_CAPACITY {
@@ -138,22 +139,54 @@ impl RuntimePool {
 
     /// The ≤1 SIM session.
     pub fn sim_session(&self) -> Option<&RuntimeSession> {
-        self.sessions.values().next()
+        self.session_of_kind(RuntimeKind::Sim)
     }
 
     /// The ≤1 SIM session, mutably.
     pub fn sim_session_mut(&mut self) -> Option<&mut RuntimeSession> {
-        self.sessions.values_mut().next()
+        self.session_of_kind_mut(RuntimeKind::Sim)
+    }
+
+    /// The ≤1 DEVICE lens session.
+    pub fn device_session(&self) -> Option<&RuntimeSession> {
+        self.session_of_kind(RuntimeKind::Device)
+    }
+
+    /// The ≤1 DEVICE lens session, mutably.
+    pub fn device_session_mut(&mut self) -> Option<&mut RuntimeSession> {
+        self.session_of_kind_mut(RuntimeKind::Device)
+    }
+
+    fn session_of_kind(&self, kind: RuntimeKind) -> Option<&RuntimeSession> {
+        self.sessions
+            .values()
+            .find(|session| session.kind() == kind)
+    }
+
+    fn session_of_kind_mut(&mut self, kind: RuntimeKind) -> Option<&mut RuntimeSession> {
+        self.sessions
+            .values_mut()
+            .find(|session| session.kind() == kind)
     }
 
     /// Remove the sim session, if one is attached (stop-sim). The lens
     /// clears with it; the caller closes the payload.
     pub fn remove_sim(&mut self) -> Option<RuntimeSession> {
-        let id = *self.sessions.keys().next()?;
+        let id = self.sim_session().map(RuntimeSession::id)?;
         self.remove(id)
     }
 
-    fn remove(&mut self, id: RuntimeId) -> Option<RuntimeSession> {
+    /// Remove the device lens session, if one is attached (lens closed,
+    /// device unplugged). The lens clears with it; the caller gives the
+    /// borrowed wire back.
+    pub fn remove_device(&mut self) -> Option<RuntimeSession> {
+        let id = self.device_session().map(RuntimeSession::id)?;
+        self.remove(id)
+    }
+
+    /// Remove one session by id. The lens clears with it; the caller owns
+    /// the payload's teardown.
+    pub(crate) fn remove(&mut self, id: RuntimeId) -> Option<RuntimeSession> {
         if self.lens == Some(id) {
             self.lens = None;
         }
@@ -181,17 +214,56 @@ fn missing_session() -> UiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::runtime_pool::runtime_session::{DeviceLensAttachment, SimAttachment};
+
+    fn sim_stub() -> RuntimePayload {
+        RuntimePayload::Sim(SimAttachment::stub_for_test())
+    }
+
+    fn device_stub(uid: &str) -> RuntimePayload {
+        RuntimePayload::Device(DeviceLensAttachment::stub_for_test(uid))
+    }
+
+    #[test]
+    fn a_device_lens_replaces_the_sim_and_the_kind_accessors_tell_them_apart() {
+        let mut pool = RuntimePool::new();
+        let sim = pool.install(sim_stub());
+        assert_eq!(pool.sim_session().map(RuntimeSession::id), Some(sim));
+        assert!(pool.device_session().is_none());
+
+        // Single-session policy: the device lens takes the tab's one slot.
+        let device = pool.install(device_stub("devabc"));
+        assert!(pool.session(sim).is_none(), "the sim was replaced");
+        assert_eq!(pool.device_session().map(RuntimeSession::id), Some(device));
+        assert!(pool.sim_session().is_none(), "kind accessors never cross");
+        assert_eq!(pool.lens(), Some(device), "the evicted lens moved");
+        assert_eq!(
+            pool.device_session()
+                .and_then(RuntimeSession::device_attachment)
+                .map(|attachment| attachment.uid.as_str()),
+            Some("devabc")
+        );
+
+        // remove_sim is a no-op on a device-only pool; remove_device clears.
+        assert!(pool.remove_sim().is_none());
+        assert_eq!(
+            pool.remove_device().map(|session| session.id()),
+            Some(device)
+        );
+        assert!(!pool.has_session());
+        assert!(pool.lens().is_none());
+    }
 
     #[test]
     fn install_replaces_and_only_an_evicted_lens_moves() {
         let mut pool = RuntimePool::new();
-        let first = pool.install(SimAttachment::stub_for_test());
+        let first = pool.install(sim_stub());
         assert_eq!(
             pool.lens(),
             Some(first),
             "an empty pool's first session claims the lens"
         );
-        let second = pool.install(SimAttachment::stub_for_test());
+        let second = pool.install(sim_stub());
 
         assert_ne!(first, second, "ids are never reused");
         assert!(
@@ -210,7 +282,7 @@ mod tests {
     #[test]
     fn detach_lens_keeps_the_session_and_reattach_resolves_again() {
         let mut pool = RuntimePool::new();
-        let sim = pool.install(SimAttachment::stub_for_test());
+        let sim = pool.install(sim_stub());
 
         pool.detach_lens();
 
@@ -228,7 +300,7 @@ mod tests {
 
         // A detached editor lets the next install claim the lens.
         pool.detach_lens();
-        let replacement = pool.install(SimAttachment::stub_for_test());
+        let replacement = pool.install(sim_stub());
         assert_eq!(pool.lens(), Some(replacement));
     }
 
@@ -237,7 +309,7 @@ mod tests {
         let mut pool = RuntimePool::new();
         assert!(pool.remove_sim().is_none());
 
-        let sim = pool.install(SimAttachment::stub_for_test());
+        let sim = pool.install(sim_stub());
         let removed = pool.remove_sim().expect("the sim session");
         assert_eq!(removed.id(), sim);
         assert!(pool.lens().is_none(), "lens cleared with its session");
@@ -253,7 +325,7 @@ mod tests {
                 if message == "server client is not connected"
         ));
 
-        let id = pool.install(SimAttachment::stub_for_test());
+        let id = pool.install(sim_stub());
         let session = pool.lens_session_mut().expect("lens resolves");
         assert_eq!(session.id(), id);
         // No client attached yet: the client surface still reports the
@@ -268,7 +340,7 @@ mod tests {
     #[test]
     fn take_all_sessions_empties_the_pool_and_the_lens() {
         let mut pool = RuntimePool::new();
-        pool.install(SimAttachment::stub_for_test());
+        pool.install(sim_stub());
 
         let taken = pool.take_all_sessions();
         assert_eq!(taken.len(), 1);

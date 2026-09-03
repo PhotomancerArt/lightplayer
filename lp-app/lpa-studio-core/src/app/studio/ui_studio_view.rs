@@ -10,8 +10,9 @@ use crate::{
 /// document**). The web shell's route reconciliation binds
 /// `/p/<slug>-<project-uid>` to this, never to raw project identity.
 ///
-/// ⚠️ The `Device` arm — and the `/device/<uid>` route it fed — went with
-/// M2 of the device-model rebuild; the rebuilt model re-adds it.
+/// The `Device` arm addresses a roster device by its registered uid (the
+/// `/device/<uid>` route, round-2 M5); a lens only attaches to an
+/// identified device, so the uid is always known.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiLensRuntime {
     /// The lens is on THE sim session. A sim runtime's identity is its
@@ -23,6 +24,10 @@ pub enum UiLensRuntime {
     /// address is cosmetic and comes from
     /// [`UiStudioView::open_project_name`], which tracks renames live.
     Sim { project_uid: Option<String> },
+    /// The lens is on a roster device: `uid` is its registered `dev…` uid,
+    /// the whole of the device route's identity. The project comes from
+    /// the device.
+    Device { uid: String },
 }
 
 /// The header session·project control's three-dot status vocabulary
@@ -40,6 +45,25 @@ pub enum UiChromeSessionStatus {
     Empty,
 }
 
+/// The LENS session's card, docked in the editor (D43): the same control
+/// panel the gallery shows for that session — the sim's live card, or the
+/// roster's own projection of the device the editor is open on (round-2
+/// M5: never a second device card, the gallery's `DeviceView` verbatim).
+#[derive(Clone, Debug, PartialEq)]
+pub enum UiLensCard {
+    Sim(crate::app::home::UiSimCard),
+    Device(crate::DeviceView),
+}
+
+/// What kind of runtime the header control's session is (D22: the sim is
+/// not a device) — the header picks its glyph, its hint copy and its
+/// teardown verb by this.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UiChromeSessionKind {
+    Sim,
+    Device,
+}
+
 /// The tab's ONE runtime session, projected for the header
 /// session·project control (single-session web policy). Same card
 /// derivation as the gallery roster, so the control and the gallery can
@@ -49,6 +73,8 @@ pub enum UiChromeSessionStatus {
 /// of a route target.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiChromeSessionControl {
+    /// Sim or device (see [`UiChromeSessionKind`]).
+    pub kind: UiChromeSessionKind,
     /// The underlying card's identity key
     /// ([`UiSimCard::identity_key`](crate::UiSimCard::identity_key)) —
     /// the render key. The sim needs no teardown target:
@@ -112,7 +138,7 @@ pub struct UiStudioView {
     /// runtime card IS the editor's right-side pane). Same construction
     /// as the gallery roster's live card; `None` while no lens session
     /// exists.
-    pub lens_card: Option<Box<crate::app::home::UiSimCard>>,
+    pub lens_card: Option<Box<UiLensCard>>,
     /// THE session this tab runs, for the header session·project control
     /// (single-session web policy). `None` with nothing attached.
     pub session: Option<UiChromeSessionControl>,
@@ -176,7 +202,7 @@ impl UiStudioView {
         self
     }
 
-    pub fn with_lens_card(mut self, card: Option<crate::app::home::UiSimCard>) -> Self {
+    pub fn with_lens_card(mut self, card: Option<UiLensCard>) -> Self {
         self.lens_card = card.map(Box::new);
         self
     }
