@@ -5920,16 +5920,59 @@ select:focus-visible {
     animation: ux-ir-spin 3.2s linear infinite;
 }
 
-/* The ruled glow bump: the standard bloom plus a wider soft halo, so the
-   chosen Primary answers the pointer a step louder than the ring family. */
-.ux-spectrum-cta:hover:not(:disabled) {
-    box-shadow:
-        0 2px 24px var(--studio-glow),
-        0 0 46px rgba(140, 170, 255, 0.22);
+/* The glow bump: the ring's OWN light. The halo is the same conic as the
+   ring (same `--ux-ir-angle`, same spin, so the two turn in lockstep),
+   painted as a 5px band just outside the button and blurred, at 0.28 —
+   ruled "about right" after 0.85 read much too strong: a whisper of
+   light, not a stage; it fades and
+   grows in over 450ms instead of popping. Geometry is the whole trick:
+   `filter` runs before `mask`, so a mask would cut the blur off hard at
+   the box (the first spike pass), and `mask-clip: no-clip` parses in
+   Chrome but still clips. An even-odd `clip-path` polygon punches the
+   button-box hole instead and reaches 40px past the box, so the blur can
+   spill outward untouched while the interior stays clean — the button's
+   background is transparent, so the interior MUST be cut, not covered.
+   The square hole meets the ring's rounded corner with a ≤1px sliver of
+   missing glow, invisible under the blur. Design record:
+   spikes/spectrum-halo/index.html (§1 mechanics, §2 intensity ladder). */
+.ux-spectrum-cta::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    z-index: 2;
+    border-radius: inherit;
+    background: conic-gradient(from var(--ux-ir-angle), var(--studio-spectrum), #5fe08b);
+    clip-path: polygon(
+        evenodd,
+        -40px -40px,
+        calc(100% + 40px) -40px,
+        calc(100% + 40px) calc(100% + 40px),
+        -40px calc(100% + 40px),
+        -40px -40px,
+        5px 5px,
+        5px calc(100% - 5px),
+        calc(100% - 5px) calc(100% - 5px),
+        calc(100% - 5px) 5px,
+        5px 5px
+    );
+    filter: blur(11px);
+    opacity: 0;
+    transform: scale(0.94);
+    pointer-events: none;
+    transition:
+        opacity 0.45s ease,
+        transform 0.45s ease;
+}
+
+.ux-spectrum-cta:hover:not(:disabled)::after {
+    opacity: 0.28;
+    transform: scale(1);
+    animation: ux-ir-spin 3.2s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .ux-spectrum-cta:hover:not(:disabled)::before {
+    .ux-spectrum-cta:hover:not(:disabled)::before,
+    .ux-spectrum-cta:hover:not(:disabled)::after {
         animation: none;
     }
 }
