@@ -1,5 +1,7 @@
 //! Run test implementation.
 
+#[cfg(test)]
+mod builtin_cycle_census;
 pub mod compile;
 pub mod execution;
 pub mod filetest_lpvm;
