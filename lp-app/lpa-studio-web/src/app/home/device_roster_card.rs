@@ -97,6 +97,32 @@ pub(crate) fn DeviceRosterCard(
     // or a non-green recovery state — so the verb appears with the attention
     // chip and the line under "Running …", and leaves with them.
     let degraded = card.status == DeviceStatus::Degraded;
+    // Re-flash on a RUNNING board (G1 2026-09-02: the only road to newer
+    // firmware was Factory reset, which "causes issues sometimes"). The
+    // pick is not the user's here — it is the board this card is registered
+    // as, resolved against the served catalog for the detected chip; when
+    // the registry has no board, a chip with exactly one fit still earns
+    // the verb. Safe on a live board: the Flash activity parks a native-USB
+    // chip in its ROM downloader first, and the merged image ends before
+    // the lpfs partition, so the project and the efuse identity survive.
+    let reflash = card
+        .detected_chip
+        .as_deref()
+        .map(|chip| flash_offer(Some(chip)))
+        .and_then(|offer| {
+            let registered = card.board_id.as_deref();
+            offer
+                .candidates
+                .iter()
+                .find(|choice| Some(choice.board_id.as_str()) == registered)
+                .or_else(
+                    || match (offer.preselect.as_deref(), offer.candidates.as_slice()) {
+                        (Some(_), [only]) => Some(only),
+                        _ => None,
+                    },
+                )
+                .cloned()
+        });
     // The running face's ONE verb: Open — the editor as a lens on this
     // board. Opening is NAVIGATION, so it is a real `<a>` to the device
     // route (the same road the project cards take): a plain click rides the
@@ -242,6 +268,28 @@ pub(crate) fn DeviceRosterCard(
                     ActionButton {
                         key: "{\"clear-faults\"}",
                         action: DevicesOp::action_for(DeviceAction::ClearFaults { device }),
+                        running: false,
+                        variant: ActionButtonVariant::Quiet,
+                        on_action,
+                    }
+                }
+                // Flash the served firmware over a running board. Offered
+                // only when the pick resolves without asking (see `reflash`);
+                // a board with no resolvable pick gets the needs-firmware
+                // face's picker, never a guess.
+                if let Some(choice) = reflash.clone()
+                    && idle
+                    && linked
+                    && !offer_flash
+                {
+                    ActionButton {
+                        key: "{\"flash-firmware\"}",
+                        action: DevicesOp::action_for(DeviceAction::Flash {
+                            device,
+                            board_id: choice.board_id.clone(),
+                            build_id: choice.build_id.clone(),
+                            park_first: choice.park_first,
+                        }),
                         running: false,
                         variant: ActionButtonVariant::Quiet,
                         on_action,
