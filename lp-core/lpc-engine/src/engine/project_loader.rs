@@ -52,6 +52,7 @@ use crate::nodes::FluidNode;
 use crate::nodes::OutputNode;
 #[cfg(feature = "node-texture")]
 use crate::nodes::TextureNode;
+use crate::nodes::fixture::mapping::map2d::object_spans_of;
 #[cfg(feature = "node-fixture")]
 use crate::nodes::fixture::mapping::mapping_from_map2d_doc;
 #[cfg(feature = "node-shader")]
@@ -1184,11 +1185,10 @@ fn resolve_fixture_mapping(
                         reason: format!("resolve map2d fixture mapping: {e}"),
                     })?;
             // The per-strand instance-address table `/sector/2`-style patch
-            // entries lower through — same doc, same resolve as the mapping
-            // (the runtime node recomputes it on asset refresh).
-            let spans = lpc_mapping::resolve(&doc)
-                .map(|resolved| lpc_mapping::object_instance_spans(&doc, &resolved))
-                .unwrap_or_default();
+            // entries lower through — from the mapping's own spans, so the
+            // document resolves exactly once (the runtime node recomputes it
+            // on asset refresh).
+            let spans = lpc_mapping::object_instance_spans_of(&doc, &object_spans_of(&mapping));
             // Keep the source so the runtime node can re-resolve on asset
             // refresh (the in-place editor's apply path).
             let source = FixtureMap2dSource {

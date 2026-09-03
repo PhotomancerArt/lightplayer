@@ -17,7 +17,7 @@
 
 use alloc::vec::Vec;
 
-use lpc_mapping::{Map2dDoc, Map2dError, ResolvedMap2d, fit_points, fit_scale, resolve};
+use lpc_mapping::{Map2dDoc, Map2dError, ObjectSpan, fit_points_in_place, fit_scale, resolve_into};
 use lpc_model::nodes::fixture::{ResolvedMappingCompact, ResolvedSpan};
 
 /// Resolve a map2d document into the compact mapping carrier for a
@@ -27,10 +27,17 @@ pub fn mapping_from_map2d_doc(
     texture_width: u32,
     texture_height: u32,
 ) -> Result<ResolvedMappingCompact, Map2dError> {
-    let ResolvedMap2d { lamps, spans } = resolve(doc)?;
-    if lamps.is_empty() {
-        // No geometry to fit (and `fit_points` would reject empty bounds):
-        // an empty carrier, matching what an empty document always produced.
+    // One exact-size 8 B/lamp buffer from resolve to carrier: the resolver
+    // streams positions into it and the fit rewrites it in place. (It used to
+    // be three buffers at the load peak — 16 B/lamp `ResolvedLamp` rows, the
+    // positions copied out, the fitted copy — and the rows were the load's
+    // largest single ask at dome scale; docs/reports/2026-09-02-per-lamp-memory-table.md.)
+    let mut points = Vec::new();
+    let mut spans = Vec::new();
+    resolve_into(doc, &mut points, &mut spans)?;
+    if points.is_empty() {
+        // No geometry to fit (and the fit would reject empty bounds): an
+        // empty carrier, matching what an empty document always produced.
         return Ok(ResolvedMappingCompact {
             spans: Vec::new(),
             points: Vec::new(),
@@ -38,7 +45,6 @@ pub fn mapping_from_map2d_doc(
         });
     }
 
-    let positions: Vec<[f32; 2]> = lamps.iter().map(|lamp| lamp.pos).collect();
     // The doc's sample_diameter is a doc-space LENGTH; the carrier's is
     // texture pixels (that is what the sampling footprint and the display
     // layout's lamp radius read). It must ride the same fit as the
@@ -46,23 +52,13 @@ pub fn mapping_from_map2d_doc(
     // chose as pixels, which the old preview's absolute clamps masked
     // (docs/defects/2026-08-24-map2d-sample-diameter-unit-mismatch.md).
     let sample_diameter = doc.sample_diameter
-        * fit_scale(
-            &positions,
-            doc.canvas_bounds(),
-            texture_width,
-            texture_height,
-        )?;
-    // The 20 B/lamp resolver output has nothing left to say once the
-    // positions are copied out; dropping it here keeps the load-time peak to
-    // two 8 B/lamp buffers instead of three.
-    drop(lamps);
-    let points = fit_points(
-        &positions,
+        * fit_scale(&points, doc.canvas_bounds(), texture_width, texture_height)?;
+    fit_points_in_place(
+        &mut points,
         doc.canvas_bounds(),
         texture_width,
         texture_height,
     )?;
-    drop(positions);
 
     // One carrier span per resolver span, and the resolver's spans are
     // *strands*, not objects: a `repeat` object emits one per instance, all
@@ -87,10 +83,47 @@ pub fn mapping_from_map2d_doc(
     })
 }
 
+/// The resolver's strand spans, read back from a compact mapping.
+///
+/// A carrier span is a resolver span with `first_channel` for `start` (wiring
+/// order is the channel order), so a caller that needs `ObjectSpan`s — the
+/// patch layer's instance-address table — gets them from the mapping it
+/// already built instead of resolving the document again.
+pub fn object_spans_of(mapping: &ResolvedMappingCompact) -> Vec<ObjectSpan> {
+    mapping
+        .spans
+        .iter()
+        .map(|span| ObjectSpan {
+            object: span.object,
+            start: span.first_channel,
+            count: span.count,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use lpc_mapping::import::svg_to_doc;
+
+    /// The spans read back from the carrier are the resolver's spans: what
+    /// the patch layer lowers `/sector/k` entries through must not drift from
+    /// what the fixture actually mapped.
+    #[test]
+    fn carrier_spans_read_back_as_the_resolver_spans() {
+        let svg = r#"
+<svg viewBox="0 0 20 10">
+  <g><polyline points="10 0 20 0"/><text>path:2,count:2</text></g>
+  <g><polyline points="0 0 10 0"/><text>path:1,count:3</text></g>
+</svg>
+"#;
+        let doc = svg_to_doc(svg, 2.0).expect("import");
+        let mapping = mapping_from_map2d_doc(&doc, 20, 10).expect("resolve");
+        assert_eq!(
+            object_spans_of(&mapping),
+            lpc_mapping::resolve(&doc).expect("resolve").spans
+        );
+    }
 
     // These expectations are carried over from the legacy in-engine SVG
     // resolver so the lpc-mapping rewrite provably preserves its numbers.

@@ -835,11 +835,12 @@ impl NodeRuntime for FixtureNode {
                     mapping_from_map2d_doc(&doc, source.render_width, source.render_height)
                         .map_err(|e| format!("resolve fixture map2d document: {e}"))?;
                 // The per-strand instance-address table `/sector/2`-style
-                // patch entries lower through, kept in lockstep with the
-                // mapping it derives from (same doc, same resolve).
-                let spans = lpc_mapping::resolve(&doc)
-                    .map(|resolved| lpc_mapping::object_instance_spans(&doc, &resolved))
-                    .unwrap_or_default();
+                // patch entries lower through, from the mapping's own spans
+                // (one resolve of the document, never two).
+                let spans = lpc_mapping::object_instance_spans_of(
+                    &doc,
+                    &super::mapping::map2d::object_spans_of(&mapping),
+                );
                 Ok((mapping, spans))
             });
         match resolved {

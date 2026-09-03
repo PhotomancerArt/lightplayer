@@ -77,6 +77,20 @@ pub fn fit_points(
     target_width: u32,
     target_height: u32,
 ) -> Result<Vec<[f32; 2]>, Map2dError> {
+    let mut fitted = points.to_vec();
+    fit_points_in_place(&mut fitted, frame, target_width, target_height)?;
+    Ok(fitted)
+}
+
+/// [`fit_points`] on the caller's own buffer: the doc-space positions become
+/// the fitted ones, and the load path keeps one 8 B/lamp buffer from resolve
+/// through to the mapping instead of a second copy for the fit.
+pub fn fit_points_in_place(
+    points: &mut [[f32; 2]],
+    frame: Option<Bounds2d>,
+    target_width: u32,
+    target_height: u32,
+) -> Result<(), Map2dError> {
     let bounds = frame
         .or_else(|| bounds_of_points(points))
         .ok_or(Map2dError::EmptyBounds)?;
@@ -102,15 +116,11 @@ pub fn fit_points(
         )
     };
 
-    Ok(points
-        .iter()
-        .map(|[x, y]| {
-            [
-                ((*x - bounds.min_x) * scale + offset_x).clamp(0.0, 1.0),
-                ((*y - bounds.min_y) * scale * destination_aspect + offset_y).clamp(0.0, 1.0),
-            ]
-        })
-        .collect())
+    for [x, y] in points.iter_mut() {
+        *x = ((*x - bounds.min_x) * scale + offset_x).clamp(0.0, 1.0);
+        *y = ((*y - bounds.min_y) * scale * destination_aspect + offset_y).clamp(0.0, 1.0);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
