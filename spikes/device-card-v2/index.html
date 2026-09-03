@@ -1,0 +1,1002 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device card v2 — the four zones, dressed · spike</title>
+<style>
+html.no-anim *, html.no-anim *::before, html.no-anim *::after { transition:none !important; animation:none !important; }
+/* =====================================================================
+   Device card v2 — full UX pass on the Studio device card.
+   Aurora ground, verbatim from src/style.css :root (2026-09-02).
+   The four zones (header / state / terminal / actions) are RULED (G1
+   2026-08-31) and stay in every concept; what this spike explores is how
+   each zone looks and the three open interaction questions:
+     §2 an actions row that never reflows when a chip arms,
+     §3 a terminal you can read, colour-read and copy from,
+     §4 a picker that is a popover, not an inline list that grows with
+        the library.
+   §1 assembles them into whole-card concepts; §5 carries the family
+   (pending link, add card) in the leading idiom.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --bg:#0d0d13; --surface:#14141c; --panel:#17171f; --raised:#1d1d28;
+  --raised-strong:#252532; --terminal:#0a0a10;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --dim:#7a7a8a;
+
+  --sel-bd:#d6dae0; --sel-bg:rgba(214,218,224,.12);
+  --focus:#a5b8ff;
+  --spectrum:#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
+  --glow:rgba(140,170,255,.3);
+  --violet:#a58af7;
+
+  --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
+  --st-neutral-bg:#12171c;   --st-neutral-bd:#3a444c;   --st-neutral-tx:#d9e2df;
+  --st-working-bg:#24230f;   --st-working-bd:#706730;   --st-working-tx:#f2e6a2;
+  --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
+  --st-warning-bg:#292614;   --st-warning-bd:#796c33;   --st-warning-tx:#f0dc7a;
+  --st-attention-bg:#291f14; --st-attention-bd:#795833; --st-attention-tx:#f0b97a;
+  --st-error-bg:#301b1d;     --st-error-bd:#874b4b;     --st-error-tx:#ffc7c7;
+
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+  --win: 4000ms;
+}
+* { box-sizing: border-box; }
+body { margin:0; padding:28px 32px 160px; background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
+h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
+p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 18px; max-width:860px; }
+p.hint b { color:var(--shell-mut); font-weight:600; }
+h2 { font-size:12px; letter-spacing:.1em; color:var(--shell-mut); text-transform:uppercase; margin:46px 0 6px; }
+h2 .n { color:var(--shell-dim); margin-right:6px; }
+p.sub { color:var(--shell-dim); font-size:12px; margin:0 0 14px; max-width:900px; }
+p.sub b { color:var(--shell-mut); font-weight:600; }
+code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls { display:flex; gap:14px; flex-wrap:wrap; align-items:center; padding:10px 14px;
+  border:1px dashed var(--shell-bd-strong); border-radius:8px; color:var(--shell-mut); font-size:12px;
+  position:sticky; top:8px; z-index:60; background:rgba(11,12,14,.92); backdrop-filter:blur(8px); }
+.controls b { color:var(--shell-tx); font-weight:600; }
+.controls button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx);
+  border:1px solid var(--shell-bd-strong); border-radius:6px; padding:3px 10px; font-size:12px; }
+.controls button:hover { background:#1e2126; }
+.controls button.active { border-color:#7be0b2; color:#7be0b2; }
+.controls .grp { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
+.controls .sep { width:1px; height:18px; background:var(--shell-bd-strong); }
+
+/* ---- concept scaffolding ------------------------------------------- */
+.conceptrow { display:grid; grid-template-columns:repeat(auto-fit, minmax(330px, 1fr)); gap:22px; align-items:start; }
+.conceptrow.wide { grid-template-columns:repeat(auto-fit, minmax(420px, 1fr)); }
+.concept { min-width:0; }
+.chead { display:flex; align-items:baseline; gap:8px; margin:0 0 8px; flex-wrap:wrap; }
+.chead .name { font-size:13.5px; font-weight:700; color:var(--shell-tx); }
+.chead .thesis { font-size:11.5px; color:var(--shell-dim); }
+.cnotes { font-size:11.5px; color:var(--shell-mut); margin:8px 2px 0; line-height:1.55; }
+.cnotes b { color:var(--shell-tx); font-weight:600; }
+.cnotes .meter { font-family:var(--mono); font-size:10.5px; color:var(--shell-dim); }
+.cnotes .meter.bad { color:#ffc7c7; }
+.cnotes .meter.ok { color:#7be0b2; }
+.stage { position:relative; border-radius:12px; border:1px solid var(--shell-bd); background:var(--bg); color:var(--tx);
+  padding:16px; font-size:13px; font-family:var(--font); }
+.stage.narrow { padding:12px; }
+.lean { border:1px solid #365545; border-radius:8px; padding:12px 16px; margin-top:26px; font-size:12px; color:var(--shell-mut); max-width:900px; }
+.lean b { color:#7be0b2; }
+.rejected { border:1px dashed var(--shell-bd); border-radius:8px; padding:10px 14px; margin-top:20px; font-size:11.5px; color:var(--shell-dim); }
+
+/* =====================================================================
+   Card grammar shared by every concept (device_roster_card.rs faithful
+   where it reproduces production; extended where a concept needs it)
+   ===================================================================== */
+.card { position:relative; display:grid; align-content:start; gap:10px; border-radius:8px; border:1px solid var(--bd);
+  background:var(--panel); padding:14px; width:100%; min-height:300px; }
+.card.armed-scope { transition:border-color .25s, box-shadow .25s; }
+.card.armed-scope.is-armed { border-color:var(--st-error-bd); box-shadow:inset 0 0 0 1px var(--st-error-bd); }
+.dim { transition:opacity .25s, filter .25s; display:grid; gap:10px; }
+.card, .dim, .zone, .card > *, .dim > *, .zone > *, .facerow > *, .popwrap { min-width:0; }
+.pop.right { left:auto; right:0; }
+.card.is-armed .dim { opacity:.4; filter:saturate(.3); }
+.card h3 { margin:0; font-size:13.5px; font-weight:700; color:var(--strong); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.idline { margin:0; font:10.5px var(--mono); color:var(--subtle); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.detail { margin:0; font-size:11.5px; line-height:1.5; color:var(--muted); }
+.quiet  { margin:0; font-size:11.5px; line-height:1.5; color:var(--subtle); }
+.fail   { margin:0; font-size:11.5px; line-height:1.5; color:var(--st-error-tx); }
+.zone { display:grid; gap:8px; border-top:1px solid var(--bd); padding-top:10px; }
+.chip { display:inline-flex; align-items:center; min-height:22px; padding:0 8px; border-radius:999px; border:1px solid;
+  font-size:11px; font-weight:700; white-space:nowrap; line-height:1; }
+.chip.good      { background:var(--st-good-bg);      border-color:var(--st-good-bd);      color:var(--st-good-tx); }
+.chip.neutral   { background:var(--st-neutral-bg);   border-color:var(--st-neutral-bd);   color:var(--st-neutral-tx); }
+.chip.working   { background:var(--st-working-bg);   border-color:var(--st-working-bd);   color:var(--st-working-tx); }
+.chip.warning   { background:var(--st-warning-bg);   border-color:var(--st-warning-bd);   color:var(--st-warning-tx); }
+.chip.attention { background:var(--st-attention-bg); border-color:var(--st-attention-bd); color:var(--st-attention-tx); }
+.chip.error     { background:var(--st-error-bg);     border-color:var(--st-error-bd);     color:var(--st-error-tx); }
+/* identity tags (concept B/C headers) */
+.tag { display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border-radius:4px; border:1px solid var(--bd-mut);
+  background:var(--surface); font:10px var(--mono); color:var(--subtle); white-space:nowrap; }
+.tag.chipname { color:var(--muted); }
+.tags { display:flex; gap:5px; flex-wrap:wrap; min-width:0; }
+
+/* buttons */
+.btn { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  height:30px; padding:0 11px; border-radius:6px; border:1px solid var(--bd); background:var(--raised); color:var(--tx);
+  font-size:12px; font-weight:600; white-space:nowrap; text-decoration:none; }
+.btn:hover { border-color:var(--bd-strong); color:var(--strong); }
+.btn.quiet { background:transparent; border-color:transparent; color:var(--muted); padding:0 9px; }
+.btn.quiet:hover { background:var(--raised); color:var(--strong); }
+.btn.outline { background:transparent; }
+.btn.sm { height:26px; padding:0 9px; font-size:11.5px; }
+.btn:disabled { cursor:not-allowed; opacity:.55; }
+/* the Primary voice: spectrum ring (ux-spectrum-cta, verbatim) */
+.cta { position:relative; border-color:transparent; background:transparent; color:var(--strong); }
+.cta::before { content:""; position:absolute; inset:-1px; z-index:3; border-radius:inherit; padding:1px;
+  background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude;
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor;
+  opacity:.62; pointer-events:none; transition:opacity .3s; }
+.cta:hover::before { opacity:1; animation:spin 3.2s linear infinite; }
+.cta:hover { box-shadow:0 2px 24px var(--glow), 0 0 46px rgba(140,170,255,.22); }
+@keyframes spin { to { --a:360deg; } }
+
+/* armed destructive chip — production 2K+ reading (prefix column opens) */
+.armchip { position:relative; white-space:nowrap; transition:background-color .5s ease-out, border-color .5s ease-out; }
+.armchip .pre { display:inline-grid; grid-template-columns:0fr; overflow:hidden; transition:grid-template-columns .22s ease; }
+.armchip .pre > span { min-width:0; overflow:hidden; }
+.armchip.on { background:var(--st-error-bg); border-color:var(--st-error-bd); color:var(--st-error-tx);
+  transition:background-color .16s ease-in, border-color .16s ease-in; animation:knock .22s ease-out; }
+.armchip.on .pre { grid-template-columns:1fr; }
+.armchip::after { content:""; position:absolute; left:4px; right:4px; bottom:1px; height:1.5px; border-radius:2px;
+  background:var(--st-error-bd); transform-origin:left; transform:scaleX(0); opacity:0; }
+.armchip.on::after { opacity:.55; animation:drain var(--win) linear forwards; }
+@keyframes knock { 0%,100%{transform:scale(1)} 35%{transform:scale(1.07)} }
+@keyframes drain { from{transform:scaleX(1)} to{transform:scaleX(0)} }
+
+/* 2D: reserved footprint — both labels share one grid cell; the hidden one holds the width */
+.armchip.reserve { display:inline-grid; grid-template-columns:1fr; }
+.armchip.reserve > .lab { grid-area:1/1; display:inline-flex; align-items:center; justify-content:center; gap:6px; transition:opacity .16s; }
+.armchip.reserve > .lab.alt { visibility:hidden; }
+.armchip.reserve.on > .lab.rest { opacity:0; }
+.armchip.reserve.on > .lab.alt { visibility:visible; }
+.armchip.reserve:not(.on) > .lab.alt { opacity:0; }
+
+/* slot grid footer (concept C) */
+.slots { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:6px; }
+.slots .btn { width:100%; padding:0 6px; height:30px; overflow:hidden; }
+.slots .btn:not(.reserve) { display:block; line-height:28px; text-align:center; text-overflow:ellipsis; }
+.slots .btn.reserve .lab { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:28px; text-align:center; }
+.slots .btn.armchip.on::after { left:6px; right:6px; }
+
+/* overflow menu (concept B) */
+.menuwrap { position:relative; margin-left:auto; }
+.menu { position:absolute; right:0; bottom:calc(100% + 6px); z-index:20; min-width:200px; display:none;
+  padding:6px; border-radius:8px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 12px 40px rgba(0,0,0,.55); }
+.menu.open { display:grid; gap:2px; }
+.menu .btn { width:100%; justify-content:flex-start; height:30px; }
+.menu .rule { height:1px; background:var(--bd-mut); margin:4px 2px; }
+.menu .armchip.reserve > .lab { justify-content:flex-start; }
+
+footer.actions { margin-top:auto; display:flex; flex-wrap:wrap; gap:6px; border-top:1px solid var(--bd); padding-top:10px; align-items:center; }
+footer.actions .spring { flex:1; }
+
+/* ---- preview slot (ux-play-* verbatim, adapted) ---------------------- */
+.play { position:relative; width:100%; height:120px; overflow:hidden; border-radius:7px; background:#07080a; border:1px solid var(--bd); }
+.play.short { height:76px; }
+.play.thumb { width:96px; height:56px; flex:none; border-radius:5px; }
+.play canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+.play.dimmed canvas { filter:saturate(.45) brightness(.5); }
+.pill { position:absolute; top:6px; right:6px; display:inline-flex; align-items:center; gap:5px; padding:1px 6px; border:1px solid var(--bd);
+  border-radius:4px; background:color-mix(in srgb, var(--terminal) 78%, transparent); font:800 9.5px var(--mono); letter-spacing:.07em; text-transform:uppercase; }
+.pill .dot { width:6px; height:6px; border-radius:50%; background:currentcolor; flex:none; }
+.pill.live { color:var(--st-good-tx); } .pill.live .dot { animation:blink 2s ease-in-out infinite; }
+.pill.stale { color:var(--st-attention-tx); } .pill.offline { color:var(--st-neutral-tx); } .pill.fault { color:var(--st-error-tx); }
+@keyframes blink { 50% { opacity:.35 } }
+.veil { position:absolute; inset:0; display:grid; align-content:end; justify-items:center; gap:6px; padding-bottom:8px;
+  background:rgba(7,8,10,.25); color:var(--muted); font-size:10.5px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; }
+.playempty { position:absolute; inset:0; display:grid; align-content:center; justify-items:center; gap:6px; padding:0 14px;
+  color:var(--dim); font-size:11px; line-height:1.4; text-align:center; }
+.playmeta { display:flex; align-items:center; gap:8px; min-width:0; font-size:11px; color:var(--dim); }
+.playmeta .name { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.playmeta .fps { flex:none; font:10.5px var(--mono); }
+.playmeta .spring { flex:1; }
+
+/* ---- activity ---------------------------------------------------------- */
+.bar { height:6px; overflow:hidden; border-radius:999px; background:var(--surface); }
+.bar > i { display:block; height:100%; border-radius:999px; background:var(--st-working-tx); }
+.bar > i.sweep { width:35%; animation:sweep 1.2s ease-in-out infinite; }
+@keyframes sweep { 0%{transform:translateX(-100%)} 100%{transform:translateX(300%)} }
+
+/* ---- face rows ----------------------------------------------------------- */
+.facerow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0; }
+.facerow .btn { margin-left:auto; }
+.facerow .lead { font-size:11.5px; color:var(--muted); flex:none; }
+.picker { display:inline-flex; align-items:center; gap:7px; height:30px; padding:0 9px 0 6px; border-radius:6px; border:1px solid var(--bd);
+  background:var(--surface); color:var(--tx); font-size:12px; font-weight:600; cursor:pointer; min-width:0; flex:1; }
+.picker { flex:1 1 170px; }
+.picker:hover { border-color:var(--bd-strong); }
+.picker .sw { width:22px; height:16px; border-radius:3px; flex:none; background:linear-gradient(135deg,#ff5d5d,#ffab4a 40%,#5fe08b); }
+.picker .sw.board { background:var(--raised-strong); border:1px solid var(--bd-strong); }
+.picker .lbl { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.picker .grp { font-size:10px; color:var(--subtle); font-weight:500; flex:none; }
+.picker .car { margin-left:auto; color:var(--subtle); font-size:10px; flex:none; }
+
+/* ---- option cards (production faithful) -------------------------------- */
+.optlabel { font:9.5px var(--mono); text-transform:uppercase; letter-spacing:.13em; color:var(--dim); }
+.optgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(7.5rem,1fr)); gap:6px; min-width:0; }
+.opt { position:relative; display:grid; gap:2px; min-width:0; cursor:pointer; padding:6px; border-radius:4px; border:1px solid var(--bd-mut);
+  background:transparent; color:var(--muted); text-align:left; font:inherit; }
+.opt:hover { border-color:var(--bd-strong); color:var(--strong); }
+.opt.sel { border-color:transparent; background:var(--sel-bg); color:var(--strong); box-shadow:0 0 0 1px var(--sel-bd); }
+.opt .t { font-size:11.5px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.opt .b { font-size:10px; line-height:1.3; color:var(--dim); }
+.opt .ck { position:absolute; right:4px; top:4px; width:14px; height:14px; border-radius:999px; background:var(--sel-bd); color:var(--bg);
+  font-size:9px; display:none; align-items:center; justify-content:center; }
+.opt.sel .ck { display:inline-flex; }
+
+/* ---- terminal --------------------------------------------------------- */
+.term { display:flex; flex-direction:column; height:160px; overflow-y:auto; overflow-x:hidden; border-radius:6px; border:1px solid var(--bd);
+  background:var(--terminal); padding:6px 8px; font:10.5px/1.45 var(--mono); color:var(--muted); scrollbar-width:thin; }
+.term.current { flex-direction:column-reverse; background:var(--surface); color:var(--subtle); font-size:10.9px; line-height:1.35; }
+.term p { margin:0; white-space:pre-wrap; word-break:break-all; }
+.term.typed p { padding-left:10px; text-indent:-10px; }
+.term .rom { color:var(--dim); }
+.term .board { color:var(--muted); }
+.term .wire { color:var(--st-live-tx); }
+.term .wire .k { color:var(--dim); }
+.term .studio { color:var(--violet); }
+.term .studio::before { content:"▸ "; color:var(--violet); opacity:.7; }
+.term .ok { color:var(--st-good-tx); }
+.term .err { color:var(--st-error-tx); }
+.term .warn { color:var(--st-warning-tx); }
+.term .ts { color:var(--dim); margin-right:6px; }
+.term .bracket { display:flex; align-items:center; gap:6px; margin:4px 0 2px; color:var(--violet); cursor:pointer; user-select:none; }
+.term .bracket::before { content:"▾"; font-size:9px; }
+.term .bracket.fold::before { content:"▸"; }
+.term .bracket .cnt { color:var(--dim); margin-left:auto; }
+.termwrap { position:relative; }
+.termbar { position:absolute; top:5px; right:14px; display:flex; gap:4px; z-index:2; }
+.termbar .btn { height:20px; padding:0 6px; font-size:10px; background:color-mix(in srgb, var(--terminal) 80%, transparent); border-color:var(--bd-mut); color:var(--subtle); }
+.termbar .btn:hover { color:var(--strong); }
+.term .sel-hint { color:var(--dim); font-style:italic; }
+.ticker { display:flex; align-items:center; gap:8px; height:30px; padding:0 9px; border-radius:6px; border:1px solid var(--bd); background:var(--terminal);
+  font:10.5px var(--mono); color:var(--muted); cursor:pointer; min-width:0; }
+.ticker .line { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ticker .n { color:var(--dim); flex:none; }
+.ticker:hover { border-color:var(--bd-strong); }
+.sheet { position:absolute; left:8px; right:8px; bottom:8px; z-index:30; border-radius:8px; border:1px solid var(--bd-strong); background:var(--raised);
+  box-shadow:0 18px 50px rgba(0,0,0,.6); padding:8px; display:none; }
+.sheet.open { display:block; }
+.sheet .term { height:260px; }
+
+/* ---- popovers (§4) ---------------------------------------------------- */
+.popwrap { position:relative; }
+.pop { position:absolute; left:0; top:calc(100% + 6px); z-index:40; width:520px; max-width:calc(100vw - 80px); display:none;
+  border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 20px 60px rgba(0,0,0,.6); }
+.pop.open { display:grid; }
+.pop .top { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--bd-mut); }
+.pop .tabs { display:flex; gap:2px; }
+.pop .tab { appearance:none; font:inherit; cursor:pointer; padding:4px 9px; border-radius:5px; border:1px solid transparent; background:transparent; color:var(--subtle); font-size:11.5px; font-weight:600; }
+.pop .tab.on { background:var(--surface); color:var(--strong); border-color:var(--bd-mut); }
+.pop .tab .c { color:var(--dim); font-weight:500; margin-left:4px; }
+.pop input { margin-left:auto; width:170px; appearance:none; font:inherit; font-size:11.5px; padding:4px 8px; border-radius:5px; border:1px solid var(--bd); background:var(--surface); color:var(--tx); }
+.pop .body { padding:10px; max-height:340px; overflow:auto; }
+.pop .cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(112px,1fr)); gap:8px; }
+.pcard { display:grid; gap:5px; padding:5px; border-radius:6px; border:1px solid var(--bd-mut); background:var(--panel); cursor:pointer; text-align:left; font:inherit; color:var(--muted); }
+.pcard:hover { border-color:var(--bd-strong); color:var(--strong); }
+.pcard.sel { box-shadow:0 0 0 1px var(--sel-bd); border-color:transparent; background:var(--sel-bg); color:var(--strong); }
+.pcard .th { position:relative; height:56px; border-radius:4px; overflow:hidden; background:#07080a; }
+.pcard .th canvas { position:absolute; inset:0; width:100%; height:100%; }
+.pcard .t { font-size:11.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pcard .b { font-size:10px; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pcard.new .th { display:grid; place-items:center; color:var(--subtle); font-size:20px; border:1px dashed var(--bd-strong); background:transparent; }
+.pop .foot { display:flex; align-items:center; gap:8px; padding:8px 10px; border-top:1px solid var(--bd-mut); font-size:11px; color:var(--dim); }
+.pop .foot .spring { flex:1; }
+/* P2 palette layout */
+.pop.palette .body { display:grid; grid-template-columns:1fr 200px; gap:0; padding:0; max-height:none; }
+.pop.palette .list { max-height:320px; overflow:auto; padding:6px; border-right:1px solid var(--bd-mut); }
+.pop.palette .row { display:flex; align-items:center; gap:9px; padding:5px 7px; border-radius:5px; cursor:pointer; color:var(--muted); font-size:12px; }
+.pop.palette .row:hover { background:var(--surface); color:var(--strong); }
+.pop.palette .row.sel { background:var(--sel-bg); color:var(--strong); box-shadow:inset 0 0 0 1px var(--sel-bd); }
+.pop.palette .row .sw { width:26px; height:18px; border-radius:3px; flex:none; overflow:hidden; position:relative; background:#07080a; }
+.pop.palette .row .sw canvas { position:absolute; inset:0; width:100%; height:100%; }
+.pop.palette .row .g { margin-left:auto; font-size:10px; color:var(--dim); flex:none; }
+.pop.palette .row .gh { font:9.5px var(--mono); text-transform:uppercase; letter-spacing:.12em; color:var(--dim); padding:8px 7px 3px; }
+.pop.palette .side { padding:10px; display:grid; gap:8px; align-content:start; }
+.pop.palette .side .big { position:relative; height:110px; border-radius:6px; overflow:hidden; background:#07080a; border:1px solid var(--bd-mut); }
+.pop.palette .side .big canvas { position:absolute; inset:0; width:100%; height:100%; }
+.pop.palette .side .t { font-size:12.5px; font-weight:700; color:var(--strong); }
+.pop.palette .side .d { font-size:11px; color:var(--subtle); line-height:1.45; }
+/* board tiles */
+.boards { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:8px; }
+.btile { display:grid; gap:3px; padding:8px; border-radius:6px; border:1px solid var(--bd-mut); background:var(--panel); cursor:pointer; text-align:left; font:inherit; color:var(--muted); }
+.btile:hover { border-color:var(--bd-strong); color:var(--strong); }
+.btile.sel { box-shadow:0 0 0 1px var(--sel-bd); border-color:transparent; background:var(--sel-bg); color:var(--strong); }
+.btile .t { font-size:12px; font-weight:600; }
+.btile .b { font-size:10.5px; color:var(--dim); }
+.btile .fam { font:9.5px var(--mono); color:var(--st-good-tx); }
+.btile.other .fam { color:var(--dim); }
+.filterline { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--subtle); }
+.filterline a { color:var(--muted); cursor:pointer; text-decoration:underline dotted; }
+
+/* ---- add + pending cards -------------------------------------------- */
+.addcard { display:flex; min-height:300px; flex-direction:column; align-items:center; justify-content:center; gap:10px; border-radius:8px;
+  border:1px dashed var(--bd-strong); padding:20px; text-align:center; }
+.addcard .ico { width:34px; height:34px; border-radius:8px; border:1px solid var(--bd); display:grid; place-items:center; color:var(--subtle); font-size:16px; }
+.addcard p { margin:0; max-width:220px; font-size:11.5px; line-height:1.5; color:var(--muted); }
+.grid3 { display:grid; grid-template-columns:repeat(auto-fill, minmax(330px,1fr)); gap:14px; }
+</style>
+</head>
+<body>
+
+<h1>Device card v2 — the four zones, dressed</h1>
+<p class="hint">
+  <b>Thesis.</b> The card's structure is settled (header / state / terminal / actions, always present, fixed-height panels
+  absorbing churn). What is not settled is how the zones look and three interaction questions the shipped card gets wrong:
+  an armed chip that changes width and reflows the row (§2), a terminal you cannot copy from or read at a glance (§3),
+  and a picker that is an inline list growing with your library (§4). §1 assembles the candidates into whole cards;
+  §5 carries the pending-link and add cards in the same idiom. The preview slot is back in every concept, wearing the
+  honest-preview grammar (live / stale / last-seen / no picture) even though its feed is a separate milestone.
+</p>
+
+<div class="controls">
+  <span><b>State</b></span>
+  <span class="grp" id="stateBtns"></span>
+  <span class="sep"></span>
+  <span class="grp">
+    <button id="tLong">Long names</button>
+    <button id="tLib">Library: 40 projects</button>
+    <button id="tArm">Arm “Forget”</button>
+    <button id="tArm2">Arm “Factory reset”</button>
+    <button id="tNoise">+ board noise</button>
+  </span>
+  <span class="sep"></span>
+  <span class="grp"><b>Preview</b>
+    <button data-play="live" class="active">live</button>
+    <button data-play="stale">stale</button>
+    <button data-play="none">no frame</button>
+  </span>
+</div>
+
+<h2><span class="n">1</span> The whole card — four concepts</h2>
+<p class="sub">
+  Same DTO, same zones, four dressings. <b>Current</b> is the shipped renderer reproduced faithfully (no preview slot, inline pickers,
+  reflowing chips). <b>A · Stage</b> puts the preview on top of the state zone as the card's picture and reduces every face to
+  “one line + one verb”. <b>B · Split</b> keeps the preview small beside the state text and moves every always-action under a ⋯ menu so the
+  footer never grows. <b>C · Instrument</b> is the dense reading for a bench with eight boards: identity as tags, a 4-line terminal that
+  opens as a sheet, actions as fixed slots. Cycle the state above; all four follow.
+</p>
+<div class="conceptrow" id="s1"></div>
+
+<h2><span class="n">2</span> The actions row — arming without reflow</h2>
+<p class="sub">
+  The shipped 2K+ chip opens a “Confirm ” grid column when armed; in a wrapping footer that width change pushes neighbours and wraps
+  the row. Four answers, each measured live: arm a chip and read the meter under the stage. <b>Reserve</b> renders both labels in one
+  cell and hides one (the spike's 2D, revived). <b>Slots</b> gives every verb a fixed cell. <b>Menu</b> moves the destructive family off the
+  row. <b>Swap</b> keeps a fixed cell and changes the verb text itself (“Factory reset” → “Confirm reset”) rather than prefixing.
+</p>
+<div class="controls" style="position:static;margin:0 0 14px;display:inline-flex"><span><b>Card width</b></span><input type="range" id="s2w" min="320" max="520" value="400" step="4"><span id="s2wv" style="font-family:var(--mono)">400px</span><span style="color:var(--shell-dim)">— the gallery grid is minmax(320px, 1fr); ~400px is a three-up column at 1440</span></div>
+<div id="s2" style="display:flex;flex-wrap:wrap;gap:22px;align-items:flex-start"></div>
+
+<h2><span class="n">3</span> The terminal — readable, colour-read, copyable</h2>
+<p class="sub">
+  Three defects in the shipped panel: rows are fed newest-first into a <code>column-reverse</code> box so drag-selection follows reversed DOM
+  order (try selecting in <b>Current</b> and pasting), the text is subtle-on-subtle at 10.9px, and every line is an untyped string.
+  <b>T1 · Typed</b> keeps natural order with a pinned bottom, types lines (ROM / board / wire / Studio / outcome) and decodes wire frames
+  into one readable line. <b>T2 · Brackets</b> folds activity narration into collapsible groups. <b>T3 · Ticker</b> shrinks the zone to
+  one line and opens a sheet in place. All keep a fixed footprint.
+</p>
+<div class="conceptrow" id="s3"></div>
+
+<h2><span class="n">4</span> The picker — a popover, not a list</h2>
+<p class="sub">
+  Today both faces (which board? / put something on it) are inline option-card grids; the second grows with the library
+  (toggle “Library: 40 projects” above and watch <b>Current</b>). The candidates make the face one line — a trigger showing the pick —
+  and open the choice as a popover that reuses the real gallery cards with their thumbs. <b>P1 · Gallery</b> is a tabbed card grid.
+  <b>P2 · Palette</b> is a searchable list with a preview pane. The board pick uses the same trigger, filtered to the detected chip, with
+  the filter stated and escapable.
+</p>
+<div class="conceptrow wide" id="s4"></div>
+
+<h2><span class="n">5</span> The family — pending link and add card</h2>
+<p class="sub">
+  The roster's other two cards in the leading idiom (concept A). A pending link is not yet a device: it carries no preview and no
+  always-actions, and the same flash face appears on it once the verdict settles. The add card is the empty state, unchanged from #482.
+</p>
+<div class="grid3" id="s5"></div>
+
+<div class="lean" id="lean"></div>
+
+<script>
+/* =====================================================================
+   Data — modelled on lpa-devices' DeviceView + real bench boards
+   ===================================================================== */
+const S = { state:'running', long:false, lib:'small', armed:null, noise:0, play:'live', picks:{} };
+const STATES = [
+  ['running','Running'], ['degraded','Degraded'], ['empty','Empty'], ['firmware','Needs firmware'],
+  ['flashing','Flashing'], ['pushing','Pushing'], ['quiet','Not responding'], ['offline','Offline'],
+];
+const BOARDS = [
+  {id:'seeed/xiao-esp32-c6', t:'XIAO ESP32-C6', m:'Seeed Studio', fam:'esp32c6', flash:'4 MB'},
+  {id:'espressif/esp32-c6-devkitc-1', t:'ESP32-C6-DevKitC-1', m:'Espressif', fam:'esp32c6', flash:'8 MB'},
+  {id:'seeed/xiao-esp32-s3-plus', t:'XIAO ESP32-S3 Plus', m:'Seeed Studio', fam:'esp32s3', flash:'16 MB'},
+  {id:'espressif/esp32-s3-devkitc-1', t:'ESP32-S3-DevKitC-1', m:'Espressif', fam:'esp32s3', flash:'8 MB'},
+  {id:'quinled/dig2go', t:'QuinLED Dig2go', m:'QuinLED', fam:'esp32', flash:'4 MB'},
+  {id:'quinled/dig-uno', t:'QuinLED Dig-Uno', m:'QuinLED', fam:'esp32', flash:'4 MB'},
+  {id:'domraem/dom-z-102', t:'DOM-Z-102', m:'Domraem', fam:'esp32', flash:'4 MB'},
+];
+const EXAMPLES = ['meteor','plasma','fire2012','comet','palette-waves','fluid','rocaille','pulse','fault-demo','logo-sign','small-dome'];
+const MINE_SMALL = ['Porch sign v3','Kitchen strip'];
+const MINE_BIG = Array.from({length:38}, (_,i)=>['Porch sign v3','Kitchen strip','Garage arc','Stair wash','Fence run (fork 3)','Meteor shower over the long fence, north side','Halloween 2025','Studio test rig','Party mode','Dome sim 2V'][i%10] + (i>9?' '+(i):''));
+const NAMES = {
+  title: l => l ? 'Porch sign — the long one over the garage door, north side' : 'Porch sign',
+  project: l => l ? 'Meteor shower over the long fence, north side (fork 3)' : 'Meteor',
+};
+function device() {
+  const l = S.long, st = S.state;
+  const d = { title:NAMES.title(l), board:'XIAO ESP32-C6', chip:'esp32c6', mac:'a0:f2:62:87:b4:8c', fw:'0.9.3', proto:20,
+              project:null, status:'Ready', kind:'good', detail:'LightPlayer · fw 0.9.3 · wire 20', freshness:null, fail:null,
+              activity:null, face:'none', linked:true, escapes:['Disconnect','Forget'], fps:43, play:S.play, faultline:null };
+  switch (st) {
+    case 'running': d.project = NAMES.project(l); d.face = 'running'; break;
+    case 'degraded': d.project = NAMES.project(l); d.face = 'running'; d.status = 'Degraded'; d.kind = 'attention';
+      d.faultline = 'Fault: node /studio.show/s quarantined after 2 crashes — output shows the fault pattern'; d.play = 'fault'; break;
+    case 'empty': d.face = 'empty'; d.detail = 'LightPlayer · fw 0.9.3 · nothing loaded'; d.play = 'none'; break;
+    case 'firmware': d.face = 'flash'; d.status = 'Needs firmware'; d.kind = 'attention'; d.detail = 'Blank flash — needs firmware'; d.play = 'none'; d.fw = null; break;
+    case 'flashing': d.status = 'Flashing'; d.kind = 'working'; d.activity = {label:'Flashing firmware', pct:62}; d.escapes = ['Cancel','Forget']; d.play = 'none'; d.detail = 'Blank flash — needs firmware'; break;
+    case 'pushing': d.status = 'Sending'; d.kind = 'working'; d.activity = {label:'Sending the project', pct:null}; d.escapes = ['Cancel','Forget']; d.play = 'none'; break;
+    case 'quiet': d.project = NAMES.project(l); d.face = 'running'; d.status = 'Not responding'; d.kind = 'warning'; d.freshness = 'quiet — last heard 12 s ago'; d.play = 'stale'; d.escapes = ['Retry','Reconnect…','Disconnect','Forget']; break;
+    case 'offline': d.project = NAMES.project(l); d.face = 'running'; d.status = 'Offline'; d.kind = 'neutral'; d.freshness = 'last heard 6 min ago'; d.play = 'offline'; d.linked = false; d.escapes = ['Reconnect…','Forget']; break;
+  }
+  return d;
+}
+const idle = d => !d.activity;
+
+/* ---- terminal lines: typed, realistic ---------------------------------- */
+function lines() {
+  const base = [
+    ['rom','ESP-ROM:esp32c6-20220919'],
+    ['rom','Build:Sep 19 2022'],
+    ['rom','rst:0x15 (USB_UART_HPSYS),boot:0x2c (SPI_FAST_FLASH_BOOT)'],
+    ['board','Boot: scanning /projects for projects'],
+    ['board','Boot: 1 valid projects found'],
+    ['board','Boot: auto-loading meteor'],
+    ['wire','M!{"hello":{"proto":20,"board":"seeed/xiao-esp32-c6","fw":"0.9.3+c3514826","mac":"a0:f2:62:87:b4:8c"}}','hello · proto 20 · seeed/xiao-esp32-c6 · fw 0.9.3'],
+    ['studio','— Sending the project —', null, 'Sending the project'],
+    ['studio','Sending meteor · 14 files · 38 KB'],
+    ['wire','M!{"ack":{"id":18,"path":"/projects/meteor/project.json"}}','ack · /projects/meteor/project.json'],
+    ['ok','Sent Meteor in 2.1 s'],
+    ['board','Boot: auto-loaded project meteor'],
+    ['wire','M!{"heartbeat":{"fps":43,"heap":112640,"project":"meteor","up":31}}','heartbeat · 43 fps · heap 110 KB · up 31 s'],
+    ['wire','M!{"heartbeat":{"fps":43,"heap":112592,"project":"meteor","up":36}}','heartbeat · 43 fps · heap 110 KB · up 36 s'],
+  ];
+  if (S.state === 'degraded') base.push(
+    ['warn','[RECOVERY] node /studio.show/s: crash 2/2 (OOM at compute compile, 250 B short of 300000 B)'],
+    ['err','[RECOVERY] node /studio.show/s disabled after 2 crashes — black fallback → fault pattern'],
+    ['wire','M!{"heartbeat":{"fps":43,"heap":1120,"project":"meteor","fault":"shader"}}','heartbeat · 43 fps · heap 1.1 KB · FAULT shader']);
+  if (S.state === 'flashing') base.push(
+    ['studio','— Flashing firmware —', null, 'Flashing firmware'],
+    ['studio','Parking the chip in its ROM downloader'],
+    ['rom','ESP-ROM:esp32c6-20220919'],
+    ['rom','waiting for download'],
+    ['studio','Chip esp32c6 matches seeed/xiao-esp32-c6 · writing lp-esp32c6-0.9.3 (1.9 MB)'],
+    ['studio','0x10000 … 62%']);
+  if (S.state === 'pushing') base.push(['studio','— Sending the project —', null, 'Sending the project'], ['studio','Sending Porch sign v3 · 22 files · 71 KB']);
+  if (S.state === 'quiet') base.push(['warn','no heartbeat for 12 s — asking again'], ['studio','pulse 1/3 · no answer'], ['studio','pulse 2/3 · no answer']);
+  if (S.state === 'firmware') return [['rom','ESP-ROM:esp32c6-20220919'],['rom','Build:Sep 19 2022'],['rom','rst:0x1 (POWERON),boot:0x2c (SPI_FAST_FLASH_BOOT)'],['rom','invalid header: 0xffffffff'],['rom','invalid header: 0xffffffff'],['rom','invalid header: 0xffffffff'],['studio','Blank flash — the chip named itself in the boot banner']];
+  for (let i = 0; i < S.noise; i++) base.push(['wire',`M!{"heartbeat":{"fps":43,"heap":${112600-i*8},"project":"meteor","up":${41+i*5}}}`,`heartbeat · 43 fps · heap 110 KB · up ${41+i*5} s`]);
+  return base;
+}
+
+/* =====================================================================
+   Renderers — shared zone pieces
+   ===================================================================== */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const chip = d => `<span class="chip ${d.kind}">${esc(d.status)}</span>`;
+
+function headerA(d) {
+  const fwtag = d.fw ? `fw ${d.fw}` : 'no firmware';
+  return `<header style="display:grid;gap:5px">
+    <div class="head"><h3 title="${esc(d.title)}">${esc(d.title)}</h3>${chip(d)}</div>
+    <p class="idline">${esc(d.board)} · <span style="color:var(--muted)">${d.chip}</span> · ${d.mac} · ${fwtag}</p>
+  </header>`;
+}
+function headerB(d) {
+  return `<header style="display:grid;gap:6px">
+    <div class="head"><h3 title="${esc(d.title)}">${esc(d.title)}</h3>${chip(d)}</div>
+    <div class="tags"><span class="tag">${esc(d.board)}</span><span class="tag chipname">${d.chip}</span><span class="tag">${d.mac.slice(-8)}</span>${d.fw?`<span class="tag">fw ${d.fw}</span>`:''}</div>
+  </header>`;
+}
+function headerC(d, play) {
+  return `<header style="display:flex;gap:10px;align-items:flex-start">
+    ${play}
+    <div style="display:grid;gap:4px;min-width:0;flex:1">
+      <div class="head"><h3 title="${esc(d.title)}">${esc(d.title)}</h3>${chip(d)}</div>
+      <p class="idline">${esc(d.board)} · <span style="color:var(--muted)">${d.chip}</span> · ${d.mac.slice(-8)}</p>
+    </div>
+  </header>`;
+}
+
+/* preview slot */
+function play(d, cls='') {
+  const p = d.play;
+  const proj = d.project;
+  const id = 'pv' + Math.random().toString(36).slice(2,8);
+  if (!proj || p === 'none') {
+    const why = d.face==='flash' ? 'Nothing running — a blank chip has no picture.'
+      : d.activity ? `${d.activity.label}… the picture returns when the board does.`
+      : 'Nothing loaded — no picture until something runs.';
+    if (cls.includes('thumb')) return `<div class="play ${cls}" title="${esc(why)}"><div class="playempty" style="font-size:14px;color:var(--bd-strong)">—</div></div>`;
+    return `<div class="play ${cls}"><div class="playempty">${esc(why)}</div></div>`;
+  }
+  const pill = p==='live' ? `<span class="pill live"><i class="dot"></i>live · ${d.fps} fps</span>`
+    : p==='fault' ? `<span class="pill fault"><i class="dot"></i>fault · ${d.fps} fps</span>`
+    : p==='stale' ? `<span class="pill stale">last frame · 12 s ago</span>`
+    : `<span class="pill offline">last seen 6 min ago</span>`;
+  const veil = p==='offline' ? `<div class="veil">last seen · not now</div>` : '';
+  return `<div class="play ${cls} ${p==='offline'?'dimmed':''}" data-play="${p}"><canvas id="${id}" data-mode="${p}"></canvas>${pill}${veil}</div>`;
+}
+function playmeta(d) {
+  if (!d.project) return '';
+  const fps = d.play==='live'||d.play==='fault' ? `${d.fps} fps from device` : d.play==='stale' ? `<span style="color:var(--st-attention-tx)">no frames for 12 s</span>` : 'last seen 6 min ago';
+  return `<div class="playmeta"><span class="name">Running ${esc(d.project)}</span><span class="spring"></span><span class="fps">${fps}</span></div>`;
+}
+
+/* faces */
+function activity(d) {
+  if (!d.activity) return '';
+  const a = d.activity;
+  return `<div style="display:grid;gap:5px"><p class="quiet">${esc(a.label)}${a.pct!=null?` · ${a.pct}%`:''}</p>
+    <div class="bar">${a.pct!=null?`<i style="width:${a.pct}%"></i>`:`<i class="sweep"></i>`}</div></div>`;
+}
+const CTA = (label, cls='') => `<button class="btn cta ${cls}">${label}</button>`;
+function faceOneLine(d, kind) {
+  // kind: 'A' (stacked line then verb) | 'row' (line + verb in one row)
+  if (d.face === 'running') {
+    const verbs = S.state==='degraded'
+      ? `<button class="btn outline sm">Clear faults</button>${CTA('Open','sm')}`
+      : (idle(d) && d.linked && S.state!=='quiet') ? CTA('Open','sm') : '';
+    return `<div class="facerow"><span class="detail" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${d.faultline?`<span class="fail">${esc(d.faultline)}</span>`:esc(d.detail)}</span>${verbs}</div>`;
+  }
+  if (d.face === 'empty') {
+    const pick = S.picks.push || {t:'Meteor', g:'example'};
+    return `<div class="facerow"><span class="lead">Put on it</span>
+      <button class="picker"><span class="sw"></span><span class="lbl">${esc(pick.t)}</span><span class="grp">${pick.g}</span><span class="car">▾</span></button>
+      ${CTA('Put it on the board','sm')}</div>`;
+  }
+  if (d.face === 'flash') {
+    const pick = S.picks.board || BOARDS[0];
+    return `<div style="display:grid;gap:6px"><div class="facerow"><span class="lead">Board</span>
+      <button class="picker"><span class="sw board"></span><span class="lbl">${esc(pick.t)}</span><span class="grp">${pick.fam}</span><span class="car">▾</span></button>
+      ${CTA('Flash firmware','sm')}</div>
+      <p class="quiet" style="font-size:10.5px">Two boards match the detected <b style="color:var(--muted)">esp32c6</b>. The pick is checked against the chip before anything is written.</p></div>`;
+  }
+  return '';
+}
+/* production faces (faithful) */
+function faceCurrent(d) {
+  if (d.face === 'running') return `<p class="detail">Running ${esc(d.project)}</p><p class="detail">${esc(d.detail)}</p>`;
+  if (d.face === 'flash') {
+    const cands = BOARDS.filter(b => b.fam==='esp32c6');
+    return `<div style="display:grid;gap:6px"><span class="optlabel">Which board is this?</span><div class="optgrid">${cands.map((b,i)=>`<button class="opt ${i===0?'sel':''}"><span class="ck">✓</span><span class="t">⌁ ${esc(b.t)}</span><span class="b">${b.m} · ${b.flash} flash</span></button>`).join('')}</div>
+      <button class="btn outline" style="width:fit-content">Flash firmware</button></div>`;
+  }
+  if (d.face === 'empty') {
+    const mine = S.lib==='big' ? MINE_BIG : MINE_SMALL;
+    const opts = [['New','New project','Generated for this board'], ...EXAMPLES.slice(0,4).map(e=>['Example',e,'From the gallery']), ...mine.map(m=>['My project',m,'From your library'])];
+    return `<div style="display:grid;gap:6px"><span class="optlabel">Put something on it</span><div class="optgrid">${opts.map((o,i)=>`<button class="opt ${i===1?'sel':''}"><span class="ck">✓</span><span class="t">${o[0]==='New'?'＋':'▦'} ${o[0]} · ${esc(o[1])}</span><span class="b">${o[2]}</span></button>`).join('')}</div>
+      <button class="btn outline" style="width:fit-content">Put it on the board</button></div>`;
+  }
+  return `<p class="detail">${esc(d.detail)}</p>`;
+}
+
+/* terminals */
+function termCurrent(ls, h) {
+  return `<div class="term current" style="${h?`height:${h}px`:''}">${ls.length? [...ls].reverse().map(l=>`<p>${esc(l[1])}</p>`).join('') : '<p style="opacity:.6">Nothing from this board yet.</p>'}</div>`;
+}
+function termTyped(ls, opts={}) {
+  const h = opts.h ? `height:${opts.h}px` : '';
+  const rows = ls.map(l => {
+    const [k, raw, decoded] = l;
+    if (k==='wire' && opts.decode !== false) return `<p class="wire"><span class="k">wire</span> ${esc(decoded||raw)}</p>`;
+    return `<p class="${k}">${esc(raw.replace(/^— (.*) —$/, '$1'))}</p>`;
+  }).join('');
+  return `<div class="termwrap"><div class="term typed" style="${h}">${rows}</div>
+    <div class="termbar"><button class="btn quiet" title="Copy the whole tail">copy</button><button class="btn quiet" title="Raw wire frames">raw</button></div></div>`;
+}
+function termBrackets(ls, opts={}) {
+  const h = opts.h ? `height:${opts.h}px` : '';
+  let out = '', open = null, cnt = 0;
+  const flush = () => { if (open) { out += `</div>`; open = null; } };
+  ls.forEach((l, i) => {
+    const [k, raw, decoded, bracket] = l;
+    if (bracket) { flush(); const n = ls.slice(i+1).findIndex(x=>x[3]); const size = n<0 ? ls.length-i-1 : n; const fold = opts.foldFirst && i < ls.length-4;
+      out += `<div class="bracket ${fold?'fold':''}" onclick="this.classList.toggle('fold');this.nextElementSibling.hidden=this.classList.contains('fold')">${esc(bracket)}<span class="cnt">${size} lines</span></div><div ${fold?'hidden':''}>`; open = true; return; }
+    if (k==='wire') out += `<p class="wire"><span class="k">wire</span> ${esc(decoded||raw)}</p>`;
+    else out += `<p class="${k}">${esc(raw)}</p>`;
+  });
+  flush();
+  return `<div class="termwrap"><div class="term typed" style="${h}">${out}</div><div class="termbar"><button class="btn quiet">copy</button></div></div>`;
+}
+function termTicker(ls, id) {
+  const last = ls[ls.length-1];
+  const txt = last[0]==='wire' ? (last[2]||last[1]) : last[1];
+  return `<div class="ticker" onclick="toggleSheet('${id}')"><span class="line ${last[0]}">${esc(txt)}</span><span class="n">${ls.length} lines ▴</span></div>
+    <div class="sheet" id="${id}">${termTyped(ls,{h:260})}</div>`;
+}
+window.toggleSheet = id => document.getElementById(id).classList.toggle('open');
+
+/* action chips */
+function armchipProd(label, key) {
+  const on = S.armed===key;
+  return `<button class="btn quiet armchip ${on?'on':''}" data-arm="${key}"><span class="pre"><span>Confirm&nbsp;</span></span>${label}</button>`;
+}
+function armchipReserve(label, key, cls='quiet') {
+  const on = S.armed===key;
+  return `<button class="btn ${cls} armchip reserve ${on?'on':''}" data-arm="${key}"><span class="lab rest">${label}</span><span class="lab alt">Confirm ${label.toLowerCase().replace('factory reset','reset')}</span></button>`;
+}
+function armchipSwap(label, key, alt) {
+  const on = S.armed===key;
+  return `<button class="btn quiet armchip reserve ${on?'on':''}" data-arm="${key}"><span class="lab rest">${label}</span><span class="lab alt">${alt}</span></button>`;
+}
+const plain = (label, cls='quiet') => `<button class="btn ${cls}">${label}</button>`;
+function escapes(d, chipfn) {
+  return d.escapes.map(e => e==='Forget' ? chipfn('Forget','forget') : plain(e)).join('');
+}
+function footerCurrent(d) {
+  return `<footer class="actions">${escapes(d, armchipProd)}${d.project?armchipProd('Remove project','remove'):''}${idle(d)&&d.linked?plain('Reset')+armchipProd('Factory reset','erase'):''}</footer>`;
+}
+function footerReserve(d) {
+  return `<footer class="actions">${escapes(d, armchipReserve)}${d.project?armchipReserve('Remove project','remove'):''}${idle(d)&&d.linked?plain('Reset')+armchipReserve('Factory reset','erase'):''}</footer>`;
+}
+function footerMenu(d, id) {
+  const primaries = d.escapes.filter(e=>e!=='Forget').map(e=>plain(e)).join('');
+  return `<footer class="actions">${primaries}<span class="spring"></span>
+    <div class="menuwrap"><button class="btn quiet" onclick="this.nextElementSibling.classList.toggle('open')" title="More">⋯</button>
+      <div class="menu" id="${id}">
+        ${idle(d)&&d.linked?plain('Reset'):''}
+        ${d.project?armchipReserve('Remove project','remove'):''}
+        ${idle(d)&&d.linked?armchipReserve('Factory reset','erase'):''}
+        <div class="rule"></div>
+        ${armchipReserve('Forget','forget')}
+      </div></div></footer>`;
+}
+function footerSlots(d) {
+  const cells = [];
+  d.escapes.filter(e=>e!=='Forget').forEach(e=>cells.push(plain(e)));
+  if (idle(d)&&d.linked) cells.push(plain('Reset'));
+  if (d.project) cells.push(armchipSwap('Remove project','remove','Confirm remove'));
+  if (idle(d)&&d.linked) cells.push(armchipSwap('Factory reset','erase','Confirm reset'));
+  cells.push(armchipSwap('Forget','forget','Confirm forget'));
+  return `<footer class="actions" style="display:block"><div class="slots">${cells.join('')}</div></footer>`;
+}
+
+/* =====================================================================
+   §1 whole cards
+   ===================================================================== */
+function cardCurrent(d) {
+  const ls = lines();
+  return `<article class="card armed-scope ${S.armed?'is-armed':''}" data-concept="current">
+    <div class="dim">
+      <header style="display:grid;gap:5px"><div class="head"><h3>${esc(d.title)}</h3>${chip(d)}</div><p class="idline">${d.mac}</p></header>
+      <section class="zone"><div style="display:grid;gap:4px">${d.face==='running'?'':`<p class="detail">${esc(d.detail)}</p>`}${d.face==='running'?faceCurrent(d):''}${d.freshness?`<p class="quiet">${esc(d.freshness)}</p>`:''}${d.faultline?`<p class="fail">${esc(d.faultline)}</p>`:''}</div>
+        ${activity(d)}${d.face!=='running'&&!d.activity?faceCurrent(d):''}</section>
+      ${d.linked?`<section class="zone">${termCurrent(ls)}</section>`:''}
+    </div>
+    ${footerCurrent(d)}
+  </article>`;
+}
+function cardA(d) {
+  const ls = lines();
+  return `<article class="card armed-scope ${S.armed?'is-armed':''}" data-concept="A">
+    <div class="dim">
+      ${headerA(d)}
+      <section class="zone">
+        ${play(d)}
+        ${playmeta(d)}
+        ${d.freshness?`<p class="quiet">${esc(d.freshness)}</p>`:''}
+        ${activity(d)}
+        ${faceOneLine(d,'A')}
+      </section>
+      <section class="zone">${d.linked?termTyped(ls,{h:150}):`<div class="term typed" style="height:150px;opacity:.6"><p class="rom">Not connected — last output kept:</p>${ls.slice(-4).map(l=>`<p class="${l[0]}">${esc(l[2]||l[1])}</p>`).join('')}</div>`}</section>
+    </div>
+    ${footerReserve(d)}
+  </article>`;
+}
+function cardB(d) {
+  const ls = lines();
+  return `<article class="card armed-scope ${S.armed?'is-armed':''}" data-concept="B">
+    <div class="dim">
+      ${headerB(d)}
+      <section class="zone">
+        <div style="display:flex;gap:10px;align-items:stretch">
+          ${play(d,'thumb')}
+          <div style="display:grid;gap:4px;min-width:0;flex:1;align-content:center">
+            ${d.project?`<p class="detail" style="color:var(--strong);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Running ${esc(d.project)}</p>`:`<p class="detail">${esc(d.detail)}</p>`}
+            ${d.project?`<p class="quiet">${d.play==='live'||d.play==='fault'?`${d.fps} fps from device`:d.play==='stale'?'<span style="color:var(--st-attention-tx)">no frames for 12 s</span>':'last seen 6 min ago'}</p>`:''}
+            ${d.freshness?`<p class="quiet">${esc(d.freshness)}</p>`:''}
+          </div>
+        </div>
+        ${activity(d)}
+        ${faceOneLine(d,'row')}
+      </section>
+      <section class="zone">${termBrackets(ls,{h:118,foldFirst:true})}</section>
+    </div>
+    ${footerMenu(d,'menu-'+Math.random().toString(36).slice(2,7))}
+  </article>`;
+}
+function cardC(d) {
+  const ls = lines();
+  const sid = 'sheet-'+Math.random().toString(36).slice(2,7);
+  return `<article class="card armed-scope ${S.armed?'is-armed':''}" data-concept="C" style="min-height:0">
+    <div class="dim">
+      ${headerC(d, play(d,'thumb'))}
+      <section class="zone">
+        ${d.project?`<div class="playmeta"><span class="name">Running ${esc(d.project)}</span><span class="spring"></span><span class="fps">${d.play==='live'||d.play==='fault'?d.fps+' fps':d.play==='stale'?'<span style=\"color:var(--st-attention-tx)\">stale 12 s</span>':'last seen 6 min'}</span></div>`:''}
+        ${d.freshness?`<p class="quiet">${esc(d.freshness)}</p>`:''}
+        ${d.faultline?`<p class="fail">${esc(d.faultline)}</p>`:''}
+        ${activity(d)}
+        ${faceOneLine(d,'row')}
+      </section>
+      <section class="zone">${termTicker(ls, sid)}</section>
+    </div>
+    ${footerSlots(d)}
+  </article>`;
+}
+
+function concept(name, thesis, stageHtml, notes, style='') {
+  const stage = stageHtml.startsWith('<div class="stage') ? stageHtml : `<div class="stage">${stageHtml}</div>`;
+  return `<div class="concept" style="${style}"><div class="chead"><span class="name">${name}</span><span class="thesis">${thesis}</span></div>
+    ${stage}${notes?`<div class="cnotes">${notes}</div>`:''}</div>`;
+}
+
+function renderS1() {
+  const d = device();
+  document.getElementById('s1').innerHTML = [
+    concept('Current', 'shipped renderer, faithful', cardCurrent(d),
+      'No preview. The face is an inline grid that grows with the library. Arming “Forget” opens a prefix column and the footer reflows. Identity is the MAC alone: board and chip are never shown.'),
+    concept('A · Stage', 'preview on top, one line + one verb', cardA(d),
+      'Header names board · chip · MAC · fw on one mono line. The preview slot is the picture of the state zone; its pill says where the picture came from and how old it is. Every face is one row. Terminal is typed and in natural order. Chips reserve their armed width.'),
+    concept('B · Split', 'thumb beside the text; ⋯ holds the destructive family', cardB(d),
+      'Shorter card. Identity as tags. Terminal folds activity brackets so a long flash narration is one line when done. The footer holds only escapes and a ⋯ menu; the always-actions arm INSIDE the menu, which has fixed width.'),
+    concept('C · Instrument', 'dense; sheet terminal; slot actions', cardC(d),
+      'For a bench of eight boards. Thumb in the header, one-line ticker terminal that opens as a sheet over the card, and a four-slot footer where each verb owns a fixed cell and arming swaps its text.'),
+  ].join('');
+  mountCanvases();
+}
+
+/* =====================================================================
+   §2 actions rows in isolation, with a reflow meter
+   ===================================================================== */
+function renderS2() {
+  const d = device(); d.project = d.project || 'Meteor'; d.activity = null; d.linked = true; d.escapes = ['Disconnect','Forget'];
+  const wrap = (html, id) => `<div class="stage narrow" style="width:100%"><div id="${id}" style="display:grid">${html}</div></div>`;
+  const W = `width:${S.w2||400}px;flex:none`;
+  document.getElementById('s2').innerHTML = [
+    concept('Current', '2K+ prefix column opens', wrap(footerCurrent(d),'m-cur'), 'Arm a chip (controls above): <span class="meter" data-meter="m-cur"></span><br>The armed label is wider than the resting one; in a wrapping row that pushes its neighbours.', W),
+    concept('Reserve', 'both labels in one cell; the hidden one holds the width', wrap(footerReserve(d),'m-res'), '<span class="meter" data-meter="m-res"></span><br>The 2D “stable footprint” from the treatments spike. Arming still TRANSFORMS (red ramp, knock, drain), only the width is pre-paid. Costs a few px of resting width per destructive chip.', W),
+    concept('Slots', 'fixed cells; the verb text swaps', wrap(footerSlots(d),'m-slot'), '<span class="meter" data-meter="m-slot"></span><br>Every verb has the same width; long labels ellipsise. Reads as a control strip. Six verbs need two rows, which is fixed per state, not per arm.', W),
+    concept('Menu', 'escapes on the row, destructive family under ⋯', wrap(footerMenu(d,'m-menu-pop'),'m-menu'), '<span class="meter" data-meter="m-menu"></span><br>Row can never grow. Costs one click of discoverability for Factory reset / Remove project / Forget, which is arguably right for verbs that destroy things.', W),
+  ].join('');
+}
+const baseline = {};
+function snapshot(el) { const r0 = el.getBoundingClientRect(); const m = {}; el.querySelectorAll('.btn').forEach((b,i)=>{ if (!b.offsetParent) return; const r=b.getBoundingClientRect(); m[i]={x:Math.round(r.left-r0.left),y:Math.round(r.top-r0.top),w:Math.round(r.width),arm:b.dataset.arm||null}; }); return {h:el.offsetHeight, m}; }
+function measure() {
+  document.querySelectorAll('[data-meter]').forEach(m => {
+    const id = m.dataset.meter, el = document.getElementById(id);
+    if (!el) return;
+    const now = snapshot(el);
+    if (!S.armed) { baseline[id] = now; m.textContent = `footer ${now.h}px · at rest`; m.className = 'meter'; return; }
+    const b = baseline[id]; if (!b) return;
+    let moved = 0, grew = 0;
+    Object.keys(now.m).forEach(i => { const a = b.m[i], c = now.m[i]; if (!a) return; if (c.arm===S.armed) grew = c.w - a.w; else if (a.x!==c.x || a.y!==c.y) moved++; });
+    const dh = now.h - b.h;
+    const bad = moved>0 || dh!==0;
+    m.textContent = `armed chip ${grew>=0?'+':''}${grew}px wide · ${moved} neighbour${moved===1?'':'s'} shifted · footer ${dh?(dh>0?'+':'')+dh+'px':'same height'} — ${bad?'REFLOWED':'STABLE'}`;
+    m.className = 'meter ' + (bad ? 'bad' : 'ok');
+  });
+}
+
+/* =====================================================================
+   §3 terminals in isolation
+   ===================================================================== */
+function renderS3() {
+  const ls = lines();
+  document.getElementById('s3').innerHTML = [
+    concept('Current', 'column-reverse, untyped, 10.9px subtle', `<div class="stage narrow">${termCurrent(ls,180)}</div>`,
+      'Drag-select from the second line to the fourth, then paste somewhere: the lines come out bottom-up, because the DOM is newest-first. Wire frames are raw JSON. No colour, no pin-to-bottom control.'),
+    concept('T1 · Typed', 'natural order, pinned bottom, typed lines, decoded wire', `<div class="stage narrow">${termTyped(ls,{h:180})}</div>`,
+      'ROM dim · board plain · <span style="color:var(--st-live-tx)">wire</span> decoded to one line (raw on demand) · <span style="color:var(--violet)">▸ Studio narration</span> · <span style="color:var(--st-good-tx)">outcome</span> / <span style="color:var(--st-error-tx)">failure</span> / <span style="color:var(--st-warning-tx)">recovery</span>. Contrast lifted to muted-on-terminal. Copy button takes the whole tail. Selection pastes top-down.'),
+    concept('T2 · Brackets', 'activity narration folds', `<div class="stage narrow">${termBrackets(ls,{h:180,foldFirst:true})}</div>`,
+      'The fold already emits “— Flashing firmware —” brackets; here they become collapsible group headers with a line count. A finished push is one row; the current activity stays open. Same typing as T1.'),
+    concept('T3 · Ticker', 'one line; sheet on demand', `<div class="stage narrow" style="min-height:140px">${termTicker(ls,'s3-sheet')}<p class="quiet" style="margin-top:8px">click the ticker</p></div>`,
+      'The zone is 30px tall. The last line is usually the one you want (the outcome, the current step). The sheet opens OVER the card, so opening it never reflows the gallery.'),
+  ].join('');
+}
+
+/* =====================================================================
+   §4 pickers
+   ===================================================================== */
+function thumbCanvas(seed) { return `<canvas data-thumb="${seed}"></canvas>`; }
+function pickerFace(kind, popId) {
+  const pick = S.picks.push || {t:'Meteor', g:'example'};
+  return `<div class="popwrap"><div class="facerow"><span class="lead">Put on it</span>
+    <button class="picker" onclick="togglePop('${popId}')"><span class="sw"></span><span class="lbl">${esc(pick.t)}</span><span class="grp">${pick.g}</span><span class="car">▾</span></button>
+    ${CTA('Put it on the board','sm')}</div>${kind==='P1'?popGallery(popId):popPalette(popId)}</div>`;
+}
+window.togglePop = id => { const el = document.getElementById(id); const open = el.classList.contains('open'); document.querySelectorAll('.pop.open').forEach(p=>p.classList.remove('open')); if (!open) el.classList.add('open'); };
+window.pick = (t, g) => { S.picks.push = {t, g}; renderS4(); renderS1(); };
+window.pickBoard = i => { S.picks.board = BOARDS[i]; renderS4(); renderS1(); };
+function popGallery(id) {
+  const mine = S.lib==='big' ? MINE_BIG : MINE_SMALL;
+  const tab = S.tab || 'ex';
+  const cards = tab==='ex' ? EXAMPLES.map(e=>`<button class="pcard ${S.picks.push?.t===e?'sel':''}" onclick="pick('${e}','example')"><div class="th">${thumbCanvas(e)}</div><span class="t">${e}</span><span class="b">example · gallery</span></button>`).join('')
+    : tab==='mine' ? mine.map(m=>`<button class="pcard ${S.picks.push?.t===m?'sel':''}" onclick="pick('${esc(m).replace(/'/g,'')}','my project')"><div class="th">${thumbCanvas(m)}</div><span class="t">${esc(m)}</span><span class="b">saved 2 d ago · 14 files</span></button>`).join('')
+    : `<button class="pcard new" onclick="pick('New project','new')"><div class="th">＋</div><span class="t">New project</span><span class="b">generated for XIAO ESP32-C6</span></button>`;
+  return `<div class="pop ${S.tab?'':''}" id="${id}">
+    <div class="top"><div class="tabs">
+      <button class="tab ${tab==='ex'?'on':''}" onclick="S.tab='ex';renderS4();togglePop('${id}')">Examples<span class="c">${EXAMPLES.length}</span></button>
+      <button class="tab ${tab==='mine'?'on':''}" onclick="S.tab='mine';renderS4();togglePop('${id}')">My projects<span class="c">${mine.length}</span></button>
+      <button class="tab ${tab==='new'?'on':''}" onclick="S.tab='new';renderS4();togglePop('${id}')">New</button></div>
+      <input placeholder="Search…"></div>
+    <div class="body"><div class="cards">${cards}</div></div>
+    <div class="foot"><span>Same cards as the Explore and Projects pages — thumbs are the real posters.</span><span class="spring"></span><span>esc closes</span></div>
+  </div>`;
+}
+function popPalette(id) {
+  const mine = S.lib==='big' ? MINE_BIG : MINE_SMALL;
+  const sel = S.picks.push?.t || 'meteor';
+  const row = (t,g,seed) => `<div class="row ${sel===t?'sel':''}" onclick="pick('${esc(t).replace(/'/g,'')}','${g}')"><span class="sw">${thumbCanvas(seed)}</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t)}</span><span class="g">${g}</span></div>`;
+  return `<div class="pop palette right" id="${id}">
+    <div class="top"><span style="font-size:11.5px;color:var(--subtle)">Put something on <b style="color:var(--strong)">Porch sign</b></span><input placeholder="Type to filter… (meteor, porch, new)" style="width:220px"></div>
+    <div class="body">
+      <div class="list">
+        <div class="gh">New</div>${row('New project','new','new')}
+        <div class="gh">My projects · ${mine.length}</div>${mine.slice(0,12).map(m=>row(m,'mine',m)).join('')}${mine.length>12?`<div class="gh">… ${mine.length-12} more (type to filter)</div>`:''}
+        <div class="gh">Examples · ${EXAMPLES.length}</div>${EXAMPLES.map(e=>row(e,'example',e)).join('')}
+      </div>
+      <div class="side"><div class="big">${thumbCanvas(sel)}</div><span class="t">${esc(sel)}</span><span class="d">Example from the gallery. A meteor with a fading tail, tuned for strips. 1 output · 300 px · 43 fps on a C6.</span>${CTA('Put it on the board','sm')}</div>
+    </div></div>`;
+}
+function boardFace(popId, showAll) {
+  const pick = S.picks.board || BOARDS[0];
+  const cands = showAll ? BOARDS : BOARDS.filter(b=>b.fam==='esp32c6');
+  return `<div class="popwrap"><div class="facerow"><span class="lead">Board</span>
+    <button class="picker" onclick="togglePop('${popId}')"><span class="sw board"></span><span class="lbl">${esc(pick.t)}</span><span class="grp">${pick.fam}</span><span class="car">▾</span></button>
+    ${CTA('Flash firmware','sm')}</div>
+    <div class="pop" id="${popId}" style="width:440px">
+      <div class="top"><div class="filterline">${showAll?`Every served board — the flash preflight checks the chip. <a onclick="S.showAll=false;renderS4();togglePop('${popId}')">only esp32c6</a>`:`Detected <span class="tag chipname">esp32c6</span> in the boot banner · ${cands.length} boards fit · <a onclick="S.showAll=true;renderS4();togglePop('${popId}')">show all</a>`}</div></div>
+      <div class="body"><div class="boards">${cands.map(b=>`<button class="btile ${b.fam!=='esp32c6'?'other':''} ${pick.id===b.id?'sel':''}" onclick="pickBoard(${BOARDS.indexOf(b)})"><span class="t">${esc(b.t)}</span><span class="b">${b.m} · ${b.flash} flash</span><span class="fam">${b.fam}${b.fam==='esp32c6'?' · matches':''}</span></button>`).join('')}</div></div>
+      <div class="foot">The pin map is written to the device, so the board must be right; the chip guard makes a wrong pick fail safely.</div>
+    </div></div>`;
+}
+function renderS4() {
+  const d = device(); d.face = 'empty'; d.detail = 'LightPlayer · fw 0.9.3 · nothing loaded';
+  document.getElementById('s4').innerHTML = [
+    concept('Current', 'inline option cards; grows with the library', `<div class="stage narrow" id="s4-cur">${faceCurrent(d)}</div>`,
+      `<span class="meter" id="s4-meter"></span><br>Group label + title crammed into one option; blurbs identical; no thumbs. With a real library this is the tallest thing on the page.`),
+    concept('P1 · Gallery', 'trigger + tabbed card grid with real thumbs', `<div class="stage narrow" style="min-height:120px">${pickerFace('P1','pop-p1')}</div>`,
+      'The face is one row regardless of library size. Tabs are the three sources the offer already groups. Cards are the gallery\'s own (poster thumb, title, provenance). Click the trigger.'),
+    concept('P2 · Palette', 'searchable list + preview pane', `<div class="stage narrow" style="min-height:120px">${pickerFace('P2','pop-p2')}</div>`,
+      'Faster for a big library: type-to-filter, arrow keys, one big preview of the highlighted item with the verb inside the popover. Feels like a command palette, not a gallery.'),
+    concept('Board pick', 'same trigger; chip filter stated and escapable', `<div class="stage narrow" style="min-height:120px">${boardFace('pop-b', S.showAll)}</div>`,
+      'Filtered to the detected chip by default, and the filter says so. “Show all” is the mid-stream-attach escape (no banner seen) and the honest reason rides the foot. Item 4/5 land here: the chip is shown, and the filter reads it.'),
+  ].join('');
+  mountCanvases();
+  const cur = document.getElementById('s4-cur'); if (cur) document.getElementById('s4-meter').textContent = `face height ${cur.offsetHeight}px with ${S.lib==='big'?40:2} library projects`;
+}
+
+/* =====================================================================
+   §5 family
+   ===================================================================== */
+function renderS5() {
+  const pendingIdent = `<article class="card" style="min-height:0"><div class="dim">
+    <header style="display:grid;gap:5px"><div class="head"><h3>USB serial · /dev/cu.usbmodem2101</h3><span class="chip working">Identifying</span></div><p class="idline">no identity yet · found 3 s ago</p></header>
+    <section class="zone"><p class="detail">New device found — identifying…</p><div class="bar"><i class="sweep"></i></div>
+      <div class="term typed" style="height:90px"><p class="rom">ESP-ROM:esp32c6-20220919</p><p class="rom">Build:Sep 19 2022</p><p class="rom">rst:0x1 (POWERON),boot:0x2c (SPI_FAST_FLASH_BOOT)</p><p class="studio">listening for a hello…</p></div></section>
+    </div><footer class="actions">${plain('Cancel')}${plain('Reset')}${armchipReserve('Dismiss','dismiss')}</footer></article>`;
+  const pendingFw = `<article class="card" style="min-height:0"><div class="dim">
+    <header style="display:grid;gap:5px"><div class="head"><h3>USB serial · /dev/cu.usbmodem2101</h3><span class="chip attention">Needs firmware</span></div><p class="idline">esp32c6 · no identity until flashed</p></header>
+    <section class="zone"><p class="detail">New device found — blank flash. Flashing it is how you keep it.</p>
+      ${boardFace('pop-b5', false)}
+      <div class="term typed" style="height:90px"><p class="rom">ESP-ROM:esp32c6-20220919</p><p class="rom">invalid header: 0xffffffff</p><p class="rom">invalid header: 0xffffffff</p><p class="studio">Blank flash — the chip named itself in the boot banner</p></div></section>
+    </div><footer class="actions">${plain('Reset')}${armchipReserve('Dismiss','dismiss')}</footer></article>`;
+  const add = `<div class="addcard"><div class="ico">⌁</div><p><b style="color:var(--strong)">Connect a LightPlayer board to control it.</b></p><p>Plug it in over USB, then pick its port.</p><button class="btn outline">It's plugged in</button></div>`;
+  document.getElementById('s5').innerHTML = [
+    concept('Pending · identifying', 'not a device yet', `<div class="stage">${pendingIdent}</div>`, 'No preview, no identity line worth the name, no always-actions. The terminal is shorter — the only zone that matters here is what the board says.'),
+    concept('Pending · needs firmware', 'the flash face on the link', `<div class="stage">${pendingFw}</div>`, 'The same board trigger + verb as §4. Flashing IS the adopt gesture, so there is no separate Keep.'),
+    concept('Add card', 'the empty state (#482, unchanged)', `<div class="stage">${add}</div>`, 'Kept as shipped; shown so the family reads together at the same card width.'),
+  ].join('');
+}
+
+/* =====================================================================
+   canvases: lamp fields + poster thumbs
+   ===================================================================== */
+const LIVE = [];
+function hash(s){ let h=2166136261; for (const c of String(s)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return (h>>>0); }
+function mountCanvases() {
+  LIVE.length = 0;
+  document.querySelectorAll('canvas[data-mode]').forEach(c => { fit(c); LIVE.push(c); });
+  document.querySelectorAll('canvas[data-thumb]').forEach(c => { fit(c); drawField(c, hash(c.dataset.thumb) % 1000 / 60, 'poster', hash(c.dataset.thumb)); });
+  tick(performance.now());
+}
+function fit(c){ const r = c.getBoundingClientRect(); c.width = Math.max(2, Math.round(r.width*2)); c.height = Math.max(2, Math.round(r.height*2)); }
+function drawField(c, t, mode, seed=7) {
+  const g = c.getContext('2d'); const W = c.width, H = c.height;
+  g.fillStyle = '#07080a'; g.fillRect(0,0,W,H);
+  const cols = 30, rows = Math.max(3, Math.round(cols * H / W)); const cw = W/cols, ch = H/rows; const r = Math.min(cw,ch)*0.32;
+  const hueBase = (seed % 360);
+  for (let y=0;y<rows;y++) for (let x=0;x<cols;x++) {
+    const u = x/cols, v = y/rows; let L, hue;
+    if (mode==='fault') { L = 0.25 + 0.2*Math.sin(t*2*Math.PI); hue = 0; }
+    else { const head = (t*0.35 + v*0.1) % 1.2; const dist = (u - head + 1.2) % 1.2; L = Math.max(0, 1 - dist*3.2) * (0.5 + 0.5*Math.sin(v*9+seed)); hue = (hueBase + u*140 + t*40) % 360; }
+    const sat = mode==='fault' ? 90 : 85;
+    g.beginPath(); g.arc(x*cw+cw/2, y*ch+ch/2, r, 0, Math.PI*2);
+    g.fillStyle = `hsl(${hue} ${sat}% ${mode==='fault'? (10+L*30) : (6 + L*54)}%)`; g.fill();
+  }
+}
+function tick(now) {
+  const t = now/1000;
+  LIVE.forEach(c => { const m = c.dataset.mode; if (m==='live') drawField(c, t, 'live'); else if (m==='fault') drawField(c, t, 'fault'); else if (!c.dataset.drawn) { drawField(c, 3.1, 'live'); c.dataset.drawn = 1; } });
+  requestAnimationFrame(tick);
+}
+
+/* =====================================================================
+   controls + wiring
+   ===================================================================== */
+function renderAll() { renderS1(); renderS2(); renderS3(); renderS4(); renderS5(); measure(); syncControls(); }
+function syncControls() {
+  document.querySelectorAll('#stateBtns button').forEach(b => b.classList.toggle('active', b.dataset.state===S.state));
+  document.getElementById('tLong').classList.toggle('active', S.long);
+  document.getElementById('tLib').classList.toggle('active', S.lib==='big');
+  document.getElementById('tArm').classList.toggle('active', S.armed==='forget');
+  document.getElementById('tArm2').classList.toggle('active', S.armed==='erase');
+  document.querySelectorAll('[data-play]').forEach(b => { if (b.tagName==='BUTTON') b.classList.toggle('active', b.dataset.play===S.play); });
+}
+document.getElementById('stateBtns').innerHTML = STATES.map(([k,l]) => `<button data-state="${k}">${l}</button>`).join('');
+document.getElementById('stateBtns').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S.state = b.dataset.state; S.armed = null; renderAll(); });
+document.getElementById('tLong').onclick = () => { S.long = !S.long; renderAll(); };
+document.getElementById('tLib').onclick = () => { S.lib = S.lib==='big' ? 'small' : 'big'; renderAll(); };
+document.getElementById('tNoise').onclick = () => { S.noise += 3; renderAll(); };
+document.querySelectorAll('.controls [data-play]').forEach(b => b.onclick = () => { S.play = b.dataset.play; renderAll(); });
+let armTimer = null;
+function setArmed(key) {
+  S.armed = S.armed===key ? null : key; clearTimeout(armTimer);
+  // re-render only the armed dress, not the whole page, so §2 meters measure the same DOM
+  document.querySelectorAll('[data-arm]').forEach(el => el.classList.toggle('on', el.dataset.arm===S.armed));
+  document.querySelectorAll('.armed-scope').forEach(c => c.classList.toggle('is-armed', !!S.armed));
+  syncControls(); requestAnimationFrame(measure);
+  if (S.armed) armTimer = setTimeout(() => setArmed(S.armed), 4000);
+}
+document.getElementById('s2w').oninput = e => { S.w2 = +e.target.value; document.getElementById('s2wv').textContent = S.w2 + 'px'; const was = S.armed; S.armed = null; renderS2(); measure(); if (was) setArmed(was); };
+document.getElementById('tArm').onclick = () => setArmed('forget');
+document.getElementById('tArm2').onclick = () => setArmed('erase');
+document.body.addEventListener('click', e => {
+  const chip = e.target.closest('[data-arm]'); if (chip) { setArmed(chip.dataset.arm); return; }
+  if (!e.target.closest('.pop') && !e.target.closest('.picker')) document.querySelectorAll('.pop.open').forEach(p=>p.classList.remove('open'));
+});
+document.addEventListener('keydown', e => { if (e.key==='Escape') { document.querySelectorAll('.pop.open,.sheet.open,.menu.open').forEach(p=>p.classList.remove('open')); } });
+window.addEventListener('resize', () => requestAnimationFrame(() => { document.querySelectorAll('canvas').forEach(fit); mountCanvases(); }));
+
+document.getElementById('lean').innerHTML = `<b>Lean.</b> Concept <b>A · Stage</b> for the card, with <b>Reserve</b> chips (§2), the <b>T1 · Typed</b> terminal with T2's
+  brackets folded in as a later nicety (§3), and <b>P1 · Gallery</b> for the picker with the board pick using the same trigger (§4).
+  Reasoning: A keeps the four zones exactly as ruled and gives the state zone a picture, which is what item 6 asked for; Reserve is the
+  only §2 answer that changes nothing about the two-click machine or the verb set; T1 fixes all three terminal defects with one typed line
+  and no new interaction; P1 reuses cards that already exist. B's ⋯ menu is the strongest alternative for the footer if the six-verb row
+  reads as clutter at the gate. C is for a bench view and could be a density toggle rather than a concept.`;
+
+// URL params for headless captures: ?state=degraded&arm=forget&open=pop-p1&lib=big&play=stale&tab=mine
+{ const q = new URLSearchParams(location.search);
+  if ([...q.keys()].length) document.documentElement.classList.add('no-anim');
+  if (q.get('state')) S.state = q.get('state'); if (q.get('lib')) S.lib = q.get('lib'); if (q.get('play')) S.play = q.get('play');
+  if (q.get('tab')) S.tab = q.get('tab'); if (q.get('long')) S.long = true; if (q.get('w2')) { S.w2 = +q.get('w2'); } if (q.get('showall')) S.showAll = true; }
+renderAll();
+{ const q = new URLSearchParams(location.search);
+  if (q.get('arm')) { setArmed(q.get('arm')); clearTimeout(armTimer); }
+  if (q.get('open')) { const el = document.getElementById(q.get('open')); if (el) el.classList.add('open'); } }
+</script>
+</body>
+</html>
