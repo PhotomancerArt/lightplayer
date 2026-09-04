@@ -217,18 +217,13 @@ impl FlashActivity {
         }
     }
 
-    /// The hello arrived: move to the board-manifest stamp, or finish if the
-    /// firmware that answered is not one we can talk to.
+    /// The hello arrived: move to the board-manifest stamp.
+    ///
+    /// A hello on another wire version is NOT a failed flash (ruled
+    /// 2026-09-04): the image wrote and the board boots it. The fold has
+    /// journaled the version and put the notice in the terminal; failing
+    /// here would tell the user the flash broke when it did not.
     fn on_hello(&mut self, now: Millis, ctx: &ActivityCtx<'_>) -> ActivityStep {
-        if let Some(proto) = ctx.evidence.mismatched_proto() {
-            return ActivityStep::done(ActivityOutcome::Failed {
-                message: format!(
-                    "flashed firmware answered with wire proto {proto}, but this build \
-                     speaks {} — the served image is stale",
-                    ctx.config.expected_proto
-                ),
-            });
-        }
         let Some(link) = ctx.link else {
             // The hello proves the board is alive, but the link vanished
             // under us in the same instant; the stamp cannot run.
@@ -366,7 +361,7 @@ impl FlashActivity {
                 rung_deadline,
                 next_poke_at,
             } => {
-                if ctx.evidence.has_hello() || ctx.evidence.mismatched_proto().is_some() {
+                if ctx.evidence.has_hello() {
                     return self.on_hello(now, ctx);
                 }
                 if now >= rung_deadline {
@@ -462,8 +457,7 @@ impl FlashActivity {
                 if self.winding_down {
                     return ActivityStep::nothing();
                 }
-                if matches!(self.phase, FlashPhase::Reconnecting { .. })
-                    && (ctx.evidence.has_hello() || ctx.evidence.mismatched_proto().is_some())
+                if matches!(self.phase, FlashPhase::Reconnecting { .. }) && ctx.evidence.has_hello()
                 {
                     return self.on_hello(now, ctx);
                 }

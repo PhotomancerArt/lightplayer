@@ -57,6 +57,95 @@ fn the_projection_is_total_and_always_escapable() {
     );
 }
 
+/// The view says no less than the fold knows.
+///
+/// The bench defect of 2026-09-04 in one sentence: the fold had the hello
+/// (firmware label, board id) and the heartbeat (running project, red
+/// fault), and the card said "no firmware" and "nothing running". Three
+/// invariants, checked after every step of every lifecycle × gesture:
+///
+/// 1. the firmware face is a ONE-TO-ONE image of the classification — a
+///    face can never be "blank" over a verdict that is not;
+/// 2. a hello in the window puts its firmware label on the face;
+/// 3. a project report on an open port reaches the loaded-project face.
+///
+/// Facts are stated when reported; verdicts gate verbs, never facts.
+#[test]
+fn the_view_says_no_less_than_the_fold_knows() {
+    use lpa_devices::Classification;
+    use lpa_devices::view::{FirmwareFace, LoadedProject};
+
+    let mut checked = 0_usize;
+    for (lifecycle_name, lifecycle) in link_lifecycles() {
+        for (gesture_name, gesture) in gestures() {
+            let case = format!("{lifecycle_name} + {gesture_name}");
+            let mut replay = Replay::new(RosterConfig::default());
+            let mut clock = 0_u64;
+            for step in lifecycle.iter().chain(gesture.iter()).cloned() {
+                clock += 10;
+                replay.step(Millis(clock), step);
+                let view = replay.view();
+                for device in replay.roster().devices() {
+                    let card = view
+                        .devices
+                        .iter()
+                        .find(|card| card.id == device.id)
+                        .unwrap_or_else(|| panic!("[{case}] device {:?} has no card", device.id));
+                    let evidence = &device.evidence;
+
+                    // 1. one-to-one
+                    let expected = match &evidence.classification {
+                        Classification::Unknown => {
+                            matches!(card.firmware_face, FirmwareFace::Unknown)
+                        }
+                        Classification::LightPlayer { .. } => {
+                            matches!(card.firmware_face, FirmwareFace::LightPlayer { .. })
+                        }
+                        Classification::Incompatible { .. } => {
+                            matches!(card.firmware_face, FirmwareFace::NoHello)
+                        }
+                        Classification::Blank => matches!(card.firmware_face, FirmwareFace::Blank),
+                        Classification::Bootloader => {
+                            matches!(card.firmware_face, FirmwareFace::Bootloader)
+                        }
+                        Classification::Foreign { .. } => {
+                            matches!(card.firmware_face, FirmwareFace::Foreign { .. })
+                        }
+                        Classification::Quiet { .. } => {
+                            matches!(card.firmware_face, FirmwareFace::Silent)
+                        }
+                    };
+                    assert!(
+                        expected,
+                        "[{case}] face {:?} is not the image of {:?}",
+                        card.firmware_face, evidence.classification
+                    );
+
+                    // 2. a hello's firmware label reaches the face
+                    if let Some(hello) = evidence.classification.hello() {
+                        assert_eq!(
+                            card.firmware_face.firmware(),
+                            hello.firmware.as_deref(),
+                            "[{case}] the hello named the firmware and the face dropped it"
+                        );
+                    }
+
+                    // 3. a report on an open port reaches the loaded face
+                    if evidence.presence.is_open() && evidence.loaded_projects().is_some() {
+                        assert_ne!(
+                            card.loaded_project,
+                            LoadedProject::Unknown,
+                            "[{case}] the board reported what it runs and the card says nothing"
+                        );
+                    }
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(checked > 100, "the enumeration got smaller: {checked}");
+}
+
 #[test]
 fn a_view_survives_a_serde_round_trip() {
     // The projection crosses a process boundary in Studio (view channel), so

@@ -60,7 +60,7 @@ pub use device::{Device, DeviceStatus};
 pub use event::{Action, ActivityMarker, Command, EffectId, EffectRequest, Event, Input};
 pub use evidence::{
     Classification, Evidence, Freshness, IncompatibleReason, Liveness, Presence, TerminalKind,
-    TerminalLine,
+    TerminalLine, WireVersion,
 };
 pub use identity::{DeviceId, DeviceUid, EndpointKey, IdentityChain, MacAddress, PeerIdentity};
 pub use intent::{ConnectionIntent, Intent};
@@ -69,7 +69,7 @@ pub use link::{Link, LinkCommand, LinkEvent, LinkId, LinkInfo, ResetKind};
 pub use record::DeviceRecord;
 pub use roster::{PendingLink, Roster, RosterConfig};
 pub use time::{Millis, TimerId};
-pub use view::{DeviceView, Escape, LoadedProject, RosterView};
+pub use view::{DeviceView, Escape, FirmwareFace, LoadedProject, RosterView};
 pub use wire::{
     ClientFrame, ClientFrameBody, HelloFacts, LoadedProjectFacts, ProjectFaultFacts, RecoveryFacts,
     RecoveryLevelFacts, RecoveryPathFacts, ServerFrame, ServerFrameBody,

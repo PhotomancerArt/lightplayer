@@ -633,10 +633,10 @@ impl Expect {
             })?;
         }
         if let Some(expected) = self.needs_firmware {
-            require(device.needs_firmware == expected, || {
+            require(device.needs_firmware() == expected, || {
                 format!(
-                    "expected needs_firmware={expected}, saw {}",
-                    device.needs_firmware
+                    "expected needs_firmware={expected}, saw {:?}",
+                    device.firmware_face
                 )
             })?;
         }

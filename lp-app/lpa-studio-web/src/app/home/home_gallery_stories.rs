@@ -659,7 +659,7 @@ fn roster_fixture() -> DeviceRosterView {
                     detail: Some("chip: esp32c6".to_string()),
                     can_adopt: true,
                     // Mid-identification: no settled verdict, no flash face.
-                    needs_firmware: false,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
                     detected_chip: Some("esp32c6".to_string()),
                     escapes: vec![DeviceEscape::Forget],
                 },
@@ -672,7 +672,7 @@ fn roster_fixture() -> DeviceRosterView {
                     can_adopt: true,
                     // Settled blank: the needs-firmware face (board pick +
                     // Flash) rides this pending card.
-                    needs_firmware: true,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
                     detected_chip: Some("esp32c6".to_string()),
                     escapes: vec![DeviceEscape::Forget],
                 },
@@ -688,8 +688,10 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("dev000000daqf6dvvqz".to_string()),
                     detected_chip: Some("esp32".to_string()),
                     board_id: Some("quinled/dig-uno".to_string()),
-                    firmware: Some("fw-esp32v3 abc1234".to_string()),
-                    needs_firmware: false,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+                        firmware: Some("fw-esp32v3 abc1234".to_string()),
+                        wire: lpa_studio_core::DeviceWireVersion::Match,
+                    },
                     degraded: None,
                     // The RUNNING face (M3): what the board itself reports,
                     // named by the storage dir it runs from.
@@ -745,8 +747,10 @@ fn roster_fixture() -> DeviceRosterView {
                     // board id and firmware label, so the identity line
                     // still names them while the re-identify runs.
                     board_id: Some("seeed/xiao-esp32-c6".to_string()),
-                    firmware: Some("fw-esp32c6 abc1234".to_string()),
-                    needs_firmware: false,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+                        firmware: Some("fw-esp32c6 abc1234".to_string()),
+                        wire: lpa_studio_core::DeviceWireVersion::Match,
+                    },
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     // Busy: one activity per device, so no second verb.
@@ -787,8 +791,7 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("dev000000000shelf01".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: None,
-                    firmware: None,
-                    needs_firmware: true,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     can_receive_project: false,
@@ -831,8 +834,10 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("60:55:f9:0a:0b:0d".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: Some("seeed/xiao-esp32-c6".to_string()),
-                    firmware: Some("fw-esp32c6 abc1234".to_string()),
-                    needs_firmware: false,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+                        firmware: Some("fw-esp32c6 abc1234".to_string()),
+                        wire: lpa_studio_core::DeviceWireVersion::Match,
+                    },
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Empty,
                     can_receive_project: true,
@@ -886,8 +891,10 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("dev000000000garage1".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: Some("seeed/xiao-esp32-c6".to_string()),
-                    firmware: Some("fw-esp32c6 abc1234".to_string()),
-                    needs_firmware: false,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+                        firmware: Some("fw-esp32c6 abc1234".to_string()),
+                        wire: lpa_studio_core::DeviceWireVersion::Match,
+                    },
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     can_receive_project: false,
@@ -957,6 +964,213 @@ fn roster_page_fixture() -> DeviceRosterView {
 /// Flashing and Sending are the SAME board mid-activity — the point of the
 /// story is that an activity changes what the rows say and never how tall
 /// they are.
+#[story(
+    description = "One card per FIRMWARE FACE — the sheet that did not exist when an older board shipped drawn as a blank chip (bench 2026-09-04: a proto-19 classic on a proto-20 Studio read \"Blank flash — needs firmware\" and \"no firmware\" while its terminal decoded the hello naming fw-esp32v3 and a heartbeat carrying a red fault). Six faces in 400px columns, each in ITS OWN words, decided in core and tested per variant: OLDER (a running LightPlayer one wire version behind — still Ready, the project and its fault still on the project line, the firmware line reading \"<firmware> · <board> — older than Studio, update recommended\" and the re-flash verb offered, never forced: warn, then proceed); NEWER (the same the other way, no recommendation); PRE-HELLO (speaks the framing, never said hello); FOREIGN (a recognised factory firmware, named); BOOTLOADER (parked in ROM download mode); SILENT (open port, nothing heard, Retry beside Reset). The chip is the STATUS, unchanged by the wire version; the face's sentence lives in the Firmware zone — and every card measures the same height (AC2)."
+)]
+fn devices_card_firmware_faces() -> Element {
+    let faces = firmware_face_fixtures();
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(2,400px)] tw:items-start tw:gap-3",
+                for (label , card , open_uid) in faces {
+                    div { key: "{label}", class: "tw:grid tw:gap-2",
+                        p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
+                            "{label}"
+                        }
+                        DeviceRosterCard {
+                            card,
+                            open_uid,
+                            projects: packages(),
+                            examples: examples(),
+                            on_action: |_| {},
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The six firmware faces a settled board can wear besides the current
+/// LightPlayer (which the states sheet already covers).
+fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
+    use lpa_studio_core::{DeviceFirmwareFace, DeviceWireVersion};
+
+    let running = roster_fixture().roster.devices.remove(0);
+    let open_uid = Some("dev000000daqf6dvvqz".to_string());
+
+    // The bench case, verbatim: an older classic, running, with a fault.
+    let older = DeviceView {
+        id: DeviceId(31),
+        title: "Bench classic · Sep 4".to_string(),
+        status: DeviceStatus::Degraded,
+        state_label: "Degraded".to_string(),
+        detail: Some("LightPlayer · fw-esp32v3 7c80a27".to_string()),
+        identity_label: Some("30:76:f5:ec:f6:34".to_string()),
+        detected_chip: Some("esp32".to_string()),
+        board_id: Some("quinled/dig-uno".to_string()),
+        firmware_face: DeviceFirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32v3 7c80a27".to_string()),
+            wire: DeviceWireVersion::BoardOlder {
+                board: 19,
+                studio: 20,
+            },
+        },
+        degraded: Some("Recovery red: /studio.show/s disabled after repeated crashes".to_string()),
+        loaded_project: DeviceLoadedProject::Running {
+            label: "studio".to_string(),
+        },
+        terminal: vec![
+            story_line(
+                DeviceTerminalKind::Wire,
+                "hello · proto 19 · ? · fw-esp32v3 7c80a27 (dirty)",
+            ),
+            story_line(
+                DeviceTerminalKind::Studio,
+                "firmware speaks wire proto 19, Studio speaks 20 — older firmware, proceeding anyway",
+            ),
+            story_line(
+                DeviceTerminalKind::Outcome,
+                "fw-esp32v3 7c80a27 (older firmware than Studio)",
+            ),
+            story_repeat(
+                DeviceTerminalKind::Wire,
+                "heartbeat · studio · FAULT red",
+                12,
+            ),
+        ],
+        ..running.clone()
+    };
+    let newer = DeviceView {
+        id: DeviceId(32),
+        title: "Dev board · Sep 4".to_string(),
+        status: DeviceStatus::Ready,
+        state_label: "Ready".to_string(),
+        degraded: None,
+        firmware_face: DeviceFirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32c6 e1f2a3b".to_string()),
+            wire: DeviceWireVersion::BoardNewer {
+                board: 21,
+                studio: 20,
+            },
+        },
+        terminal: vec![
+            story_line(
+                DeviceTerminalKind::Wire,
+                "hello · proto 21 · seeed/xiao-esp32-c6 · fw-esp32c6 e1f2a3b",
+            ),
+            story_line(
+                DeviceTerminalKind::Studio,
+                "firmware speaks wire proto 21, Studio speaks 20 — newer firmware, proceeding anyway",
+            ),
+            story_repeat(DeviceTerminalKind::Wire, "heartbeat · porch-sign", 6),
+        ],
+        ..running.clone()
+    };
+
+    // The four verdicts that ask for a flash, each on a card that has
+    // nothing else to say: no project, no picture, the face's own line.
+    let attention = |id: u64, title: &str, state: &str, face: DeviceFirmwareFace| DeviceView {
+        id: DeviceId(id),
+        title: title.to_string(),
+        status: DeviceStatus::NeedsAttention,
+        state_label: state.to_string(),
+        detail: None,
+        freshness_label: Some("last heard 2 s ago".to_string()),
+        identity_label: None,
+        detected_chip: Some("esp32c6".to_string()),
+        board_id: None,
+        firmware_face: face,
+        degraded: None,
+        loaded_project: DeviceLoadedProject::Unknown,
+        can_receive_project: false,
+        can_remove_project: false,
+        activity: None,
+        last_outcome: None,
+        terminal: vec![story_line(
+            DeviceTerminalKind::Rom,
+            "ESP-ROM:esp32c6-20220919",
+        )],
+        terminal_dropped: 0,
+        escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+    };
+    let pre_hello = DeviceView {
+        terminal: vec![
+            story_line(
+                DeviceTerminalKind::Board,
+                "[INIT] fw-esp32 initialized, starting server loop",
+            ),
+            story_repeat(DeviceTerminalKind::Wire, "UnloadProject", 3),
+            story_line(
+                DeviceTerminalKind::Outcome,
+                "speaks the framing but never said hello (pre-hello firmware)",
+            ),
+        ],
+        ..attention(
+            33,
+            "Old lamp",
+            "No LightPlayer hello — pre-hello firmware",
+            DeviceFirmwareFace::NoHello,
+        )
+    };
+    let foreign = DeviceView {
+        terminal: vec![
+            story_line(DeviceTerminalKind::Rom, "ESP-ROM:esp32c6-20220919"),
+            story_line(
+                DeviceTerminalKind::Board,
+                "Hello from Seeed Studio XIAO ESP32-C6",
+            ),
+            story_line(DeviceTerminalKind::Outcome, "Seeed XIAO factory firmware"),
+        ],
+        ..attention(
+            34,
+            "New XIAO",
+            "Running Seeed XIAO factory firmware",
+            DeviceFirmwareFace::Foreign {
+                label: Some("Seeed XIAO factory firmware".to_string()),
+            },
+        )
+    };
+    let bootloader = DeviceView {
+        terminal: vec![
+            story_line(DeviceTerminalKind::Rom, "ESP-ROM:esp32c6-20220919"),
+            story_line(DeviceTerminalKind::Rom, "waiting for download"),
+            story_line(DeviceTerminalKind::Outcome, "waiting in ROM download mode"),
+        ],
+        ..attention(
+            35,
+            "Parked board",
+            "Waiting in ROM download mode",
+            DeviceFirmwareFace::Bootloader,
+        )
+    };
+    let silent = DeviceView {
+        status: DeviceStatus::NotResponding,
+        freshness_label: None,
+        terminal: Vec::new(),
+        escapes: vec![
+            DeviceEscape::Retry,
+            DeviceEscape::Disconnect,
+            DeviceEscape::Forget,
+        ],
+        ..attention(
+            36,
+            "Quiet board",
+            "Not responding",
+            DeviceFirmwareFace::Silent,
+        )
+    };
+
+    vec![
+        ("Older than Studio", older, open_uid.clone()),
+        ("Newer than Studio", newer, open_uid),
+        ("Pre-hello firmware", pre_hello, None),
+        ("Foreign firmware", foreign, None),
+        ("Bootloader", bootloader, None),
+        ("Silent", silent, None),
+    ]
+}
+
 fn card_state_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
     let running = roster_fixture().roster.devices.remove(0);
     let open_uid = Some("dev000000daqf6dvvqz".to_string());

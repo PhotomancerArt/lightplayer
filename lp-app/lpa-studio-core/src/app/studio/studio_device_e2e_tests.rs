@@ -1584,7 +1584,7 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
             .view()
             .pending
             .first()
-            .is_some_and(|pending| pending.needs_firmware)
+            .is_some_and(|pending| pending.needs_firmware())
     });
     let pending = &bench.view().pending[0];
     assert_eq!(pending.detected_chip.as_deref(), Some("esp32c6"));
@@ -1666,7 +1666,7 @@ fn a_mid_write_failure_lands_on_an_honest_face_with_retry_in_place() {
             .view()
             .pending
             .first()
-            .is_some_and(|pending| pending.needs_firmware)
+            .is_some_and(|pending| pending.needs_firmware())
     });
     let target = bench.view().pending[0].device;
     let choice = c6_board_choice();
@@ -1693,7 +1693,7 @@ fn a_mid_write_failure_lands_on_an_honest_face_with_retry_in_place() {
         "{outcome:?}"
     );
     assert!(
-        card.needs_firmware,
+        card.needs_firmware(),
         "the face re-offers the flash — retry in place: {card:?}"
     );
     assert!(!card.escapes.is_empty(), "always a way out");
@@ -1713,7 +1713,7 @@ fn post_flash_silence_climbs_the_ladder_then_fails_with_honest_guidance() {
             .view()
             .pending
             .first()
-            .is_some_and(|pending| pending.needs_firmware)
+            .is_some_and(|pending| pending.needs_firmware())
     });
     let target = bench.view().pending[0].device;
     let choice = c6_board_choice();
@@ -1761,7 +1761,7 @@ fn forgetting_mid_flash_evicts_the_hung_effect_and_cleans_up() {
             .view()
             .pending
             .first()
-            .is_some_and(|pending| pending.needs_firmware)
+            .is_some_and(|pending| pending.needs_firmware())
     });
     let target = bench.view().pending[0].device;
     let choice = c6_board_choice();
@@ -2088,7 +2088,7 @@ fn factory_reset_wipes_the_board_and_the_card_comes_back_blank() {
             .view()
             .devices
             .first()
-            .is_some_and(|card| card.needs_firmware && card.activity.is_none())
+            .is_some_and(|card| card.needs_firmware() && card.activity.is_none())
     });
 
     let cards = bench.view().devices;
@@ -2308,10 +2308,18 @@ fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes
         lpa_devices::device::DeviceStatus::NotResponding,
         "the fold saw the port cycle its recovery performed: {card:?}"
     );
-    assert_eq!(
-        card.loaded_project,
-        lpa_devices::view::LoadedProject::Unknown,
-        "a fresh window claims nothing it has not been told again: {card:?}"
+    // A fresh window states only what it has been told again. The fake
+    // heartbeats through the reopened port, and a heartbeat CARRIES the
+    // loaded report, so the loaded face may already read Empty here — a
+    // fact stated when reported (2026-09-04) — but no hello has been heard
+    // in this window, so the VERB stays withheld: verdicts gate verbs.
+    assert!(
+        !card.can_receive_project,
+        "no hello in the fresh window, so no push verb: {card:?}"
+    );
+    assert!(
+        matches!(card.firmware_face, lpa_devices::view::FirmwareFace::Unknown),
+        "a fresh window carries no verdict it has not earned again: {card:?}"
     );
 
     // And the wire genuinely works: a re-ask reaches the board and comes
