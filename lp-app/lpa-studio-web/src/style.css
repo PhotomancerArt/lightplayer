@@ -5909,8 +5909,9 @@ select:focus-visible {
    TURNING while they fade, and only then pause. `--ux-ir-hot` is the
    "still lit" flag the pseudos read through `@container style()`: 1 the
    instant the pointer arrives (0s transition on the hover rule) and, on
-   leave, held at 1 for 0.5s by a step-end transition — the value flips
-   only at the end — which outlives the fade-out (ring 0.3s, halo 0.45s).
+   leave, held at 1 for 0.35s by a step-end transition — the value flips
+   only at the end — which outlives the fade-out (ring 0.2s, halo 0.3s;
+   tightened from 0.3s/0.45s on 2026-09-04, "could be a bit faster").
    Read from the host because if(style()) on the pseudo sees the cascaded
    flag, not the transitioned one (measured, Chrome 148). Owning the host's
    transition list is the price; Tailwind's layered `tw:transition-colors`
@@ -5922,7 +5923,7 @@ select:focus-visible {
     color: var(--studio-color-text-strong);
     --ux-ir-hot: 0;
     transition:
-        --ux-ir-hot 0.5s step-end,
+        --ux-ir-hot 0.35s step-end,
         color 150ms ease,
         background-color 150ms ease,
         border-color 150ms ease;
@@ -5955,7 +5956,7 @@ select:focus-visible {
     -webkit-mask-composite: xor;
     opacity: 0.62;
     pointer-events: none;
-    transition: opacity 0.3s;
+    transition: opacity 0.2s;
     animation: ux-ir-spin 3.2s linear infinite paused;
 }
 
@@ -5968,7 +5969,7 @@ select:focus-visible {
    ring (same `--ux-ir-angle`, same spin, so the two turn in lockstep),
    painted as a 5px band just outside the button and blurred, at 0.28 —
    ruled "about right" after 0.85 read much too strong: a whisper of
-   light, not a stage; it fades and grows in over 450ms instead of
+   light, not a stage; it fades and grows in over 300ms instead of
    popping, and keeps turning as it fades out (the host's `--ux-ir-hot`
    hold, above). Geometry is the whole trick:
    `filter` runs before `mask`, so a mask would cut the blur off hard at
@@ -6005,8 +6006,8 @@ select:focus-visible {
     transform: scale(0.94);
     pointer-events: none;
     transition:
-        opacity 0.45s ease,
-        transform 0.45s ease;
+        opacity 0.3s ease,
+        transform 0.3s ease;
     animation: ux-ir-spin 3.2s linear infinite paused;
 }
 

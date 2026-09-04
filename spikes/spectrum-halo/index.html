@@ -88,13 +88,16 @@ button { display: inline-flex; min-height: 36px; align-items: center; justify-co
    at the brightest moment of the fade. Every column below is the shipped
    ring + halo (.62 / .28, 5px band, 11px blur); only the mouse-out
    handling differs. `.pin` stands in for :hover so a script can time it.
+   2026-09-04: the fade was tightened (ring .3s→.2s, halo .45s→.3s, hold
+   .5s→.35s) — "they all kinda feel the same … the fade in/out could be a
+   bit faster". The §1/§2 halo keeps the original .45s as the record.
    ===================================================================== */
 .s { position: relative; border-color: transparent; background: transparent; color: var(--strong); }
 .s::before {
   content: ""; position: absolute; inset: -1px; z-index: 3; border-radius: inherit; padding: 1px;
   background: conic-gradient(from var(--ux-ir-angle), var(--spectrum), #5fe08b);
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;
-  opacity: .62; pointer-events: none; transition: opacity .3s;
+  opacity: .62; pointer-events: none; transition: opacity .2s;
 }
 .s::after {
   content: ""; position: absolute; inset: -5px; z-index: 2; border-radius: inherit;
@@ -103,7 +106,7 @@ button { display: inline-flex; min-height: 36px; align-items: center; justify-co
     -40px -40px, calc(100% + 40px) -40px, calc(100% + 40px) calc(100% + 40px), -40px calc(100% + 40px), -40px -40px,
     5px 5px, 5px calc(100% - 5px), calc(100% - 5px) calc(100% - 5px), calc(100% - 5px) 5px, 5px 5px);
   filter: blur(11px); opacity: 0; transform: scale(.94); pointer-events: none;
-  transition: opacity .45s ease, transform .45s ease;
+  transition: opacity .3s ease, transform .3s ease;
 }
 .s:hover::before, .s.pin::before { opacity: 1; }
 .s:hover::after,  .s.pin::after  { opacity: .28; transform: scale(1); }
@@ -168,7 +171,7 @@ button { display: inline-flex; min-height: 36px; align-items: center; justify-co
    Costs the host its `transition` list — fine for `.ux-spectrum-cta`,
    which owns its host look; not for `.ux-ir-ring`, which rides on
    arbitrary hosts. */
-.sb3 { --ux-ir-hot: 0; transition: --ux-ir-hot var(--hold, .5s) step-end; }
+.sb3 { --ux-ir-hot: 0; transition: --ux-ir-hot var(--hold, .35s) step-end; }
 .sb3:hover, .sb3.pin { --ux-ir-hot: 1; transition: --ux-ir-hot 0s; }
 .sb3::before, .sb3::after { animation: ux-ir-spin 3.2s linear infinite paused; }
 .sb3:hover::before, .sb3.pin::before, .sb3:hover::after, .sb3.pin::after { animation-play-state: running; }
@@ -180,8 +183,8 @@ button { display: inline-flex; min-height: 36px; align-items: center; justify-co
   animation: ux-ir-spin 3.2s linear infinite paused;
   animation-play-state: if(style(--ux-ir-hot: 1): running; else: paused);
 }
-.sb2::before { transition: opacity .3s, --ux-ir-hot var(--hold, .5s) step-end; }
-.sb2::after  { transition: opacity .45s ease, transform .45s ease, --ux-ir-hot var(--hold, .5s) step-end; }
+.sb2::before { transition: opacity .2s, --ux-ir-hot var(--hold, .35s) step-end; }
+.sb2::after  { transition: opacity .3s ease, transform .3s ease, --ux-ir-hot var(--hold, .35s) step-end; }
 .sb2:hover::before, .sb2.pin::before { --ux-ir-hot: 1; animation-play-state: running; transition: opacity .3s, --ux-ir-hot 0s; }
 .sb2:hover::after,  .sb2.pin::after  { --ux-ir-hot: 1; animation-play-state: running; transition: opacity .45s ease, transform .45s ease, --ux-ir-hot 0s; }
 
@@ -239,7 +242,7 @@ body.solo > :not(.s3) { display: none; }
   <div class="col"><h3>b1 · pause</h3><button class="s sb1" data-v="b1 pause">⚡ It's plugged in</button><code></code><p class="ruled">animation always declared, paused at rest — stops dead where it stands, then fades. Family rule; shipped on .ux-ir-ring</p></div>
   <div class="col"><h3>b2 · pause after the fade</h3><button class="s sb2" data-v="b2 pause-after-fade">⚡ It's plugged in</button><code></code><p>a step-end hot flag on the pseudo + if(style()) — measured: if() never sees the transitioned flag; = b1</p></div>
   <div class="col"><h3>b2 · long hold (1.2s)</h3><button class="s sb2" style="--hold:1.2s" data-v="b2 hold-1.2s">⚡ It's plugged in</button><code></code><p>same, = b1 in practice</p></div>
-  <div class="col"><h3>b3 · flag on the host</h3><button class="s sb3" data-v="b3 host-flag">⚡ It's plugged in</button><code></code><p class="ruled">same hold, read via @container style() from the button — keeps turning through the fade, pauses once dark. Shipped on .ux-spectrum-cta</p></div>
+  <div class="col"><h3>b3 · flag on the host (.35s)</h3><button class="s sb3" data-v="b3 host-flag">⚡ It's plugged in</button><code></code><p class="ruled">same hold, read via @container style() from the button — keeps turning through the fade, pauses once dark. Shipped on .ux-spectrum-cta</p></div>
   <div class="col"><h3>b3 · long hold (1.2s)</h3><button class="s sb3" style="--hold:1.2s" data-v="b3 hold-1.2s">⚡ It's plugged in</button><code></code><p>the ring keeps turning a beat after the light is gone</p></div>
   <div class="col"><h3>c · shorter fade-out</h3><button class="s sc" data-v="c fade-.15s">⚡ It's plugged in</button><code></code><p>.15s out — the snap still lands at full brightness</p></div>
 </div>
