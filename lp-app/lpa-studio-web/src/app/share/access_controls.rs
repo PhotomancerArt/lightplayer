@@ -327,13 +327,13 @@ fn segment_label(access: Access) -> &'static str {
 /// One segment button's class. `Anyone can edit` is warn-toned when
 /// pressed (post-gate refinement): the pressed state is the one that says
 /// "the link is write access right now", and it must not read like a
-/// friendly accent confirmation.
+/// friendly selected-state confirmation.
 fn segment_button_class(access: Access, pressed: bool) -> String {
     let state = match (access, pressed) {
         (Access::Edit, true) => {
             "tw:bg-status-warning-bg tw:text-status-warning-foreground tw:hover:text-status-warning-foreground"
         }
-        (_, true) => "tw:bg-accent-wash tw:text-accent tw:hover:text-accent",
+        (_, true) => "tw:bg-selection-bg tw:text-strong-foreground tw:hover:text-strong-foreground",
         (Access::Edit, false) => {
             "tw:bg-transparent tw:text-subtle-foreground tw:hover:bg-background-wash tw:hover:text-status-warning-foreground"
         }
@@ -388,17 +388,17 @@ mod tests {
         assert_eq!(segment_label(Access::Edit), "Anyone can edit");
     }
 
-    /// The pressed `Anyone can edit` segment must be WARN, never the accent
+    /// The pressed `Anyone can edit` segment must be WARN, never the selection
     /// every other pressed segment wears (post-gate refinement).
     #[test]
-    fn pressed_edit_is_warn_and_pressed_view_is_accent() {
+    fn pressed_edit_is_warn_and_pressed_view_is_selection() {
         let edit = segment_button_class(Access::Edit, true);
         assert!(edit.contains("tw:bg-status-warning-bg"));
-        assert!(!edit.contains("tw:text-accent"));
+        assert!(!edit.contains("tw:bg-selection-bg"));
 
         let view = segment_button_class(Access::View, true);
-        assert!(view.contains("tw:bg-accent-wash"));
-        assert!(view.contains("tw:text-accent"));
+        assert!(view.contains("tw:bg-selection-bg"));
+        assert!(!view.contains("tw:bg-status-warning-bg"));
     }
 
     /// No preflight: every one of these buttons must name its own

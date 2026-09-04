@@ -750,10 +750,12 @@ fn kind_glyph_class() -> &'static str {
 }
 
 /// The D16 status dot, the same three-value vocabulary the strip collapses
-/// to: accent run / amber attention / hollow connected-empty.
+/// to: good run / amber attention / hollow connected-empty.
 fn dot_class(status: UiChromeSessionStatus) -> &'static str {
     match status {
-        UiChromeSessionStatus::Run => "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-accent",
+        UiChromeSessionStatus::Run => {
+            "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-good-foreground"
+        }
         UiChromeSessionStatus::Attention => {
             "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-attention-foreground"
         }
