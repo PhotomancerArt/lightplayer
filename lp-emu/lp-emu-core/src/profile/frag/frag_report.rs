@@ -30,11 +30,10 @@ fn render_layout(out: &mut String, analysis: &FragAnalysis) {
     let total: u64 = analysis.regions.iter().map(|r| u64::from(r.size)).sum();
     let _ = writeln!(
         out,
-        "Layout {} — {} region(s), {} B total, request alignment assumed {} B",
+        "Layout {} — {} region(s), {} B total",
         analysis.layout,
         analysis.regions.len(),
         fmt_num(total),
-        analysis.assumed_align
     );
     for region in &analysis.regions {
         let _ = writeln!(
@@ -45,6 +44,25 @@ fn render_layout(out: &mut String, analysis: &FragAnalysis) {
             region.base
         );
     }
+
+    let alignments = analysis
+        .alignments
+        .iter()
+        .map(|(align, count)| format!("{align} B x{}", fmt_num(*count)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let _ = writeln!(
+        out,
+        "  request alignment recorded per row: {alignments}{}",
+        if analysis.alignments.len() == 1 && analysis.alignments.contains_key(&4) {
+            "  (only 4 B — a trace recorded before the `al` field existed reads this way too)"
+        } else {
+            ""
+        }
+    );
+
+    render_discounts(out, analysis);
+
     if analysis.unmatched_frees > 0 {
         let _ = writeln!(
             out,
@@ -54,6 +72,40 @@ fn render_layout(out: &mut String, analysis: &FragAnalysis) {
         );
     }
     out.push('\n');
+}
+
+/// Name every discount at the top of the section, with what it removed, so a
+/// discounted table can never be read as a raw one — and say so explicitly
+/// when there are none.
+fn render_discounts(out: &mut String, analysis: &FragAnalysis) {
+    if analysis.discounts.is_empty() {
+        let _ = writeln!(
+            out,
+            "  discounts: none — every allocation in the trace is replayed"
+        );
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "  ⚠ DISCOUNTED TABLE: {} call site pattern(s) dropped from the replay",
+        analysis.discounts.len()
+    );
+    for row in &analysis.discounts {
+        let _ = writeln!(
+            out,
+            "      -{:<48} {:>7} blocks, {:>11} B requested, {:>9} B peak live",
+            row.pattern,
+            fmt_num(row.blocks),
+            fmt_num(row.bytes_requested),
+            fmt_num(row.peak_live_bytes),
+        );
+        if row.blocks == 0 {
+            let _ = writeln!(
+                out,
+                "       (matched nothing — check the pattern against the pinning table's site names)"
+            );
+        }
+    }
 }
 
 fn render_markers(out: &mut String, analysis: &FragAnalysis) {
@@ -233,6 +285,13 @@ fn render_sized_allocs(out: &mut String, analysis: &FragAnalysis) {
     if analysis.frame_alloc_of_interest.is_empty() {
         let _ = writeln!(out, "  (none in this trace)\n");
         return;
+    }
+    if !analysis.discounts.is_empty() {
+        let _ = writeln!(
+            out,
+            "  (attribution over the raw trace — a discounted site still appears here, \
+             it is simply absent from the tables above)"
+        );
     }
     for site in &analysis.frame_alloc_of_interest {
         let _ = writeln!(

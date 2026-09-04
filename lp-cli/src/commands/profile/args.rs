@@ -69,6 +69,14 @@ pub struct ProfileArgs {
     /// marker.
     #[arg(long, default_value_t = 10)]
     pub frag_top: usize,
+
+    /// Drop from the fragmentation replay every allocation whose symbolized
+    /// call site contains this substring (repeatable). For discounting
+    /// emulator-only artifacts — `fw-emu`'s 256-resource board manifest makes
+    /// a few sites allocate amounts no device ever will. The report names
+    /// every active discount and what it removed.
+    #[arg(long, value_name = "SUBSTR")]
+    pub frag_discount_site: Vec<String>,
 }
 
 /// Heap layout selector for the fragmentation replay.
@@ -159,6 +167,25 @@ mod tests {
     fn default_cycle_model_is_esp32c6() {
         let cli = ProfileCli::parse_from(["lp-cli", "examples/basic"]);
         assert!(matches!(cli.run.cycle_model, CycleModelArg::Esp32C6));
+    }
+
+    #[test]
+    fn discount_sites_are_repeatable() {
+        let cli = ProfileCli::parse_from([
+            "lp-cli",
+            "examples/basic",
+            "--frag-discount-site",
+            "VirtualWs281xDriver::endpoints",
+            "--frag-discount-site",
+            "virtual_quad_rmt_gpio_board",
+        ]);
+        assert_eq!(
+            cli.run.frag_discount_site,
+            vec![
+                "VirtualWs281xDriver::endpoints".to_string(),
+                "virtual_quad_rmt_gpio_board".to_string()
+            ]
+        );
     }
 
     #[test]

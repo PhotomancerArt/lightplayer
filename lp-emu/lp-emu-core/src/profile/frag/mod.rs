@@ -19,7 +19,7 @@ pub mod frag_report;
 
 pub use first_fit_heap::{FirstFitHeap, HeapGeometry, Hole};
 pub use frag_replay::{
-    ASSUMED_ALIGN, BoundingBlock, CLASSIC_REGIONS, CrossCheckRow, FRAME_ALLOC_OF_INTEREST,
+    BoundingBlock, CLASSIC_REGIONS, CrossCheckRow, DiscountRow, FRAME_ALLOC_OF_INTEREST,
     FragAnalysis, FragLayout, FragOptions, HISTOGRAM_LABELS, HoleDetail, MarkerShape, PinningRow,
     RegionShape, RegionSpec, SizedAllocSite, WouldOom, analyze_fragmentation,
 };

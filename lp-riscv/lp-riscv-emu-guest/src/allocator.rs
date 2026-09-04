@@ -77,6 +77,14 @@ impl TrackingAllocator {
 
     #[inline(never)]
     fn trace_event(&self, event_type: i32, ptr: i32, size: i32, free: i32) {
+        self.trace_event_aligned(event_type, ptr, size, free, 0);
+    }
+
+    /// [`Self::trace_event`] plus the request's `Layout::align`, which only
+    /// the alloc path has and only the host's fragmentation replay wants.
+    /// An `align` of 0 means "not applicable" (dealloc, OOM).
+    #[inline(never)]
+    fn trace_event_aligned(&self, event_type: i32, ptr: i32, size: i32, free: i32, align: i32) {
         if WALK_IN_PROGRESS.load(Ordering::Relaxed) {
             return;
         }
@@ -86,6 +94,7 @@ impl TrackingAllocator {
         args[1] = ptr;
         args[2] = size;
         args[3] = free;
+        args[4] = align;
         syscall(SYSCALL_ALLOC_TRACE, &args);
     }
 
@@ -97,6 +106,7 @@ impl TrackingAllocator {
         old_size: i32,
         new_size: i32,
         free: i32,
+        align: i32,
     ) {
         if WALK_IN_PROGRESS.load(Ordering::Relaxed) {
             return;
@@ -109,6 +119,7 @@ impl TrackingAllocator {
         args[3] = old_size;
         args[4] = new_size;
         args[5] = free;
+        args[6] = align;
         syscall(SYSCALL_ALLOC_TRACE, &args);
     }
 }
@@ -125,11 +136,12 @@ unsafe impl core::alloc::GlobalAlloc for TrackingAllocator {
         if ptr.is_null() {
             self.trace_event(crate::syscall::ALLOC_TRACE_OOM, 0, layout.size() as i32, 0);
         } else {
-            self.trace_event(
+            self.trace_event_aligned(
                 crate::syscall::ALLOC_TRACE_ALLOC,
                 ptr as i32,
                 layout.size() as i32,
                 0,
+                layout.align() as i32,
             );
         }
         ptr
@@ -182,6 +194,7 @@ unsafe impl core::alloc::GlobalAlloc for TrackingAllocator {
                 layout.size() as i32,
                 new_size as i32,
                 0,
+                new_layout.align() as i32,
             );
         }
         new_ptr

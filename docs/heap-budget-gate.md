@@ -219,10 +219,13 @@ A harness that overstates its fidelity is worse than none. This gate does
   256-resource board profile; the classic's manifest has 34. Every port
   open re-enumerates the manifest (`endpoints()`), so the first frame's
   *transient* carries ~30 KB of open-path churn (a `Vec<HwEndpoint>` grown
-  by push, one status string per resource) and a 36,864 B `Vec<HwResource>`
-  sits live for the whole run — neither exists at that size on a device.
-  The `frame.retained` and per-lamp figures transfer; the first-frame
-  `frame.transient` overstates the device.
+  by push to a 20,480 B final doubling, one status string per resource) and
+  a 36,864 B `Vec<HwResource>` sits live for the whole run — neither exists
+  at that size on a device. The `frame.retained` and per-lamp figures
+  transfer; the first-frame `frame.transient` overstates the device. The
+  fragmentation section can subtract both — see "Discounting emulator-only
+  artifacts" below — but this ratchet cannot, so its `frame.transient` and
+  `frame.largest_alloc` (20,480 B) still carry them.
 - **Stack usage.** Neither RV32 nor Xtensa stack consumption is modeled at
   all.
 - **The JIT code region.** The emulator covers the heap;
@@ -264,17 +267,52 @@ it is the same allocator, only at the right width. Allocations the modelled
 layout cannot serve although the guest's larger heap did are listed as
 `would-OOM` and skipped — every figure after the first one is optimistic.
 
-⚠️ **Fidelity limit: alignment is not recorded.** The alloc trace carries
-each request's size but not its `Layout::align`, and the replay assumes 4 B.
-That is exact until a coarser-aligned request lands in a hole that is not
-already aligned for it, at which point the guest front-pads and the replay
-does not. On `examples/basic` in `startup` mode the replay is bit-exact
-through `server-boot`'s close and drifts to hole count ±8 and largest free
-block ±320 B (0.27%) once shader compilation runs; on `examples/zook-dome`,
-±4 holes and ±744 B. Run with `--frag-layout guest` to see the drift for a
-given trace: the cross-check table prints it per marker against the guest's
-own free-list walk. Closing that gap means recording the alignment, not
-widening the tolerance.
+**Alignment is recorded, and the replay is exact.** The alloc trace carries
+each request's `Layout::align` alongside its size (`"al":N` on `A` and `R`
+rows, omitted when it is 4 B, which readers default to). It has to: the
+allocator front-pads a hole whose start is not already aligned for the
+request, so a replay that guessed 4 B diverged from the guest's own layout
+the first time an 8- or 16-aligned request landed on a 4-mod-8 boundary —
+that guess cost hole count ±8 and largest free block ±320 B on
+`examples/basic`. With the real alignment the replay reproduces the guest's
+free-list walk **exactly** — same hole count, same largest block, same free
+total — at every marker of `examples/basic` and `examples/zook-dome` in
+`startup` mode. Run with `--frag-layout guest` to check any trace: the
+cross-check table prints the comparison per marker, and its verdict column
+is the thing to look at after touching the replay. A trace recorded before
+the field existed reads as all-4 B alignment; the report header says so.
+
+### Discounting emulator-only artifacts
+
+`fw-emu` runs the permissive 256-resource board profile and the classic's
+manifest has 34, so two call sites allocate amounts no firmware ever will
+and both dominate a classic-layout replay:
+
+| pattern | what it is | peak live (zook-dome) |
+|---|---|---|
+| `VirtualWs281xDriver::endpoints` | the `Vec<HwEndpoint>` rebuilt on every port open, grown by push to 256 × 80 B = 20,480 B | 55,784 B |
+| `HwResource` | the manifest's `Vec<HwResource>`, grown to 36,864 B and resident for the whole run | 55,296 B |
+
+`--frag-discount-site <substr>` (repeatable) drops every allocation whose
+symbolized call site — or any frame of its stack, since all `Vec` growth
+reports the same site — contains the substring, along with its frees and
+reallocs:
+
+```bash
+cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup \
+    --frag-discount-site VirtualWs281xDriver::endpoints \
+    --frag-discount-site HwResource
+```
+
+Discounting both takes `examples/zook-dome` on the classic layout from 2,452
+`would-OOM` allocations to none, and its final largest free block from
+7,328 B to 42,428 B. The report header names every active discount and the
+blocks, bytes and peak-live it removed, and says "discounts: none" when
+there are none — a discounted table can be read for what it is, and a raw
+one cannot be mistaken for a discounted one. Note that `--frag-discount-site
+HwResource` also removes the real 34-resource manifest a device would
+allocate; that is a few hundred bytes against the 36,864 B the fixture board
+costs.
 
 ## CI
 

@@ -19,26 +19,14 @@ use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
 use super::first_fit_heap::{FirstFitHeap, HeapGeometry};
-use crate::profile::alloc::{SymbolResolver, parse_trace_row};
+use crate::profile::alloc::{DEFAULT_TRACE_ALIGN, SymbolResolver, parse_trace_row};
+use std::collections::BTreeMap;
 
 /// The classic's heap, in esp-alloc registration order: the `dram_seg` arena
 /// declared by `fw-esp32v3` (`HEAP_SIZE`), then the SRAM1 tail added by
 /// `add_sram1_heap_region`. esp-alloc's `allocate` tries each region's
 /// `allocate_first_fit` in this order and returns the first that serves.
 pub const CLASSIC_REGIONS: [u32; 2] = [110 * 1024, 73_728];
-
-/// The alignment the replay assumes for every request.
-///
-/// The guest's `TrackingAllocator` does not record `Layout::align`, so the
-/// replay cannot know it. 4 B is the alignment of the overwhelming majority of
-/// Rust allocations on a 32-bit target and, critically, is `<=` the
-/// allocator's own hole alignment — at or below that value the placement is
-/// alignment-independent, because every hole already starts on a granule
-/// boundary and no front padding is ever needed. A trace containing
-/// over-aligned allocations (16 B and up) would place slightly differently on
-/// silicon; the cross-check against the guest's own shapes is what bounds that
-/// error.
-pub const ASSUMED_ALIGN: u32 = 4;
 
 /// Hole-size histogram buckets: `[8, 16)`, `[16, 32)`, … `[128 KiB, ∞)`.
 pub const HISTOGRAM_BUCKETS: usize = 15;
@@ -86,6 +74,9 @@ pub struct FragOptions {
     /// How many of the largest holes to attribute to bounding blocks at each
     /// marker.
     pub top_holes: usize,
+    /// Substrings of symbolized call sites whose allocations are dropped from
+    /// the replay entirely — see [`FragAnalysis::discounts`].
+    pub discount_sites: Vec<String>,
 }
 
 impl Default for FragOptions {
@@ -93,6 +84,7 @@ impl Default for FragOptions {
         Self {
             layout: FragLayout::Classic,
             top_holes: 10,
+            discount_sites: Vec::new(),
         }
     }
 }
@@ -106,7 +98,11 @@ pub const FRAME_ALLOC_OF_INTEREST: u32 = 20_480;
 #[derive(Debug, Serialize)]
 pub struct FragAnalysis {
     pub layout: String,
-    pub assumed_align: u32,
+    /// How many allocations were served at each recorded alignment. A trace
+    /// that carries no `al` field at all (recorded before alignment was in the
+    /// ABI) shows up here as everything at 4 B, which is the value such rows
+    /// default to.
+    pub alignments: BTreeMap<u32, u64>,
     pub regions: Vec<RegionSpec>,
     pub markers: Vec<MarkerShape>,
     pub pinning: Vec<PinningRow>,
@@ -120,6 +116,29 @@ pub struct FragAnalysis {
     /// `D`/`R` rows whose pointer the replay never saw allocated. Non-zero
     /// means the trace does not start from an empty heap.
     pub unmatched_frees: u64,
+    /// Call sites removed from the replay, and what removing them cost.
+    ///
+    /// The emulator's board profile is not a device's: `fw-emu` runs a
+    /// permissive 256-resource manifest, so a handful of call sites allocate
+    /// amounts no firmware ever will. Discounting them makes the replay answer
+    /// "what would this *workload* do to the classic" instead of "what would
+    /// the emulator's fixture board do". Every discounted table says so at the
+    /// top; a table with no discounts says that too.
+    pub discounts: Vec<DiscountRow>,
+}
+
+/// One `--frag-discount-site` pattern and the traffic it removed.
+#[derive(Debug, Serialize)]
+pub struct DiscountRow {
+    /// The substring matched against the innermost non-infrastructure frame.
+    pub pattern: String,
+    /// Allocation and realloc rows dropped.
+    pub blocks: u64,
+    /// Bytes those rows asked for — churn, not residency.
+    pub bytes_requested: u64,
+    /// The most bytes this pattern's blocks held at once. This is the
+    /// residency the rest of the replay got back.
+    pub peak_live_bytes: u64,
 }
 
 /// One modelled region, in registration order.
@@ -280,7 +299,7 @@ pub fn analyze_fragmentation(
     let (heap_start, heap_size) = read_guest_heap(meta_path)?;
     let resolver = SymbolResolver::load(meta_path)?;
     let regions = build_regions(&options.layout, heap_start, heap_size);
-    let mut replay = Replay::new(&regions, options.top_holes, &resolver);
+    let mut replay = Replay::new(&regions, options, &resolver);
 
     let reader = BufReader::new(std::fs::File::open(trace_path)?);
     for (index, line) in reader.lines().enumerate() {
@@ -367,6 +386,9 @@ struct LiveBlock {
     addr: u32,
     /// Requested size, as the trace recorded it.
     size: u32,
+    /// Requested alignment, as the trace recorded it. Needed at free time
+    /// only to pair the layouts symmetrically.
+    align: u32,
     /// What the allocator actually consumed.
     footprint: u32,
     frames: Vec<u32>,
@@ -392,10 +414,18 @@ struct Replay<'a> {
 
     live: HashMap<u32, LiveBlock>,
     live_bytes: u64,
-    /// Guest pointers whose allocation the modelled layout refused; later
-    /// `D`/`R` rows for them are expected and are not unmatched frees.
-    skipped: HashSet<u32>,
+    /// Guest pointers whose allocation the replay did not place — refused by
+    /// the modelled layout, or discounted. Later `D`/`R` rows for them are
+    /// expected and are not unmatched frees.
+    skipped: HashMap<u32, SkippedBlock>,
     unmatched_frees: u64,
+    alignments: BTreeMap<u32, u64>,
+
+    /// Discount patterns in the order they were given, each with its running
+    /// tally, plus a memo keyed by call stack so the symbolizer runs once per
+    /// distinct stack rather than once per allocation.
+    discounts: Vec<DiscountAccum>,
+    discount_memo: HashMap<Vec<u32>, Option<usize>>,
 
     /// Open windows, innermost last, as `name#opening`.
     window_stack: Vec<String>,
@@ -427,20 +457,49 @@ struct SizedAccum {
     first_ic: u64,
 }
 
+/// A block the replay declined to place, remembered so its eventual free is
+/// recognised rather than counted as a free of something never allocated.
+struct SkippedBlock {
+    footprint: u32,
+    /// Which discount pattern dropped it, if any.
+    discount: Option<usize>,
+}
+
+struct DiscountAccum {
+    pattern: String,
+    blocks: u64,
+    bytes_requested: u64,
+    live_bytes: u64,
+    peak_live_bytes: u64,
+}
+
 impl<'a> Replay<'a> {
-    fn new(regions: &[RegionSpec], top_holes: usize, resolver: &'a SymbolResolver) -> Self {
+    fn new(regions: &[RegionSpec], options: &FragOptions, resolver: &'a SymbolResolver) -> Self {
         Self {
             heaps: regions
                 .iter()
                 .map(|r| FirstFitHeap::new(HeapGeometry::RV32, r.base, r.size))
                 .collect(),
             regions: regions.to_vec(),
-            top_holes,
+            top_holes: options.top_holes,
             resolver,
             live: HashMap::new(),
             live_bytes: 0,
-            skipped: HashSet::new(),
+            skipped: HashMap::new(),
             unmatched_frees: 0,
+            alignments: BTreeMap::new(),
+            discounts: options
+                .discount_sites
+                .iter()
+                .map(|pattern| DiscountAccum {
+                    pattern: pattern.clone(),
+                    blocks: 0,
+                    bytes_requested: 0,
+                    live_bytes: 0,
+                    peak_live_bytes: 0,
+                })
+                .collect(),
+            discount_memo: HashMap::new(),
             window_stack: Vec::new(),
             openings: HashMap::new(),
             last_marker: "-".to_string(),
@@ -457,7 +516,7 @@ impl<'a> Replay<'a> {
         match event.t.as_str() {
             "A" => {
                 self.note_sized_alloc(&event);
-                self.allocate(event.ptr, event.sz, event.frames, event.ic);
+                self.allocate(event.ptr, event.sz, event.align, event.frames, event.ic);
             }
             "D" => self.deallocate(event.ptr),
             "R" => {
@@ -467,7 +526,7 @@ impl<'a> Replay<'a> {
                 // and the new block cannot land in the old one's space. Replay
                 // in that order or the placement diverges immediately.
                 let old_ptr = event.old_ptr.unwrap_or(0);
-                self.allocate(event.ptr, event.sz, event.frames, event.ic);
+                self.allocate(event.ptr, event.sz, event.align, event.frames, event.ic);
                 self.deallocate(old_ptr);
             }
             "P" => self.marker(event),
@@ -489,9 +548,36 @@ impl<'a> Replay<'a> {
         }
     }
 
-    fn allocate(&mut self, ptr: u32, size: u32, frames: Vec<u32>, ic: u64) {
+    fn allocate(&mut self, ptr: u32, size: u32, align: u32, frames: Vec<u32>, ic: u64) {
+        *self.alignments.entry(align).or_insert(0) += 1;
+        // The guest's requests are `Layout`s, so `align` is a power of two;
+        // a 0 can only come from a row that predates the field, where 4 is the
+        // documented default.
+        let align = if align.is_power_of_two() {
+            align
+        } else {
+            DEFAULT_TRACE_ALIGN
+        };
+
+        if let Some(discount) = self.discount_for(&frames) {
+            let footprint = HeapGeometry::RV32.footprint(size);
+            let accum = &mut self.discounts[discount];
+            accum.blocks += 1;
+            accum.bytes_requested += u64::from(size);
+            accum.live_bytes += u64::from(footprint);
+            accum.peak_live_bytes = accum.peak_live_bytes.max(accum.live_bytes);
+            self.skipped.insert(
+                ptr,
+                SkippedBlock {
+                    footprint,
+                    discount: Some(discount),
+                },
+            );
+            return;
+        }
+
         for (region, heap) in self.heaps.iter_mut().enumerate() {
-            if let Some(addr) = heap.allocate(size, ASSUMED_ALIGN) {
+            if let Some(addr) = heap.allocate(size, align) {
                 let footprint = heap.geometry().footprint(size);
                 self.live_bytes += u64::from(footprint);
                 self.live.insert(
@@ -500,6 +586,7 @@ impl<'a> Replay<'a> {
                         region,
                         addr,
                         size,
+                        align,
                         footprint,
                         frames,
                         born_window: self.current_window(),
@@ -519,21 +606,72 @@ impl<'a> Replay<'a> {
             window: self.current_window(),
             after_marker: self.last_marker.clone(),
         });
-        self.skipped.insert(ptr);
+        self.skipped.insert(
+            ptr,
+            SkippedBlock {
+                footprint: HeapGeometry::RV32.footprint(size),
+                discount: None,
+            },
+        );
     }
 
     fn deallocate(&mut self, ptr: u32) {
         match self.live.remove(&ptr) {
             Some(block) => {
                 self.live_bytes = self.live_bytes.saturating_sub(u64::from(block.footprint));
-                self.heaps[block.region].deallocate(block.addr, block.size, ASSUMED_ALIGN);
+                self.heaps[block.region].deallocate(block.addr, block.size, block.align);
             }
-            None => {
-                if !self.skipped.remove(&ptr) {
-                    self.unmatched_frees += 1;
+            None => match self.skipped.remove(&ptr) {
+                Some(skipped) => {
+                    if let Some(index) = skipped.discount {
+                        let accum = &mut self.discounts[index];
+                        accum.live_bytes = accum
+                            .live_bytes
+                            .saturating_sub(u64::from(skipped.footprint));
+                    }
                 }
-            }
+                None => self.unmatched_frees += 1,
+            },
         }
+    }
+
+    /// Which discount pattern, if any, claims this call stack.
+    ///
+    /// Matched against the innermost non-infrastructure site — the string the
+    /// pinning and would-OOM tables print — and, failing that, against every
+    /// frame in the stack. The second half is not optional: `Vec` growth all
+    /// reports the same site (`RawVecInner::finish_grow`, which the infra
+    /// filter does not catch), so the two allocations worth discounting on
+    /// this emulator — the `Vec<HwEndpoint>` behind
+    /// `VirtualWs281xDriver::endpoints` and the manifest's `Vec<HwResource>` —
+    /// are indistinguishable at the site alone and only tell apart one frame
+    /// deeper. Matching the whole stack is also what lets a pattern name the
+    /// *reason* an allocation exists rather than the allocator machinery that
+    /// happened to make it.
+    fn discount_for(&mut self, frames: &[u32]) -> Option<usize> {
+        if self.discounts.is_empty() {
+            return None;
+        }
+        if let Some(hit) = self.discount_memo.get(frames) {
+            return *hit;
+        }
+        let (site, _) = self.resolver.classify_alloc(frames);
+        let hit = self.discounts.iter().position(|d| {
+            let pattern = d.pattern.as_str();
+            site.contains(pattern)
+                || frames.iter().any(|&addr| {
+                    // Both spellings: the full demangled symbol, and the
+                    // shortened one the report's call stacks print. A trait
+                    // method's full name reads
+                    // `<Type as Trait>::method`, so the `Type::method` a
+                    // reader copies out of a report is a substring of the
+                    // short form only.
+                    self.resolver.resolve_full(addr).contains(pattern)
+                        || self.resolver.resolve(addr).contains(pattern)
+                })
+        });
+        self.discount_memo.insert(frames.to_vec(), hit);
+        hit
     }
 
     fn note_sized_alloc(&mut self, event: &crate::profile::alloc::TraceEventOwned) {
@@ -736,6 +874,8 @@ impl<'a> Replay<'a> {
             would_oom,
             sized_allocs,
             unmatched_frees,
+            alignments,
+            discounts,
             ..
         } = self;
 
@@ -801,7 +941,7 @@ impl<'a> Replay<'a> {
 
         FragAnalysis {
             layout: layout.label(),
-            assumed_align: ASSUMED_ALIGN,
+            alignments,
             regions: regions.to_vec(),
             markers,
             pinning,
@@ -809,6 +949,15 @@ impl<'a> Replay<'a> {
             frame_alloc_of_interest,
             cross_check,
             unmatched_frees,
+            discounts: discounts
+                .into_iter()
+                .map(|d| DiscountRow {
+                    pattern: d.pattern,
+                    blocks: d.blocks,
+                    bytes_requested: d.bytes_requested,
+                    peak_live_bytes: d.peak_live_bytes,
+                })
+                .collect(),
         }
     }
 }
@@ -885,6 +1034,7 @@ mod tests {
         let options = FragOptions {
             layout: FragLayout::Guest,
             top_holes: 10,
+            discount_sites: Vec::new(),
         };
         let analysis = analyze_fragmentation(&trace, &meta, &options).expect("analysis");
         let marker = analysis.markers.last().expect("one marker");
@@ -937,6 +1087,7 @@ mod tests {
             &FragOptions {
                 layout: FragLayout::Guest,
                 top_holes: 10,
+                discount_sites: Vec::new(),
             },
         )
         .expect("analysis");
@@ -967,6 +1118,7 @@ mod tests {
             &FragOptions {
                 layout: FragLayout::Classic,
                 top_holes: 10,
+                discount_sites: Vec::new(),
             },
         )
         .expect("analysis");

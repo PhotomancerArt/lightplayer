@@ -425,6 +425,22 @@ pub struct AllocEvent {
     pub old_ptr: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub old_sz: Option<u32>,
+    /// `Layout::align` of the request, on `"A"` and `"R"` rows only.
+    ///
+    /// Omitted when it is [`DEFAULT_TRACE_ALIGN`], which is the overwhelming
+    /// majority of rows — a trace is millions of lines and this field would
+    /// otherwise cost ~7 bytes on nearly every one of them. Readers default it
+    /// back to 4, so an older trace with no `al` anywhere parses as it always
+    /// did.
+    #[serde(rename = "al", skip_serializing_if = "is_default_align")]
+    pub align: Option<u32>,
+}
+
+/// The request alignment `heap-trace.jsonl` leaves implicit.
+pub const DEFAULT_TRACE_ALIGN: u32 = 4;
+
+fn is_default_align(align: &Option<u32>) -> bool {
+    matches!(align, None | Some(DEFAULT_TRACE_ALIGN))
 }
 
 /// Streams allocation events to `heap-trace.jsonl` and can render a heap summary section.
@@ -580,6 +596,7 @@ impl Collector for AllocCollector {
                     free: arg(3),
                     old_ptr: None,
                     old_sz: None,
+                    align: Some(arg(4)),
                 });
                 SyscallAction::Handled
             }
@@ -594,6 +611,7 @@ impl Collector for AllocCollector {
                     free: arg(3),
                     old_ptr: None,
                     old_sz: None,
+                    align: None,
                 });
                 SyscallAction::Handled
             }
@@ -608,6 +626,7 @@ impl Collector for AllocCollector {
                     free: arg(5),
                     old_ptr: Some(arg(1)),
                     old_sz: Some(arg(3)),
+                    align: Some(arg(6)),
                 });
                 SyscallAction::Handled
             }
@@ -623,6 +642,7 @@ impl Collector for AllocCollector {
                     free: 0,
                     old_ptr: None,
                     old_sz: None,
+                    align: None,
                 });
                 SyscallAction::Halt(HaltReason::Oom { size })
             }
@@ -760,6 +780,11 @@ pub(crate) struct TraceEventOwned {
     pub(crate) old_ptr: Option<u32>,
     #[serde(default)]
     pub(crate) old_sz: Option<u32>,
+    /// `Layout::align` of the request on `"A"`/`"R"` rows, defaulted to
+    /// [`DEFAULT_TRACE_ALIGN`] when the row omits it (the common case, and
+    /// every row of a trace recorded before alignment was carried).
+    #[serde(rename = "al", default = "default_trace_align")]
+    pub(crate) align: u32,
     /// Perf-event marker fields (`"t":"P"` rows only).
     #[serde(default)]
     pub(crate) name: Option<String>,
@@ -771,6 +796,10 @@ pub(crate) struct TraceEventOwned {
     pub(crate) holes: Option<u32>,
     #[serde(default)]
     pub(crate) largest: Option<u32>,
+}
+
+fn default_trace_align() -> u32 {
+    DEFAULT_TRACE_ALIGN
 }
 
 /// Parse one trace row, naming the file and line number on failure so a
@@ -1691,7 +1720,7 @@ impl SymbolResolver {
             .unwrap_or("???")
     }
 
-    fn resolve_full(&self, addr: u32) -> &str {
+    pub(crate) fn resolve_full(&self, addr: u32) -> &str {
         self.lookup(addr)
             .map(|(full, _)| full.as_str())
             .unwrap_or("???")

@@ -26,9 +26,17 @@ pub const SYSCALL_TIME_MS: i32 = 8;
 
 /// Syscall number for allocation tracing (alloc/dealloc/realloc events)
 ///
-/// Args for alloc:   a0=0, a1=ptr, a2=size, a3=free_bytes
+/// Args for alloc:   a0=0, a1=ptr, a2=size, a3=free_bytes, a4=align
 /// Args for dealloc: a0=1, a1=ptr, a2=size, a3=free_bytes
-/// Args for realloc: a0=2, a1=old_ptr, a2=new_ptr, a3=old_size, a4=new_size, a5=free_bytes
+/// Args for realloc: a0=2, a1=old_ptr, a2=new_ptr, a3=old_size, a4=new_size,
+///                   a5=free_bytes, a6=align
+///
+/// `align` is `Layout::align()` for the request. It is carried because the
+/// host-side fragmentation replay places blocks itself
+/// (`lp-emu-core::profile::frag`) and `linked_list_allocator` front-pads a
+/// hole whose start is not already aligned for the request — without the real
+/// alignment the replay diverges from the guest's own layout. Dealloc does not
+/// need it: the block's footprint is derived from its size alone.
 pub const SYSCALL_ALLOC_TRACE: i32 = 9;
 
 /// Syscall number for emitting a perf event from guest to host.

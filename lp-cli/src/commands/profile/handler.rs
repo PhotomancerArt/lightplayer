@@ -277,6 +277,7 @@ fn write_fragmentation(
     let options = FragOptions {
         layout: args.frag_layout(),
         top_holes: args.frag_top,
+        discount_sites: args.frag_discount_site.clone(),
     };
     let analysis = analyze_fragmentation(trace_path, meta_path, &options)
         .context("replay heap trace for fragmentation analysis")?;
