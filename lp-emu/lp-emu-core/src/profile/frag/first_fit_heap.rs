@@ -333,22 +333,43 @@ mod tests {
     #[test]
     fn model_matches_the_real_crate_at_host_geometry() {
         const HEAP_BYTES: usize = 64 * 1024;
-        let backing = ::alloc::vec![0u8; HEAP_BYTES].into_boxed_slice();
+        /// The largest alignment the mix below requests. Placement of an
+        /// over-aligned request depends on the region bottom's address modulo
+        /// that alignment, so the two heaps must agree on the residue, not
+        /// just on offsets from the bottom.
+        const MAX_ALIGN: usize = 64;
+        /// Deliberately start the real heap at a non-zero residue: a large host
+        /// allocation is page-aligned on macOS but page+16 under glibc, and a
+        /// residue of 0 lets the model pass while ignoring it (CI x64 caught
+        /// exactly that with an align-32 request landing 16 B apart).
+        const BOTTOM_RESIDUE: usize = 48;
+        let backing = ::alloc::vec![0u8; HEAP_BYTES + 2 * MAX_ALIGN].into_boxed_slice();
         let backing = ::alloc::boxed::Box::leak(backing);
-        let base = backing.as_mut_ptr();
+        let aligned = backing.as_mut_ptr().align_offset(MAX_ALIGN);
+        // SAFETY: `aligned + BOTTOM_RESIDUE + HEAP_BYTES` stays inside the
+        // `HEAP_BYTES + 2 * MAX_ALIGN` buffer for any `align_offset` result
+        // below `MAX_ALIGN`.
+        let base = unsafe { backing.as_mut_ptr().add(aligned + BOTTOM_RESIDUE) };
 
         let mut real = linked_list_allocator::Heap::empty();
-        // SAFETY: `backing` is a leaked, uniquely-owned buffer of exactly
-        // `HEAP_BYTES` that nothing else reads or writes for the rest of the
-        // process.
+        // SAFETY: `backing` is a leaked, uniquely-owned buffer that nothing
+        // else reads or writes for the rest of the process, and
+        // `[base, base + HEAP_BYTES)` lies inside it.
         unsafe { real.init(base, HEAP_BYTES) };
 
-        // A synthetic base: only offsets from the region bottom are compared.
-        let mut model = FirstFitHeap::new(HeapGeometry::HOST64, 0x1000_0000, HEAP_BYTES as u32);
-        assert_eq!(
-            real.bottom() as usize % 8,
-            0,
-            "host allocation is expected to be 8-aligned; the offset mapping below assumes it"
+        // A synthetic base with the SAME residue modulo every requested
+        // alignment as the real heap's bottom (which the crate may have
+        // rounded up from `base`): only offsets from the bottom are compared,
+        // and the residue is what makes over-aligned placements comparable.
+        let residue = (real.bottom() as usize % MAX_ALIGN) as u32;
+        let mut model = FirstFitHeap::new(
+            HeapGeometry::HOST64,
+            0x1000_0000 + residue,
+            HEAP_BYTES as u32,
+        );
+        assert_ne!(
+            residue, 0,
+            "the bottom residue must be non-zero or this test cannot see alignment padding"
         );
 
         // guest-ish handle -> (real ptr, model addr, size, align)
