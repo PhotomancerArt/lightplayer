@@ -979,7 +979,7 @@ fn mono_line_class() -> &'static str {
 }
 
 /// The header's identity slot: TWO fixed 16px mono rows (32px), whether the
-/// second holds anything or not — the header is 88px in every state (ADR
+/// second holds anything or not — the header is 90px in every state (ADR
 /// 2026-09-03, amended 2026-09-04), and a card whose identity is one row
 /// short stays level with its neighbours rather than sitting 16px higher.
 fn identity_rows_class() -> &'static str {
