@@ -195,10 +195,11 @@ emulator vs 53,052 B on the classic — within 2.6%.
 A harness that overstates its fidelity is worse than none. This gate does
 **not** model:
 
-- **Fragmentation.** The figures are live-byte accounting; the emulator's
-  allocator differs from `esp_alloc`, so arena layout and fragmentation
-  behaviour differ. A workload can pass this gate and still fail on device
-  because the arena is fragmented.
+- **Fragmentation.** The figures are live-byte accounting: they say how many
+  bytes were live, never whether they were contiguous. A workload can pass
+  this gate and still fail on device because the arena is fragmented. The
+  fragmentation section below is the tool for that question; it is a report,
+  not a ratchet.
 - **Two-region arenas / contiguity.** The guest heap is a single region. The
   classic's post-#288 arena is two regions, where a large allocation can fail
   while total free is ample. The `largest_alloc` ratchet is the proxy: it
@@ -231,6 +232,49 @@ A harness that overstates its fidelity is worse than none. This gate does
 - **Xtensa anything.** The guest is RV32. Per-LED and compile-transient
   deltas have transferred well to the classic in practice (2.6% above), but
   that is measured correspondence, not emulation.
+
+## The fragmentation section
+
+`lp-cli profile --collect alloc` also replays the recorded trace on a
+modelled heap layout and appends a `Heap Fragmentation` section to
+`report.txt`, with the full per-marker detail in `frag.json` beside
+`budget.json`. It answers the question the ratchet cannot: at each perf
+marker, how big is the largest free block per region, how many holes are
+there and how are they sized, and which live blocks are holding the biggest
+holes open — attributed to the call site that allocated them.
+
+```bash
+# the classic's two regions (the default), 10 holes attributed per marker
+cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup
+
+# the guest's own single region — the only layout the cross-check means anything on
+cargo run -p lp-cli -- profile examples/basic --collect alloc --mode startup \
+    --frag-layout guest
+
+# an arbitrary region list, in registration order
+cargo run -p lp-cli -- profile examples/basic --collect alloc \
+    --frag-regions 112640,73728 --frag-top 20
+```
+
+The replay models `linked_list_allocator` at the target's 32-bit block
+geometry (`lp-emu-core/src/profile/frag/first_fit_heap.rs`) rather than
+calling the crate, which on a 64-bit host has a 16 B minimum block instead
+of 8 B; a test checks the model against the real crate at host geometry, so
+it is the same allocator, only at the right width. Allocations the modelled
+layout cannot serve although the guest's larger heap did are listed as
+`would-OOM` and skipped — every figure after the first one is optimistic.
+
+⚠️ **Fidelity limit: alignment is not recorded.** The alloc trace carries
+each request's size but not its `Layout::align`, and the replay assumes 4 B.
+That is exact until a coarser-aligned request lands in a hole that is not
+already aligned for it, at which point the guest front-pads and the replay
+does not. On `examples/basic` in `startup` mode the replay is bit-exact
+through `server-boot`'s close and drifts to hole count ±8 and largest free
+block ±320 B (0.27%) once shader compilation runs; on `examples/zook-dome`,
+±4 holes and ±744 B. Run with `--frag-layout guest` to see the drift for a
+given trace: the cross-check table prints it per marker against the guest's
+own free-list walk. Closing that gap means recording the alignment, not
+widening the tolerance.
 
 ## CI
 

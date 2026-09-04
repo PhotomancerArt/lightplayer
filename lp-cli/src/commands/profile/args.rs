@@ -52,6 +52,47 @@ pub struct ProfileArgs {
     /// Optional human-readable note appended to the profile dir.
     #[arg(long)]
     pub note: Option<String>,
+
+    /// Heap layout the `alloc` collector's fragmentation section replays on:
+    /// `classic` (the ESP32 classic's two regions) or `guest` (the emulator's
+    /// own single region, the only layout the guest cross-check is meaningful
+    /// on). Ignored without `--collect alloc`.
+    #[arg(long, value_enum, default_value_t = FragLayoutArg::Classic)]
+    pub frag_layout: FragLayoutArg,
+
+    /// Override the replayed region sizes in bytes, in registration order
+    /// (e.g. `112640,73728`). Takes precedence over `--frag-layout`.
+    #[arg(long, value_delimiter = ',')]
+    pub frag_regions: Vec<u32>,
+
+    /// How many of the largest holes to attribute to bounding blocks at each
+    /// marker.
+    #[arg(long, default_value_t = 10)]
+    pub frag_top: usize,
+}
+
+/// Heap layout selector for the fragmentation replay.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FragLayoutArg {
+    /// The ESP32 classic: 110 KiB `dram_seg` arena, then the 72 KiB SRAM1 tail.
+    Classic,
+    /// The emulator guest's single region, as recorded in `meta.json`.
+    Guest,
+}
+
+impl ProfileArgs {
+    /// The layout the fragmentation replay should use: explicit
+    /// `--frag-regions` when given, otherwise the named layout.
+    pub fn frag_layout(&self) -> lp_emu_core::profile::frag::FragLayout {
+        use lp_emu_core::profile::frag::FragLayout;
+        if !self.frag_regions.is_empty() {
+            return FragLayout::Custom(self.frag_regions.clone());
+        }
+        match self.frag_layout {
+            FragLayoutArg::Classic => FragLayout::Classic,
+            FragLayoutArg::Guest => FragLayout::Guest,
+        }
+    }
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -118,6 +159,30 @@ mod tests {
     fn default_cycle_model_is_esp32c6() {
         let cli = ProfileCli::parse_from(["lp-cli", "examples/basic"]);
         assert!(matches!(cli.run.cycle_model, CycleModelArg::Esp32C6));
+    }
+
+    #[test]
+    fn frag_layout_defaults_to_classic() {
+        let cli = ProfileCli::parse_from(["lp-cli", "examples/basic"]);
+        assert_eq!(cli.run.frag_layout, FragLayoutArg::Classic);
+        assert_eq!(cli.run.frag_top, 10);
+        assert!(cli.run.frag_regions.is_empty());
+    }
+
+    #[test]
+    fn explicit_frag_regions_win_over_the_named_layout() {
+        let cli = ProfileCli::parse_from([
+            "lp-cli",
+            "examples/basic",
+            "--frag-layout",
+            "guest",
+            "--frag-regions",
+            "1024,2048",
+        ]);
+        assert_eq!(
+            cli.run.frag_layout(),
+            lp_emu_core::profile::frag::FragLayout::Custom(vec![1024, 2048])
+        );
     }
 
     #[test]

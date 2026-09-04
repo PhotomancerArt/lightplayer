@@ -740,34 +740,53 @@ pub fn heap_budget(trace_path: &Path, meta_path: &Path) -> io::Result<Vec<Window
 
 // --- Trace replay + stats (mirrors lp-cli profile heap analysis) ---
 
+/// One parsed `heap-trace.jsonl` row. Shared with [`super::frag`], which
+/// replays the same rows on a modelled heap layout — the two analyses must
+/// never drift on what a row means.
 #[derive(Debug, Deserialize)]
-struct TraceEventOwned {
-    t: String,
+pub(crate) struct TraceEventOwned {
+    pub(crate) t: String,
     #[serde(default)]
-    ptr: u32,
+    pub(crate) ptr: u32,
     #[serde(default)]
-    sz: u32,
+    pub(crate) sz: u32,
     #[serde(default)]
-    ic: u64,
+    pub(crate) ic: u64,
     #[serde(default)]
-    frames: Vec<u32>,
+    pub(crate) frames: Vec<u32>,
     #[serde(default)]
-    free: u32,
+    pub(crate) free: u32,
     #[serde(default)]
-    old_ptr: Option<u32>,
+    pub(crate) old_ptr: Option<u32>,
     #[serde(default)]
-    old_sz: Option<u32>,
+    pub(crate) old_sz: Option<u32>,
     /// Perf-event marker fields (`"t":"P"` rows only).
     #[serde(default)]
-    name: Option<String>,
+    pub(crate) name: Option<String>,
     #[serde(default)]
-    kind: Option<String>,
+    pub(crate) kind: Option<String>,
     /// Free-list-shape summary fields (`"t":"F"` rows only). `free` reuses
     /// the field above (the walk's total free bytes).
     #[serde(default)]
-    holes: Option<u32>,
+    pub(crate) holes: Option<u32>,
     #[serde(default)]
-    largest: Option<u32>,
+    pub(crate) largest: Option<u32>,
+}
+
+/// Parse one trace row, naming the file and line number on failure so a
+/// truncated or hand-edited trace says where it went wrong instead of
+/// panicking somewhere downstream.
+pub(crate) fn parse_trace_row(
+    trace_path: &Path,
+    line_no: usize,
+    line: &str,
+) -> io::Result<TraceEventOwned> {
+    serde_json::from_str(line).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{}:{line_no}: {e} (line: {line})", trace_path.display()),
+        )
+    })
 }
 
 /// Per-window aggregation for one named perf-event window (e.g. `shader-compile`).
@@ -1064,18 +1083,14 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
     // sit in between) — no other event can land there.
     let mut pending_close_idx: Option<usize> = None;
 
-    for line in lines {
+    for (index, line) in lines.enumerate() {
+        let line_no = index + 1;
         let line = line?;
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        let event: TraceEventOwned = serde_json::from_str(line).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("heap-trace.jsonl: {e} (line: {line})"),
-            )
-        })?;
+        let event = parse_trace_row(trace_path, line_no, line)?;
 
         match event.t.as_str() {
             "A" => {
@@ -1619,12 +1634,12 @@ struct SymbolEntry {
     name: String,
 }
 
-struct SymbolResolver {
+pub(crate) struct SymbolResolver {
     symbols: Vec<(u32, u32, String, String)>,
 }
 
 impl SymbolResolver {
-    fn load(meta_path: &Path) -> io::Result<Self> {
+    pub(crate) fn load(meta_path: &Path) -> io::Result<Self> {
         let content = std::fs::read_to_string(meta_path)?;
         let meta: TraceMetaSymbols = serde_json::from_str(&content).map_err(|e| {
             io::Error::new(
@@ -1670,7 +1685,7 @@ impl SymbolResolver {
         Ok(Self { symbols })
     }
 
-    fn resolve(&self, addr: u32) -> &str {
+    pub(crate) fn resolve(&self, addr: u32) -> &str {
         self.lookup(addr)
             .map(|(_, display)| display.as_str())
             .unwrap_or("???")
@@ -1695,7 +1710,7 @@ impl SymbolResolver {
         None
     }
 
-    fn format_callstack(&self, frames: &[u32], max_frames: usize) -> String {
+    pub(crate) fn format_callstack(&self, frames: &[u32], max_frames: usize) -> String {
         let take = frames.len().min(max_frames);
         frames[..take]
             .iter()
@@ -1735,7 +1750,7 @@ impl SymbolResolver {
         name.to_string()
     }
 
-    fn classify_alloc(&self, frames: &[u32]) -> (String, Option<String>) {
+    pub(crate) fn classify_alloc(&self, frames: &[u32]) -> (String, Option<String>) {
         let callers = if frames.len() > 1 {
             &frames[1..]
         } else if !frames.is_empty() {

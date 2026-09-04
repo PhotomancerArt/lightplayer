@@ -1,0 +1,147 @@
+{
+ "schema_version": 1,
+ "timestamp": "2026-09-04T22:02:08.942750+00:00",
+ "project": "Basic",
+ "workload": "examples/basic",
+ "note": "trimmed P3 cross-check fixture: symbols reduced to those the retained rows resolve to",
+ "clock_source": "emu_estimated",
+ "mode": "startup",
+ "cycle_model": "esp32c6",
+ "max_cycles": 200000000,
+ "cycles_used": 188684593,
+ "terminated_by": "profile_stop",
+ "collectors": {
+  "alloc": {
+   "heap_size": 327680,
+   "heap_start": 2147483648
+  }
+ },
+ "symbols": [
+  {
+   "addr": 34,
+   "name": "_RINvNtCsbgr8V9fYQSs_4core3ptr13drop_in_placeINtNtCs6Jb0PNN2XwX_9lp_shader11compile_job18ShaderCompileStateNtNtNtCscmCShiqnN4P_11lpvm_native6rt_jit6engine15NativeJitEngineEECsbSzErDlYO6r_6fw_emu",
+   "size": 538
+  },
+  {
+   "addr": 261710,
+   "name": "_RINvNvMs2_NtCsdeuDu0AakVC_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalEBa_",
+   "size": 146
+  },
+  {
+   "addr": 261856,
+   "name": "_RNvMs4_NtCsdeuDu0AakVC_5alloc7raw_vecNtB5_11RawVecInner11finish_growB7_",
+   "size": 300
+  },
+  {
+   "addr": 262368,
+   "name": "_RNvNvNtCsdeuDu0AakVC_5alloc3fmt6format12format_inner",
+   "size": 408
+  },
+  {
+   "addr": 262922,
+   "name": "_RNvXsZ_NtCsdeuDu0AakVC_5alloc6stringNtB5_6StringNtNtCsbgr8V9fYQSs_4core3fmt5Write9write_str",
+   "size": 100
+  },
+  {
+   "addr": 263426,
+   "name": "_RNvXs4_NtCsdeuDu0AakVC_5alloc6stringNtB5_6StringNtNtCsbgr8V9fYQSs_4core5clone5Clone5clone",
+   "size": 182
+  },
+  {
+   "addr": 267962,
+   "name": "_RNvNtCsbgr8V9fYQSs_4core3fmt5write",
+   "size": 470
+  },
+  {
+   "addr": 313652,
+   "name": "_RNvXNtNtCsdT8o3cYwlYt_7fw_core3log3emuNtB2_9EmuLoggerNtCset4PXGU9hes_3log3Log3log",
+   "size": 256
+  },
+  {
+   "addr": 567368,
+   "name": "_lp_main",
+   "size": 12168
+  },
+  {
+   "addr": 779636,
+   "name": "_RNvMNtCsi3EDCJ4sQDq_18lp_riscv_emu_guest9allocatorNtB2_17TrackingAllocator11trace_event",
+   "size": 46
+  },
+  {
+   "addr": 779796,
+   "name": "_RNvMNtCsi3EDCJ4sQDq_18lp_riscv_emu_guest9allocatorNtB2_17TrackingAllocator19trace_realloc_event",
+   "size": 52
+  },
+  {
+   "addr": 780322,
+   "name": "_RNvCs8KB9cOwApJh_7___rustc17rust_begin_unwind",
+   "size": 84
+  },
+  {
+   "addr": 837836,
+   "name": "_RNvMs4_NtCsdeuDu0AakVC_5alloc7raw_vecNtB5_11RawVecInner11finish_growCs5HyhoNTIhux_10lpa_server",
+   "size": 340
+  },
+  {
+   "addr": 915250,
+   "name": "_RNvMs3_NtCsdeuDu0AakVC_5alloc7raw_vecINtB5_6RawVecNtNtCsbChpQvP661n_9lpc_model7feature9LpFeatureE8grow_oneCs5HyhoNTIhux_10lpa_server",
+   "size": 92
+  },
+  {
+   "addr": 1933664,
+   "name": "_RNvMNtCsgofQXZUBCba_12lpc_hardware9hw_systemNtB2_14HardwareSystem20with_virtual_drivers",
+   "size": 1956
+  },
+  {
+   "addr": 1960624,
+   "name": "_RNvMs4_NtCsdeuDu0AakVC_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsgofQXZUBCba_12lpc_hardware",
+   "size": 340
+  },
+  {
+   "addr": 1961098,
+   "name": "_RNvMs3_NtCsdeuDu0AakVC_5alloc7raw_vecINtB5_6RawVecINtNtB7_5boxed3BoxDNtNtNtNtCsgofQXZUBCba_12lpc_hardware7drivers5radio12radio_driver11RadioDriverEL_EE8grow_oneB1d_",
+   "size": 92
+  },
+  {
+   "addr": 1961376,
+   "name": "_RNvMs3_NtCsdeuDu0AakVC_5alloc7raw_vecINtB5_6RawVecNtNtNtCsgofQXZUBCba_12lpc_hardware8resource11hw_resource10HwResourceE8grow_oneBS_",
+   "size": 94
+  },
+  {
+   "addr": 2297852,
+   "name": "_RNvMNtCsbChpQvP661n_9lpc_model22hardware_endpoint_specNtB2_14HwEndpointSpec11from_static",
+   "size": 328
+  },
+  {
+   "addr": 2883384,
+   "name": "_RNvNtCs31aJqNmjEsE_4lpfs7lp_path9normalize",
+   "size": 1990
+  },
+  {
+   "addr": 2885806,
+   "name": "_RINvNvMs2_NtCsdeuDu0AakVC_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECs31aJqNmjEsE_4lpfs",
+   "size": 134
+  },
+  {
+   "addr": 2885940,
+   "name": "_RNvMs4_NtCsdeuDu0AakVC_5alloc7raw_vecNtB5_11RawVecInner11finish_growCs31aJqNmjEsE_4lpfs",
+   "size": 340
+  },
+  {
+   "addr": 3505118,
+   "name": "_RNvMs4_NtCsdeuDu0AakVC_5alloc7raw_vecNtB5_11RawVecInner11finish_growCscmCShiqnN4P_11lpvm_native",
+   "size": 340
+  },
+  {
+   "addr": 3536954,
+   "name": "_RNvMs3_NtCsdeuDu0AakVC_5alloc7raw_vecINtB5_6RawVecNtNtCs6qA2GANKGQR_10lp_emu_abi16jit_symbol_entry14JitSymbolEntryE8grow_oneCscmCShiqnN4P_11lpvm_native",
+   "size": 92
+  },
+  {
+   "addr": 3614762,
+   "name": "_RNvMs_NtCs1yVsr6I7uhJ_13lp_collection3mapINtB4_6VecMapNtNtCsdeuDu0AakVC_5alloc6string6StringjE6insertCscmCShiqnN4P_11lpvm_native",
+   "size": 488
+  }
+ ],
+ "dynamic_symbols": []
+}

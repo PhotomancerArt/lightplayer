@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 pub mod alloc;
 pub mod cpu;
 pub mod events;
+pub mod frag;
 pub mod jit_symbols;
 pub mod perf_event;
 
