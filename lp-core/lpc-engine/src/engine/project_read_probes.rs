@@ -465,7 +465,7 @@ impl Engine {
                 continue;
             };
             let revision = buffer.changed_at();
-            let bytes = buffer.value().bytes.clone();
+            let bytes = buffer.value().bytes().into_owned();
 
             let display_layout = if let ControlDisplayLayoutRead::None = request.display_layout {
                 ControlDisplayLayoutProbeResult::Omitted

@@ -166,7 +166,11 @@ pub fn LogoLockup(
     // overhang), so 0.12×size lands on the norm.
     let gap = ((size as f32) * 0.12).round().max(2.0) as u32;
     let word_px = ((size as f32) * 0.61).round() as u32;
-    let tone = if mono { "" } else { "tw:text-strong" };
+    let tone = if mono {
+        ""
+    } else {
+        "tw:text-strong-foreground"
+    };
     // The word yields at narrow widths; the mark stays. Container query
     // when a container encloses the lockup (the site chrome bar), viewport
     // fallback everywhere else.
@@ -214,7 +218,11 @@ pub fn LogoStacked(
 ) -> Element {
     let gap = ((size as f32) * 0.14).round() as u32;
     let word_px = ((size as f32) * 0.28).round() as u32;
-    let tone = if mono { "" } else { "tw:text-strong" };
+    let tone = if mono {
+        ""
+    } else {
+        "tw:text-strong-foreground"
+    };
     rsx! {
         span {
             class: "tw:flex tw:flex-none tw:cursor-default tw:flex-col tw:items-center {tone}",

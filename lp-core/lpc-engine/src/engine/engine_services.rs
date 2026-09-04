@@ -177,12 +177,6 @@ pub struct EngineServices {
     radio_service: Option<Rc<dyn RadioService>>,
     /// Fixture-written buffers paired with the wires their output node drives.
     output_sinks: HashMap<RuntimeBufferId, OutputSinkSet>,
-    /// Scratch the flush decodes each node buffer into, once per frame.
-    ///
-    /// Kept across frames so the decode of a buffer several wires share costs
-    /// no allocation at all in the steady state — it used to be a fresh `Vec`
-    /// per sink per frame.
-    flush_samples: Vec<u16>,
 }
 
 /// Hardware button access used by runtime input nodes.
@@ -232,7 +226,6 @@ impl EngineServices {
             button_service: None,
             radio_service: None,
             output_sinks: HashMap::new(),
-            flush_samples: Vec::new(),
         }
     }
 
@@ -356,13 +349,8 @@ impl EngineServices {
         let Some(mut boxed) = self.output_provider.take() else {
             return Ok(());
         };
-        let result = flush_registered_sinks(
-            boxed.as_mut(),
-            revision,
-            buffers,
-            &mut self.output_sinks,
-            &mut self.flush_samples,
-        );
+        let result =
+            flush_registered_sinks(boxed.as_mut(), revision, buffers, &mut self.output_sinks);
         self.output_provider = Some(boxed);
         result
     }
@@ -616,15 +604,16 @@ fn output_options_eq(
 /// Every failure is logged with its node and port; the first is returned so
 /// the tick still reports an error.
 ///
-/// Each node's buffer is decoded **once**, into `samples`, and every wire of
-/// that node takes a sub-slice of it — the decode used to run per sink, which
-/// with N wires per node would have been N copies of the same buffer per frame.
+/// Each node's samples are borrowed **once** from its runtime buffer and every
+/// wire of that node takes a sub-slice — no per-frame decode, no scratch. (It
+/// used to decode LE bytes into a `Vec<u16>` per sink, then once per frame
+/// into a kept scratch; the output node now stores `u16` samples, so the
+/// buffer is the only copy.)
 fn flush_registered_sinks(
     provider: &mut dyn OutputProvider,
     revision: Revision,
     buffers: &RuntimeBufferStore,
     sinks: &mut HashMap<RuntimeBufferId, OutputSinkSet>,
-    samples: &mut Vec<u16>,
 ) -> Result<(), OutputFlushError> {
     let mut first_error: Option<OutputFlushError> = None;
     let mut failed = 0usize;
@@ -646,8 +635,12 @@ fn flush_registered_sinks(
             continue;
         }
 
-        let bytes = versioned.value().bytes.as_slice();
-        if bytes.is_empty() {
+        // Borrowed straight from the buffer — the output node stores its
+        // samples as `u16`, so there is nothing to decode per frame.
+        let Some(samples) = versioned.value().samples16() else {
+            continue;
+        };
+        if samples.is_empty() {
             continue;
         }
 
@@ -661,7 +654,7 @@ fn flush_registered_sinks(
             continue;
         }
 
-        if bytes.len() % 6 != 0 {
+        if samples.len() % 3 != 0 {
             let error = OutputFlushError::MisalignedPayload {
                 node: sink.node,
                 buffer_id: *buffer_id,
@@ -671,8 +664,6 @@ fn flush_registered_sinks(
             first_error.get_or_insert(error);
             continue;
         }
-
-        decode_bytes_as_u16_le_into(bytes, samples);
 
         for wire in sink.wires.iter_mut() {
             if wire.parked_at_generation == Some(generation) {
@@ -843,16 +834,6 @@ fn wire_slice<'a>(node: NodeId, wire: &mut OutputWire, samples: &'a [u16]) -> Op
     Some(&samples[start..start + len as usize])
 }
 
-fn decode_bytes_as_u16_le_into(bytes: &[u8], out: &mut Vec<u16>) {
-    out.clear();
-    out.reserve(bytes.len() / 2);
-    out.extend(
-        bytes
-            .chunks_exact(2)
-            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]])),
-    );
-}
-
 /// Open the wire's port if it has none, parking it on failure.
 ///
 /// `generation` is the provider's hardware generation sampled before any open
@@ -922,7 +903,7 @@ mod tests {
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = buffers.insert(WithRevision::new(
             Revision::new(1),
-            RuntimeBuffer::output_channels_u16(6, vec![0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6]),
+            RuntimeBuffer::output_channels_u16(6, vec![256, 512, 768, 1024, 1280, 1536]),
         ));
         let endpoint = endpoint("ws281x:local:D10");
         services.register_output_sink(buffer_id, node(1), &OutputDef::new(endpoint.clone()));
@@ -953,7 +934,7 @@ mod tests {
         let mut buffers = RuntimeBufferStore::new();
         let buffer_id = buffers.insert(WithRevision::new(
             Revision::new(1),
-            RuntimeBuffer::output_channels_u16(6, vec![0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6]),
+            RuntimeBuffer::output_channels_u16(6, vec![256, 512, 768, 1024, 1280, 1536]),
         ));
         let endpoint = endpoint("ws281x:local:D10");
         services.register_output_sink(buffer_id, node(1), &OutputDef::new(endpoint.clone()));
@@ -1917,13 +1898,9 @@ mod tests {
         lamps: u32,
         revision: Revision,
     ) -> RuntimeBufferId {
-        let mut bytes = Vec::new();
-        for sample in ramp(0, lamps * 3) {
-            bytes.extend_from_slice(&sample.to_le_bytes());
-        }
         store.insert(WithRevision::new(
             revision,
-            RuntimeBuffer::output_channels_u16(lamps, bytes),
+            RuntimeBuffer::output_channels_u16(lamps, ramp(0, lamps * 3)),
         ))
     }
 
@@ -1944,7 +1921,7 @@ mod tests {
     fn output_buffer(store: &mut RuntimeBufferStore, revision: Revision) -> RuntimeBufferId {
         store.insert(WithRevision::new(
             revision,
-            RuntimeBuffer::output_channels_u16(3, vec![0, 1, 0, 2, 0, 3]),
+            RuntimeBuffer::output_channels_u16(3, vec![256, 512, 768]),
         ))
     }
 

@@ -453,12 +453,14 @@ fn published_outputs(rt: &LoadedProjectRuntime) -> Vec<(String, (usize, u64, [u8
         let Some(buffer) = engine.runtime_buffers().get(buffer_id) else {
             continue;
         };
-        let bytes = &buffer.value().bytes;
+        // The wire form (LE u16 pairs): the golden digests are byte digests
+        // and must not move when the engine's storage type does.
+        let bytes = buffer.value().bytes();
         let mut head = [0u8; 6];
         for (slot, byte) in head.iter_mut().zip(bytes.iter()) {
             *slot = *byte;
         }
-        out.push((entry.path.to_string(), (bytes.len(), fnv1a64(bytes), head)));
+        out.push((entry.path.to_string(), (bytes.len(), fnv1a64(&bytes), head)));
     }
     out
 }

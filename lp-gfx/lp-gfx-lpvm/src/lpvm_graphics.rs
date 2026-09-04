@@ -321,6 +321,10 @@ where
         Ok(())
     }
 
+    fn sample_out_data<'a>(&self, out: &'a SampleOutHandle) -> Result<&'a [u16], GfxError> {
+        Ok(sample_out_buf(out)?.data())
+    }
+
     fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {
         sample_out_buf_mut(out)?.data_mut().fill(0);
         Ok(())

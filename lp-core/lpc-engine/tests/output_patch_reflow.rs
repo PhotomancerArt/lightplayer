@@ -152,10 +152,8 @@ fn published_lamps(engine: &Engine) -> Vec<[u16; 3]> {
         .get(buffer_id)
         .expect("sink buffer")
         .value()
-        .bytes
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-        .collect::<Vec<u16>>()
+        .samples16()
+        .expect("output channels are u16 samples")
         .chunks_exact(3)
         .map(|lamp| [lamp[0], lamp[1], lamp[2]])
         .collect()

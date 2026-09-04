@@ -6,7 +6,7 @@
 //!
 //! An output consumes N control products, not one. Each becomes one or more
 //! [`OutputFragment`]s — a `(product, source offset, offset, len, reversed)`
-//! placement — rendered into its OWN sub-slice of `control_samples`. With a
+//! placement — rendered into its OWN sub-slice of the channel buffer. With a
 //! single unpatched producer (every checked-in example) the one fragment
 //! covers the whole buffer and the path is byte-identical to the pre-fragment
 //! one; that identity is pinned by
@@ -241,7 +241,15 @@ pub struct FragmentCoverage {
 /// Output node that owns the materialized control sample buffer.
 pub struct OutputNode {
     channel_buffer_id: Option<RuntimeBufferId>,
-    control_samples: Vec<u16>,
+    /// Sample count of the frame last published to the channel buffer — the
+    /// "established extent" a test pattern repaints. The samples themselves
+    /// live in the runtime buffer (their one home, 6 B/lamp); the node takes
+    /// that storage for the frame it renders and hands it back at publish.
+    established_samples: usize,
+    /// The frame the channel buffer was last published at, so a render that
+    /// fails midway can hand the storage back without marking the buffer
+    /// changed — the wire keeps its last good frame.
+    published_at: Revision,
     def_view: Option<OutputDefView>,
     /// Last frame's fragment-placement complaint, or `None` when the set was
     /// clean. Keep-last-good, like the fixture's `input_error`: a frame that
@@ -295,7 +303,8 @@ impl OutputNode {
     pub fn new() -> Self {
         Self {
             channel_buffer_id: None,
-            control_samples: Vec::new(),
+            established_samples: 0,
+            published_at: Revision::default(),
             def_view: None,
             fragment_status: None,
             identity_status: None,
@@ -382,12 +391,12 @@ impl OutputNode {
     /// layout cannot say which channel is which (A2) — a mis-decoded chase
     /// would name the wrong end of the strand, which is worse than the
     /// direction-free language.
-    fn paint_highlight(&mut self, highlight: &Highlight, time_seconds: f32) {
+    fn paint_highlight(&self, samples: &mut [u16], highlight: &Highlight, time_seconds: f32) {
         match highlight {
-            Highlight::Breath(spans) => self.paint_breath(spans, time_seconds),
+            Highlight::Breath(spans) => Self::paint_breath(samples, spans, time_seconds),
             Highlight::Chase(spans) => {
-                if !self.paint_chase(spans, time_seconds) {
-                    self.paint_breath(&breath_spans(spans), time_seconds);
+                if !self.paint_chase(samples, spans, time_seconds) {
+                    Self::paint_breath(samples, &breath_spans(spans), time_seconds);
                 }
             }
         }
@@ -401,29 +410,30 @@ impl OutputNode {
     /// take the breathing white ([`highlight_level_16`]). Lamps past the
     /// established extent are clipped, not an error: a selection can outlive
     /// a shrinking wire by a frame, and a diagnostic never kills output.
-    fn paint_breath(&mut self, spans: &[(u32, u32)], time_seconds: f32) {
+    fn paint_breath(samples: &mut [u16], spans: &[(u32, u32)], time_seconds: f32) {
         if spans.is_empty() {
             return;
         }
-        for sample in self.control_samples.iter_mut() {
+        for sample in samples.iter_mut() {
             *sample >>= 2;
         }
         let level = highlight_level_16(time_seconds);
         for (start, count) in spans {
             let first = lamps_to_samples(*start) as usize;
             let last = lamps_to_samples(start.saturating_add(*count)) as usize;
-            let end = last.min(self.control_samples.len());
+            let end = last.min(samples.len());
             if first >= end {
                 continue;
             }
-            for sample in self.control_samples[first..end].iter_mut() {
+            for sample in samples[first..end].iter_mut() {
                 *sample = level;
             }
         }
     }
 
     /// Resolve this output's producers and render their fragments into
-    /// `control_samples`, then overlay the highlight and publish.
+    /// `samples` (the channel buffer's own storage, taken for the frame),
+    /// then overlay the highlight. Publishing is the caller's move.
     ///
     /// Split out of [`NodeRuntime::consume`] so that a failure ANYWHERE in
     /// it still lets the fault pattern paint over the buffer afterwards.
@@ -434,6 +444,7 @@ impl OutputNode {
         &mut self,
         ctx: &mut TickContext<'_>,
         highlight: &Highlight,
+        samples: &mut Vec<u16>,
     ) -> Result<(), NodeError> {
         let prod = ctx
             .resolve(&QueryKey::ConsumedSlot {
@@ -456,14 +467,13 @@ impl OutputNode {
             })
             .collect();
         let fragments = plan_fragments(&placements);
-        self.render_fragments(ctx, &fragments)?;
+        self.render_fragments_into(ctx, &fragments, samples)?;
         // The highlight overlay repaints AFTER the real render, so the frame
         // underneath stays the graph's and un-highlighted lamps are untouched.
-        // With no highlight this is a no-op and the publish above was the
-        // frame — the byte-identical path every unpulsed project takes.
+        // With no highlight this is a no-op — the byte-identical path every
+        // unpulsed project takes.
         if !highlight.is_empty() {
-            self.paint_highlight(highlight, ctx.time_seconds());
-            self.publish_channel_buffer(ctx)?;
+            self.paint_highlight(samples, highlight, ctx.time_seconds());
         }
         Ok(())
     }
@@ -471,11 +481,11 @@ impl OutputNode {
     /// Paint the fault pattern over the WHOLE buffer, if the project has
     /// been faulted long enough and this engine wants the pattern.
     ///
-    /// Returns whether it painted, so the caller knows to re-publish. Also
+    /// Returns whether it painted, so the caller knows to publish. Also
     /// latches [`Self::fault_pattern_nodes`], which is what makes the
     /// output's own badge explain the red instead of looking healthy while
     /// the wire shows a diagnostic.
-    fn apply_fault_pattern(&mut self, ctx: &TickContext<'_>) -> bool {
+    fn apply_fault_pattern(&mut self, ctx: &TickContext<'_>, samples: &mut [u16]) -> bool {
         self.fault_pattern_nodes = None;
         if ctx.fault_presentation() != FaultPresentation::Pattern {
             return false;
@@ -486,10 +496,10 @@ impl OutputNode {
         if ctx.time_seconds() - since < FAULT_PATTERN_DELAY_SECONDS {
             return false;
         }
-        if self.control_samples.is_empty() {
+        if samples.is_empty() {
             return false;
         }
-        self.paint_fault_pattern(ctx.time_seconds());
+        self.paint_fault_pattern(samples, ctx.time_seconds());
         self.fault_pattern_nodes = Some(ctx.project_fault_node_count());
         true
     }
@@ -506,13 +516,12 @@ impl OutputNode {
     /// lamp the layout cannot name (a gap, a `Raw` run, or no layout yet —
     /// nothing has rendered) falls back to RGB: an approximate diagnostic
     /// beats a dark one.
-    fn paint_fault_pattern(&mut self, time_seconds: f32) {
+    fn paint_fault_pattern(&self, samples: &mut [u16], time_seconds: f32) {
         let level = fault_level_16(time_seconds);
         let mut lookup = self
             .published_sample_layout
             .as_ref()
             .map(ChannelOrders::new);
-        let samples = &mut self.control_samples;
         let lamp = SAMPLES_PER_LAMP as usize;
         let mut first = 0usize;
         while first + lamp <= samples.len() {
@@ -544,7 +553,7 @@ impl OutputNode {
     /// Returns `false` and paints NOTHING when the output's declared sample
     /// layout does not resolve every named in-extent lamp to an RGB run
     /// (A2): the caller then falls back to the breath.
-    fn paint_chase(&mut self, spans: &[ChaseSpan], time_seconds: f32) -> bool {
+    fn paint_chase(&self, samples: &mut [u16], spans: &[ChaseSpan], time_seconds: f32) -> bool {
         let total = chase_lamp_count(spans);
         if total == 0 {
             return false;
@@ -552,7 +561,7 @@ impl OutputNode {
         let Some(layout) = self.published_sample_layout.as_ref() else {
             return false;
         };
-        let established = self.control_samples.len();
+        let established = samples.len();
 
         // Resolve first, paint second: a half-decoded chase is a lie about
         // the wire, so one unresolvable lamp sends the whole output to the
@@ -568,7 +577,7 @@ impl OutputNode {
             }
         }
 
-        for sample in self.control_samples.iter_mut() {
+        for sample in samples.iter_mut() {
             *sample >>= 2;
         }
         let phase = chase::phase_at(time_seconds);
@@ -584,7 +593,7 @@ impl OutputNode {
                 continue;
             };
             let ordered = ordered_rgb_16(order, rgb);
-            self.control_samples[first..end].copy_from_slice(&ordered);
+            samples[first..end].copy_from_slice(&ordered);
         }
         true
     }
@@ -594,46 +603,98 @@ impl OutputNode {
     /// Keeps the LAST-ESTABLISHED sample count: a test pattern never resizes
     /// the channel extent, it only repaints it, so the flush path sees exactly
     /// the buffer shape the real render produced.
-    fn fill_solid(&mut self, rgb: [u8; 3]) {
+    fn fill_solid(samples: &mut [u16], rgb: [u8; 3]) {
         // 8-bit unorm to 16-bit unorm: 0..=255 maps onto 0..=65535 exactly.
         let rgb16 = [
             u16::from(rgb[0]) * 257,
             u16::from(rgb[1]) * 257,
             u16::from(rgb[2]) * 257,
         ];
-        for (index, sample) in self.control_samples.iter_mut().enumerate() {
+        for (index, sample) in samples.iter_mut().enumerate() {
             *sample = rgb16[index % 3];
         }
     }
 
-    /// Render a planned fragment set into `control_samples` and latch the
-    /// frame's interpretation metadata.
+    /// Take the channel buffer's sample storage for this frame.
+    ///
+    /// The runtime buffer is the samples' one home; rendering into a
+    /// node-owned copy and publishing it would be a second 6 B/lamp buffer
+    /// and a copy per frame. Taking marks the buffer changed for this frame
+    /// — every caller either publishes in the same tick or restores through
+    /// [`Self::restore_channel_samples`].
+    fn take_channel_samples(&self, ctx: &mut TickContext<'_>) -> Result<Vec<u16>, NodeError> {
+        let buffer_id = self
+            .channel_buffer_id
+            .ok_or_else(|| NodeError::msg("output channel buffer not initialized"))?;
+        let mut taken = Vec::new();
+        ctx.with_runtime_buffer_mut(buffer_id, ctx.revision(), |buffer| {
+            // A buffer that is not (yet) a sample buffer yields nothing; the
+            // render sizes the empty Vec and the publish stores it as samples.
+            taken = buffer.take_samples16().unwrap_or_default();
+            Ok(())
+        })?;
+        Ok(taken)
+    }
+
+    /// Hand the storage back after a render that failed, marked at the frame
+    /// it was last published: the flush sees no change and the wire keeps its
+    /// last good frame rather than a half-rendered one.
+    fn restore_channel_samples(&self, ctx: &mut TickContext<'_>, samples: Vec<u16>) {
+        let Some(buffer_id) = self.channel_buffer_id else {
+            return;
+        };
+        let _ = ctx.with_runtime_buffer_mut(buffer_id, self.published_at, |buffer| {
+            buffer.set_samples16(samples);
+            Ok(())
+        });
+    }
+
+    /// Take, render, publish — the whole frame for a planned fragment set.
+    ///
+    /// Separate from [`Self::consume`] so tests can drive placements that
+    /// auto-flow cannot yet produce (reversal, overlap, gaps): those arrive
+    /// with the patch file, and the engine must already be right when they do.
+    #[cfg(test)]
+    fn render_fragments(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+        fragments: &[OutputFragment],
+    ) -> Result<(), NodeError> {
+        let mut samples = self.take_channel_samples(ctx)?;
+        if let Err(error) = self.render_fragments_into(ctx, fragments, &mut samples) {
+            self.restore_channel_samples(ctx, samples);
+            return Err(error);
+        }
+        self.publish_channel_buffer(ctx, samples)
+    }
+
+    /// Render a planned fragment set into `samples` and latch the frame's
+    /// interpretation metadata.
     ///
     /// The buffer is sized to the set's extent, every fragment renders into
     /// its own sub-slice, and only then are gaps and contested ranges zeroed —
     /// "degrade AFTER rendering the rest" is what keeps a mis-patched strand
     /// from darkening the strands beside it.
     ///
-    /// Separate from [`Self::consume`] so tests can drive placements that
-    /// auto-flow cannot yet produce (reversal, overlap, gaps): those arrive
-    /// with the patch file, and the engine must already be right when they do.
-    fn render_fragments(
+    /// The samples are the channel buffer's own storage, taken for the frame
+    /// by [`Self::take_channel_samples`].
+    fn render_fragments_into(
         &mut self,
         ctx: &mut TickContext<'_>,
         fragments: &[OutputFragment],
+        samples: &mut Vec<u16>,
     ) -> Result<(), NodeError> {
         let coverage = fragment_coverage(fragments);
         self.fragment_status = coverage_status(&coverage);
 
-        self.control_samples
-            .resize(coverage.total_samples as usize, 0);
+        samples.resize(coverage.total_samples as usize, 0);
 
         let mut spans = Vec::new();
         let mut scratch = ProductScratch::default();
         for fragment in fragments {
             let start = fragment.offset_samples as usize;
             let end = fragment.end_samples() as usize;
-            if self.control_samples.get(start..end).is_none() {
+            if samples.get(start..end).is_none() {
                 // Unreachable while the buffer is sized from the same
                 // coverage; a fragment that cannot be placed is skipped
                 // rather than allowed to panic mid-frame.
@@ -641,18 +702,15 @@ impl OutputNode {
             }
             let extent = fragment.product.preferred_extent();
             let layout = if fragment.covers_whole_product() {
-                let target_samples = &mut self.control_samples[start..end];
+                let target_samples = &mut samples[start..end];
                 let request = ControlRenderRequest::unorm16(extent);
                 let target =
                     ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, target_samples);
                 let layout = ctx.render_control(fragment.product, &request, target)?;
                 if fragment.reversed {
-                    reverse_lamps(&mut self.control_samples[start..end]);
+                    reverse_lamps(&mut samples[start..end]);
                 }
-                rotate_lamps(
-                    &mut self.control_samples[start..end],
-                    fragment.rotation_samples,
-                );
+                rotate_lamps(&mut samples[start..end], fragment.rotation_samples);
                 layout
             } else {
                 // A partial run: the producer renders whole (once per frame,
@@ -669,14 +727,11 @@ impl OutputNode {
                     // shifting the rest of the wire to cover it up.
                     continue;
                 };
-                self.control_samples[start..end].copy_from_slice(source);
+                samples[start..end].copy_from_slice(source);
                 if fragment.reversed {
-                    reverse_lamps(&mut self.control_samples[start..end]);
+                    reverse_lamps(&mut samples[start..end]);
                 }
-                rotate_lamps(
-                    &mut self.control_samples[start..end],
-                    fragment.rotation_samples,
-                );
+                rotate_lamps(&mut samples[start..end], fragment.rotation_samples);
                 rendered.layout.clone()
             };
             place_spans(&layout, fragment, &mut spans);
@@ -684,7 +739,7 @@ impl OutputNode {
 
         for (start, end) in coverage.gaps.iter().chain(coverage.contested.iter()) {
             let range = (*start as usize)..(*end as usize);
-            if let Some(samples) = self.control_samples.get_mut(range) {
+            if let Some(samples) = samples.get_mut(range) {
                 samples.fill(0);
             }
         }
@@ -694,34 +749,33 @@ impl OutputNode {
             self.published_fragments = fragments.to_vec();
             self.placement_revision = ctx.revision();
         }
-
-        self.publish_channel_buffer(ctx)
+        Ok(())
     }
 
-    /// Copy `control_samples` into the runtime buffer and mark it dirty for this frame.
+    /// Hand the rendered samples back to the runtime buffer and mark it dirty
+    /// for this frame. No copy: the Vec is the buffer's own storage.
     ///
     /// Shared by the render path and the test-pattern bypass so both publish
-    /// byte-identical buffer kind, metadata, and revision.
-    fn publish_channel_buffer(&self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    /// identical buffer kind, metadata, and revision.
+    fn publish_channel_buffer(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+        samples: Vec<u16>,
+    ) -> Result<(), NodeError> {
         let buffer_id = self
             .channel_buffer_id
             .ok_or_else(|| NodeError::msg("output channel buffer not initialized"))?;
-        ctx.with_runtime_buffer_mut(buffer_id, ctx.revision(), |buffer| {
+        let revision = ctx.revision();
+        self.established_samples = samples.len();
+        self.published_at = revision;
+        let channels = (samples.len() / 3) as u32;
+        ctx.with_runtime_buffer_mut(buffer_id, revision, |buffer| {
             buffer.kind = RuntimeBufferKind::OutputChannels;
             buffer.metadata = RuntimeBufferMetadata::OutputChannels {
-                channels: (self.control_samples.len() / 3) as u32,
+                channels,
                 sample_format: RuntimeChannelSampleFormat::U16,
             };
-            buffer
-                .bytes
-                .resize(self.control_samples.len().saturating_mul(2), 0);
-            for (chunk, sample) in buffer
-                .bytes
-                .chunks_exact_mut(2)
-                .zip(self.control_samples.iter())
-            {
-                chunk.copy_from_slice(&sample.to_le_bytes());
-            }
+            buffer.set_samples16(samples);
             Ok(())
         })
     }
@@ -1466,15 +1520,16 @@ impl NodeRuntime for OutputNode {
         // before the first rendered frame there is nothing to repaint, so that
         // frame renders the graph and establishes it.
         let highlight = self.highlight_value(ctx)?;
-        if self.test_pattern_active(ctx)? && !self.control_samples.is_empty() {
-            self.fill_solid(TEST_PATTERN_RGB);
-            self.paint_highlight(&highlight, ctx.time_seconds());
+        if self.test_pattern_active(ctx)? && self.established_samples > 0 {
+            let mut samples = self.take_channel_samples(ctx)?;
+            Self::fill_solid(&mut samples, TEST_PATTERN_RGB);
+            self.paint_highlight(&mut samples, &highlight, ctx.time_seconds());
             // The bypass paints the fault pattern too: an output left on
             // `test_pattern` while the project faults would otherwise be the
             // one wire still lying, and a test pattern is exactly what an
             // operator reaches for when something looks wrong.
-            self.apply_fault_pattern(ctx);
-            return self.publish_channel_buffer(ctx);
+            self.apply_fault_pattern(ctx, &mut samples);
+            return self.publish_channel_buffer(ctx, samples);
         }
 
         // The graph frame is rendered into a Result that is deliberately NOT
@@ -1484,13 +1539,19 @@ impl NodeRuntime for OutputNode {
         // gets its turn either way, over whatever extent the frame managed to
         // establish. The error still travels: the engine reads it and faults
         // this node on it.
-        let rendered = self.render_graph_frame(ctx, &highlight);
-        let painted = if self.apply_fault_pattern(ctx) {
-            self.publish_channel_buffer(ctx)
-        } else {
-            Ok(())
-        };
-        rendered.and(painted)
+        let mut samples = self.take_channel_samples(ctx)?;
+        let rendered = self.render_graph_frame(ctx, &highlight, &mut samples);
+        let painted = self.apply_fault_pattern(ctx, &mut samples);
+        if rendered.is_ok() || painted {
+            // A good frame, or the fault pattern over what a failed one
+            // established: either way the buffer is this frame's to publish.
+            let published = self.publish_channel_buffer(ctx, samples);
+            return rendered.and(published);
+        }
+        // Failed with nothing to show for it: hand the storage back
+        // unpublished, so the wire keeps its last good frame.
+        self.restore_channel_samples(ctx, samples);
+        rendered
     }
 
     fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
@@ -1631,13 +1692,12 @@ mod tests {
             }
         }
 
-        /// The published buffer decoded back into u16 samples.
+        /// The published samples.
         fn published_samples(&self) -> Vec<u16> {
             self.buffer
-                .bytes
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
-                .collect()
+                .samples16()
+                .map(<[u16]>::to_vec)
+                .unwrap_or_default()
         }
     }
 
@@ -2016,14 +2076,14 @@ mod tests {
         consume_at(&mut node, &mut resolver, Revision::new(1)).expect("graph frame");
         let graph_kind = resolver.buffer.kind.clone();
         let graph_metadata = resolver.buffer.metadata.clone();
-        let graph_len = resolver.buffer.bytes.len();
+        let graph_len = resolver.buffer.byte_len();
 
         resolver.test_pattern = true;
         consume_at(&mut node, &mut resolver, Revision::new(2)).expect("pattern frame");
 
         assert_eq!(resolver.buffer.kind, graph_kind);
         assert_eq!(resolver.buffer.metadata, graph_metadata);
-        assert_eq!(resolver.buffer.bytes.len(), graph_len);
+        assert_eq!(resolver.buffer.byte_len(), graph_len);
     }
 
     #[test]
@@ -2061,16 +2121,19 @@ mod tests {
     }
 
     /// The compile-window broadcast drops NOTHING here (M6 P4). The #303
-    /// handler cleared `control_samples`; measurement showed the output's own
-    /// `produce` resizes it back earlier in the same tick than the compile
-    /// runs, so the drop freed nothing at the compile instant. See
+    /// handler cleared the control samples; measurement showed the output's
+    /// own `produce` resizes them back earlier in the same tick than the
+    /// compile runs, so the drop freed nothing at the compile instant. See
     /// `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`.
+    /// The samples live in the channel buffer now; the established extent
+    /// the node remembers must survive too.
     #[test]
     fn memory_pressure_does_not_drop_the_control_samples() {
         let mut node = output_node();
         let mut resolver = FakeResolver::new();
         consume_at(&mut node, &mut resolver, Revision::new(1)).expect("graph frame");
-        let samples_before = node.control_samples.clone();
+        let samples_before = resolver.published_samples();
+        let established_before = node.established_samples;
         assert!(
             !samples_before.is_empty(),
             "an empty baseline would prove nothing"
@@ -2088,9 +2151,11 @@ mod tests {
         }
 
         assert_eq!(
-            node.control_samples, samples_before,
-            "control_samples must survive a pressure broadcast"
+            resolver.published_samples(),
+            samples_before,
+            "the published samples must survive a pressure broadcast"
         );
+        assert_eq!(node.established_samples, established_before);
     }
 
     #[test]
@@ -2757,7 +2822,7 @@ mod tests {
         consume_at(&mut plain, &mut plain_resolver, Revision::new(1)).expect("plain frame");
 
         assert_eq!(
-            chased_resolver.buffer.bytes, plain_resolver.buffer.bytes,
+            chased_resolver.buffer.data, plain_resolver.buffer.data,
             "an empty chase is an empty highlight: the render path publishes \
              exactly the bytes it always did",
         );

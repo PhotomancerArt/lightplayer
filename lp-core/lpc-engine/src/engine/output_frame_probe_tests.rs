@@ -298,8 +298,8 @@ impl Harness {
             .get(self.sink)
             .expect("sink buffer")
             .value()
-            .bytes
-            .clone()
+            .bytes()
+            .into_owned()
     }
 
     fn read(&mut self, display_layout: ControlDisplayLayoutRead) -> Vec<OutputFrameEntry> {
