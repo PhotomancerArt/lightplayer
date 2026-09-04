@@ -1391,9 +1391,13 @@ fn GalleryPages(
 /// in `lpa-devices` is 200; this fixture stands in for 250 raw lines
 /// having arrived (200 kept, 50 dropped), mixing every
 /// [`DeviceTerminalKind`], a single ×6 repeat, several decoded wire
-/// summaries and one 400-character line to exercise the fold control.
+/// summaries, one 400-character block-plan dump, and — last, so the pinned
+/// view opens on them — the two long verdict lines a person pastes into a
+/// bug report: the 2026-09-04 bench's stamp-failed flash outcome, and a
+/// long identification failure. None of them fold (2026-09-04): they wrap
+/// whole so a select + Cmd+C copies the reason, not "+77 chars".
 #[story(
-    description = "The terminal renderer alone (P5): natural oldest-first order, typed colours, a ×6 repeat badge, a 400-char line folded to 120 chars + a click-to-expand control, wire rows tagged and coloured live-blue, and the dropped-lines notice for the 50 lines the 200-line cap pushed out. Pinned to the bottom on load."
+    description = "The terminal renderer alone (P5): natural oldest-first order, typed colours, a ×6 repeat badge, wire rows tagged and coloured live-blue, the dropped-lines notice for the 50 lines the 200-line cap pushed out, and — pinned into view at the bottom — two long verdict lines (a 193-char green flash outcome from the 2026-09-04 bench and a 234-char red identification failure) wrapping WHOLE under a hanging indent. No line ever folds (2026-09-04): the box is a fixed-height scroller, so a long line costs scroll, never card height, and selecting the panel + Cmd+C copies exactly what the board said. Pinned to the bottom on load."
 )]
 fn device_terminal_processed() -> Element {
     rsx! {
@@ -1414,17 +1418,28 @@ fn device_terminal_processed() -> Element {
     }
 }
 
-/// A 400-character line — long enough to trip the fold at 160 and show a
-/// realistic "the panel used to just eat this" block-plan dump.
+/// A 400-character line — the realistic "the panel used to just eat this"
+/// block-plan dump, wrapping whole now that nothing folds.
 fn device_terminal_story_long_line() -> String {
     let prefix = "Esp32C6RmtWs281xDriver: block plan published: outputs=[{pin:2,px:300,fmt:grb},{pin:3,px:300,fmt:grb}] clock=pll_f80m/1 lut=gamma-2.2-8bit dither=temporal-4 frame_us=23100 margin_words=3 — this is the kind of line that used to eat the panel — ";
     let filler_len = 400_usize.saturating_sub(prefix.chars().count());
     format!("{prefix}{}", "…".repeat(filler_len))
 }
 
+/// The 2026-09-04 bench line, as the flash activity minted it: a flash that
+/// installed but could not stamp the board manifest degrades to a
+/// success-with-a-reason (`success_without_stamp`), so it is an OUTCOME
+/// line — and the fold used to show 120 characters of it plus "+77 chars".
+const BENCH_STAMP_FAILED_OUTCOME: &str = "firmware installed; writing the board manifest failed (the board never became ready to write to: transport error: Transport closed — the port went away) — the compiled-in default pin map stands";
+
+/// A long FAILURE line of the shape `device_readiness` produces when
+/// nothing answered the hello: the verdict, then the recent serial snippet
+/// it was reached from.
+const LONG_IDENTIFICATION_FAILURE: &str = "identification timed out — Transport error: no LightPlayer firmware detected; recent serial output: invalid header: 0xffffffff · invalid header: 0xffffffff · ESP-ROM:esp32c6-20220919 · rst:0x1 (POWERON),boot:0x2c (SPI_FAST_FLASH_BOOT)";
+
 /// 200 typed lines (the model's `TERMINAL_CAP`) mixing every
-/// [`DeviceTerminalKind`], the ×6 repeat, the 400-char fold line, and a
-/// run of decoded wire heartbeats.
+/// [`DeviceTerminalKind`], the ×6 repeat, the 400-char block-plan dump, a
+/// run of decoded wire heartbeats, and the two long verdict lines last.
 fn device_terminal_story_lines() -> Vec<DeviceTerminalLine> {
     let mut lines = vec![
         DeviceTerminalLine {
@@ -1496,9 +1511,16 @@ fn device_terminal_story_lines() -> Vec<DeviceTerminalLine> {
         },
     ];
 
-    // Fill the rest of the 200-line cap with decoded wire heartbeats, the
-    // bulk of what a running board actually says.
-    let heartbeats_needed = 200_usize.saturating_sub(lines.len());
+    // Fill up to the 200-line cap with decoded wire heartbeats, the bulk of
+    // what a running board actually says, leaving room for the tail below.
+    let tail = vec![
+        story_line(DeviceTerminalKind::Studio, "Flashing firmware"),
+        story_line(DeviceTerminalKind::Studio, "Writing the board manifest"),
+        story_line(DeviceTerminalKind::Outcome, BENCH_STAMP_FAILED_OUTCOME),
+        story_line(DeviceTerminalKind::Studio, "Identifying the board"),
+        story_line(DeviceTerminalKind::Failure, LONG_IDENTIFICATION_FAILURE),
+    ];
+    let heartbeats_needed = 200_usize.saturating_sub(lines.len() + tail.len());
     for index in 0..heartbeats_needed {
         lines.push(DeviceTerminalLine {
             kind: DeviceTerminalKind::Wire,
@@ -1510,6 +1532,7 @@ fn device_terminal_story_lines() -> Vec<DeviceTerminalLine> {
             repeats: 1,
         });
     }
+    lines.extend(tail);
 
     lines
 }
