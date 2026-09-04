@@ -71,9 +71,9 @@
 use dioxus::prelude::*;
 use lpa_boards::{BoardDiagram, DiagramMode};
 use lpa_studio_core::{
-    DeviceAction, DeviceId, DevicePushOp, DeviceView, DevicesOp, FlashBoardChoice, PreviewSource,
-    PushOffer, PushSource, PushSourceChoice, PushSourceGroup, UiAction, UiExampleCard,
-    UiPackageCard, device_chip, flash_offer, push_offer,
+    DeviceAction, DeviceId, DevicePushOp, DeviceView, DevicesOp, FirmwareVerb, FlashBoardChoice,
+    PreviewSource, PushOffer, PushSource, PushSourceChoice, PushSourceGroup, UiAction,
+    UiExampleCard, UiPackageCard, device_chip, flash_offer, push_offer,
 };
 
 use super::card_thumb::{CardThumb, thumb_swatch_style};
@@ -418,11 +418,12 @@ pub(crate) enum BoardPickMode {
     /// The needs-firmware verb row: a picker trigger that fills the row,
     /// with the Flash CTA beside it. Picking only updates the trigger.
     Row,
-    /// The re-flash verb on a board that is already running (the P4
-    /// amendment): the quiet "Flash firmware" chip IS the trigger, and
-    /// picking a board flashes it straight away — the verb was already
-    /// pressed, so the pick completes the gesture rather than arming a
-    /// second one.
+    /// Update firmware on a board that is already running whose board did
+    /// not resolve ([`FirmwareVerb::UpdatePick`], the P4 amendment): the
+    /// quiet "Update firmware" chip IS the trigger, the panel says why a
+    /// pick is being asked for at all, and picking a board flashes it
+    /// straight away — the verb was already pressed, so the pick completes
+    /// the gesture rather than arming a second one.
     Verb,
 }
 
@@ -495,6 +496,16 @@ pub(crate) fn BoardPickPopover(
         show_all(),
     );
     let escape = board_filter_escape(chip_name.as_deref(), show_all());
+    // The verb whose pick this is, when the verb itself opened it: the
+    // Update-with-pick verb, whose reason line core wrote.
+    let verb = match mode {
+        BoardPickMode::Row => None,
+        BoardPickMode::Verb => Some(FirmwareVerb::UpdatePick),
+    };
+    let why = verb
+        .as_ref()
+        .and_then(|verb| verb.pick_reason())
+        .map(str::to_string);
     let candidates = offer.candidates.clone();
     let candidates_for_pick = offer.candidates.clone();
     let panel = rsx! {
@@ -503,6 +514,7 @@ pub(crate) fn BoardPickPopover(
             chip: chip_name.clone(),
             selected: selected_id,
             lead,
+            why,
             escape_label: escape.as_ref().map(|escape| escape.label.clone()),
             escape_show_all: escape.map(|escape| escape.show_all).unwrap_or_default(),
             on_show_all: move |next: bool| show_all.set(next),
@@ -529,11 +541,10 @@ pub(crate) fn BoardPickPopover(
                 class: quiet_action_class().to_string(),
                 open_class: quiet_action_class().to_string(),
                 trigger: rsx! {
-                    span { "Flash firmware" }
+                    span { "{FirmwareVerb::UpdatePick.label()}" }
                 },
-                label: "Flash firmware".to_string(),
-                title: "Write the firmware this Studio serves onto the board; the project and identity stay. Several boards fit this chip, so say which one it is."
-                    .to_string(),
+                label: FirmwareVerb::UpdatePick.label().to_string(),
+                title: FirmwareVerb::UpdatePick.summary(),
                 popup_class: BOARD_POPUP_CLASS.to_string(),
                 chrome_class: "ux-popover-chrome-neutral".to_string(),
                 placement: PopoverPlacement::BottomStart,
@@ -596,6 +607,11 @@ fn BoardPickPanel(
     chip: Option<String>,
     selected: Option<String>,
     lead: String,
+    /// Why a pick is being asked for on THIS verb, when the verb itself
+    /// opened the panel (a running board whose board is unknown). Core's
+    /// words; `None` on the needs-firmware row, where the pick is the face.
+    #[props(default)]
+    why: Option<String>,
     escape_label: Option<String>,
     escape_show_all: bool,
     on_show_all: EventHandler<bool>,
@@ -621,6 +637,9 @@ fn BoardPickPanel(
                         }
                     }
                 }
+            }
+            if let Some(why) = why {
+                p { class: pick_reason_class(), "{why}" }
             }
             div { class: panel_body_class(),
                 div { class: board_grid_class(),
@@ -989,6 +1008,13 @@ fn pick_card_sub_class() -> &'static str {
 /// tab's card is exactly the size of every other card.
 fn pick_new_face_class() -> &'static str {
     "tw:grid tw:aspect-[4/3] tw:w-full tw:place-items-center tw:rounded-xs tw:border tw:border-dashed tw:border-border-strong tw:text-lg tw:text-subtle-foreground"
+}
+
+/// The one line under the filter that says why a running board is being
+/// asked to pick at all. Body tone, not the filter's subtle one: it is the
+/// answer to "why is this here?", and it reads once.
+fn pick_reason_class() -> &'static str {
+    "tw:m-0 tw:border-b tw:border-border-muted tw:px-2.5 tw:py-1.5 tw:text-[11px] tw:leading-snug tw:text-foreground"
 }
 
 fn filter_line_class() -> &'static str {

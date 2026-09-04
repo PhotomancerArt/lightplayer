@@ -55,8 +55,8 @@ pub use device_firmware_face::{
     device_firmware_line, firmware_face_preview_sentence, pending_firmware_line,
 };
 pub use device_flash::{
-    FlashBoardChoice, FlashOffer, derive_flash_name, flash_offer, flash_offer_for, reflash_choice,
-    taken_device_titles,
+    FirmwareVerb, FlashBoardChoice, FlashOffer, derive_flash_name, firmware_verb, flash_offer,
+    flash_offer_for, reflash_choice, taken_device_titles,
 };
 pub use device_identity::{
     DeviceIdentityLine, IdentityFirmware as DeviceIdentityFirmware, device_chip,

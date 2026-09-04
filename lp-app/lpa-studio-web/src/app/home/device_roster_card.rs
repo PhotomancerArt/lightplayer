@@ -54,7 +54,7 @@
 //! | zone | info line | verbs |
 //! |---|---|---|
 //! | Project | the project name, "Nothing loaded", the push's label + %; a degraded board's fault text replaces it | Open · Clear faults … [pick] Put it on the board … Remove |
-//! | Firmware | "<firmware> · <board>" (with "— older than Studio" when it is), the flash face's own verdict line ("Blank flash — needs firmware", …), the flash's label + % (the terminal is this zone's second half) | [board pick] Flash firmware … Factory reset |
+//! | Firmware | "<firmware> · <board>" (with "— older than Studio" when it is), the flash face's own verdict line ("Blank flash — needs firmware", …), the flash's label + % (the terminal is this zone's second half) | [board pick] Flash firmware (a needs-firmware face) · Update firmware (a running LightPlayer; opens the pick once when its board is unknown) … Factory reset |
 //! | Device | freshness ("last heard 3 s ago" / "quiet — …"), "Identifying…" | Reset · Retry · Disconnect … Forget |
 //!
 //! An activity lights the bar of the zone it belongs to and puts its
@@ -94,10 +94,10 @@
 //! a picker may never open from a row that is not fixed-height, because a
 //! panel that pushes the card taller is exactly what AC2 forbids. The
 //! popovers' panels float in the top layer, so opening one cannot change
-//! the card's height at all. The re-flash's unresolved case (a chip with
-//! several fitting boards, none registered) is the same quiet chip
-//! re-dressed as [`BoardPickPopover`]'s trigger, and picking a board
-//! flashes it.
+//! the card's height at all. Update firmware's unresolved case (a chip with
+//! several fitting boards, none registered — [`FirmwareVerb::UpdatePick`])
+//! is the same quiet chip re-dressed as [`BoardPickPopover`]'s trigger, and
+//! picking a board flashes it.
 //!
 //! Arming any destructive chip marks the whole card (`.ux-armed-scope:has()`
 //! in style.css, D8). Arming dims what the card SAYS (`ux-armed-dim` on the
@@ -118,9 +118,9 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceAction, DeviceActivityView, DeviceEscape, DeviceLoadedProject, DeviceStatus, DeviceView,
-    DevicesOp, PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiStatus, device_chip,
+    DevicesOp, FirmwareVerb, PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiStatus,
     device_escape_action, device_firmware_line, device_identity_line, device_status_kind,
-    firmware_face_preview_sentence, pending_escape_action, pending_firmware_line, reflash_choice,
+    firmware_face_preview_sentence, firmware_verb, pending_escape_action, pending_firmware_line,
 };
 
 use super::device_pick_popover::{
@@ -160,9 +160,13 @@ pub(crate) fn DeviceRosterCard(
         label: card.state_label.clone(),
         kind: device_status_kind(card.status),
     };
-    // The flash face appears on a settled needs-firmware verdict, never
-    // while an activity runs (the verb row is withdrawn then).
-    let offer_flash = card.needs_firmware() && card.activity.is_none();
+    // The FIRMWARE zone's verb, decided in core (ruled 2026-09-04): Flash,
+    // with the pick, on a needs-firmware face; Update on a running
+    // LightPlayer — one click when its board resolved, the pick once when
+    // it did not. `None` while an activity runs (the row is withdrawn).
+    let verb = firmware_verb(&card);
+    let offer_flash = matches!(verb, Some(FirmwareVerb::Flash));
+    let update_action = verb.as_ref().and_then(|verb| verb.update_action(device));
     // The empty face: a LightPlayer that has REPORTED nothing loaded. A
     // board that simply has not said yet gets neither face — see
     // `DeviceLoadedProject::Unknown`.
@@ -182,25 +186,9 @@ pub(crate) fn DeviceRosterCard(
     // or a non-green recovery state — so the verb appears with the attention
     // chip and the fault line, and leaves with them.
     let degraded = card.status == DeviceStatus::Degraded;
-    // Re-flash on a RUNNING board (G1 2026-09-02: the only road to newer
-    // firmware was Factory reset, which "causes issues sometimes"). The
-    // pick is not the user's here — it is the board this card is registered
-    // as, resolved against the served catalog for the JOINED chip; when the
-    // registry has no board, a chip with exactly one fit still earns the
-    // verb. Safe on a live board: the Flash activity parks a native-USB
-    // chip in its ROM downloader first, and the merged image ends before
-    // the lpfs partition, so the project and the efuse identity survive.
+    // The chip the board popovers filter by, and the source that answered
+    // it (the panel says which). Core's verb already joined the same chip.
     let chip = joined_chip(&card);
-    let reflash = reflash_choice(device_chip(&card).as_deref(), card.board_id.as_deref());
-    // When the pick does NOT resolve (a chip with several boards and no
-    // registered one — every board flashed before the hello carried its
-    // board id), the SAME quiet chip becomes the board popover's trigger
-    // instead of guessing, and picking a board flashes it. The popover's
-    // panel floats in the top layer, so opening it cannot change the card's
-    // height — which is why the verb could come up out of the footer at all.
-    let offer_reflash_picker = reflash.is_none()
-        && chip.is_some()
-        && matches!(card.status, DeviceStatus::Ready | DeviceStatus::Degraded);
     // The running face's ONE Primary: Open — the editor as a lens on this
     // board. Opening is NAVIGATION, so it is a real `<a>` to the device
     // route (the same road the project cards take): a plain click rides the
@@ -363,40 +351,49 @@ pub(crate) fn DeviceRosterCard(
                     } else if card.activity.is_some() {
                         // Withdrawn at its height while other work runs.
                     } else {
-                        // The blank board's face: the chip-filtered board
-                        // pick plus its Flash CTA, on one row.
-                        if offer_flash {
-                            BoardPickPopover { device, chip: chip.clone(), on_action }
-                        }
-                        // Re-flash (#500) on a board that is already
-                        // running: a resolved pick dispatches Flash straight
-                        // away; an unresolved one turns the same quiet chip
-                        // into the board popover's trigger.
-                        if let Some(choice) = reflash.clone()
-                            && idle
-                            && linked
-                            && !offer_flash
-                        {
-                            ActionButton {
-                                key: "{\"flash-firmware\"}",
-                                action: DevicesOp::action_for(DeviceAction::Flash {
+                        match verb {
+                            // The blank board's face: the chip-filtered
+                            // board pick plus its Flash CTA, on one row.
+                            Some(FirmwareVerb::Flash) => rsx! {
+                                BoardPickPopover { device, chip: chip.clone(), on_action }
+                            },
+                            // Update (#500) on a board that is already
+                            // running (G1 2026-09-02: the only road to
+                            // newer firmware was Factory reset, which
+                            // "causes issues sometimes"), its board
+                            // resolved: one click, wearing core's label.
+                            // Safe on a live board: the Flash activity
+                            // parks a native-USB chip in its ROM
+                            // downloader first, and the merged image ends
+                            // before the lpfs partition, so the project
+                            // and the efuse identity survive.
+                            Some(FirmwareVerb::Update(_)) => rsx! {
+                                if let Some(action) = update_action.clone() {
+                                    ActionButton {
+                                        key: "{\"update-firmware\"}",
+                                        action,
+                                        running: false,
+                                        variant: ActionButtonVariant::Quiet,
+                                        on_action,
+                                    }
+                                }
+                            },
+                            // The same verb with the board unresolved:
+                            // the quiet chip is the board popover's
+                            // trigger, and picking flashes. The panel
+                            // floats in the top layer, so opening it
+                            // cannot change the card's height — which is
+                            // why the verb could come up out of the footer
+                            // at all.
+                            Some(FirmwareVerb::UpdatePick) => rsx! {
+                                BoardPickPopover {
                                     device,
-                                    board_id: choice.board_id.clone(),
-                                    build_id: choice.build_id.clone(),
-                                    park_first: choice.park_first,
-                                }),
-                                running: false,
-                                variant: ActionButtonVariant::Quiet,
-                                on_action,
-                            }
-                        }
-                        if offer_reflash_picker && idle && linked && !offer_flash {
-                            BoardPickPopover {
-                                device,
-                                chip: chip.clone(),
-                                mode: BoardPickMode::Verb,
-                                on_action,
-                            }
+                                    chip: chip.clone(),
+                                    mode: BoardPickMode::Verb,
+                                    on_action,
+                                }
+                            },
+                            None => rsx! {},
                         }
                         span { class: "tw:min-w-0 tw:flex-1" }
                         // The other firmware verb: wipe the flash back to a

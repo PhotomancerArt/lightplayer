@@ -26,8 +26,19 @@
 //!    back.
 //!
 //! The hello is **fold evidence**, never a sticky gate: the reducer settles
-//! the moment `ctx.evidence.has_hello()` turns true, whichever rung caused
-//! it. All waiting is scheduled timers (I7 — a reducer never awaits).
+//! the moment the fold has heard one, whichever rung caused it. All waiting
+//! is scheduled timers (I7 — a reducer never awaits).
+//!
+//! ⚠️ The hello has to be NEWER than the write. The observation window a
+//! hello lives in survives a close (the ADR's ruled list: open, successful
+//! reset and detach clear it; close never did), so a board that ran
+//! LightPlayer before the flash still carries its pre-flash hello while the
+//! flasher's closed port is being reopened. Reading that hello as the new
+//! firmware answering started the manifest stamp over the closed port on
+//! the ladder's first poke, and every write failed on the spot with
+//! "Serial port is not open." (bench, classic V3 on a CH340, 2026-09-04).
+//! The ladder therefore asks for a hello heard at or after the instant the
+//! write effect ended — see [`FlashActivity::heard_flashed_firmware`].
 //!
 //! Once the hello proves the app protocol is up, one more coarse effect
 //! writes the picked board's runtime manifest to `/hardware.json`
@@ -92,6 +103,11 @@ enum FlashPhase {
         rung_deadline: Millis,
         /// Next instant to retry the open / re-ask the hello.
         next_poke_at: Millis,
+        /// When the ladder began: the instant the write effect ended. Only
+        /// a hello heard at or after this is the flashed firmware speaking;
+        /// an older one in the same window is the board the flash replaced.
+        #[serde(default)]
+        since: Millis,
     },
     /// Hello heard; the board-manifest effect is writing `/hardware.json`.
     Stamping { deadline: Millis },
@@ -250,6 +266,20 @@ impl FlashActivity {
         }])
     }
 
+    /// Whether the fold has heard the FLASHED firmware: a hello at or after
+    /// the instant the write effect ended. `has_hello` alone is not the
+    /// question — the window survives a close, so a board that ran
+    /// LightPlayer before the flash still carries its pre-flash hello while
+    /// the flasher's closed port is being reopened (bench, 2026-09-04).
+    fn heard_flashed_firmware(&self, ctx: &ActivityCtx<'_>) -> bool {
+        let FlashPhase::Reconnecting { since, .. } = &self.phase else {
+            return false;
+        };
+        ctx.evidence
+            .hello_heard_at()
+            .is_some_and(|heard_at| heard_at >= *since)
+    }
+
     fn success(&self, ctx: &ActivityCtx<'_>) -> ActivityOutcome {
         let label = ctx
             .evidence
@@ -310,6 +340,7 @@ impl FlashActivity {
                             rung: ReconnectRung::Reopen,
                             rung_deadline: now.plus_ms(ctx.config.flash_rung_ms),
                             next_poke_at: now.plus_ms(ctx.config.flash_reopen_retry_ms),
+                            since: now,
                         };
                         ActivityStep::Continue(self.open_port(ctx))
                     }
@@ -360,8 +391,9 @@ impl FlashActivity {
                 rung,
                 rung_deadline,
                 next_poke_at,
+                since,
             } => {
-                if ctx.evidence.has_hello() {
+                if self.heard_flashed_firmware(ctx) {
                     return self.on_hello(now, ctx);
                 }
                 if now >= rung_deadline {
@@ -381,6 +413,7 @@ impl FlashActivity {
                         rung,
                         rung_deadline,
                         next_poke_at: now.plus_ms(ctx.config.flash_reopen_retry_ms),
+                        since,
                     };
                     return ActivityStep::Continue(commands);
                 }
@@ -430,10 +463,15 @@ impl FlashActivity {
             // Keep knocking — the rung deadline still moves the ladder on.
             _ => self.open_port(ctx),
         };
+        let since = match self.phase {
+            FlashPhase::Reconnecting { since, .. } => since,
+            _ => now,
+        };
         self.phase = FlashPhase::Reconnecting {
             rung: next,
             rung_deadline: now.plus_ms(ctx.config.flash_rung_ms),
             next_poke_at: now.plus_ms(ctx.config.flash_reopen_retry_ms),
+            since,
         };
         ActivityStep::Continue(commands)
     }
@@ -457,8 +495,7 @@ impl FlashActivity {
                 if self.winding_down {
                     return ActivityStep::nothing();
                 }
-                if matches!(self.phase, FlashPhase::Reconnecting { .. }) && ctx.evidence.has_hello()
-                {
+                if self.heard_flashed_firmware(ctx) {
                     return self.on_hello(now, ctx);
                 }
                 ActivityStep::nothing()

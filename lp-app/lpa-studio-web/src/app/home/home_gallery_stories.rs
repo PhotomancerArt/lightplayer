@@ -27,7 +27,9 @@ use lpa_studio_core::{
 };
 
 use crate::app::home::card_thumb::CardThumb;
-use crate::app::home::device_pick_popover::{BoardPickPopover, ChipSource, ProjectPickPopover};
+use crate::app::home::device_pick_popover::{
+    BoardPickMode, BoardPickPopover, ChipSource, ProjectPickPopover,
+};
 use crate::app::home::device_roster_card::DeviceRosterCard;
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
@@ -970,7 +972,7 @@ fn roster_page_fixture() -> DeviceRosterView {
 /// story is that an activity changes what the rows say and never how tall
 /// they are.
 #[story(
-    description = "One card per FIRMWARE FACE — the sheet that did not exist when an older board shipped drawn as a blank chip (bench 2026-09-04: a proto-19 classic on a proto-20 Studio read \"Blank flash — needs firmware\" and \"no firmware\" while its terminal decoded the hello naming fw-esp32v3 and a heartbeat carrying a red fault). Six faces in 400px columns, each in ITS OWN words, decided in core and tested per variant: OLDER (a running LightPlayer one wire version behind — still Ready, the project and its fault still on the project line, the firmware line reading \"<firmware> · <board> — older than Studio, update recommended\" and the re-flash verb offered, never forced: warn, then proceed); NEWER (the same the other way, no recommendation); PRE-HELLO (speaks the framing, never said hello); FOREIGN (a recognised factory firmware, named); BOOTLOADER (parked in ROM download mode); SILENT (open port, nothing heard, Retry beside Reset); and ATTACHED — NOT LISTENING (the older classic after Disconnect, bench 2026-09-04: the window restarted so the Firmware zone says \"No firmware reported yet\", while the header keeps the chip, board and firmware the record remembers — \"fw fw-esp32v3 7c80a27 (last seen)\", memory marked as memory, never a live claim). The chip is the STATUS, unchanged by the wire version; the face's sentence lives in the Firmware zone — and every card measures the same height (AC2)."
+    description = "One card per FIRMWARE FACE — the sheet that did not exist when an older board shipped drawn as a blank chip (bench 2026-09-04: a proto-19 classic on a proto-20 Studio read \"Blank flash — needs firmware\" and \"no firmware\" while its terminal decoded the hello naming fw-esp32v3 and a heartbeat carrying a red fault). Eight cards in 400px columns, each in ITS OWN words, decided in core and tested per variant. Two VERBS for two situations (ruled 2026-09-04): a running LightPlayer offers UPDATE FIRMWARE, matching its line's \"update recommended\"; a needs-firmware face offers FLASH FIRMWARE with the board pick, since nothing is known. OLDER (a running LightPlayer one wire version behind — still Ready, the project and its fault still on the project line, the firmware line reading \"<firmware> · <board> — older than Studio, update recommended\", and Update firmware as ONE click because the registry knows the board: offered, never forced — warn, then proceed); OLDER, BOARD UNKNOWN (the bench classic verbatim: its hello says `?` because the board id comes from the manifest Studio stamps at flash and this board was flashed from the CLI, the registry has no board either, and a classic chip fits several boards — so the SAME Update verb opens the pick once, and the panel says why); NEWER (the same the other way, no recommendation); PRE-HELLO (speaks the framing, never said hello); FOREIGN (a recognised factory firmware, named); BOOTLOADER (parked in ROM download mode); SILENT (open port, nothing heard, Retry beside Reset); and ATTACHED — NOT LISTENING (the older classic after Disconnect, bench 2026-09-04: the window restarted so the Firmware zone says \"No firmware reported yet\", while the header keeps the chip, board and firmware the record remembers — \"fw fw-esp32v3 7c80a27 (last seen)\", memory marked as memory, never a live claim). The chip is the STATUS, unchanged by the wire version; the face's sentence lives in the Firmware zone — and every card measures the same height (AC2)."
 )]
 fn devices_card_firmware_faces() -> Element {
     let faces = firmware_face_fixtures();
@@ -996,19 +998,22 @@ fn devices_card_firmware_faces() -> Element {
     }
 }
 
-/// The six firmware faces a settled board can wear besides the current
-/// LightPlayer (which the states sheet already covers), plus the closed
-/// window that wears none and remembers one.
+/// The firmware faces a settled board can wear besides the current
+/// LightPlayer (which the states sheet already covers) — the older face
+/// twice, once with its board known and once without, because the verb
+/// row differs (one click vs. the pick once) — plus the closed window that
+/// wears none and remembers one.
 fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
     use lpa_studio_core::{DeviceFirmwareFace, DeviceWireVersion};
 
     let running = roster_fixture().roster.devices.remove(0);
     let open_uid = Some("dev000000daqf6dvvqz".to_string());
 
-    // The bench case, verbatim: an older classic, running, with a fault.
+    // An older classic, running, with a fault — and REGISTERED as a
+    // Dig-Uno, so Update firmware is one click.
     let older = DeviceView {
         id: DeviceId(31),
-        title: "Bench classic · Sep 4".to_string(),
+        title: "Shop classic · Sep 4".to_string(),
         status: DeviceStatus::Degraded,
         state_label: "Degraded".to_string(),
         detail: Some("LightPlayer · fw-esp32v3 7c80a27".to_string()),
@@ -1029,7 +1034,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         terminal: vec![
             story_line(
                 DeviceTerminalKind::Wire,
-                "hello · proto 19 · ? · fw-esp32v3 7c80a27 (dirty)",
+                "hello · proto 19 · quinled/dig-uno · fw-esp32v3 7c80a27 (dirty)",
             ),
             story_line(
                 DeviceTerminalKind::Studio,
@@ -1046,6 +1051,35 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             ),
         ],
         ..running.clone()
+    };
+    // The bench case, verbatim: the same older classic, but its hello
+    // reports board `?` (flashed from the CLI, so no stamped manifest) and
+    // the registry has no board either. A classic chip fits several boards,
+    // so the SAME Update verb opens the pick once — and says why.
+    let older_unknown = DeviceView {
+        id: DeviceId(37),
+        title: "Bench classic · Sep 4".to_string(),
+        board_id: None,
+        terminal: vec![
+            story_line(
+                DeviceTerminalKind::Wire,
+                "hello · proto 19 · ? · fw-esp32v3 7c80a27 (dirty)",
+            ),
+            story_line(
+                DeviceTerminalKind::Studio,
+                "firmware speaks wire proto 19, Studio speaks 20 — older firmware, proceeding anyway",
+            ),
+            story_line(
+                DeviceTerminalKind::Outcome,
+                "fw-esp32v3 7c80a27 (older firmware than Studio)",
+            ),
+            story_repeat(
+                DeviceTerminalKind::Wire,
+                "heartbeat · studio · FAULT red",
+                12,
+            ),
+        ],
+        ..older.clone()
     };
     let newer = DeviceView {
         id: DeviceId(32),
@@ -1213,6 +1247,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
 
     vec![
         ("Older than Studio", older, open_uid.clone()),
+        ("Older, board unknown", older_unknown, open_uid.clone()),
         ("Newer than Studio", newer, open_uid),
         ("Pre-hello firmware", pre_hello, None),
         ("Foreign firmware", foreign, None),
@@ -1569,12 +1604,25 @@ fn device_pick_popover_open() -> Element {
     description = "The board pick popover, open and filtered (P6, AC4; renderings P10). The chip the boot banner named narrows the served catalog, and the panel SAYS so — which chip, which source answered it, how many boards fit — with \"show all\" as the escape; the flash preflight's chip guard, not the filter, is what makes a wrong pick fail safely, which is what the foot line is for. Each tile now LEADS with the board as lpa-boards draws it — the same sidecar and the same renderer the boards page uses, turned a quarter turn and fitted to a 56px band, so a devkit lies along the band instead of standing in it as a sliver and tiles of a three-to-one height range still line their names up — over the name, its manufacturer and flash, and its family, marked green only where it matches the detected chip. The trigger's swatch carries the picked board's own silhouette. Two C6 boards fit, so nothing is preselected and the Flash verb waits: the pin map is written to the device, so the card never guesses."
 )]
 fn device_board_pick_open() -> Element {
+    board_pick_story(BoardPickMode::Row, ("esp32c6", ChipSource::BootBanner))
+}
+
+#[story(
+    description = "Update firmware's pick, open (ruled 2026-09-04). A running LightPlayer wears UPDATE FIRMWARE, and when its board is known that is one click. This is the other case — the bench classic: its hello reports board `?` (the board id comes from the manifest Studio stamps at flash, and this board was flashed from the CLI), the registry has no board, and a classic ESP32 chip fits several served boards — so the SAME quiet chip is the picker's trigger, and the panel earns the detour with one line under its filter: \"This board hasn't said which board it is. Pick once; Studio stamps it at flash, and next time this is one click.\" Picking a board flashes it straight away: the verb was already pressed. The verb, the reason, and whether a pick is needed at all are decided in core (`firmware_verb`) and tested there; this panel only draws them."
+)]
+fn device_update_pick_open() -> Element {
+    board_pick_story(BoardPickMode::Verb, ("esp32", ChipSource::BootBanner))
+}
+
+/// One 420px column with the board pick popover mounted open.
+fn board_pick_story(mode: BoardPickMode, chip: (&str, ChipSource)) -> Element {
     rsx! {
         section { class: "tw:min-h-[420px] tw:w-[420px] tw:p-4",
             div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
                 BoardPickPopover {
                     device: DeviceId(3),
-                    chip: Some(("esp32c6".to_string(), ChipSource::BootBanner)),
+                    chip: Some((chip.0.to_string(), chip.1)),
+                    mode,
                     initially_open: true,
                     on_action: |_| {},
                 }
