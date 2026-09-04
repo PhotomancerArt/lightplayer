@@ -60,6 +60,14 @@ burns a hardware session and blocks whatever gate the board was needed for.
 - **2026-08-02** — bisected and gated. The classic now runs decisions-only
   at 18,144 B / 16 fps, ahead of its pre-#243 18,128 B / 13 fps; flipping the
   gate back on costs 8,368 B for 5 fps.
+- **2026-09-02** — the emulator heap-budget gate (`docs/heap-budget-gate.md`)
+  now prices a per-frame cache in bytes without a serial cable: `fw-emu`
+  turned `resolver-payload-cache` on to match the C6, and the record diff
+  showed `examples/basic` `frame.retained` +15,361 B (30,007 → 45,368 B).
+  Same gate gained `alloc_count` / `alloc_bytes` per frame (a steady-render
+  pass), so the *churn* side of a per-frame optimisation is priced too. Partial
+  exit: the number is produced by CI and moves when a cache is added; it is
+  the C6 configuration, not the classic's arena.
 
 **Exit criteria** — a per-project heap number for a known project on the
 classic (or a faithful emulation of its arena) is produced by something

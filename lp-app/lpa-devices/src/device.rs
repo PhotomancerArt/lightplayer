@@ -24,11 +24,15 @@
 use serde::{Deserialize, Serialize};
 
 use crate::activity::activity_cell::Reducer;
+use crate::activity::erase::EraseActivity;
+use crate::activity::flash::FlashActivity;
 use crate::activity::identify::IdentifyActivity;
+use crate::activity::push::PushActivity;
+use crate::activity::remove_project::RemoveProjectActivity;
 use crate::activity::{
     ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityProgress, ActivityStep,
 };
-use crate::event::{Action, ActivityMarker, Command, Event, Input};
+use crate::event::{Action, ActivityMarker, Command, EffectId, Event, Input};
 use crate::evidence::{Classification, Evidence};
 use crate::identity::{DeviceId, IdentityBinding, IdentityChain};
 use crate::intent::{ConnectionIntent, Intent};
@@ -37,6 +41,16 @@ use crate::link::{LinkCommand, LinkId};
 use crate::record::DeviceRecord;
 use crate::roster::ModelCtx;
 use crate::time::Millis;
+use crate::wire::ClientFrame;
+
+/// Correlation ids for the two frames [`Action::ClearFaults`] sends.
+///
+/// Constants rather than a counter because nothing correlates them: the fold
+/// reads a frame's BODY, and every activity already restarts its own ids at
+/// 1 (see `IdentifyActivity::ask`). A number that only ever appears in a
+/// journal line earns no state on the device.
+const CLEAR_FAULTS_REQUEST_ID: u32 = 1;
+const CLEAR_FAULTS_REREAD_REQUEST_ID: u32 = 2;
 
 /// One known device.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -58,6 +72,11 @@ pub struct Device {
     /// gesture that asks again.
     #[serde(default)]
     identify_retries: u32,
+    /// Generations handed to coarse effects on this device. Monotonic and
+    /// never reset: a marker from an effect this device started two
+    /// activities ago must not be able to look current.
+    #[serde(default)]
+    next_effect_id: u64,
 }
 
 impl Device {
@@ -71,6 +90,7 @@ impl Device {
             activity: None,
             armed_timer: None,
             identify_retries: 0,
+            next_effect_id: 0,
         }
     }
 
@@ -145,6 +165,7 @@ impl Device {
         let Some(cell) = self.activity.take() else {
             return Vec::new();
         };
+        let mut abandoned = self.abandon_commands(&cell);
         ctx.journal.note(
             now,
             self.scope(),
@@ -176,7 +197,29 @@ impl Device {
             },
             ctx,
         );
-        self.recovery_commands(reason, ctx)
+        // The abandon goes FIRST: the recovery it precedes reopens the port,
+        // and a pump still paused behind an orphaned borrow would eat every
+        // line the reopened port carries.
+        abandoned.extend(self.recovery_commands(reason, ctx));
+        abandoned
+    }
+
+    /// Let go of the coarse effect a cell that is coming down still owns.
+    ///
+    /// The effect itself cannot be stopped — it runs in a spawned future the
+    /// model has no handle on — but its exclusive wire borrow can be given
+    /// back, and it must be: an orphaned borrow held the fold deaf for the
+    /// rest of the effect's own budget (G1 bench, 2026-08-31). Late markers
+    /// are already dropped by the generation stamp.
+    fn abandon_commands(&self, cell: &ActivityCell) -> Vec<Command> {
+        let (Some(effect_id), Some(link)) = (cell.current_effect, self.link()) else {
+            return Vec::new();
+        };
+        vec![Command::AbandonEffect {
+            device: self.id,
+            link,
+            effect_id,
+        }]
     }
 
     /// Persist-worthy snapshot of identity + preferences.
@@ -219,6 +262,7 @@ impl Device {
             return Vec::new();
         }
         let settle_at = now.plus_ms(ctx.config.identify_deadline_ms);
+        let effect_id = self.mint_effect_id();
         let mut reducer =
             IdentifyActivity::new(now, settle_at, ctx.config.hello_request_interval_ms);
         let commands = {
@@ -226,6 +270,7 @@ impl Device {
                 link: self.evidence.link(),
                 evidence: &self.evidence,
                 config: ctx.config,
+                effect_id,
             };
             reducer.spawn_commands(&mut activity_ctx)
         };
@@ -234,12 +279,164 @@ impl Device {
             settle_at.plus_ms(ctx.config.supervision_slack_ms),
             Reducer::Identify(reducer),
         );
+        self.install_activity(now, cell, effect_id, &commands, ctx);
+        commands
+    }
+
+    /// Spawn the Flash activity, unless the device is already busy (I5) or
+    /// has no link to flash over. The build id was resolved by the app from
+    /// (board, detected chip); the model treats both as opaque.
+    pub(crate) fn spawn_flash(
+        &mut self,
+        now: Millis,
+        board_id: &str,
+        build_id: &str,
+        park_first: bool,
+        ctx: &mut ModelCtx<'_>,
+    ) -> Vec<Command> {
+        if self.activity.is_some() || self.link().is_none() {
+            return Vec::new();
+        }
+        let effect_id = self.mint_effect_id();
+        let mut reducer = FlashActivity::new(
+            self.id,
+            board_id.to_string(),
+            build_id.to_string(),
+            park_first,
+        );
+        let commands = {
+            let activity_ctx = ActivityCtx {
+                link: self.evidence.link(),
+                evidence: &self.evidence,
+                config: ctx.config,
+                effect_id,
+            };
+            reducer.spawn_commands(now, &activity_ctx)
+        };
+        let cell = ActivityCell::new(
+            now,
+            now.plus_ms(ctx.config.flash_deadline_ms),
+            Reducer::Flash(reducer),
+        );
+        self.install_activity(now, cell, effect_id, &commands, ctx);
+        commands
+    }
+
+    /// Spawn the Erase activity — Factory reset — unless the device is
+    /// already busy (I5) or has no link to erase over.
+    pub(crate) fn spawn_erase(&mut self, now: Millis, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
+        if self.activity.is_some() || self.link().is_none() {
+            return Vec::new();
+        }
+        let effect_id = self.mint_effect_id();
+        let reducer = EraseActivity::new(self.id);
+        let commands = {
+            let activity_ctx = ActivityCtx {
+                link: self.evidence.link(),
+                evidence: &self.evidence,
+                config: ctx.config,
+                effect_id,
+            };
+            reducer.spawn_commands(&activity_ctx)
+        };
+        let cell = ActivityCell::new(
+            now,
+            now.plus_ms(ctx.config.flash_deadline_ms),
+            Reducer::Erase(reducer),
+        );
+        self.install_activity(now, cell, effect_id, &commands, ctx);
+        commands
+    }
+
+    /// Spawn the Remove-project activity, unless the device is already busy
+    /// (I5) or has no link to talk over. WHICH project is removed is the
+    /// board's own report, read inside the conversation — see
+    /// [`Action::RemoveProject`](crate::Action::RemoveProject).
+    pub(crate) fn spawn_remove_project(
+        &mut self,
+        now: Millis,
+        ctx: &mut ModelCtx<'_>,
+    ) -> Vec<Command> {
+        if self.activity.is_some() || self.link().is_none() {
+            return Vec::new();
+        }
+        let effect_id = self.mint_effect_id();
+        let reducer = RemoveProjectActivity::new(self.id);
+        let commands = {
+            let activity_ctx = ActivityCtx {
+                link: self.evidence.link(),
+                evidence: &self.evidence,
+                config: ctx.config,
+                effect_id,
+            };
+            reducer.spawn_commands(&activity_ctx)
+        };
+        // The same conversation shape as a push, over the same wire: its
+        // backstop is the same one.
+        let cell = ActivityCell::new(
+            now,
+            now.plus_ms(ctx.config.push_deadline_ms),
+            Reducer::RemoveProject(reducer),
+        );
+        self.install_activity(now, cell, effect_id, &commands, ctx);
+        commands
+    }
+
+    /// Spawn the Push activity, unless the device is already busy (I5) or
+    /// has no link to push over. The payload was staged with the effects
+    /// layer before this gesture was folded — see
+    /// [`Action::Push`](crate::Action::Push) for why the model does not
+    /// carry it.
+    pub(crate) fn spawn_push(&mut self, now: Millis, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
+        if self.activity.is_some() || self.link().is_none() {
+            return Vec::new();
+        }
+        let effect_id = self.mint_effect_id();
+        let reducer = PushActivity::new(self.id);
+        let commands = {
+            let activity_ctx = ActivityCtx {
+                link: self.evidence.link(),
+                evidence: &self.evidence,
+                config: ctx.config,
+                effect_id,
+            };
+            reducer.spawn_commands(&activity_ctx)
+        };
+        let cell = ActivityCell::new(
+            now,
+            now.plus_ms(ctx.config.push_deadline_ms),
+            Reducer::Push(reducer),
+        );
+        self.install_activity(now, cell, effect_id, &commands, ctx);
+        commands
+    }
+
+    /// Seat a freshly spawned activity: journal the bracket, raise the
+    /// `Started` marker, and remember which coarse effect (if any) the
+    /// spawn started, so that effect's markers can be told apart from a
+    /// predecessor's.
+    fn install_activity(
+        &mut self,
+        now: Millis,
+        mut cell: ActivityCell,
+        effect_id: EffectId,
+        commands: &[Command],
+        ctx: &mut ModelCtx<'_>,
+    ) {
+        if starts_effect(commands, effect_id) {
+            cell.current_effect = Some(effect_id);
+        }
         let kind = cell.kind;
         self.activity = Some(cell);
         ctx.journal
             .note(now, self.scope(), JournalNote::ActivityStarted { kind });
         self.raise_marker(now, ActivityMarker::Started { kind }, ctx);
-        commands
+    }
+
+    /// The stamp the next coarse effect this device starts will wear.
+    fn mint_effect_id(&mut self) -> EffectId {
+        self.next_effect_id += 1;
+        EffectId(self.next_effect_id)
     }
 
     pub(crate) fn scope(&self) -> Scope {
@@ -278,6 +475,86 @@ impl Device {
                 self.identify_retries = 0;
                 self.spawn_identify(now, ctx)
             }
+            Action::Flash {
+                board_id,
+                build_id,
+                park_first,
+                ..
+            } => {
+                // Flashing implies wanting the board connected afterwards.
+                self.intent.connection = ConnectionIntent::Connected;
+                self.spawn_flash(now, board_id, build_id, *park_first, ctx)
+            }
+            Action::Push { .. } => {
+                // Sending a project implies wanting the board connected.
+                self.intent.connection = ConnectionIntent::Connected;
+                self.spawn_push(now, ctx)
+            }
+            Action::Erase { .. } => {
+                // A wipe implies staying connected to re-flash afterwards.
+                self.intent.connection = ConnectionIntent::Connected;
+                self.spawn_erase(now, ctx)
+            }
+            Action::ResetBoard { .. } => {
+                // A hardware reset is a direct gesture, not an activity: one
+                // command, then identify reads whatever boots. Refused while
+                // an activity runs (I5 — a reset under a flash would wreck
+                // it) and without a link there is nothing to pulse.
+                if self.activity.is_some() {
+                    return Vec::new();
+                }
+                let Some(link) = self.link() else {
+                    return Vec::new();
+                };
+                let mut commands = vec![Command::Link {
+                    link,
+                    command: crate::link::LinkCommand::RunReset(crate::link::ResetKind::Normal),
+                }];
+                commands.extend(self.spawn_identify(now, ctx));
+                commands
+            }
+            Action::ClearFaults { .. } => {
+                // A direct gesture like ResetBoard, and for the same reason:
+                // there is nothing to supervise. The device answers and then
+                // does NOTHING — no reboot, no re-load — because the cleared
+                // ledger takes effect on its own next tick. An activity that
+                // owns the port would have its correlation walked over, so
+                // this is refused while one runs (I5), and with no link there
+                // is nobody to ask.
+                if self.activity.is_some() {
+                    return Vec::new();
+                }
+                let Some(link) = self.link() else {
+                    return Vec::new();
+                };
+                // Asked for, not waited for: the loaded-project report is
+                // what carries each project's fault verdict, and a card that
+                // kept saying Degraded for a whole heartbeat period after
+                // the user cleared it would read as a verb that did nothing.
+                // The answer is honest either way — a failure that is still
+                // there faults again on the next tick and the following
+                // heartbeat re-degrades the card.
+                vec![
+                    Command::Link {
+                        link,
+                        command: LinkCommand::SendFrame(ClientFrame::clear_faults(
+                            CLEAR_FAULTS_REQUEST_ID,
+                        )),
+                    },
+                    Command::Link {
+                        link,
+                        command: LinkCommand::SendFrame(ClientFrame::list_loaded(
+                            CLEAR_FAULTS_REREAD_REQUEST_ID,
+                        )),
+                    },
+                ]
+            }
+            Action::RemoveProject { .. } => {
+                // Clearing a board implies staying connected to put
+                // something else on it — the empty face is the next stop.
+                self.intent.connection = ConnectionIntent::Connected;
+                self.spawn_remove_project(now, ctx)
+            }
             Action::SetName { name, .. } => {
                 self.intent.name = Some(name.clone());
                 vec![Command::PersistRecord(self.record_snapshot())]
@@ -297,6 +574,30 @@ impl Device {
     }
 
     fn handle_event(&mut self, now: Millis, event: &Event, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
+        // A coarse effect runs in a spawned future nothing can cancel. When
+        // its activity is evicted mid-run — a cancel grace that expired, a
+        // deadline, a Forget — the effect keeps going and eventually reports.
+        // Without this guard that straggler's `Ended` would fold as the END
+        // of whatever activity is running NOW, retiring a live push because
+        // an old flash finally finished. It is dropped before the fold, and
+        // journaled so the timeline still explains the silence.
+        if let Event::ActivityMarker {
+            effect: Some(effect),
+            marker,
+            ..
+        } = event
+            && self.activity.as_ref().and_then(|cell| cell.current_effect) != Some(*effect)
+        {
+            ctx.journal.note(
+                now,
+                self.scope(),
+                JournalNote::StaleEffectMarker {
+                    effect: *effect,
+                    ended: matches!(marker, ActivityMarker::Ended { .. }),
+                },
+            );
+            return Vec::new();
+        }
         if matches!(event, Event::LinkAttached { .. }) {
             // A fresh link generation gets a fresh auto-retry budget.
             self.identify_retries = 0;
@@ -391,6 +692,7 @@ impl Device {
         input: &Input,
         ctx: &mut ModelCtx<'_>,
     ) -> Option<ActivityStep> {
+        let effect_id = self.mint_effect_id();
         let Self {
             activity, evidence, ..
         } = self;
@@ -399,8 +701,13 @@ impl Device {
             link: evidence.link(),
             evidence,
             config: ctx.config,
+            effect_id,
         };
-        Some(cell.handle(now, input, &mut activity_ctx))
+        let step = cell.handle(now, input, &mut activity_ctx);
+        if starts_effect(step_commands(&step), effect_id) {
+            cell.current_effect = Some(effect_id);
+        }
+        Some(step)
     }
 
     fn apply_step(
@@ -418,6 +725,11 @@ impl Device {
                 let Some(cell) = self.activity.take() else {
                     return commands;
                 };
+                // A reducer can settle while its effect is still running —
+                // the stamp's own deadline is exactly that case. Give the
+                // wire back rather than leaving the pump paused behind an
+                // effect nothing is listening to any more.
+                commands.extend(self.abandon_commands(&cell));
                 ctx.journal.note(
                     now,
                     self.scope(),
@@ -462,7 +774,7 @@ impl Device {
         let Some(cell) = &self.activity else {
             return Vec::new();
         };
-        if cell.cancel_grace_expired(now, ctx.config.cancel_grace_ms) {
+        if cell.cancel_grace_expired(now, cell.kind.cancel_grace_ms(ctx.config)) {
             return self.evict(now, EvictionReason::CancelGraceExpired, ctx);
         }
         if now >= cell.deadline {
@@ -497,8 +809,11 @@ impl Device {
     }
 
     fn raise_marker(&mut self, now: Millis, marker: ActivityMarker, ctx: &mut ModelCtx<'_>) {
+        // The model's own bracket: no effect stamp, and therefore never
+        // stale — it is raised by the same fold that would judge it.
         let event = Event::ActivityMarker {
             device: self.id,
+            effect: None,
             marker,
         };
         let notes = self
@@ -517,13 +832,12 @@ impl Device {
     fn rearm(&mut self, now: Millis, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
         let mut soonest: Option<Millis> = None;
         if let Some(cell) = &self.activity {
-            soonest = Some(cell.next_deadline(ctx.config.cancel_grace_ms));
+            soonest = Some(cell.next_deadline(cell.kind.cancel_grace_ms(ctx.config)));
         }
-        if let Some(quiet_at) = self
-            .evidence
-            .freshness
-            .quiet_deadline(ctx.config.quiet_after_ms)
-        {
+        // `Evidence`'s own answer, not the raw freshness one: a borrowed
+        // wire has no silence to time, so a flash does not keep re-arming a
+        // quiet timer that could only fire a lie.
+        if let Some(quiet_at) = self.evidence.quiet_deadline(ctx.config.quiet_after_ms) {
             soonest = Some(match soonest {
                 Some(existing) => existing.min(quiet_at),
                 None => quiet_at,
@@ -547,6 +861,23 @@ impl Device {
     }
 }
 
+/// Whether a batch of commands starts the coarse effect stamped `effect_id`.
+fn starts_effect(commands: &[Command], effect_id: EffectId) -> bool {
+    commands.iter().any(|command| {
+        matches!(
+            command,
+            Command::RunEffect { effect_id: started, .. } if *started == effect_id
+        )
+    })
+}
+
+/// The commands a step is carrying, whichever shape it took.
+fn step_commands(step: &ActivityStep) -> &[Command] {
+    match step {
+        ActivityStep::Continue(commands) | ActivityStep::Done { commands, .. } => commands,
+    }
+}
+
 /// A device's headline state, for the projection and for tests. Derived —
 /// never stored.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -559,6 +890,14 @@ pub enum DeviceStatus {
     Busy,
     /// Identified as a usable LightPlayer.
     Ready,
+    /// A usable LightPlayer that is running something BROKEN: a node in
+    /// fault, or a crash-recovery state it reported as not green.
+    ///
+    /// Still a running board — the loaded-project face stays `Running` —
+    /// but "Ready" over a show that is painting the fault pattern is the
+    /// lie this status exists to stop (2026-09-01 bench: two days of
+    /// "Running" over a black strip).
+    Degraded,
     /// Identified as something else: blank, bootloader, foreign,
     /// incompatible.
     NeedsAttention,
@@ -576,14 +915,32 @@ impl Device {
         if !self.evidence.presence.is_attached() {
             return DeviceStatus::Offline;
         }
+        // Statuses that CLAIM we are listening (Ready, NotResponding) are
+        // only honest on an open port: a surviving verdict on a closed one
+        // (the window outlives a close — a close is our action, not
+        // evidence) renders as Attached instead, because "Ready" from a
+        // port nobody holds is the same lie "port closed" was. Verdicts
+        // that ask for action (needs-firmware family) keep their face:
+        // they are actionable exactly as stored, listening or not.
         match &self.evidence.classification {
-            Classification::LightPlayer { .. } => DeviceStatus::Ready,
+            Classification::LightPlayer { .. } => {
+                if !self.evidence.presence.is_open() {
+                    return DeviceStatus::Attached;
+                }
+                // Degradation is a refinement of Ready, never of a verdict
+                // that already asks for action: a board we are not
+                // listening to has nothing current to say about its own
+                // health, and a blank chip has no project to fault.
+                match self.evidence.is_degraded() {
+                    true => DeviceStatus::Degraded,
+                    false => DeviceStatus::Ready,
+                }
+            }
             Classification::Incompatible { .. }
             | Classification::Blank
             | Classification::Bootloader
             | Classification::Foreign { .. } => DeviceStatus::NeedsAttention,
-            Classification::Quiet { .. } => DeviceStatus::NotResponding,
-            Classification::Unknown => {
+            Classification::Quiet { .. } | Classification::Unknown => {
                 if self.evidence.presence.is_open() {
                     DeviceStatus::NotResponding
                 } else {

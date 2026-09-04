@@ -4,6 +4,25 @@ use lps_shared::LpsType;
 use crate::hir::PlaceSegment;
 use crate::{Diagnostic, Span};
 
+/// The element type an index segment selects from a value of type `ty`.
+fn index_element_type(span: Span, ty: &LpsType) -> Result<LpsType, Diagnostic> {
+    crate::hir::index_element_type(ty)
+        .ok_or_else(|| Diagnostic::error(span, "index base must be vector, matrix, or array"))
+}
+
+/// The type member `member` of struct `ty` projects to.
+fn field_type(span: Span, ty: &LpsType, member: u16) -> Result<LpsType, Diagnostic> {
+    crate::hir::field_type(ty, member)
+        .cloned()
+        .ok_or_else(|| Diagnostic::error(span, "field projection of a non-struct"))
+}
+
+/// The type a swizzle of `lanes` projects from vector `ty` to.
+fn swizzle_type(span: Span, ty: &LpsType, lanes: &[u8]) -> Result<LpsType, Diagnostic> {
+    crate::hir::swizzle_type(ty, lanes.len())
+        .ok_or_else(|| Diagnostic::error(span, "swizzle of a non-vector"))
+}
+
 use super::super::{Lanes, LowerCtx, LowerValue, lower_expr};
 use super::access::copy_value;
 use super::index::{assign_index_value, lower_index};
@@ -19,15 +38,29 @@ pub(super) fn read_segments(
     };
     let value = match segment {
         PlaceSegment::Field {
+            member,
             lane_offset,
             lane_count,
-            ty,
             ..
-        } => read_contiguous_lanes(span, value, *lane_offset, *lane_count, ty)?,
-        PlaceSegment::Swizzle { lanes, ty, .. } => read_lane_map(span, value, lanes, ty)?,
-        PlaceSegment::Index { index, ty } => {
+        } => {
+            let ty = field_type(span, &value.ty, *member)?;
+            read_contiguous_lanes(
+                span,
+                value,
+                *lane_offset as usize,
+                *lane_count as usize,
+                &ty,
+            )?
+        }
+        PlaceSegment::Swizzle { .. } => {
+            let lanes = segment.swizzle_lanes().unwrap_or_default();
+            let ty = swizzle_type(span, &value.ty, lanes)?;
+            read_lane_map(span, value, lanes, &ty)?
+        }
+        PlaceSegment::Index { index } => {
+            let ty = index_element_type(span, &value.ty)?;
             let index = lower_expr(ctx, *index)?;
-            lower_index(ctx, span, value, index, ty)?
+            lower_index(ctx, span, value, index, &ty)?
         }
     };
     read_segments(ctx, span, value, rest)
@@ -46,32 +79,38 @@ pub(super) fn assign_segments(
     };
     match segment {
         PlaceSegment::Field {
+            member,
             lane_offset,
             lane_count,
-            ty,
             ..
-        } => assign_contiguous_lanes(
-            ctx,
-            span,
-            value,
-            *lane_offset,
-            *lane_count,
-            ty,
-            rest,
-            assignment,
-        ),
-        PlaceSegment::Swizzle { lanes, ty, .. } => {
-            assign_lane_map(ctx, span, value, lanes, ty, rest, assignment)
+        } => {
+            let ty = field_type(span, &value.ty, *member)?;
+            assign_contiguous_lanes(
+                ctx,
+                span,
+                value,
+                *lane_offset as usize,
+                *lane_count as usize,
+                &ty,
+                rest,
+                assignment,
+            )
         }
-        PlaceSegment::Index { index, ty } => {
+        PlaceSegment::Swizzle { .. } => {
+            let lanes = segment.swizzle_lanes().unwrap_or_default();
+            let ty = swizzle_type(span, &value.ty, lanes)?;
+            assign_lane_map(ctx, span, value, lanes, &ty, rest, assignment)
+        }
+        PlaceSegment::Index { index } => {
+            let ty = index_element_type(span, &value.ty)?;
             let index = lower_expr(ctx, *index)?;
             if rest.is_empty() {
-                assign_index_value(ctx, span, value.clone(), index, ty, assignment)?;
+                assign_index_value(ctx, span, value.clone(), index, &ty, assignment)?;
                 return Ok(value);
             }
-            let selected = lower_index(ctx, span, value.clone(), index.clone(), ty)?;
+            let selected = lower_index(ctx, span, value.clone(), index.clone(), &ty)?;
             let updated = assign_segments(ctx, span, selected, rest, assignment)?;
-            assign_index_value(ctx, span, value.clone(), index, ty, updated)?;
+            assign_index_value(ctx, span, value.clone(), index, &ty, updated)?;
             Ok(value)
         }
     }
@@ -116,7 +155,7 @@ fn assign_lane_map(
     ctx: &mut LowerCtx<'_>,
     span: Span,
     value: LowerValue,
-    lanes: &[usize],
+    lanes: &[u8],
     ty: &LpsType,
     rest: &[PlaceSegment],
     assignment: LowerValue,
@@ -151,12 +190,12 @@ fn read_contiguous_lanes(
 fn read_lane_map(
     span: Span,
     value: LowerValue,
-    lanes: &[usize],
+    lanes: &[u8],
     ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let mut out = Lanes::new();
     for lane in lanes {
-        let Some(value_lane) = value.lanes.get(*lane) else {
+        let Some(value_lane) = value.lanes.get(usize::from(*lane)) else {
             return Err(Diagnostic::error(span, "lane read out of range"));
         };
         out.push(*value_lane);
@@ -171,14 +210,14 @@ fn copy_mapped_lanes(
     ctx: &mut LowerCtx<'_>,
     span: Span,
     value: &LowerValue,
-    lanes: &[usize],
+    lanes: &[u8],
     updated: &LowerValue,
 ) -> Result<(), Diagnostic> {
     if updated.lanes.len() != lanes.len() {
         return Err(Diagnostic::error(span, "swizzle assignment width mismatch"));
     }
     for (dst_lane, src_lane) in lanes.iter().zip(updated.lanes.iter()) {
-        let Some(dst) = value.lanes.get(*dst_lane) else {
+        let Some(dst) = value.lanes.get(usize::from(*dst_lane)) else {
             return Err(Diagnostic::error(
                 span,
                 "swizzle assignment lane out of range",

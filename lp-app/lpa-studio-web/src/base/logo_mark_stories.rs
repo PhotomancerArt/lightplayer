@@ -87,7 +87,7 @@ fn app_icons() -> Element {
 )]
 fn mark_sizes() -> Element {
     rsx! {
-        div { class: "tw:flex tw:items-center tw:justify-center tw:gap-8 tw:bg-terminal tw:p-10 tw:text-strong",
+        div { class: "tw:flex tw:items-center tw:justify-center tw:gap-8 tw:bg-terminal tw:p-10 tw:text-strong-foreground",
             LogoMark { size: 16 }
             LogoMark { size: 22 }
             LogoMark { size: 32 }

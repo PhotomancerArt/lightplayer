@@ -153,6 +153,16 @@ pub enum JournalNote {
         label: String,
         percent: Option<u8>,
     },
+    /// A marker arrived from a coarse effect this device is no longer
+    /// waiting on — an evicted effect's future finally reporting. Dropped
+    /// before the fold; journaled here because "the flash said nothing"
+    /// needs an explanation in the timeline, not silence.
+    StaleEffectMarker {
+        effect: crate::event::EffectId,
+        /// Whether the straggler was an ENDING (the dangerous kind: it
+        /// would have retired the activity that replaced it).
+        ended: bool,
+    },
 }
 
 /// Why an activity was removed rather than allowed to finish.

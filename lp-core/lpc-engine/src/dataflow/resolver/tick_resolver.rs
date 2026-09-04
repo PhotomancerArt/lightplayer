@@ -30,6 +30,53 @@ pub trait TickResolver {
         path: &'static str,
     ) -> Result<Production, ResolveError>;
 
+    /// Resolve the bus `channel` in `scope`, named by a constant, without
+    /// rebuilding the [`ChannelName`] each frame.
+    ///
+    /// Defaulted through [`Self::resolve`] so a node-level test fake need
+    /// only answer the generic path; the session-backed implementation
+    /// interns the key per structural epoch instead.
+    fn resolve_static_bus(
+        &mut self,
+        scope: Option<ScopeRef>,
+        channel: &'static str,
+    ) -> Result<Production, ResolveError> {
+        self.resolve(&QueryKey::Bus {
+            scope,
+            channel: ChannelName(alloc::string::String::from(channel)),
+        })
+    }
+
+    /// The shared, interned form of `query`, for a caller that keeps a key
+    /// across frames rather than rebuilding it.
+    ///
+    /// Defaulted to a private copy so a test fake needs no intern table; the
+    /// session-backed implementation hands back the table's own `Rc`, which
+    /// is what keeps a per-node key cache from doubling the resident path
+    /// data the resolver already holds.
+    fn intern_key(&mut self, query: &QueryKey) -> alloc::rc::Rc<QueryKey> {
+        alloc::rc::Rc::new(query.clone())
+    }
+
+    /// How many times the graph has changed shape. Only equality across two
+    /// observations is meaningful. A cache holding [`Self::intern_key`]
+    /// results watches this to drop keys the intern table has forgotten;
+    /// the default never moves, which is correct for a fake that never
+    /// invalidates.
+    fn structure_epoch(&self) -> u64 {
+        0
+    }
+
+    /// The shared handle to use for a produced slot's path in a
+    /// [`crate::dataflow::resolver::ProductionSource::ProducedSlot`].
+    ///
+    /// Defaulted to a private copy for test fakes; the session-backed
+    /// implementation interns one handle per produced path so a per-frame
+    /// publish copies a pointer instead of the path.
+    fn produced_slot_path(&mut self, slot: &SlotPath) -> alloc::rc::Rc<SlotPath> {
+        alloc::rc::Rc::new(slot.clone())
+    }
+
     fn publish_produced_slot(
         &mut self,
         node: NodeId,
@@ -178,6 +225,28 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
         self.session
             .resolve_static_consumed(self.host, node, path)
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
+    fn resolve_static_bus(
+        &mut self,
+        scope: Option<ScopeRef>,
+        channel: &'static str,
+    ) -> Result<Production, ResolveError> {
+        self.session
+            .resolve_static_bus(self.host, scope, channel)
+            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
+    fn intern_key(&mut self, query: &QueryKey) -> alloc::rc::Rc<QueryKey> {
+        self.session.intern_key(query)
+    }
+
+    fn produced_slot_path(&mut self, slot: &SlotPath) -> alloc::rc::Rc<SlotPath> {
+        self.session.produced_slot_path(slot)
+    }
+
+    fn structure_epoch(&self) -> u64 {
+        self.session.structure_epoch()
     }
 
     fn publish_produced_slot(

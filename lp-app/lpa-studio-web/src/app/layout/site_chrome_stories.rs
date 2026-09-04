@@ -12,8 +12,9 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, DirtySummary, ProjectController, ProjectNodeAddress, ProjectOp,
     ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotEditOp, SlotPath, UiAction,
-    UiChromeSessionControl, UiChromeSessionStatus, UiHistoryKind, UiPaneAction, UiPendingEdit,
-    UiPendingEditKind, UiPendingEditPhase, UiProjectHistory, UiProjectHistoryEntry, UiStatus,
+    UiChromeSessionControl, UiChromeSessionKind, UiChromeSessionStatus, UiHistoryKind,
+    UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProjectHistory,
+    UiProjectHistoryEntry, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -472,6 +473,7 @@ fn control_row_as(
 /// "Sim" when the project names no board (ruling Q6).
 fn sim_control(board: Option<&str>) -> UiChromeSessionControl {
     UiChromeSessionControl {
+        kind: UiChromeSessionKind::Sim,
         key: "runtime-sim".to_string(),
         name: "Sim".to_string(),
         board: board.map(str::to_string),
@@ -480,10 +482,18 @@ fn sim_control(board: Option<&str>) -> UiChromeSessionControl {
     }
 }
 
-/// The hardware-session rows went with M2 of the device-model rebuild;
-/// what stands in is a boardless sim (the same lockup with no suffix).
+/// THE device lens session (round-2 M5): the board's own name IS the
+/// device name, so no board suffix (ruling 8.1's hardware half), and the
+/// stat line is what the lens client heard.
 fn hardware_control() -> UiChromeSessionControl {
-    sim_control(None)
+    UiChromeSessionControl {
+        kind: UiChromeSessionKind::Device,
+        key: "device:dev000000daqf6dvvqz".to_string(),
+        name: "XIAO ESP32-C6 · Sep 1".to_string(),
+        board: None,
+        status: UiChromeSessionStatus::Run,
+        stat_line: Some("43 fps".to_string()),
+    }
 }
 
 /// A connected hardware session with nothing loaded — the honest-empty

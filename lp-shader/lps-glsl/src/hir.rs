@@ -22,63 +22,75 @@ mod place;
 mod scalar;
 mod shape;
 mod symbols;
+mod type_table;
 mod typeck;
 mod types;
 mod typing;
 
-pub(crate) use arena::{ExprId, ExprList, HirArena, PlaceId};
+pub(crate) use arena::{ExprId, ExprList, PlaceId};
 use array_size::{ArraySizeConsts, eval_array_size_expr};
+pub(crate) use type_table::{HirView, TypeId, TypeTable, TypedArena};
 // The builtin checks double as the test-only ground truth for the
 // editor-facing [`crate::builtin_inventory`] (its drift tests tie the
 // inventory to them).
 #[cfg(test)]
 pub(crate) use builtin::{builtin_has_out_args, builtin_kind, check_builtin_arity, is_glsl_import};
 use function::{FunctionSig, GlobalConst, ImportRegistry};
-pub(crate) use place::{HirPlace, PlaceRoot, PlaceSegment};
-pub(crate) use shape::TypeShape;
+pub(crate) use place::{
+    HirPlace, PlaceRoot, PlaceSegment, field_type, index_element_type, swizzle_type,
+};
 pub use symbols::{
     FnParamSymbol, FnSymbol, StructSymbol, SymbolAnalysis, VarSymbol, analyze_symbols,
 };
 use typeck::TypeCtx;
 use types::StructTypes;
 pub use types::{
-    BuiltinKind, GlobalInfo, HirExpr, HirExprKind, HirFunction, HirFunctionBody, HirModule,
-    HirOutArg, HirParam, HirStmt, HirTextureOperand, HirUserCallWriteback, ImportKey, UniformInfo,
+    BuiltinKind, GlobalInfo, HirExprKind, HirExprRef, HirFunction, HirFunctionBody,
+    HirFunctionParam, HirModule, HirOutArg, HirParam, HirStmt, HirTextureOperand,
+    HirUserCallWriteback, ImportId, ImportInfo, ImportKey, UniformInfo,
 };
 pub use typing::{scalar_base_type, scalar_ir_types, scalar_lane_count};
 
 #[derive(Debug)]
 pub struct HirBuildJob<'src> {
     source: &'src str,
-    tokens: Vec<Token>,
     index: TopLevelIndex,
     options: CompileOptions,
-    state: HirBuildState,
+    state: HirBuildState<'src>,
 }
 
 #[derive(Debug)]
-enum HirBuildState {
+enum HirBuildState<'src> {
+    /// The token tape lives here, not on the job: only the header step
+    /// reads it (array-size consts, global initialisers), and it is the
+    /// largest thing the build holds — 24 B per token, ~16 KB for meteor's
+    /// sim shader — so it is dropped with this state instead of staying
+    /// resident under every function's typing.
     Header {
-        bodies: Vec<(String, ParsedFunctionBody)>,
+        tokens: Vec<Token>,
+        bodies: Vec<(String, ParsedFunctionBody<'src>)>,
     },
-    Functions(Box<HirBuildFunctionState>),
-    ShaderInit(Box<HirBuildFunctionState>),
+    Functions(Box<HirBuildFunctionState<'src>>),
+    ShaderInit(Box<HirBuildFunctionState<'src>>),
     Done,
 }
 
 #[derive(Debug)]
-struct HirBuildFunctionState {
+struct HirBuildFunctionState<'src> {
     array_size_consts: ArraySizeConsts,
     structs: StructTypes,
     uniforms: VecMap<String, UniformInfo>,
     uniforms_type: Option<LpsType>,
     global_vars: VecMap<String, GlobalInfo>,
     globals_type: Option<LpsType>,
-    global_inits: Vec<GlobalInit>,
+    global_inits: Vec<GlobalInit<'src>>,
     functions_sigs: Vec<FunctionSig>,
     imports: ImportRegistry,
+    /// The module's type table: every function, global const and signature
+    /// interns into it (see `type_table`).
+    types: TypeTable,
     globals: VecMap<String, GlobalConst>,
-    body_map: VecMap<String, ParsedFunctionBody>,
+    body_map: VecMap<String, ParsedFunctionBody<'src>>,
     functions: Vec<HirFunction>,
     /// Set when [`synthesize_shader_init`] produced the trailing synthetic
     /// function; the module signature is built from the sig table in
@@ -98,30 +110,29 @@ impl<'src> HirBuildJob<'src> {
         source: &'src str,
         tokens: Vec<Token>,
         index: TopLevelIndex,
-        bodies: Vec<(String, ParsedFunctionBody)>,
+        bodies: Vec<(String, ParsedFunctionBody<'src>)>,
         options: CompileOptions,
     ) -> Self {
         Self {
             source,
-            tokens,
             index,
             options,
-            state: HirBuildState::Header { bodies },
+            state: HirBuildState::Header { tokens, bodies },
         }
     }
 
     pub fn step(&mut self) -> Result<HirBuildStepResult, Diagnostic> {
         let state = core::mem::replace(&mut self.state, HirBuildState::Done);
         match state {
-            HirBuildState::Header { bodies } => {
+            HirBuildState::Header { tokens, bodies } => {
                 let (array_size_consts, const_init_cache) =
-                    build_array_size_consts(self.source, &self.tokens, &self.index)?;
+                    build_array_size_consts(self.source, &tokens, &self.index)?;
                 let structs = build_struct_types(&self.index, &array_size_consts)?;
                 let (uniforms, uniforms_type, uniforms_size) =
                     build_uniforms(&self.index, &structs, &array_size_consts)?;
                 let (global_vars, globals_type, global_inits) = build_global_vars(
                     self.source,
-                    &self.tokens,
+                    &tokens,
                     &self.index,
                     &structs,
                     &array_size_consts,
@@ -130,9 +141,10 @@ impl<'src> HirBuildJob<'src> {
                 let functions_sigs =
                     build_function_sigs(&self.index, &structs, &array_size_consts)?;
                 let mut imports = ImportRegistry::default();
+                let mut types = TypeTable::default();
                 let globals = build_global_consts(
                     self.source,
-                    &self.tokens,
+                    &tokens,
                     &self.index,
                     &uniforms,
                     &global_vars,
@@ -140,6 +152,7 @@ impl<'src> HirBuildJob<'src> {
                     &structs,
                     &array_size_consts,
                     &mut imports,
+                    &mut types,
                     &self.options.texture_specs,
                     const_init_cache,
                 )?;
@@ -153,6 +166,7 @@ impl<'src> HirBuildJob<'src> {
                     global_inits,
                     functions_sigs,
                     imports,
+                    types,
                     globals,
                     body_map: function_body_map(bodies),
                     functions: Vec::new(),
@@ -181,6 +195,7 @@ impl<'src> HirBuildJob<'src> {
                     &state.structs,
                     &state.array_size_consts,
                     &mut state.imports,
+                    &mut state.types,
                     &self.options.texture_specs,
                 )? {
                     state.has_shader_init = true;
@@ -196,7 +211,10 @@ impl<'src> HirBuildJob<'src> {
         }
     }
 
-    fn type_next_function(&self, state: &mut HirBuildFunctionState) -> Result<(), Diagnostic> {
+    fn type_next_function(
+        &self,
+        state: &mut HirBuildFunctionState<'src>,
+    ) -> Result<(), Diagnostic> {
         let function_index = state.next_function;
         let sig = &state.functions_sigs[function_index];
         let decl = &self.index.functions[function_index];
@@ -214,22 +232,25 @@ impl<'src> HirBuildJob<'src> {
             &state.array_size_consts,
             &mut state.imports,
             &self.options.texture_specs,
+            &mut state.types,
         );
         let body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
+        let (return_ty, params) = intern_signature(&mut state.types, sig);
         state.functions.push(HirFunction {
             name: sig.name.clone(),
-            return_ty: sig.return_ty.clone(),
-            params: sig.params.clone(),
+            return_ty,
+            params,
             body,
         });
         Ok(())
     }
 }
 
-impl HirBuildFunctionState {
+impl HirBuildFunctionState<'_> {
     fn finish(self, options: &CompileOptions) -> HirModule {
         HirModule {
             functions: self.functions,
+            types: self.types,
             meta: LpsModuleSig {
                 functions: module_function_sigs(self.functions_sigs, self.has_shader_init),
                 uniforms_type: self.uniforms_type,
@@ -282,15 +303,29 @@ fn module_function_sigs(sigs: Vec<FunctionSig>, has_shader_init: bool) -> Vec<Lp
     meta
 }
 
+/// A function's signature types as ids into the module's type table.
+fn intern_signature(types: &mut TypeTable, sig: &FunctionSig) -> (TypeId, Vec<HirFunctionParam>) {
+    let return_ty = types.intern(sig.return_ty.clone());
+    let params = sig
+        .params
+        .iter()
+        .map(|p| HirFunctionParam {
+            ty: types.intern(p.ty.clone()),
+            qualifier: p.qualifier,
+        })
+        .collect();
+    (return_ty, params)
+}
+
 #[allow(
     dead_code,
     reason = "kept as the synchronous HIR builder for tests and future callers"
 )]
-pub fn build_hir(
-    source: &str,
+pub fn build_hir<'src>(
+    source: &'src str,
     tokens: &[Token],
     index: &TopLevelIndex,
-    bodies: Vec<(String, ParsedFunctionBody)>,
+    bodies: Vec<(String, ParsedFunctionBody<'src>)>,
     options: &CompileOptions,
 ) -> Result<HirModule, Diagnostic> {
     let (array_size_consts, const_init_cache) = build_array_size_consts(source, tokens, index)?;
@@ -307,6 +342,7 @@ pub fn build_hir(
     )?;
     let functions_sigs = build_function_sigs(index, &structs, &array_size_consts)?;
     let mut imports = ImportRegistry::default();
+    let mut types = TypeTable::default();
     let globals = build_global_consts(
         source,
         tokens,
@@ -317,6 +353,7 @@ pub fn build_hir(
         &structs,
         &array_size_consts,
         &mut imports,
+        &mut types,
         &options.texture_specs,
         const_init_cache,
     )?;
@@ -354,12 +391,14 @@ pub fn build_hir(
             &array_size_consts,
             &mut imports,
             &options.texture_specs,
+            &mut types,
         );
         let body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
+        let (return_ty, params) = intern_signature(&mut types, sig);
         functions.push(HirFunction {
             name: sig.name.clone(),
-            return_ty: sig.return_ty.clone(),
-            params: sig.params.clone(),
+            return_ty,
+            params,
             body,
         });
     }
@@ -373,6 +412,7 @@ pub fn build_hir(
         &structs,
         &array_size_consts,
         &mut imports,
+        &mut types,
         &options.texture_specs,
     )? {
         function_meta.push(LpsFnSig {
@@ -386,6 +426,7 @@ pub fn build_hir(
 
     Ok(HirModule {
         functions,
+        types,
         meta: LpsModuleSig {
             functions: function_meta,
             uniforms_type,
@@ -559,7 +600,7 @@ fn infer_array_decl_type(
 fn resolve_init_list_lens(
     span: Span,
     lens: &[Option<u32>],
-    init: &ParsedExpr,
+    init: &ParsedExpr<'_>,
 ) -> Result<Vec<Option<u32>>, Diagnostic> {
     let Some((first_len, rest_lens)) = lens.split_first() else {
         return Ok(Vec::new());
@@ -593,7 +634,7 @@ fn infer_array_constructor_type(
     span: Span,
     base: LpsType,
     lens: &[Option<u32>],
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     args: &[ExprId],
 ) -> Result<LpsType, Diagnostic> {
     let Some((first_len, rest_lens)) = lens.split_first() else {
@@ -659,11 +700,11 @@ fn array_base_and_lens(ty: &LpsType) -> Option<(LpsType, Vec<u32>)> {
 /// index-for-index with `index.consts`, `None` for entries this pass didn't
 /// touch). [`build_global_consts`] consumes the cache instead of re-parsing
 /// the same spans.
-fn build_array_size_consts(
-    source: &str,
+fn build_array_size_consts<'src>(
+    source: &'src str,
     tokens: &[Token],
     index: &TopLevelIndex,
-) -> Result<(ArraySizeConsts, Vec<Option<ParsedExpr>>), Diagnostic> {
+) -> Result<(ArraySizeConsts, Vec<Option<ParsedExpr<'src>>>), Diagnostic> {
     let mut consts = VecMap::new();
     let mut parsed_cache = Vec::with_capacity(index.consts.len());
     for konst in &index.consts {
@@ -684,7 +725,7 @@ fn build_array_size_consts(
     Ok((consts, parsed_cache))
 }
 
-fn eval_parsed_array_size_expr(expr: &ParsedExpr, consts: &ArraySizeConsts) -> Option<u32> {
+fn eval_parsed_array_size_expr(expr: &ParsedExpr<'_>, consts: &ArraySizeConsts) -> Option<u32> {
     let value = eval_parsed_const_int(expr, consts)?;
     if value < 0 {
         return None;
@@ -692,11 +733,11 @@ fn eval_parsed_array_size_expr(expr: &ParsedExpr, consts: &ArraySizeConsts) -> O
     u32::try_from(value).ok()
 }
 
-fn eval_parsed_const_int(expr: &ParsedExpr, consts: &ArraySizeConsts) -> Option<i64> {
+fn eval_parsed_const_int(expr: &ParsedExpr<'_>, consts: &ArraySizeConsts) -> Option<i64> {
     match &expr.kind {
         ParsedExprKind::IntLiteral(value) => Some(i64::from(*value)),
         ParsedExprKind::UIntLiteral(value) => Some(i64::from(*value)),
-        ParsedExprKind::Name(name) => consts.get(name).copied().map(i64::from),
+        ParsedExprKind::Name(name) => consts.get(*name).copied().map(i64::from),
         ParsedExprKind::Unary {
             op: UnaryOp::Neg,
             expr,
@@ -810,19 +851,19 @@ fn build_uniforms(
 }
 
 #[derive(Debug, Clone)]
-struct GlobalInit {
+struct GlobalInit<'src> {
     name: String,
     ty: LpsType,
     byte_offset: u32,
     init_span: Span,
     /// Parsed once in [`build_global_vars`] (validation pass); carried here
     /// so [`synthesize_shader_init`] doesn't parse the same span again.
-    init: ParsedExpr,
+    init: ParsedExpr<'src>,
 }
 
-fn function_body_map(
-    bodies: Vec<(String, ParsedFunctionBody)>,
-) -> VecMap<String, ParsedFunctionBody> {
+fn function_body_map<'src>(
+    bodies: Vec<(String, ParsedFunctionBody<'src>)>,
+) -> VecMap<String, ParsedFunctionBody<'src>> {
     let mut body_map = VecMap::new();
     for (name, body) in bodies {
         body_map.insert(name, body);
@@ -830,14 +871,21 @@ fn function_body_map(
     body_map
 }
 
-fn build_global_vars(
-    source: &str,
+fn build_global_vars<'src>(
+    source: &'src str,
     tokens: &[Token],
     index: &TopLevelIndex,
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
     uniforms_size: usize,
-) -> Result<(VecMap<String, GlobalInfo>, Option<LpsType>, Vec<GlobalInit>), Diagnostic> {
+) -> Result<
+    (
+        VecMap<String, GlobalInfo>,
+        Option<LpsType>,
+        Vec<GlobalInit<'src>>,
+    ),
+    Diagnostic,
+> {
     let mut order = Vec::<String>::new();
     let mut by_name = VecMap::<String, (LpsType, Span, Option<Span>)>::new();
     for global in &index.globals {
@@ -898,8 +946,8 @@ fn build_global_vars(
     Ok((globals, globals_type, inits))
 }
 
-fn build_global_consts(
-    source: &str,
+fn build_global_consts<'src>(
+    source: &'src str,
     tokens: &[Token],
     index: &TopLevelIndex,
     uniforms: &VecMap<String, UniformInfo>,
@@ -908,8 +956,9 @@ fn build_global_consts(
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
     imports: &mut ImportRegistry,
+    types: &mut TypeTable,
     texture_specs: &VecMap<String, lps_shared::TextureBindingSpec>,
-    mut const_init_cache: Vec<Option<ParsedExpr>>,
+    mut const_init_cache: Vec<Option<ParsedExpr<'src>>>,
 ) -> Result<VecMap<String, GlobalConst>, Diagnostic> {
     let mut globals = VecMap::new();
     for (const_index, konst) in index.consts.iter().enumerate() {
@@ -936,13 +985,14 @@ fn build_global_consts(
             array_size_consts,
             imports,
             texture_specs,
+            types,
         );
         let expr = ctx.type_expr(&parsed)?;
         let expr = ctx.coerce_expr(expr, &ty)?;
         globals.insert(
             konst.name.clone(),
             GlobalConst {
-                arena: core::mem::take(&mut ctx.arena),
+                arena: ctx.arena.take_arena(),
                 expr,
             },
         );
@@ -955,7 +1005,7 @@ fn build_global_consts(
     reason = "synthetic init needs the same typing context as functions"
 )]
 fn synthesize_shader_init(
-    inits: &[GlobalInit],
+    inits: &[GlobalInit<'_>],
     functions: &[FunctionSig],
     uniforms: &VecMap<String, UniformInfo>,
     global_consts: &VecMap<String, GlobalConst>,
@@ -963,6 +1013,7 @@ fn synthesize_shader_init(
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
     imports: &mut ImportRegistry,
+    types: &mut TypeTable,
     texture_specs: &VecMap<String, lps_shared::TextureBindingSpec>,
 ) -> Result<Option<HirFunction>, Diagnostic> {
     if inits.is_empty() {
@@ -983,6 +1034,7 @@ fn synthesize_shader_init(
         array_size_consts,
         imports,
         texture_specs,
+        types,
     );
     let mut statements = Vec::new();
     for init in inits {
@@ -1003,11 +1055,13 @@ fn synthesize_shader_init(
         statements.push(HirStmt::Expr(assign));
     }
     let locals = core::mem::take(&mut ctx.locals);
-    let arena = core::mem::take(&mut ctx.arena);
+    let arena = ctx.arena.take_arena();
+    drop(ctx);
+    let (return_ty, params) = intern_signature(types, &sig);
     Ok(Some(HirFunction {
         name: sig.name.clone(),
-        return_ty: sig.return_ty.clone(),
-        params: Vec::new(),
+        return_ty,
+        params,
         body: HirFunctionBody {
             locals,
             statements,

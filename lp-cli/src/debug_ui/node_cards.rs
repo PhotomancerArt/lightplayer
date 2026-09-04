@@ -670,6 +670,7 @@ fn status_label(status: &NodeRuntimeStatus) -> &str {
         NodeRuntimeStatus::Ok => "ok",
         NodeRuntimeStatus::Warn(_) => "warn",
         NodeRuntimeStatus::Error(_) => "error",
+        NodeRuntimeStatus::Fault(_) => "fault",
         NodeRuntimeStatus::Unsupported(_) => "not in this build",
     }
 }
@@ -684,7 +685,12 @@ fn state_label(state: &WireEntryState) -> &str {
 
 fn node_status_color(status: &NodeRuntimeStatus, state: &WireEntryState) -> egui::Color32 {
     match (status, state) {
-        (NodeRuntimeStatus::Error(_) | NodeRuntimeStatus::InitError(_), _)
+        (
+            NodeRuntimeStatus::Error(_)
+            | NodeRuntimeStatus::InitError(_)
+            | NodeRuntimeStatus::Fault(_),
+            _,
+        )
         | (_, WireEntryState::Failed { .. }) => egui::Color32::from_rgb(220, 75, 72),
         (NodeRuntimeStatus::Warn(_), _) => egui::Color32::from_rgb(214, 159, 43),
         (NodeRuntimeStatus::Ok, WireEntryState::Alive) => egui::Color32::from_rgb(76, 174, 114),

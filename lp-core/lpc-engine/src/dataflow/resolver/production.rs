@@ -61,8 +61,15 @@ pub enum ProductionSource {
     Literal,
     Default,
     Merged,
-    ProducedSlot { node: NodeId, slot: SlotPath },
-    BusBinding { binding: BindingRef },
+    /// `slot` is `Rc`-shared so that cloning a cached [`Production`] (every
+    /// cache hit, every insert) never deep-copies the path's `Vec<String>`.
+    ProducedSlot {
+        node: NodeId,
+        slot: Rc<SlotPath>,
+    },
+    BusBinding {
+        binding: BindingRef,
+    },
 }
 
 #[cfg(test)]
@@ -70,6 +77,8 @@ mod tests {
     use super::{Production, ProductionSource};
     use crate::dataflow::binding::BindingRef;
     use crate::shader_abi::LpsValueToModelConversionError;
+    use crate::test_alloc_counter::measure;
+    use alloc::rc::Rc;
     use lpc_model::NodeId;
     use lpc_model::Revision;
     use lpc_model::SlotPath;
@@ -100,7 +109,7 @@ mod tests {
             v,
             ProductionSource::ProducedSlot {
                 node: NodeId::new(9),
-                slot: SlotPath::parse("result").unwrap(),
+                slot: Rc::new(SlotPath::parse("result").unwrap()),
             },
         )
         .expect("production");
@@ -117,7 +126,7 @@ mod tests {
             pv.source,
             ProductionSource::ProducedSlot {
                 node: NodeId::new(9),
-                slot: SlotPath::parse("result").unwrap(),
+                slot: Rc::new(SlotPath::parse("result").unwrap()),
             }
         );
 
@@ -147,5 +156,24 @@ mod tests {
         let pv = Production::value(v, ProductionSource::Literal).expect("production");
         assert_eq!(pv.value_leaf().expect("leaf").changed_at(), frame);
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(-0.5)));
+    }
+
+    /// The cache clones a `Production` on every hit and every insert
+    /// (`resolve_session.rs`). A produced-slot source must not turn that into
+    /// a `SlotPath` deep copy.
+    #[test]
+    fn produced_slot_production_clone_is_alloc_free() {
+        let pv = Production::value(
+            WithRevision::new(Revision::new(1), LpsValueF32::F32(1.0)),
+            ProductionSource::ProducedSlot {
+                node: NodeId::new(0),
+                slot: Rc::new(SlotPath::parse("result").unwrap()),
+            },
+        )
+        .expect("production");
+
+        let (cloned, activity) = measure(|| pv.clone());
+        assert_eq!(activity.allocs, 0, "clone must not allocate: {activity:?}");
+        assert_eq!(cloned.source, pv.source);
     }
 }

@@ -1,12 +1,11 @@
 use alloc::vec::Vec;
 
-use lp_collection::ChunkedVec;
-use lps_shared::LpsType;
-
 use crate::Span;
+use lp_collection::ChunkedVec;
 
-use super::place::HirPlace;
-use super::types::{HirExpr, HirExprKind};
+use super::place::{PlaceRecord, PlaceRoot, PlaceSegment, SegmentList};
+use super::type_table::TypeId;
+use super::types::{HirExpr, HirExprKind, HirUserCallWriteback};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ExprId(u32);
@@ -20,15 +19,43 @@ pub struct ExprList {
     len: u16,
 }
 
+/// A span of [`HirUserCallWriteback`]s in the arena's writeback list; most
+/// calls have none and cost eight bytes for saying so.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WritebackList {
+    start: u32,
+    len: u16,
+}
+
+impl WritebackList {
+    pub const EMPTY: Self = Self { start: 0, len: 0 };
+
+    pub fn is_empty(self) -> bool {
+        self.len == 0
+    }
+}
+
+/// One function's HIR nodes. Every type in it is a [`TypeId`] into the
+/// module's [`TypeTable`](super::type_table::TypeTable); the arena never
+/// owns an `LpsType`, so reading a node's type goes through a
+/// [`HirView`](super::type_table::HirView) (lowering) or a
+/// [`TypedArena`](super::type_table::TypedArena) (typing) that pairs the
+/// arena with the table.
 #[derive(Debug, Clone, Default)]
 pub struct HirArena {
     exprs: ChunkedVec<HirExpr>,
-    places: ChunkedVec<HirPlace>,
+    places: ChunkedVec<PlaceRecord>,
     expr_lists: Vec<ExprId>,
+    /// Every place's segments, back to back; a [`PlaceRecord`] spans its
+    /// own. One list instead of one `Vec` per place: a place has one or
+    /// two segments and a `Vec` of them cost a 4-element allocation each.
+    segments: Vec<PlaceSegment>,
+    /// Every call's `out`/`inout` writebacks, back to back.
+    writebacks: Vec<HirUserCallWriteback>,
 }
 
 impl HirArena {
-    pub(crate) fn push_expr(&mut self, span: Span, ty: LpsType, kind: HirExprKind) -> ExprId {
+    pub(crate) fn push_expr_typed(&mut self, span: Span, ty: TypeId, kind: HirExprKind) -> ExprId {
         let id = ExprId(
             self.exprs
                 .len()
@@ -39,35 +66,65 @@ impl HirArena {
         id
     }
 
-    pub(crate) fn expr(&self, id: ExprId) -> &HirExpr {
+    /// The stored node: span, type id and kind, unresolved.
+    pub(crate) fn node(&self, id: ExprId) -> &HirExpr {
         self.exprs
             .get(id.index())
             .expect("HIR expression id out of range")
     }
 
-    pub(crate) fn expr_ty(&self, id: ExprId) -> &LpsType {
-        &self.expr(id).ty
+    pub(crate) fn expr_type_id(&self, id: ExprId) -> TypeId {
+        self.node(id).ty
     }
 
     pub(crate) fn expr_span(&self, id: ExprId) -> Span {
-        self.expr(id).span
+        self.node(id).span
     }
 
-    pub(crate) fn push_place(&mut self, place: HirPlace) -> PlaceId {
+    pub(crate) fn push_place_typed<I>(
+        &mut self,
+        root: PlaceRoot,
+        segments: I,
+        ty: TypeId,
+    ) -> PlaceId
+    where
+        I: IntoIterator<Item = PlaceSegment>,
+    {
         let id = PlaceId(
             self.places
                 .len()
                 .try_into()
                 .expect("HIR place arena exceeded u32"),
         );
-        self.places.push(place);
+        let start = self.segments.len();
+        self.segments.extend(segments);
+        let len = self.segments.len() - start;
+        self.places.push(PlaceRecord {
+            root,
+            segments: SegmentList {
+                start: start.try_into().expect("HIR segment list exceeded u32"),
+                len: len.try_into().expect("HIR place exceeded u16 segments"),
+            },
+            ty,
+        });
         id
     }
 
-    pub(crate) fn place(&self, id: PlaceId) -> &HirPlace {
+    pub(crate) fn place_record(&self, id: PlaceId) -> &PlaceRecord {
         self.places
             .get(id.index())
             .expect("HIR place id out of range")
+    }
+
+    pub(crate) fn place_type_id(&self, id: PlaceId) -> TypeId {
+        self.place_record(id).ty
+    }
+
+    /// The projections of place `id`, root first.
+    pub(crate) fn place_segments(&self, id: PlaceId) -> &[PlaceSegment] {
+        let list = self.place_record(id).segments;
+        let start = list.start as usize;
+        &self.segments[start..start + usize::from(list.len)]
     }
 
     pub(crate) fn push_expr_list<I>(&mut self, ids: I) -> ExprList
@@ -87,6 +144,24 @@ impl HirArena {
         let start = list.start as usize;
         let end = start + usize::from(list.len);
         &self.expr_lists[start..end]
+    }
+
+    pub(crate) fn push_writebacks<I>(&mut self, items: I) -> WritebackList
+    where
+        I: IntoIterator<Item = HirUserCallWriteback>,
+    {
+        let start = self.writebacks.len();
+        self.writebacks.extend(items);
+        let len = self.writebacks.len() - start;
+        WritebackList {
+            start: start.try_into().expect("HIR writeback list exceeded u32"),
+            len: len.try_into().expect("HIR writeback list exceeded u16"),
+        }
+    }
+
+    pub(crate) fn writebacks(&self, list: WritebackList) -> &[HirUserCallWriteback] {
+        let start = list.start as usize;
+        &self.writebacks[start..start + usize::from(list.len)]
     }
 }
 
@@ -109,5 +184,36 @@ impl ExprList {
 
     pub fn is_empty(self) -> bool {
         self.len == 0
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    extern crate std;
+    /// Prints the HIR node sizes the memory probes reason with (`cargo test
+    /// -p lps-glsl -- hir_node_sizes_print --nocapture`). No assertion: the
+    /// numbers are host sizes (8-byte pointers) and feed the per-node
+    /// arithmetic in the compile-peak investigation, not a contract.
+    #[test]
+    fn hir_node_sizes_print() {
+        use core::mem::size_of;
+        use lps_shared::{LpsType, StructMember};
+
+        use super::super::place::{HirPlace, PlaceRecord, PlaceSegment};
+        use super::super::types::{HirExpr, HirStmt};
+        use super::*;
+        use crate::Token;
+        use crate::body::ParsedExpr;
+
+        std::println!("LpsType        {:>4} B", size_of::<LpsType>());
+        std::println!("StructMember   {:>4} B", size_of::<StructMember>());
+        std::println!("HirExpr        {:>4} B", size_of::<HirExpr>());
+        std::println!("HirPlace       {:>4} B", size_of::<HirPlace>());
+        std::println!("PlaceRecord    {:>4} B", size_of::<PlaceRecord>());
+        std::println!("PlaceSegment   {:>4} B", size_of::<PlaceSegment>());
+        std::println!("HirStmt        {:>4} B", size_of::<HirStmt>());
+        std::println!("Token          {:>4} B", size_of::<Token>());
+        std::println!("ParsedExpr     {:>4} B", size_of::<ParsedExpr>());
+        std::println!("ExprId/PlaceId {:>4} B", size_of::<ExprId>());
     }
 }

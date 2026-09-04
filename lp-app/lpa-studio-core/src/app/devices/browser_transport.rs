@@ -16,9 +16,16 @@ use lpa_devices::link::LinkInfo;
 use lpa_link::device_link::browser_serial::BrowserSerialLink;
 use lpa_link::device_link::wire::link_info;
 use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Provider;
-use lpa_link::{LinkEndpointId, LinkProvider};
+use lpa_link::{LinkEndpointId, LinkManagementEvent, LinkManagementEventSink, LinkProvider};
 
-use super::device_transport::{DeviceTransport, DeviceTransportFuture, GrantedLink};
+use super::device_transport::{
+    DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
+    DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
+};
+
+/// Where the board runtime manifest lives on a device (read by the
+/// firmware's loader at boot — effective next restart, board-selection D4).
+const DEVICE_HARDWARE_MANIFEST_PATH: &str = "/hardware.json";
 
 /// The browser Web Serial transport.
 pub struct BrowserSerialTransport {
@@ -66,8 +73,151 @@ impl DeviceTransport for BrowserSerialTransport {
                 .map_err(|error| error.to_string())?;
             Ok(granted
                 .iter()
+                // Under Brave's `SerialAllowAllPortsForUrls` policy,
+                // `getPorts()` also surfaces Bluetooth serial nodes (no USB
+                // ids at all). Only ports that could be an ESP32-class
+                // bridge become links — the same allowlist the chooser
+                // filter uses — so junk grants can never mint pending
+                // cards. The chooser path is unfiltered on purpose: a
+                // HUMAN pick through `requestPort` is already filtered by
+                // the JS side, and honoring it beats second-guessing it.
+                .filter(|grant| {
+                    let keep = lpa_link::is_esp32_serial_candidate(grant.usb_vid_pid);
+                    if !keep {
+                        log::debug!(
+                            "granted port {} is not an ESP32-class serial bridge; skipping",
+                            grant.endpoint.id.as_str()
+                        );
+                    }
+                    keep
+                })
                 .map(|grant| Self::granted(&provider, &grant.endpoint, grant.usb_vid_pid))
                 .collect())
+        })
+    }
+
+    fn run_effect(
+        &self,
+        info: LinkInfo,
+        call: DeviceEffectCall,
+        progress: DeviceEffectProgress,
+    ) -> DeviceTransportFuture<Result<DeviceEffectFacts, String>> {
+        let provider = Rc::clone(&self.provider);
+        Box::pin(async move {
+            let endpoint = LinkEndpointId::new(info.endpoint.0.clone());
+            // The connector-level event stream becomes the progress sink the
+            // effects layer turns into `ActivityMarker::Progress` — the ONE
+            // road to the screen (the 2026-07-28 defect's lesson). Logs ride
+            // it too, as label-only progress, so the card's narration keeps
+            // moving between percent ticks.
+            let events = LinkManagementEventSink::new(move |event| match event {
+                LinkManagementEvent::Log { message } => (progress)(message, None),
+                LinkManagementEvent::Progress(update) => (progress)(
+                    update.label,
+                    update
+                        .percent
+                        .map(|percent| u8::try_from(percent.min(100)).unwrap_or(100)),
+                ),
+            });
+            match call {
+                DeviceEffectCall::FlashFirmware { build_id } => {
+                    // `flashFirmware` in the JS releases the port's
+                    // reader/writer and closes it before esptool builds its
+                    // transport — the release half of the exclusive-borrow
+                    // discipline; the effects layer paused the pump for the
+                    // read half. The chip guard and the pre-write
+                    // `readBaseMac` live in that same JS and are
+                    // load-bearing — this path must never bypass them.
+                    let result = provider
+                        .flash_firmware_with_events(&endpoint, Some(&build_id), events)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: format!("wrote {}", result.manifest.display_name),
+                        probed_mac: result.base_mac,
+                        chip_name: result.chip_name,
+                    })
+                }
+                DeviceEffectCall::EraseFlash => {
+                    // Same exclusive-borrow discipline as the flash; the
+                    // erase's own verification (completion line outranking
+                    // the benign flash-id warning on C6 rev 2) lives in the
+                    // shipped JS.
+                    provider
+                        .erase_device_flash_with_events(&endpoint, events)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: "flash erased".to_string(),
+                        ..Default::default()
+                    })
+                }
+                DeviceEffectCall::RemoveProject {
+                    fallback_storage_id,
+                } => {
+                    // Same borrow discipline as the push, and the same
+                    // `lpa-client` framing under it. WHICH dir goes is read
+                    // from the board inside the conversation — the model
+                    // never names a path.
+                    let report = provider
+                        .remove_device_project(&endpoint, &fallback_storage_id, events)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: match report.was_loaded {
+                            true => format!("removed {}", report.storage_id),
+                            // Under-claim: the board had already stopped
+                            // reporting it, so "removed" would be a claim
+                            // about something we never saw.
+                            false => format!(
+                                "the board reported nothing loaded; cleared {}",
+                                report.storage_id
+                            ),
+                        },
+                        ..Default::default()
+                    })
+                }
+                DeviceEffectCall::WriteHardwareManifest { manifest_json } => {
+                    provider
+                        .write_device_file(
+                            &endpoint,
+                            DEVICE_HARDWARE_MANIFEST_PATH,
+                            manifest_json.as_bytes(),
+                            events,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: "board manifest written".to_string(),
+                        ..Default::default()
+                    })
+                }
+                DeviceEffectCall::PushProject {
+                    files,
+                    expected_hash,
+                    fallback_storage_id,
+                } => {
+                    // The conversation is `lpa-client`'s, on the raw `M!`
+                    // line framing the JS controller already does. The
+                    // effects layer paused this port's pump before calling
+                    // us — two drainers would split the responses between
+                    // them and both halves would look like a dead board.
+                    let report = provider
+                        .push_device_project(
+                            &endpoint,
+                            &files,
+                            &expected_hash,
+                            &fallback_storage_id,
+                            events,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(DeviceEffectFacts {
+                        summary: format!("project sent to {}", report.storage_id),
+                        ..Default::default()
+                    })
+                }
+            }
         })
     }
 
@@ -108,5 +258,35 @@ impl DeviceTransport for BrowserSerialTransport {
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         })
+    }
+
+    fn lens_client_io(
+        &self,
+        info: LinkInfo,
+        tap: LensLineTap,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+        let endpoint = LinkEndpointId::new(info.endpoint.0);
+        // Console lines the lens io sees are ALREADY on their way to the
+        // fold through the tap (the card's terminal shows them); the
+        // management sink only needs to keep the io's own diagnostics
+        // (malformed frames) from vanishing.
+        let events = LinkManagementEventSink::new(|event| {
+            if let LinkManagementEvent::Log { message } = event {
+                log::debug!("lens io: {message}");
+            }
+        });
+        // The provider's tap vocabulary is its own (lpa-link stays
+        // independent of the studio's); the join is one match.
+        let tap: Rc<dyn Fn(lpa_link::providers::browser_serial_esp32::LensTapLine)> =
+            Rc::new(move |line| {
+                use lpa_link::providers::browser_serial_esp32::LensTapLine;
+                tap(match line {
+                    LensTapLine::Line(line) => LensTapEvent::Line(line),
+                    LensTapLine::PortError(error) => LensTapEvent::PortError(error),
+                })
+            });
+        self.provider
+            .lens_client_io(&endpoint, tap, events)
+            .map_err(|error| error.to_string())
     }
 }

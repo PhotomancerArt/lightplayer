@@ -112,6 +112,14 @@ pub enum Step {
         #[serde(default)]
         mac: Option<String>,
     },
+    /// The board's answer to "what have you got loaded?" — the fact the
+    /// empty and running faces are made of. An EMPTY list is the interesting
+    /// one: it is what says "nothing on this board", which no silence can.
+    Loaded {
+        link: u64,
+        #[serde(default)]
+        projects: Vec<String>,
+    },
     Hello {
         link: u64,
         #[serde(default)]
@@ -161,6 +169,66 @@ pub enum Step {
     },
     Identify {
         device: u64,
+    },
+    /// The Flash gesture: board picked, build resolved by the app.
+    Flash {
+        device: u64,
+        board: String,
+        build: String,
+    },
+    /// The Push gesture. The payload is the app's to stage; the model's
+    /// gesture names only the board.
+    Push {
+        device: u64,
+    },
+    /// The Factory-reset gesture.
+    Erase {
+        device: u64,
+    },
+    /// The Remove-project gesture (the always-actions row's second verb).
+    RemoveProject {
+        device: u64,
+    },
+    /// A coarse effect took the wire, or gave it back. Scripted so a fixture
+    /// can prove that a long borrow never turns into a "went quiet" verdict
+    /// about a board nobody was listening to.
+    Borrow {
+        link: u64,
+        held: bool,
+    },
+    /// A coarse effect's progress marker, as the effects layer sinks it.
+    ///
+    /// `effect` is the generation stamp the effects layer puts on every
+    /// marker. Absent means unstamped — the shape the model's own brackets
+    /// wear, and the one a fixture uses when it does not care which effect
+    /// spoke.
+    EffectProgress {
+        device: u64,
+        label: String,
+        #[serde(default)]
+        percent: Option<u8>,
+        #[serde(default)]
+        effect: Option<u64>,
+    },
+    /// A coarse effect's end marker. `ok` scripts the success/failure fork;
+    /// `message` is the outcome line.
+    EffectEnded {
+        device: u64,
+        ok: bool,
+        #[serde(default)]
+        message: Option<String>,
+        #[serde(default)]
+        effect: Option<u64>,
+        /// Which activity the effect belonged to (default: Flash, the first
+        /// consumer of the seam).
+        #[serde(default)]
+        kind: Option<ActivityKind>,
+    },
+    /// Identity a coarse effect learned out-of-band (the flash preflight's
+    /// efuse MAC read).
+    MacObserved {
+        device: u64,
+        mac: String,
     },
     SetName {
         device: u64,
@@ -286,6 +354,16 @@ impl Step {
                 LinkId(link),
                 LinkEvent::Frame(ServerFrame::heartbeat(peer_identity(uid, mac, None))),
             ),
+            Self::Loaded { link, projects } => Input::link(
+                LinkId(link),
+                LinkEvent::Frame(ServerFrame::loaded_report(
+                    2,
+                    projects
+                        .into_iter()
+                        .map(crate::wire::LoadedProjectFacts::new)
+                        .collect(),
+                )),
+            ),
             Self::Hello {
                 link,
                 uid,
@@ -334,6 +412,67 @@ impl Step {
             Self::Identify { device } => Input::Action(Action::Identify {
                 device: DeviceId(device),
             }),
+            Self::Flash {
+                device,
+                board,
+                build,
+            } => Input::Action(Action::Flash {
+                device: DeviceId(device),
+                board_id: board,
+                build_id: build,
+                park_first: false,
+            }),
+            Self::Push { device } => Input::Action(Action::Push {
+                device: DeviceId(device),
+            }),
+            Self::Erase { device } => Input::Action(Action::Erase {
+                device: DeviceId(device),
+            }),
+            Self::RemoveProject { device } => Input::Action(Action::RemoveProject {
+                device: DeviceId(device),
+            }),
+            Self::Borrow { link, held } => Input::Event(Event::LinkBorrow {
+                link: LinkId(link),
+                held,
+            }),
+            Self::EffectProgress {
+                device,
+                label,
+                percent,
+                effect,
+            } => Input::Event(Event::ActivityMarker {
+                device: DeviceId(device),
+                effect: effect.map(crate::event::EffectId),
+                marker: crate::event::ActivityMarker::Progress { label, percent },
+            }),
+            Self::EffectEnded {
+                device,
+                ok,
+                message,
+                effect,
+                kind,
+            } => Input::Event(Event::ActivityMarker {
+                device: DeviceId(device),
+                effect: effect.map(crate::event::EffectId),
+                marker: crate::event::ActivityMarker::Ended {
+                    kind: kind.unwrap_or(ActivityKind::Flash),
+                    outcome: match ok {
+                        true => crate::activity::ActivityOutcome::Succeeded {
+                            summary: message.unwrap_or_else(|| "done".to_string()),
+                        },
+                        false => crate::activity::ActivityOutcome::Failed {
+                            message: message.unwrap_or_else(|| "failed".to_string()),
+                        },
+                    },
+                },
+            }),
+            Self::MacObserved { device, mac } => Input::Event(Event::IdentityObserved {
+                device: DeviceId(device),
+                identity: PeerIdentity {
+                    mac: Some(MacAddress(mac)),
+                    ..Default::default()
+                },
+            }),
             Self::SetName { device, name } => Input::Action(Action::SetName {
                 device: DeviceId(device),
                 name,
@@ -361,6 +500,8 @@ pub struct Expect {
     pub activity: Option<ActivityKind>,
     pub cancel_requested: Option<bool>,
     pub escapes: Option<Vec<Escape>>,
+    /// Whether the card wears the needs-firmware face (board pick + Flash).
+    pub needs_firmware: Option<bool>,
     pub outcome_ok: Option<bool>,
     pub outcome_contains: Option<String>,
     pub pending_index: Option<usize>,
@@ -491,6 +632,14 @@ impl Expect {
                 format!("expected state {expected:?}, saw {:?}", device.state_label)
             })?;
         }
+        if let Some(expected) = self.needs_firmware {
+            require(device.needs_firmware == expected, || {
+                format!(
+                    "expected needs_firmware={expected}, saw {}",
+                    device.needs_firmware
+                )
+            })?;
+        }
         if let Some(expected) = self.device_status {
             require(device.status == expected, || {
                 format!("expected status {expected:?}, saw {:?}", device.status)
@@ -593,6 +742,7 @@ impl Expect {
             || self.activity.is_some()
             || self.cancel_requested.is_some()
             || self.escapes.is_some()
+            || self.needs_firmware.is_some()
             || self.outcome_ok.is_some()
             || self.outcome_contains.is_some()
     }

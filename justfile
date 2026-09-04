@@ -1462,7 +1462,8 @@ _fw-size-check name chip flash_size elf partition margin doc:
     fi
 
 # Heap-budget ratchet: per-window heap deltas (project-load, shader-compile,
-# frame, …) measured on the RV32 emulator vs the checked-in measured record
+# frame, …) and per-frame allocation churn (a steady-render pass) measured on
+# the RV32 emulator vs the checked-in measured record
 # (scripts/heap-budget-record.json). A ratchet, not a ceiling — fails on any
 # growth beyond the margin; an intentional increase re-baselines explicitly
 # with `just heap-budget-baseline` so the growth lands in the PR diff.
@@ -1895,7 +1896,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-upgrade-fw lint-torture-corpus lint-vec-corpus
+check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-upgrade-fw lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -1918,6 +1919,18 @@ lint-torture-corpus:
 # triage hand-added to the float op-add/op-multiply large-numbers cases.
 lint-vec-corpus:
     cargo run -p lps-filetests-gen-app -- --check
+
+# A `tw:` utility built on a theme token `lp-app/lpa-studio-web/tailwind.css`
+# does not define (`tw:bg-panel`, `tw:text-error-foreground`) is not an error
+# to rustc or to Tailwind's scanner — it generates NOTHING, and the surface
+# falls through to transparent/inherited (the device roster card shipped with
+# a transparent background that way). The script generates the stylesheet
+# with the pinned standalone Tailwind CLI dx uses (dx's tool cache, or a
+# one-time download of the pinned release) and checks every token against it.
+#
+# Every `tw:` utility in the Studio markup must generate a CSS rule.
+lint-tw-utilities:
+    python3 scripts/check-tw-utilities.py
 
 # Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
 lint-schemars-fw:

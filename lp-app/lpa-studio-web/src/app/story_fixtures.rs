@@ -13,10 +13,10 @@ use lpa_studio_core::{
     ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,
     ProjectRuntimeSummary, ProjectState, ProjectSyncPhase, ProjectSyncSummary, SimCardState,
     UiAction, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConsoleView, UiIssue,
-    UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiMetric, UiNodeChild, UiNodeHeader,
-    UiNodeSection, UiNodeTab, UiNodeView, UiPaneView, UiProducedProduct, UiProducedValue,
-    UiSimCard, UiSimProjectChip, UiSlotAsset, UiSlotSourceState, UiSlotValue, UiStatus,
-    UiStudioView, UiViewContent,
+    UiLensCard, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiMetric, UiNodeChild,
+    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPaneView, UiProducedProduct,
+    UiProducedValue, UiSimCard, UiSimProjectChip, UiSlotAsset, UiSlotSourceState, UiSlotValue,
+    UiStatus, UiStudioView, UiViewContent,
 };
 
 /// Timestamp shared by every story log fixture, so stories stay
@@ -30,7 +30,7 @@ pub(crate) const STORY_LOG_TIMESTAMP: f64 = 1_720_000_000.0;
 fn story_view(panes: Vec<UiPaneView>, logs: Vec<UiLogEntry>) -> UiStudioView {
     let mut console = UiConsoleView::empty();
     console.entries = logs;
-    UiStudioView::new(panes, console).with_lens_card(Some(simulator_lens_card()))
+    UiStudioView::new(panes, console).with_lens_card(Some(UiLensCard::Sim(simulator_lens_card())))
 }
 
 /// The editor's runtime surface (D43): a running simulator as the LENS

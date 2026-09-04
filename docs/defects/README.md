@@ -180,6 +180,17 @@ genuinely fits none of these, and define it here in one line.
   added anywhere in the pipeline (a deferred queue, a render-cycle
   bounce) turns it routine. The fix shape is a queue of everything still
   in flight, never a bigger window on a single slot.
+- **`deadline-margin-by-accident`** — a real-time deadline is met only by
+  incidental margin (cache warmth, a light workload, a small image) rather
+  than by construction, so unrelated growth elsewhere crosses it silently
+  and the failure is quantised at one specific deadline, every time. The
+  fix is placement or budget, verified by measurement, not by attributes.
+- **`arena-retained-transient`** — a value that is transient by intent
+  (an intermediate of a recursive build, a type copied "for convenience"
+  onto every node) is pushed into an arena whose lifetime is the whole
+  pass, so the working set scales with references × payload size instead
+  of with the result. Presents as an allocation failure far larger than
+  the input could justify.
 
 ## Index
 
@@ -272,8 +283,28 @@ contract, the exact conventions (coordinate handed to the entry, rounding
 of the final channel value) deserve identity tests with known expected
 values; statistical diffs are for the arithmetic in between.
 
+**2026-09-01 names a shape that had already produced three entries under
+three different classes.** `silent-black-under-node-quarantine` (this one,
+`state-conflation`: `Error`/"Running" each modeled two facts as one) is the
+same underlying mechanism as `classic-rmt-open-fault` (`misattributed-
+symptom`, 2026-08-01), `boot-compile-oom-crash-loop` (`silent-drop`,
+2026-08-07), and `shader-jit-compile-transient-starves-classic-heap`
+(2026-08-29, still open) — in every one, an OOM at a compile safe point read
+as something else entirely (an RMT fault, a vanished board, a heap-starved
+device, a healthy card) because nothing between the recovery ledger and the
+eyes looking at the result carried a typed "fault" signal. They are classed
+differently because each names *how* the symptom was misread rather than
+*why* the underlying signal never arrived — which is the same split noted
+for `split-source-of-truth`/`config-masked-defect` above. Four in a month,
+now with a fix (`docs/adr/2026-09-02-fault-is-never-black.md`): watch whether
+a fifth still lands somewhere the new `Fault` status and pattern don't reach.
+
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| assumed-context | 2026-09-02 | [flash-from-running-board-parks-until-reset](2026-09-02-flash-from-running-board-parks-until-reset.md) | open | lpa-devices Flash activity post-write wait; browser flasher closing reset |
+| stand-in-divergence | 2026-09-02 | [ignored-emu-fuel-probe-renders-black-on-first-probe](2026-09-02-ignored-emu-fuel-probe-renders-black-on-first-probe.md) | open | lpc-engine compile-window deferral vs render probes; fw-tests recovery_emu (ignored) |
+| state-conflation | 2026-09-01 | [silent-black-under-node-quarantine](2026-09-01-silent-black-under-node-quarantine.md) | fixed | lpc-engine node status + output fallback; lpa-devices heartbeat mirror |
+| misattributed-symptom | 2026-08-31 | [c6-rmt-ws281x-dark](2026-08-31-c6-rmt-ws281x-dark.md) | harness fixed (#491); app half fixed (#495 heap, #496 fault pattern + card) | fw-esp32c6 harness serial io + lpc-engine shader node under lp-recovery |
 | unit-mismatch | 2026-08-24 | [map2d-sample-diameter-unit-mismatch](2026-08-24-map2d-sample-diameter-unit-mismatch.md) | fixed | lpc-engine map2d resolve + ResolvedMappingCompact consumers |
 | lifecycle-ownership | 2026-08-14 | [post-acquire-open-failure-leaks-the-project-lock](2026-08-14-post-acquire-open-failure-leaks-the-project-lock.md) | fixed | lpa-studio-web library_host_opfs + lpa-studio-core project_controller |
 | lock-held-across-foreign-latency | 2026-08-14 | [sync-holds-the-project-lock-across-the-network](2026-08-14-sync-holds-the-project-lock-across-the-network.md) | fixed | lpa-studio-web cloud/sync + library_host_opfs |
@@ -359,6 +390,11 @@ values; statistical diffs are for the arithmetic in between.
 | unbounded-restatement | 2026-07-28 | [tick-error-restated-every-frame](2026-07-28-tick-error-restated-every-frame.md) | fixed | lpa-server (advance_frame) |
 | unsynchronized-shared-artifact | 2026-07-29 | [builtins-elf-uplift-race](2026-07-29-builtins-elf-uplift-race.md) | fixed | justfile `test` + lpvm-cranelift/build.rs |
 | missing-coverage | 2026-07-29 | [uniform-struct-array-runtime-index](2026-07-29-uniform-struct-array-runtime-index.md) | fixed | examples/effects/meteor + lps-frontend lowering |
+| arena-retained-transient | 2026-08-29 | [shader-jit-compile-transient-starves-classic-heap](2026-08-29-shader-jit-compile-transient-starves-classic-heap.md) | open (host + emulator attribution done 2026-09-02; silicon re-measure pending) | lps-glsl HIR build transient vs the classic's arena; probes `xt_compile_peak_memory`, `example_shader_compile_peak_memory` |
+| arena-retained-transient | 2026-09-01 | [hir-place-clones-exhaust-c6-heap-at-compute-compile](2026-09-01-hir-place-clones-exhaust-c6-heap-at-compute-compile.md) | fixed (recurrence 2026-09-02 on every other node kind — fixed, PR #497; module-wide interning open) | lps-glsl hir/typeck + hir/place + lower/place; lpc-engine shader nodes ([mem] bracket) |
+| deadline-margin-by-accident | 2026-09-02 | [c6-ws281x-first-three-leds-then-stale](2026-09-02-c6-ws281x-first-three-leds-then-stale.md) | fixed | fw-esp32c6 output/rmt + lp-ws281x refill path placement |
+| untested-path | 2026-09-02 | [studio-flasher-cannot-recover-a-boot-looping-c6](2026-09-02-studio-flasher-cannot-recover-a-boot-looping-c6.md) | **open** | lpa-studio-web device card flash flow (esptool-js ladder) |
+| lifecycle-ownership | 2026-09-02 | [same-gpio-rebind-disconnects-the-pad](2026-09-02-same-gpio-rebind-disconnects-the-pad.md) | fixed | fw-esp32c6 + fw-esp32s3 output/rmt `bind_channel` (esp-hal `with_pin` guard order) |
 
 ## Predecessor: `docs/bugs/`
 

@@ -253,9 +253,30 @@ journal be replayed.
   `lpc-wire` ↔ `wire.rs` adapter lands, records and journal get their
   persistence, and the four shipped machines are deleted. That PR is where
   the deletion test (I8) is actually checked.
-- Round 2: Setup / Flash / Provision / Push / Pull activities; the wizard
+- ~~Round 2: Setup / Flash / Provision / Push / Pull activities; the wizard
   as a Setup projection; the post-flash reset ladder as effects (vision
-  R5).
+  R5).~~ **Landed differently (round-2 M2, 2026-08-30): no wizard, no
+  Setup/Provision orchestrators** — Yona's card ruling made Flash (and
+  M3's Push) the activities, and the card face picks the verb from fold
+  evidence. The seam they run on is the **coarse-effect seam**:
+
+  - A new `Command::RunEffect { device, link, effect }` arm whose
+    `EffectRequest` is a closed data enum (`Flash`, `WriteBoardManifest`;
+    M3/M4 add push/pull/erase). The model stays sans-IO — the arm is data,
+    and everything the effect learns re-enters as events
+    (`ActivityMarker::{Progress, Ended}`, `IdentityObserved` for the flash
+    preflight's efuse MAC).
+  - The effects layer executes it with an **exclusive borrow of the wire**:
+    the link's pump is paused for the effect's duration (the `borrowed`
+    flag on the link slot) and the platform below releases the port's
+    reader/writer before any tool touches the port — the `device_manage.rs`
+    discipline, kept under the new model. Handles are never held across a
+    reset that re-enumerates (ADR 2026-07-30); they are re-derived from the
+    endpoint by session adoption.
+  - The post-flash reconnect ladder (reopen-with-adoption → ask →
+    `Normal` → `BothThenDrop` → honest failure) lives in the Flash
+    REDUCER as scheduled timers — the boot hello is fold evidence, never a
+    sticky gate, and the reducer never awaits (I7).
 - Vision R4 (firmware stamps identity into the heartbeat as well as the
   hello) is modeled AND live since round 2's wire groundwork: the firmware
   stamps `HeartbeatIdentity` (uid + base MAC) on every heartbeat and the

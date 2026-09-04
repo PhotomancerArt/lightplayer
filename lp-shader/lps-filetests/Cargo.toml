@@ -53,3 +53,9 @@ libm = "0.2"
 [[test]]
 name = "filetests"
 harness = true
+
+# Frontend peak-memory sweep over the corpus (one test; process-wide
+# allocator counters). See the file's module doc.
+[[test]]
+name = "compile_peak_memory_corpus"
+harness = true

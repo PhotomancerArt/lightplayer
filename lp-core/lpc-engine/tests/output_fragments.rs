@@ -139,10 +139,9 @@ fn published_samples(fixtures: &[(&str, u32, f32)]) -> Vec<u16> {
         .get(buffer_id)
         .expect("sink buffer")
         .value()
-        .bytes
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-        .collect()
+        .samples16()
+        .expect("output channels are u16 samples")
+        .to_vec()
 }
 
 /// The status of the output node once the graph has settled.

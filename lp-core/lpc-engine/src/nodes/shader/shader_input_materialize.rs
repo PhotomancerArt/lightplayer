@@ -13,12 +13,20 @@ use lps_shared::LpsValueF32;
 
 use crate::dataflow::resolver::resolver::model_value_to_lps_value_f32;
 
+use super::map_input_template::{MapInputTemplateKey, MapInputTemplates};
+
 /// Convert one resolved/default shader input into the runtime shader ABI shape.
+///
+/// `templates` caches the frame-invariant half of a **map** input (see
+/// [`MapInputTemplates`]); the shader node runtimes own one per node. `None`
+/// takes the rebuild-every-call path, which is what one-shot callers and
+/// unit fakes want.
 pub fn materialize_shader_input(
     slot_name: &str,
     slot: &ShaderSlotDef,
     data: Option<&SlotData>,
     registry: &SlotShapeRegistry,
+    templates: Option<&mut MapInputTemplates>,
 ) -> Result<LpsValueF32, ShaderInputMaterializeError> {
     // Defense in depth at the allocation site: the compile seams validate
     // whole defs, but this function resizes a `Vec` straight off the
@@ -40,7 +48,7 @@ pub fn materialize_shader_input(
         ShaderSlotKind::Value | ShaderSlotKind::Phasor | ShaderSlotKind::Seconds => {
             materialize_value_input(slot_name, slot, data)
         }
-        ShaderSlotKind::Map => materialize_map_input(slot_name, slot, data, registry),
+        ShaderSlotKind::Map => materialize_map_input(slot_name, slot, data, registry, templates),
         ShaderSlotKind::Buffer => materialize_buffer_input(slot_name, slot, data),
         // A palette's uniform is a texture handle, not a value: there is no
         // `LpValue` shape a sampler could be materialized from, and the
@@ -160,24 +168,45 @@ fn materialize_value_input(
     slot: &ShaderSlotDef,
     data: Option<&SlotData>,
 ) -> Result<LpsValueF32, ShaderInputMaterializeError> {
-    let value = match data {
-        Some(SlotData::Value(value)) => value.value().clone(),
+    // Convert straight off the resolved value: a `clone()` here deep-copies
+    // every field name of a struct-valued uniform, once per frame, to hand
+    // the conversion something it only ever reads.
+    let default;
+    let value: &LpValue = match data {
+        Some(SlotData::Value(value)) => value.value(),
         Some(_) => {
             return Err(ShaderInputMaterializeError::ExpectedValue(String::from(
                 slot_name,
             )));
         }
-        None => slot.default_value(),
+        None => {
+            default = slot.default_value();
+            &default
+        }
     };
-    model_value_to_lps_value_f32(&value)
+    model_value_to_lps_value_f32(value)
         .map_err(|e| ShaderInputMaterializeError::Value(format!("shader input {slot_name:?}: {e}")))
 }
 
+/// Fill the uniform's fixed-length array from the resolved map: one
+/// conversion per resolved entry, and one clone of the cached sentinel
+/// element per empty slot.
+///
+/// The resolved map is read **by reference** throughout. It used to be
+/// cloned whole (`map.entries.clone()`), then each entry's `LpValue` cloned
+/// again into a `Vec<LpValue>` scratch, then converted — three deep copies of
+/// a struct-valued map, each copying every field name, per frame.
+///
+/// The residual cost the `String` field-name representation forces (plan Q5)
+/// is the sentinel clone per **empty** slot: `LpsValueF32::Struct` owns its
+/// field names, so a fully-fanned-out uniform still allocates one name set
+/// per unused element. Interning the names is its own plan.
 fn materialize_map_input(
     slot_name: &str,
     slot: &ShaderSlotDef,
     data: Option<&SlotData>,
     registry: &SlotShapeRegistry,
+    templates: Option<&mut MapInputTemplates>,
 ) -> Result<LpsValueF32, ShaderInputMaterializeError> {
     let mapping = slot
         .mapping
@@ -197,35 +226,52 @@ fn materialize_map_input(
     let len = *mapping.len.value();
     let key_field = mapping.key.value().as_str();
     let empty_key = *mapping.empty_key.value();
-    let element_ty = lp_type_for_ref(slot.value.value(), registry)?;
-    let default_element = default_value_for_type(&element_ty)?;
-    let mut items = Vec::new();
     let len_usize = usize::try_from(len).map_err(|_| {
         ShaderInputMaterializeError::Value(format!("shader map input {slot_name:?}: len overflow"))
     })?;
-    items.resize(len_usize, default_element.clone());
-    for item in &mut items {
-        set_u32_field(slot_name, item, key_field, empty_key)?;
-    }
 
-    let entries: VecMap<SlotMapKey, SlotData> = match data {
-        Some(SlotData::Map(map)) => map.entries.clone(),
+    let value_ref = slot.value.value();
+    let template_key = MapInputTemplateKey {
+        value_ref: value_ref.as_str(),
+        key_field,
+        empty_key,
+        len: len_usize,
+        shapes_revision: registry.revision(),
+    };
+    let build = || {
+        build_empty_element(
+            slot_name, value_ref, registry, key_field, empty_key, len_usize,
+        )
+    };
+    let rebuilt;
+    let empty_element: Option<&LpsValueF32> = match templates {
+        Some(templates) => templates.empty_element(slot_name, template_key, build)?,
+        None => {
+            rebuilt = build()?;
+            rebuilt.as_ref()
+        }
+    };
+
+    let entries: Option<&VecMap<SlotMapKey, SlotData>> = match data {
+        Some(SlotData::Map(map)) => Some(&map.entries),
         Some(_) => {
             return Err(ShaderInputMaterializeError::ExpectedMap(String::from(
                 slot_name,
             )));
         }
-        None => VecMap::new(),
+        None => None,
     };
-    if entries.len() > len_usize {
+    let entry_count = entries.map_or(0, VecMap::len);
+    if entry_count > len_usize {
         return Err(ShaderInputMaterializeError::TooManyEntries {
             slot: String::from(slot_name),
             len,
-            count: entries.len(),
+            count: entry_count,
         });
     }
 
-    for (index, (key, data)) in entries.into_iter().enumerate() {
+    let mut out = Vec::with_capacity(len_usize);
+    for (key, data) in entries.map(VecMap::iter).into_iter().flatten() {
         let SlotMapKey::U32(key) = key else {
             return Err(ShaderInputMaterializeError::UnsupportedKey(String::from(
                 slot_name,
@@ -236,17 +282,41 @@ fn materialize_map_input(
                 slot_name,
             )));
         };
-        validate_u32_field(slot_name, value.value(), key_field, key)?;
-        items[index] = value.value().clone();
-    }
-
-    let mut out = Vec::with_capacity(items.len());
-    for value in &items {
-        out.push(model_value_to_lps_value_f32(value).map_err(|e| {
+        validate_u32_field(slot_name, value.value(), key_field, *key)?;
+        out.push(model_value_to_lps_value_f32(value.value()).map_err(|e| {
             ShaderInputMaterializeError::Value(format!("shader input {slot_name:?}: {e}"))
         })?);
     }
+    if let Some(empty_element) = empty_element {
+        while out.len() < len_usize {
+            out.push(empty_element.clone());
+        }
+    }
     Ok(LpsValueF32::Array(out.into_boxed_slice()))
+}
+
+/// The sentinel element the map uniform's empty slots carry, in the shader
+/// ABI shape. `None` when the mapping is zero-length and no element is ever
+/// emitted — the key-field check stays where it was, on an element that was
+/// actually going to be written.
+fn build_empty_element(
+    slot_name: &str,
+    value_ref: &ShaderValueShapeRef,
+    registry: &SlotShapeRegistry,
+    key_field: &str,
+    empty_key: u32,
+    len: usize,
+) -> Result<Option<LpsValueF32>, ShaderInputMaterializeError> {
+    let element_ty = lp_type_for_ref(value_ref, registry)?;
+    let mut element = default_value_for_type(&element_ty)?;
+    if len == 0 {
+        return Ok(None);
+    }
+    set_u32_field(slot_name, &mut element, key_field, empty_key)?;
+    let element = model_value_to_lps_value_f32(&element).map_err(|e| {
+        ShaderInputMaterializeError::Value(format!("shader input {slot_name:?}: {e}"))
+    })?;
+    Ok(Some(element))
 }
 
 /// A buffer input is one packed value: present data validates elem/len and
@@ -271,16 +341,22 @@ fn materialize_buffer_input(
         .buffer_len()
         .ok_or_else(|| ShaderInputMaterializeError::MissingLen(String::from(slot_name)))?;
 
-    let value = match data {
-        Some(SlotData::Value(value)) => value.value().clone(),
+    // By reference: cloning here copied the whole packed buffer every frame
+    // to hand the conversion a value it only reads.
+    let zeroed;
+    let value: &LpValue = match data {
+        Some(SlotData::Value(value)) => value.value(),
         Some(_) => {
             return Err(ShaderInputMaterializeError::ExpectedValue(String::from(
                 slot_name,
             )));
         }
-        None => LpValue::Buffer(lpc_model::LpBuffer::zeroed(elem, len)),
+        None => {
+            zeroed = LpValue::Buffer(lpc_model::LpBuffer::zeroed(elem, len));
+            &zeroed
+        }
     };
-    let LpValue::Buffer(ref buffer) = value else {
+    let LpValue::Buffer(buffer) = value else {
         return Err(ShaderInputMaterializeError::ExpectedBuffer(String::from(
             slot_name,
         )));
@@ -292,7 +368,7 @@ fn materialize_buffer_input(
             got: alloc::format!("{:?}[{}]", buffer.elem, buffer.len()),
         });
     }
-    model_value_to_lps_value_f32(&value)
+    model_value_to_lps_value_f32(value)
         .map_err(|e| ShaderInputMaterializeError::Value(format!("shader input {slot_name:?}: {e}")))
 }
 
@@ -432,7 +508,7 @@ mod tests {
         ));
 
         let value =
-            materialize_shader_input("events", &slot, Some(&data), &registry).expect("input");
+            materialize_shader_input("events", &slot, Some(&data), &registry, None).expect("input");
 
         let LpsValueF32::Array(items) = value else {
             panic!("expected array");
@@ -451,7 +527,8 @@ mod tests {
             ShaderSlotMappingDef::sentinel(2, "id", 0),
         );
 
-        let value = materialize_shader_input("events", &slot, None, &registry).expect("input");
+        let value =
+            materialize_shader_input("events", &slot, None, &registry, None).expect("input");
 
         let LpsValueF32::Array(items) = value else {
             panic!("expected array");
@@ -459,6 +536,120 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert_message(&items[0], 0, 0);
         assert_message(&items[1], 0, 0);
+    }
+
+    /// The empty slots carry the mapping's **authored** sentinel, not a
+    /// zeroed key: the shader tells a live element from a spare one by
+    /// comparing this field.
+    #[test]
+    fn empty_slots_carry_the_authored_sentinel_key() {
+        let registry = SlotShapeRegistry::default();
+        let slot = ShaderSlotDef::map_u32_native(
+            CONTROL_MESSAGE_SHAPE_NAME,
+            ShaderSlotMappingDef::sentinel(3, "id", 999),
+        );
+        let data = messages(&[(7, 42)]);
+
+        let value =
+            materialize_shader_input("events", &slot, Some(&data), &registry, None).expect("input");
+
+        let LpsValueF32::Array(items) = value else {
+            panic!("expected array");
+        };
+        assert_message(&items[0], 7, 42);
+        assert_message(&items[1], 999, 0);
+        assert_message(&items[2], 999, 0);
+    }
+
+    /// A map with more entries than the uniform's array can hold is a
+    /// diagnosable overflow, never a silent truncation.
+    #[test]
+    fn rejects_more_entries_than_the_mapping_length() {
+        let registry = SlotShapeRegistry::default();
+        let slot = ShaderSlotDef::map_u32_native(
+            CONTROL_MESSAGE_SHAPE_NAME,
+            ShaderSlotMappingDef::sentinel(2, "id", 0),
+        );
+        let data = messages(&[(1, 10), (2, 20), (3, 30)]);
+
+        let err = materialize_shader_input("events", &slot, Some(&data), &registry, None)
+            .expect_err("too many entries");
+
+        assert!(matches!(
+            err,
+            ShaderInputMaterializeError::TooManyEntries {
+                len: 2,
+                count: 3,
+                ..
+            }
+        ));
+    }
+
+    /// The phase's claim, measured: with the sentinel template cached, a map
+    /// input costs **one conversion per entry** and the output vector —
+    /// nothing copies the map, its entries, or rebuilds the element.
+    #[test]
+    fn a_warmed_map_input_costs_one_conversion_per_entry() {
+        let registry = SlotShapeRegistry::default();
+        let slot = ShaderSlotDef::map_u32_native(
+            CONTROL_MESSAGE_SHAPE_NAME,
+            ShaderSlotMappingDef::sentinel(3, "id", 0),
+        );
+        let data = messages(&[(1, 10), (2, 20), (3, 30)]);
+        let values: Vec<&LpValue> = entry_values(&data);
+        let mut templates = MapInputTemplates::new();
+        materialize_shader_input(
+            "events",
+            &slot,
+            Some(&data),
+            &registry,
+            Some(&mut templates),
+        )
+        .expect("warm-up");
+
+        let (_, conversions) = crate::test_alloc_counter::measure(|| {
+            for value in &values {
+                model_value_to_lps_value_f32(value).expect("convert");
+            }
+        });
+        let (_, materialized) = crate::test_alloc_counter::measure(|| {
+            materialize_shader_input(
+                "events",
+                &slot,
+                Some(&data),
+                &registry,
+                Some(&mut templates),
+            )
+            .expect("input")
+        });
+
+        assert_eq!(materialized.allocs, conversions.allocs + 1);
+    }
+
+    /// The template is per (uniform, shape): a re-authored empty key must
+    /// reach the array, not be answered from a stale cached element. Caching
+    /// bugs are silent, so this is a test rather than a comment.
+    #[test]
+    fn a_reauthored_empty_key_reaches_the_next_frames_array() {
+        let registry = SlotShapeRegistry::default();
+        let mut slot = ShaderSlotDef::map_u32_native(
+            CONTROL_MESSAGE_SHAPE_NAME,
+            ShaderSlotMappingDef::sentinel(2, "id", 0),
+        );
+        let mut templates = MapInputTemplates::new();
+        materialize_shader_input("events", &slot, None, &registry, Some(&mut templates))
+            .expect("first frame");
+
+        slot.mapping = lpc_model::OptionSlot::some(ShaderSlotMappingDef::sentinel(2, "id", 999));
+        let value =
+            materialize_shader_input("events", &slot, None, &registry, Some(&mut templates))
+                .expect("second frame");
+
+        let LpsValueF32::Array(items) = value else {
+            panic!("expected array");
+        };
+        assert_message(&items[0], 999, 0);
+        assert_message(&items[1], 999, 0);
     }
 
     #[test]
@@ -479,7 +670,7 @@ mod tests {
             )]),
         ));
 
-        let err = materialize_shader_input("events", &slot, Some(&data), &registry)
+        let err = materialize_shader_input("events", &slot, Some(&data), &registry, None)
             .expect_err("mismatched key");
 
         assert!(matches!(
@@ -500,7 +691,8 @@ mod tests {
         .expect("buffer");
         let data = SlotData::Value(WithRevision::new(Revision::new(4), LpValue::Buffer(buffer)));
 
-        let value = materialize_shader_input("heat", &slot, Some(&data), &registry).expect("input");
+        let value =
+            materialize_shader_input("heat", &slot, Some(&data), &registry, None).expect("input");
 
         let LpsValueF32::Buffer(out) = value else {
             panic!("expected buffer, got {value:?}");
@@ -518,7 +710,7 @@ mod tests {
         let registry = SlotShapeRegistry::default();
         let slot = ShaderSlotDef::buffer_builtin("f32", 2);
 
-        let value = materialize_shader_input("heat", &slot, None, &registry).expect("input");
+        let value = materialize_shader_input("heat", &slot, None, &registry, None).expect("input");
 
         let LpsValueF32::Buffer(out) = value else {
             panic!("expected buffer, got {value:?}");
@@ -537,7 +729,7 @@ mod tests {
             LpValue::Buffer(lpc_model::LpBuffer::zeroed(lpc_model::BufferElem::F32, 3)),
         ));
 
-        let err = materialize_shader_input("heat", &slot, Some(&data), &registry)
+        let err = materialize_shader_input("heat", &slot, Some(&data), &registry, None)
             .expect_err("shape mismatch");
 
         assert!(matches!(
@@ -554,12 +746,43 @@ mod tests {
         let registry = SlotShapeRegistry::default();
         let slot = ShaderSlotDef::buffer_builtin("f32", 1_000_000_000);
 
-        let err = materialize_shader_input("heat", &slot, None, &registry).expect_err("budget");
+        let err =
+            materialize_shader_input("heat", &slot, None, &registry, None).expect_err("budget");
 
         assert!(matches!(
             err,
             ShaderInputMaterializeError::OverBudget { .. }
         ));
+    }
+
+    /// A resolved map of `(key, seq)` control messages, keyed by `key`.
+    fn messages(entries: &[(u32, u32)]) -> SlotData {
+        let mut map = VecMap::new();
+        for (key, seq) in entries {
+            map.insert(
+                SlotMapKey::U32(*key),
+                SlotData::Value(WithRevision::new(
+                    Revision::new(4),
+                    ControlMessage::new(*key, *seq).to_lp_value(),
+                )),
+            );
+        }
+        SlotData::Map(SlotMapDyn::with_revision(Revision::new(4), map))
+    }
+
+    fn entry_values(data: &SlotData) -> Vec<&LpValue> {
+        let SlotData::Map(map) = data else {
+            panic!("expected map");
+        };
+        map.entries
+            .values()
+            .map(|entry| {
+                let SlotData::Value(value) = entry else {
+                    panic!("expected value");
+                };
+                value.value()
+            })
+            .collect()
     }
 
     fn assert_message(value: &LpsValueF32, id: u32, seq: u32) {

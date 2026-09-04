@@ -42,6 +42,40 @@ through the same pipeline under a caller-provided compile budget.
 lex -> index -> body/HIR -> lower -> done
 ```
 
+## Memory Shape
+
+The frontend runs on the device's heap, and its compile transient is what
+the ESP32-C6 and the classic have left after a project loads. Two probes pin
+the shape in CI: `lpc-engine/tests/example_shader_compile_peak_memory.rs`
+(every example, both device ISAs, one ranked table) and
+`lps-filetests/tests/compile_peak_memory_corpus.rs` (the whole filetest
+corpus, frontend only). The rules those numbers came from:
+
+- **A node stores an id; the thing with one home stores the value.** Every
+  expression, place, local and function signature refers to its type through
+  the module's type table (`HirModule.types`, `TypeTable::intern`, `TypeId`
+  — one table per compile, shared by every function, global const and
+  signature; ADR `2026-09-02-glsl-module-wide-type-table`); a call refers
+  to its import by `ImportId`; a field projection carries its member index.
+  Nothing in the HIR owns an `LpsType`, a `String` or a `Vec` per node.
+- **Names are borrows of the source.** The parsed body (`ParsedExpr<'src>`)
+  holds `&'src str` identifiers and `Cow<'src, str>` type/call names (owned
+  only for the composed array spellings); the source outlives the job, so
+  the body stage allocates per node, never per name. What that stage costs
+  is the nodes: one boxed 64-byte `ParsedExpr` per child.
+- **The arena is a lifetime, not a container.** Anything pushed into it lives
+  until the function lowers, so builders push only finished nodes
+  (`TypeCtx::build_place`), and per-node lists (writebacks, place segments)
+  live in flat arena lists, not a `Vec` per node.
+- **Inputs drop as soon as their last reader is done.** The token tape lives
+  in the header step; each parsed body is dropped once its function is
+  typed.
+
+`HirExpr` is 56 bytes host (`cargo test -p lps-glsl -- hir_node_sizes_print
+--nocapture` prints the current sizes). Host bytes overstate device bytes by
+~1.9× (8- vs 4-byte pointers); the ratio has held across three very
+different shaders on the RV32 emulator's heap-budget windows.
+
 ## Language Scope
 
 This is not intended to be a complete desktop GLSL implementation. It is the

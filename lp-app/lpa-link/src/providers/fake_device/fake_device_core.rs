@@ -60,6 +60,8 @@ impl FakeEsp32Device {
                 last_rts: None,
                 reboot_requests: Arc::new(AtomicUsize::new(0)),
                 reboots_performed: 0,
+                loaded_projects: Vec::new(),
+                pending_loads: std::collections::BTreeMap::new(),
             })),
         }
     }
@@ -233,6 +235,19 @@ pub(crate) struct FakeDeviceCore {
     /// Reboots this device has actually performed — the difference from
     /// [`Self::reboot_requests`] is a reset still owed.
     reboots_performed: usize,
+    /// What the server has loaded, as the wire has reported it.
+    ///
+    /// Real firmware assembles this into every heartbeat straight from the
+    /// server's own registry; the fake's heartbeat is synthetic and has no
+    /// registry to read, so it tracks the ANSWERS the server gave instead —
+    /// `ListLoadedProjects` snapshots, and `LoadProject` replies correlated
+    /// with the path their request carried. Nothing is inferred from a
+    /// request alone: a load that failed must not make the fake claim more
+    /// than hardware would.
+    loaded_projects: Vec<lpc_wire::server::LoadedProject>,
+    /// `LoadProject` requests in flight, by correlation id, so the reply can
+    /// be paired with the path it loaded.
+    pending_loads: std::collections::BTreeMap<u64, lpc_model::LpPathBuf>,
 }
 
 impl FakeDeviceCore {
@@ -244,6 +259,8 @@ impl FakeDeviceCore {
         self.input_buf.clear();
         self.stalled_by_cut = false;
         self.last_heartbeat = None;
+        self.loaded_projects.clear();
+        self.pending_loads.clear();
         // Dropping a RunningLp phase drops the HostRuntime, which joins the
         // server thread (bounded).
         self.phase = FakePhase::fresh(&self.script.boot);
@@ -448,6 +465,7 @@ impl FakeDeviceCore {
             if drop_responses && frame.id != 0 {
                 continue;
             }
+            self.note_server_frame(&frame);
             if !self.emit_wire_frame(&frame) {
                 return;
             }
@@ -488,7 +506,7 @@ impl FakeDeviceCore {
                     max: 0.0,
                 },
                 frame_count: 0,
-                loaded_projects: Vec::new(),
+                loaded_projects: self.loaded_projects.clone(),
                 uptime_ms: 0,
                 memory: None,
                 recovery: None,
@@ -663,7 +681,35 @@ impl FakeDeviceCore {
         Ok(())
     }
 
+    /// Track what the SERVER said it has loaded, so the synthetic heartbeat
+    /// can carry the same fact real firmware's does.
+    fn note_server_frame(&mut self, frame: &lpc_wire::WireServerMessage) {
+        match &frame.msg {
+            lpc_wire::ServerMsgBody::ListLoadedProjects { projects } => {
+                self.loaded_projects = projects.clone();
+            }
+            lpc_wire::ServerMsgBody::LoadProject { handle } => {
+                let Some(path) = self.pending_loads.remove(&frame.id) else {
+                    return;
+                };
+                self.loaded_projects
+                    .retain(|loaded| loaded.handle != *handle);
+                self.loaded_projects
+                    .push(lpc_wire::server::LoadedProject::new(*handle, path));
+            }
+            lpc_wire::ServerMsgBody::StopAllProjects => self.loaded_projects.clear(),
+            _ => {}
+        }
+    }
+
     fn forward_to_server(&mut self, message: ClientMessage) {
+        // A load's reply carries only a handle, so the path it asked for is
+        // remembered here and paired when the answer comes back.
+        if let lpc_wire::ClientRequest::LoadProject { path } = &message.msg {
+            let path = format!("/{}", path.trim_start_matches('/'));
+            self.pending_loads
+                .insert(message.id, lpc_model::AsLpPathBuf::as_path_buf(&path));
+        }
         let FakePhase::RunningLp { runtime } = &self.phase else {
             return;
         };

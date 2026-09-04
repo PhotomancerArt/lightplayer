@@ -5,13 +5,14 @@ use lps_shared::LpsType;
 
 use crate::{Diagnostic, Span};
 
-use super::arena::{ExprId, ExprList, HirArena};
+use super::arena::{ExprId, ExprList};
 use super::const_fold::fold_cast;
 use super::scalar::{scalar_base_type, scalar_lane_count};
+use super::type_table::TypedArena;
 use super::types::HirExprKind;
 
 pub(super) fn coerce_constructor_args(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     target_ty: &LpsType,
     args: ExprList,
@@ -87,7 +88,7 @@ pub(super) fn coerce_constructor_args(
 /// Contexts that *are* defined over `genBType` (component selection in `mix`)
 /// use [`coerce_selection_pair`] instead.
 pub(super) fn coerce_arithmetic_pair(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     lhs: ExprId,
     rhs: ExprId,
@@ -103,7 +104,7 @@ pub(super) fn has_bool_lanes(ty: &LpsType) -> bool {
 
 /// Reject `bool` / `bvecN` operands in an arithmetic context, naming both types.
 fn reject_bool_arithmetic_operands(
-    arena: &HirArena,
+    arena: &TypedArena<'_>,
     span: Span,
     lhs: ExprId,
     rhs: ExprId,
@@ -123,7 +124,7 @@ fn reject_bool_arithmetic_operands(
 /// rejection — for the `mix(genBType, genBType, genBType)` overload, the one
 /// place GLSL pairs bool operands under a non-logical builtin.
 pub(super) fn coerce_selection_pair(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     lhs: ExprId,
     rhs: ExprId,
@@ -143,7 +144,7 @@ pub(super) fn coerce_selection_pair(
 }
 
 fn coerce_matrix_arithmetic_operand(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     expr: ExprId,
     matrix_ty: &LpsType,
 ) -> Result<ExprId, Diagnostic> {
@@ -154,7 +155,7 @@ fn coerce_matrix_arithmetic_operand(
 }
 
 pub(super) fn coerce_comparison_pair(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     lhs: ExprId,
     rhs: ExprId,
@@ -171,7 +172,7 @@ pub(super) fn coerce_comparison_pair(
 }
 
 pub(super) fn coerce_expr(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     expr: ExprId,
     target: &LpsType,
 ) -> Result<ExprId, Diagnostic> {
@@ -213,7 +214,7 @@ pub(super) fn coerce_expr(
     }
 }
 
-fn cast_expr(arena: &mut HirArena, expr: ExprId, target: LpsType) -> ExprId {
+fn cast_expr(arena: &mut TypedArena<'_>, expr: ExprId, target: LpsType) -> ExprId {
     let span = arena.expr_span(expr);
     if let Some(folded) = fold_cast(span, &target, arena.expr(expr)) {
         return arena.push_expr(folded.span, folded.ty, folded.kind);
@@ -261,7 +262,7 @@ pub(super) fn comparison_result_type(operand_ty: &LpsType) -> Option<LpsType> {
 }
 
 pub(super) fn zero_expr(
-    arena: &mut HirArena,
+    arena: &mut TypedArena<'_>,
     span: Span,
     ty: &LpsType,
 ) -> Result<ExprId, Diagnostic> {

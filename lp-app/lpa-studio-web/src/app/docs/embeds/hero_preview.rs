@@ -78,7 +78,9 @@ fn hero_badge_class(badge: &ThumbPreviewBadge) -> &'static str {
     match badge {
         ThumbPreviewBadge::Gpu => "tw:border-border-muted tw:text-dim-foreground",
         ThumbPreviewBadge::Cpu { .. } => "tw:border-border-muted tw:text-muted-foreground",
-        ThumbPreviewBadge::Error { .. } => "tw:border-border-strong tw:text-error-foreground",
+        ThumbPreviewBadge::Error { .. } => {
+            "tw:border-border-strong tw:text-status-error-foreground"
+        }
     }
 }
 

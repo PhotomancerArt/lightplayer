@@ -25,11 +25,13 @@ use crate::node::{
 use crate::shader_abi::compute_desc_from_model_def;
 use lp_gfx::LpComputeShader;
 
+use super::authored_field_keys::AuthoredFieldKeys;
 use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
+use super::map_input_template::MapInputTemplates;
 use super::shader_node::{
     TimeProductCache, format_compile_stats, input_resolve_warning, note_input_resolve_failures,
-    resolve_or_default_input, sync_float_mode_pin, sync_shader_slot_def_from_authored,
+    resolve_or_default_input, sync_consumed_slots_from_authored, sync_float_mode_pin,
 };
 
 /// Runtime node for `kind = "shader/compute"` artifacts.
@@ -55,6 +57,13 @@ pub struct ComputeShaderNode {
     /// Compile-window deferral state — same protocol as `shader_node.rs`.
     compile_window_requested: bool,
     compile_window: Option<Revision>,
+    /// Frame-invariant half of this node's map uniforms, resolved once per
+    /// (uniform, declared shape) instead of per frame
+    /// ([`MapInputTemplates`]).
+    map_templates: MapInputTemplates,
+    /// The resolver keys this node's per-tick authored sync reads through
+    /// ([`AuthoredFieldKeys`]).
+    authored_keys: AuthoredFieldKeys,
     state: ComputeShaderState,
 }
 
@@ -78,6 +87,8 @@ impl ComputeShaderNode {
             needs_compile: true,
             compile_window_requested: false,
             compile_window: None,
+            map_templates: MapInputTemplates::new(),
+            authored_keys: AuthoredFieldKeys::new(),
             state,
         }
     }
@@ -176,12 +187,24 @@ impl ComputeShaderNode {
         self.needs_compile = false;
         self.compilation_error = None;
         let compile_start_ms = ctx.now_ms();
+        // Heap bracket around the compile: the pair is the device-side
+        // measurement of the compile transient's resident remainder, and the
+        // "before" line is the headroom the compile had to work with.
+        lpc_shared::memory::log_global_memory_checkpoint("compute shader compile before");
         lpc_shared::backtrace::set_oom_context("compute shader node: compile");
+        // Perf window around the compile, the same `shader-compile` event
+        // the px node emits: the emulator's heap-budget gate (`lp-cli
+        // profile --collect alloc`) reports the transient per window, and
+        // without this bracket a compute compile's transient landed in
+        // `frame`, invisible as a compile cost.
+        lp_perf::emit_begin!(lp_perf::EVENT_SHADER_COMPILE);
         // Terminal on every target — see the sibling comment in `shader_node.rs`.
         let compile_result = graphics
             .compile_compute_shader(desc)
             .map_err(|error| format!("{error}"));
+        lp_perf::emit_end!(lp_perf::EVENT_SHADER_COMPILE);
         lpc_shared::backtrace::clear_oom_context();
+        lpc_shared::memory::log_global_memory_checkpoint("compute shader compile after");
         let compile_elapsed_ms = compile_start_ms.and_then(|start| ctx.elapsed_ms(start));
 
         match compile_result {
@@ -217,20 +240,40 @@ impl ComputeShaderNode {
         }
     }
 
-    fn collect_inputs(
-        &mut self,
-        ctx: &mut TickContext<'_>,
-    ) -> Result<Vec<(String, LpsValueF32)>, NodeError> {
-        let mut inputs = Vec::new();
+    /// Resolve every consumed input, in `def.consumed_slots.entries` order.
+    ///
+    /// Values only: the names are already owned by `consumed_slots`, and the
+    /// uniform list the shader ABI takes borrows them there. Returning
+    /// `(String, LpsValueF32)` pairs meant a name clone per uniform per
+    /// frame, and forced `produce` to clone every *value* again to build the
+    /// borrowed pair list — a full struct-array copy per frame for a map
+    /// uniform.
+    fn collect_inputs(&mut self, ctx: &mut TickContext<'_>) -> Result<Vec<LpsValueF32>, NodeError> {
+        let mut values = Vec::with_capacity(self.def.consumed_slots.entries.len());
         let mut failures = Vec::new();
         let mut timebase = TimeProductCache::new();
-        for (name, slot) in &self.def.consumed_slots.entries {
-            let (value, failure) =
-                resolve_or_default_input(ctx, name, slot, "compute shader", &mut timebase)?;
+        let Self {
+            def,
+            map_templates,
+            authored_keys,
+            ..
+        } = self;
+        let epoch = ctx.structure_epoch();
+        for (name, slot) in &def.consumed_slots.entries {
+            let keys = authored_keys.uniform(name, epoch);
+            let (value, failure) = resolve_or_default_input(
+                ctx,
+                name,
+                keys,
+                slot,
+                "compute shader",
+                &mut timebase,
+                map_templates,
+            )?;
             if let Some(failure) = failure {
                 failures.push((name.clone(), failure));
             }
-            inputs.push((name.clone(), value));
+            values.push(value);
         }
         note_input_resolve_failures(
             &mut self.input_resolve_failures,
@@ -238,45 +281,48 @@ impl ComputeShaderNode {
             self.node_id,
             "compute-shader",
         );
-        Ok(inputs)
+        Ok(values)
     }
 
+    /// Read every produced global back out of the program and into runtime
+    /// state.
+    ///
+    /// Walked by **index**: `state` answers both the def and the write, so
+    /// the read borrow has to end before the write begins. Collecting the
+    /// defs first was the old way out, and it cloned every produced slot def
+    /// — names, mapping, key and all — on every frame to dodge one borrow.
     fn sync_outputs(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        let shader = self
-            .shader
+        let Self { shader, state, .. } = self;
+        let shader = shader
             .as_mut()
             .ok_or_else(|| NodeError::msg("compute shader missing after compile"))?;
         let revision = ctx.revision();
-        let slots: Vec<_> = self
-            .state
-            .slot_defs()
-            .map(|(name, slot)| (String::from(name), slot.clone()))
-            .collect();
-        for (name, slot) in slots {
+        for index in 0..state.slot_count() {
+            let Some((name, slot)) = state.slot_def_at(index) else {
+                continue;
+            };
             let raw = shader
-                .get_output(name.as_str())
+                .get_output(name)
                 .map_err(|e| NodeError::msg(format!("compute output {name:?}: {e}")))?;
-            let data = materialize_produced_slot(name.as_str(), &slot, &raw, revision)
+            let data = materialize_produced_slot(name, slot, &raw, revision)
                 .map_err(|e| NodeError::msg(format!("compute output {name:?}: {e}")))?;
-            self.state
-                .set_slot_data(name.as_str(), data)
-                .map_err(|e| NodeError::msg(format!("compute state: {e}")))?;
+            state.set_slot_data_at(index, data);
         }
         Ok(())
     }
 
-    fn sync_def_from_view(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    pub(super) fn sync_def_from_view(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<(), NodeError> {
         let mut compile_changed = false;
         compile_changed |= sync_float_mode_pin(ctx, &mut self.def.float_mode)?;
 
-        let consumed_keys: Vec<String> = self.def.consumed_slots.entries.keys().cloned().collect();
-        for key in consumed_keys {
-            let Some(slot) = self.def.consumed_slots.entries.get_mut(&key) else {
-                continue;
-            };
-            compile_changed |=
-                sync_shader_slot_def_from_authored(ctx, &alloc::format!("consumed[{key}]"), slot)?;
-        }
+        let Self {
+            def, authored_keys, ..
+        } = self;
+        compile_changed |=
+            sync_consumed_slots_from_authored(ctx, &mut def.consumed_slots, authored_keys)?;
 
         if compile_changed {
             self.needs_compile = true;
@@ -293,14 +339,26 @@ impl NodeRuntime for ComputeShaderNode {
         ctx: &mut TickContext<'_>,
     ) -> Result<ProduceResult, NodeError> {
         self.sync_def_from_view(ctx)?;
-        let input_pairs = self.collect_inputs(ctx)?;
-        let inputs: Vec<_> = input_pairs
-            .iter()
-            .map(|(name, value)| (name.as_str(), value.clone()))
-            .collect();
+        // Inputs resolve on every produce, whether or not there is a program
+        // to feed: `collect_inputs` is what reports a broken binding, and
+        // moving it behind `ensure_compiled` would silence the warning for a
+        // node whose shader has not compiled yet.
+        let values = self.collect_inputs(ctx)?;
         if !self.ensure_compiled(ctx)? {
             return Ok(ProduceResult::Produced);
         }
+        // Names borrowed from the def, values *moved* out of `collect_inputs`
+        // — the ABI's `&[(&str, LpsValueF32)]` used to be built by cloning
+        // every value, which for a struct-valued map meant copying the whole
+        // array (and every field name in it) once per frame.
+        let inputs: Vec<(&str, LpsValueF32)> = self
+            .def
+            .consumed_slots
+            .entries
+            .keys()
+            .map(String::as_str)
+            .zip(values)
+            .collect();
         let shader = self
             .shader
             .as_mut()
@@ -308,6 +366,9 @@ impl NodeRuntime for ComputeShaderNode {
         shader
             .tick(&inputs)
             .map_err(|e| NodeError::msg(format!("compute tick: {e}")))?;
+        // `inputs` borrows the def; a `Vec`'s destructor keeps that borrow
+        // alive to the end of the scope, and `sync_outputs` wants `&mut self`.
+        drop(inputs);
         self.sync_outputs(ctx)?;
         Ok(ProduceResult::Produced)
     }
@@ -401,7 +462,12 @@ struct RuntimeSourceAsset {
 /// Compose the compiler input (generated uniform header + user source) and
 /// return it with the number of lines the header prefix occupies before the
 /// user's line 1.
-fn compute_glsl_source(
+///
+/// Public so the memory probes (`tests/meteor_compute_compile_peak_memory.rs`)
+/// can compile exactly the text the node compiles, header included — the
+/// header is where the produced struct-array globals get declared, and those
+/// are what the frontend's per-reference type clones scale with.
+pub fn compute_glsl_source(
     def: &ComputeShaderDef,
     source: &str,
     slot_shapes: &SlotShapeRegistry,

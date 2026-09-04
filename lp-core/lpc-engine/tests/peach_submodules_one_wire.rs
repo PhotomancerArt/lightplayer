@@ -84,8 +84,7 @@ fn both_peaches_merge_both_submodules_onto_one_wire() {
             )
             .expect("sink buffer")
             .value()
-            .bytes
-            .len();
+            .byte_len();
         assert_eq!(
             bytes,
             WIRE_LAMPS as usize * 3 * 2,

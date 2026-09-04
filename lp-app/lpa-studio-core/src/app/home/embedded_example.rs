@@ -184,6 +184,87 @@ pub static PLASMA_FILES: &[ExampleFile] = &[
     ),
 ];
 
+/// `examples/pulse` — the plainest possible shader: the whole fixture
+/// breathes one colour on a phasor, a raised cosine so the floor is never
+/// black. The hardware-walk test subject generally: if a strip is dark
+/// under `pulse`, that is the wiring or a fault, never the content.
+/// Publishes `speed`.
+pub static PULSE_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/pulse/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/pulse/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/pulse/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/pulse/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/pulse/output.json"),
+    ),
+    (
+        "shader.json",
+        include_bytes!("../../../../../examples/pulse/shader.json"),
+    ),
+    (
+        "shader.glsl",
+        include_bytes!("../../../../../examples/pulse/shader.glsl"),
+    ),
+    (
+        "fixture.map2d.json",
+        include_bytes!("../../../../../examples/pulse/fixture.map2d.json"),
+    ),
+];
+
+/// `examples/fault-demo` — a shader that compiles fine but FAULTS every
+/// frame at run time (fuel exhaustion): the deterministic, non-crashing
+/// demo of "a fault is never black" (docs/adr/2026-09-02-fault-is-never-black.md)
+/// — the outputs show the red breathe and the device card reads Degraded.
+/// Publishes `speed` (the gallery rule needs one root control; the shader
+/// itself never reads it).
+pub static FAULT_DEMO_FILES: &[ExampleFile] = &[
+    (
+        "project.json",
+        include_bytes!("../../../../../examples/fault-demo/project.json"),
+    ),
+    (
+        "module.json",
+        include_bytes!("../../../../../examples/fault-demo/module.json"),
+    ),
+    (
+        "clock.json",
+        include_bytes!("../../../../../examples/fault-demo/clock.json"),
+    ),
+    (
+        "fixture.json",
+        include_bytes!("../../../../../examples/fault-demo/fixture.json"),
+    ),
+    (
+        "output.json",
+        include_bytes!("../../../../../examples/fault-demo/output.json"),
+    ),
+    (
+        "shader.json",
+        include_bytes!("../../../../../examples/fault-demo/shader.json"),
+    ),
+    (
+        "shader.glsl",
+        include_bytes!("../../../../../examples/fault-demo/shader.glsl"),
+    ),
+    (
+        "fixture.map2d.json",
+        include_bytes!("../../../../../examples/fault-demo/fixture.map2d.json"),
+    ),
+];
+
 /// `examples/plasma-duo` — the plasma shader driving TWO fixtures in one
 /// module: the disc and a 16×16 grid, each with its own output channel.
 /// Exists for the "What's a shader?" docs page ("it gets projected onto
@@ -746,6 +827,18 @@ static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
         name: "Peach (2D)",
         kind: "Module",
         files: PEACH_2D_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/pulse",
+        name: "Pulse",
+        kind: "Module",
+        files: PULSE_FILES,
+    },
+    EmbeddedExample {
+        id: "examples/fault-demo",
+        name: "Fault demo",
+        kind: "Module",
+        files: FAULT_DEMO_FILES,
     },
 ];
 

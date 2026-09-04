@@ -216,6 +216,13 @@ pub(crate) enum StudioRoute {
         /// mutually exclusive zooms.
         view: ProjectView,
     },
+    /// A roster device's address (`/device/<dev-uid>`, device-model round
+    /// 2 M5): the editor as a lens on that board's session; the project
+    /// comes from the device. `uid` is the registered `dev…` uid, the whole
+    /// of the identity. Reload re-derives: the granted port reconnects, the
+    /// board identifies, and the lens re-attaches. Same view suffixes as
+    /// [`StudioRoute::Project`] — zooms on one session, never a boundary.
+    Device { uid: String, view: ProjectView },
     /// The story book; `None` selects the book's default story.
     Stories { story_id: Option<String> },
     /// The public boards catalog (project-free, renders the checked-in
@@ -283,11 +290,21 @@ impl StudioRoute {
         let (path, _query) = path.split_once('?').unwrap_or((path, ""));
         let mut segments = path.split('/').filter(|s| !s.is_empty());
         match segments.next() {
-            // `/device/<uid>` used to address a board's runtime session.
-            // Device support is being rebuilt (M2 of the device-model
-            // rebuild), so an old bookmark lands on the Devices page,
-            // which says so — never on a blank Home.
-            Some("device") => StudioRoute::Devices,
+            // The device route: exactly one uid segment, optionally a view
+            // suffix. A bare `/device` or depth junk lands on the Devices
+            // page — the gallery is the honest answer to "which board?" —
+            // never on a blank Home.
+            Some("device") => match (segments.next(), segments.next(), segments.next()) {
+                (Some(uid), None, _) => device_route(uid, ProjectView::Workspace),
+                (Some(uid), Some("play"), None) => device_route(uid, ProjectView::Play),
+                (Some(uid), Some("patch" | "patching"), None) => {
+                    device_route(uid, ProjectView::Patch)
+                }
+                (Some(uid), Some("mapping" | "map"), None) => {
+                    device_route(uid, ProjectView::Mapping)
+                }
+                _ => StudioRoute::Devices,
+            },
             // The project route. Exactly one link segment, optionally
             // followed by `play` — depth junk is not a guess at some
             // project, it is an unknown path. The segment itself is as
@@ -399,6 +416,15 @@ impl StudioRoute {
                     ProjectView::Mapping => format!("{path}/mapping"),
                 }
             }
+            StudioRoute::Device { uid, view } => {
+                let path = format!("/device/{uid}");
+                match view {
+                    ProjectView::Workspace => path,
+                    ProjectView::Play => format!("{path}/play"),
+                    ProjectView::Patch => format!("{path}/patch"),
+                    ProjectView::Mapping => format!("{path}/mapping"),
+                }
+            }
             StudioRoute::Stories { story_id: None } => "/stories".to_string(),
             StudioRoute::Stories { story_id: Some(id) } => format!("/stories/{id}"),
             StudioRoute::Boards { board: None } => "/boards".to_string(),
@@ -454,6 +480,7 @@ impl StudioRoute {
         match (self, other) {
             (StudioRoute::Project { uid: a, .. }, StudioRoute::Project { uid: b, .. }) => a == b,
             (StudioRoute::Example { slug: a, .. }, StudioRoute::Example { slug: b, .. }) => a == b,
+            (StudioRoute::Device { uid: a, .. }, StudioRoute::Device { uid: b, .. }) => a == b,
             _ => self == other,
         }
     }
@@ -472,6 +499,10 @@ impl StudioRoute {
                 slug: slug.clone(),
                 view,
             },
+            StudioRoute::Device { uid, .. } => StudioRoute::Device {
+                uid: uid.clone(),
+                view,
+            },
             other => other.clone(),
         }
     }
@@ -482,7 +513,9 @@ impl StudioRoute {
         match self {
             // Entering or leaving play exits every other view — they are
             // exclusive zooms on one session.
-            StudioRoute::Project { .. } | StudioRoute::Example { .. } => self.with_view(if play {
+            StudioRoute::Project { .. }
+            | StudioRoute::Example { .. }
+            | StudioRoute::Device { .. } => self.with_view(if play {
                 ProjectView::Play
             } else {
                 ProjectView::Workspace
@@ -501,6 +534,9 @@ impl StudioRoute {
             } | StudioRoute::Example {
                 view: ProjectView::Play,
                 ..
+            } | StudioRoute::Device {
+                view: ProjectView::Play,
+                ..
             }
         )
     }
@@ -509,7 +545,9 @@ impl StudioRoute {
     /// the workspace (they have no view suffix to speak of).
     pub(crate) fn project_view(&self) -> ProjectView {
         match self {
-            StudioRoute::Project { view, .. } | StudioRoute::Example { view, .. } => *view,
+            StudioRoute::Project { view, .. }
+            | StudioRoute::Example { view, .. }
+            | StudioRoute::Device { view, .. } => *view,
             _ => ProjectView::Workspace,
         }
     }
@@ -519,8 +557,21 @@ impl StudioRoute {
     pub(crate) fn is_lens(&self) -> bool {
         matches!(
             self,
-            StudioRoute::Project { .. } | StudioRoute::Example { .. }
+            StudioRoute::Project { .. } | StudioRoute::Example { .. } | StudioRoute::Device { .. }
         )
+    }
+}
+
+/// One `/device/` uid segment as a route. The uid is the registered `dev…`
+/// identity verbatim (never re-spelled — it is what the roster keys on);
+/// an empty segment is the gallery, not a guess.
+fn device_route(uid: &str, view: ProjectView) -> StudioRoute {
+    if uid.is_empty() {
+        return StudioRoute::Devices;
+    }
+    StudioRoute::Device {
+        uid: uid.to_string(),
+        view,
     }
 }
 
@@ -683,6 +734,12 @@ pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
                 view: ProjectView::Workspace,
             })
         }
+        // A device lens is addressed by the device's registered uid; the
+        // project comes from the board, so no slug decorates it.
+        UiLensRuntime::Device { uid } => Some(StudioRoute::Device {
+            uid: uid.clone(),
+            view: ProjectView::Workspace,
+        }),
     }
 }
 
@@ -1097,6 +1154,14 @@ mod tests {
                 slug: "fyeah-sign".to_string(),
                 view: ProjectView::Play,
             },
+            StudioRoute::Device {
+                uid: "dev000000daqf6dvvqz".to_string(),
+                view: ProjectView::Workspace,
+            },
+            StudioRoute::Device {
+                uid: "dev000000daqf6dvvqz".to_string(),
+                view: ProjectView::Play,
+            },
             StudioRoute::Stories { story_id: None },
             StudioRoute::Stories {
                 story_id: Some("base/detail-popover/open-sections".to_string()),
@@ -1212,25 +1277,73 @@ mod tests {
         }
     }
 
-    /// Every `/device…` shape lands on the Devices page rather than the
-    /// landing: device support is being rebuilt (M2 of the device-model
-    /// rebuild) and that page says so, which is a better answer to an old
-    /// bookmark than a blank Home. Depth junk included — there is no
-    /// device route left to be malformed against.
+    /// `/device/<uid>` addresses a board's session (round-2 M5): one uid
+    /// segment, the same view suffixes as a project, and both dialects.
+    /// A bare `/device` or depth junk lands on the Devices page — the
+    /// gallery is the honest answer to "which board?" — never on Home.
     #[test]
-    fn device_paths_land_on_the_devices_page() {
+    fn device_paths_address_a_board_and_junk_lands_on_the_gallery() {
+        let device = |view| StudioRoute::Device {
+            uid: "devx".to_string(),
+            view,
+        };
+        assert_eq!(
+            StudioRoute::parse("/device/devx"),
+            device(ProjectView::Workspace)
+        );
+        assert_eq!(
+            StudioRoute::parse("#/device/devx"),
+            device(ProjectView::Workspace)
+        );
+        assert_eq!(
+            StudioRoute::parse("/device/devx/play"),
+            device(ProjectView::Play)
+        );
+        assert_eq!(
+            StudioRoute::parse("/device/devx/patch"),
+            device(ProjectView::Patch)
+        );
+        assert_eq!(
+            StudioRoute::parse("/device/devx/mapping"),
+            device(ProjectView::Mapping)
+        );
+        assert_eq!(device(ProjectView::Workspace).path(), "/device/devx");
+        assert_eq!(device(ProjectView::Play).path(), "/device/devx/play");
         for path in [
             "/device",
-            "/device/devx",
-            "/device/devx/play",
+            "/device/",
             "/device/devx/extra",
             "/device/devx/play/extra",
-            "#/device/devx",
             "#/device/devx/extra",
             "#/device/devx/play/extra",
         ] {
             assert_eq!(StudioRoute::parse(path), StudioRoute::Devices, "{path:?}");
         }
+        // Play and workspace are one session; a different board is not.
+        assert!(device(ProjectView::Play).same_session(&device(ProjectView::Workspace)));
+        assert!(
+            !device(ProjectView::Play).same_session(&StudioRoute::Device {
+                uid: "devy".to_string(),
+                view: ProjectView::Play,
+            })
+        );
+        assert!(device(ProjectView::Workspace).is_lens());
+    }
+
+    /// The device lens binds its device's address, bare (the project comes
+    /// from the board, so no slug decorates it).
+    #[test]
+    fn a_device_lens_binds_the_device_route() {
+        let view = editor_view(Some(UiLensRuntime::Device {
+            uid: "dev000000daqf6dvvqz".to_string(),
+        }));
+        assert_eq!(
+            lens_route(&view),
+            Some(StudioRoute::Device {
+                uid: "dev000000daqf6dvvqz".to_string(),
+                view: ProjectView::Workspace,
+            })
+        );
     }
 
     /// `/` and the kept `/home` alias both land on Home — the root IS the
@@ -1276,14 +1389,14 @@ mod tests {
                 view: ProjectView::Play
             }
         );
-        // `/device/<uid>` no longer addresses a runtime: device support
-        // is being rebuilt, so an old bookmark lands on the page that
-        // says so.
+        // …and on the device route, where play is the same zoom suffix.
         assert_eq!(
             StudioRoute::parse("/device/deva/play"),
-            StudioRoute::Devices
+            StudioRoute::Device {
+                uid: "deva".to_string(),
+                view: ProjectView::Play
+            }
         );
-        assert_eq!(StudioRoute::parse("/device/deva"), StudioRoute::Devices);
         // `play` is a suffix, never a link: it names no project, so it is
         // the landing rather than a guess
         assert_eq!(StudioRoute::parse("/p/play"), StudioRoute::Home);

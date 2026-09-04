@@ -179,7 +179,7 @@ pub(crate) fn BrandHero() -> Element {
                 div {
                     class: hero_word_class(word_lit),
                     style: "top:258px",
-                    span { class: "tw:flex tw:text-strong",
+                    span { class: "tw:flex tw:text-strong-foreground",
                         BrandWord { word_px: WORD_PX as u32 }
                     }
                 }
@@ -239,7 +239,9 @@ fn hero_badge_class(badge: &ThumbPreviewBadge) -> &'static str {
     match badge {
         ThumbPreviewBadge::Gpu => "tw:border-border-muted tw:text-dim-foreground",
         ThumbPreviewBadge::Cpu { .. } => "tw:border-border-muted tw:text-muted-foreground",
-        ThumbPreviewBadge::Error { .. } => "tw:border-border-strong tw:text-error-foreground",
+        ThumbPreviewBadge::Error { .. } => {
+            "tw:border-border-strong tw:text-status-error-foreground"
+        }
     }
 }
 

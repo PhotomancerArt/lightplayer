@@ -10,7 +10,7 @@ use crate::dataflow::resolver::{
     Production, ProductionSource, QueryKey, ResolveError, TickResolver,
 };
 use crate::dataflow::timebase::PhasorKey;
-use crate::engine::{ButtonService, RadioService};
+use crate::engine::{ButtonService, FaultPresentation, RadioService};
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
@@ -127,6 +127,16 @@ pub struct TickContext<'r> {
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
     frame_time_seconds: f32,
+    /// Frame time the project's continuous fault began at, as derived at the
+    /// END of the previous tick (`Engine::project_fault`). `None` = no node
+    /// is in `Fault`. Read by outputs to decide whether to paint the fault
+    /// pattern; the one-frame lag is why this can be a plain value rather
+    /// than a query into a tree that is mid-walk.
+    project_fault_since_seconds: Option<f32>,
+    /// How many nodes were in `Fault` at that derivation — the N in the
+    /// output's own "showing fault pattern" status.
+    project_fault_node_count: u32,
+    fault_presentation: FaultPresentation,
 }
 
 impl<'r> TickContext<'r> {
@@ -184,11 +194,49 @@ impl<'r> TickContext<'r> {
             button_service,
             radio_service,
             frame_time_seconds,
+            project_fault_since_seconds: None,
+            project_fault_node_count: 0,
+            fault_presentation: FaultPresentation::default(),
         }
+    }
+
+    /// Attach the previous tick's project-fault verdict and the engine's
+    /// presentation knob.
+    ///
+    /// A builder step rather than a constructor argument because almost no
+    /// caller cares: only [`crate::nodes::OutputNode`] reads these, and
+    /// every context built outside `Engine::tick_nodes` (tests, probes)
+    /// honestly has no verdict to state.
+    pub fn with_project_fault(
+        mut self,
+        since_seconds: Option<f32>,
+        node_count: u32,
+        presentation: FaultPresentation,
+    ) -> Self {
+        self.project_fault_since_seconds = since_seconds;
+        self.project_fault_node_count = node_count;
+        self.fault_presentation = presentation;
+        self
     }
 
     pub fn node_id(&self) -> NodeId {
         self.node_id
+    }
+
+    /// Frame time the project's continuous fault began at, or `None` when
+    /// no node is in `Fault`. Compare against [`Self::time_seconds`].
+    pub fn project_fault_since_seconds(&self) -> Option<f32> {
+        self.project_fault_since_seconds
+    }
+
+    /// How many nodes are in `Fault` (0 when [`Self::project_fault_since_seconds`] is `None`).
+    pub fn project_fault_node_count(&self) -> u32 {
+        self.project_fault_node_count
+    }
+
+    /// What this engine wants outputs to do while the project is faulted.
+    pub fn fault_presentation(&self) -> FaultPresentation {
+        self.fault_presentation
     }
 
     pub fn revision(&self) -> Revision {
@@ -213,23 +261,61 @@ impl<'r> TickContext<'r> {
         self.resolver.resolve_static_consumed(node, path)
     }
 
+    /// Resolve a bus channel named by a constant, for this node's read
+    /// scope or another.
+    ///
+    /// Prefer this to building a [`QueryKey::Bus`] when the channel name is
+    /// a literal: the [`lpc_model::ChannelName`] is built once per
+    /// (scope, name) per structural epoch instead of per read.
+    pub fn resolve_static_bus(
+        &mut self,
+        scope: Option<ScopeRef>,
+        channel: &'static str,
+    ) -> Result<Production, ResolveError> {
+        self.resolver.resolve_static_bus(scope, channel)
+    }
+
+    /// The shared, interned form of `query` — for a node that keeps the keys
+    /// it reads every tick instead of rebuilding them.
+    ///
+    /// The returned key stays valid forever (a [`QueryKey`] is not epoch
+    /// scoped, unlike a `QueryId`); what [`Self::structure_epoch`] is for is
+    /// noticing that the intern table dropped its half, so the holder can
+    /// re-share rather than keep a private copy alive.
+    pub fn intern_key(&mut self, query: &QueryKey) -> Rc<QueryKey> {
+        self.resolver.intern_key(query)
+    }
+
+    /// How many times the graph has changed shape. Only equality across two
+    /// observations is meaningful.
+    pub fn structure_epoch(&self) -> u64 {
+        self.resolver.structure_epoch()
+    }
+
+    /// Publish one of this node's runtime state slots for the current frame.
+    ///
+    /// `slot` is borrowed: a node publishes the same path every frame, so
+    /// the caller keeps it and the provenance handle is interned
+    /// ([`crate::dataflow::resolver::TickResolver::produced_slot_path`])
+    /// rather than deep-copied per publish.
     pub fn publish_runtime_slot(
         &mut self,
         state_root: &dyn SlotAccess,
-        slot: SlotPath,
+        slot: &SlotPath,
     ) -> Result<(), NodeError> {
-        let (data, shape) = lookup_slot_data_and_shape(state_root, self.slot_shapes, &slot)
+        let (data, shape) = lookup_slot_data_and_shape(state_root, self.slot_shapes, slot)
             .map_err(|e| NodeError::msg(alloc::format!("runtime slot lookup {slot}: {e}")))?;
         let snapshot = lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes);
+        let path = self.resolver.produced_slot_path(slot);
         let production = Production::new(
             snapshot,
             ProductionSource::ProducedSlot {
                 node: self.node_id,
-                slot: slot.clone(),
+                slot: path,
             },
         );
         self.resolver
-            .publish_produced_slot(self.node_id, slot, production)
+            .publish_produced_slot(self.node_id, slot.clone(), production)
             .map_err(|e| NodeError::msg(alloc::format!("publish runtime slot: {}", e.message)))
     }
 
@@ -1142,8 +1228,7 @@ mod tests {
         };
         let slot = SlotPath::parse("value").expect("value slot");
 
-        ctx.publish_runtime_slot(&state, slot.clone())
-            .expect("publish");
+        ctx.publish_runtime_slot(&state, &slot).expect("publish");
         let production = ctx
             .resolve(&QueryKey::ProducedSlot { node, slot })
             .expect("resolve published slot");

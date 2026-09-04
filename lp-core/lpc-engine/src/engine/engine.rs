@@ -38,8 +38,33 @@ use crate::products::visual::{
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
 
-use super::{ButtonService, EngineError, EngineServices, ProjectRuntimeIndex, RadioService};
+use super::{
+    ButtonService, EngineError, EngineServices, FaultPresentation, ProjectFault,
+    ProjectRuntimeIndex, RadioService,
+};
 use super::{FrameNum, FrameTime};
+
+/// The project-fault verdict as a tick carries it: a `Copy` snapshot of
+/// [`Engine::project_fault`] taken at the END of the previous tick, plus the
+/// engine's [`FaultPresentation`] knob.
+///
+/// Flattened out of `ProjectFault` on purpose — the node list belongs to the
+/// engine's accessor and the wire, and the buffer painting only needs "since
+/// when" and "how many".
+#[derive(Clone, Copy, Debug)]
+struct FaultTickView {
+    since_seconds: Option<f32>,
+    node_count: u32,
+    presentation: FaultPresentation,
+}
+
+fn fault_tick_view(fault: Option<&ProjectFault>, presentation: FaultPresentation) -> FaultTickView {
+    FaultTickView {
+        since_seconds: fault.map(|fault| fault.since_seconds),
+        node_count: fault.map_or(0, |fault| fault.nodes.len() as u32),
+        presentation,
+    }
+}
 
 /// Conventional demand input used by the M2 engine slice.
 #[cfg(test)]
@@ -102,6 +127,21 @@ pub struct Engine {
     /// un-plumbed host refuses big layouts rather than wedging a serial
     /// link. Device/link state, never project data.
     display_layout_budget: Option<usize>,
+    /// Every node in [`NodeRuntimeStatus::Fault`] as of the END of the last
+    /// tick, and when the project's continuous fault began — the project-level
+    /// verdict outputs paint the fault pattern from (D1).
+    ///
+    /// Derived, never authored: `tick_nodes` recomputes it from the tree's
+    /// entry statuses every frame, so clearing the underlying failure clears
+    /// this on the next tick with nothing to invalidate.
+    project_fault: Option<ProjectFault>,
+    /// (faulted-entry count, newest faulted status revision) as of the last
+    /// derivation — the cheap "did the fault set change?" test that keeps a
+    /// standing fault from rebuilding [`Self::project_fault`] every frame.
+    project_fault_fingerprint: Option<(usize, Revision)>,
+    /// What outputs do while [`Self::project_fault`] is set (D2). Engine
+    /// state, default `Pattern`, not persisted anywhere.
+    fault_presentation: FaultPresentation,
     /// The tree shape and resolver epoch as of the last tick, so that a
     /// structural change that forgot to invalidate resolution is caught here
     /// rather than by someone noticing a stale value on a device.
@@ -138,6 +178,9 @@ impl Engine {
                 lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
                     - lpc_wire::PROJECT_READ_PROBE_HEADER_RESERVE_BYTES,
             ),
+            project_fault: None,
+            project_fault_fingerprint: None,
+            fault_presentation: FaultPresentation::default(),
             #[cfg(debug_assertions)]
             last_structural_check: None,
         }
@@ -205,6 +248,47 @@ impl Engine {
 
     pub fn demand_roots(&self) -> &[NodeId] {
         &self.demand_roots
+    }
+
+    /// The project's fault verdict as of the end of the last tick, or `None`
+    /// when no node is in [`NodeRuntimeStatus::Fault`].
+    pub fn project_fault(&self) -> Option<&ProjectFault> {
+        self.project_fault.as_ref()
+    }
+
+    /// What outputs do while the project is faulted (default
+    /// [`FaultPresentation::Pattern`]).
+    pub fn fault_presentation(&self) -> FaultPresentation {
+        self.fault_presentation
+    }
+
+    pub fn set_fault_presentation(&mut self, presentation: FaultPresentation) {
+        self.fault_presentation = presentation;
+    }
+
+    /// Re-arm every faulted node and drop the project's fault verdict.
+    ///
+    /// Two moves, and both are needed: [`NodeRuntime::clear_fault`] unlatches
+    /// whatever the node stopped retrying (a shader's denied compile), and the
+    /// entry statuses drop back to `Ok` so the very next tick RE-DERIVES the
+    /// truth instead of inheriting a stale verdict. A failure that is still
+    /// there simply faults again on that tick — which is the honest answer,
+    /// and the reason this never needs to know why a node faulted.
+    ///
+    /// It does NOT clear the crash-recovery ledger: that lives outside the
+    /// engine (P3's verb clears both).
+    pub fn clear_faults(&mut self) {
+        let revision = self.revision;
+        for entry in self.tree.entries_mut() {
+            if let NodeEntryState::Alive(node) = entry.state.get_mut() {
+                node.clear_fault();
+            }
+            if matches!(entry.status.value(), NodeRuntimeStatus::Fault(_)) {
+                entry.set_status(NodeRuntimeStatus::Ok, revision);
+            }
+        }
+        self.project_fault = None;
+        self.project_fault_fingerprint = None;
     }
 
     pub fn add_demand_root(&mut self, node: NodeId) {
@@ -566,8 +650,15 @@ impl Engine {
         // while they run.
         lpc_shared::backtrace::set_oom_context("engine: tick");
         lp_perf::emit_begin!(lp_perf::EVENT_FRAME);
-        let result = (|| {
-            self.tick_nodes(registry, delta_ms)?;
+        // The walk's outcome and the flush are SEPARATE: a failed walk still
+        // flushes whatever the outputs published this frame. The frame where
+        // an output's own render fails is exactly the frame it paints the
+        // fault pattern (never-black), and until 2026-09-02 that buffer never
+        // reached the wall — the `?` here returned before the flush, so the
+        // sim (which reads the published buffer) breathed red while the LEDs
+        // stayed dark (G1 bench, docs/adr/2026-09-02-fault-is-never-black.md).
+        let walk = self.tick_nodes(registry, delta_ms);
+        let flushed = {
             let revision = self.revision;
             self.refresh_output_sink_configs(registry);
             let buffers = &self.runtime_buffers;
@@ -575,9 +666,9 @@ impl Engine {
                 .flush_dirty_output_sinks(revision, buffers)
                 .map_err(|e| EngineError::OutputFlush {
                     message: alloc::format!("{e}"),
-                })?;
-            Ok(())
-        })();
+                })
+        };
+        let result = walk.and(flushed);
         lp_perf::emit_end!(lp_perf::EVENT_FRAME);
         lpc_shared::backtrace::clear_oom_context();
         result
@@ -703,14 +794,21 @@ impl Engine {
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
+            fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
 
-        let walk = (|| {
-            for &root in &self.demand_roots {
-                consume_tree_node(&mut session, &mut host, root)?;
+        // Every demand root gets its turn: one output failing must not take
+        // its siblings dark for the frame (they would keep a stale buffer on
+        // the wall, and under a project fault they must paint the pattern
+        // themselves). The FIRST error is the frame's verdict, as before.
+        let mut walk: Result<(), EngineError> = Ok(());
+        for &root in &self.demand_roots {
+            if let Err(error) = consume_tree_node(&mut session, &mut host, root)
+                && walk.is_ok()
+            {
+                walk = Err(error);
             }
-            Ok(())
-        })();
+        }
 
         // End-of-tick timebase maintenance, deliberately OUTSIDE the `?`
         // path above: a node erroring mid-walk must not stall the store's
@@ -723,6 +821,56 @@ impl Engine {
                 Some(NodeEntryState::Alive(_))
             )
         });
+
+        // The project's fault verdict, re-derived from scratch every tick and
+        // deliberately OUTSIDE the `?` path for the same reason the timebase
+        // sweep is: the frame where a node starts failing is exactly the frame
+        // the walk aborts on, and that is the frame the verdict has to appear.
+        //
+        // Outputs read this on the NEXT tick (`FaultTickView`), which is one
+        // frame of lag under a one-second persistence — cheap, and it avoids
+        // asking "has the node that faults later in the walk faulted yet?"
+        // partway through the walk.
+        //
+        // Scanned through a cheap fingerprint first, so the steady states
+        // allocate NOTHING: no fault at all, or the same fault standing
+        // frame after frame. `set_entry_status_if_changed` only stamps a
+        // status revision when the status actually changed, so (how many are
+        // faulted, newest faulted status revision) moves whenever the set or
+        // any message does. That matters here more than almost anywhere: the
+        // device this feature exists for was quarantined for two days
+        // straight, and it must not churn the heap it already ran out of.
+        let mut fault_count = 0usize;
+        let mut newest_fault = Revision::default();
+        for entry in self.tree.entries() {
+            if matches!(entry.status.value(), NodeRuntimeStatus::Fault(_)) {
+                fault_count += 1;
+                newest_fault = newest_fault.max(entry.status.changed_at());
+            }
+        }
+        let fingerprint = (fault_count > 0).then_some((fault_count, newest_fault));
+        if fault_count == 0 {
+            self.project_fault = None;
+        } else if fingerprint != self.project_fault_fingerprint || self.project_fault.is_none() {
+            let mut nodes = Vec::with_capacity(fault_count);
+            for entry in self.tree.entries() {
+                if let NodeRuntimeStatus::Fault(message) = entry.status.value() {
+                    nodes.push((entry.path.to_string(), message.clone()));
+                }
+            }
+            // Continuous: the clock starts at the first faulted tick and
+            // survives the SET changing, so a fault that moves from one node
+            // to another does not restart the persistence delay.
+            let since_seconds = self
+                .project_fault
+                .as_ref()
+                .map_or(time_s, |fault| fault.since_seconds);
+            self.project_fault = Some(ProjectFault {
+                since_seconds,
+                nodes,
+            });
+        }
+        self.project_fault_fingerprint = fingerprint;
 
         self.resolver = resolver;
         walk
@@ -790,6 +938,7 @@ impl Engine {
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
+            fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
         // Render-scoped OOM attribution, same rationale as [`Self::tick`].
         lpc_shared::backtrace::set_oom_context("engine: render texture product");
@@ -836,6 +985,7 @@ impl Engine {
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
+            fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
         host.visual_node_space(product)
     }
@@ -927,6 +1077,7 @@ impl Engine {
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
+            fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
         let result = session.resolve(&mut host, &key);
         self.resolver = resolver_tmp;
@@ -986,6 +1137,7 @@ impl Engine {
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
+            fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
         host.render_node_control(product, request, target)
     }
@@ -1030,6 +1182,7 @@ impl Engine {
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
+            fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
         let scope = scope.or_else(|| host.tree.node_scope(host.tree.root()));
         let result = session.resolve(
@@ -1074,6 +1227,7 @@ impl Engine {
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
+            fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
         host.render_node_control_probe(product, request, target, display_layout)
     }
@@ -1115,6 +1269,7 @@ impl Engine {
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
             frame_revision: self.revision,
+            fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
         host.node_control_display_layout(product, display_layout)
     }
@@ -1180,6 +1335,10 @@ struct EngineResolveHost<'a> {
     /// exactly how a shader deferred its compile forever — see
     /// `docs/defects/2026-08-03-render-context-revision-read-from-ambient-counter.md`.
     frame_revision: Revision,
+    /// The PREVIOUS tick's project-fault verdict and the engine's
+    /// presentation knob, stamped onto every [`TickContext`] this host
+    /// builds. See [`FaultTickView`].
+    fault: FaultTickView,
 }
 
 impl EngineResolveHost<'_> {
@@ -1253,7 +1412,9 @@ impl EngineResolveHost<'_> {
             product,
             ProductionSource::ProducedSlot {
                 node,
-                slot: slot.clone(),
+                // Interned rather than freshly copied: this runs once per
+                // produced slot per frame.
+                slot: session.produced_slot_path(slot),
             },
         ))
     }
@@ -1361,6 +1522,7 @@ impl EngineResolveHost<'_> {
         let radio_service = self.radio_service.clone();
         let time_s = self.frame_time_seconds;
         let slot_shapes = self.slot_shapes;
+        let fault = self.fault;
         let recovery_name = recovery_frame_name(&self.tree, node_id);
         let produce_result = {
             let mut bridge = SessionHostResolver {
@@ -1378,6 +1540,11 @@ impl EngineResolveHost<'_> {
                 button_service,
                 radio_service,
                 time_s,
+            )
+            .with_project_fault(
+                fault.since_seconds,
+                fault.node_count,
+                fault.presentation,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
                 node_runtime.produce(slot, &mut tick_ctx)
@@ -1413,9 +1580,14 @@ impl EngineResolveHost<'_> {
             }
             Err(e) => {
                 let message = e.to_string();
+                // The RUNTIME failed a valid configuration (D3): a tick that
+                // returned an error, a render trap, or a call the recovery
+                // ledger refused after repeated crashes — never something the
+                // author can edit their way out of. `Fault` is what makes
+                // every output of this project paint the fault pattern.
                 set_entry_status_if_changed(
                     entry,
-                    NodeRuntimeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Fault(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!(
@@ -2109,9 +2281,14 @@ impl EngineResolveHost<'_> {
             }
             Err(e) => {
                 let message = e.to_string();
+                // The RUNTIME failed a valid configuration (D3): a tick that
+                // returned an error, a render trap, or a call the recovery
+                // ledger refused after repeated crashes — never something the
+                // author can edit their way out of. `Fault` is what makes
+                // every output of this project paint the fault pattern.
                 set_entry_status_if_changed(
                     entry,
-                    NodeRuntimeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Fault(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!("render: {message}")))
@@ -2200,9 +2377,14 @@ impl EngineResolveHost<'_> {
             }
             Err(e) => {
                 let message = e.to_string();
+                // The RUNTIME failed a valid configuration (D3): a tick that
+                // returned an error, a render trap, or a call the recovery
+                // ledger refused after repeated crashes — never something the
+                // author can edit their way out of. `Fault` is what makes
+                // every output of this project paint the fault pattern.
                 set_entry_status_if_changed(
                     entry,
-                    NodeRuntimeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Fault(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!("render: {message}")))
@@ -2291,9 +2473,14 @@ impl EngineResolveHost<'_> {
             }
             Err(e) => {
                 let message = e.to_string();
+                // The RUNTIME failed a valid configuration (D3): a tick that
+                // returned an error, a render trap, or a call the recovery
+                // ledger refused after repeated crashes — never something the
+                // author can edit their way out of. `Fault` is what makes
+                // every output of this project paint the fault pattern.
                 set_entry_status_if_changed(
                     entry,
-                    NodeRuntimeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Fault(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!(
@@ -2384,6 +2571,12 @@ impl EngineResolveHost<'_> {
             }
             Err(e) => {
                 let message = e.to_string();
+                // Deliberately `Error`, not `Fault`: the control-render
+                // dispatch is what an OUTPUT calls while composing, so this
+                // `Err` propagates out of `OutputNode::consume` and the
+                // output entry takes the `Fault` (and the project with it) on
+                // the consume arm. Faulting here too would only double-count
+                // the same failure.
                 set_entry_status_if_changed(
                     entry,
                     NodeRuntimeStatus::Error(message.clone()),
@@ -2958,6 +3151,7 @@ fn consume_tree_node(
     let radio_service = host.radio_service.clone();
     let time_s = host.frame_time_seconds;
     let slot_shapes = host.slot_shapes;
+    let fault = host.fault;
     let recovery_name = recovery_frame_name(&host.tree, node_id);
     let consume_result = {
         let mut bridge = SessionHostResolver {
@@ -2975,7 +3169,8 @@ fn consume_tree_node(
             button_service,
             radio_service,
             time_s,
-        );
+        )
+        .with_project_fault(fault.since_seconds, fault.node_count, fault.presentation);
         catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
             node_runtime.consume(&mut tick_ctx)
         })
@@ -2996,7 +3191,10 @@ fn consume_tree_node(
         }
         Err(e) => {
             let message = e.to_string();
-            set_entry_status_if_changed(entry, NodeRuntimeStatus::Error(message.clone()), revision);
+            // A tick that returned an error is a RUNTIME failure, not an
+            // authoring one — see the sibling comment in
+            // `produce_produced_slot`.
+            set_entry_status_if_changed(entry, NodeRuntimeStatus::Fault(message.clone()), revision);
             Err(EngineError::Node {
                 node: node_id,
                 message,
@@ -3054,6 +3252,7 @@ pub(crate) fn resolve_with_engine_host(
         safe_output_clamp_q16: eng.safe_output_clamp_q16,
         display_layout_budget: eng.display_layout_budget,
         frame_revision: eng.revision,
+        fault: fault_tick_view(eng.project_fault.as_ref(), eng.fault_presentation),
     };
     let result = session
         .resolve(&mut host, &key)
@@ -3099,6 +3298,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         safe_output_clamp_q16: eng.safe_output_clamp_q16,
         display_layout_budget: eng.display_layout_budget,
         frame_revision: eng.revision,
+        fault: fault_tick_view(eng.project_fault.as_ref(), eng.fault_presentation),
     };
     let result = session.resolve(&mut host, &key).and_then(|first| {
         session
@@ -3194,10 +3394,19 @@ mod tests {
 
         let entry = eng.tree().get(node).expect("entry");
         assert!(matches!(entry.state.value(), NodeEntryState::Alive(_)));
+        // Fault, not Error: a tick that returned an error is the RUNTIME
+        // failing a configuration nobody can edit their way out of (D3).
         assert!(matches!(
             entry.status.value(),
-            NodeRuntimeStatus::Error(message) if message == "intentional tick failure"
+            NodeRuntimeStatus::Fault(message) if message == "intentional tick failure"
         ));
+        let fault = eng.project_fault().expect("the project is faulted");
+        assert_eq!(fault.nodes.len(), 1);
+        assert!(
+            fault.nodes[0].1.contains("intentional tick failure"),
+            "{:?}",
+            fault.nodes,
+        );
     }
 
     #[test]

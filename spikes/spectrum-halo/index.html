@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Spectrum halo — the Primary's hover glow is the ring's own light</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* =====================================================================
+   Spectrum halo spike (2026-09-02). The spectrum-outline Primary
+   (`.ux-spectrum-cta`, devices-page-treatments 1F) had a hover glow that
+   was a flat violet box-shadow: it popped on with no transition and
+   matched neither the rainbow ring nor its spin. Ask: fade/grow in, and
+   glow FROM the border in the ring's own gradient.
+
+   §1 is the mechanics — four ways to blur a ring, three of which fail
+   the same way: `filter` runs before `mask`, so a masked pseudo cuts the
+   blur off hard at its box. §2 is the intensity ladder; 0.85 was ruled
+   "much too strong", 0.28 "about right". Aurora ground verbatim from
+   src/style.css :root.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --bg:#0d0d13; --strong:#fffaf0;
+  --spectrum:#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
+  --glow:rgba(140,170,255,.3);
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66; --shell-tx:#e8e6e1;
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 28px 32px 120px; background: var(--shell-bg); color: var(--shell-tx); font: 14px/1.45 var(--font); }
+h1 { font-size: 13px; letter-spacing: .12em; color: var(--shell-mut); text-transform: uppercase; margin: 0 0 6px; }
+h2 { font-size: 12px; letter-spacing: .1em; color: var(--shell-mut); text-transform: uppercase; margin: 36px 0 14px; }
+p.hint { color: var(--shell-dim); font-size: 12px; margin: 0 0 18px; max-width: 72ch; }
+.row { display: flex; gap: 48px; flex-wrap: wrap; align-items: flex-start; }
+.col { display: flex; flex-direction: column; gap: 16px; align-items: center; width: 210px; }
+.col h3 { margin: 0; font-weight: 500; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--shell-dim); }
+.col p { margin: 0; font-size: 11.5px; color: var(--shell-dim); text-align: center; line-height: 1.5; }
+.col p.ruled { color: var(--shell-tx); }
+
+button { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 8px; border-radius: 6px; border: 1px solid; padding: 0 12px; font: 700 14px var(--font); line-height: 1; cursor: pointer; }
+@property --ux-ir-angle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+@keyframes ux-ir-spin { to { --ux-ir-angle: 360deg; } }
+
+/* The ring, verbatim from .ux-spectrum-cta::before. */
+.cta { position: relative; border-color: transparent; background: transparent; color: var(--strong); }
+.cta::before {
+  content: ""; position: absolute; inset: -1px; z-index: 3; border-radius: inherit; padding: 1px;
+  background: conic-gradient(from var(--ux-ir-angle), var(--spectrum), #5fe08b);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;
+  opacity: .62; pointer-events: none; transition: opacity .3s;
+}
+.cta:hover::before, .pin::before { opacity: 1; animation: ux-ir-spin 3.2s linear infinite; }
+
+/* §1a — today: flat violet box-shadow, one colour, no transition. */
+.today:hover, .today.pin { box-shadow: 0 2px 24px var(--glow), 0 0 46px rgba(140,170,255,.22); }
+
+/* Shared halo pseudo; the variants below only change how the hole is cut. */
+.halo::after {
+  content: ""; position: absolute; z-index: 2; border-radius: inherit;
+  background: conic-gradient(from var(--ux-ir-angle), var(--spectrum), #5fe08b);
+  filter: blur(var(--r, 9px)); opacity: 0; transform: scale(.94); pointer-events: none;
+  transition: opacity .45s ease, transform .45s ease;
+}
+.halo:hover::after, .halo.pin::after { opacity: var(--o, .85); transform: scale(1); animation: ux-ir-spin 3.2s linear infinite; }
+
+/* §1b — masked, FAILS: mask runs after filter and clips the blur at the box → glowing rectangle. */
+.v-mask::after { inset: -18px; padding: 18px; mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; --r: 12px; }
+/* §1c — mask-clip: no-clip, FAILS: parses in Chrome 148 (CSS.supports says true) but the blur is still clipped. */
+.v-noclip::after { inset: -7px; padding: 7px; mask: linear-gradient(#000 0 0) content-box no-repeat, linear-gradient(#000 0 0); mask-composite: exclude; mask-clip: no-clip; }
+/* §1d — even-odd clip-path, WORKS: the polygon punches the button-box hole and reaches 40px past the box, so the blur spills outward untouched. Shipped. */
+.v-clip::after {
+  inset: calc(-1 * var(--b, 7px));
+  clip-path: polygon(evenodd,
+    -40px -40px, calc(100% + 40px) -40px, calc(100% + 40px) calc(100% + 40px), -40px calc(100% + 40px), -40px -40px,
+    var(--b, 7px) var(--b, 7px), var(--b, 7px) calc(100% - var(--b, 7px)),
+    calc(100% - var(--b, 7px)) calc(100% - var(--b, 7px)), calc(100% - var(--b, 7px)) var(--b, 7px), var(--b, 7px) var(--b, 7px));
+}
+</style>
+</head>
+<body>
+<h1>Spectrum halo</h1>
+<p class="hint">The Primary's hover glow, rebuilt as the ring's own conic gradient blurred behind the button — same registered angle, same spin, so ring and halo turn in lockstep; fades and grows in over 450ms. Hover any button; the second in each column is pinned to the hover state.</p>
+
+<h2>§1 · mechanics — cutting the hole</h2>
+<div class="row">
+  <div class="col"><h3>a · today</h3><button class="cta today">⚡ It's plugged in</button><button class="cta today pin">⚡ pinned</button><p>flat violet box-shadow; one colour, pops in</p></div>
+  <div class="col"><h3>b · mask</h3><button class="cta halo v-mask">⚡ It's plugged in</button><button class="cta halo v-mask pin">⚡ pinned</button><p>filter runs before mask → the blur is cut hard at the box</p></div>
+  <div class="col"><h3>c · mask-clip: no-clip</h3><button class="cta halo v-noclip">⚡ It's plugged in</button><button class="cta halo v-noclip pin">⚡ pinned</button><p>parses in Chrome, still clips</p></div>
+  <div class="col"><h3>d · even-odd clip-path</h3><button class="cta halo v-clip">⚡ It's plugged in</button><button class="cta halo v-clip pin">⚡ pinned</button><p class="ruled">hole at the button box, polygon reaches 40px out — shipped</p></div>
+</div>
+
+<h2>§2 · intensity ladder (opacity · band · blur)</h2>
+<div class="row">
+  <div class="col"><h3>.85 · 7px · 9px</h3><button class="cta halo v-clip pin" style="--o:.85;--b:7px;--r:9px">⚡ It's plugged in</button><p>ruled "much too strong"</p></div>
+  <div class="col"><h3>.5 · 6px · 10px</h3><button class="cta halo v-clip pin" style="--o:.5;--b:6px;--r:10px">⚡ It's plugged in</button></div>
+  <div class="col"><h3>.38 · 6px · 10px</h3><button class="cta halo v-clip pin" style="--o:.38;--b:6px;--r:10px">⚡ It's plugged in</button></div>
+  <div class="col"><h3>.28 · 5px · 11px</h3><button class="cta halo v-clip pin" style="--o:.28;--b:5px;--r:11px">⚡ It's plugged in</button><p class="ruled">ruled "about right" — shipped</p></div>
+</div>
+</body>
+</html>

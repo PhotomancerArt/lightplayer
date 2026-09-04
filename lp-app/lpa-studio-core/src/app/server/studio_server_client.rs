@@ -27,6 +27,16 @@ use crate::{
     UxUpdateSink,
 };
 
+/// Where the editor lens's request ids start on a borrowed roster wire.
+///
+/// The roster model and its coarse effects number their frames from 1 in
+/// small `u32` counters, and a reply to one of them (a push's trailing
+/// "what are you running now?") can still be in flight when the lens takes
+/// the port. Starting the lens above the whole `u32` range keeps that reply
+/// the roster's (it reaches the fold through the lens tap) instead of the
+/// lens's first answer.
+const LENS_REQUEST_ID_BASE: u64 = 1 << 32;
+
 pub struct StudioServerClient {
     client: LpClient<Box<dyn ClientIo>>,
     protocol: String,
@@ -106,6 +116,34 @@ impl StudioServerClient {
             client: LpClient::new(session.client_io())
                 .with_request_deadline(session.request_deadline()),
             protocol: connection_protocol(&session.connection().kind),
+            pending_logs: Rc::new(RefCell::new(Vec::new())),
+            last_recovery: None,
+            last_output_status: None,
+            last_fps: None,
+            last_loaded_projects: None,
+        }
+    }
+
+    /// A client over the editor lens's io on a roster device's borrowed
+    /// wire (round-2 M5). The io is the transport's `lens_client_io`; the
+    /// device's console lines reach the roster fold through the lens tap,
+    /// not this client's pending logs.
+    ///
+    /// Carries a total per-request deadline like every hardware client:
+    /// real firmware can drop a response while heartbeating, and only a
+    /// total bound in the correlation layer turns that into an error
+    /// instead of an unbounded wait. Its request ids start at
+    /// [`LENS_REQUEST_ID_BASE`], above the roster's own counters.
+    pub fn from_lens_io(
+        io: Box<dyn ClientIo>,
+        deadline: lpa_client::RequestDeadline,
+        protocol: impl Into<String>,
+    ) -> Self {
+        Self {
+            client: LpClient::new(io)
+                .with_request_ids_from(LENS_REQUEST_ID_BASE)
+                .with_request_deadline(deadline),
+            protocol: protocol.into(),
             pending_logs: Rc::new(RefCell::new(Vec::new())),
             last_recovery: None,
             last_output_status: None,
@@ -523,6 +561,18 @@ impl StudioServerClient {
         let mut logs = self.absorb_events(outcome.events);
         logs.extend(self.take_pending_logs());
         Ok(logs)
+    }
+
+    /// Ask the server for its hello: wire proto, build facts (the features
+    /// compiled in), and the stamped device uid. The add-node picker's
+    /// "Not on this device" gate reads `build.features` off this at lens
+    /// attach — the roster fold's hello mirror deliberately carries none.
+    /// Side-channel events ride into the pending logs like any other op.
+    pub async fn hello(&mut self) -> Result<lpc_wire::ServerHello, UiError> {
+        let outcome = self.client.hello().await.map_err(map_client_error)?;
+        let drafts = self.absorb_events(outcome.events);
+        self.pending_logs.borrow_mut().extend(drafts);
+        Ok(outcome.value)
     }
 
     pub async fn list_loaded_projects(&mut self) -> Result<LoadedProjectCatalog, UiError> {

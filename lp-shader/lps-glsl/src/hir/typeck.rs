@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -10,15 +11,17 @@ use lps_shared::{
 use crate::body::{AssignOp, BinaryOp, ParsedExpr, ParsedExprKind, ParsedStmt, UnaryOp};
 use crate::{Diagnostic, Span};
 
+use super::arena::WritebackList;
 use super::arena::{ExprId, ExprList, HirArena, PlaceId};
 use super::array_size::ArraySizeConsts;
 use super::const_fold::{fold_binary, fold_builtin_call, fold_glsl_import_call, fold_unary};
 use super::function::{FunctionSig, GlobalConst, ImportRegistry};
 use super::place::{AccessMode, HirPlace, PlaceRoot, PlaceSegment};
+use super::type_table::{TypeTable, TypedArena};
 use super::types::StructTypes;
 use super::types::{
     GlobalInfo, HirExprKind, HirFunctionBody, HirLocal, HirOutArg, HirParam, HirStmt,
-    HirTextureOperand, HirUserCallWriteback, UniformInfo,
+    HirTextureOperand, HirUserCallWriteback, SwizzleLanes, UniformInfo,
 };
 use super::typing::builtin_has_out_args;
 use super::typing::{
@@ -50,7 +53,7 @@ pub(super) struct TypeCtx<'a> {
     imports: &'a mut ImportRegistry,
     texture_specs: &'a VecMap<String, TextureBindingSpec>,
     pub(super) locals: Vec<HirLocal>,
-    pub(super) arena: HirArena,
+    pub(super) arena: TypedArena<'a>,
     scopes: Vec<VecMap<String, usize>>,
     loop_depth: usize,
 }
@@ -66,6 +69,7 @@ impl<'a> TypeCtx<'a> {
         array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
         texture_specs: &'a VecMap<String, TextureBindingSpec>,
+        types: &'a mut TypeTable,
     ) -> Self {
         Self {
             params: &function.params,
@@ -78,7 +82,7 @@ impl<'a> TypeCtx<'a> {
             imports,
             texture_specs,
             locals: Vec::new(),
-            arena: HirArena::default(),
+            arena: TypedArena::new(types),
             scopes: alloc::vec![VecMap::new()],
             loop_depth: 0,
         }
@@ -93,6 +97,7 @@ impl<'a> TypeCtx<'a> {
         array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
         texture_specs: &'a VecMap<String, TextureBindingSpec>,
+        types: &'a mut TypeTable,
     ) -> Self {
         Self {
             params: &[],
@@ -105,7 +110,7 @@ impl<'a> TypeCtx<'a> {
             imports,
             texture_specs,
             locals: Vec::new(),
-            arena: HirArena::default(),
+            arena: TypedArena::new(types),
             scopes: alloc::vec![VecMap::new()],
             loop_depth: 0,
         }
@@ -113,20 +118,20 @@ impl<'a> TypeCtx<'a> {
 
     pub(super) fn type_block(
         &mut self,
-        parsed: &[ParsedStmt],
+        parsed: &[ParsedStmt<'_>],
         return_ty: &LpsType,
     ) -> Result<HirFunctionBody, Diagnostic> {
         let statements = self.type_statements(parsed, return_ty)?;
         Ok(HirFunctionBody {
             locals: core::mem::take(&mut self.locals),
             statements,
-            arena: core::mem::take(&mut self.arena),
+            arena: self.arena.take_arena(),
         })
     }
 
     fn type_statements(
         &mut self,
-        parsed: &[ParsedStmt],
+        parsed: &[ParsedStmt<'_>],
         return_ty: &LpsType,
     ) -> Result<Vec<HirStmt>, Diagnostic> {
         let mut statements = Vec::new();
@@ -138,7 +143,7 @@ impl<'a> TypeCtx<'a> {
 
     fn type_stmt(
         &mut self,
-        stmt: &ParsedStmt,
+        stmt: &ParsedStmt<'_>,
         return_ty: &LpsType,
     ) -> Result<Vec<HirStmt>, Diagnostic> {
         match stmt {
@@ -155,16 +160,16 @@ impl<'a> TypeCtx<'a> {
                     let ty = self.type_decl_ty(ty, *span, None)?;
                     zero_expr(&mut self.arena, *span, &ty)?
                 };
-                let ty = self.arena.expr_ty(init).clone();
+                let ty = self.arena.expr_type_id(init);
                 let local = self.locals.len();
                 self.locals.push(HirLocal {
-                    name: name.clone(),
-                    ty: ty.clone(),
+                    name: String::from(*name),
+                    ty,
                 });
                 self.scopes
                     .last_mut()
                     .expect("type scope")
-                    .insert(name.clone(), local);
+                    .insert(String::from(*name), local);
                 Ok(alloc::vec![HirStmt::Let { local, init }])
             }
             ParsedStmt::LetGroup { declarations, .. } => {
@@ -176,16 +181,16 @@ impl<'a> TypeCtx<'a> {
                         let ty = self.type_decl_ty(&declaration.ty, declaration.span, None)?;
                         zero_expr(&mut self.arena, declaration.span, &ty)?
                     };
-                    let ty = self.arena.expr_ty(init).clone();
+                    let ty = self.arena.expr_type_id(init);
                     let local = self.locals.len();
                     self.locals.push(HirLocal {
-                        name: declaration.name.clone(),
-                        ty: ty.clone(),
+                        name: String::from(declaration.name),
+                        ty,
                     });
                     self.scopes
                         .last_mut()
                         .expect("type scope")
-                        .insert(declaration.name.clone(), local);
+                        .insert(String::from(declaration.name), local);
                     statements.push(HirStmt::Let { local, init });
                 }
                 Ok(statements)
@@ -198,13 +203,13 @@ impl<'a> TypeCtx<'a> {
             } => {
                 let target = self.type_assign_target(&ParsedExpr {
                     span: *span,
-                    kind: ParsedExprKind::Name(name.clone()),
+                    kind: ParsedExprKind::Name(name),
                 })?;
                 let value = self.type_assign_value(*span, &target, *op, value)?;
-                let ty = self.arena.expr_ty(value).clone();
-                let expr = self
-                    .arena
-                    .push_expr(*span, ty, HirExprKind::Assign { target, value });
+                let ty = self.arena.expr_type_id(value);
+                let expr =
+                    self.arena
+                        .push_expr_typed(*span, ty, HirExprKind::Assign { target, value });
                 Ok(alloc::vec![HirStmt::Expr(expr)])
             }
             ParsedStmt::If {
@@ -331,7 +336,7 @@ impl<'a> TypeCtx<'a> {
         }
     }
 
-    pub(super) fn type_expr(&mut self, expr: &ParsedExpr) -> Result<ExprId, Diagnostic> {
+    pub(super) fn type_expr(&mut self, expr: &ParsedExpr<'_>) -> Result<ExprId, Diagnostic> {
         match &expr.kind {
             ParsedExprKind::BoolLiteral(v) => {
                 Ok(self
@@ -366,8 +371,8 @@ impl<'a> TypeCtx<'a> {
                 if self.roots_in_a_place(expr)
                     && let Ok(place) = self.type_place(expr, AccessMode::Read)
                 {
-                    let ty = self.arena.place(place).ty.clone();
-                    return Ok(self.arena.push_expr(
+                    let ty = self.arena.place_type_id(place);
+                    return Ok(self.arena.push_expr_typed(
                         expr.span,
                         ty,
                         HirExprKind::PlaceRead { target: place },
@@ -375,6 +380,8 @@ impl<'a> TypeCtx<'a> {
                 }
                 let base = self.type_expr(base)?;
                 let (lanes, ty) = access_lanes(expr.span, self.arena.expr_ty(base), fields)?;
+                let lanes = SwizzleLanes::from_slice(&lanes)
+                    .ok_or_else(|| Diagnostic::error(expr.span, "unsupported swizzle"))?;
                 Ok(self
                     .arena
                     .push_expr(expr.span, ty, HirExprKind::Swizzle { base, lanes }))
@@ -397,8 +404,8 @@ impl<'a> TypeCtx<'a> {
                 if self.roots_in_a_place(expr)
                     && let Ok(place) = self.type_place(expr, AccessMode::Read)
                 {
-                    let ty = self.arena.place(place).ty.clone();
-                    return Ok(self.arena.push_expr(
+                    let ty = self.arena.place_type_id(place);
+                    return Ok(self.arena.push_expr_typed(
                         expr.span,
                         ty,
                         HirExprKind::PlaceRead { target: place },
@@ -462,10 +469,12 @@ impl<'a> TypeCtx<'a> {
             ParsedExprKind::Binary { op, lhs, rhs } if *op == BinaryOp::Comma => {
                 let first = self.type_expr(lhs)?;
                 let second = self.type_expr(rhs)?;
-                let ty = self.arena.expr_ty(second).clone();
-                Ok(self
-                    .arena
-                    .push_expr(expr.span, ty, HirExprKind::Sequence { first, second }))
+                let ty = self.arena.expr_type_id(second);
+                Ok(self.arena.push_expr_typed(
+                    expr.span,
+                    ty,
+                    HirExprKind::Sequence { first, second },
+                ))
             }
             ParsedExprKind::Binary { op, lhs, rhs } => self.type_binary(expr.span, *op, lhs, rhs),
             ParsedExprKind::Conditional {
@@ -476,10 +485,10 @@ impl<'a> TypeCtx<'a> {
             ParsedExprKind::Assign { target, op, value } => {
                 let target = self.type_assign_target(target)?;
                 let value = self.type_assign_value(expr.span, &target, *op, value)?;
-                let ty = self.arena.expr_ty(value).clone();
+                let ty = self.arena.expr_type_id(value);
                 Ok(self
                     .arena
-                    .push_expr(expr.span, ty, HirExprKind::Assign { target, value }))
+                    .push_expr_typed(expr.span, ty, HirExprKind::Assign { target, value }))
             }
             ParsedExprKind::IncDec { target, op, prefix } => {
                 let target = self.type_assign_target(target)?;
@@ -508,9 +517,9 @@ impl<'a> TypeCtx<'a> {
 
     fn type_name(&mut self, span: Span, name: &str) -> Result<ExprId, Diagnostic> {
         if let Some(local) = self.resolve_local(name) {
-            return Ok(self.arena.push_expr(
+            return Ok(self.arena.push_expr_typed(
                 span,
-                self.locals[local].ty.clone(),
+                self.locals[local].ty,
                 HirExprKind::Local { index: local },
             ));
         }
@@ -556,7 +565,7 @@ impl<'a> TypeCtx<'a> {
         &mut self,
         span: Span,
         name: &str,
-        args: &[ParsedExpr],
+        args: &[ParsedExpr<'_>],
     ) -> Result<ExprId, Diagnostic> {
         let args = self.type_expr_args(args)?;
         let target_ty = self.type_constructor_target(name, span, args)?;
@@ -570,7 +579,7 @@ impl<'a> TypeCtx<'a> {
         &mut self,
         span: Span,
         name: &str,
-        args: &[ParsedExpr],
+        args: &[ParsedExpr<'_>],
     ) -> Result<ExprId, Diagnostic> {
         if let Some((function, sig)) = self
             .functions
@@ -594,7 +603,7 @@ impl<'a> TypeCtx<'a> {
                     }
                     ParamQualifier::Out => {
                         let target = self.type_assign_target(arg)?;
-                        if self.arena.place(target).ty != param.ty {
+                        if *self.arena.place(target).ty != param.ty {
                             return Err(Diagnostic::error(
                                 arg.span,
                                 "out argument type must match parameter type",
@@ -602,15 +611,14 @@ impl<'a> TypeCtx<'a> {
                         }
                         call_args.push(zero_expr(&mut self.arena, arg.span, &param.ty)?);
                         writebacks.push(HirUserCallWriteback {
-                            arg_index,
+                            arg_index: arg_index as u32,
                             target,
-                            ty: param.ty.clone(),
                             copy_in: false,
                         });
                     }
                     ParamQualifier::InOut => {
                         let target = self.type_assign_target(arg)?;
-                        if self.arena.place(target).ty != param.ty {
+                        if *self.arena.place(target).ty != param.ty {
                             return Err(Diagnostic::error(
                                 arg.span,
                                 "inout argument type must match parameter type",
@@ -619,15 +627,15 @@ impl<'a> TypeCtx<'a> {
                         let value = self.type_expr(arg)?;
                         call_args.push(self.coerce_expr(value, &param.ty)?);
                         writebacks.push(HirUserCallWriteback {
-                            arg_index,
+                            arg_index: arg_index as u32,
                             target,
-                            ty: param.ty.clone(),
                             copy_in: true,
                         });
                     }
                 }
             }
             let args = self.arena.push_expr_list(call_args);
+            let writebacks = self.arena.push_writebacks(writebacks);
             return Ok(self.arena.push_expr(
                 span,
                 sig.return_ty.clone(),
@@ -667,7 +675,7 @@ impl<'a> TypeCtx<'a> {
                 HirExprKind::Builtin {
                     kind,
                     args,
-                    writebacks: Vec::new(),
+                    writebacks: WritebackList::EMPTY,
                 },
             ));
         }
@@ -714,7 +722,7 @@ impl<'a> TypeCtx<'a> {
         ))
     }
 
-    fn type_expr_args(&mut self, args: &[ParsedExpr]) -> Result<ExprList, Diagnostic> {
+    fn type_expr_args(&mut self, args: &[ParsedExpr<'_>]) -> Result<ExprList, Diagnostic> {
         let mut typed = Vec::with_capacity(args.len());
         for arg in args {
             typed.push(self.type_expr(arg)?);
@@ -725,7 +733,7 @@ impl<'a> TypeCtx<'a> {
     fn type_texel_fetch_call(
         &mut self,
         span: Span,
-        args: &[ParsedExpr],
+        args: &[ParsedExpr<'_>],
     ) -> Result<ExprId, Diagnostic> {
         if args.len() != 3 {
             return Err(Diagnostic::error(span, "texelFetch expects 3 arguments"));
@@ -744,14 +752,18 @@ impl<'a> TypeCtx<'a> {
             span,
             LpsType::Vec4,
             HirExprKind::TexelFetch {
-                sampler,
+                sampler: Box::new(sampler),
                 coord,
                 lod,
             },
         ))
     }
 
-    fn type_texture_call(&mut self, span: Span, args: &[ParsedExpr]) -> Result<ExprId, Diagnostic> {
+    fn type_texture_call(
+        &mut self,
+        span: Span,
+        args: &[ParsedExpr<'_>],
+    ) -> Result<ExprId, Diagnostic> {
         if args.len() != 2 {
             return Err(Diagnostic::error(
                 span,
@@ -803,7 +815,7 @@ impl<'a> TypeCtx<'a> {
             span,
             LpsType::Vec4,
             HirExprKind::Texture {
-                sampler,
+                sampler: Box::new(sampler),
                 coord,
                 import,
             },
@@ -812,39 +824,49 @@ impl<'a> TypeCtx<'a> {
 
     fn type_texture_operand(
         &mut self,
-        expr: &ParsedExpr,
+        expr: &ParsedExpr<'_>,
         fn_name: &str,
     ) -> Result<HirTextureOperand, Diagnostic> {
         let place = self.type_place(expr, AccessMode::Read)?;
         let place_ref = self.arena.place(place);
-        if place_ref.ty != LpsType::Texture2D {
+        if *place_ref.ty != LpsType::Texture2D {
             return Err(Diagnostic::error(
                 expr.span,
                 format!("{fn_name} expects sampler2D uniform"),
             ));
         }
-        let PlaceRoot::Uniform {
-            name,
-            byte_offset,
-            ty: _,
-        } = place_ref.root.clone()
-        else {
+        let PlaceRoot::Uniform { name, byte_offset } = place_ref.root.clone() else {
             return Err(Diagnostic::error(
                 expr.span,
                 format!("{fn_name} sampler must be a uniform sampler2D"),
             ));
         };
+        // Walk the projected type alongside the segments: a field segment
+        // carries its member index, and the name comes from the struct.
+        let mut current_ty = self
+            .uniforms
+            .get(&name)
+            .map(|u| &u.ty)
+            .ok_or_else(|| Diagnostic::error(expr.span, format!("unknown uniform `{name}`")))?;
         let mut path = name;
         let mut descriptor_byte_offset = byte_offset;
-        for segment in place_ref.segments.clone() {
-            match segment {
+        for segment in self.arena.place_segments(place) {
+            match *segment {
                 PlaceSegment::Field {
-                    name, byte_offset, ..
+                    member,
+                    byte_offset,
+                    ..
                 } => {
+                    let member_name =
+                        super::place::field_name(current_ty, member).ok_or_else(|| {
+                            Diagnostic::error(expr.span, "struct member out of range")
+                        })?;
                     path.push('.');
-                    path.push_str(&name);
-                    descriptor_byte_offset =
-                        descriptor_byte_offset.saturating_add(byte_offset as u32);
+                    path.push_str(&member_name);
+                    current_ty = super::place::field_type(current_ty, member).ok_or_else(|| {
+                        Diagnostic::error(expr.span, "struct member out of range")
+                    })?;
+                    descriptor_byte_offset = descriptor_byte_offset.saturating_add(byte_offset);
                 }
                 PlaceSegment::Index { .. } | PlaceSegment::Swizzle { .. } => {
                     return Err(Diagnostic::error(
@@ -887,9 +909,10 @@ impl<'a> TypeCtx<'a> {
                     format!("lpfn_psrdnoise gradient argument must be a local {gradient_ty:?}"),
                 ));
             };
+            let local =
+                u32::try_from(*index).map_err(|_| Diagnostic::error(span, "too many locals"))?;
             out = Some(HirOutArg {
-                local: index,
-                ty: gradient_ty,
+                local,
                 arg_index: 3,
             });
             gradient_arg = Some(3);
@@ -940,8 +963,8 @@ impl<'a> TypeCtx<'a> {
         &mut self,
         span: Span,
         op: BinaryOp,
-        lhs: &ParsedExpr,
-        rhs: &ParsedExpr,
+        lhs: &ParsedExpr<'_>,
+        rhs: &ParsedExpr<'_>,
     ) -> Result<ExprId, Diagnostic> {
         let parsed_lhs = lhs;
         let parsed_rhs = rhs;
@@ -1035,9 +1058,9 @@ impl<'a> TypeCtx<'a> {
     fn type_conditional(
         &mut self,
         span: Span,
-        condition: &ParsedExpr,
-        accept: &ParsedExpr,
-        reject: &ParsedExpr,
+        condition: &ParsedExpr<'_>,
+        accept: &ParsedExpr<'_>,
+        reject: &ParsedExpr<'_>,
     ) -> Result<ExprId, Diagnostic> {
         let condition = self.type_expr(condition)?;
         let condition = self.coerce_expr(condition, &LpsType::Bool)?;
@@ -1069,7 +1092,7 @@ impl<'a> TypeCtx<'a> {
         span: Span,
         target: &PlaceId,
         op: AssignOp,
-        value: &ParsedExpr,
+        value: &ParsedExpr<'_>,
     ) -> Result<ExprId, Diagnostic> {
         let ty = self.arena.place(*target).ty.clone();
         let value = self.type_expr(value)?;
@@ -1091,39 +1114,63 @@ impl<'a> TypeCtx<'a> {
         self.coerce_expr(value, &ty)
     }
 
-    pub(super) fn type_assign_target(&mut self, expr: &ParsedExpr) -> Result<PlaceId, Diagnostic> {
+    pub(super) fn type_assign_target(
+        &mut self,
+        expr: &ParsedExpr<'_>,
+    ) -> Result<PlaceId, Diagnostic> {
         let place = self.type_place(expr, AccessMode::Write)?;
         Ok(place)
     }
 
-    fn type_place(&mut self, expr: &ParsedExpr, mode: AccessMode) -> Result<PlaceId, Diagnostic> {
-        let place = match &expr.kind {
-            ParsedExprKind::Name(name) => self
-                .arena
-                .push_place(self.type_name_place(expr.span, name)?),
+    fn type_place(
+        &mut self,
+        expr: &ParsedExpr<'_>,
+        mode: AccessMode,
+    ) -> Result<PlaceId, Diagnostic> {
+        let place = self.build_place(expr, mode)?;
+        Ok(self.arena.push_place(place))
+    }
+
+    /// Type a place expression into one [`HirPlace`], by value.
+    ///
+    /// Only the finished place reaches the arena (see [`Self::type_place`]).
+    /// This used to push every intermediate of `a[i].f.x` too — `a`, `a[i]`,
+    /// `a[i].f` — each a full clone of the one before, root type and all.
+    /// Nothing ever read those intermediates, but the arena is not freed
+    /// until the function lowers, so a struct-array global referenced N
+    /// times held ~3N copies of its whole type (member names included) for
+    /// the entire HIR build. On the ESP32-C6 that was the meteor sim
+    /// compile: 40 references to `meteors[i].field` exhausted a 300 KB heap.
+    fn build_place(
+        &mut self,
+        expr: &ParsedExpr<'_>,
+        mode: AccessMode,
+    ) -> Result<HirPlace, Diagnostic> {
+        match &expr.kind {
+            ParsedExprKind::Name(name) => {
+                let place = self.type_name_place(expr.span, name)?;
+                if mode != AccessMode::Read && !place.root.is_writable() {
+                    return Err(Diagnostic::error(
+                        expr.span,
+                        "cannot write to uniform variable",
+                    ));
+                }
+                Ok(place)
+            }
             ParsedExprKind::Swizzle { base, fields } => {
-                let base_id = self.type_place(base, mode)?;
-                let mut base = self.arena.place(base_id).clone();
+                let mut base = self.build_place(base, mode)?;
                 base.push_field(expr.span, fields)?;
-                self.arena.push_place(base)
+                Ok(base)
             }
             ParsedExprKind::Index { base, index } => {
-                let base_id = self.type_place(base, mode)?;
-                let mut base = self.arena.place(base_id).clone();
+                let mut base = self.build_place(base, mode)?;
                 let index = self.type_expr(index)?;
                 let index = self.coerce_expr(index, &LpsType::Int)?;
                 base.push_index(index, expr.span)?;
-                self.arena.push_place(base)
+                Ok(base)
             }
-            _ => return Err(Diagnostic::error(expr.span, "invalid place expression")),
-        };
-        if mode != AccessMode::Read && !self.arena.place(place).root.is_writable() {
-            return Err(Diagnostic::error(
-                expr.span,
-                "cannot write to uniform variable",
-            ));
+            _ => Err(Diagnostic::error(expr.span, "invalid place expression")),
         }
-        Ok(place)
     }
 
     /// Cheap syntactic precheck for the speculative `type_place` probes on
@@ -1137,7 +1184,7 @@ impl<'a> TypeCtx<'a> {
     /// only avoids the discarded diagnostic. Roots that do resolve still go
     /// through `type_place` unchanged, so real errors keep their text and
     /// order.
-    fn roots_in_a_place(&self, expr: &ParsedExpr) -> bool {
+    fn roots_in_a_place(&self, expr: &ParsedExpr<'_>) -> bool {
         match &expr.kind {
             ParsedExprKind::Name(name) => self.is_place_name(name),
             ParsedExprKind::Swizzle { base, .. } | ParsedExprKind::Index { base, .. } => {
@@ -1158,7 +1205,7 @@ impl<'a> TypeCtx<'a> {
 
     fn type_name_place(&self, span: Span, name: &str) -> Result<HirPlace, Diagnostic> {
         if let Some(local) = self.resolve_local(name) {
-            let ty = self.locals[local].ty.clone();
+            let ty = self.arena.ty(self.locals[local].ty).clone();
             return Ok(HirPlace::local(local, ty));
         }
         if let Some((param, p)) = self
@@ -1205,7 +1252,7 @@ impl<'a> TypeCtx<'a> {
         &mut self,
         name: &str,
         span: Span,
-        init: &ParsedExpr,
+        init: &ParsedExpr<'_>,
     ) -> Result<ExprId, Diagnostic> {
         if matches!(init.kind, ParsedExprKind::InitList { .. }) {
             let ty = self.type_init_list_decl_ty(name, span, init)?;
@@ -1220,7 +1267,7 @@ impl<'a> TypeCtx<'a> {
         &self,
         name: &str,
         span: Span,
-        init: &ParsedExpr,
+        init: &ParsedExpr<'_>,
     ) -> Result<LpsType, Diagnostic> {
         if let Some((base_name, lens)) = parse_array_type_name(name, self.array_size_consts) {
             let base = scalar_or_struct_type_name_to_lps(base_name, span, self.structs)?;
@@ -1232,7 +1279,7 @@ impl<'a> TypeCtx<'a> {
 
     fn type_init_list(
         &mut self,
-        init: &ParsedExpr,
+        init: &ParsedExpr<'_>,
         target: &LpsType,
     ) -> Result<ExprId, Diagnostic> {
         let ParsedExprKind::InitList { elements } = &init.kind else {
@@ -1338,7 +1385,7 @@ impl<'a> TypeCtx<'a> {
     }
 
     fn clone_expr_from(&mut self, source: &HirArena, expr: ExprId) -> ExprId {
-        let source_expr = source.expr(expr);
+        let source_expr = source.node(expr);
         let kind = match &source_expr.kind {
             HirExprKind::Constructor { args } => {
                 let args = self.clone_expr_list_from(source, *args);
@@ -1349,7 +1396,7 @@ impl<'a> TypeCtx<'a> {
             },
             HirExprKind::Swizzle { base, lanes } => HirExprKind::Swizzle {
                 base: self.clone_expr_from(source, *base),
-                lanes: lanes.clone(),
+                lanes: *lanes,
             },
             HirExprKind::Index { base, index } => HirExprKind::Index {
                 base: self.clone_expr_from(source, *base),
@@ -1362,7 +1409,7 @@ impl<'a> TypeCtx<'a> {
             } => HirExprKind::Builtin {
                 kind: *kind,
                 args: self.clone_expr_list_from(source, *args),
-                writebacks: writebacks.clone(),
+                writebacks: self.clone_writebacks_from(source, *writebacks),
             },
             HirExprKind::UserCall {
                 function,
@@ -1371,12 +1418,12 @@ impl<'a> TypeCtx<'a> {
             } => HirExprKind::UserCall {
                 function: *function,
                 args: self.clone_expr_list_from(source, *args),
-                writebacks: writebacks.clone(),
+                writebacks: self.clone_writebacks_from(source, *writebacks),
             },
             HirExprKind::ImportCall { import, args, out } => HirExprKind::ImportCall {
-                import: import.clone(),
+                import: *import,
                 args: self.clone_expr_list_from(source, *args),
-                out: out.clone(),
+                out: *out,
             },
             HirExprKind::TexelFetch {
                 sampler,
@@ -1394,7 +1441,7 @@ impl<'a> TypeCtx<'a> {
             } => HirExprKind::Texture {
                 sampler: sampler.clone(),
                 coord: self.clone_expr_from(source, *coord),
-                import: import.clone(),
+                import: *import,
             },
             HirExprKind::Unary { op, expr } => HirExprKind::Unary {
                 op: *op,
@@ -1433,7 +1480,7 @@ impl<'a> TypeCtx<'a> {
             kind => kind.clone(),
         };
         self.arena
-            .push_expr(source_expr.span, source_expr.ty.clone(), kind)
+            .push_expr_typed(source_expr.span, source_expr.ty, kind)
     }
 
     fn clone_expr_list_from(&mut self, source: &HirArena, list: ExprList) -> ExprList {
@@ -1445,14 +1492,32 @@ impl<'a> TypeCtx<'a> {
         self.arena.push_expr_list(ids)
     }
 
+    fn clone_writebacks_from(&mut self, source: &HirArena, list: WritebackList) -> WritebackList {
+        let cloned = source
+            .writebacks(list)
+            .iter()
+            .map(|w| HirUserCallWriteback {
+                arg_index: w.arg_index,
+                target: self.clone_place_from(source, w.target),
+                copy_in: w.copy_in,
+            })
+            .collect::<Vec<_>>();
+        self.arena.push_writebacks(cloned)
+    }
+
     fn clone_place_from(&mut self, source: &HirArena, place: PlaceId) -> PlaceId {
-        let mut place = source.place(place).clone();
-        for segment in &mut place.segments {
-            if let PlaceSegment::Index { index, .. } = segment {
-                *index = self.clone_expr_from(source, *index);
-            }
+        let record = source.place_record(place);
+        let mut segments = Vec::with_capacity(source.place_segments(place).len());
+        for segment in source.place_segments(place) {
+            segments.push(match *segment {
+                PlaceSegment::Index { index } => PlaceSegment::Index {
+                    index: self.clone_expr_from(source, index),
+                },
+                other => other,
+            });
         }
-        self.arena.push_place(place)
+        self.arena
+            .push_place_typed(record.root.clone(), segments, record.ty)
     }
 
     fn one_lanes_expr(&mut self, span: Span, ty: &LpsType) -> Result<ExprId, Diagnostic> {
@@ -1541,11 +1606,11 @@ fn psrdnoise_param_types(glsl_params: &[&str]) -> Vec<lpir::IrType> {
     param_types
 }
 
-fn same_nonzero_const_expr_tree(lhs: &ParsedExpr, rhs: &ParsedExpr) -> bool {
+fn same_nonzero_const_expr_tree(lhs: &ParsedExpr<'_>, rhs: &ParsedExpr<'_>) -> bool {
     const_expr_tree_nonzero(lhs) && const_expr_tree_eq(lhs, rhs)
 }
 
-fn const_expr_tree_eq(lhs: &ParsedExpr, rhs: &ParsedExpr) -> bool {
+fn const_expr_tree_eq(lhs: &ParsedExpr<'_>, rhs: &ParsedExpr<'_>) -> bool {
     match (&lhs.kind, &rhs.kind) {
         (ParsedExprKind::BoolLiteral(a), ParsedExprKind::BoolLiteral(b)) => a == b,
         (ParsedExprKind::FloatLiteral(a), ParsedExprKind::FloatLiteral(b)) => a == b,
@@ -1581,7 +1646,7 @@ fn const_expr_tree_eq(lhs: &ParsedExpr, rhs: &ParsedExpr) -> bool {
     }
 }
 
-fn const_expr_tree_nonzero(expr: &ParsedExpr) -> bool {
+fn const_expr_tree_nonzero(expr: &ParsedExpr<'_>) -> bool {
     match &expr.kind {
         ParsedExprKind::FloatLiteral(value) => *value != 0.0,
         ParsedExprKind::IntLiteral(value) => *value != 0,

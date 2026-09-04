@@ -56,11 +56,12 @@ pub use map2d_doc::{
     RepeatShape, RingDir, RingOrder, RingShape,
 };
 pub use map2d_error::Map2dError;
-pub use map2d_fit::{Bounds2d, bounds_of_points, fit_points, fit_scale};
+pub use map2d_fit::{Bounds2d, bounds_of_points, fit_points, fit_points_in_place, fit_scale};
 pub use map2d_object_id::{MAP2D_OBJECT_ID_MAX_LEN, Map2dObjectId, ensure_object_ids};
 pub use map2d_resolve::{
     ObjectInstanceSpan, ObjectSpan, ResolvedLamp, ResolvedMap2d, Rotation2d, filled_polygon_cells,
-    object_instance_spans, object_stride, path_gap_breaks, resolve, shape_lamp_count, shape_stride,
+    object_instance_spans, object_instance_spans_of, object_stride, path_gap_breaks, resolve,
+    resolve_into, shape_lamp_count, shape_stride,
 };
 pub use patch::{
     PATCH_FORMAT, PATCH_FORMAT_BASE, PATCH_FORMAT_FLOW, PATCH_FORMAT_OBJECT_GRAIN, PatchDoc,

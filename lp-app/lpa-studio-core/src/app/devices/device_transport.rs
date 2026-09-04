@@ -36,10 +36,106 @@ pub struct GrantedLink {
     pub link: Box<dyn Link>,
 }
 
+/// One coarse-effect call, in platform terms. The model's
+/// [`EffectRequest`](lpa_devices::EffectRequest) is resolved into this by
+/// the effects layer (build ids stay opaque; the board manifest is resolved
+/// to its JSON before it crosses the seam, so a transport never depends on
+/// `lpa-boards`).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeviceEffectCall {
+    /// esptool flash of a packaged build. The chip guard and the pre-write
+    /// base-MAC read live below this seam and are load-bearing.
+    FlashFirmware { build_id: String },
+    /// esptool full-flash erase (the card's Factory reset). Verification —
+    /// the completion line outranking the benign flash-id warning (C6 rev 2
+    /// lore) — lives below this seam in the shipped JS.
+    EraseFlash,
+    /// Run the `lpa-client` remove conversation over the borrowed port: ask
+    /// the board what storage dir it runs from, stop it, and delete that
+    /// dir. The firmware stays; only the project goes.
+    RemoveProject {
+        /// Where to delete when the board reports nothing loaded — the race
+        /// between the card offering the verb and the effect running. An
+        /// absent dir is a no-op, never an error.
+        fallback_storage_id: String,
+    },
+    /// Write the board runtime manifest to `/hardware.json` over the app
+    /// protocol (board-selection D4; effective next boot).
+    WriteHardwareManifest { manifest_json: String },
+    /// Run the `lpa-client` push conversation over the borrowed port: find
+    /// the storage dir the board runs from, replace it, load it, verify the
+    /// package hash.
+    ///
+    /// The files arrive already resolved — the app read them out of the
+    /// library (or out of the live handle for a project open in this tab)
+    /// before the gesture was folded, because the model must not carry
+    /// project bytes through its journal.
+    PushProject {
+        files: Vec<(String, Vec<u8>)>,
+        /// The library copy's canonical hash. A device that ends up with
+        /// anything else is a failed push, not a quiet one.
+        expected_hash: String,
+        /// Where to write when the board reports nothing loaded — a
+        /// freshly flashed board has no dir to replace.
+        fallback_storage_id: String,
+    },
+}
+
+/// What a finished effect learned, beyond succeeding.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DeviceEffectFacts {
+    /// One line for the activity outcome.
+    pub summary: String,
+    /// The base MAC the flash preflight read from efuse, already normalized
+    /// — identity evidence for a blank board.
+    pub probed_mac: Option<String>,
+    /// The chip the operation talked to, as the tool reported it.
+    pub chip_name: Option<String>,
+}
+
+/// Progress callback for a running effect: label + optional percent. Called
+/// from inside the effect's own future; the effects layer turns each call
+/// into an `ActivityMarker::Progress` event.
+pub type DeviceEffectProgress = std::rc::Rc<dyn Fn(String, Option<u8>)>;
+
+/// What the lens io tees to the effects layer (round-2 M5): every whole
+/// line it drains from the wire — `M!` frames and console output alike,
+/// verbatim, before the io decodes it for its own conversation — and every
+/// port error the platform reports underneath it. The effects layer turns
+/// each into the `LinkEvent` the paused pump would have produced and feeds
+/// the roster fold, so the card keeps its evidence while the editor owns
+/// the port, and hears the port die the way the pump would have.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LensTapEvent {
+    /// One whole line off the wire.
+    Line(String),
+    /// The port failed under the io (unplug, the OS revoking it): the
+    /// platform's own message. The pump's rule applies — an error means the
+    /// port died, so the fold hears an error AND a close.
+    PortError(String),
+}
+
+/// The lens tap sink.
+pub type LensLineTap = std::rc::Rc<dyn Fn(LensTapEvent)>;
+
 /// How the app reaches real ports.
 pub trait DeviceTransport {
     /// A short label for logs ("browser Web Serial").
     fn label(&self) -> &'static str;
+
+    /// Run one coarse effect against a granted endpoint, with **exclusive
+    /// ownership of the wire** for the duration (the `device_manage.rs`
+    /// discipline): the effects layer pauses the link's pump before calling
+    /// this, and the platform below releases the port's reader/writer before
+    /// any tool touches the port. Never hold a handle across a reset that
+    /// re-enumerates (ADR 2026-07-30) — handles are re-derived from the
+    /// endpoint afterwards.
+    fn run_effect(
+        &self,
+        info: LinkInfo,
+        call: DeviceEffectCall,
+        progress: DeviceEffectProgress,
+    ) -> DeviceTransportFuture<Result<DeviceEffectFacts, String>>;
 
     /// The grants this origin ALREADY holds, as closed links. No chooser, no
     /// prompt — this is the startup and hotplug sweep.
@@ -56,4 +152,20 @@ pub trait DeviceTransport {
     /// `forget_endpoint`). Best-effort: a grant that cannot be revoked is
     /// worth a log line, not a stuck card.
     fn revoke_grant(&self, info: LinkInfo) -> DeviceTransportFuture<Result<(), String>>;
+
+    /// A long-lived `lpa-client` io over a granted endpoint's OPEN port for
+    /// the editor lens (round-2 M5): the session's wire client speaks the
+    /// app protocol through it for as long as the lens is attached.
+    ///
+    /// Same exclusive-borrow discipline as [`Self::run_effect`], held open
+    /// instead of run to completion: the effects layer pauses the link's
+    /// pump before building this and resumes it when the lens releases the
+    /// wire. `tap` receives every line the io drains, so the fold never
+    /// goes deaf. The io never closes the port — it belongs to the model's
+    /// link.
+    fn lens_client_io(
+        &self,
+        info: LinkInfo,
+        tap: LensLineTap,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, String>;
 }

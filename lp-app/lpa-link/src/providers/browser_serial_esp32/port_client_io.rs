@@ -1,0 +1,302 @@
+//! A minimal `lpa-client` conversation over a granted Web Serial port.
+//!
+//! The round-2 coarse-effect seam needs one thing the dumb `Link` contract
+//! cannot give it: a REAL protocol exchange (request out, decoded response
+//! body back). The model's frame mirror is deliberately lossy — a response
+//! body surfaces there as a label — so anything that wants the body speaks
+//! `lpa-client` below the mirror, on the raw `M!` line framing the JS
+//! controller already does.
+//!
+//! # Exclusive borrow, or two readers fight
+//!
+//! `takeLines` drains a shared buffer. While this io runs, the effects layer
+//! MUST have paused the model's link pump for the same port (that is the
+//! coarse-effect discipline: borrow the wire exclusively, run, give it
+//! back). Two drainers would each get half the frames, and the halves would
+//! both look like a dead device.
+//!
+//! Lines that are not `M!` frames (boot output, logs) are forwarded to the
+//! management event sink so the conversation's journal stays honest.
+//!
+//! The editor lens (round-2 M5) rides the same io, held open for as long as
+//! the lens is attached, with a **tap**: every drained line — frame or not —
+//! is handed to the caller verbatim before the io decodes it, so the device
+//! model's fold keeps receiving the evidence its paused pump would have.
+
+use std::rc::Rc;
+
+use async_trait::async_trait;
+use js_sys::{Function, Promise, Reflect};
+use lpa_client::{ClientIo, LpClient};
+use lpc_wire::{ClientMessage, TransportError, WireServerMessage};
+use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen_futures::JsFuture;
+
+use crate::provider::management_event::{LinkManagementEvent, LinkManagementEventSink};
+use crate::providers::browser_serial_esp32::browser_serial;
+use crate::{LinkError, LinkManagementProgress};
+
+/// How often the receive loop re-drains the JS line buffer.
+const RECEIVE_POLL_MS: u32 = 20;
+
+/// Quiet budget for one response. Heartbeats restart nothing here — the
+/// conversation is short and the caller's activity deadline is the outer
+/// bound — so this is a plain per-request ceiling.
+const RESPONSE_BUDGET_MS: u32 = 5_000;
+
+/// Write `bytes` to `path` on the device over the app protocol.
+///
+/// Round 2's first consumer is the flash activity's board-manifest stamp
+/// (`/hardware.json`, board-selection D4). M3's push conversation reuses
+/// this seam's shape.
+///
+/// ⚠️ The write **waits for the board to answer something cheap first**. A
+/// just-flashed device formats its littlefs on the first boot and simply
+/// does not answer fs writes while it does; going straight in burned ~40 s
+/// of retried writes and then reported failure at a board that was fine
+/// (G1 bench, 2026-08-31). [`lpa_client::wait_until_ready`] is that wait,
+/// and the caller's activity deadline (`stamp_deadline_ms`) bounds it.
+pub async fn write_device_file(
+    port_id: u32,
+    path: &str,
+    bytes: &[u8],
+    events: LinkManagementEventSink,
+) -> Result<(), LinkError> {
+    use lpc_model::AsLpPath;
+    let io = PortLineIo {
+        port_id,
+        pending: Vec::new(),
+        events: events.clone(),
+        tap: None,
+    };
+    let mut client = LpClient::new(io);
+    let mut progress = progress_reporter(&events);
+    lpa_client::wait_until_ready(&mut client, lpa_client::READY_ATTEMPTS, &mut progress)
+        .await
+        .map_err(|error| {
+            LinkError::other(format!("the board never became ready to write to: {error}"))
+        })?;
+
+    events.emit(LinkManagementEvent::progress(LinkManagementProgress::new(
+        format!("Writing {path}"),
+    )));
+    let outcome = client
+        .fs_write(path.as_path(), bytes.to_vec())
+        .await
+        .map_err(|error| LinkError::other(format!("device file write failed: {error}")))?;
+    for event in outcome.events {
+        events.emit(LinkManagementEvent::log(format!("{event:?}")));
+    }
+    Ok(())
+}
+
+/// Take the loaded project off the device over the app protocol: ask what it
+/// runs from, stop it, delete that dir. The conversation is `lpa-client`'s;
+/// this function is only the port half.
+pub async fn remove_device_project(
+    port_id: u32,
+    fallback_storage_id: &str,
+    events: LinkManagementEventSink,
+) -> Result<lpa_client::RemoveReport, LinkError> {
+    let io = PortLineIo {
+        port_id,
+        pending: Vec::new(),
+        events: events.clone(),
+        tap: None,
+    };
+    let mut client = LpClient::new(io);
+    let mut progress = progress_reporter(&events);
+    lpa_client::remove_project(&mut client, fallback_storage_id, &mut progress)
+        .await
+        .map_err(|error| LinkError::other(format!("removing the project failed: {error}")))
+}
+
+/// The progress closure every conversation on this seam reports through.
+///
+/// A label-only step stays label-only: reporting 0% would make the card's
+/// bar jump backwards between named steps.
+fn progress_reporter(events: &LinkManagementEventSink) -> impl FnMut(String, Option<u8>) + use<'_> {
+    move |label: String, percent: Option<u8>| {
+        let update = LinkManagementProgress::new(label);
+        let update = match percent {
+            Some(percent) => update.with_percent(u32::from(percent)),
+            None => update,
+        };
+        events.emit(LinkManagementEvent::progress(update));
+    }
+}
+
+/// Push a project onto the device over the app protocol.
+///
+/// The conversation itself is `lpa-client`'s — the same stop → clear →
+/// chunked write → load → hash-verify the studio runs against the sim — so
+/// this function is only the port half: build the io, hand the progress
+/// through, translate the error.
+pub async fn push_device_project(
+    port_id: u32,
+    files: &[(String, Vec<u8>)],
+    expected_hash: &str,
+    fallback_storage_id: &str,
+    events: LinkManagementEventSink,
+) -> Result<lpa_client::PushReport, LinkError> {
+    let io = PortLineIo {
+        port_id,
+        pending: Vec::new(),
+        events: events.clone(),
+        tap: None,
+    };
+    let mut client = LpClient::new(io);
+    let mut progress = progress_reporter(&events);
+    lpa_client::push_project(
+        &mut client,
+        files,
+        expected_hash,
+        fallback_storage_id,
+        &mut progress,
+    )
+    .await
+    .map_err(|error| LinkError::other(format!("push failed: {error}")))
+}
+
+/// The editor lens's io over one port's raw line framing (round-2 M5).
+///
+/// Exactly the conversation io above, held open by the lens session's
+/// client instead of by one effect, with every drained line teed to `tap`
+/// before decoding. Non-frame lines are ALSO still reported through the
+/// management sink (`events`) for the lens session's own console. The port
+/// stays the model's: `close` is a no-op, and the effects layer's borrow
+/// release is what resumes the pump.
+pub fn lens_client_io(
+    port_id: u32,
+    tap: Rc<dyn Fn(LensTapLine)>,
+    events: LinkManagementEventSink,
+) -> Box<dyn ClientIo> {
+    Box::new(PortLineIo {
+        port_id,
+        pending: Vec::new(),
+        events,
+        tap: Some(tap),
+    })
+}
+
+/// `ClientIo` over one port's raw line framing.
+struct PortLineIo {
+    port_id: u32,
+    /// Frames drained but not yet handed out (one `takeLines` batch can
+    /// carry several).
+    pending: Vec<WireServerMessage>,
+    events: LinkManagementEventSink,
+    /// The lens tap: every drained line, verbatim, before decoding, and
+    /// every port error the JS controller reports. `None` for the one-shot
+    /// conversations (the paused pump has nothing to hear while an effect
+    /// runs; the fold waits for the end marker).
+    tap: Option<Rc<dyn Fn(LensTapLine)>>,
+}
+
+/// What the lens io tees: a line off the wire, or the controller's own
+/// error (the port died — unplug, revocation). Mirrors the studio's
+/// `LensTapEvent`; this crate stays independent of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LensTapLine {
+    Line(String),
+    PortError(String),
+}
+
+#[async_trait(?Send)]
+impl ClientIo for PortLineIo {
+    async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
+        let json = lpc_wire::json::to_string(&msg)
+            .map_err(|error| TransportError::Other(format!("encode failed: {error}")))?;
+        browser_serial::write_line(self.port_id, &format!("M!{json}\n"))
+            .await
+            .map_err(|error| {
+                // A write only fails when the port is gone or closed under
+                // us ("Serial port is not open." after an unplug — bench,
+                // 2026-09-02: the read pump ended silently and the write
+                // was the first thing to say so). The lens tap carries it
+                // so the fold hears the port die.
+                if let Some(tap) = &self.tap {
+                    tap(LensTapLine::PortError(error.to_string()));
+                }
+                TransportError::Other(error.to_string())
+            })
+    }
+
+    async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
+        let mut waited = 0_u32;
+        loop {
+            if !self.pending.is_empty() {
+                return Ok(self.pending.remove(0));
+            }
+            if let Some(tap) = &self.tap {
+                // The controller's errors are the port dying underneath
+                // us (the pump's mark-gone rule); the lens hears them
+                // here because the pump is paused — and the conversation
+                // fails NOW rather than waiting out its budget on a port
+                // that is gone.
+                let errors = browser_serial::take_errors(self.port_id);
+                if let Some(first) = errors.first().cloned() {
+                    for error in errors {
+                        tap(LensTapLine::PortError(error));
+                    }
+                    return Err(TransportError::Other(first));
+                }
+            }
+            for line in browser_serial::take_lines(self.port_id) {
+                if let Some(tap) = &self.tap {
+                    tap(LensTapLine::Line(line.clone()));
+                }
+                match line.strip_prefix("M!") {
+                    Some(json) => match lpc_wire::json::from_str::<WireServerMessage>(json) {
+                        Ok(message) => self.pending.push(message),
+                        Err(error) => self.events.emit(LinkManagementEvent::log(format!(
+                            "malformed frame: {error}"
+                        ))),
+                    },
+                    None => self.events.emit(LinkManagementEvent::log(line)),
+                }
+            }
+            if !self.pending.is_empty() {
+                continue;
+            }
+            if waited >= RESPONSE_BUDGET_MS {
+                return Err(TransportError::Other(format!(
+                    "device did not respond within {:.1}s",
+                    f64::from(RESPONSE_BUDGET_MS) / 1_000.0
+                )));
+            }
+            sleep_ms(RECEIVE_POLL_MS).await;
+            waited += RECEIVE_POLL_MS;
+        }
+    }
+
+    async fn close(&mut self) -> Result<(), TransportError> {
+        // The port belongs to the model's link; the borrow ends, the port
+        // stays open.
+        Ok(())
+    }
+}
+
+/// One `setTimeout` tick, with no `web-sys` dependency: the global's
+/// `setTimeout` looked up reflectively works in both window and worker
+/// scopes.
+async fn sleep_ms(ms: u32) {
+    let promise = Promise::new(&mut |resolve, _reject| {
+        let global = js_sys::global();
+        let set_timeout = Reflect::get(&global, &JsValue::from_str("setTimeout"))
+            .ok()
+            .and_then(|value| value.dyn_into::<Function>().ok());
+        match set_timeout {
+            Some(set_timeout) => {
+                let _ = set_timeout.call2(&global, &resolve, &JsValue::from_f64(f64::from(ms)));
+            }
+            // No setTimeout in this scope: resolve immediately rather than
+            // hang. The receive loop degrades to a hot poll, which is still
+            // bounded by its budget.
+            None => {
+                let _ = resolve.call0(&JsValue::NULL);
+            }
+        }
+    });
+    let _ = JsFuture::from(promise).await;
+}

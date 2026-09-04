@@ -6,13 +6,17 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::event::{Command, Input};
+use crate::event::{Command, EffectId, Input};
 use crate::evidence::Evidence;
 use crate::link::LinkId;
 use crate::roster::RosterConfig;
 use crate::time::Millis;
 
+use super::erase::EraseActivity;
+use super::flash::FlashActivity;
 use super::identify::IdentifyActivity;
+use super::push::PushActivity;
+use super::remove_project::RemoveProjectActivity;
 
 /// Which flow an activity is running. One per device at a time (invariant
 /// I5): a gesture on a busy device gets a visible "busy with X — cancel it?",
@@ -20,6 +24,10 @@ use super::identify::IdentifyActivity;
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ActivityKind {
     Identify,
+    Flash,
+    Push,
+    Erase,
+    RemoveProject,
 }
 
 impl ActivityKind {
@@ -27,6 +35,35 @@ impl ActivityKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Identify => "Identifying",
+            Self::Flash => "Flashing firmware",
+            Self::Push => "Sending the project",
+            Self::Erase => "Erasing the flash",
+            Self::RemoveProject => "Removing the project",
+        }
+    }
+
+    /// How long a cancelled activity of this kind gets to wind down before
+    /// eviction. Flash is wide on purpose: esptool-js cannot abort a write
+    /// cleanly, so the reducer holds a cancel through the write window with
+    /// an honest label — a 2 s grace would evict it into a half-written
+    /// image. Cancellation stays bounded (I2); the bound is just as wide as
+    /// the physics.
+    pub fn cancel_grace_ms(self, config: &RosterConfig) -> u64 {
+        match self {
+            Self::Identify => config.cancel_grace_ms,
+            Self::Flash => config.flash_cancel_grace_ms,
+            // A push cannot be torn out mid-write either — the device's
+            // project dir was cleared before the first byte went down — so
+            // the cancel waits out the conversation rather than leaving half
+            // a project on the board.
+            Self::Push => config.push_cancel_grace_ms,
+            // An erase cannot be aborted mid-wipe either; the flash grace
+            // is the same physics.
+            Self::Erase => config.flash_cancel_grace_ms,
+            // Removing shares the push's physics from the other direction:
+            // the dir is being deleted, and stopping halfway would leave a
+            // board loading half a project.
+            Self::RemoveProject => config.push_cancel_grace_ms,
         }
     }
 }
@@ -108,6 +145,11 @@ pub struct ActivityCtx<'a> {
     /// reducer, so a reducer always reads fresh evidence.
     pub evidence: &'a Evidence,
     pub config: &'a RosterConfig,
+    /// The stamp a [`Command::RunEffect`](crate::Command::RunEffect) emitted
+    /// from THIS step must wear. Minted by the device, which then records it
+    /// on the cell — that pairing is what lets a marker from an evicted
+    /// effect be recognized and dropped.
+    pub effect_id: EffectId,
 }
 
 /// The one thing a flow implements.
@@ -156,6 +198,11 @@ pub struct ActivityCell {
     pub deadline: Millis,
     pub cancel: CancelPhase,
     pub progress: Option<ActivityProgress>,
+    /// The coarse effect this cell is currently waiting on, if any. Markers
+    /// stamped with anything else came from an effect this cell does not own
+    /// — a straggler from an evicted predecessor — and are dropped.
+    #[serde(default)]
+    pub current_effect: Option<EffectId>,
     reducer: Reducer,
 }
 
@@ -167,6 +214,7 @@ impl ActivityCell {
             deadline,
             cancel: CancelPhase::Running,
             progress: None,
+            current_effect: None,
             reducer,
         }
     }
@@ -212,24 +260,40 @@ impl ActivityCell {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) enum Reducer {
     Identify(IdentifyActivity),
+    Flash(FlashActivity),
+    Push(PushActivity),
+    Erase(EraseActivity),
+    RemoveProject(RemoveProjectActivity),
 }
 
 impl ActivityReducer for Reducer {
     fn kind(&self) -> ActivityKind {
         match self {
             Self::Identify(reducer) => reducer.kind(),
+            Self::Flash(reducer) => reducer.kind(),
+            Self::Push(reducer) => reducer.kind(),
+            Self::Erase(reducer) => reducer.kind(),
+            Self::RemoveProject(reducer) => reducer.kind(),
         }
     }
 
     fn handle(&mut self, now: Millis, input: &Input, ctx: &mut ActivityCtx<'_>) -> ActivityStep {
         match self {
             Self::Identify(reducer) => reducer.handle(now, input, ctx),
+            Self::Flash(reducer) => reducer.handle(now, input, ctx),
+            Self::Push(reducer) => reducer.handle(now, input, ctx),
+            Self::Erase(reducer) => reducer.handle(now, input, ctx),
+            Self::RemoveProject(reducer) => reducer.handle(now, input, ctx),
         }
     }
 
     fn next_deadline(&self) -> Option<Millis> {
         match self {
             Self::Identify(reducer) => reducer.next_deadline(),
+            Self::Flash(reducer) => reducer.next_deadline(),
+            Self::Push(reducer) => reducer.next_deadline(),
+            Self::Erase(reducer) => reducer.next_deadline(),
+            Self::RemoveProject(reducer) => reducer.next_deadline(),
         }
     }
 }

@@ -1159,6 +1159,17 @@ fn node_status_view(entry: &TreeEntryView) -> ProjectNodeStatusView {
                 Some(message.clone()),
                 ProjectNodeStatusTone::Error,
             ),
+            // Same family as Error (failed), a different WORD because the
+            // fix is not an edit: a fault is a quarantine, a trap, a tick
+            // that failed — retry or clear it, do not go looking for a typo.
+            // The tone carries that distinction into the diagnostic parsers
+            // too (`ProjectNodeStatusTone::Fault`), which must never read a
+            // recovery message as a GLSL location.
+            NodeRuntimeStatus::Fault(message) => ProjectNodeStatusView::new(
+                "Fault",
+                Some(message.clone()),
+                ProjectNodeStatusTone::Fault,
+            ),
             // Deliberately NOT the error family: the project is fine, this
             // device's firmware simply carries no runtime for the kind.
             NodeRuntimeStatus::Unsupported(message) => ProjectNodeStatusView::new(

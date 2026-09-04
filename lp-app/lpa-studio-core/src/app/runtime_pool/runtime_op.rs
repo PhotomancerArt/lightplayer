@@ -25,6 +25,14 @@ pub enum RuntimeOp {
     /// read-back on the wire, so the console's selector shows the last
     /// requested level optimistically.
     SetLogLevel { level: UiLogLevel },
+    /// Open the editor as a lens on a roster device (round-2 M5): borrow the
+    /// device's wire, install a device session, attach the lens. `uid` is
+    /// the device's registered `dev…` uid — the `/device/<uid>` address.
+    OpenDeviceLens { uid: String },
+    /// Close the device lens: detach the editor, drop the device session,
+    /// give the wire back to the roster. The device itself stays on its
+    /// card — nothing about the board changes.
+    CloseDeviceLens,
 }
 
 impl RuntimeOp {
@@ -49,6 +57,17 @@ impl ControllerOp for RuntimeOp {
                 "Ask the runtime's server to log at this level.",
                 ActionPriority::Tertiary,
             ),
+            Self::OpenDeviceLens { .. } => ActionMeta::new(
+                "Open",
+                "Open this board in the editor.",
+                ActionPriority::Primary,
+            )
+            .with_icon("open"),
+            Self::CloseDeviceLens => ActionMeta::new(
+                "Close",
+                "Close the editor on this board and give its wire back.",
+                ActionPriority::Tertiary,
+            ),
         }
     }
 
@@ -61,6 +80,14 @@ impl ControllerOp for RuntimeOp {
             Self::SetLogLevel { .. } => ActionClass::Foreground {
                 deadline: PROJECT_ACTION_DEADLINE,
             },
+            // The attach is a handful of wire reads (loaded projects, the
+            // project's inventory) on a board that just said hello.
+            Self::OpenDeviceLens { .. } => ActionClass::Foreground {
+                deadline: PROJECT_ACTION_DEADLINE,
+            },
+            // Tears the session down; it owns the connection for the
+            // duration, so it carries no deadline (like stopping the sim).
+            Self::CloseDeviceLens => ActionClass::Recovery,
         }
     }
 
@@ -92,6 +119,24 @@ mod tests {
             ActionClass::Recovery
         );
         assert!(RuntimeOp::StopSimulator.default_action_meta().destructive);
+    }
+
+    #[test]
+    fn opening_a_device_lens_is_bounded_and_closing_it_owns_the_connection() {
+        assert_eq!(
+            RuntimeOp::OpenDeviceLens {
+                uid: "devabc".to_string()
+            }
+            .action_class(),
+            ActionClass::Foreground {
+                deadline: PROJECT_ACTION_DEADLINE,
+            }
+        );
+        assert_eq!(
+            RuntimeOp::CloseDeviceLens.action_class(),
+            ActionClass::Recovery
+        );
+        assert!(!RuntimeOp::CloseDeviceLens.default_action_meta().destructive);
     }
 
     #[test]

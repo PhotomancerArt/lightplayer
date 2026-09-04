@@ -1,4 +1,4 @@
-use alloc::string::ToString;
+use alloc::borrow::Cow;
 use alloc::vec::Vec;
 
 use crate::syntax::ParsedStmt;
@@ -8,7 +8,7 @@ use super::BodyParser;
 use super::stmt_end;
 
 impl<'src, 'tok> BodyParser<'src, 'tok> {
-    pub(super) fn parse_block_contents(&mut self) -> Result<Vec<ParsedStmt>, Diagnostic> {
+    pub(super) fn parse_block_contents(&mut self) -> Result<Vec<ParsedStmt<'src>>, Diagnostic> {
         let mut statements = Vec::new();
         while !self.at_punct("}") {
             if self.at_end() {
@@ -22,7 +22,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         Ok(statements)
     }
 
-    pub(super) fn parse_statement(&mut self) -> Result<ParsedStmt, Diagnostic> {
+    pub(super) fn parse_statement(&mut self) -> Result<ParsedStmt<'src>, Diagnostic> {
         if self.at_punct(";") {
             let span = self.bump().span;
             return Ok(ParsedStmt::Empty { span });
@@ -86,7 +86,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                 let value = self.parse_expr(0)?;
                 let end = self.expect_punct(";")?.span.end;
                 return Ok(ParsedStmt::Assign {
-                    name: name_tok.lexeme(self.source).to_string(),
+                    name: name_tok.lexeme(self.source),
                     op,
                     value,
                     span: Span::new(name_tok.span.start, end),
@@ -102,7 +102,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         })
     }
 
-    pub(super) fn parse_if(&mut self) -> Result<ParsedStmt, Diagnostic> {
+    pub(super) fn parse_if(&mut self) -> Result<ParsedStmt<'src>, Diagnostic> {
         let start = self.expect_keyword(Keyword::If)?.span.start;
         self.expect_punct("(")?;
         let condition = self.parse_expr(0)?;
@@ -126,7 +126,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         })
     }
 
-    pub(super) fn parse_for(&mut self) -> Result<ParsedStmt, Diagnostic> {
+    pub(super) fn parse_for(&mut self) -> Result<ParsedStmt<'src>, Diagnostic> {
         let start = self.expect_keyword(Keyword::For)?.span.start;
         self.expect_punct("(")?;
         let init = if self.at_punct(";") {
@@ -173,7 +173,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         })
     }
 
-    pub(super) fn parse_while(&mut self) -> Result<ParsedStmt, Diagnostic> {
+    pub(super) fn parse_while(&mut self) -> Result<ParsedStmt<'src>, Diagnostic> {
         let start = self.expect_keyword(Keyword::While)?.span.start;
         self.expect_punct("(")?;
         let condition = self.parse_expr(0)?;
@@ -187,7 +187,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         })
     }
 
-    pub(super) fn parse_do_while(&mut self) -> Result<ParsedStmt, Diagnostic> {
+    pub(super) fn parse_do_while(&mut self) -> Result<ParsedStmt<'src>, Diagnostic> {
         let start = self.expect_keyword(Keyword::Do)?.span.start;
         let body = self.parse_statement_or_block()?;
         self.expect_keyword(Keyword::While)?;
@@ -202,7 +202,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         })
     }
 
-    pub(super) fn parse_statement_or_block(&mut self) -> Result<Vec<ParsedStmt>, Diagnostic> {
+    pub(super) fn parse_statement_or_block(&mut self) -> Result<Vec<ParsedStmt<'src>>, Diagnostic> {
         if self.at_punct("{") {
             self.bump();
             let statements = self.parse_block_contents()?;
@@ -213,7 +213,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         }
     }
 
-    pub(super) fn parse_let(&mut self) -> Result<ParsedStmt, Diagnostic> {
+    pub(super) fn parse_let(&mut self) -> Result<ParsedStmt<'src>, Diagnostic> {
         let start = self.current_span().start;
         let is_const = if self.at_keyword(Keyword::Const) {
             self.bump();
@@ -221,17 +221,17 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         } else {
             false
         };
-        let mut base_ty = self.expect_type_name()?.to_string();
+        let mut base_ty: Cow<'src, str> = Cow::Borrowed(self.expect_type_name()?);
         while self.at_punct("[") {
-            base_ty.push_str(self.parse_array_suffix()?);
+            base_ty.to_mut().push_str(self.parse_array_suffix()?);
         }
         let mut declarations = Vec::new();
         loop {
             let decl_start = self.current_span().start;
             let mut ty = base_ty.clone();
-            let name = self.expect_identifier_like()?.to_string();
+            let name = self.expect_identifier_like()?;
             while self.at_punct("[") {
-                ty.push_str(self.parse_array_suffix()?);
+                ty.to_mut().push_str(self.parse_array_suffix()?);
             }
             let init = if self.at_punct("=") {
                 self.bump();

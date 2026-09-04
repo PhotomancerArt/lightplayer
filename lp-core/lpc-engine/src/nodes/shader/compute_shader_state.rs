@@ -48,10 +48,29 @@ impl ComputeShaderState {
         self.shape_id
     }
 
-    pub fn slot_defs(&self) -> impl Iterator<Item = (&str, &ShaderSlotDef)> {
+    /// How many produced slots this state carries.
+    ///
+    /// Produced slots are addressed by **index** as well as by name so a
+    /// caller can read a def and write its data without cloning the def to
+    /// end the read borrow first — the compute node's per-frame output sync
+    /// walks them this way.
+    pub fn slot_count(&self) -> usize {
+        self.fields.len()
+    }
+
+    pub fn slot_def_at(&self, index: usize) -> Option<(&str, &ShaderSlotDef)> {
         self.fields
-            .iter()
+            .get(index)
             .map(|field| (field.name.as_str(), &field.slot))
+    }
+
+    /// Write one produced slot's data by index. Infallible by construction:
+    /// the index came from [`Self::slot_count`], and the field set does not
+    /// change while a sync walks it.
+    pub fn set_slot_data_at(&mut self, index: usize, data: SlotData) {
+        if let Some(field) = self.fields.get_mut(index) {
+            field.data = data;
+        }
     }
 
     pub fn set_slot_data(&mut self, name: &str, data: SlotData) -> Result<(), ComputeStateError> {

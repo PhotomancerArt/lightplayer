@@ -87,13 +87,18 @@ pub enum CatalogOp {
     UpgradePackageFormat {
         project_uid: String,
     },
-    /// Fork a TRANSIENT view session's working copy into a new library
-    /// project at the explicit save (examples vision P5): a fresh uid is
-    /// minted at install (the incoming manifest's uid — the PARENT cloud
-    /// document's — is dropped), the provenance seeds a fresh history
-    /// (`ForkedFrom` origin + the initial save), and the parent's own log
-    /// stays with the parent. Creation-shaped, like `Duplicate` without a
+    /// Install a set of files under a FRESH identity: a fresh uid is minted
+    /// at install (the incoming manifest's uid is dropped, never patched),
+    /// the provenance seeds a fresh history, and whatever the files came
+    /// from keeps its own log. Creation-shaped, like `Duplicate` without a
     /// library source.
+    ///
+    /// Named for its first caller — forking a TRANSIENT view session's
+    /// working copy at the explicit save (examples vision P5), where the
+    /// dropped uid is the PARENT cloud document's. Round 2's device push is
+    /// the second: putting a gallery example on a board installs it here
+    /// first, by the same rule, because a push has to be recordable and only
+    /// a library project has an identity to record against.
     ForkTransientCopy {
         name: String,
         files: Vec<(String, Vec<u8>)>,
@@ -134,6 +139,29 @@ pub enum CatalogOp {
     /// Idempotent — forgetting an unknown row is a no-op.
     ForgetRegisteredDevice {
         uid: String,
+    },
+    /// Record a completed push (M3 of the round-2 rebuild, restoring the
+    /// pre-teardown op): a history `Pushed` event on the project, plus the
+    /// device association naming what that board was last given.
+    ///
+    /// The association is the behind/ahead baseline the sync verdicts of M4
+    /// are computed against, so it is written HERE — at the moment the push
+    /// verified — rather than derived later from something that could
+    /// disagree.
+    ///
+    /// Merge semantics, like [`CatalogOp::UpsertRegisteredDevice`]: the row
+    /// keeps everything the model does not own, and a sighting never
+    /// renames (D34).
+    RecordPush {
+        project_uid: String,
+        /// The registry row this push went to. Its `uid` must be a
+        /// `PrefixedUid` — a board still keyed on its MAC has no history
+        /// identity to write, and is skipped by the caller rather than
+        /// invented for.
+        device: Box<crate::app::places::RegisteredDevice>,
+        /// Canonical content hash of what was pushed, verified on the
+        /// device before this op runs.
+        version: lpc_history::ContentHash,
     },
 }
 
@@ -393,6 +421,14 @@ pub fn apply_catalog_op(
                 .map_err(LibraryHostError::from)?;
             None
         }
+        CatalogOp::RecordPush {
+            project_uid,
+            device,
+            version,
+        } => {
+            record_push(store, &project_uid, &device, version, now)?;
+            Some(summary_for(store, parse_uid(&project_uid)?)?)
+        }
         CatalogOp::UpgradePackageFormat { project_uid } => {
             let uid = parse_uid(&project_uid)?;
             let mut handle = store.open(uid)?;
@@ -480,6 +516,53 @@ pub fn open_project_via_store(
         history_fs: handle.history_fs,
         receipt,
     })
+}
+
+/// Bank one completed push: the project's history gains a `Pushed` event,
+/// and the device row remembers what it was last given.
+///
+/// Restored from the pre-teardown `device_session::record_push` with one
+/// change: the registry write is the MERGE upsert the round-2 model uses, so
+/// the fields the model owns (name, transport, last seen) and the fields the
+/// library owns (association, board id, previous uids) each survive the
+/// other's writer.
+fn record_push(
+    store: &LibraryStore,
+    project_uid: &str,
+    device: &crate::app::places::RegisteredDevice,
+    version: lpc_history::ContentHash,
+    now: f64,
+) -> Result<(), LibraryHostError> {
+    let uid = parse_uid(project_uid)?;
+    let device_uid: PrefixedUid = device.uid.parse().map_err(|error| {
+        LibraryHostError::Host(format!("invalid device uid {:?}: {error}", device.uid))
+    })?;
+    let mut handle = store.open(uid)?;
+    let event = handle
+        .history
+        .record_push(version, device_uid, now, None)
+        .map_err(|error| LibraryHostError::from(LibraryError::History(error.to_string())))?;
+    {
+        let history_fs = handle.history_fs.borrow();
+        lpc_history::EventLog::new(&*history_fs)
+            .append(&event)
+            .map_err(|error| LibraryHostError::from(LibraryError::History(error.to_string())))?;
+    }
+    let registry = crate::app::places::DeviceRegistry::new(store.fs_handle());
+    let mut row = registry
+        .list()
+        .map_err(LibraryHostError::from)?
+        .into_iter()
+        .find(|existing| existing.uid == device.uid)
+        .unwrap_or_else(|| device.clone());
+    row.association = Some(lpc_history::DeviceAssociation {
+        device: device_uid,
+        project: uid,
+        version,
+        at: now,
+    });
+    registry.upsert(row).map_err(LibraryHostError::from)?;
+    Ok(())
 }
 
 fn parse_uid(uid: &str) -> Result<PrefixedUid, LibraryHostError> {

@@ -15,6 +15,14 @@ const MIN_FIXED: i32 = i32::MIN; // Minimum representable fixed-point value
 /// Handles overflow/underflow by saturating to max/min fixed-point values.
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpir_fmul_q32(a: i32, b: i32) -> i32 {
+    fmul_q32_sat(a, b)
+}
+
+/// The saturating product behind [`__lp_lpir_fmul_q32`], for builtins that
+/// use it as an internal step (`exp`'s series terms) and must not pay a call
+/// per use. Same semantics, same results.
+#[inline(always)]
+pub(crate) fn fmul_q32_sat(a: i32, b: i32) -> i32 {
     // Handle zero case early
     if a == 0 || b == 0 {
         return 0;

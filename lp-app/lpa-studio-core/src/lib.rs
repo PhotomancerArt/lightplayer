@@ -36,9 +36,12 @@ pub use app::bus::{
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use app::devices::BrowserSerialTransport;
 pub use app::devices::{
-    DeviceEffects, DeviceRoster, DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture,
-    DeviceTransport, DeviceTransportFuture, DevicesOp, GrantedLink, JournalLine,
-    device_escape_action, device_status_kind, pending_escape_action,
+    CompletedPush, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects,
+    DevicePushOp, DeviceRoster, DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture,
+    DeviceTransport, DeviceTransportFuture, DevicesOp, FlashBoardChoice, FlashOffer, GrantedLink,
+    JournalLine, LensLineTap, LensTapEvent, PushOffer, PushPayload, PushSource, PushSourceChoice,
+    PushSourceGroup, StagedPush, device_escape_action, device_status_kind,
+    first_bundled_example_id, flash_offer, pending_escape_action, push_offer,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::home::{
@@ -114,8 +117,9 @@ pub use app::roster::{
     sim_rich_object,
 };
 pub use app::runtime_pool::{
-    CardFeedApply, CardFeedState, RuntimeId, RuntimeOp, RuntimePool, RuntimeSession,
-    SIM_SESSION_CAPACITY, SimAttachment, SimLink, SimLoadedProject,
+    CardFeedApply, CardFeedState, DeviceLensAttachment, RuntimeId, RuntimeKind, RuntimeOp,
+    RuntimePayload, RuntimePool, RuntimeSession, SIM_SESSION_CAPACITY, SimAttachment, SimLink,
+    SimLoadedProject,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerSnapshot, ServerState,
@@ -138,10 +142,11 @@ pub use app::studio::{
     PASSIVE_PREEMPTIONS_BEFORE_PROMOTION, RefreshCadence, SIMULATOR_REFRESH_INTERVAL,
     STUDIO_LOG_SINK, StudioActor, StudioActorOptions, StudioCommand, StudioController,
     StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver, StudioViewSender,
-    UiChromeSessionControl, UiChromeSessionStatus, UiConsoleView, UiError, UiLensRuntime,
-    UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice, UiNoticeLevel,
-    UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL,
-    VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work, studio_view_channel,
+    UiChromeSessionControl, UiChromeSessionKind, UiChromeSessionStatus, UiConsoleView, UiError,
+    UiLensCard, UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource,
+    UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
+    VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work,
+    studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;
@@ -157,8 +162,8 @@ pub use core::{
 /// and dispatches it without a second dependency edge. The model is the ONE
 /// device vocabulary — there is no `Ui*` mirror of it, on purpose.
 pub use lpa_devices::view::{
-    ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape, OutcomeView,
-    PendingLinkView, RosterView,
+    ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape,
+    LoadedProject as DeviceLoadedProject, OutcomeView, PendingLinkView, RosterView,
 };
 pub use lpa_devices::{
     Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,

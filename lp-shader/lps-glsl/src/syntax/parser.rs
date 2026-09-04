@@ -31,21 +31,21 @@ fn token_subslice<'tok>(tokens: &'tok [Token], span: Span) -> &'tok [Token] {
     subslice
 }
 
-pub fn parse_function_body(
-    source: &str,
+pub fn parse_function_body<'src>(
+    source: &'src str,
     tokens: &[Token],
     body_span: Span,
     struct_names: &[StructDecl],
-) -> Result<ParsedFunctionBody, Diagnostic> {
+) -> Result<ParsedFunctionBody<'src>, Diagnostic> {
     let body_tokens = token_subslice(tokens, body_span);
     BodyParser::new(source, body_tokens, struct_names).parse()
 }
 
-pub fn parse_expr_tokens(
-    source: &str,
+pub fn parse_expr_tokens<'src>(
+    source: &'src str,
     tokens: &[Token],
     span: Span,
-) -> Result<ParsedExpr, Diagnostic> {
+) -> Result<ParsedExpr<'src>, Diagnostic> {
     let expr_tokens = token_subslice(tokens, span);
     let mut parser = BodyParser::new(source, expr_tokens, &[]);
     let expr = parser.parse_expr(0)?;
@@ -75,7 +75,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         }
     }
 
-    fn parse(mut self) -> Result<ParsedFunctionBody, Diagnostic> {
+    fn parse(mut self) -> Result<ParsedFunctionBody<'src>, Diagnostic> {
         self.expect_punct("{")?;
         let statements = self.parse_block_contents()?;
         self.expect_punct("}")?;
@@ -94,7 +94,7 @@ mod expr;
 mod stmt;
 mod ty;
 
-pub(super) fn stmt_end(stmt: &ParsedStmt) -> usize {
+pub(super) fn stmt_end(stmt: &ParsedStmt<'_>) -> usize {
     match stmt {
         ParsedStmt::Let { span, .. }
         | ParsedStmt::LetGroup { span, .. }

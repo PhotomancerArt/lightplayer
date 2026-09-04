@@ -184,6 +184,10 @@ holds the full context.
 | Tracking copies derive as `MineLocal` (an Edit-link visitor or a legacy View copy reads as "Private" on the bar and is offered Duplicate, not the tracking-copy fork) | `2026-08-30-relationship-control-three-segment-bar` | The visitor banner's own retirement, or the derivation learns about tracking copies |
 | History restore/checkout behind the popover's read-only History tab (`SnapshotStore::materialize` and `LocalProject::checkout` exist; the rows are text) | `2026-08-30-relationship-control-three-segment-bar` | The history effort takes the seam |
 | The desktop device panel's retirement into the runtime popover (declared landing zone, not yet a move) | `2026-08-30-relationship-control-three-segment-bar` | The device panel is retired |
+| Persisted black-on-fault preference (`project.json` or a device setting; needs a format bump either way) | `2026-09-02-fault-is-never-black` | A user asks for the pattern off by default, or a project ships intending `Black` |
+| Dependency-path fault taint and per-fragment verdicts (today's rule is project-level: any `Fault` paints every output) | `2026-09-02-fault-is-never-black` | A project needs some outputs to keep rendering while a sibling output's own chain is faulted |
+| Flash-persisted recovery ledger | `2026-07-04-crash-recovery-model`; `2026-09-02-fault-is-never-black` | A quarantine needs to survive a power cycle, not just a Clear-faults verb |
+| The main-stack high-water probe is C6-only; the classic and the S3 keep unmeasured stacks, and the tick's ~37 KB stack consumers are unprofiled | `2026-09-02-esp32c6-ram-split` | A bench journal on either Xtensa board, or a project that pushes the C6 mark past ~50 KB |
 
 ## Relationship To Shared Planning
 

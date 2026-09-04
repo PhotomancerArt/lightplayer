@@ -69,7 +69,7 @@
 //! was consulted; see `AGENTS.md`.
 
 use esp_hal::peripherals::RMT;
-use lp_ws281x::{BlockPlan, InterruptFlags, RmtHw, SharedBlockPlan};
+use lp_ws281x::{BlockPlan, InterruptFlags, RamWindow, RmtHw, SharedBlockPlan};
 
 /// TX channels the ESP32-C6 RMT exposes. `CH0`/`CH1` transmit; `CH2`/`CH3` are
 /// receive-only and are never configured by this driver.
@@ -177,7 +177,14 @@ impl RmtHw for C6Rmt {
         TX_PLAN.window_words(ch, BLOCK_WORDS)
     }
 
-    #[inline]
+    // `always` on every operation the interrupt path calls: the service path
+    // is linked into IRAM (`lp-ws281x/isr-in-ram`), and an outlined copy of a
+    // backend method would sit in flash and put a cache miss back on the
+    // refill deadline. Measured on the baseline image (2026-09-02): with
+    // plain `#[inline]` at `opt-level = "z"`, `write_ram`, `read_pos`,
+    // `set_tx_threshold`, the per-word plan lookups and the fill closure all
+    // landed in flash, four distinct regions apart.
+    #[inline(always)]
     fn write_ram(&self, ch: u8, word_idx: usize, value: u32) {
         let Some(ptr) = ram_word(ch, word_idx) else {
             return;
@@ -189,7 +196,32 @@ impl RmtHw for C6Rmt {
         unsafe { ptr.write_volatile(value) };
     }
 
-    #[inline]
+    /// The hoisted form of [`ram_word`]'s per-word plan lookup: one window
+    /// derivation per fill instead of two atomic loads and two bounds checks
+    /// per word. Same bounds argument — `window_start` into the 192-word RMT
+    /// RAM, stores below `words == window_words`, and `start + words` checked
+    /// against [`PLAN_RAM_WORDS`] as a whole.
+    #[inline(always)]
+    fn ram_window(&self, ch: u8) -> Option<RamWindow> {
+        let words = TX_PLAN.window_words(ch, BLOCK_WORDS);
+        if words == 0 {
+            return None;
+        }
+        let start = TX_PLAN.window_start(ch, BLOCK_WORDS);
+        if start + words > PLAN_RAM_WORDS {
+            return None;
+        }
+        // SAFETY: `RAM_BASE` is the RMT RAM window, `PLAN_RAM_WORDS` (192)
+        // u32 words long; `start + words` was just bounded to it, so the base
+        // and every word the driver may store through it stay inside one
+        // MMIO object.
+        Some(RamWindow {
+            base: unsafe { (RAM_BASE as *mut u32).add(start) },
+            words,
+        })
+    }
+
+    #[inline(always)]
     fn set_tx_threshold(&self, ch: u8, words: u16) {
         if ch as usize >= TX_CHANNELS {
             return;
@@ -202,7 +234,7 @@ impl RmtHw for C6Rmt {
             .modify(|_, w| unsafe { w.tx_lim().bits(words & TX_LIM_MAX) });
     }
 
-    #[inline]
+    #[inline(always)]
     fn read_pos(&self, ch: u8) -> u16 {
         let window = TX_PLAN.window_words(ch, BLOCK_WORDS);
         if window == 0 {
@@ -276,7 +308,7 @@ impl RmtHw for C6Rmt {
             .modify(|_, w| w.conf_update().set_bit());
     }
 
-    #[inline]
+    #[inline(always)]
     fn take_interrupts(&self) -> InterruptFlags {
         let rmt = RMT::regs();
         // `int_st` is `int_raw & int_ena`, so causes this firmware never asked

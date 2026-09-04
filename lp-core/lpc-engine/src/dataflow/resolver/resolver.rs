@@ -27,6 +27,9 @@ use crate::dataflow::resolver::query_intern::{QueryId, QueryInternTable};
 use crate::dataflow::resolver::query_key::QueryKey;
 use crate::dataflow::resolver::resolve_error::ResolveError;
 use crate::dataflow::resolver::resolver_cache::ResolverCache;
+use crate::node::ScopeRef;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
 use lp_collection::VecMap;
 use lpc_model::LpValue;
 use lpc_model::NodeId;
@@ -88,6 +91,23 @@ pub struct Resolver {
     /// values stopped being rebuilt. Lives here because it shares the intern
     /// table's lifetime exactly.
     static_paths: VecMap<(NodeId, &'static str), QueryId>,
+    /// `(scope, channel name)` → the bus query it names.
+    ///
+    /// The sibling of [`Self::static_paths`] for the well-known channels a
+    /// node reads every frame (`bus:time`, above all): building the key
+    /// means a `ChannelName(String)` per read, allocated only to be hashed
+    /// and dropped.
+    static_bus: VecMap<(Option<ScopeRef>, &'static str), QueryId>,
+    /// The shared handles produced-slot [`crate::dataflow::resolver::Production`]s
+    /// carry, one per distinct produced path. Sorted, so lookup is a binary
+    /// search over path comparisons and never allocates.
+    ///
+    /// `ProductionSource::ProducedSlot` holds an `Rc<SlotPath>` so that
+    /// cloning a cached production copies no path — but the producing side
+    /// was still deep-copying the path into a fresh `Rc` on every produce
+    /// and every publish, once per produced slot per frame. Interning the
+    /// handle makes that a pointer copy too.
+    produced_paths: Vec<Rc<SlotPath>>,
 }
 
 impl Resolver {
@@ -99,6 +119,8 @@ impl Resolver {
             frame_counters: ResolveFrameCounters::default(),
             force_invalidate_per_frame: false,
             static_paths: VecMap::new(),
+            static_bus: VecMap::new(),
+            produced_paths: Vec::new(),
         }
     }
 
@@ -119,6 +141,21 @@ impl Resolver {
         self.intern.intern(query)
     }
 
+    /// The interned key for `query`, shared with the intern table.
+    ///
+    /// For callers that want to hold a key across frames instead of
+    /// rebuilding it (a node caching the authored fields it reads every
+    /// tick): sharing the table's `Rc` means the cached key costs a pointer
+    /// rather than a second copy of the path's segment `Vec` and `String`s.
+    pub fn intern_key(&mut self, query: &QueryKey) -> Rc<QueryKey> {
+        let id = self.intern.intern(query);
+        Rc::clone(
+            self.intern
+                .key(id)
+                .expect("a just-interned id always has a key"),
+        )
+    }
+
     /// Id for `node`'s consumed slot at the compile-time-constant `path`,
     /// parsing the path at most once per epoch.
     pub fn intern_static_consumed(
@@ -133,6 +170,36 @@ impl Resolver {
         let id = self.intern.intern(&QueryKey::ConsumedSlot { node, slot });
         self.static_paths.insert((node, path), id);
         Ok(id)
+    }
+
+    /// Id for the bus query on `channel` in `scope`, building the
+    /// [`lpc_model::ChannelName`] at most once per epoch.
+    pub fn intern_static_bus(&mut self, scope: Option<ScopeRef>, channel: &'static str) -> QueryId {
+        if let Some(id) = self.static_bus.get(&(scope, channel)) {
+            return *id;
+        }
+        let id = self.intern.intern(&QueryKey::Bus {
+            scope,
+            channel: lpc_model::ChannelName(alloc::string::String::from(channel)),
+        });
+        self.static_bus.insert((scope, channel), id);
+        id
+    }
+
+    /// The shared handle for a produced slot's path, interning it on first
+    /// use. See [`Self::produced_paths`].
+    pub fn produced_slot_path(&mut self, slot: &SlotPath) -> Rc<SlotPath> {
+        match self
+            .produced_paths
+            .binary_search_by(|held| held.as_ref().cmp(slot))
+        {
+            Ok(index) => Rc::clone(&self.produced_paths[index]),
+            Err(index) => {
+                let handle = Rc::new(slot.clone());
+                self.produced_paths.insert(index, Rc::clone(&handle));
+                handle
+            }
+        }
     }
 
     /// Start a new frame: per-frame resolved values are discarded.
@@ -151,6 +218,11 @@ impl Resolver {
         self.cache.invalidate_structure();
         self.intern.clear();
         self.static_paths.clear();
+        self.static_bus.clear();
+        // Paths outlive epochs, but a node the change removed should not
+        // keep its paths resident; the survivors re-intern on their next
+        // produce.
+        self.produced_paths.clear();
     }
 
     /// Throw away *all* resolution every frame, as if the graph changed shape
@@ -297,6 +369,50 @@ mod tests {
             }
             _ => panic!("expected array"),
         }
+    }
+
+    /// The bus-name memo must key on the SCOPE as well as the name: a
+    /// module that shadows `time` with its own clock and the root scope are
+    /// different queries, and collapsing them would hand a node inside a
+    /// module some other scope's timebase.
+    #[test]
+    fn the_static_bus_memo_keys_on_scope_and_name() {
+        let mut resolver = Resolver::new();
+        let root = resolver.intern_static_bus(None, "time");
+        let scoped = resolver.intern_static_bus(
+            Some(ScopeRef::Module {
+                owner: NodeId::new(3),
+            }),
+            "time",
+        );
+        let other_channel = resolver.intern_static_bus(None, "speed");
+
+        assert_ne!(root, scoped);
+        assert_ne!(root, other_channel);
+        assert_eq!(resolver.intern_static_bus(None, "time"), root);
+        assert_eq!(
+            resolver.intern_static_bus(None, "time"),
+            resolver.intern_query(&QueryKey::Bus {
+                scope: None,
+                channel: lpc_model::ChannelName(alloc::string::String::from("time")),
+            }),
+            "the memo must agree with a freshly built key"
+        );
+    }
+
+    /// Ids are epoch scoped, so a structural change has to drop the memo
+    /// with the intern table — a stale id would index another epoch's key.
+    #[test]
+    fn a_structural_change_clears_the_static_bus_memo() {
+        let mut resolver = Resolver::new();
+        resolver.intern_static_bus(None, "time");
+
+        resolver.invalidate_structure();
+
+        assert!(
+            resolver.static_bus.is_empty(),
+            "the memo must not outlive the intern table"
+        );
     }
 
     #[test]

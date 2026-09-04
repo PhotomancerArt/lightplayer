@@ -106,8 +106,23 @@ impl PanelWriterStore {
     }
 
     /// Clear one writer. Returns true when something was engaged.
+    ///
+    /// `VecMap::remove` needs an owned key, and cloning `channel` just to
+    /// look it up is a per-call `String` copy for a store that only ever
+    /// holds a handful of engaged writers. Find the matching key by
+    /// reference first — O(n) over engaged writers — and clone only that one
+    /// key, only on a hit.
     pub fn clear(&mut self, scope: ScopeRef, channel: &ChannelName) -> bool {
-        let cleared = self.writers.remove(&(scope, channel.clone())).is_some();
+        let Some(key) = self
+            .writers
+            .iter()
+            .map(|(key, _)| key)
+            .find(|(s, c)| *s == scope && c == channel)
+            .cloned()
+        else {
+            return false;
+        };
+        let cleared = self.writers.remove(&key).is_some();
         if cleared {
             self.mutations = self.mutations.saturating_add(1);
         }
@@ -133,8 +148,17 @@ impl PanelWriterStore {
     }
 
     /// The engaged writer for `(scope, channel)`, if any.
+    ///
+    /// `VecMap::get` needs `K: Borrow<Q>`, which a `(ScopeRef, ChannelName)`
+    /// key cannot give a `(ScopeRef, &ChannelName)` query, so this looked up
+    /// by cloning `channel` on every call — a per-frame `String` clone this
+    /// store's few engaged writers do not justify. Compare by reference
+    /// instead. O(n) with n = engaged writers.
     pub fn get(&self, scope: ScopeRef, channel: &ChannelName) -> Option<&PanelWriter> {
-        self.writers.get(&(scope, channel.clone()))
+        self.writers
+            .iter()
+            .find(|((s, c), _)| *s == scope && c == channel)
+            .map(|(_, writer)| writer)
     }
 
     /// Every engaged writer.

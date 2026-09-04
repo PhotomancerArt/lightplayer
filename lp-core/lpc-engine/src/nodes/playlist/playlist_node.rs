@@ -54,14 +54,37 @@ pub struct PlaylistNode {
     /// running transition adds no per-tick heap churn (the tick-alloc rule
     /// from defect 2026-08-29-flash-write-wedges-under-zook-playback).
     crossfade_scratch: CrossfadeScratch,
+    /// The four produced-slot paths this node publishes every `produce`,
+    /// parsed once. Parsing them per frame was four `SlotPath`s built and
+    /// dropped per tick for constants.
+    published_paths: PublishedPaths,
 }
 
-/// The crossfade sample path's persistent buffers (each `4 × point count`
-/// `u16`s while a transition runs).
+/// The runtime state paths a [`PlaylistNode`] publishes each frame.
+struct PublishedPaths {
+    entry_time: SlotPath,
+    entry_progress: SlotPath,
+    active_entry: SlotPath,
+    output: SlotPath,
+}
+
+impl PublishedPaths {
+    fn new() -> Self {
+        Self {
+            entry_time: SlotPath::parse("entry_time").expect("playlist entry_time path"),
+            entry_progress: SlotPath::parse("entry_progress")
+                .expect("playlist entry_progress path"),
+            active_entry: SlotPath::parse("active_entry").expect("playlist active_entry path"),
+            output: SlotPath::parse("output").expect("playlist output path"),
+        }
+    }
+}
+
+/// The crossfade sample path's persistent blend buffer (`4 × point count`
+/// `u16`s while a transition runs). The two inputs are read in place from
+/// their sample-outs (`LpGraphics::sample_out_data`), not copied here.
 #[derive(Default)]
 struct CrossfadeScratch {
-    previous: Vec<u16>,
-    active: Vec<u16>,
     blended: Vec<u16>,
 }
 
@@ -92,6 +115,7 @@ impl PlaylistNode {
             last_seen_triggers: VecMap::new(),
             pending_activate: None,
             crossfade_scratch: CrossfadeScratch::default(),
+            published_paths: PublishedPaths::new(),
         }
     }
 
@@ -197,10 +221,10 @@ impl NodeRuntime for PlaylistNode {
         self.state
             .active_entry
             .set_with_version(ctx.revision(), self.current_entry);
-        ctx.publish_runtime_slot(&self.state, SlotPath::parse("entry_time").unwrap())?;
-        ctx.publish_runtime_slot(&self.state, SlotPath::parse("entry_progress").unwrap())?;
-        ctx.publish_runtime_slot(&self.state, SlotPath::parse("active_entry").unwrap())?;
-        ctx.publish_runtime_slot(&self.state, SlotPath::parse("output").unwrap())?;
+        ctx.publish_runtime_slot(&self.state, &self.published_paths.entry_time)?;
+        ctx.publish_runtime_slot(&self.state, &self.published_paths.entry_progress)?;
+        ctx.publish_runtime_slot(&self.state, &self.published_paths.active_entry)?;
+        ctx.publish_runtime_slot(&self.state, &self.published_paths.output)?;
 
         self.active_product = Some(resolve_entry_product(
             ctx,
@@ -455,28 +479,17 @@ impl RenderNode for PlaylistNode {
         let channel_len = point_count as usize * 4;
         let scratch = &mut self.crossfade_scratch;
         ensure_scratch_len(
-            &mut scratch.previous,
-            channel_len,
-            "playlist previous samples",
-        )?;
-        ensure_scratch_len(&mut scratch.active, channel_len, "playlist active samples")?;
-        ensure_scratch_len(
             &mut scratch.blended,
             channel_len,
             "playlist blended samples",
         )?;
-        graphics
-            .read_sample_out_into(&previous_samples, &mut scratch.previous)
+        let previous_data = graphics
+            .sample_out_data(&previous_samples)
             .map_err(err_ctx("playlist previous sample read"))?;
-        graphics
-            .read_sample_out_into(&active_samples, &mut scratch.active)
+        let active_data = graphics
+            .sample_out_data(&active_samples)
             .map_err(err_ctx("playlist active sample read"))?;
-        blend_rgba16_samples(
-            &scratch.previous,
-            &scratch.active,
-            alpha,
-            &mut scratch.blended,
-        )?;
+        blend_rgba16_samples(previous_data, active_data, alpha, &mut scratch.blended)?;
         graphics
             .write_sample_out(target.samples, &scratch.blended)
             .map_err(err_ctx("playlist crossfade sample write"))
