@@ -43,7 +43,14 @@
 //! Once the hello proves the app protocol is up, one more coarse effect
 //! writes the picked board's runtime manifest to `/hardware.json`
 //! (board-selection D4, effective next boot). Its failure degrades honestly:
-//! the flash stands, the summary says the pin map stayed default.
+//! the flash stands, and the summary says only what the reducer knows. A
+//! stamp the board answered with an error carries the conversation's own
+//! words (it knows what it left on the board); a stamp that heard nothing
+//! back says the write was **not confirmed** — never that the default pin
+//! map stands. The flasher keeps littlefs, so a reflashed board may well
+//! be running the manifest an earlier stamp wrote (bench, 2026-09-04:
+//! the card claimed the default while five strips ran on the board's own
+//! pin map).
 //!
 //! Cancellation is honest about physics: esptool-js cannot abort a write
 //! cleanly, so a cancel during the write window is *held* — the card says
@@ -245,7 +252,7 @@ impl FlashActivity {
             // under us in the same instant; the stamp cannot run.
             return ActivityStep::done(self.success_without_stamp(
                 "firmware installed; the board manifest was not written (port lost) — \
-                 the compiled-in default pin map stands",
+                 the board keeps whatever pin map it had",
             ));
         };
         // The stamp's OWN budget, not a ladder rung: the write goes to a
@@ -353,10 +360,13 @@ impl FlashActivity {
             FlashPhase::Stamping { .. } => match outcome {
                 ActivityOutcome::Succeeded { .. } => ActivityStep::done(self.success(ctx)),
                 // The flash stands; only the pin-map stamp failed. Degrade
-                // honestly rather than calling the whole thing a failure.
+                // honestly rather than calling the whole thing a failure —
+                // and let the conversation's message be the claim about
+                // what is on the board: it wrote the chunks, it knows
+                // whether a partial file came off. The reducer adds nothing
+                // about pin maps that it does not know.
                 other => ActivityStep::done(self.success_without_stamp(&format!(
-                    "firmware installed; writing the board manifest failed ({}) — the \
-                     compiled-in default pin map stands",
+                    "firmware installed; writing the board manifest failed ({})",
                     other.summary()
                 ))),
             },
@@ -421,10 +431,14 @@ impl FlashActivity {
             }
             FlashPhase::Stamping { deadline } => {
                 if now >= deadline {
-                    // The stamp effect went quiet. The flash stands.
+                    // The stamp effect went quiet. The flash stands — and
+                    // silence is not a verdict on the manifest: the write
+                    // may have landed, the board may be running the one
+                    // an earlier stamp left (the flasher keeps littlefs).
+                    // Say what is known: nothing came back.
                     return ActivityStep::done(self.success_without_stamp(
-                        "firmware installed; writing the board manifest timed out — the \
-                         compiled-in default pin map stands",
+                        "firmware installed; the board manifest write was not confirmed — \
+                         the board never answered it, so whatever pin map it has stands",
                     ));
                 }
                 ActivityStep::nothing()
@@ -972,22 +986,112 @@ mod tests {
             activity.handle(
                 Millis(1_500),
                 &ended(ActivityOutcome::Failed {
-                    message: "fs write refused".to_string(),
+                    message: "chunk 2/6 of /hardware.json failed: offset mismatch; the \
+                              partial file was removed"
+                        .to_string(),
                 }),
                 ctx,
             )
         });
 
+        // The conversation's words are the claim about the board: it wrote
+        // the chunks and knows what it left. The reducer adds no pin-map
+        // claim of its own.
         assert!(
             matches!(
                 step,
                 ActivityStep::Done {
                     outcome: ActivityOutcome::Succeeded { ref summary },
                     ..
-                } if summary.contains("default pin map")
+                } if summary.contains("firmware installed")
+                    && summary.contains("partial file was removed")
+                    && !summary.contains("default pin map")
             ),
             "the flash stands: {step:?}"
         );
+    }
+
+    /// The bench of 2026-09-04: the classic soft-reset decoding the stamp,
+    /// the effect never reported, and the card said "the compiled-in default
+    /// pin map stands" over a board running the manifest an earlier stamp had
+    /// left (the flasher keeps littlefs). A stamp that heard nothing says
+    /// nothing was confirmed — it does not know what is on the board.
+    #[test]
+    fn a_stamp_that_hears_nothing_says_unconfirmed_never_that_the_default_stands() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = flash();
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(0),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "written".to_string(),
+                }),
+                ctx,
+            )
+        });
+        hello(&mut evidence, Millis(1_000), &config);
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(Millis(1_000), &timer(), ctx)
+        });
+
+        let past_the_stamp = Millis(1_000 + config.stamp_deadline_ms + 1);
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(past_the_stamp, &timer(), ctx)
+        });
+
+        let ActivityStep::Done {
+            outcome: ActivityOutcome::Succeeded { summary },
+            ..
+        } = step
+        else {
+            panic!("the flash stands: {step:?}");
+        };
+        assert!(summary.contains("not confirmed"), "{summary}");
+        assert!(
+            !summary.contains("default"),
+            "silence is not a verdict on the manifest: {summary}"
+        );
+    }
+
+    /// The link vanishing in the same instant as the hello: the stamp cannot
+    /// run, and the summary says so without guessing what pin map the board
+    /// has (a reflashed board keeps its littlefs).
+    #[test]
+    fn a_hello_with_no_link_ends_without_claiming_the_default_pin_map() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = flash();
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(0),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "written".to_string(),
+                }),
+                ctx,
+            )
+        });
+        hello(&mut evidence, Millis(1_000), &config);
+
+        let mut ctx = ActivityCtx {
+            link: None,
+            evidence: &evidence,
+            config: &config,
+            effect_id: crate::event::EffectId(1),
+        };
+        let step = activity.handle(Millis(1_000), &timer(), &mut ctx);
+
+        let ActivityStep::Done {
+            outcome: ActivityOutcome::Succeeded { summary },
+            ..
+        } = step
+        else {
+            panic!("the flash stands: {step:?}");
+        };
+        assert!(summary.contains("port lost"), "{summary}");
+        assert!(!summary.contains("default"), "{summary}");
     }
 
     /// C1 (G1 bench, 2026-08-31): the stamp used to inherit the ladder's 8 s
@@ -1046,7 +1150,7 @@ mod tests {
                 ActivityStep::Done {
                     outcome: ActivityOutcome::Succeeded { ref summary },
                     ..
-                } if summary.contains("default pin map")
+                } if summary.contains("not confirmed")
             ),
             "{step:?}"
         );
