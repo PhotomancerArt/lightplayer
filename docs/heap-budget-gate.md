@@ -195,11 +195,14 @@ emulator vs 53,052 B on the classic — within 2.6%.
 A harness that overstates its fidelity is worse than none. This gate does
 **not** model:
 
-- **Fragmentation.** The figures are live-byte accounting: they say how many
-  bytes were live, never whether they were contiguous. A workload can pass
-  this gate and still fail on device because the arena is fragmented. The
-  fragmentation section below is the tool for that question; it is a report,
-  not a ratchet.
+- **Fragmentation, beyond each window's close.** Five of the seven figures
+  are live-byte accounting: they say how many bytes were live, never whether
+  they were contiguous. The other two do price contiguity, but only at each
+  window's `"E"` marker: `largest_free_at_close` and `holes_at_close` ratchet
+  the guest's own free-list shape at that instant, and nothing between two
+  markers is ratcheted at all. A workload can hold both figures and still
+  fail on device mid-window. The fragmentation and counterfactual sections
+  below are the tools for that question; they are reports, not ratchets.
 - **Two-region arenas / contiguity.** The guest heap is a single region. The
   classic's post-#288 arena is two regions, where a large allocation can fail
   while total free is ample. The `largest_alloc` ratchet is the proxy: it
@@ -343,6 +346,10 @@ cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup
 ```
 
 Each `--cf` is one row. Terms join with `+` to combine levers in a single row.
+
+The table this machinery was built for, with every lever ranked by the
+contiguous bytes it recovers and the approximation each number carries, is
+`docs/reports/2026-09-04-classic-heap-fragmentation.md`.
 
 | term | what it does to the trace | approximation it states |
 |---|---|---|

@@ -301,6 +301,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| stand-in-divergence | 2026-09-04 | [read-gate-refuses-on-largest-block-proxy](2026-09-04-read-gate-refuses-on-largest-block-proxy.md) | **open** | lpa-server ProjectRead headroom gate vs the classic's two-region heap |
 | assumed-context | 2026-09-02 | [flash-from-running-board-parks-until-reset](2026-09-02-flash-from-running-board-parks-until-reset.md) | open | lpa-devices Flash activity post-write wait; browser flasher closing reset |
 | stand-in-divergence | 2026-09-02 | [ignored-emu-fuel-probe-renders-black-on-first-probe](2026-09-02-ignored-emu-fuel-probe-renders-black-on-first-probe.md) | open | lpc-engine compile-window deferral vs render probes; fw-tests recovery_emu (ignored) |
 | state-conflation | 2026-09-01 | [silent-black-under-node-quarantine](2026-09-01-silent-black-under-node-quarantine.md) | fixed | lpc-engine node status + output fallback; lpa-devices heartbeat mirror |
