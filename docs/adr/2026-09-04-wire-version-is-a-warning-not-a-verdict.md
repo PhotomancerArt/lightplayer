@@ -102,16 +102,46 @@ fold must refuse it in `observe_frame`, so the two can never disagree.
 - `scenarios.rs::a_proto_mismatch_is_a_warning_on_a_ready_board_not_a_verdict`:
   Ready, board id kept, push offered, journaled once, said once in the
   terminal.
-- Story `devices_card_firmware_faces`: older (the bench case verbatim),
-  newer, pre-hello, foreign, bootloader, silent — so no face ships unseen.
+- Story `devices_card_firmware_faces`: older (board known — Update in
+  one click), older with the board unknown (the bench case verbatim —
+  Update opens the pick), newer, pre-hello, foreign, bootloader, silent —
+  so no face ships unseen. Story `device_update_pick_open` shows the pick
+  with its reason line.
+
+### 5. Two verbs for two situations: Flash on a needs-firmware face, Update on a running LightPlayer
+
+The card carried one label, "Flash firmware", for two different gestures.
+Yona's ruling (2026-09-04, on the bench classic):
+
+- **Flash firmware** stays on the needs-firmware faces (`Blank`,
+  `Bootloader`, `Foreign`, `NoHello`, `Silent`), always with the board
+  pick, because nothing is known.
+- **Update firmware** on a running LightPlayer. Board known → one click, no
+  pick (`reflash_choice` resolves). Board unknown — several catalog boards
+  fit the joined chip and the registry has no board — the SAME verb opens
+  the pick once, and the panel says why in one line: *"This board hasn't
+  said which board it is. Pick once; Studio stamps it at flash, and next
+  time this is one click."* The firmware line already reads "older than
+  Studio, update recommended", so verb and line now match.
+
+Why the bench board asks: its hello reports board `?` because the board
+id comes from the `/hardware.json` manifest Studio stamps at flash, and
+that board was flashed from the CLI; a classic ESP32 chip fits several
+served boards.
+
+The decision lives in core — `FirmwareVerb` and `firmware_verb(view)` in
+`device_flash.rs`, with the label, the hover summary, the pick reason and
+the one-click action — and is tested per situation, including the
+line/verb agreement. The card and the popover only draw it.
 
 ## Consequences
 
 - The bench board now reads: chip `Degraded`; identity line
   `esp32 · <mac> · fw fw-esp32v3 7c80a27…`; project line `Recovery red: …`
   with Open · Clear faults · Remove; firmware line `fw-esp32v3 7c80a27… —
-  older than Studio, update recommended` with Flash firmware · Factory
-  reset; the board pick narrowed to classic ESP32 boards on its own
+  older than Studio, update recommended` with Update firmware · Factory
+  reset — the verb opening the board pick once, since this board's hello
+  names no board; the pick narrowed to classic ESP32 boards on its own
   (the chip rung off the firmware label runs again). Open attached the
   editor lens on the proto-19 board.
 - A *newer* board against an older deployed Studio is the same warning the
