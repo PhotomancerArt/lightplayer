@@ -27,7 +27,7 @@ Two profile modes per project:
   capture and would record zeros). This is the **steady-state** figure and the
   home of the per-frame allocation ratchet.
 
-Five figures per window:
+Seven figures per window:
 
 - **transient** — peak live bytes above the window's live-at-open baseline,
   maximised across openings. The cost of doing whatever the window does.
@@ -43,6 +43,56 @@ Five figures per window:
   same 25 KB every time costs nothing in `retained` and everything here. On a
   part with a linked-list allocator, churn is cycles (malloc + free were 19%
   of Meteor's frame on 2026-09-02) and fragmentation pressure.
+- **largest_free_at_close** — the guest's largest free-list hole at the
+  window's `"E"` marker, MIN across openings (the worst close). Unlike every
+  other figure here, **shrinking** is the failure direction: this ratchets
+  against the block getting *smaller*, so `check` fails when the measurement
+  is below the record, not above it. `largest_alloc` above is a residency
+  proxy for contiguity failure; this is the guest's own answer to "how big a
+  block can this window's close still serve", read exactly rather than
+  inferred from request sizes.
+- **holes_at_close** — free-list hole count at the same close, MAX across
+  openings (the worst close). Keeps the normal grew-beyond-record direction:
+  more holes is worse.
+
+### Guest walk = truth
+
+Both figures come from the guest's own free list, read exactly rather than
+modeled: after a perf-event marker, when an `AllocCollector` is active and
+enabled, the host's `SYSCALL_PERF_EVENT` return value tells the guest to run
+a walk (`lp-riscv-emu-guest::allocator`, ported from
+`fw-esp32v3::recovery::panic_path::free_list_shape`) — take the smallest
+block `linked_list_allocator` will hand out, over and over, until it
+refuses; first-fit over an address-sorted list returns them ascending, so a
+run of blocks with no gap is exactly one hole. Every unit taken is linked
+into an intrusive list through its own (otherwise unused) storage — no side
+array, so unlike the panic-path probe this walk does not cap the number of
+holes it will report — then every block goes back.
+
+Each run is one `heap-trace.jsonl` row (`"t":"H"`, `ptr`/`sz` = the hole's
+start and length), following the `"t":"P"` marker it describes; the walk
+ends with one `"t":"F"` row (`holes`, `largest`, `free` = the walk's total).
+`F.holes` always equals the count of `"t":"H"` rows since the preceding
+`"t":"P"` row — that invariant is how a reader checks it received every run.
+Tracing is suppressed for the walk's own alloc/dealloc traffic (an
+`AtomicBool` the `TrackingAllocator` checks), so the walk does not pollute
+the very trace it is annotating, and it never fires unless an
+`AllocCollector` asked for it — a cpu-only profile, or any marker before the
+collector enables, costs nothing extra. `largest_free_at_close`/
+`holes_at_close` are `None` (omitted from the JSON, not `0`) on a trace with
+no `"t":"H"`/`"t":"F"` rows at all — an older `lp-cli`, or a run with no
+alloc collector — and `heap-budget-check.sh` reports that the same way it
+reports any other figure the measurement dropped: `"figure missing from
+measurement (older lp-cli?)"`.
+
+⚠️ **Cost.** The walk allocates the whole free heap in 8 B units — up to
+~40 K alloc+free pairs per marker at 320 K, roughly a dozen markers per
+startup profile. Measured 2026-09-04 on `examples/zook-dome --mode
+startup`: 6.6 s wall without the walk (no alloc collector), 8.9 s with it —
+about +35%, all of it inside the already-`--collect alloc` path (a cpu-only
+profile is unaffected). Not sampled down: a fragmentation figure that skips
+holes to save time is a figure that can miss the one hole a later window
+needed.
 
 **`server-boot`** brackets fw-emu's boot from recovery init through server
 and transport construction, before the first tick (`lp-fw/fw-emu/src/main.rs`).
@@ -82,6 +132,8 @@ allocated at tick/output-open time, so a per-LED regression shows up as
 `check` compares every figure the record holds, generically: a figure added to
 the record ratchets from then on. A recorded window missing from the
 measurement fails (the instrument or the instrumented path broke).
+`largest_free_at_close` is the one figure with an inverted rule — see
+"Ratchet, not ceiling" below.
 
 To add a project, add its key under `projects` (an empty object is enough)
 and run `just heap-budget-baseline`; the baseline reads the project list from
@@ -107,7 +159,12 @@ allocate at that point (a 47,600 B ask with ~18 KB free).
 
 The record holds **today's measured values** — descriptive ("what this
 project costs today"), not prescriptive ("what the dome may use"). Any growth
-fails; an intentional increase updates the record in the same PR:
+fails, with one figure inverted: `largest_free_at_close` is a bigger-is-better
+figure (the guest's own largest free block at a window's close), so `check`
+fails when it **shrinks** below the record instead of when it grows past it —
+"improved" for every other figure means "went down", for this one it means
+"went up". An intentional change to any figure updates the record in the
+same PR:
 
 ```bash
 just heap-budget-baseline

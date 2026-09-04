@@ -4,8 +4,8 @@ use ::alloc::format;
 use ::alloc::string::{String, ToString};
 use ::alloc::vec::Vec;
 use lp_emu_abi::{
-    ALLOC_TRACE_ALLOC, ALLOC_TRACE_DEALLOC, ALLOC_TRACE_OOM, ALLOC_TRACE_REALLOC,
-    SYSCALL_ALLOC_TRACE,
+    ALLOC_TRACE_ALLOC, ALLOC_TRACE_DEALLOC, ALLOC_TRACE_FREE_LIST_END, ALLOC_TRACE_FREE_RUN,
+    ALLOC_TRACE_OOM, ALLOC_TRACE_REALLOC, SYSCALL_ALLOC_TRACE,
 };
 use rustc_demangle::demangle;
 use serde::{Deserialize, Serialize};
@@ -311,6 +311,100 @@ mod tests {
         .expect("parse");
         assert_eq!(resolver.resolve(0x1000), "FixtureRuntime::render");
     }
+
+    /// Two closes of the same window: the first leaves a big, unfragmented
+    /// heap (1 hole, 100 B), the second a small, fragmented one (5 holes,
+    /// 20 B). `largest_free_at_close` must ratchet to the MIN of the two
+    /// (20, the worse close) and `holes_at_close` to the MAX (5).
+    #[test]
+    fn free_list_shape_ratchets_largest_min_and_holes_max_across_closes() {
+        use std::io::Write as _;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let meta_path = dir.path().join("meta.json");
+        std::fs::write(
+            &meta_path,
+            r#"{ "collectors": { "alloc": { "heap_start": 0, "heap_size": 1024 } }, "symbols": [] }"#,
+        )
+        .expect("write meta");
+
+        let trace_path = dir.path().join("heap-trace.jsonl");
+        let mut f = std::fs::File::create(&trace_path).expect("create trace");
+        for line in [
+            // Opening 1: shape recorded at both the "B" and "E" markers; only
+            // the "E" one (1 hole, largest 100) should feed the ratchet.
+            r#"{"t":"P","name":"frame","kind":"B","cycle":1,"ic":1}"#,
+            r#"{"t":"H","ptr":16,"sz":900,"ic":1}"#,
+            r#"{"t":"F","holes":1,"largest":900,"free":900,"ic":1}"#,
+            r#"{"t":"P","name":"frame","kind":"E","cycle":2,"ic":2}"#,
+            r#"{"t":"H","ptr":16,"sz":100,"ic":2}"#,
+            r#"{"t":"F","holes":1,"largest":100,"free":100,"ic":2}"#,
+            // Opening 2: closes worse on both figures — more holes, a
+            // smaller largest block.
+            r#"{"t":"P","name":"frame","kind":"B","cycle":3,"ic":3}"#,
+            r#"{"t":"P","name":"frame","kind":"E","cycle":4,"ic":4}"#,
+            r#"{"t":"H","ptr":16,"sz":20,"ic":4}"#,
+            r#"{"t":"H","ptr":100,"sz":16,"ic":4}"#,
+            r#"{"t":"H","ptr":200,"sz":16,"ic":4}"#,
+            r#"{"t":"H","ptr":300,"sz":16,"ic":4}"#,
+            r#"{"t":"H","ptr":400,"sz":16,"ic":4}"#,
+            r#"{"t":"F","holes":5,"largest":20,"free":84,"ic":4}"#,
+        ] {
+            writeln!(f, "{line}").expect("write line");
+        }
+        drop(f);
+
+        let budget = super::heap_budget(&trace_path, &meta_path).expect("budget");
+        assert_eq!(budget.len(), 1);
+        let w = &budget[0];
+        assert_eq!(w.name, "frame");
+        assert_eq!(
+            w.largest_free_at_close,
+            Some(20),
+            "MIN across closes: 100 then 20"
+        );
+        assert_eq!(w.holes_at_close, Some(5), "MAX across closes: 1 then 5");
+    }
+
+    /// A trace with no `"t":"H"`/`"t":"F"` rows at all (an older `lp-cli`, or
+    /// a profile run with no alloc collector) must leave both figures
+    /// absent rather than defaulting to 0 — 0 would read as "no free space
+    /// left", which is a false alarm the ratchet script must not raise.
+    #[test]
+    fn free_list_shape_figures_absent_when_trace_has_no_shape_rows() {
+        use std::io::Write as _;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let meta_path = dir.path().join("meta.json");
+        std::fs::write(
+            &meta_path,
+            r#"{ "collectors": { "alloc": { "heap_start": 0, "heap_size": 1024 } }, "symbols": [] }"#,
+        )
+        .expect("write meta");
+
+        let trace_path = dir.path().join("heap-trace.jsonl");
+        let mut f = std::fs::File::create(&trace_path).expect("create trace");
+        for line in [
+            r#"{"t":"P","name":"frame","kind":"B","cycle":1,"ic":1}"#,
+            r#"{"t":"A","ptr":16,"sz":8,"ic":2,"frames":[],"free":0}"#,
+            r#"{"t":"P","name":"frame","kind":"E","cycle":3,"ic":3}"#,
+        ] {
+            writeln!(f, "{line}").expect("write line");
+        }
+        drop(f);
+
+        let budget = super::heap_budget(&trace_path, &meta_path).expect("budget");
+        assert_eq!(budget.len(), 1);
+        let w = &budget[0];
+        assert_eq!(w.largest_free_at_close, None);
+        assert_eq!(w.holes_at_close, None);
+
+        // The absent figures must not appear in the serialized JSON either
+        // — that is what lets the ratchet script tell "missing" from "0".
+        let json = serde_json::to_string(w).expect("serialize");
+        assert!(!json.contains("largest_free_at_close"), "{json}");
+        assert!(!json.contains("holes_at_close"), "{json}");
+    }
 }
 
 /// A single allocation event, serialized as one JSON line in `heap-trace.jsonl`.
@@ -366,6 +460,14 @@ impl AllocCollector {
         self.event_count
     }
 
+    /// Whether this collector is currently gated on (see [`GateAction`]).
+    /// Read by [`super::ProfileSession::wants_free_list_shape`] to decide
+    /// the `SYSCALL_PERF_EVENT` return value the guest checks before
+    /// running its free-list walk.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
     fn write(&mut self, evt: AllocEvent) -> io::Result<()> {
         if serde_json::to_writer(&mut self.writer, &evt).is_ok() {
             self.writer.write_all(b"\n")?;
@@ -387,6 +489,42 @@ impl AllocCollector {
             "kind": evt.kind.as_str(),
             "cycle": evt.cycle,
             "ic": self.last_ic,
+        });
+        if serde_json::to_writer(&mut self.writer, &line).is_ok() {
+            let _ = self.writer.write_all(b"\n");
+        }
+    }
+
+    /// Write one contiguous free-list run (`"t":"H"`) from the guest's exact
+    /// free-list walk. Zero or more of these follow the `"t":"P"` marker
+    /// they describe, terminated by one `"t":"F"` row. Not counted toward
+    /// [`Self::event_count`] — like marker rows, these describe the trace
+    /// rather than being a heap operation themselves.
+    fn write_free_run(&mut self, ptr: u32, sz: u32, ic: u64) {
+        let line = serde_json::json!({
+            "t": "H",
+            "ptr": ptr,
+            "sz": sz,
+            "ic": ic,
+        });
+        if serde_json::to_writer(&mut self.writer, &line).is_ok() {
+            let _ = self.writer.write_all(b"\n");
+        }
+    }
+
+    /// Write the free-list walk's summary row (`"t":"F"`), terminating the
+    /// run of `"t":"H"` rows following one `"t":"P"` marker. `holes` is the
+    /// exact count of those `"t":"H"` rows since the marker; `free` is the
+    /// walk's total, which can sit up to `4 * holes` bytes below the
+    /// allocator's own free-byte count (each hole rounds down to the
+    /// allocator's 8-byte minimum block).
+    fn write_free_list_end(&mut self, holes: u32, largest: u32, free: u32, ic: u64) {
+        let line = serde_json::json!({
+            "t": "F",
+            "holes": holes,
+            "largest": largest,
+            "free": free,
+            "ic": ic,
         });
         if serde_json::to_writer(&mut self.writer, &line).is_ok() {
             let _ = self.writer.write_all(b"\n");
@@ -427,13 +565,12 @@ impl Collector for AllocCollector {
         if !self.enabled && event_type != ALLOC_TRACE_OOM {
             return SyscallAction::Handled;
         }
-        let frames = ctx.unwind_backtrace();
         let ic = ctx.instruction_count;
-
         let arg = |i: usize| -> u32 { args.get(i).copied().unwrap_or(0) };
 
         match event_type {
             ALLOC_TRACE_ALLOC => {
+                let frames = ctx.unwind_backtrace();
                 let _ = self.write(AllocEvent {
                     t: "A",
                     ptr: arg(1),
@@ -447,6 +584,7 @@ impl Collector for AllocCollector {
                 SyscallAction::Handled
             }
             ALLOC_TRACE_DEALLOC => {
+                let frames = ctx.unwind_backtrace();
                 let _ = self.write(AllocEvent {
                     t: "D",
                     ptr: arg(1),
@@ -460,6 +598,7 @@ impl Collector for AllocCollector {
                 SyscallAction::Handled
             }
             ALLOC_TRACE_REALLOC => {
+                let frames = ctx.unwind_backtrace();
                 let _ = self.write(AllocEvent {
                     t: "R",
                     ptr: arg(2),
@@ -473,6 +612,7 @@ impl Collector for AllocCollector {
                 SyscallAction::Handled
             }
             ALLOC_TRACE_OOM => {
+                let frames = ctx.unwind_backtrace();
                 let size = arg(2);
                 let _ = self.write(AllocEvent {
                     t: "O",
@@ -485,6 +625,16 @@ impl Collector for AllocCollector {
                     old_sz: None,
                 });
                 SyscallAction::Halt(HaltReason::Oom { size })
+            }
+            // Free-list shape rows: no call site to unwind, so these skip
+            // the backtrace walk the heap-event kinds above pay for.
+            ALLOC_TRACE_FREE_RUN => {
+                self.write_free_run(arg(1), arg(2), ic);
+                SyscallAction::Handled
+            }
+            ALLOC_TRACE_FREE_LIST_END => {
+                self.write_free_list_end(arg(1), arg(2), arg(3), ic);
+                SyscallAction::Handled
             }
             _ => SyscallAction::Handled,
         }
@@ -555,6 +705,17 @@ pub struct WindowBudget {
     /// not residency: a steady frame that allocates and frees the same 25 KB
     /// every time costs nothing in `retained` and everything here.
     pub alloc_bytes: u64,
+    /// Largest free-list hole at the window's close (its `"E"` marker),
+    /// MIN across openings — the worst close. `None` when the trace has no
+    /// guest free-list-shape rows (older `lp-cli`); the ratchet script
+    /// reports that the same way it reports any other missing figure.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub largest_free_at_close: Option<u32>,
+    /// Free-list hole count at the window's close, MAX across openings —
+    /// the worst close. `None` under the same condition as
+    /// `largest_free_at_close`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub holes_at_close: Option<u32>,
 }
 
 /// Replay the trace and return per-window budget figures in first-open order.
@@ -571,6 +732,8 @@ pub fn heap_budget(trace_path: &Path, meta_path: &Path) -> io::Result<Vec<Window
             largest_alloc: w.largest_alloc,
             alloc_count: w.max_allocs_per_opening,
             alloc_bytes: w.max_bytes_per_opening,
+            largest_free_at_close: w.largest_free_at_close,
+            holes_at_close: w.holes_at_close,
         })
         .collect())
 }
@@ -599,6 +762,12 @@ struct TraceEventOwned {
     name: Option<String>,
     #[serde(default)]
     kind: Option<String>,
+    /// Free-list-shape summary fields (`"t":"F"` rows only). `free` reuses
+    /// the field above (the walk's total free bytes).
+    #[serde(default)]
+    holes: Option<u32>,
+    #[serde(default)]
+    largest: Option<u32>,
 }
 
 /// Per-window aggregation for one named perf-event window (e.g. `shader-compile`).
@@ -641,6 +810,18 @@ struct WindowStats {
     /// The worst opening seen — the per-frame allocation ratchet figures.
     max_allocs_per_opening: u64,
     max_bytes_per_opening: u64,
+
+    // --- free-list shape at close, from the guest's exact walk (P1) ---
+    //
+    // Populated only when the trace carries `"t":"H"`/`"t":"F"` rows (an
+    // `AllocCollector` was active for the run); `None` otherwise, so an
+    // older trace ratchets on residency/churn alone, same as before this
+    // figure existed.
+    /// MIN across every `"E"`-marker close that had a shape row — the worst
+    /// close.
+    largest_free_at_close: Option<u32>,
+    /// MAX across every `"E"`-marker close that had a shape row.
+    holes_at_close: Option<u32>,
 }
 
 impl WindowStats {
@@ -684,6 +865,20 @@ impl WindowStats {
         }
         self.max_allocs_per_opening = self.max_allocs_per_opening.max(self.opening_allocs);
         self.max_bytes_per_opening = self.max_bytes_per_opening.max(self.opening_bytes);
+    }
+
+    /// Fold in the guest's exact free-list shape at one `"E"`-marker close:
+    /// `largest_free_at_close` ratchets to the MIN across closes (the worst
+    /// one), `holes_at_close` to the MAX.
+    fn observe_close_shape(&mut self, holes: u32, largest: u32) {
+        self.largest_free_at_close = Some(match self.largest_free_at_close {
+            Some(prev) => prev.min(largest),
+            None => largest,
+        });
+        self.holes_at_close = Some(match self.holes_at_close {
+            Some(prev) => prev.max(holes),
+            None => holes,
+        });
     }
 
     fn record_site(&mut self, frames: &[u32], sz: u32, resolver: &SymbolResolver) {
@@ -861,6 +1056,13 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
     // Running total of live bytes, maintained alongside `live` so window peaks
     // can be read without re-summing the map on every event.
     let mut live_bytes: u64 = 0;
+    // The window index an `"E"` marker most recently closed, so a following
+    // `"t":"F"` row (the free-list-shape summary) can be folded into that
+    // window's `largest_free_at_close`/`holes_at_close`. The guest walk runs
+    // synchronously on the marker's own call stack, so an `"F"` row is
+    // always for the `"P"` row immediately preceding it (only `"H"` rows can
+    // sit in between) — no other event can land there.
+    let mut pending_close_idx: Option<usize> = None;
 
     for line in lines {
         let line = line?;
@@ -947,6 +1149,7 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
             }
             "P" => {
                 let name = event.name.as_deref().unwrap_or("?");
+                pending_close_idx = None;
                 match event.kind.as_deref() {
                     Some("B") => {
                         let idx = match windows.iter().position(|(n, _)| n == name) {
@@ -965,9 +1168,20 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
                             let idx = active[pos];
                             windows[idx].1.close(live_bytes);
                             active.remove(pos);
+                            pending_close_idx = Some(idx);
                         }
                     }
                     _ => {}
+                }
+            }
+            // One contiguous free-list run; the ratchet only cares about the
+            // "t":"F" summary that follows, see below.
+            "H" => {}
+            "F" => {
+                if let Some(idx) = pending_close_idx.take() {
+                    windows[idx]
+                        .1
+                        .observe_close_shape(event.holes.unwrap_or(0), event.largest.unwrap_or(0));
                 }
             }
             _ => {}

@@ -55,6 +55,20 @@ pub const ALLOC_TRACE_REALLOC: i32 = 2;
 /// OOM: a0=3, a1=0, a2=requested_size (uses trace_event layout: event_type, ptr, size, free)
 pub const ALLOC_TRACE_OOM: i32 = 3;
 
+/// One contiguous free-list run found by the guest's exact free-list walk
+/// (`lp-riscv-emu-guest::allocator`), emitted after a perf-event marker when
+/// the host asked for it (see [`crate::SYSCALL_PERF_EVENT`]'s return value).
+/// One syscall per run — the walk does not cap how many it emits.
+///
+/// Args: a0=4, a1=run_start_ptr, a2=run_len_bytes.
+pub const ALLOC_TRACE_FREE_RUN: i32 = 4;
+
+/// Terminates one free-list walk's run of `ALLOC_TRACE_FREE_RUN` syscalls,
+/// carrying the totals the host can check its run count against.
+///
+/// Args: a0=5, a1=holes, a2=largest_hole_bytes, a3=total_free_bytes.
+pub const ALLOC_TRACE_FREE_LIST_END: i32 = 5;
+
 /// Number of syscall arguments
 pub const SYSCALL_ARGS: usize = 7;
 
