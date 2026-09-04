@@ -61,15 +61,16 @@ firmware sits in the project section"):
 
 | zone | fixed rows | measured height (400px column) |
 |---|---|---|
-| header | title · status chip, board · chip · MAC · firmware identity line | 72px |
+| header | title · status chip, then the identity as two fixed 16px mono rows: board · chip / MAC · firmware (amended 2026-09-04, was one 72px line) | 88px |
 | Project | preview (120) · info (17) · bar (4) · verbs (30) | 220px |
 | Firmware + Terminal | info (17) · bar (4) · verbs (30), then the terminal flush as the zone's last block | 252px |
 | Device | info (17) · verbs (30) | 80px |
 
 All six idle/active states (Running, Nothing-loaded, Needs-firmware,
-Flashing, Sending, Degraded) measure **626px** total at every column width
+Flashing, Sending, Degraded) measured **626px** total at every column width
 tested (320/400/420px+), confirmed by a CDP measurement pass against the
-served `devices_card_states` story. No zone ever grows past its own fixed
+served `devices_card_states` story — **642px** since the 2026-09-04
+amendment below gave the header its second identity row. No zone ever grows past its own fixed
 rows; the only two cases where the card DOES reflow are a user-triggered
 popover pick panel (which floats in the browser's top layer and never
 touches in-flow layout) and the footer-style wrap of the Device zone's
@@ -178,6 +179,26 @@ already running LightPlayer firmware when it first hello'd.
 - Landscape board renderings in the picker tiles (P10 follow-up) are
   unrelated to card height but share the "board's own picture" seam this
   ADR's Project/Firmware zoning opened up for pickers.
+
+## Amendments
+
+- **2026-09-04 — the identity line is two fixed rows (header 72 → 88px).**
+  The header's identity was one truncated mono line, `board · chip · MAC ·
+  fw <label>`. At the 400px column every card on
+  `devices_card_firmware_faces` ellipsised at `… · fw fw-esp…`, so the
+  clause PR #514 added — the firmware a closed window still remembers,
+  marked as memory — was invisible on the one card it exists for. The
+  identity now prints as two 16px rows, `board · chip` over `MAC ·
+  <label>` (`DeviceIdentityLine::rows`), each truncating on its own and
+  the pair a fixed 32px slot whether or not the second row has anything to
+  say — so this is a height-table change, never a reflow. The clause also
+  lost its `fw ` prefix (every label already starts with `fw-`) and the
+  memory mark became its own dotted clause, `· last seen`, in the dim tone
+  but the same selectable text (no fold, no tooltip-only: the identity is
+  drag-selected and pasted). That row split rather than hardware-over-
+  firmware because it is the one that holds the longest catalog board name
+  at 400px. Spike: `spikes/device-card-identity-line/index.html`
+  (treatment E, board·chip / MAC·fw split).
 
 ## Spike and gate record
 

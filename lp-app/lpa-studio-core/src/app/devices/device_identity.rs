@@ -28,7 +28,12 @@ pub fn device_chip(view: &DeviceView) -> Option<String> {
     })
 }
 
-/// The header's identity line: board · chip · MAC · firmware.
+/// The header's identity line: board · chip · MAC · firmware — printed as
+/// TWO fixed rows ([`Self::rows`]) since the follow-up to PR #514: at the
+/// card's 400px column one truncated line ellipsised every card at
+/// "… · fw fw-esp…", hiding the firmware clause exactly on the card it
+/// exists for (the attached-but-closed classic, bench 2026-09-04). Spike:
+/// `spikes/device-card-identity-line/index.html`, treatment E.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeviceIdentityLine {
     /// The board's catalog display name when its id resolves, else the raw
@@ -54,12 +59,12 @@ pub struct DeviceIdentityLine {
 /// line is identity, not verdict — and a known board's identity includes
 /// what it last ran. So when this window has no verdict at all (an
 /// attached-but-closed port, a freshly rehydrated row, a board gone quiet)
-/// the line reads the record's memory, and says it is memory: "fw …
-/// (last seen)". A window that HAS a verdict about the flash — blank,
+/// the line reads the record's memory, and says it is memory: "… · last
+/// seen". A window that HAS a verdict about the flash — blank,
 /// bootloader, foreign, pre-hello — outranks the memory, so the line reads
 /// "no firmware" there rather than naming a label the board no longer
 /// wears (bench 2026-09-04: Disconnect on a known classic read
-/// "no firmware" a second after "fw fw-esp32v3 7c80a27…").
+/// "no firmware" a second after "fw-esp32v3 7c80a27").
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IdentityFirmware {
     /// This window's hello named it.
@@ -81,32 +86,79 @@ impl IdentityFirmware {
         }
     }
 
-    /// The clause as the header prints it.
-    fn display(&self) -> String {
+    /// The clause's words: the label bare, or the honest "no firmware".
+    /// Bare because every firmware label already starts with `fw-` — the
+    /// old "fw fw-esp32v3 …" paid twice for one fact, on the line that had
+    /// the least room to spare.
+    pub fn label_text(&self) -> &str {
         match self {
-            Self::Reported(label) => format!("fw {label}"),
-            Self::Remembered(label) => format!("fw {label} (last seen)"),
-            Self::None => "no firmware".to_string(),
+            Self::Reported(label) | Self::Remembered(label) => label,
+            Self::None => "no firmware",
+        }
+    }
+
+    /// The memory mark that follows the label when it is what the record
+    /// remembers rather than what this window heard. Its own clause so the
+    /// renderer can set it in the dim tone — it stays plain text in the
+    /// same line, selectable and pasteable with the rest.
+    pub fn memory_mark(&self) -> Option<&'static str> {
+        match self {
+            Self::Remembered(_) => Some("last seen"),
+            Self::Reported(_) | Self::None => None,
         }
     }
 }
 
+/// The identity line's two fixed rows: what the hardware is, and what is
+/// bound to and running on it.
+///
+/// This split — board · chip above, MAC · firmware below — rather than
+/// hardware (board · chip · MAC) above firmware alone, because at the
+/// card's 400px column it is the one that holds every catalog board name:
+/// "WLED LAN 4-Channel (DOM-Z-102) · esp32 · 30:76:f5:ec:f6:34" is 59
+/// mono characters against ~56 of room, while each of these rows stays
+/// under 50 (spike round 1, longest-board case).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdentityRows {
+    /// board · chip — empty when neither is known.
+    pub board: String,
+    /// MAC · firmware label (the label always; the MAC when known). The
+    /// memory mark is NOT in here — [`IdentityFirmware::memory_mark`]
+    /// hands it to the renderer separately so it can wear the dim tone.
+    pub firmware: String,
+}
+
 impl DeviceIdentityLine {
-    /// The present parts, joined with " · ". Firmware always renders —
-    /// "fw …", "fw … (last seen)" or the honest "no firmware" — because
-    /// "nothing on this chip yet" is itself the fact the header is stating.
+    /// The two rows the header prints ([`IdentityRows`]).
+    pub fn rows(&self) -> IdentityRows {
+        let board = [self.board.as_deref(), self.chip.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let firmware = [self.mac.as_deref(), Some(self.firmware.label_text())]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
+        IdentityRows { board, firmware }
+    }
+
+    /// Every present part joined with " · " as one string — the rows, then
+    /// the memory mark — for the header's `title` and for tests. Firmware
+    /// always renders — the label, "… · last seen" or the honest "no
+    /// firmware" — because "nothing on this chip yet" is itself the fact
+    /// the header is stating.
     pub fn display(&self) -> String {
+        let rows = self.rows();
         let mut parts: Vec<String> = Vec::new();
-        if let Some(board) = &self.board {
-            parts.push(board.clone());
+        if !rows.board.is_empty() {
+            parts.push(rows.board);
         }
-        if let Some(chip) = &self.chip {
-            parts.push(chip.clone());
+        parts.push(rows.firmware);
+        if let Some(mark) = self.firmware.memory_mark() {
+            parts.push(mark.to_string());
         }
-        if let Some(mac) = &self.mac {
-            parts.push(mac.clone());
-        }
-        parts.push(self.firmware.display());
         parts.join(" · ")
     }
 }
@@ -230,8 +282,15 @@ mod tests {
             IdentityFirmware::Reported("fw-esp32c6 abc1234".to_string())
         );
         assert_eq!(
+            line.rows(),
+            IdentityRows {
+                board: "XIAO ESP32-C6 · esp32c6".to_string(),
+                firmware: "60:55:f9:0a:0b:0c · fw-esp32c6 abc1234".to_string(),
+            }
+        );
+        assert_eq!(
             line.display(),
-            "XIAO ESP32-C6 · esp32c6 · 60:55:f9:0a:0b:0c · fw fw-esp32c6 abc1234"
+            "XIAO ESP32-C6 · esp32c6 · 60:55:f9:0a:0b:0c · fw-esp32c6 abc1234"
         );
     }
 
@@ -245,6 +304,7 @@ mod tests {
         let line = device_identity_line(&view);
         assert_eq!(line.firmware, IdentityFirmware::None);
         assert_eq!(line.display(), "XIAO ESP32-C6 · esp32c6 · no firmware");
+        assert_eq!(line.rows().firmware, "no firmware");
     }
 
     #[test]
@@ -260,7 +320,21 @@ mod tests {
 
         let display = device_identity_line(&view).display();
         assert!(!display.contains(" ·  ·"), "{display}");
-        assert_eq!(display, "XIAO ESP32-C6 · esp32c6 · fw fw-esp32c6 abc1234");
+        assert_eq!(display, "XIAO ESP32-C6 · esp32c6 · fw-esp32c6 abc1234");
+    }
+
+    /// A pre-hello board (a chip and nothing else) still prints both rows:
+    /// the chip alone above, "no firmware" below — never a blank row 1
+    /// with the chip shoved down.
+    #[test]
+    fn a_chip_only_board_keeps_the_chip_on_the_board_row() {
+        let mut view = card();
+        view.detected_chip = Some("esp32c6".to_string());
+        view.firmware_face = lpa_devices::view::FirmwareFace::NoHello;
+
+        let rows = device_identity_line(&view).rows();
+        assert_eq!(rows.board, "esp32c6");
+        assert_eq!(rows.firmware, "no firmware");
     }
 
     /// The bench case (2026-09-04): Disconnect on a known classic. The
@@ -282,9 +356,20 @@ mod tests {
             IdentityFirmware::Remembered("fw-esp32v3 7c80a27".to_string())
         );
         assert_eq!(line.firmware.label(), Some("fw-esp32v3 7c80a27"));
+        assert_eq!(line.firmware.label_text(), "fw-esp32v3 7c80a27");
+        assert_eq!(line.firmware.memory_mark(), Some("last seen"));
+        // The mark rides beside the rows, not inside them, so the renderer
+        // can dim it; the joined string carries it as the last clause.
+        assert_eq!(
+            line.rows(),
+            IdentityRows {
+                board: "QuinLED-Dig-Uno · esp32".to_string(),
+                firmware: "30:76:f5:ec:f6:34 · fw-esp32v3 7c80a27".to_string(),
+            }
+        );
         assert_eq!(
             line.display(),
-            "QuinLED-Dig-Uno · esp32 · 30:76:f5:ec:f6:34 · fw fw-esp32v3 7c80a27 (last seen)"
+            "QuinLED-Dig-Uno · esp32 · 30:76:f5:ec:f6:34 · fw-esp32v3 7c80a27 · last seen"
         );
 
         // A board gone quiet has made no statement about its flash either.
@@ -306,16 +391,19 @@ mod tests {
         };
         view.remembered_firmware = Some("fw-esp32v3 0000000".to_string());
 
+        let line = device_identity_line(&view);
         assert_eq!(
-            device_identity_line(&view).firmware,
+            line.firmware,
             IdentityFirmware::Reported("fw-esp32v3 1111111".to_string())
         );
+        assert_eq!(line.firmware.memory_mark(), None);
+        assert!(!line.display().contains("last seen"));
     }
 
     /// A verdict that there is no LightPlayer on the flash (erased, parked
     /// in ROM, somebody else's firmware, pre-hello) outranks the memory:
     /// naming a label the board no longer wears would be the lie the
-    /// "(last seen)" mark exists to avoid.
+    /// "· last seen" mark exists to avoid.
     #[test]
     fn a_flash_verdict_outranks_the_remembered_firmware() {
         use lpa_devices::view::FirmwareFace;
