@@ -1,8 +1,12 @@
 # ADR: Single-session web policy and the session·project control
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-08-30 — see the Decision section)
 - **Date:** 2026-08-19
 - **Deciders:** Photomancer
+- **Amended 2026-08-30** (`2026-08-30-relationship-control-three-segment-bar.md`):
+  the lockup is three segments with three popovers now, and the
+  fused-lockup/single-wash rationale inverts — see the amendment note under
+  "Every segment of the lockup opens the panel". Everything else stands.
 - **Supersedes:** None
 - **Superseded by:** None
 
@@ -91,6 +95,22 @@ chip (its popup moved onto this control's panel).
 session per tab the device segment has nothing to navigate *to* — you are
 always on the one session there is — so the whole trigger is uniformly
 "inspect", never "go to X".
+
+> **Amended 2026-08-30** (`2026-08-30-relationship-control-three-segment-bar.md`).
+> The lockup is now **three segments with three popovers** —
+> `[ device | project | changes ]` — and the single-wash hover retires with
+> the single panel. The rationale above was sound on its own premise: the
+> segments did the same thing, so lighting them separately would have
+> promised a distinction that did not exist. Once each segment opens a
+> DIFFERENT panel that argument runs the other way, and the per-segment
+> wash becomes the honest promise it would once have faked. What this ADR
+> decided otherwise is untouched: one session per tab, studio-or-site
+> navigation, the ungated single mount (below), and Save as a sibling
+> button rather than a segment — the stateless-trigger constraint that
+> forced the G1 amendment is exactly what still keeps it outside every
+> trigger subtree. The panel's `ProjectDetailSections` are not homeless
+> either: they sit behind the project popover's ⋯ menu, one row named
+> Details.
 
 **G1 amendment — Save/↺ stand apart from the lockup.** The shipped design
 (F1, fix round landed at commit `6d2e0b2b7`) diverges from the spike's

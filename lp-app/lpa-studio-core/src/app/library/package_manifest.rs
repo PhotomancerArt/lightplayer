@@ -20,6 +20,8 @@ pub struct ManifestFields {
     pub format: Option<u32>,
     pub uid: Option<String>,
     pub name: Option<String>,
+    /// Provenance: ISO date the project was created (manifest `created`).
+    pub created: Option<String>,
     /// Advisory board target (gallery-rework vision D3); `None` for an
     /// untargeted project. Passed through read-only — the library never
     /// writes it (P02 scope: reading only; the generator writes it, P03).
@@ -57,6 +59,7 @@ pub fn read_manifest(fs: &dyn LpFs) -> Result<ManifestFields, LibraryError> {
         format: manifest.format,
         uid: manifest.uid,
         name: manifest.name,
+        created: manifest.created,
         target: manifest.target,
         kind,
         exports,

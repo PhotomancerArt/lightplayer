@@ -252,6 +252,77 @@ fn explicit_save_forks_the_transient_session_into_the_library() {
     );
 }
 
+/// The pristine-fork case (relationship-control plan P1, Q5): a `SaveOverlay`
+/// with NO edits still reaches `fork_transient_at_save` (`written == 0`
+/// only skips the pull; `pulled` stays true), so an unedited example session
+/// promotes into the library on the very first save — exactly what P3's
+/// "Save a copy" button on a pristine example needs to work without forcing
+/// an edit first.
+#[test]
+fn a_clean_save_forks_the_transient_session_with_no_edits() {
+    let store = empty_store();
+    let (controller, host) = controller_over(store.clone());
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle.tx.send(open_example(EXAMPLE));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("open emits a snapshot");
+    let session_uid = snapshot
+        .open_project_uid
+        .clone()
+        .expect("the transient session has identity");
+    assert_eq!(
+        editor_dirty(&snapshot),
+        (0, 0),
+        "no edits were made — the overlay is clean"
+    );
+
+    // The pristine save: no edits precede it.
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("save emits a snapshot");
+
+    // D7/Q5: the clean save still forked — same identity, no reload.
+    assert!(
+        !snapshot.open_project_transient,
+        "a save with nothing to write still forks: the session is ordinary now"
+    );
+    assert_eq!(snapshot.transient_fork_generation, 1, "one fork completed");
+    assert_eq!(
+        snapshot.open_project_uid.as_deref(),
+        Some(session_uid.as_str()),
+        "the fork PROMOTES the session uid — identity survives the install"
+    );
+
+    let installed = store.list().expect("list");
+    assert_eq!(installed.len(), 1, "exactly one package installed");
+    assert_eq!(installed[0].uid.to_string(), session_uid);
+    let meta = crate::app::library::package_meta::read_meta(
+        &*store
+            .open(installed[0].uid)
+            .expect("installed opens")
+            .package_fs
+            .borrow(),
+    )
+    .expect("meta reads")
+    .expect("meta exists");
+    assert_eq!(
+        meta.provenance,
+        PackageProvenance::SeededFrom {
+            source: EXAMPLE.to_string()
+        },
+        "the fork records where it came from even with no edits"
+    );
+    assert!(
+        host.saved_notifications().is_empty(),
+        "the fork-causing save itself never broadcasts (written == 0 skips \
+         pull_committed_changes_into_library, and the session is still \
+         transient at that point besides) — same as the edited case, whose \
+         first save is also silent"
+    );
+}
+
 #[test]
 fn replacing_a_transient_open_queues_no_close() {
     let store = empty_store();

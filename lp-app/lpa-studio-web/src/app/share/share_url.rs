@@ -19,15 +19,23 @@ pub struct ShareUrl {
     /// The cosmetic half. Empty for a project whose name slugifies to
     /// nothing (emoji-only, CJK-only) — then the address is the bare uid.
     pub slug: String,
-    /// The load-bearing half: `prj…`.
-    pub uid: PrefixedUid,
+    /// The load-bearing half: `prj…`. `None` for an **embedded example**,
+    /// whose canonical address is the bare `/p/<slug>` — its transient
+    /// session carries a RAM-minted uid that must never reach a URL
+    /// (`UiStudioView::open_transient_example`). Not a new grammar: it is
+    /// the `StudioRoute::Example` address the router already serves.
+    pub uid: Option<PrefixedUid>,
 }
 
 impl ShareUrl {
-    /// `/p/<slug>-<uid>`, or `/p/<uid>` when there is no slug — the one
-    /// grammar, from the one module that owns it.
+    /// `/p/<slug>-<uid>`, `/p/<uid>` when there is no slug, and the bare
+    /// `/p/<slug>` for a uid-less example — the one grammar, from the one
+    /// module that owns it.
     pub fn path(&self) -> String {
-        share_link::canonical_path(&self.slug, self.uid)
+        match self.uid {
+            Some(uid) => share_link::canonical_path(&self.slug, uid),
+            None => format!("/p/{}", self.slug),
+        }
     }
 
     /// The whole thing, as it goes on the clipboard. The origin gets its
@@ -43,12 +51,16 @@ impl ShareUrl {
     }
 
     /// The uid's own segment as the hero paints it: `-prj…` after the slug,
-    /// or the bare uid when there is no slug to hang it off.
+    /// the bare uid when there is no slug to hang it off, and nothing at
+    /// all for an example (the slug IS the whole address).
     pub fn uid_segment(&self) -> String {
+        let Some(uid) = self.uid else {
+            return String::new();
+        };
         if self.slug.is_empty() {
-            self.uid.to_string()
+            uid.to_string()
         } else {
-            format!("-{}", self.uid)
+            format!("-{uid}")
         }
     }
 }
@@ -63,7 +75,7 @@ pub fn project_link_absolute(name: &str, uid: &str) -> String {
         Ok(uid) => ShareUrl {
             origin: current_origin(),
             slug,
-            uid,
+            uid: Some(uid),
         }
         .absolute(),
         // A malformed uid never happens in practice (these come off view
@@ -115,7 +127,7 @@ mod tests {
         let url = ShareUrl {
             origin: "lightplayer.app".to_string(),
             slug: "radiance-dome".to_string(),
-            uid: uid(),
+            uid: Some(uid()),
         };
         assert_eq!(url.path(), format!("/p/radiance-dome-{}", uid()));
         assert_eq!(url.uid_segment(), format!("-{}", uid()));
@@ -132,10 +144,25 @@ mod tests {
         let url = ShareUrl {
             origin: "lightplayer.app".to_string(),
             slug: String::new(),
-            uid: uid(),
+            uid: Some(uid()),
         };
         assert_eq!(url.path(), format!("/p/{}", uid()));
         assert_eq!(url.uid_segment(), uid().to_string());
+    }
+
+    /// An embedded example's address is the bare `/p/<slug>`: its transient
+    /// uid is RAM-minted and must never reach a URL, so the hero paints no
+    /// uid segment at all and the copied link carries none either.
+    #[test]
+    fn an_example_link_is_the_bare_slug() {
+        let url = ShareUrl {
+            origin: "lightplayer.app".to_string(),
+            slug: "small-dome".to_string(),
+            uid: None,
+        };
+        assert_eq!(url.path(), "/p/small-dome");
+        assert_eq!(url.uid_segment(), "");
+        assert_eq!(url.absolute(), "https://lightplayer.app/p/small-dome");
     }
 
     /// The dev server is `127.0.0.1:2820` over http; an origin that
@@ -145,7 +172,7 @@ mod tests {
         let url = ShareUrl {
             origin: "http://127.0.0.1:2820".to_string(),
             slug: "zook-dome".to_string(),
-            uid: uid(),
+            uid: Some(uid()),
         };
         assert_eq!(
             url.absolute(),
@@ -159,7 +186,7 @@ mod tests {
         let url = ShareUrl {
             origin: String::new(),
             slug: "zook-dome".to_string(),
-            uid: uid(),
+            uid: Some(uid()),
         };
         assert_eq!(url.absolute(), url.path());
     }

@@ -2421,6 +2421,24 @@ impl ProjectController {
         .with_edits_in_flight(self.edits_in_flight())
         .with_patch_surface(surface, self.patch_selection.clone())
         .with_edit_journal(self.edit_journal.entries())
+        .with_history(self.active_project_history())
+    }
+
+    /// The open project's document history, projected for the popover's
+    /// History tab (relationship-control D10).
+    ///
+    /// EAGER, on the ordinary view build: the active handle's history is
+    /// already replayed in memory, so this is a capped walk over a `Vec`
+    /// — cheaper than the `project.json` read this same build does — and
+    /// no lock is taken and nothing is awaited. A session with no library
+    /// package behind it (the storeless demo path) projects to the empty
+    /// history, which the tab renders as its honest empty state.
+    fn active_project_history(&self) -> crate::UiProjectHistory {
+        self.library
+            .as_ref()
+            .and_then(|context| context.active.as_ref())
+            .map(|active| crate::UiProjectHistory::from_history(&active.handle.history))
+            .unwrap_or_default()
     }
 
     /// Human-readable project name for the project pane title and the root
@@ -4396,7 +4414,8 @@ impl ProjectController {
     /// `None` when no library package backs the running project — the demo
     /// path and a device-hosted project this library does not know have no
     /// manifest to designate against, so neither the rail nor the popup row
-    /// appears at all (the `ProjectShareSection` precedent).
+    /// appears at all (the same precedent the project popover's export
+    /// rows follow: no package, no rows).
     fn export_designation_context(&self) -> Option<ExportDesignationContext> {
         let active = self.library.as_ref()?.active.as_ref()?;
         let fields = {
@@ -5315,6 +5334,7 @@ impl ProjectController {
             format: fields.format,
             uid: fields.uid,
             name: fields.name,
+            created: fields.created,
             kind,
         })
     }
