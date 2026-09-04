@@ -1006,6 +1006,123 @@ fn a_silent_board_after_a_flash_climbs_the_ladder_then_fails_honestly() {
     );
 }
 
+/// The bench defect of 2026-09-04 (classic V3 on a CH340 bridge): the board
+/// was running LightPlayer BEFORE the flash, so its pre-flash hello sat in
+/// the observation window — a window a close does not clear, by the ADR's
+/// rule — and the ladder's first poke, one second after the effect ended,
+/// mistook that stale hello for the flashed firmware answering. The stamp
+/// then ran over the port the flasher had closed and all five attempts
+/// failed on the spot with "Serial port is not open.". A hello proves the
+/// NEW firmware only if it was heard after the flash ended.
+#[test]
+fn a_pre_flash_hello_never_starts_the_stamp_before_the_port_comes_back() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    let device = first_device(&replay);
+    replay.step(
+        Millis(2_000),
+        Step::Flash {
+            device: device.0,
+            board: "dig-uno".to_string(),
+            build: "esp32-4mb".to_string(),
+        },
+    );
+    // The flasher closed the port under its borrow (the release half of the
+    // exclusive-borrow discipline); the model heard the close.
+    replay.step(Millis(29_000), Step::closed(1));
+    let commands = replay.step(
+        Millis(30_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
+    );
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::Link {
+                command: lpa_devices::LinkCommand::Open { .. },
+                ..
+            }
+        )),
+        "the ladder starts by reopening: {commands:?}"
+    );
+
+    // The reopen is still in flight when the ladder's first poke fires.
+    let first_poke = 30_000 + config.flash_reopen_retry_ms + 100;
+    replay.advance_to(Millis(first_poke));
+    let stamps_before_reopen = replay
+        .commands()
+        .iter()
+        .filter(|(at, command)| {
+            *at >= Millis(30_000)
+                && matches!(
+                    command,
+                    lpa_devices::Command::RunEffect {
+                        effect: lpa_devices::EffectRequest::WriteBoardManifest { .. },
+                        ..
+                    }
+                )
+        })
+        .count();
+    assert_eq!(
+        stamps_before_reopen,
+        0,
+        "the pre-flash hello is not the flashed firmware answering: {:?}",
+        replay.commands()
+    );
+    let view = replay.view();
+    assert_eq!(
+        view.devices[0]
+            .activity
+            .as_ref()
+            .map(|activity| activity.kind),
+        Some(ActivityKind::Flash),
+        "the ladder is still climbing: {:?}",
+        view.devices[0]
+    );
+
+    // The port comes back and the NEW firmware hellos: now the stamp runs,
+    // over an open port.
+    replay.step(Millis(33_000), Step::opened(1));
+    let commands = replay.step(
+        Millis(34_000),
+        Step::hello(1).uid("dev_2f8a").board("dig-uno"),
+    );
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::RunEffect {
+                effect: lpa_devices::EffectRequest::WriteBoardManifest { board_id },
+                ..
+            } if board_id == "dig-uno"
+        )),
+        "a hello heard after the flash starts the stamp: {commands:?}"
+    );
+    replay.step(
+        Millis(34_500),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: Some("manifest written".to_string()),
+            effect: None,
+            kind: None,
+        },
+    );
+    let outcome = replay.view().devices[0]
+        .last_outcome
+        .clone()
+        .expect("an outcome");
+    assert!(outcome.ok, "{outcome:?}");
+    assert!(
+        !outcome.summary.contains("manifest"),
+        "a stamped flash says nothing about a missing manifest: {outcome:?}"
+    );
+}
+
 /// Forget works mid-flash (I3): the entry, record and grant go, and the
 /// journal shows an eviction — cancellation bounded by removal.
 #[test]

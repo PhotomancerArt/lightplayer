@@ -229,6 +229,14 @@ impl Evidence {
         self.observations.hello.is_some()
     }
 
+    /// When the current window's hello was heard, if one has been. This is
+    /// how an activity tells a hello that answered ITS reopen from one the
+    /// board sent before the activity began: the window survives a close,
+    /// so [`Self::has_hello`] alone cannot.
+    pub fn hello_heard_at(&self) -> Option<Millis> {
+        self.observations.hello_at
+    }
+
     /// How the board's wire proto compares to this build's, once a hello has
     /// said what it speaks. `None` until one has.
     ///
@@ -395,6 +403,9 @@ impl Evidence {
             }
             LinkEvent::Frame(frame) => {
                 self.observations.observe_frame(&frame.body, config);
+                if matches!(frame.body, ServerFrameBody::Hello(_)) {
+                    self.observations.hello_at = Some(now);
+                }
                 // Decoded to one readable line: this is what makes
                 // heartbeats visible in the panel at all (they never reached
                 // it before). The summary carries no uptime and no counter,
@@ -728,6 +739,14 @@ struct Observations {
     detected_chip: Option<String>,
     frames_seen: usize,
     hello: Option<HelloFacts>,
+    /// When this window's hello was heard. The Flash ladder asks whether a
+    /// hello is NEWER than its write effect's end: a close does not clear
+    /// the window, so a board that ran LightPlayer before a flash still
+    /// carries its pre-flash hello here while the flasher's closed port is
+    /// being reopened (bench, 2026-09-04: that hello started the manifest
+    /// stamp over the closed port on the ladder's first poke).
+    #[serde(default)]
+    hello_at: Option<Millis>,
     /// The board's own report of what it is running. Window-scoped like
     /// every other observation: a reopened port has to be told again.
     loaded: Option<Vec<LoadedProjectFacts>>,
