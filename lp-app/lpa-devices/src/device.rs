@@ -247,8 +247,36 @@ impl Device {
             .detected_chip()
             .map(str::to_string)
             .or(record.chip);
+        record.firmware = self
+            .evidence
+            .classification
+            .hello()
+            .and_then(|hello| hello.firmware.clone())
+            .or(record.firmware);
         self.record = Some(record.clone());
         record
+    }
+
+    /// Whether the current window holds a hardware fact (board id, chip,
+    /// firmware label) the record has not stored yet.
+    ///
+    /// Identity promotion is the persist trigger a NEW board trips; a
+    /// known board's hello promotes nothing, and identify's own end-of-
+    /// activity persist is the only other one — which misses a fresh hello
+    /// after a re-flash. This is the trigger for "the board just told us
+    /// something the registry does not know", so what the record remembers
+    /// is never one window behind what the board last said.
+    fn record_has_news(&self) -> bool {
+        let Some(record) = &self.record else {
+            return false;
+        };
+        let hello = self.evidence.classification.hello();
+        let board_id = hello.and_then(|hello| hello.board_id.as_deref());
+        let firmware = hello.and_then(|hello| hello.firmware.as_deref());
+        let chip = self.evidence.detected_chip();
+        (board_id.is_some() && board_id != record.board_id.as_deref())
+            || (firmware.is_some() && firmware != record.firmware.as_deref())
+            || (chip.is_some() && chip != record.chip.as_deref())
     }
 
     /// Fold an event without journaling the input itself. The roster uses
@@ -669,7 +697,7 @@ impl Device {
         // 5. Supervision looks at the clock last.
         commands.extend(self.supervise(now, ctx));
 
-        if promoted_identity {
+        if promoted_identity || self.record_has_news() {
             commands.push(Command::PersistRecord(self.record_snapshot()));
         }
         commands
@@ -1392,6 +1420,129 @@ mod tests {
             view.detected_chip.as_deref(),
             Some("esp32c6"),
             "the view falls back to the record's chip"
+        );
+    }
+
+    /// Bench 2026-09-04: Disconnect on a known classic dropped the header
+    /// to "no firmware". The record must remember the last hello's firmware
+    /// label the way it remembers board id and chip, a window reset must
+    /// not clear it, and the view must carry it beside a face that honestly
+    /// stays Unknown.
+    #[test]
+    fn the_record_remembers_the_last_reported_firmware_across_a_window_reset() {
+        let mut harness = Harness::new();
+        let mut device = harness.attached_device();
+        harness.feed(
+            &mut device,
+            Millis(0),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Opened {
+                    info: LinkInfo::default(),
+                },
+            ),
+        );
+        harness.feed(
+            &mut device,
+            Millis(20),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Frame(ServerFrame::hello(
+                    1,
+                    HelloFacts {
+                        proto: harness.config.expected_proto,
+                        firmware: Some("fw-esp32v3 7c80a27 (dirty)".to_string()),
+                        ..Default::default()
+                    },
+                )),
+            ),
+        );
+        assert_eq!(
+            device.record_snapshot().firmware.as_deref(),
+            Some("fw-esp32v3 7c80a27 (dirty)")
+        );
+
+        // The window resets; the hello is gone from the evidence...
+        harness.feed(
+            &mut device,
+            Millis(30),
+            Input::link(
+                LinkId(1),
+                LinkEvent::ResetOutcome {
+                    kind: crate::link::ResetKind::Normal,
+                    ok: true,
+                },
+            ),
+        );
+        assert!(!device.evidence.has_hello(), "setup: the window reset");
+
+        // ...the record keeps the label, and the view says which is which.
+        assert_eq!(
+            device.record_snapshot().firmware.as_deref(),
+            Some("fw-esp32v3 7c80a27 (dirty)"),
+            "a window reset must not clear a learned firmware label"
+        );
+        let view = crate::view::device_view(&device, Millis(40));
+        assert_eq!(view.firmware_face, crate::view::FirmwareFace::Unknown);
+        assert_eq!(
+            view.remembered_firmware.as_deref(),
+            Some("fw-esp32v3 7c80a27 (dirty)")
+        );
+    }
+
+    /// A KNOWN board's hello promotes no identity, so nothing used to
+    /// persist it outside identify's own end — a fresh label after a
+    /// re-flash stayed one window behind on disk. A hello that tells the
+    /// record something new is itself the trigger; the same hello again
+    /// is not.
+    #[test]
+    fn a_hello_that_teaches_the_record_something_new_persists_it() {
+        let mut harness = Harness::new();
+        let mut device = harness.attached_device();
+        device.record = Some(DeviceRecord::new(device.id, device.identity.clone()));
+        harness.feed(
+            &mut device,
+            Millis(0),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Opened {
+                    info: LinkInfo::default(),
+                },
+            ),
+        );
+        let proto = harness.config.expected_proto;
+        let hello = |label: &str| {
+            Input::link(
+                LinkId(1),
+                LinkEvent::Frame(ServerFrame::hello(
+                    1,
+                    HelloFacts {
+                        proto,
+                        firmware: Some(label.to_string()),
+                        ..Default::default()
+                    },
+                )),
+            )
+        };
+        let persisted = |commands: &[Command]| {
+            commands.iter().find_map(|command| match command {
+                Command::PersistRecord(record) => Some(record.firmware.clone()),
+                _ => None,
+            })
+        };
+
+        let commands = harness.feed(&mut device, Millis(10), hello("fw-esp32v3 1111111"));
+        assert_eq!(
+            persisted(&commands),
+            Some(Some("fw-esp32v3 1111111".to_string())),
+            "a new firmware label persists the record"
+        );
+
+        let commands = harness.feed(&mut device, Millis(20), hello("fw-esp32v3 1111111"));
+        assert_eq!(
+            persisted(&commands),
+            None,
+            "the same label again is not news"
         );
     }
 

@@ -1091,6 +1091,7 @@ mod tests {
                 firmware: None,
                 wire: lpa_studio_core::DeviceWireVersion::Match,
             },
+            remembered_firmware: None,
             degraded: None,
             loaded_project: DeviceLoadedProject::Unknown,
             can_receive_project: false,

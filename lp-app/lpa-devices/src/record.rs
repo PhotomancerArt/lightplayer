@@ -44,6 +44,18 @@ pub struct DeviceRecord {
     /// Same never-cleared-by-a-later-None rule as [`Self::board_id`].
     #[serde(default)]
     pub chip: Option<String>,
+    /// The firmware label the board last reported in a hello
+    /// (`HelloFacts::firmware`, "fw-esp32c6 abc1234"). Same
+    /// never-cleared-by-a-later-None rule as [`Self::board_id`].
+    ///
+    /// This is MEMORY, not a verdict: the current window's firmware face
+    /// (`FirmwareFace`) is built from the current window's hello alone,
+    /// and this field exists so the header's identity line can still name
+    /// what the board last ran — marked as remembered — after a close or
+    /// a rehydrate has reset that window (bench 2026-09-04: Disconnect on
+    /// a known classic dropped the identity line to "no firmware").
+    #[serde(default)]
+    pub firmware: Option<String>,
 }
 
 impl DeviceRecord {
@@ -56,6 +68,7 @@ impl DeviceRecord {
             last_seen: None,
             board_id: None,
             chip: None,
+            firmware: None,
         }
     }
 
@@ -98,11 +111,11 @@ mod tests {
         assert_eq!(anonymous.title(), "Unnamed device");
     }
 
-    /// A registry row written before `board_id`/`chip` existed must still
-    /// load — the persisted-format rule (AGENTS.md): additive
+    /// A registry row written before `board_id`/`chip`/`firmware` existed
+    /// must still load — the persisted-format rule (AGENTS.md): additive
     /// `#[serde(default)]` fields, no version bump, old rows still parse.
     #[test]
-    fn a_legacy_record_without_board_id_or_chip_deserialises() {
+    fn a_legacy_record_without_board_id_chip_or_firmware_deserialises() {
         let json = r#"{
             "device": 1,
             "identity": {
@@ -120,6 +133,7 @@ mod tests {
 
         assert_eq!(record.board_id, None);
         assert_eq!(record.chip, None);
+        assert_eq!(record.firmware, None);
         assert_eq!(record.name.as_deref(), Some("Kitchen"));
     }
 }

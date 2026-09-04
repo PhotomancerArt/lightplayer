@@ -19,6 +19,7 @@
 //! | `last_seen` (millis) | `last_seen_at` (epoch seconds) |
 //! | `board_id` (learned, never cleared) | `board_id` (additive — the SAME field a provisioning-flow board pick also writes) |
 //! | `chip` (learned, never cleared) | `chip` (additive) |
+//! | `firmware` (learned, never cleared) | `firmware` (additive) |
 //!
 //! **`identity.endpoint` is deliberately NOT persisted.** A browser Web
 //! Serial endpoint id is minted per page load from a counter
@@ -69,6 +70,7 @@ pub fn registry_row_from_record(record: &DeviceRecord) -> Option<RegisteredDevic
         association: None,
         board_id: record.board_id.clone(),
         chip: record.chip.clone(),
+        firmware: record.firmware.clone(),
         hardware_id: record
             .identity
             .mac
@@ -165,6 +167,7 @@ pub fn record_from_registry_row(row: &RegisteredDevice, fallback_device_id: u64)
         // still carries what an earlier one wrote.
         board_id: row.board_id.clone(),
         chip: row.chip.clone(),
+        firmware: row.firmware.clone(),
     }
 }
 
@@ -186,6 +189,7 @@ mod tests {
             last_seen: Some(Millis(1_500)),
             board_id: Some("seeed/xiao-esp32-c6".to_string()),
             chip: Some("esp32c6".to_string()),
+            firmware: Some("fw-esp32c6 abc1234".to_string()),
         }
     }
 
@@ -210,6 +214,10 @@ mod tests {
         assert_eq!(
             back.chip, original.chip,
             "the learned chip survives a full app restart"
+        );
+        assert_eq!(
+            back.firmware, original.firmware,
+            "the last reported firmware label survives a restart"
         );
         assert_eq!(
             back.identity.endpoint, None,

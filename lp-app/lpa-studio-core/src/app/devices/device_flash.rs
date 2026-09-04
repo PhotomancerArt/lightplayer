@@ -371,6 +371,7 @@ mod tests {
                 firmware: Some("fw-esp32c6 abc1234".to_string()),
                 wire: lpa_devices::WireVersion::Match,
             },
+            remembered_firmware: None,
             degraded: None,
             loaded_project: LoadedProject::Empty,
             can_receive_project: true,
