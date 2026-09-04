@@ -258,6 +258,7 @@ mod tests {
             identity_label: None,
             detected_chip: None,
             board_id: board_id.map(str::to_string),
+            firmware: None,
             needs_firmware: false,
             degraded: None,
             loaded_project: LoadedProject::Empty,
@@ -265,7 +266,8 @@ mod tests {
             can_remove_project: false,
             activity: None,
             last_outcome: None,
-            terminal_lines: Vec::new(),
+            terminal: Vec::new(),
+            terminal_dropped: 0,
             escapes: vec![lpa_devices::view::Escape::Forget],
         }
     }

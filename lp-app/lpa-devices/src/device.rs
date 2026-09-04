@@ -232,6 +232,21 @@ impl Device {
         record.name = self.intent.name.clone();
         record.autoconnect = self.intent.autoconnect;
         record.last_seen = self.evidence.freshness.last_heard.or(record.last_seen);
+        // Learned, never cleared: a window reset (reopen, reboot) drops the
+        // CURRENT window's hello and boot banner, but the record's job is to
+        // remember what was already learned, the same way `last_seen` above
+        // never regresses to `None`.
+        record.board_id = self
+            .evidence
+            .classification
+            .hello()
+            .and_then(|hello| hello.board_id.clone())
+            .or(record.board_id);
+        record.chip = self
+            .evidence
+            .detected_chip()
+            .map(str::to_string)
+            .or(record.chip);
         self.record = Some(record.clone());
         record
     }
@@ -1283,6 +1298,101 @@ mod tests {
             ),
         );
         assert_eq!(device.status(), DeviceStatus::Ready);
+    }
+
+    /// D2: the record learns board id from a hello and chip from a boot
+    /// banner, and a later window reset (a reopen with no fresh hello, a
+    /// successful reboot) must not clear either — the same
+    /// never-regresses shape `record_snapshot` already gives `last_seen`.
+    /// The view falls back to the record when the CURRENT window has
+    /// nothing of its own to say.
+    #[test]
+    fn the_record_learns_board_id_and_chip_and_a_window_reset_never_clears_them() {
+        let mut harness = Harness::new();
+        let mut device = harness.attached_device();
+        harness.feed(
+            &mut device,
+            Millis(0),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Opened {
+                    info: LinkInfo::default(),
+                },
+            ),
+        );
+        harness.feed(
+            &mut device,
+            Millis(10),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Line("ESP-ROM:esp32c6-20220919".to_string()),
+            ),
+        );
+        harness.feed(
+            &mut device,
+            Millis(20),
+            Input::link(
+                LinkId(1),
+                LinkEvent::Frame(ServerFrame::hello(
+                    1,
+                    HelloFacts {
+                        proto: harness.config.expected_proto,
+                        board_id: Some("dig-uno".to_string()),
+                        ..Default::default()
+                    },
+                )),
+            ),
+        );
+
+        let record = device.record_snapshot();
+        assert_eq!(record.board_id.as_deref(), Some("dig-uno"));
+        assert_eq!(record.chip.as_deref(), Some("esp32c6"));
+
+        // A successful reset clears the CURRENT observation window (the
+        // hello and the boot banner are both gone from `evidence`)...
+        harness.feed(
+            &mut device,
+            Millis(30),
+            Input::link(
+                LinkId(1),
+                LinkEvent::ResetOutcome {
+                    kind: crate::link::ResetKind::Normal,
+                    ok: true,
+                },
+            ),
+        );
+        assert_eq!(
+            device.evidence.detected_chip(),
+            None,
+            "setup: the window reset"
+        );
+        assert!(!device.evidence.has_hello(), "setup: the window reset");
+
+        // ...but the record must not forget what it already learned.
+        let record = device.record_snapshot();
+        assert_eq!(
+            record.board_id.as_deref(),
+            Some("dig-uno"),
+            "a window reset must not clear a learned board id"
+        );
+        assert_eq!(
+            record.chip.as_deref(),
+            Some("esp32c6"),
+            "a window reset must not clear a learned chip"
+        );
+
+        // The view falls back to the record when the window has nothing.
+        let view = crate::view::device_view(&device, Millis(40));
+        assert_eq!(
+            view.board_id.as_deref(),
+            Some("dig-uno"),
+            "the view falls back to the record's board id"
+        );
+        assert_eq!(
+            view.detected_chip.as_deref(),
+            Some("esp32c6"),
+            "the view falls back to the record's chip"
+        );
     }
 
     struct Harness {

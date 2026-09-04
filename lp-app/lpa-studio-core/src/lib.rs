@@ -37,11 +37,13 @@ pub use app::bus::{
 pub use app::devices::BrowserSerialTransport;
 pub use app::devices::{
     CompletedPush, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects,
-    DevicePushOp, DeviceRoster, DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture,
-    DeviceTransport, DeviceTransportFuture, DevicesOp, FlashBoardChoice, FlashOffer, GrantedLink,
-    JournalLine, LensLineTap, LensTapEvent, PushOffer, PushPayload, PushSource, PushSourceChoice,
-    PushSourceGroup, StagedPush, device_escape_action, device_status_kind,
-    first_bundled_example_id, flash_offer, pending_escape_action, push_offer,
+    DeviceIdentityLine, DevicePushOp, DeviceRoster, DeviceRosterView, DeviceTaskFuture,
+    DeviceTimerFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, FlashBoardChoice,
+    FlashOffer, GrantedLink, JournalLine, LensLineTap, LensTapEvent, PushOffer, PushPayload,
+    PushSource, PushSourceChoice, PushSourceGroup, RememberedView, RosterSplit, StagedPush,
+    device_chip, device_escape_action, device_identity_line, device_status_kind,
+    first_bundled_example_id, flash_offer, flash_offer_for, pending_escape_action, push_offer,
+    reflash_choice, split_roster,
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::home::{
@@ -168,7 +170,8 @@ pub use lpa_devices::{
     Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,
     EndpointKey as DeviceEndpointKey, Event as DeviceEvent, Input as DeviceInput,
     LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo, Millis as DeviceMillis,
-    RosterConfig as DeviceRosterConfig,
+    RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
+    TerminalLine as DeviceTerminalLine,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";

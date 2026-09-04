@@ -554,6 +554,15 @@ label:has(> input:not(:disabled)) {
     margin-inline: auto;
 }
 
+/* The device card's fixed preview SLOT (device-card-v2 spike §1, gate
+   2026-09-02): the same frame at the card's own fixed row height. A
+   modifier rather than a utility because the height is a RULE — it is what
+   makes a device card's height independent of what the board is doing, so
+   it belongs with the frame it constrains, not at one call site. */
+.ux-play-frame-slot {
+    height: 120px;
+}
+
 /* Offline / not-responding: the last frame is still the truth about what
    the board was doing, so it stays — desaturated and dimmed, the card
    grammar's "last known, not current". */
@@ -5978,11 +5987,14 @@ select:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
-   Armed destructive chip (2K+) — devices-treatments spike gate 2026-08-31.
+   Armed destructive chip (2K+) — devices-treatments spike gate 2026-08-31,
+   RESERVE width from `spikes/device-card-v2/index.html` §2 (gate
+   2026-09-02, superseding the "Confirm " prefix column).
    Two-click keeps its machine (action_button.rs); this is the armed
-   READING: the label grows a "Confirm " prefix (an inline-grid span
-   animating 0fr→1fr — a content swap can't drive a width transition, so
-   the prefix is always in the DOM and only its column opens), red ramps
+   READING: the chip renders BOTH labels in one grid cell, so it is
+   already as wide as "Confirm ⟨verb⟩" at rest and arming swaps
+   visibility/opacity instead of moving the row (the prefix column grew
+   the chip ~50px and shifted its neighbours — spike §2 meter). Red ramps
    in over 160ms with a small knock, and the stand-down window shows as a
    QUIET drain: border-tone, hairline, 55% — ruled "quieter" at the final
    spike gate; never the bright error text.
@@ -6000,16 +6012,28 @@ select:focus-visible {
         border-color 0.5s ease-out;
 }
 
-.ux-armed-chip .ux-armed-prefix {
+/* Both labels stack in one cell: the cell is as wide as the wider (armed)
+   one, so the chip's width never changes. */
+.ux-armed-labels {
     display: inline-grid;
-    grid-template-columns: 0fr;
-    overflow: hidden;
-    transition: grid-template-columns 0.22s ease;
+    grid-template-columns: 1fr;
 }
 
-.ux-armed-chip .ux-armed-prefix > span {
-    min-width: 0;
-    overflow: hidden;
+.ux-armed-labels > span {
+    grid-area: 1 / 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
+    transition: opacity 0.16s ease;
+}
+
+/* `visibility` (not `display`) keeps the armed label in the layout so it
+   holds the width; `opacity` is what the swap animates. */
+.ux-armed-labels > .ux-armed-label-armed {
+    visibility: hidden;
+    opacity: 0;
 }
 
 @keyframes ux-armed-knock {
@@ -6032,8 +6056,13 @@ select:focus-visible {
     animation: ux-armed-knock 0.22s ease-out;
 }
 
-.ux-armed .ux-armed-prefix {
-    grid-template-columns: 1fr;
+.ux-armed .ux-armed-labels > .ux-armed-label-rest {
+    opacity: 0;
+}
+
+.ux-armed .ux-armed-labels > .ux-armed-label-armed {
+    visibility: visible;
+    opacity: 1;
 }
 
 /* The quiet drain track. */
@@ -6097,7 +6126,7 @@ select:focus-visible {
         transform: scaleX(1);
     }
 
-    .ux-armed-chip .ux-armed-prefix {
+    .ux-armed-labels > span {
         transition: none;
     }
 }

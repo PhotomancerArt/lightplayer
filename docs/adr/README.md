@@ -184,6 +184,8 @@ holds the full context.
 | Dependency-path fault taint and per-fragment verdicts (today's rule is project-level: any `Fault` paints every output) | `2026-09-02-fault-is-never-black` | A project needs some outputs to keep rendering while a sibling output's own chain is faulted |
 | Flash-persisted recovery ledger | `2026-07-04-crash-recovery-model`; `2026-09-02-fault-is-never-black` | A quarantine needs to survive a power cycle, not just a Clear-faults verb |
 | The main-stack high-water probe is C6-only; the classic and the S3 keep unmeasured stacks, and the tick's ~37 KB stack consumers are unprofiled | `2026-09-02-esp32c6-ram-split` | A bench journal on either Xtensa board, or a project that pushes the C6 mark past ~50 KB |
+| A footer/verb menu on the device card (cut for this pass — the six-annoyance list did not ask for it, and the verb rows have not run out of room at shipping widths) | `2026-09-03-device-card-fixed-height-and-disconnect-disappears` | A zone's verb row starts clipping at widths Studio actually ships at |
+| Preview FEED for the device card's 120px slot (a standing frame conversation that yields to verbs; aspect-fit sizing returns with it) | `2026-09-03-device-card-fixed-height-and-disconnect-disappears` | The M5 editor-lens tap (or a successor) is ready to carry a live frame into the card |
 
 ## Relationship To Shared Planning
 

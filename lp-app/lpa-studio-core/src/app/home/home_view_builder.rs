@@ -158,7 +158,6 @@ pub fn build_home_view(
             projects: Vec::new(),
             examples,
             devices: crate::DeviceRosterView::default(),
-            remembered: Vec::new(),
             library_available: false,
             opening,
             issue,
@@ -181,13 +180,6 @@ pub fn build_home_view(
         // Filled by `StudioController::home_view` from the roster: the
         // builder reads the LIBRARY, and the device model is not in it.
         devices: crate::DeviceRosterView::default(),
-        // The registry survived the device teardown; the stub names what it
-        // holds so the records are visibly intact.
-        remembered: inputs
-            .registered
-            .iter()
-            .map(|device| device.name.clone())
-            .collect(),
         library_available: true,
         opening,
         issue: issue.or_else(|| inputs.issue.clone()),
@@ -607,7 +599,7 @@ mod tests {
             view.render_text_lines(),
             vec![
                 format!(
-                    "Home: 0 runtimes, 0 projects, {} examples, 0 remembered",
+                    "Home: 0 runtimes, 0 projects, {} examples",
                     embedded_examples().len()
                 ),
                 "  opening prjx".to_string(),

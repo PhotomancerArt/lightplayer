@@ -503,6 +503,13 @@ impl StudioController {
     /// convenience that survives a refresh, not the source of truth.
     pub async fn settle_device_records(&mut self) {
         self.run_due_device_sweep();
+        // Before anything is written: a registered board that still has no
+        // name gets one (G1 2026-09-03). It rides as a `SetName` action, so
+        // the model learns it the same way a rename does and the record it
+        // then persists carries the name to the registry row.
+        for action in self.auto_name_actions() {
+            self.fold_device_input(crate::DeviceInput::Action(action));
+        }
         let writes = self.devices.take_writes();
         if writes.is_empty() {
             return;
@@ -2838,6 +2845,56 @@ impl StudioController {
         opened.receipt.abandon();
         let (files, hash) = payload?;
         Ok((files, hash, opened.slug))
+    }
+
+    /// The auto-names due right now: one `SetName` per registered board that
+    /// has none (`auto_record_name` holds the rule and its three guards).
+    ///
+    /// The FLASH gesture has minted a name since M2, but only that gesture
+    /// did — so a board that arrived already flashed (the bench C6, anything
+    /// flashed from the CLI, any row written before the auto-name existed)
+    /// wore its MAC as its title forever, which is what G1 found on the
+    /// devices page. Running the same rule at the registry-write seam covers
+    /// every road onto the roster, including a boot that rehydrated the row
+    /// from `/registry.json`.
+    ///
+    /// It reads the model's own records rather than the registry file: the
+    /// record is what the fold is about to persist, and the name has to
+    /// enter through the model anyway (the card's title is
+    /// `Device::title()`, not the row's `name` — a row renamed behind the
+    /// model's back would be forgotten by the next snapshot).
+    fn auto_name_actions(&mut self) -> Vec<crate::DeviceAction> {
+        let unnamed: Vec<lpa_devices::record::DeviceRecord> = self
+            .devices
+            .roster()
+            .devices()
+            .iter()
+            .filter_map(|entry| entry.record.clone())
+            // The rule's own guards are in `auto_record_name`; these two are
+            // repeated here only so the common case (every board named, or a
+            // blank board that has not said what it is) costs a scan and
+            // never a roster projection.
+            .filter(|record| record.name.is_none() && record.identity.name.is_none())
+            .filter(|record| record.board_id.is_some())
+            .collect();
+        if unnamed.is_empty() {
+            return Vec::new();
+        }
+        let now = (self.now_secs)();
+        let mut taken =
+            crate::app::devices::taken_device_titles(&self.device_roster_view().roster.devices);
+        let mut actions = Vec::new();
+        for record in unnamed {
+            let Some(name) = crate::app::devices::auto_record_name(&record, now, &taken) else {
+                continue;
+            };
+            taken.push(name.clone());
+            actions.push(crate::DeviceAction::SetName {
+                device: record.device,
+                name,
+            });
+        }
+        actions
     }
 
     /// The auto-name that precedes a Flash on a still-unnamed board, if one

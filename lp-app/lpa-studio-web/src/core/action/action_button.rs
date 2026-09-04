@@ -65,26 +65,21 @@ pub fn ActionButton(
     // the devices-treatments spike gate), the second click dispatches.
     // Arming stands down on blur or after a short window — the native
     // dialog stays for confirmations not marked inline. The armed dress
-    // (prefix reveal, ramp, knock, quiet drain) lives in `.ux-armed-chip`/
+    // (reserved width, ramp, knock, quiet drain) lives in `.ux-armed-chip`/
     // `.ux-armed` (style.css); the owning card marks itself via
     // `.ux-armed-scope:has(.ux-armed)`, so no armed state leaves this
     // component.
     let inline_confirm = confirmation.as_ref().is_some_and(|c| c.inline);
     let mut armed = use_signal(|| armed_preview);
     let mut arm_generation = use_signal(|| 0u64);
-    let armed_verb = confirmation
-        .as_ref()
-        .map(|c| c.confirm_label.clone())
-        .unwrap_or_default();
     let armed_title = confirmation
         .as_ref()
         .map(|c| c.message.clone())
         .unwrap_or_default();
-    let shown_label = if inline_confirm && armed() {
-        armed_verb
-    } else {
-        label
-    };
+    let (rest_label, armed_label) = confirm_chip_labels(
+        &label,
+        confirmation.as_ref().map(|c| c.confirm_label.as_str()),
+    );
     let shown_title = if inline_confirm && armed() {
         armed_title
     } else {
@@ -136,19 +131,18 @@ pub fn ActionButton(
                         }
                     }
                 }
-                // The "Confirm " prefix is always in the DOM (a content
-                // swap cannot drive a width transition); arming opens its
-                // grid column. Prefix and verb share one wrapper so the
-                // button's flex gap can't open a seam between them; the
-                // prefix is hidden from AT — the armed `title` carries the
-                // confirmation message.
-                span { class: "tw:inline-flex",
-                    if inline_confirm {
-                        span { class: "ux-armed-prefix", aria_hidden: "true",
-                            span { "Confirm\u{a0}" }
-                        }
+                // RESERVE (device-card-v2 spike §2, gate 2026-09-02): both
+                // labels live in ONE grid cell, so the chip is already as
+                // wide as its armed reading and arming cannot move it or
+                // its neighbours. The armed label is hidden from AT — the
+                // armed `title` carries the confirmation message.
+                if inline_confirm {
+                    span { class: "ux-armed-labels",
+                        span { class: "ux-armed-label-rest", "{rest_label}" }
+                        span { class: "ux-armed-label-armed", aria_hidden: "true", "{armed_label}" }
                     }
-                    span { "{shown_label}" }
+                } else {
+                    span { class: "tw:inline-flex", "{rest_label}" }
                 }
             }
             if let Some(reason) = disabled_reason.as_ref() {
@@ -158,10 +152,26 @@ pub fn ActionButton(
     }
 }
 
+/// The two labels an inline-confirm chip renders AT THE SAME TIME: the
+/// resting verb and the armed "Confirm ⟨verb⟩" reading. Both sit in one
+/// grid cell (`.ux-armed-labels`), so the chip reserves the armed width
+/// and arming never reflows the row — the RESERVE ruling from the
+/// device-card-v2 spike (§2, gate 2026-09-02). Without a confirmation the
+/// armed label is the resting one, and nothing renders it.
+///
+/// Kept as a plain function so the pair is testable without mounting.
+fn confirm_chip_labels(label: &str, confirm_verb: Option<&str>) -> (String, String) {
+    let armed = match confirm_verb {
+        Some(verb) => format!("Confirm {verb}"),
+        None => label.to_string(),
+    };
+    (label.to_string(), armed)
+}
+
 /// The inline-confirm chip's classes for its current armed state. The base
-/// chip always wears `ux-armed-chip` (prefix mechanics + quiet drain host);
-/// arming adds `ux-armed` (error tint, knock, drain running). Kept as a
-/// plain function so the composition is testable without mounting.
+/// chip always wears `ux-armed-chip` (reserve mechanics + quiet drain
+/// host); arming adds `ux-armed` (error tint, knock, drain running). Kept
+/// as a plain function so the composition is testable without mounting.
 fn confirm_chip_class(base: &'static str, armed: bool) -> String {
     if armed {
         format!("{base} ux-armed-chip ux-armed")
@@ -395,9 +405,31 @@ mod tests {
     }
 
     #[test]
+    fn the_armed_chip_renders_both_labels_at_once() {
+        // RESERVE (device-card-v2 spike §2, gate 2026-09-02): the chip
+        // renders its resting verb AND "Confirm ⟨verb⟩" in one grid cell,
+        // so its width is the armed width in both states. The exact
+        // "Confirm ⟨verb⟩" reading is the 2026-08-31 gate's ruling and
+        // survives the mechanism change.
+        let (rest, armed) = confirm_chip_labels("Forget", Some("Forget"));
+        assert_eq!(rest, "Forget");
+        assert_eq!(armed, "Confirm Forget");
+
+        let (rest, armed) = confirm_chip_labels("Factory reset", Some("Erase everything"));
+        assert_eq!(rest, "Factory reset");
+        assert_eq!(armed, "Confirm Erase everything");
+
+        // No confirmation: nothing renders the pair, and the armed label
+        // must not invent a verb.
+        let (rest, armed) = confirm_chip_labels("Disconnect", None);
+        assert_eq!(rest, "Disconnect");
+        assert_eq!(armed, "Disconnect");
+    }
+
+    #[test]
     fn the_armed_chip_composes_the_armed_dress_over_its_base() {
         // 2K+ (devices-treatments gate): the inline-confirm chip always
-        // hosts the prefix/drain mechanics; arming adds the tint/knock
+        // hosts the reserve/drain mechanics; arming adds the tint/knock
         // class. The spectrum ring never reaches a destructive chip.
         let idle = confirm_chip_class(quiet_class(true), false);
         assert!(idle.contains("ux-armed-chip"), "{idle}");
