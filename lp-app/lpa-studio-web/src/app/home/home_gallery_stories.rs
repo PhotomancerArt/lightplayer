@@ -1205,7 +1205,10 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             story_line(DeviceTerminalKind::Studio, "Closed the port"),
         ],
         terminal_dropped: 0,
-        escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
+        // The link is still attached (the port was closed, not unplugged),
+        // so the projection offers Disconnect — which is also what keeps
+        // the terminal and the verb rows drawn at their fixed heights.
+        escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
     };
 
     vec![
