@@ -155,3 +155,29 @@ line/verb agreement. The card and the popover only draw it.
 - `lpa-link`'s legacy `DeviceSession` hello gate (`HelloGate::Incompatible`
   on proto mismatch) still exists behind the host-serial/CLI paths and was
   not changed; the Studio device model no longer goes through it.
+
+## Amendment 2026-09-04: the identity line may read memory, marked as memory
+
+Bench, an hour after the above shipped: Disconnect on the same classic
+left the header reading `30:76:f5:ec:f6:34 · no firmware`. Chip and board
+survived the close because `DeviceView::detected_chip` / `board_id` fall
+back to the persisted `DeviceRecord`; the firmware label did not, because
+`FirmwareFace` is built from the current window's hello alone and a close
+restarts the window.
+
+Rule 3 stands for the Firmware ZONE: its face is this window's verdict,
+and an attached-but-closed board honestly reads "No firmware reported
+yet". The header's identity line is a different sentence — identity, not
+verdict — and a known board's identity includes what it last ran. So:
+
+- `DeviceRecord::firmware` remembers the last hello's label under the same
+  learned-never-cleared rule as `board_id` / `chip`, and a hello that tells
+  the record something new persists it (a known board's hello promotes no
+  identity, so it tripped no persist before).
+- `DeviceView::remembered_firmware` carries that memory beside the face.
+- `device_identity_line` reads `IdentityFirmware::{Reported, Remembered,
+  None}`: this window's hello first; else, when the window holds no
+  verdict about the flash (`Unknown`, `Silent`), the memory as
+  `fw … (last seen)`; a verdict that there is no LightPlayer on the flash
+  (Blank, Bootloader, Foreign, NoHello) outranks the memory and reads
+  "no firmware".

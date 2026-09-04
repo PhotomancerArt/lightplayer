@@ -259,6 +259,7 @@ mod tests {
             detected_chip: None,
             board_id: board_id.map(str::to_string),
             firmware_face: lpa_devices::view::FirmwareFace::Unknown,
+            remembered_firmware: None,
             degraded: None,
             loaded_project: LoadedProject::Empty,
             can_receive_project: true,

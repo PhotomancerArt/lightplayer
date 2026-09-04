@@ -1250,6 +1250,7 @@ mod tests {
             detected_chip: None,
             board_id: None,
             firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
+            remembered_firmware: None,
             degraded: None,
             loaded_project: DeviceLoadedProject::Empty,
             can_receive_project: true,

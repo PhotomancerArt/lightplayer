@@ -63,6 +63,18 @@ pub struct DeviceView {
     /// out of a bool (which is how an older LightPlayer came to be drawn as
     /// a blank chip, bench 2026-09-04). See [`FirmwareFace`].
     pub firmware_face: FirmwareFace,
+    /// What the record remembers the board last ran — the firmware label
+    /// of the last hello heard in ANY window, from the persisted
+    /// [`DeviceRecord::firmware`]. Memory, not a verdict: the current
+    /// window's verdict is [`Self::firmware_face`], and it stays
+    /// [`FirmwareFace::Unknown`] on an attached-but-closed or freshly
+    /// rehydrated board. The header's identity line reads this, marked as
+    /// remembered, when that window has nothing to say (bench 2026-09-04:
+    /// Disconnect dropped a known classic to "no firmware" while chip and
+    /// board, which already fall back to the record, stayed put).
+    ///
+    /// [`DeviceRecord::firmware`]: crate::record::DeviceRecord::firmware
+    pub remembered_firmware: Option<String>,
     /// ONE line naming why a running board is not running well: a node in
     /// fault, or a recovery state the device reported as not green.
     ///
@@ -280,6 +292,10 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
                     .and_then(|record| record.board_id.clone())
             }),
         firmware_face: firmware_face(&device.evidence),
+        remembered_firmware: device
+            .record
+            .as_ref()
+            .and_then(|record| record.firmware.clone()),
         degraded: degraded(device),
         // The mirror of the push condition, over the OTHER answer: a board
         // that reported something running, on an open port, idle.

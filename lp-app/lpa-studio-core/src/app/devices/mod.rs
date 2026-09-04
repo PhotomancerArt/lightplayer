@@ -58,7 +58,10 @@ pub use device_flash::{
     FirmwareVerb, FlashBoardChoice, FlashOffer, derive_flash_name, firmware_verb, flash_offer,
     flash_offer_for, reflash_choice, taken_device_titles,
 };
-pub use device_identity::{DeviceIdentityLine, device_chip, device_identity_line};
+pub use device_identity::{
+    DeviceIdentityLine, IdentityFirmware as DeviceIdentityFirmware, device_chip,
+    device_identity_line,
+};
 pub use device_push::{
     DevicePushOp, PushOffer, PushSource, PushSourceChoice, PushSourceGroup,
     first_bundled_example_id, push_offer,
