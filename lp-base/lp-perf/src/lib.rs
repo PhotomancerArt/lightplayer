@@ -12,10 +12,16 @@ pub enum PerfEventKind {
 
 // Canonical event-name constants. New names get added here, never
 // inline in call sites.
+// ⚠️ The emulator host drops markers whose name it does not know: every
+// name here must also be in `lp_emu_core::profile::perf_event::KNOWN_EVENT_NAMES`.
 pub const EVENT_FRAME: &str = "frame";
 pub const EVENT_SHADER_COMPILE: &str = "shader-compile";
 pub const EVENT_SHADER_LINK: &str = "shader-link";
 pub const EVENT_PROJECT_LOAD: &str = "project-load";
+/// Server boot: recovery init through server + transport construction,
+/// before the first tick. Its `retained` figure is what the server holds
+/// before any project exists (emitted by fw-emu; a no-op on device sinks).
+pub const EVENT_SERVER_BOOT: &str = "server-boot";
 
 #[macro_export]
 macro_rules! emit_begin {

@@ -1,12 +1,19 @@
 {
   "comment": "Measured heap-budget record — a ratchet, not a target. These are what the projects cost TODAY on the RV32 emulator, not what any product may use. Per project and profile mode; steady-render records only the frame window. Regenerate with `just heap-budget-baseline`; see docs/heap-budget-gate.md.",
-  "recorded": "2026-09-02",
-  "commit": "eeb99c0b3",
+  "recorded": "2026-09-04",
+  "commit": "5c870f6c1",
   "projects": {
     "examples/basic": {
       "modes": {
         "startup": {
           "windows": {
+            "server-boot": {
+              "transient": 47648,
+              "retained": 47648,
+              "largest_alloc": 36864,
+              "alloc_count": 928,
+              "alloc_bytes": 86507
+            },
             "project-load": {
               "transient": 41336,
               "retained": 36542,
@@ -54,6 +61,13 @@
       "modes": {
         "startup": {
           "windows": {
+            "server-boot": {
+              "transient": 47648,
+              "retained": 47648,
+              "largest_alloc": 36864,
+              "alloc_count": 928,
+              "alloc_bytes": 86507
+            },
             "project-load": {
               "transient": 46795,
               "retained": 43483,
@@ -101,6 +115,13 @@
       "modes": {
         "startup": {
           "windows": {
+            "server-boot": {
+              "transient": 47648,
+              "retained": 47648,
+              "largest_alloc": 36864,
+              "alloc_count": 928,
+              "alloc_bytes": 86507
+            },
             "project-load": {
               "transient": 46288,
               "retained": 41663,

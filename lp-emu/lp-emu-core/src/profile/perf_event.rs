@@ -9,11 +9,15 @@ pub const EVENT_PROFILE_START: &str = "profile:start";
 /// Host-only synthetic marker: session ended (see [`crate::profile::ProfileSession::end`]).
 pub const EVENT_PROFILE_END: &str = "profile:end";
 
+/// ⚠️ A guest marker whose name is not in this list is dropped by the
+/// emulator run loop (`intern_known_name` returns `None`), silently. Every
+/// `lp_perf::EVENT_*` constant must have its string here.
 pub static KNOWN_EVENT_NAMES: &[&str] = &[
     "frame",
     "shader-compile",
     "shader-link",
     "project-load",
+    "server-boot",
     "profile:start",
     "profile:end",
 ];

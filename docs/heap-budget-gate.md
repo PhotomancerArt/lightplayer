@@ -17,7 +17,7 @@ landed.
 Two profile modes per project:
 
 - **`startup`** — project load through the first *compiled* frame. Every
-  perf-event window in the trace is recorded: `project-load`, `shader-compile`,
+  perf-event window in the trace is recorded: `server-boot`, `project-load`, `shader-compile`,
   `shader-link`, `frame`. Its `frame` window brackets frames 1–2, and frame 2
   contains the shader compile (compiles are deferred one frame; see
   `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`), so this
@@ -44,6 +44,21 @@ Five figures per window:
   part with a linked-list allocator, churn is cycles (malloc + free were 19%
   of Meteor's frame on 2026-09-02) and fragmentation pressure.
 
+**`server-boot`** brackets fw-emu's boot from recovery init through server
+and transport construction, before the first tick (`lp-fw/fw-emu/src/main.rs`).
+Its `retained` figure is what the server holds before any project exists —
+the pre-project residency that `memory.ld`'s "~52 KB harness baseline" note
+could only estimate. Its `largest_alloc` is the permissive 256-resource
+hardware manifest's `Vec<HwResource>` (36,864 B on 2026-09-04). Collection is
+already enabled at `profile:start`, so no gate change was needed.
+
+⚠️ **A marker name the host does not know is dropped silently.** The
+emulator run loop interns guest perf-event names against
+`lp_emu_core::profile::perf_event::KNOWN_EVENT_NAMES`; a new
+`lp_perf::EVENT_*` constant that is not added there records nothing and warns
+only in the emulator log. `server-boot` was invisible for exactly this reason
+on its first run.
+
 ⚠️ **Per-LED cost lands in the `frame` window, not `project-load`.**
 `direct_points`, the graphics sample buffers and `DisplayPipeline` are all
 allocated at tick/output-open time, so a per-LED regression shows up as
@@ -56,7 +71,7 @@ allocated at tick/output-open time, so a per-LED regression shows up as
   "projects": {
     "examples/basic": {
       "modes": {
-        "startup":       { "windows": { "project-load": {…}, "shader-compile": {…}, "shader-link": {…}, "frame": {…} } },
+        "startup":       { "windows": { "server-boot": {…}, "project-load": {…}, "shader-compile": {…}, "shader-link": {…}, "frame": {…} } },
         "steady-render": { "windows": { "frame": { "transient": …, "retained": …, "largest_alloc": …, "alloc_count": …, "alloc_bytes": … } } }
       }
     }
