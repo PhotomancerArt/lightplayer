@@ -303,7 +303,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | --- | --- | --- | --- | --- |
 | assumed-context | 2026-09-02 | [flash-from-running-board-parks-until-reset](2026-09-02-flash-from-running-board-parks-until-reset.md) | open | lpa-devices Flash activity post-write wait; browser flasher closing reset |
 | state-conflation | 2026-09-04 | [pre-flash-hello-stamps-over-a-closed-port](2026-09-04-pre-flash-hello-stamps-over-a-closed-port.md) | fixed | lpa-devices Flash activity ladder → manifest stamp; evidence window hello timestamp |
-| arena-retained-transient | 2026-09-04 | [classic-ooms-decoding-the-manifest-write](2026-09-04-classic-ooms-decoding-the-manifest-write.md) | **open** | fw-esp32v3 wire request decode under an auto-loaded project; Flash stamp timeout copy |
+| assumed-context | 2026-09-04 | [classic-ooms-decoding-the-manifest-write](2026-09-04-classic-ooms-decoding-the-manifest-write.md) | **open** | fw-esp32v3 wire request decode under an auto-loaded project; Flash stamp timeout copy |
 | stand-in-divergence | 2026-09-02 | [ignored-emu-fuel-probe-renders-black-on-first-probe](2026-09-02-ignored-emu-fuel-probe-renders-black-on-first-probe.md) | open | lpc-engine compile-window deferral vs render probes; fw-tests recovery_emu (ignored) |
 | state-conflation | 2026-09-01 | [silent-black-under-node-quarantine](2026-09-01-silent-black-under-node-quarantine.md) | fixed | lpc-engine node status + output fallback; lpa-devices heartbeat mirror |
 | misattributed-symptom | 2026-08-31 | [c6-rmt-ws281x-dark](2026-08-31-c6-rmt-ws281x-dark.md) | harness fixed (#491); app half fixed (#495 heap, #496 fault pattern + card) | fw-esp32c6 harness serial io + lpc-engine shader node under lp-recovery |

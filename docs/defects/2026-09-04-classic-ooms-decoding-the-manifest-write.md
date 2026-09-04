@@ -2,7 +2,7 @@
 status: open
 found: 2026-09-04          # how: hardware-walk (classic ESP32 V3 on a CH340 bridge, the bench walk that verified PR #510)
 area: fw-esp32v3 wire request decode (lpc-wire serde_base64 → FsRequest::Write) under an auto-loaded project; lpa-devices Flash activity stamp outcome copy
-class: arena-retained-transient
+class: assumed-context
 related:
   - 2026-09-04-pre-flash-hello-stamps-over-a-closed-port.md
   - 2026-08-29-shader-jit-compile-transient-starves-classic-heap.md
