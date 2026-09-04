@@ -545,6 +545,7 @@ mod tests {
             detected_chip: chip.map(str::to_string),
             board_id: board.map(str::to_string),
             firmware_face: face,
+            remembered_firmware: None,
             degraded: None,
             loaded_project: LoadedProject::Running {
                 label: "studio".to_string(),
