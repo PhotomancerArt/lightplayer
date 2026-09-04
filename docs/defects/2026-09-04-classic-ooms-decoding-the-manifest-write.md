@@ -132,7 +132,20 @@ the guess was wrong.
 
 ## References
 
-- Device trace: bench tab on this worktree's server, 2026-09-04
+- Device trace (before): bench tab on the PR #510 worktree's server, 2026-09-04
   (`lp-studio-device-trace` in localStorage; the flash at
   `+134.96s Writing /hardware.json`, OOM at `+135.09s`).
+- Device trace (after): bench tab on this fix's worktree server (port
+  36001), 2026-09-04 13:59 — a reflash from the card on the same board
+  with the same `studio` project auto-loaded: `Writing /hardware.json
+  (1/6)` … `(6/6)` at +17.61 s … +18.32 s after the write effect ended
+  (~140 ms per chunk), `board manifest written`, outcome `firmware
+  installed — domraem/dom-z-102 · fw-esp32v3 cd1139501e18`. No OOM, no
+  reset; the strips ran through the stamp. A second flash (14:04) booted
+  the board from the chunk-written file — `hardware manifest:
+  domraem/dom-z-102 (DOM-Z-102)` at +17.22 s, no "override … is invalid"
+  — and stamped it again the same way. (The card's Reset was acknowledged
+  but did not reboot this CH340 classic while it was running — the frame
+  counter kept climbing — so the boot read needed the flasher's own hard
+  reset.)
 - Heap-pressure lineage: `2026-08-29-shader-jit-compile-transient-starves-classic-heap.md`.
