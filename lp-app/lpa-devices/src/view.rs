@@ -500,9 +500,6 @@ fn classification_label(classification: &Classification) -> String {
         Classification::Unknown => "Identifying…".to_string(),
         Classification::LightPlayer { hello } => format!("LightPlayer · {}", hello.label()),
         Classification::Incompatible {
-            reason: IncompatibleReason::ProtoMismatch { proto },
-        } => format!("Incompatible firmware (wire proto {proto})"),
-        Classification::Incompatible {
             reason: IncompatibleReason::NoHello,
         } => "No LightPlayer hello — pre-hello firmware".to_string(),
         Classification::Blank => "Blank flash — needs firmware".to_string(),
@@ -629,9 +626,6 @@ mod tests {
             },
             Classification::Incompatible {
                 reason: IncompatibleReason::NoHello,
-            },
-            Classification::Incompatible {
-                reason: IncompatibleReason::ProtoMismatch { proto: 3 },
             },
             Classification::Quiet { since: Millis(0) },
         ];

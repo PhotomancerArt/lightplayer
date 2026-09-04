@@ -60,7 +60,7 @@ pub use device::{Device, DeviceStatus};
 pub use event::{Action, ActivityMarker, Command, EffectId, EffectRequest, Event, Input};
 pub use evidence::{
     Classification, Evidence, Freshness, IncompatibleReason, Liveness, Presence, TerminalKind,
-    TerminalLine,
+    TerminalLine, WireVersion,
 };
 pub use identity::{DeviceId, DeviceUid, EndpointKey, IdentityChain, MacAddress, PeerIdentity};
 pub use intent::{ConnectionIntent, Intent};

@@ -133,6 +133,13 @@ pub enum JournalNote {
     CameBack {
         quiet_for_ms: u64,
     },
+    /// A hello claimed a wire proto other than this build's. Once per
+    /// observation window; a fact, not a verdict — the board stays a
+    /// LightPlayer and every verb stays offered (ruled 2026-09-04).
+    WireVersionMismatch {
+        board: u32,
+        studio: u32,
+    },
     ActivityStarted {
         kind: ActivityKind,
     },

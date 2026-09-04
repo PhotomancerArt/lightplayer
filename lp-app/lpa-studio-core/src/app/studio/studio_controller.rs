@@ -3082,16 +3082,15 @@ impl StudioController {
                 "this board's port is closed — connect it first".to_string(),
             ));
         }
+        // Any hello, on any wire version: an older board is opened on the
+        // hope-it-works terms Yona ruled (2026-09-04) — the fold has
+        // journaled the version difference, and a request the old firmware
+        // cannot answer fails the way any request fails.
         let hello = device.evidence.classification.hello().ok_or_else(|| {
             UiError::MissingSession(
                 "this board has not identified itself as a LightPlayer yet".to_string(),
             )
         })?;
-        if let Some(proto) = device.evidence.mismatched_proto() {
-            return Err(UiError::MissingSession(format!(
-                "this board speaks wire proto {proto}; update its firmware first"
-            )));
-        }
         if device.is_busy() {
             return Err(UiError::MissingSession(
                 "this board is busy with an activity; wait for it to finish".to_string(),

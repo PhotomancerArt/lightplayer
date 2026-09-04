@@ -223,14 +223,25 @@ impl Evidence {
         self.observations.classify(true, now)
     }
 
-    /// Whether a hello has been heard in the CURRENT observation window.
+    /// Whether a hello has been heard in the CURRENT observation window —
+    /// any hello, whatever wire proto it claims (see [`Self::wire_version`]).
     pub fn has_hello(&self) -> bool {
         self.observations.hello.is_some()
     }
 
-    /// A proto-mismatched hello in the current window, if one arrived.
-    pub fn mismatched_proto(&self) -> Option<u32> {
-        self.observations.wrong_proto
+    /// How the board's wire proto compares to this build's, once a hello has
+    /// said what it speaks. `None` until one has.
+    ///
+    /// A FACT, not a verdict (ruled 2026-09-04): a board on another wire
+    /// version is still a LightPlayer we talk to — the user at 2am wants the
+    /// small change, not a forced flash that might go wrong — and this is
+    /// what lets every face and verb stay while the firmware line says
+    /// "older than Studio".
+    pub fn wire_version(&self) -> Option<WireVersion> {
+        self.observations
+            .hello
+            .as_ref()
+            .map(|hello| WireVersion::compare(hello.proto, self.observations.expected_proto))
     }
 
     /// Non-hello frames absorbed in the current window: proof of a live peer,
@@ -389,6 +400,22 @@ impl Evidence {
                 // it before). The summary carries no uptime and no counter,
                 // so an unchanging heartbeat collapses via `push_output`.
                 self.push_output(TerminalKind::Wire, wire_summary(&frame.body));
+                // A hello on another wire version is news once per window:
+                // one journal line and one terminal line saying we noticed
+                // and are carrying on. Every hello after it in the same
+                // window says the same thing, so it is not repeated.
+                if let ServerFrameBody::Hello(hello) = &frame.body
+                    && let Some(version) = self.wire_version()
+                    && version.is_mismatch()
+                    && !self.observations.wire_mismatch_noted
+                {
+                    self.observations.wire_mismatch_noted = true;
+                    self.push_output(TerminalKind::Studio, version.notice());
+                    notes.push(JournalNote::WireVersionMismatch {
+                        board: hello.proto,
+                        studio: config.expected_proto,
+                    });
+                }
                 if let Some(observed) = frame.identity() {
                     notes.extend(identity_notes(identity.learn(observed)));
                 }
@@ -558,10 +585,60 @@ impl Classification {
 /// Mirrors `lpa-link`'s `IncompatibleReason`, minus the sticky state
 /// machine: [`Self::NoHello`] is decided at the identify deadline (frames
 /// flowed, no hello ever came), never on first sight of a non-hello frame.
+///
+/// There is deliberately no proto-mismatch variant any more. A hello on
+/// another wire version used to land here and the card then described a
+/// running board as a blank chip (bench 2026-09-04, proto-19 V3 on a
+/// proto-20 Studio). The version difference is a fact on the LightPlayer
+/// verdict — [`Evidence::wire_version`] — not a reason to refuse it.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum IncompatibleReason {
-    ProtoMismatch { proto: u32 },
     NoHello,
+}
+
+/// The board's wire proto against this build's.
+///
+/// Studio has no wire-format versioning yet (ruled 2026-09-04: hope it
+/// works, so long as we are aware it is old or new). This is the
+/// awareness: it rides the firmware face and the journal, changes no
+/// status and withholds no verb.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum WireVersion {
+    Match,
+    BoardOlder { board: u32, studio: u32 },
+    BoardNewer { board: u32, studio: u32 },
+}
+
+impl WireVersion {
+    pub fn compare(board: u32, studio: u32) -> Self {
+        match board.cmp(&studio) {
+            std::cmp::Ordering::Equal => Self::Match,
+            std::cmp::Ordering::Less => Self::BoardOlder { board, studio },
+            std::cmp::Ordering::Greater => Self::BoardNewer { board, studio },
+        }
+    }
+
+    pub fn is_mismatch(self) -> bool {
+        !matches!(self, Self::Match)
+    }
+
+    /// The one-line notice the terminal and the journal carry. Internal
+    /// vocabulary ("wire proto") is fine here — this is the log, and the
+    /// numbers are what a bug report needs; the card's firmware line says
+    /// it in user words.
+    pub fn notice(self) -> String {
+        match self {
+            Self::Match => "firmware speaks this build's wire proto".to_string(),
+            Self::BoardOlder { board, studio } => format!(
+                "firmware speaks wire proto {board}, Studio speaks {studio} — older firmware, \
+                 proceeding anyway"
+            ),
+            Self::BoardNewer { board, studio } => format!(
+                "firmware speaks wire proto {board}, Studio speaks {studio} — newer firmware, \
+                 proceeding anyway"
+            ),
+        }
+    }
 }
 
 /// How recently we heard anything, and which side of the hysteresis we are
@@ -658,7 +735,9 @@ struct Observations {
     /// for the same reason, and — like `loaded` — only REPLACED by a frame
     /// that carries one.
     recovery: Option<RecoveryFacts>,
-    wrong_proto: Option<u32>,
+    /// The wire-version notice has been journaled for this window.
+    #[serde(default)]
+    wire_mismatch_noted: bool,
     errors: usize,
     settled: bool,
     expected_proto: u32,
@@ -675,11 +754,13 @@ impl Observations {
     fn observe_frame(&mut self, body: &ServerFrameBody, config: &RosterConfig) {
         self.expected_proto = config.expected_proto;
         match body {
-            ServerFrameBody::Hello(hello) if hello.proto == config.expected_proto => {
-                self.hello = Some(hello.clone());
-            }
+            // EVERY hello is kept, whatever proto it claims. Dropping the
+            // mismatched ones here is how the card came to say "no firmware"
+            // over a board whose hello had just named its firmware (bench
+            // 2026-09-04). The proto comparison is a fact read off the
+            // stored hello — `Evidence::wire_version` — never a filter.
             ServerFrameBody::Hello(hello) => {
-                self.wrong_proto = Some(hello.proto);
+                self.hello = Some(hello.clone());
             }
             // Absorbed, never condemned: a running server heartbeats, so a
             // mid-stream attach sees frames before any hello answer.
@@ -746,13 +827,9 @@ impl Observations {
     /// deliberately unable to remember anything that is not in this window.
     fn classify(&self, settled: bool, now: Millis) -> Classification {
         if let Some(hello) = &self.hello {
+            // Any hello: a LightPlayer, on whatever wire version it speaks.
             return Classification::LightPlayer {
                 hello: hello.clone(),
-            };
-        }
-        if let Some(proto) = self.wrong_proto {
-            return Classification::Incompatible {
-                reason: IncompatibleReason::ProtoMismatch { proto },
             };
         }
         if self.rom_download > 0 {
