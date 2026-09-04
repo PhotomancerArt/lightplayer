@@ -126,7 +126,7 @@ Yona's ruling (2026-09-04, on the bench classic):
 
 Why the bench board asks: its hello reports board `?` because the board
 id comes from the `/hardware.json` manifest Studio stamps at flash, and
-that board was flashed from the CLI; a classic ESP32 chip fits three
+that board was flashed from the CLI; a classic ESP32 chip fits several
 served boards.
 
 The decision lives in core — `FirmwareVerb` and `firmware_verb(view)` in
