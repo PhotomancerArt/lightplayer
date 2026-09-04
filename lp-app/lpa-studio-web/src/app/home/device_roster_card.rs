@@ -54,7 +54,7 @@
 //! | zone | info line | verbs |
 //! |---|---|---|
 //! | Project | the project name, "Nothing loaded", the push's label + %; a degraded board's fault text replaces it | Open · Clear faults … [pick] Put it on the board … Remove |
-//! | Firmware | "<firmware> · <board>", "Blank flash — needs firmware", the flash's label + % (the terminal is this zone's second half) | [board pick] Flash firmware … Factory reset |
+//! | Firmware | "<firmware> · <board>" (with "— older than Studio" when it is), the flash face's own verdict line ("Blank flash — needs firmware", …), the flash's label + % (the terminal is this zone's second half) | [board pick] Flash firmware … Factory reset |
 //! | Device | freshness ("last heard 3 s ago" / "quiet — …"), "Identifying…" | Reset · Retry · Disconnect … Forget |
 //!
 //! An activity lights the bar of the zone it belongs to and puts its
@@ -119,8 +119,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceAction, DeviceActivityView, DeviceEscape, DeviceLoadedProject, DeviceStatus, DeviceView,
     DevicesOp, PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiStatus, device_chip,
-    device_escape_action, device_identity_line, device_status_kind, pending_escape_action,
-    reflash_choice,
+    device_escape_action, device_firmware_line, device_identity_line, device_status_kind,
+    firmware_face_preview_sentence, pending_escape_action, pending_firmware_line, reflash_choice,
 };
 
 use super::device_pick_popover::{
@@ -547,13 +547,9 @@ pub(crate) fn PendingLinkCard(
         Some(detail) => format!("{} · {detail}", pending.state_label),
         None => pending.state_label.clone(),
     };
-    // The firmware zone's line, in the two readings a link that has not
-    // identified itself can honestly give: the settled blank verdict, or
-    // the honest "nothing is known yet".
-    let firmware_line = match pending.needs_firmware() {
-        true => BLANK_FLASH_LINE.to_string(),
-        false => "Firmware unknown until this board identifies".to_string(),
-    };
+    // The firmware zone's line: the settled verdict's own words, or the
+    // honest "nothing is known yet" — decided in core, per variant.
+    let firmware_line = pending_firmware_line(&pending.firmware_face);
 
     rsx! {
         article { class: card_class(),
@@ -712,10 +708,6 @@ fn activity_zone(kind: lpa_studio_core::DeviceActivityKind) -> ZoneKind {
     }
 }
 
-/// The blank board's verdict, worded the same in the device card's firmware
-/// zone and on a pending link.
-const BLANK_FLASH_LINE: &str = "Blank flash — needs firmware";
-
 /// The PROJECT zone's info line: what is on the board, or what is being put
 /// on it, or the one line naming why what is on it is not running well.
 ///
@@ -759,20 +751,9 @@ fn firmware_line_text(
     {
         return activity_line_text(activity);
     }
-    if card.needs_firmware() {
-        return BLANK_FLASH_LINE.to_string();
-    }
-    let parts: Vec<String> = card
-        .firmware_face
-        .firmware()
-        .map(str::to_string)
-        .into_iter()
-        .chain(board.map(str::to_string))
-        .collect();
-    if parts.is_empty() {
-        return "No firmware reported yet".to_string();
-    }
-    parts.join(" · ")
+    // The words are the face's own, decided (and tested per variant) in
+    // core — this renderer never turns a verdict back into a noun.
+    device_firmware_line(&card.firmware_face, board)
 }
 
 /// The DEVICE zone's info line: how long ago this board was heard from, or
@@ -818,8 +799,10 @@ fn activity_line_text(activity: &DeviceActivityView) -> String {
 /// no picture, in this state, in plain words — never a fake picture and
 /// never an empty box.
 fn preview_sentence(card: &DeviceView) -> String {
-    if card.needs_firmware() && card.activity.is_none() {
-        return "Nothing running — a blank chip has no picture.".to_string();
+    if card.activity.is_none()
+        && let Some(sentence) = firmware_face_preview_sentence(&card.firmware_face)
+    {
+        return sentence;
     }
     if let Some(activity) = &card.activity {
         let label = activity.label.trim_end_matches(['…', '.', ' ']);
@@ -1103,7 +1086,11 @@ mod tests {
             identity_label: None,
             detected_chip: None,
             board_id: None,
-            firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
+            // A Ready board that reported no firmware label.
+            firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+                firmware: None,
+                wire: lpa_studio_core::DeviceWireVersion::Match,
+            },
             degraded: None,
             loaded_project: DeviceLoadedProject::Unknown,
             can_receive_project: false,
@@ -1187,6 +1174,19 @@ mod tests {
         assert_eq!(
             firmware_line_text(&card, Some("XIAO ESP32-C6"), None),
             "fw-esp32c6 0.9.3 · XIAO ESP32-C6"
+        );
+        // The bench case (2026-09-04): an older board keeps its firmware
+        // label and says it is older, in the same line — never "blank".
+        card.firmware_face = lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32v3 7c80a27".to_string()),
+            wire: lpa_studio_core::DeviceWireVersion::BoardOlder {
+                board: 19,
+                studio: 20,
+            },
+        };
+        assert_eq!(
+            firmware_line_text(&card, Some("QuinLED-Dig-Uno"), None),
+            "fw-esp32v3 7c80a27 · QuinLED-Dig-Uno — older than Studio, update recommended"
         );
         // A board that hello'd but reported no firmware label still names
         // the board rather than dropping to the honest-nothing line.

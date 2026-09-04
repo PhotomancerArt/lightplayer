@@ -35,6 +35,7 @@
 pub mod browser_transport;
 pub mod device_affordance;
 pub mod device_effects;
+pub mod device_firmware_face;
 pub mod device_flash;
 pub mod device_identity;
 pub mod device_push;
@@ -49,6 +50,9 @@ pub use device_affordance::{device_escape_action, device_status_kind, pending_es
 pub use device_effects::{
     CompletedPush, DeviceEffects, DeviceTaskFuture, DeviceTimerFuture, PendingWrites, PushPayload,
     StagedPush,
+};
+pub use device_firmware_face::{
+    device_firmware_line, firmware_face_preview_sentence, pending_firmware_line,
 };
 pub use device_flash::{
     FlashBoardChoice, FlashOffer, derive_flash_name, flash_offer, flash_offer_for, reflash_choice,
