@@ -659,7 +659,7 @@ fn roster_fixture() -> DeviceRosterView {
                     detail: Some("chip: esp32c6".to_string()),
                     can_adopt: true,
                     // Mid-identification: no settled verdict, no flash face.
-                    needs_firmware: false,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
                     detected_chip: Some("esp32c6".to_string()),
                     escapes: vec![DeviceEscape::Forget],
                 },
@@ -672,7 +672,7 @@ fn roster_fixture() -> DeviceRosterView {
                     can_adopt: true,
                     // Settled blank: the needs-firmware face (board pick +
                     // Flash) rides this pending card.
-                    needs_firmware: true,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
                     detected_chip: Some("esp32c6".to_string()),
                     escapes: vec![DeviceEscape::Forget],
                 },
@@ -688,8 +688,10 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("dev000000daqf6dvvqz".to_string()),
                     detected_chip: Some("esp32".to_string()),
                     board_id: Some("quinled/dig-uno".to_string()),
-                    firmware: Some("fw-esp32v3 abc1234".to_string()),
-                    needs_firmware: false,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+                        firmware: Some("fw-esp32v3 abc1234".to_string()),
+                        wire: lpa_studio_core::DeviceWireVersion::Match,
+                    },
                     degraded: None,
                     // The RUNNING face (M3): what the board itself reports,
                     // named by the storage dir it runs from.
@@ -745,8 +747,10 @@ fn roster_fixture() -> DeviceRosterView {
                     // board id and firmware label, so the identity line
                     // still names them while the re-identify runs.
                     board_id: Some("seeed/xiao-esp32-c6".to_string()),
-                    firmware: Some("fw-esp32c6 abc1234".to_string()),
-                    needs_firmware: false,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+                        firmware: Some("fw-esp32c6 abc1234".to_string()),
+                        wire: lpa_studio_core::DeviceWireVersion::Match,
+                    },
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     // Busy: one activity per device, so no second verb.
@@ -787,8 +791,7 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("dev000000000shelf01".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: None,
-                    firmware: None,
-                    needs_firmware: true,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     can_receive_project: false,
@@ -831,8 +834,10 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("60:55:f9:0a:0b:0d".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: Some("seeed/xiao-esp32-c6".to_string()),
-                    firmware: Some("fw-esp32c6 abc1234".to_string()),
-                    needs_firmware: false,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+                        firmware: Some("fw-esp32c6 abc1234".to_string()),
+                        wire: lpa_studio_core::DeviceWireVersion::Match,
+                    },
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Empty,
                     can_receive_project: true,
@@ -886,8 +891,10 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("dev000000000garage1".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: Some("seeed/xiao-esp32-c6".to_string()),
-                    firmware: Some("fw-esp32c6 abc1234".to_string()),
-                    needs_firmware: false,
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+                        firmware: Some("fw-esp32c6 abc1234".to_string()),
+                        wire: lpa_studio_core::DeviceWireVersion::Match,
+                    },
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     can_receive_project: false,

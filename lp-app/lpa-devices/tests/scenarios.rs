@@ -708,7 +708,16 @@ fn a_proto_mismatch_is_a_warning_on_a_ready_board_not_a_verdict() {
     assert_eq!(view.devices.len(), 1);
     let card = &view.devices[0];
     assert_eq!(card.state_label, "Ready", "{card:?}");
-    assert!(!card.needs_firmware, "an older board is not a blank one");
+    assert!(!card.needs_firmware(), "an older board is not a blank one");
+    assert_eq!(
+        card.firmware_face.wire(),
+        Some(lpa_devices::WireVersion::BoardOlder {
+            board: config.expected_proto - 1,
+            studio: config.expected_proto,
+        }),
+        "the face carries the awareness: {:?}",
+        card.firmware_face
+    );
     assert_eq!(
         card.board_id.as_deref(),
         Some("quinled/dig-uno"),
@@ -796,7 +805,7 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
     replay.step(Millis(60), Step::line(1, "invalid header: 0xffffffff"));
     replay.advance_to(Millis(6_000));
     let view = replay.view();
-    assert!(view.pending[0].needs_firmware, "{:?}", view.pending[0]);
+    assert!(view.pending[0].needs_firmware(), "{:?}", view.pending[0]);
     assert_eq!(view.pending[0].detected_chip.as_deref(), Some("esp32c6"));
     let device = view.pending[0].device;
 
@@ -920,7 +929,7 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
         "{:?}",
         view.devices[0]
     );
-    assert!(!view.devices[0].needs_firmware);
+    assert!(!view.devices[0].needs_firmware());
     let outcome = view.devices[0].last_outcome.as_ref().expect("an outcome");
     assert!(outcome.ok, "{outcome:?}");
     assert!(
@@ -1432,7 +1441,7 @@ fn reset_board_pulses_the_hardware_and_identify_reads_the_boot() {
     replay.step(Millis(9_520), Step::line(1, "invalid header: 0xffffffff"));
     let view = replay.view();
     assert!(
-        view.pending[0].needs_firmware,
+        view.pending[0].needs_firmware(),
         "the reset turned silence into an honest verdict: {view:?}"
     );
 
@@ -1443,7 +1452,7 @@ fn reset_board_pulses_the_hardware_and_identify_reads_the_boot() {
     replay.step(Millis(9_600), Step::closed(1));
     let view = replay.view();
     assert!(
-        view.pending[0].needs_firmware,
+        view.pending[0].needs_firmware(),
         "the verdict survives us hanging up: {view:?}"
     );
 }

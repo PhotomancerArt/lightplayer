@@ -75,7 +75,7 @@ pub fn device_identity_line(view: &DeviceView) -> DeviceIdentityLine {
         board: view.board_id.as_deref().map(resolved_board_name),
         chip: device_chip(view),
         mac: view.identity_label.clone(),
-        firmware: view.firmware.clone(),
+        firmware: view.firmware_face.firmware().map(str::to_string),
     }
 }
 
@@ -107,8 +107,7 @@ mod tests {
             identity_label: None,
             detected_chip: None,
             board_id: None,
-            firmware: None,
-            needs_firmware: false,
+            firmware_face: lpa_devices::view::FirmwareFace::Unknown,
             degraded: None,
             loaded_project: LoadedProject::Empty,
             can_receive_project: true,
@@ -155,7 +154,10 @@ mod tests {
         view.board_id = Some("seeed/xiao-esp32-c6".to_string());
         view.detected_chip = Some("esp32c6".to_string());
         view.identity_label = Some("60:55:f9:0a:0b:0c".to_string());
-        view.firmware = Some("fw-esp32c6 abc1234".to_string());
+        view.firmware_face = lpa_devices::view::FirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32c6 abc1234".to_string()),
+            wire: lpa_devices::WireVersion::Match,
+        };
 
         let line = device_identity_line(&view);
         assert_eq!(line.board.as_deref(), Some("XIAO ESP32-C6"));
@@ -173,7 +175,7 @@ mod tests {
         let mut view = card();
         view.board_id = Some("seeed/xiao-esp32-c6".to_string());
         view.detected_chip = Some("esp32c6".to_string());
-        view.firmware = None;
+        view.firmware_face = lpa_devices::view::FirmwareFace::Blank;
 
         let line = device_identity_line(&view);
         assert_eq!(line.firmware, None);
@@ -186,7 +188,10 @@ mod tests {
         view.board_id = Some("seeed/xiao-esp32-c6".to_string());
         view.detected_chip = Some("esp32c6".to_string());
         view.identity_label = None;
-        view.firmware = Some("fw-esp32c6 abc1234".to_string());
+        view.firmware_face = lpa_devices::view::FirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32c6 abc1234".to_string()),
+            wire: lpa_devices::WireVersion::Match,
+        };
 
         let display = device_identity_line(&view).display();
         assert!(!display.contains(" ·  ·"), "{display}");

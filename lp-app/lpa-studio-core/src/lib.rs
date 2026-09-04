@@ -164,14 +164,15 @@ pub use core::{
 /// device vocabulary — there is no `Ui*` mirror of it, on purpose.
 pub use lpa_devices::view::{
     ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape,
-    LoadedProject as DeviceLoadedProject, OutcomeView, PendingLinkView, RosterView,
+    FirmwareFace as DeviceFirmwareFace, LoadedProject as DeviceLoadedProject, OutcomeView,
+    PendingLinkView, RosterView,
 };
 pub use lpa_devices::{
     Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,
     EndpointKey as DeviceEndpointKey, Event as DeviceEvent, Input as DeviceInput,
     LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo, Millis as DeviceMillis,
     RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
-    TerminalLine as DeviceTerminalLine,
+    TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";

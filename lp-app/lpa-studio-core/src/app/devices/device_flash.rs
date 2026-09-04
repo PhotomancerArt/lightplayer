@@ -367,8 +367,10 @@ mod tests {
             // attached, so the only chip fact is its hello's board id.
             detected_chip: None,
             board_id: Some("seeed/xiao-esp32-c6".to_string()),
-            firmware: Some("fw-esp32c6 abc1234".to_string()),
-            needs_firmware: false,
+            firmware_face: lpa_devices::view::FirmwareFace::LightPlayer {
+                firmware: Some("fw-esp32c6 abc1234".to_string()),
+                wire: lpa_devices::WireVersion::Match,
+            },
             degraded: None,
             loaded_project: LoadedProject::Empty,
             can_receive_project: true,

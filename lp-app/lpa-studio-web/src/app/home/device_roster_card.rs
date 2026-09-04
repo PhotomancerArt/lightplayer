@@ -162,7 +162,7 @@ pub(crate) fn DeviceRosterCard(
     };
     // The flash face appears on a settled needs-firmware verdict, never
     // while an activity runs (the verb row is withdrawn then).
-    let offer_flash = card.needs_firmware && card.activity.is_none();
+    let offer_flash = card.needs_firmware() && card.activity.is_none();
     // The empty face: a LightPlayer that has REPORTED nothing loaded. A
     // board that simply has not said yet gets neither face — see
     // `DeviceLoadedProject::Unknown`.
@@ -550,7 +550,7 @@ pub(crate) fn PendingLinkCard(
     // The firmware zone's line, in the two readings a link that has not
     // identified itself can honestly give: the settled blank verdict, or
     // the honest "nothing is known yet".
-    let firmware_line = match pending.needs_firmware {
+    let firmware_line = match pending.needs_firmware() {
         true => BLANK_FLASH_LINE.to_string(),
         false => "Firmware unknown until this board identifies".to_string(),
     };
@@ -584,7 +584,7 @@ pub(crate) fn PendingLinkCard(
                         div { class: progress_slot_class(false) }
                     }
                     div { class: verb_row_class(),
-                        if pending.needs_firmware {
+                        if pending.needs_firmware() {
                             // The same popover the device card's firmware
                             // zone wears: a blank chip's only chip fact is
                             // its ROM boot banner.
@@ -621,7 +621,7 @@ pub(crate) fn PendingLinkCard(
                         variant: ActionButtonVariant::Quiet,
                         on_action,
                     }
-                    if pending.can_adopt && !pending.needs_firmware {
+                    if pending.can_adopt && !pending.needs_firmware() {
                         // A blank chip may never identify itself, so a user
                         // gesture must be able to keep it. On a
                         // needs-firmware verdict the Flash verb IS that
@@ -759,12 +759,13 @@ fn firmware_line_text(
     {
         return activity_line_text(activity);
     }
-    if card.needs_firmware {
+    if card.needs_firmware() {
         return BLANK_FLASH_LINE.to_string();
     }
     let parts: Vec<String> = card
-        .firmware
-        .clone()
+        .firmware_face
+        .firmware()
+        .map(str::to_string)
         .into_iter()
         .chain(board.map(str::to_string))
         .collect();
@@ -817,7 +818,7 @@ fn activity_line_text(activity: &DeviceActivityView) -> String {
 /// no picture, in this state, in plain words — never a fake picture and
 /// never an empty box.
 fn preview_sentence(card: &DeviceView) -> String {
-    if card.needs_firmware && card.activity.is_none() {
+    if card.needs_firmware() && card.activity.is_none() {
         return "Nothing running — a blank chip has no picture.".to_string();
     }
     if let Some(activity) = &card.activity {
@@ -1102,8 +1103,7 @@ mod tests {
             identity_label: None,
             detected_chip: None,
             board_id: None,
-            firmware: None,
-            needs_firmware: false,
+            firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
             degraded: None,
             loaded_project: DeviceLoadedProject::Unknown,
             can_receive_project: false,
@@ -1180,7 +1180,10 @@ mod tests {
             "No firmware reported yet"
         );
 
-        card.firmware = Some("fw-esp32c6 0.9.3".to_string());
+        card.firmware_face = lpa_studio_core::DeviceFirmwareFace::LightPlayer {
+            firmware: Some("fw-esp32c6 0.9.3".to_string()),
+            wire: lpa_studio_core::DeviceWireVersion::Match,
+        };
         assert_eq!(
             firmware_line_text(&card, Some("XIAO ESP32-C6"), None),
             "fw-esp32c6 0.9.3 · XIAO ESP32-C6"
@@ -1192,7 +1195,7 @@ mod tests {
             "XIAO ESP32-C6"
         );
 
-        card.needs_firmware = true;
+        card.firmware_face = lpa_studio_core::DeviceFirmwareFace::Blank;
         assert_eq!(
             firmware_line_text(&card, Some("XIAO ESP32-C6"), None),
             "Blank flash — needs firmware"
@@ -1273,7 +1276,7 @@ mod tests {
             "No picture yet — the live feed is coming."
         );
 
-        card.needs_firmware = true;
+        card.firmware_face = lpa_studio_core::DeviceFirmwareFace::Blank;
         assert_eq!(
             preview_sentence(&card),
             "Nothing running — a blank chip has no picture."
