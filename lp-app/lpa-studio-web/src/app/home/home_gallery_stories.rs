@@ -895,10 +895,11 @@ fn roster_fixture() -> DeviceRosterView {
                     identity_label: Some("dev000000000garage1".to_string()),
                     detected_chip: Some("esp32c6".to_string()),
                     board_id: Some("seeed/xiao-esp32-c6".to_string()),
-                    firmware_face: lpa_studio_core::DeviceFirmwareFace::LightPlayer {
-                        firmware: Some("fw-esp32c6 abc1234".to_string()),
-                        wire: lpa_studio_core::DeviceWireVersion::Match,
-                    },
+                    // No link, no window, no verdict: the face is Unknown
+                    // (the Firmware zone says so), and the header names
+                    // what the record remembers, marked as memory.
+                    firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
+                    remembered_firmware: Some("fw-esp32c6 abc1234".to_string()),
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     can_receive_project: false,
@@ -969,7 +970,7 @@ fn roster_page_fixture() -> DeviceRosterView {
 /// story is that an activity changes what the rows say and never how tall
 /// they are.
 #[story(
-    description = "One card per FIRMWARE FACE — the sheet that did not exist when an older board shipped drawn as a blank chip (bench 2026-09-04: a proto-19 classic on a proto-20 Studio read \"Blank flash — needs firmware\" and \"no firmware\" while its terminal decoded the hello naming fw-esp32v3 and a heartbeat carrying a red fault). Six faces in 400px columns, each in ITS OWN words, decided in core and tested per variant: OLDER (a running LightPlayer one wire version behind — still Ready, the project and its fault still on the project line, the firmware line reading \"<firmware> · <board> — older than Studio, update recommended\" and the re-flash verb offered, never forced: warn, then proceed); NEWER (the same the other way, no recommendation); PRE-HELLO (speaks the framing, never said hello); FOREIGN (a recognised factory firmware, named); BOOTLOADER (parked in ROM download mode); SILENT (open port, nothing heard, Retry beside Reset). The chip is the STATUS, unchanged by the wire version; the face's sentence lives in the Firmware zone — and every card measures the same height (AC2)."
+    description = "One card per FIRMWARE FACE — the sheet that did not exist when an older board shipped drawn as a blank chip (bench 2026-09-04: a proto-19 classic on a proto-20 Studio read \"Blank flash — needs firmware\" and \"no firmware\" while its terminal decoded the hello naming fw-esp32v3 and a heartbeat carrying a red fault). Six faces in 400px columns, each in ITS OWN words, decided in core and tested per variant: OLDER (a running LightPlayer one wire version behind — still Ready, the project and its fault still on the project line, the firmware line reading \"<firmware> · <board> — older than Studio, update recommended\" and the re-flash verb offered, never forced: warn, then proceed); NEWER (the same the other way, no recommendation); PRE-HELLO (speaks the framing, never said hello); FOREIGN (a recognised factory firmware, named); BOOTLOADER (parked in ROM download mode); SILENT (open port, nothing heard, Retry beside Reset); and ATTACHED — NOT LISTENING (the older classic after Disconnect, bench 2026-09-04: the window restarted so the Firmware zone says \"No firmware reported yet\", while the header keeps the chip, board and firmware the record remembers — \"fw fw-esp32v3 7c80a27 (last seen)\", memory marked as memory, never a live claim). The chip is the STATUS, unchanged by the wire version; the face's sentence lives in the Firmware zone — and every card measures the same height (AC2)."
 )]
 fn devices_card_firmware_faces() -> Element {
     let faces = firmware_face_fixtures();
@@ -996,7 +997,8 @@ fn devices_card_firmware_faces() -> Element {
 }
 
 /// The six firmware faces a settled board can wear besides the current
-/// LightPlayer (which the states sheet already covers).
+/// LightPlayer (which the states sheet already covers), plus the closed
+/// window that wears none and remembers one.
 fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
     use lpa_studio_core::{DeviceFirmwareFace, DeviceWireVersion};
 
@@ -1085,9 +1087,9 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         detected_chip: Some("esp32c6".to_string()),
         board_id: None,
         firmware_face: face,
+        remembered_firmware: None,
         degraded: None,
         loaded_project: DeviceLoadedProject::Unknown,
-        remembered_firmware: None,
         can_receive_project: false,
         can_remove_project: false,
         activity: None,
@@ -1166,6 +1168,46 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         )
     };
 
+    // The bench case after Disconnect (2026-09-04): the same classic, port
+    // handed back. The window restarted, so the face is Unknown and the
+    // Firmware zone honestly says nothing was reported — while the header
+    // keeps the identity the board already earned: chip and board from the
+    // record, and the firmware it last ran, marked "(last seen)" rather
+    // than passed off as live.
+    let attached_closed = DeviceView {
+        id: DeviceId(37),
+        title: "Bench classic · Sep 4".to_string(),
+        status: DeviceStatus::Attached,
+        state_label: "Attached — not listening".to_string(),
+        detail: None,
+        freshness_label: Some("last heard 8 s ago".to_string()),
+        identity_label: Some("30:76:f5:ec:f6:34".to_string()),
+        detected_chip: Some("esp32".to_string()),
+        board_id: Some("quinled/dig-uno".to_string()),
+        firmware_face: DeviceFirmwareFace::Unknown,
+        remembered_firmware: Some("fw-esp32v3 7c80a27".to_string()),
+        degraded: None,
+        loaded_project: DeviceLoadedProject::Unknown,
+        can_receive_project: false,
+        can_remove_project: false,
+        activity: None,
+        last_outcome: None,
+        terminal: vec![
+            story_line(
+                DeviceTerminalKind::Wire,
+                "hello · proto 19 · ? · fw-esp32v3 7c80a27 (dirty)",
+            ),
+            story_repeat(
+                DeviceTerminalKind::Wire,
+                "heartbeat · studio · FAULT red",
+                5,
+            ),
+            story_line(DeviceTerminalKind::Studio, "Closed the port"),
+        ],
+        terminal_dropped: 0,
+        escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
+    };
+
     vec![
         ("Older than Studio", older, open_uid.clone()),
         ("Newer than Studio", newer, open_uid),
@@ -1173,6 +1215,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         ("Foreign firmware", foreign, None),
         ("Bootloader", bootloader, None),
         ("Silent", silent, None),
+        ("Attached — not listening", attached_closed, None),
     ]
 }
 
