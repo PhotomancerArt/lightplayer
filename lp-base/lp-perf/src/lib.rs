@@ -24,6 +24,12 @@ pub const EVENT_PROJECT_LOAD: &str = "project-load";
 /// before the first tick. Its `retained` figure is what the server holds
 /// before any project exists (emitted by fw-emu; a no-op on device sinks).
 pub const EVENT_SERVER_BOOT: &str = "server-boot";
+/// One accepted `ProjectRead` request, from just after the headroom gate
+/// until its event stream has finished or failed. The read's cost is
+/// hundreds of small transient allocations, which is exactly the shape a
+/// largest-free-block gate cannot see; this window is what makes it
+/// measurable (`docs/heap-budget-gate.md`).
+pub const EVENT_PROJECT_READ: &str = "project-read";
 
 #[macro_export]
 macro_rules! emit_begin {

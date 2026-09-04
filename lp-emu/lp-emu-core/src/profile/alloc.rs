@@ -763,7 +763,12 @@ pub fn heap_budget(trace_path: &Path, meta_path: &Path) -> io::Result<Vec<Window
 /// One parsed `heap-trace.jsonl` row. Shared with [`super::frag`], which
 /// replays the same rows on a modelled heap layout — the two analyses must
 /// never drift on what a row means.
-#[derive(Debug, Deserialize)]
+///
+/// `Clone` because the counterfactual transforms
+/// ([`super::frag::frag_counterfactual`]) rewrite the event stream and replay
+/// the rewritten copy — the original has to survive for the next
+/// counterfactual.
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct TraceEventOwned {
     pub(crate) t: String,
     #[serde(default)]
@@ -800,6 +805,70 @@ pub(crate) struct TraceEventOwned {
 
 fn default_trace_align() -> u32 {
     DEFAULT_TRACE_ALIGN
+}
+
+impl TraceEventOwned {
+    /// An empty row of kind `t` — the base every synthesized row is built
+    /// from, so a new field on the struct cannot silently default to garbage
+    /// in a rewritten stream.
+    pub(crate) fn blank(t: &str) -> Self {
+        Self {
+            t: t.to_string(),
+            ptr: 0,
+            sz: 0,
+            ic: 0,
+            frames: Vec::new(),
+            free: 0,
+            old_ptr: None,
+            old_sz: None,
+            align: DEFAULT_TRACE_ALIGN,
+            name: None,
+            kind: None,
+            holes: None,
+            largest: None,
+        }
+    }
+
+    /// An `"A"` row — used by the counterfactual transforms to stand a scratch
+    /// arena or a hoisted resident in for the rows they replaced.
+    pub(crate) fn synthetic_alloc(
+        ptr: u32,
+        sz: u32,
+        align: u32,
+        frames: Vec<u32>,
+        ic: u64,
+    ) -> Self {
+        Self {
+            ptr,
+            sz,
+            align,
+            frames,
+            ic,
+            ..Self::blank("A")
+        }
+    }
+
+    /// A `"D"` row for `ptr`.
+    pub(crate) fn synthetic_free(ptr: u32, ic: u64) -> Self {
+        Self {
+            ptr,
+            ic,
+            ..Self::blank("D")
+        }
+    }
+
+    /// A `"P"` marker row. Only tests build these; the transforms never invent
+    /// or move a marker, so the counterfactual's marker stream is always the
+    /// baseline's.
+    #[cfg(test)]
+    pub(crate) fn synthetic_marker(name: String, kind: String, ic: u64) -> Self {
+        Self {
+            name: Some(name),
+            kind: Some(kind),
+            ic,
+            ..Self::blank("P")
+        }
+    }
 }
 
 /// Parse one trace row, naming the file and line number on failure so a
@@ -1668,6 +1737,16 @@ pub(crate) struct SymbolResolver {
 }
 
 impl SymbolResolver {
+    /// A resolver that knows no symbols — every address resolves to its hex
+    /// form. Tests that build synthetic traces need a resolver but not a
+    /// symbol table.
+    #[cfg(test)]
+    pub(crate) fn empty() -> Self {
+        Self {
+            symbols: Vec::new(),
+        }
+    }
+
     pub(crate) fn load(meta_path: &Path) -> io::Result<Self> {
         let content = std::fs::read_to_string(meta_path)?;
         let meta: TraceMetaSymbols = serde_json::from_str(&content).map_err(|e| {

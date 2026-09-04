@@ -19,7 +19,10 @@ use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
 use super::first_fit_heap::{FirstFitHeap, HeapGeometry};
-use crate::profile::alloc::{DEFAULT_TRACE_ALIGN, SymbolResolver, parse_trace_row};
+use super::frag_discount::DiscountMatcher;
+use crate::profile::alloc::{
+    DEFAULT_TRACE_ALIGN, SymbolResolver, TraceEventOwned, parse_trace_row,
+};
 use std::collections::BTreeMap;
 
 /// The classic's heap, in esp-alloc registration order: the `dram_seg` arena
@@ -116,6 +119,12 @@ pub struct FragAnalysis {
     /// `D`/`R` rows whose pointer the replay never saw allocated. Non-zero
     /// means the trace does not start from an empty heap.
     pub unmatched_frees: u64,
+    /// Allocations of a pointer that was already live. A recorded trace never
+    /// produces one; a counterfactual transform that moves an allocation
+    /// earlier in time can, and every figure after it under-counts the live
+    /// set. Non-zero is a bug in the transform, not a property of the
+    /// workload.
+    pub pointer_collisions: u64,
     /// Call sites removed from the replay, and what removing them cost.
     ///
     /// The emulator's board profile is not a device's: `fw-emu` runs a
@@ -298,24 +307,59 @@ pub fn analyze_fragmentation(
 ) -> io::Result<FragAnalysis> {
     let (heap_start, heap_size) = read_guest_heap(meta_path)?;
     let resolver = SymbolResolver::load(meta_path)?;
-    let regions = build_regions(&options.layout, heap_start, heap_size);
-    let mut replay = Replay::new(&regions, options, &resolver);
+    let events = load_trace(trace_path)?;
+    Ok(analyze_events(
+        &events, heap_start, heap_size, &resolver, options,
+    ))
+}
 
+/// Read the whole `heap-trace.jsonl` into memory.
+///
+/// The counterfactuals rewrite the event stream and replay it several times,
+/// which a streaming reader cannot serve; a startup trace is a few hundred
+/// thousand rows, so holding it costs tens of megabytes on a host that has
+/// them.
+pub(super) fn load_trace(trace_path: &Path) -> io::Result<Vec<TraceEventOwned>> {
     let reader = BufReader::new(std::fs::File::open(trace_path)?);
+    let mut events = Vec::new();
     for (index, line) in reader.lines().enumerate() {
         let line = line?;
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        let event = parse_trace_row(trace_path, index + 1, line)?;
-        replay.apply(event);
+        events.push(parse_trace_row(trace_path, index + 1, line)?);
     }
-
-    Ok(replay.finish(&options.layout, &regions))
+    Ok(events)
 }
 
-fn build_regions(layout: &FragLayout, heap_start: u32, heap_size: u32) -> Vec<RegionSpec> {
+/// Replay an already-parsed event stream — the counterfactuals' entry point,
+/// which hands in a rewritten stream rather than one read from a file.
+pub(super) fn analyze_events(
+    events: &[TraceEventOwned],
+    heap_start: u32,
+    heap_size: u32,
+    resolver: &SymbolResolver,
+    options: &FragOptions,
+) -> FragAnalysis {
+    let regions = build_regions(&options.layout, heap_start, heap_size);
+    let mut replay = Replay::new(&regions, options, resolver);
+    for event in events {
+        replay.apply(event);
+    }
+    replay.finish(&options.layout, &regions)
+}
+
+/// The guest heap's base and size, as `meta.json` recorded them.
+pub(super) fn guest_heap_from_meta(meta_path: &Path) -> io::Result<(u32, u32)> {
+    read_guest_heap(meta_path)
+}
+
+pub(super) fn build_regions(
+    layout: &FragLayout,
+    heap_start: u32,
+    heap_size: u32,
+) -> Vec<RegionSpec> {
     // Region bases only have to be far enough apart that no two regions can be
     // confused for each other; nothing in the analysis depends on the classic's
     // real DRAM addresses, and the guest's own base is used verbatim so the
@@ -419,13 +463,13 @@ struct Replay<'a> {
     /// expected and are not unmatched frees.
     skipped: HashMap<u32, SkippedBlock>,
     unmatched_frees: u64,
+    pointer_collisions: u64,
     alignments: BTreeMap<u32, u64>,
 
-    /// Discount patterns in the order they were given, each with its running
-    /// tally, plus a memo keyed by call stack so the symbolizer runs once per
-    /// distinct stack rather than once per allocation.
-    discounts: Vec<DiscountAccum>,
-    discount_memo: HashMap<Vec<u32>, Option<usize>>,
+    /// Discount patterns in the order they were given, plus their running
+    /// tallies — one per pattern, index-aligned with the matcher's.
+    discounts: DiscountMatcher<'a>,
+    discount_stats: Vec<DiscountAccum>,
 
     /// Open windows, innermost last, as `name#opening`.
     window_stack: Vec<String>,
@@ -487,8 +531,10 @@ impl<'a> Replay<'a> {
             live_bytes: 0,
             skipped: HashMap::new(),
             unmatched_frees: 0,
+            pointer_collisions: 0,
             alignments: BTreeMap::new(),
-            discounts: options
+            discounts: DiscountMatcher::new(resolver, &options.discount_sites),
+            discount_stats: options
                 .discount_sites
                 .iter()
                 .map(|pattern| DiscountAccum {
@@ -499,7 +545,6 @@ impl<'a> Replay<'a> {
                     peak_live_bytes: 0,
                 })
                 .collect(),
-            discount_memo: HashMap::new(),
             window_stack: Vec::new(),
             openings: HashMap::new(),
             last_marker: "-".to_string(),
@@ -512,21 +557,21 @@ impl<'a> Replay<'a> {
         }
     }
 
-    fn apply(&mut self, event: crate::profile::alloc::TraceEventOwned) {
+    fn apply(&mut self, event: &TraceEventOwned) {
         match event.t.as_str() {
             "A" => {
-                self.note_sized_alloc(&event);
-                self.allocate(event.ptr, event.sz, event.align, event.frames, event.ic);
+                self.note_sized_alloc(event);
+                self.allocate(event.ptr, event.sz, event.align, &event.frames, event.ic);
             }
             "D" => self.deallocate(event.ptr),
             "R" => {
-                self.note_sized_alloc(&event);
+                self.note_sized_alloc(event);
                 // The guest's `TrackingAllocator::realloc` allocates the new
                 // block BEFORE freeing the old one, so both are live at once
                 // and the new block cannot land in the old one's space. Replay
                 // in that order or the placement diverges immediately.
                 let old_ptr = event.old_ptr.unwrap_or(0);
-                self.allocate(event.ptr, event.sz, event.align, event.frames, event.ic);
+                self.allocate(event.ptr, event.sz, event.align, &event.frames, event.ic);
                 self.deallocate(old_ptr);
             }
             "P" => self.marker(event),
@@ -548,7 +593,7 @@ impl<'a> Replay<'a> {
         }
     }
 
-    fn allocate(&mut self, ptr: u32, size: u32, align: u32, frames: Vec<u32>, ic: u64) {
+    fn allocate(&mut self, ptr: u32, size: u32, align: u32, frames: &[u32], ic: u64) {
         *self.alignments.entry(align).or_insert(0) += 1;
         // The guest's requests are `Layout`s, so `align` is a power of two;
         // a 0 can only come from a row that predates the field, where 4 is the
@@ -559,9 +604,9 @@ impl<'a> Replay<'a> {
             DEFAULT_TRACE_ALIGN
         };
 
-        if let Some(discount) = self.discount_for(&frames) {
+        if let Some(discount) = self.discounts.matches(frames) {
             let footprint = HeapGeometry::RV32.footprint(size);
-            let accum = &mut self.discounts[discount];
+            let accum = &mut self.discount_stats[discount];
             accum.blocks += 1;
             accum.bytes_requested += u64::from(size);
             accum.live_bytes += u64::from(footprint);
@@ -580,29 +625,41 @@ impl<'a> Replay<'a> {
             if let Some(addr) = heap.allocate(size, align) {
                 let footprint = heap.geometry().footprint(size);
                 self.live_bytes += u64::from(footprint);
-                self.live.insert(
-                    ptr,
-                    LiveBlock {
-                        region,
-                        addr,
-                        size,
-                        align,
-                        footprint,
-                        frames,
-                        born_window: self.current_window(),
-                        born_ic: ic,
-                    },
-                );
+                if self
+                    .live
+                    .insert(
+                        ptr,
+                        LiveBlock {
+                            region,
+                            addr,
+                            size,
+                            align,
+                            footprint,
+                            frames: frames.to_vec(),
+                            born_window: self.current_window(),
+                            born_ic: ic,
+                        },
+                    )
+                    .is_some()
+                {
+                    // The live set is keyed by the guest pointer, so a pointer
+                    // handed out twice without a free between silently evicts
+                    // the older block and every figure derived from the live
+                    // set starts under-counting. A recorded trace never does
+                    // this; a counterfactual that moves an allocation earlier
+                    // in time can, which is precisely the bug worth catching.
+                    self.pointer_collisions += 1;
+                }
                 return;
             }
         }
 
-        let (site, _) = self.resolver.classify_alloc(&frames);
+        let (site, _) = self.resolver.classify_alloc(frames);
         self.would_oom.push(WouldOom {
             ic,
             size,
             site,
-            callstack: self.resolver.format_callstack(&frames, 6),
+            callstack: self.resolver.format_callstack(frames, 6),
             window: self.current_window(),
             after_marker: self.last_marker.clone(),
         });
@@ -624,7 +681,7 @@ impl<'a> Replay<'a> {
             None => match self.skipped.remove(&ptr) {
                 Some(skipped) => {
                     if let Some(index) = skipped.discount {
-                        let accum = &mut self.discounts[index];
+                        let accum = &mut self.discount_stats[index];
                         accum.live_bytes = accum
                             .live_bytes
                             .saturating_sub(u64::from(skipped.footprint));
@@ -635,46 +692,7 @@ impl<'a> Replay<'a> {
         }
     }
 
-    /// Which discount pattern, if any, claims this call stack.
-    ///
-    /// Matched against the innermost non-infrastructure site — the string the
-    /// pinning and would-OOM tables print — and, failing that, against every
-    /// frame in the stack. The second half is not optional: `Vec` growth all
-    /// reports the same site (`RawVecInner::finish_grow`, which the infra
-    /// filter does not catch), so the two allocations worth discounting on
-    /// this emulator — the `Vec<HwEndpoint>` behind
-    /// `VirtualWs281xDriver::endpoints` and the manifest's `Vec<HwResource>` —
-    /// are indistinguishable at the site alone and only tell apart one frame
-    /// deeper. Matching the whole stack is also what lets a pattern name the
-    /// *reason* an allocation exists rather than the allocator machinery that
-    /// happened to make it.
-    fn discount_for(&mut self, frames: &[u32]) -> Option<usize> {
-        if self.discounts.is_empty() {
-            return None;
-        }
-        if let Some(hit) = self.discount_memo.get(frames) {
-            return *hit;
-        }
-        let (site, _) = self.resolver.classify_alloc(frames);
-        let hit = self.discounts.iter().position(|d| {
-            let pattern = d.pattern.as_str();
-            site.contains(pattern)
-                || frames.iter().any(|&addr| {
-                    // Both spellings: the full demangled symbol, and the
-                    // shortened one the report's call stacks print. A trait
-                    // method's full name reads
-                    // `<Type as Trait>::method`, so the `Type::method` a
-                    // reader copies out of a report is a substring of the
-                    // short form only.
-                    self.resolver.resolve_full(addr).contains(pattern)
-                        || self.resolver.resolve(addr).contains(pattern)
-                })
-        });
-        self.discount_memo.insert(frames.to_vec(), hit);
-        hit
-    }
-
-    fn note_sized_alloc(&mut self, event: &crate::profile::alloc::TraceEventOwned) {
+    fn note_sized_alloc(&mut self, event: &TraceEventOwned) {
         if event.sz != FRAME_ALLOC_OF_INTEREST {
             return;
         }
@@ -692,9 +710,9 @@ impl<'a> Replay<'a> {
         entry.count += 1;
     }
 
-    fn marker(&mut self, event: crate::profile::alloc::TraceEventOwned) {
-        let name = event.name.unwrap_or_else(|| "?".to_string());
-        let kind = event.kind.unwrap_or_else(|| "?".to_string());
+    fn marker(&mut self, event: &TraceEventOwned) {
+        let name = event.name.clone().unwrap_or_else(|| "?".to_string());
+        let kind = event.kind.clone().unwrap_or_else(|| "?".to_string());
         self.last_marker = name.clone();
 
         match kind.as_str() {
@@ -874,8 +892,9 @@ impl<'a> Replay<'a> {
             would_oom,
             sized_allocs,
             unmatched_frees,
+            pointer_collisions,
             alignments,
-            discounts,
+            discount_stats,
             ..
         } = self;
 
@@ -949,7 +968,8 @@ impl<'a> Replay<'a> {
             frame_alloc_of_interest,
             cross_check,
             unmatched_frees,
-            discounts: discounts
+            pointer_collisions,
+            discounts: discount_stats
                 .into_iter()
                 .map(|d| DiscountRow {
                     pattern: d.pattern,

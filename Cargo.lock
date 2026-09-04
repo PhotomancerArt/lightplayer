@@ -5656,6 +5656,7 @@ dependencies = [
  "linked_list_allocator",
  "log",
  "lp-emu-abi",
+ "rlsf",
  "rustc-demangle",
  "serde",
  "serde_json",

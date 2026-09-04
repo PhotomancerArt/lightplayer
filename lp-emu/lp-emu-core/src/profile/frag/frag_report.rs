@@ -1,12 +1,14 @@
 //! Renders a [`FragAnalysis`] as the `lp-cli profile` `Heap Fragmentation`
-//! report section. `frag.json` carries the full per-marker detail; this text
-//! is the part meant to be read.
+//! report section, and a [`CounterfactualReport`] as the
+//! `Heap Counterfactuals` one. `frag.json` and `frag-cf.json` carry the full
+//! per-marker detail; this text is the part meant to be read.
 
 use ::alloc::format;
 use ::alloc::string::{String, ToString};
 use ::alloc::vec::Vec;
 use std::fmt::Write as _;
 
+use super::frag_counterfactual::CounterfactualReport;
 use super::frag_replay::{FRAME_ALLOC_OF_INTEREST, FragAnalysis, HISTOGRAM_LABELS};
 
 /// How many pinning residents and would-OOM rows the text section lists.
@@ -24,6 +26,105 @@ pub fn render_fragmentation_section(analysis: &FragAnalysis) -> String {
     render_sized_allocs(&mut out, analysis);
     render_cross_check(&mut out, analysis);
     out
+}
+
+/// Render the counterfactual table (without the `=== … ===` banner): one row
+/// per lever, baseline first, one block of columns per marker that matters.
+///
+/// The table is wide, so it is printed as one stanza per row rather than one
+/// line — a line long enough to hold five markers × five figures wraps in
+/// every terminal and stops being readable at all.
+pub fn render_counterfactual_section(report: &CounterfactualReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Layout {} — {} region(s); every row is the same trace replayed with one lever \
+         already pulled",
+        report.layout,
+        report.regions.len()
+    );
+    render_discount_line(&mut out, report);
+    if report.columns.is_empty() {
+        let _ = writeln!(
+            out,
+            "  (no project-load, shader-compile, frame or project-read window closed in this \
+             trace — nothing to tabulate)"
+        );
+        return out;
+    }
+    let last = report
+        .columns
+        .last()
+        .expect("just checked the column list is not empty");
+    out.push('\n');
+
+    let _ = writeln!(
+        out,
+        "  {:<34} {:>11} {:>11} {:>11} {:>7} {:>11}",
+        "counterfactual @ marker", "largest", "r0 largest", "r1 largest", "holes", "free"
+    );
+    for row in &report.rows {
+        let _ = writeln!(
+            out,
+            "  {} [{}]{}",
+            row.label,
+            row.engine,
+            if row.would_oom > 0 {
+                format!("  ⚠ {} would-OOM", fmt_num(row.would_oom))
+            } else {
+                String::new()
+            }
+        );
+        for cell in &row.cells {
+            let _ = writeln!(
+                out,
+                "  {:<34} {:>11} {:>11} {:>11} {:>7} {:>11}",
+                format!("    {}", truncate(&cell.column, 30)),
+                fmt_num(u64::from(cell.largest)),
+                fmt_num(u64::from(cell.region_largest.first().copied().unwrap_or(0))),
+                fmt_num(u64::from(cell.region_largest.get(1).copied().unwrap_or(0))),
+                cell.holes,
+                fmt_num(u64::from(cell.free)),
+            );
+        }
+        if row.label != "baseline" {
+            let _ = writeln!(
+                out,
+                "    Δ largest at {}: {}{}",
+                last.label,
+                if row.delta_largest_last >= 0 { "+" } else { "" },
+                fmt_signed(row.delta_largest_last),
+            );
+        }
+        for note in &row.notes {
+            let _ = writeln!(out, "    note: {note}");
+        }
+        for approximation in &row.approximations {
+            let _ = writeln!(out, "    approximation: {approximation}");
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn render_discount_line(out: &mut String, report: &CounterfactualReport) {
+    if report.discounts.is_empty() {
+        let _ = writeln!(
+            out,
+            "  discounts: none — every allocation in the trace is replayed"
+        );
+        return;
+    }
+    let patterns = report
+        .discounts
+        .iter()
+        .map(|d| d.pattern.clone())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let _ = writeln!(
+        out,
+        "  ⚠ DISCOUNTED TABLE: dropped call site pattern(s): {patterns}"
+    );
 }
 
 fn render_layout(out: &mut String, analysis: &FragAnalysis) {
@@ -63,6 +164,14 @@ fn render_layout(out: &mut String, analysis: &FragAnalysis) {
 
     render_discounts(out, analysis);
 
+    if analysis.pointer_collisions > 0 {
+        let _ = writeln!(
+            out,
+            "  ⚠ {} allocation(s) of a pointer that was already live — the live set silently \
+             dropped the older block, so every figure below under-counts",
+            analysis.pointer_collisions
+        );
+    }
     if analysis.unmatched_frees > 0 {
         let _ = writeln!(
             out,
@@ -377,6 +486,15 @@ fn truncate(s: &str, width: usize) -> String {
     }
     let kept: String = s.chars().take(width.saturating_sub(1)).collect();
     format!("{kept}…")
+}
+
+/// [`fmt_num`] for a delta, which may be negative.
+fn fmt_signed(n: i64) -> String {
+    format!(
+        "{}{}",
+        if n < 0 { "-" } else { "" },
+        fmt_num(n.unsigned_abs())
+    )
 }
 
 /// Thousands separators, so a 186,368 in a column of six-digit numbers is

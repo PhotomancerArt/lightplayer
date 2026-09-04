@@ -10,17 +10,30 @@
 //! region, the hole histogram, and the live blocks that hold the biggest holes
 //! open, attributed to the call site that allocated them.
 //!
+//! On top of that, [`frag_counterfactual`] replays the same trace with one
+//! lever already pulled — a scratch arena for a transient window, its
+//! residents packed ahead of its churn, or TLSF ([`tlsf_heap`]) instead of the
+//! first-fit list — so a lever can be priced before anyone implements it. No
+//! lever is implemented here.
+//!
 //! Everything here is host-only analysis behind the `std` feature; nothing in
 //! this module runs on a device.
 
 pub mod first_fit_heap;
+pub mod frag_counterfactual;
+mod frag_discount;
 pub mod frag_replay;
 pub mod frag_report;
+pub(crate) mod tlsf_heap;
 
 pub use first_fit_heap::{FirstFitHeap, HeapGeometry, Hole};
+pub use frag_counterfactual::{
+    CounterfactualCell, CounterfactualColumn, CounterfactualReport, CounterfactualRow,
+    CounterfactualSpec, CounterfactualTerm, analyze_counterfactuals,
+};
 pub use frag_replay::{
     BoundingBlock, CLASSIC_REGIONS, CrossCheckRow, DiscountRow, FRAME_ALLOC_OF_INTEREST,
     FragAnalysis, FragLayout, FragOptions, HISTOGRAM_LABELS, HoleDetail, MarkerShape, PinningRow,
     RegionShape, RegionSpec, SizedAllocSite, WouldOom, analyze_fragmentation,
 };
-pub use frag_report::render_fragmentation_section;
+pub use frag_report::{render_counterfactual_section, render_fragmentation_section};

@@ -314,6 +314,75 @@ HwResource` also removes the real 34-resource manifest a device would
 allocate; that is a few hundred bytes against the 36,864 B the fixture board
 costs.
 
+## The counterfactual table
+
+The fragmentation section says where the free space went. `--cf` says what
+recovering it would be worth: the same recorded trace, replayed with one lever
+already pulled, tabulated against a baseline replay of the untransformed
+trace. Nothing here implements a lever — the point is to price one before
+anyone writes it.
+
+```bash
+scripts/frag-table.sh            # the three reference projects, every lever
+scripts/frag-table.sh examples/basic   # or a project list of your own
+```
+
+The script runs `startup` mode with the two discounts above and every
+counterfactual, and prints each run's `Heap Counterfactuals` section; the same
+data lands in `frag-cf.json` beside `frag.json`. To run one by hand:
+
+```bash
+cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup \
+    --workload studio-sync \
+    --frag-discount-site VirtualWs281xDriver::endpoints \
+    --frag-discount-site HwResource \
+    --cf "scratch=shader-compile,project-read" \
+    --cf "residents-first=project-load,frame" \
+    --cf tlsf \
+    --cf "scratch=shader-compile,project-read+residents-first=project-load,frame"
+```
+
+Each `--cf` is one row. Terms join with `+` to combine levers in a single row.
+
+| term | what it does to the trace | approximation it states |
+|---|---|---|
+| `scratch=<windows>` | every block born *and* freed inside one opening of a named window is removed; one allocation of that opening's peak live bytes takes their place at its `B`, freed at its `E`. Reallocs are followed as free-then-alloc | a real arena still costs its peak; growth strategy and alignment slack are not modeled |
+| `residents-first=<windows>` | every block born inside an opening and still live at its `E` moves to the opening's `B`, in original order, ahead of the churn; a realloc chain collapses to one allocation of its final size | assumes sizes are knowable at window open (exact `with_capacity`) |
+| `tlsf` | the trace is replayed unchanged through `rlsf` — the real crate, at the version and generic instantiation (`Tlsf<'static, usize, usize, 32, 32>`) esp-alloc 0.10 uses for its `TLSF` heap algorithm, pools inserted with `insert_free_block_ptr` the same way | host headers are 16 B, the device's 8 B; the FL/SL bitmaps are static and not in the pool |
+
+Columns are the markers that matter: `project-load E`, `shader-compile E`,
+`project-read E` when the trace has one, and the first and last `frame E`. The
+row's Δ is its largest free block at the last column, minus the baseline's.
+
+⚠️ **The TLSF row is bound by host geometry, not by TLSF.** `rlsf` derives its
+block geometry from `size_of::<usize>()` — a 32 B granule and a 16 B header on
+this host, 16 B and 8 B on the 32-bit target — and its generic parameters
+(`FLBitmap`, `SLBitmap`, `FLLEN`, `SLLEN`) only pick the bitmap words, so there
+is no 32-bit-width instantiation to ask for the way
+`first_fit_heap.rs` models one for `linked_list_allocator`. Every TLSF row
+therefore prints the surcharge that costs it — tens of kilobytes of live set on
+these workloads — and should be read as a pessimistic bound, never as the
+device's number. Getting the device's number needs either a width-parametrized
+TLSF model or the silicon arm (P5).
+
+### The `project-read` window and `--workload studio-sync`
+
+`project-read` opens on an accepted `ProjectRead` — past the headroom gate and
+past project lookup — and closes when its event stream finishes or fails
+(`lpa-server/src/server.rs`, markers only; on device `lp_perf` is the no-op
+sink). The default profile workload never issues a read, so
+`--workload studio-sync` sends Studio's staged initial sync as soon as the
+project is loaded: the skeleton read, then per-node slot detail paged 16 ids at
+a time with `since: None`, then one probe per read.
+
+⚠️ `--mode startup` stops at the frame that contained the first shader
+compile, and those staged reads are served in the same ticks — so what lands in
+a startup trace is the skeleton read, and the later pages are cut off by the
+gate (the run says so on stderr). That is the shape `frag-table.sh` measures.
+The ratchet's own runs use the default `frames` workload and so carry no
+`project-read` window; recording one would mean the gate adopting the
+`studio-sync` workload, which moves every other recorded figure with it.
+
 ## CI
 
 Runs in the `Validate (x64)` job of `.github/workflows/pre-merge.yml` when
