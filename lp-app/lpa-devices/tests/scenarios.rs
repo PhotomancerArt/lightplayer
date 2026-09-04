@@ -1123,6 +1123,135 @@ fn a_pre_flash_hello_never_starts_the_stamp_before_the_port_comes_back() {
     );
 }
 
+/// The bench defect of 2026-09-04, second half (classic V3, auto-loaded
+/// project resident): the board soft-reset decoding the stamp, the effect
+/// never reported, the stamp waited out its deadline — and the card closed
+/// with "the compiled-in default pin map stands" over a board that had been
+/// running the manifest an earlier stamp wrote (the flasher keeps
+/// littlefs). A stamp that heard nothing back says the write was not
+/// confirmed. It does not know what is on the board, so it does not say.
+#[test]
+fn a_stamp_that_hears_nothing_back_says_unconfirmed_not_that_the_default_stands() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    let device = first_device(&replay);
+    replay.step(
+        Millis(2_000),
+        Step::Flash {
+            device: device.0,
+            board: "dig-uno".to_string(),
+            build: "esp32-4mb".to_string(),
+        },
+    );
+    replay.step(Millis(29_000), Step::closed(1));
+    replay.step(
+        Millis(30_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
+    );
+    replay.step(Millis(33_000), Step::opened(1));
+    let commands = replay.step(
+        Millis(34_000),
+        Step::hello(1).uid("dev_2f8a").board("dig-uno"),
+    );
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::RunEffect {
+                effect: lpa_devices::EffectRequest::WriteBoardManifest { .. },
+                ..
+            }
+        )),
+        "the stamp runs: {commands:?}"
+    );
+
+    // The board went quiet under the write; nothing ever comes back. The
+    // runner fires the stamp's own deadline on the way.
+    replay.advance_to(Millis(34_000 + config.stamp_deadline_ms + 1_000));
+
+    let view = replay.view();
+    let card = &view.devices[0];
+    assert!(card.activity.is_none(), "the stamp is bounded: {card:?}");
+    let outcome = card.last_outcome.as_ref().expect("an outcome");
+    assert!(outcome.ok, "the flash stands: {outcome:?}");
+    assert!(
+        outcome.summary.contains("not confirmed"),
+        "silence is reported as silence: {outcome:?}"
+    );
+    assert!(
+        !outcome.summary.contains("default"),
+        "and never as a verdict on the pin map: {outcome:?}"
+    );
+}
+
+/// A stamp the board answered with an error carries the conversation's
+/// own words onto the card — it wrote the chunks and knows what it left on
+/// the board — and the reducer adds no pin-map claim of its own.
+#[test]
+fn a_stamp_the_board_refused_carries_the_conversations_words_not_a_pin_map_verdict() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    let device = first_device(&replay);
+    replay.step(
+        Millis(2_000),
+        Step::Flash {
+            device: device.0,
+            board: "dig-uno".to_string(),
+            build: "esp32-4mb".to_string(),
+        },
+    );
+    replay.step(Millis(29_000), Step::closed(1));
+    replay.step(
+        Millis(30_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
+    );
+    replay.step(Millis(33_000), Step::opened(1));
+    replay.step(
+        Millis(34_000),
+        Step::hello(1).uid("dev_2f8a").board("dig-uno"),
+    );
+    replay.step(
+        Millis(35_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: false,
+            message: Some(
+                "device file write failed: chunk 3/6 of /hardware.json failed: offset \
+                 mismatch; the partial file was removed, so the board boots on its \
+                 compiled-in default pin map"
+                    .to_string(),
+            ),
+            effect: None,
+            kind: None,
+        },
+    );
+
+    let view = replay.view();
+    let outcome = view.devices[0].last_outcome.as_ref().expect("an outcome");
+    assert!(outcome.ok, "the flash stands: {outcome:?}");
+    assert!(
+        outcome.summary.contains("chunk 3/6")
+            && outcome.summary.contains("partial file was removed"),
+        "the conversation's words reach the card: {outcome:?}"
+    );
+    assert_eq!(
+        outcome.summary.matches("default pin map").count(),
+        1,
+        "the only pin-map claim is the conversation's own: {outcome:?}"
+    );
+}
+
 /// Forget works mid-flash (I3): the entry, record and grant go, and the
 /// journal shows an eviction — cancellation bounded by removal.
 #[test]
