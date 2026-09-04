@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device card identity line — room for the firmware clause · spike</title>
+<style>
+/* =====================================================================
+   Device card · identity line (header, zone 1).
+   Aurora ground, verbatim from spikes/device-card-v2 (src/style.css :root).
+
+   THESIS. The header's identity line is ONE truncated mono line:
+     board · chip · MAC · fw <label> [(last seen)]
+   At the card's own 400px column every card on the firmware-faces story
+   ellipsises at "… · fw fw-esp…", so the clause PR #514 added — the
+   firmware a closed window still remembers, marked as memory — is
+   invisible exactly on the card it exists for (Attached — not listening,
+   bench 2026-09-04). Constraints the treatments respect:
+     · pasteable text stays pasteable: Yona drag-selects + Cmd+C the
+       identity (no fold, no clip, no click-to-expand, no tooltip-only)
+     · the card's rows are fixed height (ADR 2026-09-03): a second row
+       is a HEIGHT-TABLE change (header 72 → 88px), never a reflow
+     · the Firmware ZONE keeps stating only the window's verdict; the
+       header states identity, memory marked as memory (PR #514)
+   ===================================================================== */
+html.no-anim *, html.no-anim *::before, html.no-anim *::after { transition:none !important; animation:none !important; }
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --bg:#0d0d13; --surface:#14141c; --panel:#17171f; --raised:#1d1d28;
+  --raised-strong:#252532; --terminal:#0a0a10;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --dim:#7a7a8a;
+
+  --sel-bd:#d6dae0; --sel-bg:rgba(214,218,224,.12);
+  --focus:#a5b8ff;
+  --violet:#a58af7;
+
+  --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
+  --st-neutral-bg:#12171c;   --st-neutral-bd:#3a444c;   --st-neutral-tx:#d9e2df;
+  --st-working-bg:#24230f;   --st-working-bd:#706730;   --st-working-tx:#f2e6a2;
+  --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
+  --st-warning-bg:#292614;   --st-warning-bd:#796c33;   --st-warning-tx:#f0dc7a;
+  --st-attention-bg:#291f14; --st-attention-bd:#795833; --st-attention-tx:#f0b97a;
+  --st-error-bg:#301b1d;     --st-error-bd:#874b4b;     --st-error-tx:#ffc7c7;
+
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+
+  --w: 400px;
+}
+* { box-sizing: border-box; }
+body { margin:0; padding:28px 32px 160px; background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
+h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
+p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 18px; max-width:900px; }
+p.hint b { color:var(--shell-mut); font-weight:600; }
+h2 { font-size:12px; letter-spacing:.1em; color:var(--shell-mut); text-transform:uppercase; margin:46px 0 6px; }
+h2 .n { color:var(--shell-dim); margin-right:6px; }
+p.sub { color:var(--shell-dim); font-size:12px; margin:0 0 14px; max-width:900px; }
+p.sub b { color:var(--shell-mut); font-weight:600; }
+code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls { display:flex; gap:14px; flex-wrap:wrap; align-items:center; padding:10px 14px;
+  border:1px dashed var(--shell-bd-strong); border-radius:8px; color:var(--shell-mut); font-size:12px;
+  position:sticky; top:8px; z-index:60; background:rgba(11,12,14,.92); backdrop-filter:blur(8px); }
+.controls b { color:var(--shell-tx); font-weight:600; }
+.controls button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx);
+  border:1px solid var(--shell-bd-strong); border-radius:6px; padding:3px 10px; font-size:12px; }
+.controls button:hover { background:#1e2126; }
+.controls button.active { border-color:#7be0b2; color:#7be0b2; }
+.controls .grp { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
+.controls .sep { width:1px; height:18px; background:var(--shell-bd-strong); }
+.controls input[type=range] { width:140px; }
+.controls .mono { font-family:var(--mono); font-size:11px; }
+#sheetpick button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx);
+  border:1px solid var(--shell-bd-strong); border-radius:6px; padding:2px 9px; font-size:11px; font-family:var(--mono); }
+#sheetpick button.active { border-color:#7be0b2; color:#7be0b2; }
+
+/* ---- concept frames -------------------------------------------------- */
+.concepts { display:grid; grid-template-columns:repeat(auto-fill, var(--w)); gap:26px 22px; align-items:start; margin-top:14px; }
+.concept { display:grid; gap:8px; min-width:0; }
+.concept h3.c { margin:0; font-size:12px; color:var(--shell-tx); font-weight:600; }
+.concept h3.c .k { display:inline-block; min-width:18px; color:#7be0b2; font-family:var(--mono); font-size:11px; margin-right:6px; }
+.concept p.cn { margin:0; font-size:11.5px; line-height:1.45; color:var(--shell-dim); }
+.concept p.cn b { color:var(--shell-mut); font-weight:600; }
+.concept .ruler { font:10.5px var(--mono); color:var(--shell-dim); margin:0; display:flex; gap:10px; flex-wrap:wrap; }
+.concept .ruler .clip { color:var(--st-error-tx); }
+.concept .ruler .ok { color:#7be0b2; }
+.concept.lean h3.c .k { color:#f0dc7a; }
+.sheet { display:grid; grid-template-columns:repeat(auto-fill, var(--w)); gap:14px 12px; align-items:start; margin-top:12px; }
+.sheet .lab { margin:0 0 6px; font-size:10.9px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--subtle); }
+
+/* =====================================================================
+   Card grammar — device_roster_card.rs, faithful metrics
+   (Tailwind: px-4 pt-4 pb-3 · gap-2 · gap-1.5 · text-sm/20 · text-[0.68rem]).
+   Only the header and the Firmware zone's three rows are drawn; the
+   Project / Device zones and the terminal do not touch the question.
+   ===================================================================== */
+.card { display:flex; flex-direction:column; border-radius:6px; border:1px solid var(--bd); background:var(--panel); min-width:0; }
+.card header { display:grid; gap:8px; min-width:0; padding:16px 16px 12px; }
+.card header .id { display:grid; gap:6px; min-width:0; }
+.card .head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; min-width:0; }
+.card h3 { margin:0; flex:1; min-width:0; font-size:14px; line-height:20px; font-weight:700; color:var(--strong);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chip { flex:none; display:inline-flex; align-items:center; min-height:22px; padding:0 8px; border-radius:999px; border:1px solid;
+  font-size:11px; font-weight:600; line-height:1; white-space:nowrap; }
+.chip.good      { background:var(--st-good-bg);      border-color:var(--st-good-bd);      color:var(--st-good-tx); }
+.chip.neutral   { background:var(--st-neutral-bg);   border-color:var(--st-neutral-bd);   color:var(--st-neutral-tx); }
+.chip.warning   { background:var(--st-warning-bg);   border-color:var(--st-warning-bd);   color:var(--st-warning-tx); }
+.chip.attention { background:var(--st-attention-bg); border-color:var(--st-attention-bd); color:var(--st-attention-tx); }
+
+/* the mono identity line, verbatim: m-0 truncate font-mono text-[0.68rem] subtle */
+.mono-line { margin:0; min-width:0; font-family:var(--mono); font-size:0.68rem; line-height:16px; color:var(--subtle);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mono-line .mem { color:var(--dim); }
+.mono-line .fwl { color:var(--muted); }
+/* overflow highlighter (exploration aid, not design): a clipped line gets a red right edge */
+html.showclip .mono-line.over { box-shadow: inset -2px 0 0 var(--st-error-tx); }
+html.showclip .mono-wrap.over { box-shadow: inset -2px 0 0 var(--st-error-tx); }
+
+/* C · wrap, clamped to two rows; the text stays ONE string */
+.mono-wrap { margin:0; min-width:0; font-family:var(--mono); font-size:0.68rem; line-height:16px; color:var(--subtle);
+  height:32px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+  overflow-wrap:anywhere; }
+/* B/E/F · two fixed rows: each its own truncating line, the pair 32px */
+.rows { display:grid; gap:0; min-width:0; height:32px; }
+/* F · MAC set right on row 1 */
+.mono-split { display:flex; justify-content:space-between; gap:12px; min-width:0; height:16px; }
+.mono-split .mono-line { flex:1 1 auto; }
+.mono-split .mono-line.mac { flex:0 0 auto; }
+
+/* the Firmware zone's rows — info (17) · bar (4) · verbs (30), same as production */
+.zone { display:grid; gap:8px; min-width:0; border-top:1px solid var(--bd-strong); padding:12px 16px; }
+.info { margin:0; height:17px; font-size:12px; line-height:17px; color:var(--subtle); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bar { height:4px; border-radius:2px; background:var(--bd-mut); }
+.verbs { display:flex; gap:8px; align-items:center; height:30px; }
+.verb { display:inline-flex; align-items:center; height:26px; padding:0 10px; border-radius:6px; border:1px solid var(--bd-strong);
+  background:var(--raised); color:var(--tx); font-size:12px; font-weight:600; }
+.verb.primary { border-color:var(--sel-bd); }
+
+.rejected { border:1px dashed var(--shell-bd); border-radius:8px; padding:10px 14px; margin-top:26px; font-size:11.5px; color:var(--shell-dim); max-width:900px; }
+.rejected b { color:var(--shell-mut); font-weight:600; }
+</style>
+</head>
+<body>
+
+<h1>Device card · identity line — room for the firmware clause</h1>
+<p class="hint">
+  The header's identity line is <b>one truncated mono line</b>: <code>board · chip · MAC · fw &lt;label&gt; [(last seen)]</code>.
+  At the card's 400px column every card on <code>devices_card_firmware_faces</code> ellipsises at <code>… · fw fw-esp…</code>,
+  so the clause PR #514 added — the firmware a closed window still remembers, marked as memory — is invisible on the one
+  card it exists for. Six treatments below, in the card's own metrics. Constraints: <b>pasteable text stays pasteable</b>
+  (drag-select + Cmd+C the identity — no fold, no tooltip-only, no click-to-expand); <b>rows are fixed height</b>
+  (ADR 2026-09-03 — a second row is a height-table change, 72 → 88px, never a reflow); the Firmware zone below keeps
+  stating only this window's verdict. The red right edge marks a clipped line (exploration aid, toggle below).
+</p>
+
+<div class="controls" id="ctl">
+  <span><b>Case</b></span>
+  <span class="grp" id="cases"></span>
+  <span class="sep"></span>
+  <span><b>Width</b></span>
+  <input type="range" id="w" min="320" max="520" step="4" value="400"><span class="mono" id="wv">400px</span>
+  <span class="sep"></span>
+  <span class="grp">
+    <button id="b-clip" class="active">mark clipped</button>
+    <button id="b-dedupe">drop chip when the board name says it</button>
+    <button id="b-split">B/E split: board·chip / MAC·fw</button>
+  </span>
+</div>
+
+<h2><span class="n">1</span>Six treatments, one case at a time</h2>
+<p class="sub">
+  Same card, same case, six headers. <b>A</b> is production today. Each frame prints its measured header height and which
+  identity row (if any) still clips at this width — the story sheet's column is 400px; the gallery grid's floor is 320px.
+</p>
+<div class="concepts" id="concepts"></div>
+
+<h2><span class="n">2</span>One treatment across every face</h2>
+<p class="sub">
+  The firmware-faces story sheet, redrawn with one treatment so the gate can read it the way CI's story comment will.
+  Pick the treatment to sheet: <span class="grp" id="sheetpick" style="display:inline-flex"></span>
+</p>
+<div class="sheet" id="sheet"></div>
+
+<div class="rejected">
+  <b>Not explored, and why.</b>
+  <ul>
+    <li><b>Moving the firmware clause into the Firmware zone's info line.</b> That zone states this window's verdict only
+      (ADR 2026-09-04, "facts are stated when reported"); memory on that line is the lie PR #514's "(last seen)" mark exists to avoid.</li>
+    <li><b>Abbreviating the MAC</b> (last 3 octets). The MAC is the strongest identity binding and the thing most often pasted; a partial MAC is not pasteable.</li>
+    <li><b>Tooltip-only overflow</b> (production's <code>title</code> attribute). Already there, and it is not selectable text.</li>
+  </ul>
+</div>
+
+<script>
+/* ---------------------------------------------------------------------
+   Cases — modelled on firmware_face_fixtures() (home_gallery_stories.rs)
+   fw: {kind:'reported'|'remembered'|'none', label}
+   --------------------------------------------------------------------- */
+const CASES = [
+  { id:'attached', name:'Attached — not listening', title:'Bench classic · Sep 4', status:'Attached — not listening', kind:'neutral',
+    board:'QuinLED-Dig-Uno', chip:'esp32', mac:'30:76:f5:ec:f6:34', fw:{kind:'remembered', label:'fw-esp32v3 7c80a27'},
+    line:'No firmware reported yet', verbs:[] },
+  { id:'older-unknown', name:'Older, board unknown', title:'Bench classic · Sep 4', status:'Degraded', kind:'attention',
+    board:null, chip:'esp32', mac:'30:76:f5:ec:f6:34', fw:{kind:'reported', label:'fw-esp32v3 7c80a27'},
+    line:'fw-esp32v3 7c80a27 · board ? — older than Studio, update recommended', verbs:['Update firmware'] },
+  { id:'older', name:'Older', title:'Shop classic · Sep 4', status:'Degraded', kind:'attention',
+    board:'QuinLED-Dig-Uno', chip:'esp32', mac:'30:76:f5:ec:f6:34', fw:{kind:'reported', label:'fw-esp32v3 7c80a27'},
+    line:'fw-esp32v3 7c80a27 · QuinLED-Dig-Uno — older than Studio, update recommended', verbs:['Update firmware'] },
+  { id:'running', name:'Running C6', title:'Dev board · Sep 4', status:'Ready', kind:'good',
+    board:'XIAO ESP32-C6', chip:'esp32c6', mac:'60:55:f9:0a:0b:0c', fw:{kind:'reported', label:'fw-esp32c6 e1f2a3b'},
+    line:'fw-esp32c6 e1f2a3b · XIAO ESP32-C6', verbs:['Update firmware'] },
+  { id:'long', name:'Longest board name', title:"Luna's porch sign", status:'Ready', kind:'good',
+    board:'WLED LAN 4-Channel (DOM-Z-102)', chip:'esp32', mac:'30:76:f5:ec:f6:34', fw:{kind:'reported', label:'fw-esp32v3 7c80a27'},
+    line:'fw-esp32v3 7c80a27 · WLED LAN 4-Channel (DOM-Z-102)', verbs:['Update firmware'] },
+  { id:'blank', name:'Blank flash', title:'Fake ESP32 (usb-4)', status:'Needs firmware', kind:'attention',
+    board:null, chip:'esp32c6', mac:null, fw:{kind:'none'},
+    line:'Blank flash — needs firmware', verbs:['Flash firmware'] },
+  { id:'prehello', name:'Pre-hello, no MAC', title:'Old lamp', status:'Needs firmware', kind:'attention',
+    board:null, chip:'esp32c6', mac:null, fw:{kind:'none'},
+    line:'No LightPlayer hello — pre-hello firmware', verbs:['Flash firmware'] },
+];
+
+const state = { case:'attached', clip:true, dedupe:false, split:false, sheet:'E' };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const SEP = ' · ';
+
+/* ---- the clause grammar --------------------------------------------- */
+// today's words: "fw <label>" / "fw <label> (last seen)" / "no firmware"
+const fwToday = fw => fw.kind === 'reported' ? `fw ${fw.label}` : fw.kind === 'remembered' ? `fw ${fw.label} (last seen)` : 'no firmware';
+// shortened: the label already starts with "fw-", so the "fw " prefix goes; the memory mark becomes its own dotted clause
+const fwShort = fw => fw.kind === 'reported' ? fw.label : fw.kind === 'remembered' ? `${fw.label}${SEP}last seen` : 'no firmware';
+// shortened + marked: same text, the memory mark in the dim tone (still plain selectable text)
+const fwShortHtml = fw => fw.kind === 'reported' ? `<span class="fwl">${esc(fw.label)}</span>`
+  : fw.kind === 'remembered' ? `<span class="fwl">${esc(fw.label)}</span>${SEP}<span class="mem">last seen</span>` : 'no firmware';
+
+// "drop chip when the board name says it": XIAO ESP32-C6 already says esp32c6; QuinLED-Dig-Uno does not say esp32
+const chipOf = c => {
+  if (!state.dedupe || !c.board || !c.chip) return c.chip;
+  const flat = c.board.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return flat.includes(c.chip.toLowerCase()) ? null : c.chip;
+};
+const hw = c => [c.board, chipOf(c), c.mac].filter(Boolean);            // board · chip · MAC
+const bc = c => [c.board, chipOf(c)].filter(Boolean);                   // board · chip
+const macfw = (c, fwtext) => [c.mac, fwtext].filter(Boolean);           // MAC · fw
+
+const line = (parts, cls='') => `<p class="mono-line ${cls}">${parts.join(SEP)}</p>`;
+
+/* ---- the six treatments ---------------------------------------------- */
+const CONCEPTS = [
+  { k:'A', name:'Current — one truncated line', note:'Production today (<code>mono_line_class</code>): <code>board · chip · MAC · fw &lt;label&gt;</code>, ellipsised. Header 72px. The firmware clause is the tail, so it is the part that goes.',
+    identity: c => line([...hw(c).map(esc), esc(fwToday(c.fw))]) },
+  { k:'B', name:'Two fixed rows', note:'The same words on two independently truncating rows: <b>hardware</b> (board · chip · MAC) then <b>firmware</b> — or, with the toggle, board · chip then MAC · fw. Header 88px, fixed; a short identity leaves row 2 blank rather than moving anything.',
+    identity: c => {
+      const r1 = state.split ? bc(c) : hw(c);
+      const r2 = state.split ? macfw(c, fwToday(c.fw)) : [fwToday(c.fw)];
+      return `<div class="rows">${line(r1.map(esc))}${line(r2.map(esc))}</div>`;
+    } },
+  { k:'C', name:'Wrap, clamped to two rows', note:'One string, allowed to wrap once; clamped at two rows (88px header) with an ellipsis if it still overflows. Selecting yields exactly the production string. The break lands wherever the width says — mid-MAC on some widths.',
+    identity: c => `<p class="mono-wrap">${esc([...hw(c), fwToday(c.fw)].join(SEP))}</p>` },
+  { k:'D', name:'Shorter clause, one line', note:'Keep one row (72px) and spend the characters better: drop the <code>fw </code> prefix (the label already starts with <code>fw-</code>) and turn <code>(last seen)</code> into its own clause. Optional: drop the chip when the board name already says it. Fits only the short identities.',
+    identity: c => line([...hw(c).map(esc), esc(fwShort(c.fw))]) },
+  { k:'E', name:'Two rows + shorter clause, memory marked', lean:true, note:'B and D together: hardware on row 1, the bare label on row 2 with <code>· last seen</code> in the dim tone — memory reads as memory at a glance, and the whole thing is still one selectable block of text. Header 88px.',
+    identity: c => {
+      const r1 = state.split ? bc(c) : hw(c);
+      const fwh = fwShortHtml(c.fw);
+      const r2 = state.split ? [c.mac ? esc(c.mac) : null, fwh].filter(Boolean) : [fwh];
+      return `<div class="rows">${line(r1.map(esc))}${line(r2)}</div>`;
+    } },
+  { k:'F', name:'Two rows, MAC set right', note:'Row 1 is board · chip on the left and the MAC flush right under the status chip; row 2 is the firmware. The MAC never fights the board name for the same run of characters — but a long board name still clips against it, and a right-set MAC reads as a second column rather than one line of identity.',
+    identity: c => `<div class="rows">
+      <div class="mono-split">${line(bc(c).map(esc))}${c.mac ? line([esc(c.mac)], 'mac') : ''}</div>
+      ${line([fwShortHtml(c.fw)])}</div>` },
+];
+
+/* ---- card ------------------------------------------------------------ */
+function card(c, concept) {
+  return `<article class="card" data-k="${concept.k}">
+    <header>
+      <div class="id">
+        <div class="head"><h3 title="${esc(c.title)}">${esc(c.title)}</h3><span class="chip ${c.kind}">${esc(c.status)}</span></div>
+        ${concept.identity(c)}
+      </div>
+    </header>
+    <section class="zone">
+      <p class="info">${esc(c.line)}</p>
+      <div class="bar"></div>
+      <div class="verbs">${c.verbs.map((v, i) => `<span class="verb ${i === 0 ? 'primary' : ''}">${esc(v)}</span>`).join('')}</div>
+    </section>
+  </article>`;
+}
+
+function measure(root) {
+  root.querySelectorAll('.mono-line, .mono-wrap').forEach(el => {
+    const over = el.classList.contains('mono-wrap') ? el.scrollHeight > el.clientHeight + 1 : el.scrollWidth > el.clientWidth + 1;
+    el.classList.toggle('over', over);
+  });
+}
+function rulerOf(article) {
+  const h = Math.round(article.querySelector('header').getBoundingClientRect().height);
+  const lines = [...article.querySelectorAll('.mono-line, .mono-wrap')];
+  const clipped = lines.map((el, i) => el.classList.contains('over') ? i + 1 : null).filter(Boolean);
+  const total = Math.round(article.getBoundingClientRect().height);
+  return `<span>header <b>${h}px</b></span><span>card ${total}px</span>` +
+    (clipped.length ? `<span class="clip">row ${clipped.join(', ')} clipped</span>` : `<span class="ok">nothing clipped</span>`);
+}
+
+function renderConcepts() {
+  const c = CASES.find(x => x.id === state.case);
+  const root = document.getElementById('concepts');
+  root.innerHTML = CONCEPTS.map(k => `<div class="concept ${k.lean ? 'lean' : ''}">
+      <h3 class="c"><span class="k">${k.k}</span>${esc(k.name)}${k.lean ? ' <span style="color:#f0dc7a;font-weight:500">· lean</span>' : ''}</h3>
+      ${card(c, k)}
+      <p class="ruler"></p>
+      <p class="cn">${k.note}</p>
+    </div>`).join('');
+  measure(root);
+  root.querySelectorAll('.concept').forEach(el => { el.querySelector('.ruler').innerHTML = rulerOf(el.querySelector('article')); });
+}
+function renderSheet() {
+  const k = CONCEPTS.find(x => x.k === state.sheet);
+  const root = document.getElementById('sheet');
+  root.innerHTML = CASES.map(c => `<div class="concept"><p class="lab">${esc(c.name)}</p>${card(c, k)}<p class="ruler"></p></div>`).join('');
+  measure(root);
+  root.querySelectorAll('.concept').forEach(el => { el.querySelector('.ruler').innerHTML = rulerOf(el.querySelector('article')); });
+}
+function render() { renderConcepts(); renderSheet(); }
+
+/* ---- controls -------------------------------------------------------- */
+const casesEl = document.getElementById('cases');
+casesEl.innerHTML = CASES.map(c => `<button data-case="${c.id}" class="${c.id === state.case ? 'active' : ''}">${esc(c.name)}</button>`).join('');
+casesEl.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  state.case = b.dataset.case;
+  casesEl.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+  renderConcepts();
+});
+const pick = document.getElementById('sheetpick');
+pick.innerHTML = CONCEPTS.map(k => `<button data-k="${k.k}" class="${k.k === state.sheet ? 'active' : ''}">${k.k}</button>`).join('');
+pick.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  state.sheet = b.dataset.k;
+  pick.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+  renderSheet();
+});
+const w = document.getElementById('w'), wv = document.getElementById('wv');
+w.addEventListener('input', () => { document.documentElement.style.setProperty('--w', w.value + 'px'); wv.textContent = w.value + 'px'; render(); });
+const toggle = (id, key, after) => {
+  const b = document.getElementById(id);
+  b.addEventListener('click', () => { state[key] = !state[key]; b.classList.toggle('active', state[key]); after(); });
+};
+toggle('b-clip', 'clip', () => { document.documentElement.classList.toggle('showclip', state.clip); });
+toggle('b-dedupe', 'dedupe', render);
+toggle('b-split', 'split', render);
+document.documentElement.classList.toggle('showclip', state.clip);
+
+// URL params for headless captures: ?case=long&w=320&sheet=B&split=1&dedupe=1
+const q = new URLSearchParams(location.search);
+if (q.get('case')) { state.case = q.get('case'); casesEl.querySelectorAll('button').forEach(x => x.classList.toggle('active', x.dataset.case === state.case)); }
+if (q.get('w')) { w.value = q.get('w'); document.documentElement.style.setProperty('--w', w.value + 'px'); wv.textContent = w.value + 'px'; }
+if (q.get('sheet')) { state.sheet = q.get('sheet'); pick.querySelectorAll('button').forEach(x => x.classList.toggle('active', x.dataset.k === state.sheet)); }
+if (q.get('split')) { state.split = true; document.getElementById('b-split').classList.add('active'); }
+if (q.get('dedupe')) { state.dedupe = true; document.getElementById('b-dedupe').classList.add('active'); }
+render();
+</script>
+</body>
+</html>
