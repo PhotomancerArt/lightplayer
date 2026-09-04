@@ -15,12 +15,37 @@
 //!    a fault read exactly like a heartbeat. Lines are typed
 //!    ([`DeviceTerminalKind`]) and coloured against the Aurora status
 //!    tokens (`kind_class`).
-//! 3. **Untyped, unfolded, unbounded.** A multi-hundred-character block-plan
-//!    dump used to just sit there and a repeating heartbeat scrolled the
-//!    panel forever. The model (P1) now caps at 200 lines, collapses
-//!    consecutive repeats into `repeats`, and counts what fell off
-//!    (`dropped`); this renderer folds anything still over 160 characters
-//!    behind a click-to-expand and shows the drop count as the first row.
+//! 3. **Untyped and unbounded.** A repeating heartbeat scrolled the panel
+//!    forever. The model (P1) now caps at 200 lines, collapses consecutive
+//!    repeats into `repeats`, and counts what fell off (`dropped`); this
+//!    renderer shows the drop count as the first row.
+//!
+//! # No fold: every line whole, wrapped (2026-09-04)
+//!
+//! P5 shipped the spike's long-line fold — anything over 160 characters
+//! rendered as a 120-character head plus a "… +N chars" click-to-expand —
+//! and the 2026-09-04 bench retired it. The one line that mattered that
+//! day, a flash that installed but could not stamp the board manifest, read
+//! `…transport error: Transp… +77 chars`. Yona reads this panel by
+//! selecting text and pressing Cmd+C, not by clicking rows or a copy
+//! button, and the fold broke exactly that: a selection over a folded row
+//! put "+77 chars" in the clipboard instead of the reason, and the per-row
+//! click handler meant a drag-select that ended on a long row toggled it.
+//!
+//! So there is no fold and no per-line length bound here at all. Rows wrap
+//! whole ([`ROW_BASE`]: `whitespace-pre-wrap` + `break-all`, hanging
+//! indent) inside a fixed-height scroll box ([`TERMINAL_CLASS`] +
+//! `height_class`), so a long line costs scroll distance and never card
+//! height — the device card's "board events never move it" rule
+//! (`docs/adr/2026-09-03-device-card-fixed-height-and-disconnect-disappears.md`)
+//! holds without a fold — and a selection copies exactly what the board
+//! said. The model bounds the COUNT (`TERMINAL_CAP` in `lpa-devices`), and
+//! every summary it mints (`wire_summary`, an outcome's `summary()`) is
+//! bounded by construction; a board printing a multi-kilobyte line with no
+//! newline is the one input that could fill the box, and if it ever
+//! happens the answer is a model-side bound on what the fold keeps, not a
+//! render-side fold that lies to the clipboard.
+//! See `docs/adr/2026-09-04-device-terminal-never-folds-a-line.md`.
 //!
 //! # One box, and flush inside it (D3; G1 2026-09-03)
 //!
@@ -74,7 +99,6 @@
 //! one here would mean showing a lie. Dropped; a follow-up would add a raw
 //! frame capture to the model first.
 
-use std::collections::HashSet;
 use std::rc::Rc;
 
 use dioxus::prelude::dioxus_core::use_after_render;
@@ -87,11 +111,6 @@ const PIN_THRESHOLD_PX: f64 = 4.0;
 /// at mount is not enough.
 const PIN_RETRY_DELAYS_MS: [u32; 4] = [0, 50, 250, 1000];
 
-/// A line renders folded once it is longer than this (spike parity).
-const FOLD_AT_CHARS: usize = 160;
-/// How much of a folded line shows ahead of the "… +N chars" control.
-const FOLD_HEAD_CHARS: usize = 120;
-
 /// The card's terminal zone. `height_class` is the panel's fixed height —
 /// `tw:h-40` on a device card, the shorter `tw:h-24` on a pending link,
 /// which has far less to say (`device_roster_card.rs`).
@@ -102,7 +121,6 @@ pub(crate) fn DeviceTerminal(
     dropped: u32,
     height_class: &'static str,
 ) -> Element {
-    let mut expanded = use_signal(HashSet::<usize>::new);
     let mut terminal_element = use_signal(|| None::<Rc<MountedData>>);
     let mut pinned = use_signal(|| true);
 
@@ -168,19 +186,7 @@ pub(crate) fn DeviceTerminal(
                             }
                         }
                         for (index , line) in lines.iter().enumerate() {
-                            TerminalRow {
-                                key: "{index}",
-                                line: line.clone(),
-                                is_expanded: expanded.read().contains(&index),
-                                on_toggle: move |()| {
-                                    expanded
-                                        .with_mut(|set| {
-                                            if !set.remove(&index) {
-                                                set.insert(index);
-                                            }
-                                        });
-                                },
-                            }
+                            TerminalRow { key: "{index}", line: line.clone() }
                         }
                     }
                 }
@@ -189,48 +195,24 @@ pub(crate) fn DeviceTerminal(
     }
 }
 
-/// One terminal row: kind tag/marker, text (folded past
-/// [`FOLD_AT_CHARS`]), and a `×N` repeat badge.
+/// One terminal row: kind tag/marker, the whole text (wrapped, never
+/// folded — see the module doc), and a `×N` repeat badge. Deliberately no
+/// click handler: a row that reacts to a click is a row a drag-select can
+/// trip over.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn TerminalRow(
-    line: DeviceTerminalLine,
-    is_expanded: bool,
-    on_toggle: EventHandler<()>,
-) -> Element {
-    let fold = fold_text(&line.text);
-    let is_long = fold.is_some();
-    let class = if is_long {
-        format!("{ROW_BASE} tw:cursor-pointer {}", kind_class(line.kind))
-    } else {
-        format!("{ROW_BASE} {}", kind_class(line.kind))
-    };
+fn TerminalRow(line: DeviceTerminalLine) -> Element {
+    let class = format!("{ROW_BASE} {}", kind_class(line.kind));
 
     rsx! {
-        p {
-            class,
-            onclick: move |_| {
-                if is_long {
-                    on_toggle.call(());
-                }
-            },
+        p { class,
             if matches!(line.kind, DeviceTerminalKind::Wire) {
                 span { class: "tw:mr-1 tw:text-dim-foreground", "wire" }
             }
             if matches!(line.kind, DeviceTerminalKind::Studio) {
                 span { class: "tw:opacity-70", "▸ " }
             }
-            if let Some((head, remaining)) = fold {
-                if is_expanded {
-                    "{line.text} "
-                    span { class: FOLD_CONTROL_CLASS, "less" }
-                } else {
-                    "{head}… "
-                    span { class: FOLD_CONTROL_CLASS, "+{remaining} chars" }
-                }
-            } else {
-                "{line.text}"
-            }
+            "{line.text}"
             if line.repeats > 1 {
                 span { class: REPEAT_BADGE_CLASS, "×{line.repeats}" }
             }
@@ -260,15 +242,15 @@ const TERMINAL_CLASS: &str = "tw:overflow-y-auto tw:overflow-x-hidden tw:bg-term
 
 const COPY_BUTTON_CLASS: &str = "tw:absolute tw:right-1 tw:top-1 tw:z-10 tw:h-5 tw:cursor-pointer tw:appearance-none tw:rounded tw:border tw:border-border-muted tw:bg-terminal/85 tw:px-1.5 tw:text-[10px] tw:leading-5 tw:text-subtle-foreground tw:transition-colors tw:hover:text-strong-foreground";
 
-/// Hanging indent (`pl-2.5` + `-10px` text-indent, spike parity) so a
-/// wrapped long line's continuation lines sit flush under the first
-/// character rather than under the kind marker.
+/// Every row wraps whole: `whitespace-pre-wrap` + `break-all` is what lets
+/// a 200-character reason (or a 400-character block-plan dump) read in
+/// full and copy in full, and the hanging indent (`pl-2.5` + `-10px`
+/// text-indent, spike parity) sits a wrapped line's continuation rows flush
+/// under its first character rather than under the kind marker.
 const ROW_BASE: &str =
     "tw:m-0 tw:whitespace-pre-wrap tw:break-all tw:pl-2.5 tw:[text-indent:-10px]";
 
 const DROPPED_ROW_CLASS: &str = "tw:m-0 tw:mb-1 tw:pl-2.5 tw:[text-indent:-10px] tw:border-b tw:border-dashed tw:border-border-muted tw:pb-1 tw:italic tw:text-dim-foreground";
-
-const FOLD_CONTROL_CLASS: &str = "tw:text-subtle-foreground tw:underline tw:decoration-dotted";
 
 const REPEAT_BADGE_CLASS: &str = "tw:ml-1.5 tw:inline-block tw:rounded tw:border tw:border-border-muted tw:px-1 tw:align-baseline tw:text-[9.5px] tw:text-dim-foreground";
 
@@ -287,21 +269,11 @@ fn kind_class(kind: DeviceTerminalKind) -> &'static str {
     }
 }
 
-/// Split `text` into a fold head plus the remaining character count, when
-/// it is long enough to fold. `None` means render it whole.
-fn fold_text(text: &str) -> Option<(String, usize)> {
-    let char_count = text.chars().count();
-    if char_count <= FOLD_AT_CHARS {
-        return None;
-    }
-    let head: String = text.chars().take(FOLD_HEAD_CHARS).collect();
-    Some((head, char_count - FOLD_HEAD_CHARS))
-}
-
 /// The whole tail as plain text for the copy button: one line per row,
-/// `×N` appended for a repeat, folded lines copied in full regardless of
-/// their expand state. The dropped-count notice is UI chrome, not a line
-/// the board or Studio said, so it is not included.
+/// every line whole, `×N` appended for a repeat. The dropped-count notice
+/// is UI chrome, not a line the board or Studio said, so it is not
+/// included. (Selecting the panel and pressing Cmd+C copies the same text,
+/// which is the point of never folding a row.)
 fn copy_tail(lines: &[DeviceTerminalLine]) -> String {
     lines
         .iter()
@@ -360,28 +332,36 @@ mod tests {
         }
     }
 
+    /// No fold (2026-09-04): a long line wraps whole inside the scroll box,
+    /// so a selection copies what the board said and the card's height rule
+    /// is carried by the box's fixed height, not by clipping rows. Guards
+    /// the two classes that decision lives in: rows must wrap (and never
+    /// clip, ellipsise, or line-clamp), and the box must scroll.
     #[test]
-    fn fold_text_leaves_short_lines_alone() {
-        assert_eq!(fold_text("hello"), None);
-        assert_eq!(fold_text(&"x".repeat(160)), None);
+    fn rows_wrap_whole_inside_a_scrolling_box() {
+        for wrap in ["tw:whitespace-pre-wrap", "tw:break-all"] {
+            assert!(ROW_BASE.contains(wrap), "{ROW_BASE}");
+        }
+        for clip in [
+            "truncate",
+            "line-clamp",
+            "overflow-hidden",
+            "text-ellipsis",
+            "nowrap",
+        ] {
+            assert!(!ROW_BASE.contains(clip), "{ROW_BASE} clips with {clip}");
+        }
+        assert!(
+            TERMINAL_CLASS.contains("tw:overflow-y-auto"),
+            "{TERMINAL_CLASS}"
+        );
     }
 
     #[test]
-    fn fold_text_splits_long_lines_at_the_head_length() {
-        let text = "x".repeat(161);
-        let (head, remaining) = fold_text(&text).expect("161 chars folds");
-        assert_eq!(head.chars().count(), FOLD_HEAD_CHARS);
-        assert_eq!(remaining, 161 - FOLD_HEAD_CHARS);
-    }
-
-    #[test]
-    fn fold_text_counts_chars_not_bytes() {
-        // Multi-byte characters must not panic a byte-offset slice and must
-        // count as one character each.
-        let text = "é".repeat(200);
-        let (head, remaining) = fold_text(&text).expect("200 chars folds");
-        assert_eq!(head.chars().count(), FOLD_HEAD_CHARS);
-        assert_eq!(remaining, 200 - FOLD_HEAD_CHARS);
+    fn copy_tail_keeps_a_long_line_whole() {
+        let long = "x".repeat(400);
+        let lines = vec![line(DeviceTerminalKind::Failure, &long, 1)];
+        assert_eq!(copy_tail(&lines), long);
     }
 
     #[test]
