@@ -25,12 +25,21 @@
 //! later than this core boots — so [`run`] idles behind the doorbell until
 //! [`publish_slots`] rings it.
 //!
-//! Everything on this path is `#[esp_hal::ram]`: the PRO core's flash
-//! traffic stalls a core-1 flash fetch, and while a *stalled pusher* is only
-//! a delayed wave (thread context has no deadline), the idle/wake machinery
-//! is cheap to keep resident. `with_app_core_stalled` (flash writes) freezes
-//! the pusher mid-instruction and resumes it in place; no protocol state
-//! straddles the stall in a way a resume cannot finish.
+//! Everything in THIS module is `#[esp_hal::ram]` — the doorbell, the wake
+//! flag, the idle loop, the clock and `run`'s loop — because the idle/wake
+//! machinery is what the refill trampoline touches and it is cheap to keep
+//! resident. The work the loop drives is NOT: `Pusher::dispose_through` /
+//! `release_wire_slot`, `Ws281xDriver::start_frame`, `ChannelState::stats`
+//! and the `v3_rmt` pad ops run from flash (~1.3 KB, measured 2026-09-05
+//! with `scripts/fw-iram-flash-refs.py`; see
+//! docs/debt/classic-iram-handlers-reach-flash.md). That is accepted, not
+//! an oversight: the PRO core's flash traffic can stall a core-1 flash
+//! fetch, but a *stalled pusher* is only a delayed wave (thread context has
+//! no deadline), and the APP core's private cache keeps that small working
+//! set resident. `with_app_core_stalled` (flash writes) freezes the pusher
+//! mid-instruction and resumes it in place — a flash fetch from this core
+//! can never coincide with a write — and no protocol state straddles the
+//! stall in a way a resume cannot finish.
 
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use core::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize};
