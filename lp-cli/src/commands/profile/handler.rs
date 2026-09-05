@@ -33,6 +33,9 @@ pub fn handle_profile(args: ProfileArgs) -> Result<()> {
 
 async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
     validate_collectors(&args.collect)?;
+    // Parsed up front: a typo in `--cf` should not cost a full emulator run
+    // before it is reported.
+    args.counterfactuals()?;
 
     let dir = std::env::current_dir()
         .context("Failed to get current directory")?
@@ -145,8 +148,15 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
 
     let client = TokioLpClient::new(Box::new(transport));
 
-    let workload_result =
-        workload::run_workload(&client, &emulator_arc, &dir, &project_uid, args.max_cycles).await;
+    let workload_result = workload::run_workload(
+        &client,
+        &emulator_arc,
+        &dir,
+        &project_uid,
+        args.max_cycles,
+        args.workload,
+    )
+    .await;
 
     if let Err(e) = &workload_result {
         eprintln!("Workload stopped early: {e:#}");
@@ -207,6 +217,8 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
             serde_json::to_string_pretty(&budget_json).context("serialize budget.json")?,
         )
         .with_context(|| format!("write {}", budget_path.display()))?;
+
+        write_fragmentation(&args, &trace_dir, &trace_path, &meta_path)?;
     }
 
     if let Some(cpu) = session
@@ -251,6 +263,75 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
     );
 
     println!("{}", trace_dir.display());
+
+    Ok(())
+}
+
+/// Replay the heap trace on the modelled layout and emit both halves of the
+/// fragmentation output: `frag.json` next to `budget.json`, and a
+/// `Heap Fragmentation` section appended to the session's `report.txt`.
+///
+/// This runs in the CLI rather than in the `AllocCollector`'s own report
+/// section because the layout, region sizes, and hole depth are command-line
+/// choices the collector knows nothing about.
+fn write_fragmentation(
+    args: &ProfileArgs,
+    trace_dir: &Path,
+    trace_path: &Path,
+    meta_path: &Path,
+) -> Result<()> {
+    use lp_emu_core::profile::frag::{
+        FragOptions, analyze_counterfactuals, analyze_fragmentation, render_counterfactual_section,
+        render_fragmentation_section,
+    };
+
+    let options = FragOptions {
+        layout: args.frag_layout(),
+        top_holes: args.frag_top,
+        discount_sites: args.frag_discount_site.clone(),
+    };
+    let analysis = analyze_fragmentation(trace_path, meta_path, &options)
+        .context("replay heap trace for fragmentation analysis")?;
+
+    let frag_path = trace_dir.join("frag.json");
+    std::fs::write(
+        &frag_path,
+        serde_json::to_string_pretty(&analysis).context("serialize frag.json")?,
+    )
+    .with_context(|| format!("write {}", frag_path.display()))?;
+
+    let report_path = trace_dir.join("report.txt");
+    let mut report = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&report_path)
+        .with_context(|| {
+            format!(
+                "open {} for the fragmentation section",
+                report_path.display()
+            )
+        })?;
+    use std::io::Write as _;
+    writeln!(report, "=== Heap Fragmentation ===")?;
+    write!(report, "{}", render_fragmentation_section(&analysis))?;
+
+    let specs = args.counterfactuals()?;
+    if !specs.is_empty() {
+        let counterfactuals = analyze_counterfactuals(trace_path, meta_path, &options, &specs)
+            .context("replay heap trace for the counterfactual table")?;
+        let cf_path = trace_dir.join("frag-cf.json");
+        std::fs::write(
+            &cf_path,
+            serde_json::to_string_pretty(&counterfactuals).context("serialize frag-cf.json")?,
+        )
+        .with_context(|| format!("write {}", cf_path.display()))?;
+        writeln!(report)?;
+        writeln!(report, "=== Heap Counterfactuals ===")?;
+        write!(
+            report,
+            "{}",
+            render_counterfactual_section(&counterfactuals)
+        )?;
+    }
 
     Ok(())
 }

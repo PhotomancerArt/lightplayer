@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 pub mod alloc;
 pub mod cpu;
 pub mod events;
+pub mod frag;
 pub mod jit_symbols;
 pub mod perf_event;
 
@@ -381,6 +382,24 @@ impl ProfileSession {
 
     pub fn collectors(&self) -> &[Box<dyn Collector>] {
         &self.collectors
+    }
+
+    /// True when an active, enabled `AllocCollector` wants the guest's exact
+    /// free-list shape after the marker syscall just dispatched to
+    /// [`Self::on_perf_event`]. The RV32 run loop's `SYSCALL_PERF_EVENT`
+    /// handler sets the syscall's return register from this so the guest
+    /// perf sink knows whether to run its (relatively expensive) free-list
+    /// walk — cpu-only profiles and gates before the collector enables pay
+    /// nothing.
+    ///
+    /// `Collector` has no dedicated "wants shape" method, so this downcasts
+    /// each collector via [`Collector::as_any`] looking for an
+    /// `alloc::AllocCollector`.
+    pub fn wants_free_list_shape(&self) -> bool {
+        self.collectors
+            .iter()
+            .filter_map(|c| c.as_any().downcast_ref::<alloc::AllocCollector>())
+            .any(alloc::AllocCollector::is_enabled)
     }
 
     pub fn finish(&mut self) -> std::io::Result<Vec<(String, u64)>> {

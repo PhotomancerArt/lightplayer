@@ -8,16 +8,22 @@ pub fn emit(name: &'static str, kind: PerfEventKind) {
     let ptr = name.as_ptr() as i32;
     let len = name.len() as i32;
     let kind_u = kind as i32;
+    let result: i32;
     unsafe {
         core::arch::asm!(
             "ecall",
             in("x17") SYSCALL_PERF_EVENT,
-            in("x10") ptr,
+            inlateout("x10") ptr => result,
             in("x11") len,
             in("x12") kind_u,
             // x13 reserved for future arg payload
             options(nostack, preserves_flags),
         );
+    }
+    // 1 = an active AllocCollector wants the guest's exact free-list shape
+    // after this marker; see `lp_emu_core::profile::ProfileSession::wants_free_list_shape`.
+    if result == 1 {
+        crate::call_marker_shape_hook();
     }
 }
 

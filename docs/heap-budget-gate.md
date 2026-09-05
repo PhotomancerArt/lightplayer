@@ -17,7 +17,7 @@ landed.
 Two profile modes per project:
 
 - **`startup`** — project load through the first *compiled* frame. Every
-  perf-event window in the trace is recorded: `project-load`, `shader-compile`,
+  perf-event window in the trace is recorded: `server-boot`, `project-load`, `shader-compile`,
   `shader-link`, `frame`. Its `frame` window brackets frames 1–2, and frame 2
   contains the shader compile (compiles are deferred one frame; see
   `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`), so this
@@ -27,7 +27,7 @@ Two profile modes per project:
   capture and would record zeros). This is the **steady-state** figure and the
   home of the per-frame allocation ratchet.
 
-Five figures per window:
+Seven figures per window:
 
 - **transient** — peak live bytes above the window's live-at-open baseline,
   maximised across openings. The cost of doing whatever the window does.
@@ -43,6 +43,82 @@ Five figures per window:
   same 25 KB every time costs nothing in `retained` and everything here. On a
   part with a linked-list allocator, churn is cycles (malloc + free were 19%
   of Meteor's frame on 2026-09-02) and fragmentation pressure.
+- **largest_free_at_close** — the guest's largest free-list hole at the
+  window's `"E"` marker, MIN across openings (the worst close). Unlike every
+  other figure here, **shrinking** is the failure direction: this ratchets
+  against the block getting *smaller*, so `check` fails when the measurement
+  is below the record, not above it. `largest_alloc` above is a residency
+  proxy for contiguity failure; this is the guest's own answer to "how big a
+  block can this window's close still serve", read exactly rather than
+  inferred from request sizes.
+- **holes_at_close** — free-list hole count at the same close, MAX across
+  openings (the worst close). Keeps the normal grew-beyond-record direction:
+  more holes is worse.
+
+### Guest walk = truth
+
+Both figures come from the guest's own free list, read exactly rather than
+modeled: after a perf-event marker, when an `AllocCollector` is active and
+enabled, the host's `SYSCALL_PERF_EVENT` return value tells the guest to run
+a walk (`lp-riscv-emu-guest::allocator`, ported from
+`fw-esp32v3::recovery::panic_path::free_list_shape`) — take the smallest
+block `linked_list_allocator` will hand out, over and over, until it
+refuses; first-fit over an address-sorted list returns them ascending, so a
+run of blocks with no gap is exactly one hole. Every unit taken is linked
+into an intrusive list through its own (otherwise unused) storage — no side
+array, so unlike the panic-path probe this walk does not cap the number of
+holes it will report — then every block goes back.
+
+Each run is one `heap-trace.jsonl` row (`"t":"H"`, `ptr`/`sz` = the hole's
+start and length), following the `"t":"P"` marker it describes; the walk
+ends with one `"t":"F"` row (`holes`, `largest`, `free` = the walk's total).
+`F.holes` always equals the count of `"t":"H"` rows since the preceding
+`"t":"P"` row — that invariant is how a reader checks it received every run.
+Tracing is suppressed for the walk's own alloc/dealloc traffic (an
+`AtomicBool` the `TrackingAllocator` checks), so the walk does not pollute
+the very trace it is annotating, and it never fires unless an
+`AllocCollector` asked for it — a cpu-only profile, or any marker before the
+collector enables, costs nothing extra. `largest_free_at_close`/
+`holes_at_close` are `None` (omitted from the JSON, not `0`) on a trace with
+no `"t":"H"`/`"t":"F"` rows at all — an older `lp-cli`, or a run with no
+alloc collector — and `heap-budget-check.sh` reports that the same way it
+reports any other figure the measurement dropped: `"figure missing from
+measurement (older lp-cli?)"`.
+
+⚠️ **Cost.** The walk allocates the whole free heap in 8 B units — up to
+~40 K alloc+free pairs per marker at 320 K, roughly a dozen markers per
+startup profile. Measured 2026-09-04 on `examples/zook-dome --mode
+startup`: 6.6 s wall without the walk (no alloc collector), 8.9 s with it —
+about +35%, all of it inside the already-`--collect alloc` path (a cpu-only
+profile is unaffected). Not sampled down: a fragmentation figure that skips
+holes to save time is a figure that can miss the one hole a later window
+needed.
+
+**`server-boot`** brackets fw-emu's boot from recovery init through server
+and transport construction, before the first tick (`lp-fw/fw-emu/src/main.rs`).
+Its `retained` figure is what the server holds before any project exists —
+the pre-project residency that `memory.ld`'s "~52 KB harness baseline" note
+could only estimate. Its `largest_alloc` is the permissive 256-resource
+hardware manifest's `Vec<HwResource>` (36,864 B on 2026-09-04). Collection is
+already enabled at `profile:start`, so no gate change was needed.
+
+⚠️ **The free-list figures are exact, so anything host-ordered shows up in
+them.** `transient`/`retained` survive a reordering of the same allocations;
+`largest_free_at_close` and `holes_at_close` do not. The first CI run of the
+figures differed from the Mac baseline by 1–7 holes because the profile
+workload deployed project files in `read_dir` order (sorted on APFS, hashed
+on ext4). The deploy walk now sorts (`collect_project_deploy_files`). If the
+figures ever differ between hosts again, look for another host-ordered
+input reaching the guest (directory walks, HashMap iteration over host-side
+data, wall-clock time — the profile already runs the guest on
+`TimeMode::Simulated(0)`), not for tolerance to add.
+
+⚠️ **A marker name the host does not know is dropped silently.** The
+emulator run loop interns guest perf-event names against
+`lp_emu_core::profile::perf_event::KNOWN_EVENT_NAMES`; a new
+`lp_perf::EVENT_*` constant that is not added there records nothing and warns
+only in the emulator log. `server-boot` was invisible for exactly this reason
+on its first run.
 
 ⚠️ **Per-LED cost lands in the `frame` window, not `project-load`.**
 `direct_points`, the graphics sample buffers and `DisplayPipeline` are all
@@ -56,7 +132,7 @@ allocated at tick/output-open time, so a per-LED regression shows up as
   "projects": {
     "examples/basic": {
       "modes": {
-        "startup":       { "windows": { "project-load": {…}, "shader-compile": {…}, "shader-link": {…}, "frame": {…} } },
+        "startup":       { "windows": { "server-boot": {…}, "project-load": {…}, "shader-compile": {…}, "shader-link": {…}, "frame": {…} } },
         "steady-render": { "windows": { "frame": { "transient": …, "retained": …, "largest_alloc": …, "alloc_count": …, "alloc_bytes": … } } }
       }
     }
@@ -67,6 +143,8 @@ allocated at tick/output-open time, so a per-LED regression shows up as
 `check` compares every figure the record holds, generically: a figure added to
 the record ratchets from then on. A recorded window missing from the
 measurement fails (the instrument or the instrumented path broke).
+`largest_free_at_close` is the one figure with an inverted rule — see
+"Ratchet, not ceiling" below.
 
 To add a project, add its key under `projects` (an empty object is enough)
 and run `just heap-budget-baseline`; the baseline reads the project list from
@@ -92,7 +170,12 @@ allocate at that point (a 47,600 B ask with ~18 KB free).
 
 The record holds **today's measured values** — descriptive ("what this
 project costs today"), not prescriptive ("what the dome may use"). Any growth
-fails; an intentional increase updates the record in the same PR:
+fails, with one figure inverted: `largest_free_at_close` is a bigger-is-better
+figure (the guest's own largest free block at a window's close), so `check`
+fails when it **shrinks** below the record instead of when it grows past it —
+"improved" for every other figure means "went down", for this one it means
+"went up". An intentional change to any figure updates the record in the
+same PR:
 
 ```bash
 just heap-budget-baseline
@@ -123,10 +206,14 @@ emulator vs 53,052 B on the classic — within 2.6%.
 A harness that overstates its fidelity is worse than none. This gate does
 **not** model:
 
-- **Fragmentation.** The figures are live-byte accounting; the emulator's
-  allocator differs from `esp_alloc`, so arena layout and fragmentation
-  behaviour differ. A workload can pass this gate and still fail on device
-  because the arena is fragmented.
+- **Fragmentation, beyond each window's close.** Five of the seven figures
+  are live-byte accounting: they say how many bytes were live, never whether
+  they were contiguous. The other two do price contiguity, but only at each
+  window's `"E"` marker: `largest_free_at_close` and `holes_at_close` ratchet
+  the guest's own free-list shape at that instant, and nothing between two
+  markers is ratcheted at all. A workload can hold both figures and still
+  fail on device mid-window. The fragmentation and counterfactual sections
+  below are the tools for that question; they are reports, not ratchets.
 - **Two-region arenas / contiguity.** The guest heap is a single region. The
   classic's post-#288 arena is two regions, where a large allocation can fail
   while total free is ample. The `largest_alloc` ratchet is the proxy: it
@@ -146,10 +233,13 @@ A harness that overstates its fidelity is worse than none. This gate does
   256-resource board profile; the classic's manifest has 34. Every port
   open re-enumerates the manifest (`endpoints()`), so the first frame's
   *transient* carries ~30 KB of open-path churn (a `Vec<HwEndpoint>` grown
-  by push, one status string per resource) and a 36,864 B `Vec<HwResource>`
-  sits live for the whole run — neither exists at that size on a device.
-  The `frame.retained` and per-lamp figures transfer; the first-frame
-  `frame.transient` overstates the device.
+  by push to a 20,480 B final doubling, one status string per resource) and
+  a 36,864 B `Vec<HwResource>` sits live for the whole run — neither exists
+  at that size on a device. The `frame.retained` and per-lamp figures
+  transfer; the first-frame `frame.transient` overstates the device. The
+  fragmentation section can subtract both — see "Discounting emulator-only
+  artifacts" below — but this ratchet cannot, so its `frame.transient` and
+  `frame.largest_alloc` (20,480 B) still carry them.
 - **Stack usage.** Neither RV32 nor Xtensa stack consumption is modeled at
   all.
 - **The JIT code region.** The emulator covers the heap;
@@ -159,6 +249,157 @@ A harness that overstates its fidelity is worse than none. This gate does
 - **Xtensa anything.** The guest is RV32. Per-LED and compile-transient
   deltas have transferred well to the classic in practice (2.6% above), but
   that is measured correspondence, not emulation.
+
+## The fragmentation section
+
+`lp-cli profile --collect alloc` also replays the recorded trace on a
+modelled heap layout and appends a `Heap Fragmentation` section to
+`report.txt`, with the full per-marker detail in `frag.json` beside
+`budget.json`. It answers the question the ratchet cannot: at each perf
+marker, how big is the largest free block per region, how many holes are
+there and how are they sized, and which live blocks are holding the biggest
+holes open — attributed to the call site that allocated them.
+
+```bash
+# the classic's two regions (the default), 10 holes attributed per marker
+cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup
+
+# the guest's own single region — the only layout the cross-check means anything on
+cargo run -p lp-cli -- profile examples/basic --collect alloc --mode startup \
+    --frag-layout guest
+
+# an arbitrary region list, in registration order
+cargo run -p lp-cli -- profile examples/basic --collect alloc \
+    --frag-regions 112640,73728 --frag-top 20
+```
+
+The replay models `linked_list_allocator` at the target's 32-bit block
+geometry (`lp-emu-core/src/profile/frag/first_fit_heap.rs`) rather than
+calling the crate, which on a 64-bit host has a 16 B minimum block instead
+of 8 B; a test checks the model against the real crate at host geometry, so
+it is the same allocator, only at the right width. Allocations the modelled
+layout cannot serve although the guest's larger heap did are listed as
+`would-OOM` and skipped — every figure after the first one is optimistic.
+
+**Alignment is recorded, and the replay is exact.** The alloc trace carries
+each request's `Layout::align` alongside its size (`"al":N` on `A` and `R`
+rows, omitted when it is 4 B, which readers default to). It has to: the
+allocator front-pads a hole whose start is not already aligned for the
+request, so a replay that guessed 4 B diverged from the guest's own layout
+the first time an 8- or 16-aligned request landed on a 4-mod-8 boundary —
+that guess cost hole count ±8 and largest free block ±320 B on
+`examples/basic`. With the real alignment the replay reproduces the guest's
+free-list walk **exactly** — same hole count, same largest block, same free
+total — at every marker of `examples/basic` and `examples/zook-dome` in
+`startup` mode. Run with `--frag-layout guest` to check any trace: the
+cross-check table prints the comparison per marker, and its verdict column
+is the thing to look at after touching the replay. A trace recorded before
+the field existed reads as all-4 B alignment; the report header says so.
+
+### Discounting emulator-only artifacts
+
+`fw-emu` runs the permissive 256-resource board profile and the classic's
+manifest has 34, so two call sites allocate amounts no firmware ever will
+and both dominate a classic-layout replay:
+
+| pattern | what it is | peak live (zook-dome) |
+|---|---|---|
+| `VirtualWs281xDriver::endpoints` | the `Vec<HwEndpoint>` rebuilt on every port open, grown by push to 256 × 80 B = 20,480 B | 55,784 B |
+| `HwResource` | the manifest's `Vec<HwResource>`, grown to 36,864 B and resident for the whole run | 55,296 B |
+
+`--frag-discount-site <substr>` (repeatable) drops every allocation whose
+symbolized call site — or any frame of its stack, since all `Vec` growth
+reports the same site — contains the substring, along with its frees and
+reallocs:
+
+```bash
+cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup \
+    --frag-discount-site VirtualWs281xDriver::endpoints \
+    --frag-discount-site HwResource
+```
+
+Discounting both takes `examples/zook-dome` on the classic layout from 2,452
+`would-OOM` allocations to none, and its final largest free block from
+7,328 B to 42,428 B. The report header names every active discount and the
+blocks, bytes and peak-live it removed, and says "discounts: none" when
+there are none — a discounted table can be read for what it is, and a raw
+one cannot be mistaken for a discounted one. Note that `--frag-discount-site
+HwResource` also removes the real 34-resource manifest a device would
+allocate; that is a few hundred bytes against the 36,864 B the fixture board
+costs.
+
+## The counterfactual table
+
+The fragmentation section says where the free space went. `--cf` says what
+recovering it would be worth: the same recorded trace, replayed with one lever
+already pulled, tabulated against a baseline replay of the untransformed
+trace. Nothing here implements a lever — the point is to price one before
+anyone writes it.
+
+```bash
+scripts/frag-table.sh            # the three reference projects, every lever
+scripts/frag-table.sh examples/basic   # or a project list of your own
+```
+
+The script runs `startup` mode with the two discounts above and every
+counterfactual, and prints each run's `Heap Counterfactuals` section; the same
+data lands in `frag-cf.json` beside `frag.json`. To run one by hand:
+
+```bash
+cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup \
+    --workload studio-sync \
+    --frag-discount-site VirtualWs281xDriver::endpoints \
+    --frag-discount-site HwResource \
+    --cf "scratch=shader-compile,project-read" \
+    --cf "residents-first=project-load,frame" \
+    --cf tlsf \
+    --cf "scratch=shader-compile,project-read+residents-first=project-load,frame"
+```
+
+Each `--cf` is one row. Terms join with `+` to combine levers in a single row.
+
+The table this machinery was built for, with every lever ranked by the
+contiguous bytes it recovers and the approximation each number carries, is
+`docs/reports/2026-09-04-classic-heap-fragmentation.md`.
+
+| term | what it does to the trace | approximation it states |
+|---|---|---|
+| `scratch=<windows>` | every block born *and* freed inside one opening of a named window is removed; one allocation of that opening's peak live bytes takes their place at its `B`, freed at its `E`. Reallocs are followed as free-then-alloc | a real arena still costs its peak; growth strategy and alignment slack are not modeled |
+| `residents-first=<windows>` | every block born inside an opening and still live at its `E` moves to the opening's `B`, in original order, ahead of the churn; a realloc chain collapses to one allocation of its final size | assumes sizes are knowable at window open (exact `with_capacity`) |
+| `tlsf` | the trace is replayed unchanged through `rlsf` — the real crate, at the version and generic instantiation (`Tlsf<'static, usize, usize, 32, 32>`) esp-alloc 0.10 uses for its `TLSF` heap algorithm, pools inserted with `insert_free_block_ptr` the same way | host headers are 16 B, the device's 8 B; the FL/SL bitmaps are static and not in the pool |
+
+Columns are the markers that matter: `project-load E`, `shader-compile E`,
+`project-read E` when the trace has one, and the first and last `frame E`. The
+row's Δ is its largest free block at the last column, minus the baseline's.
+
+⚠️ **The TLSF row is bound by host geometry, not by TLSF.** `rlsf` derives its
+block geometry from `size_of::<usize>()` — a 32 B granule and a 16 B header on
+this host, 16 B and 8 B on the 32-bit target — and its generic parameters
+(`FLBitmap`, `SLBitmap`, `FLLEN`, `SLLEN`) only pick the bitmap words, so there
+is no 32-bit-width instantiation to ask for the way
+`first_fit_heap.rs` models one for `linked_list_allocator`. Every TLSF row
+therefore prints the surcharge that costs it — tens of kilobytes of live set on
+these workloads — and should be read as a pessimistic bound, never as the
+device's number. Getting the device's number needs either a width-parametrized
+TLSF model or the silicon arm (P5).
+
+### The `project-read` window and `--workload studio-sync`
+
+`project-read` opens on an accepted `ProjectRead` — past the headroom gate and
+past project lookup — and closes when its event stream finishes or fails
+(`lpa-server/src/server.rs`, markers only; on device `lp_perf` is the no-op
+sink). The default profile workload never issues a read, so
+`--workload studio-sync` sends Studio's staged initial sync as soon as the
+project is loaded: the skeleton read, then per-node slot detail paged 16 ids at
+a time with `since: None`, then one probe per read.
+
+⚠️ `--mode startup` stops at the frame that contained the first shader
+compile, and those staged reads are served in the same ticks — so what lands in
+a startup trace is the skeleton read, and the later pages are cut off by the
+gate (the run says so on stderr). That is the shape `frag-table.sh` measures.
+The ratchet's own runs use the default `frames` workload and so carry no
+`project-read` window; recording one would mean the gate adopting the
+`studio-sync` workload, which moves every other recorded figure with it.
 
 ## CI
 

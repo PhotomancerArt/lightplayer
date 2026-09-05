@@ -68,6 +68,17 @@ burns a hardware session and blocks whatever gate the board was needed for.
   pass), so the *churn* side of a per-frame optimisation is priced too. Partial
   exit: the number is produced by CI and moves when a cache is added; it is
   the C6 configuration, not the classic's arena.
+- **2026-09-04** — the ratchet now prices *fragmentation* as well as bytes:
+  `largest_free_at_close` (the guest's own largest free-list hole at each
+  window's close, ratcheted against **shrinking**) and `holes_at_close`
+  (ratcheted against growing), read from an exact free-list walk rather than
+  inferred. A cache that keeps its bytes flat but leaves the heap in more
+  pieces now fails the gate. Beside it, `lp-cli profile` replays the trace on
+  the classic's two-region layout and prices candidate fixes in contiguous
+  bytes (`scripts/frag-table.sh`,
+  `docs/reports/2026-09-04-classic-heap-fragmentation.md`) — still the
+  emulator's configuration, not the classic's arena, so the exit criteria
+  below stand.
 
 **Exit criteria** — a per-project heap number for a known project on the
 classic (or a faithful emulation of its arena) is produced by something

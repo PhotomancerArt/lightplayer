@@ -708,14 +708,23 @@ impl LpServer {
                                 msg_id,
                                 sink_frame_budget,
                             );
+                            // The read window opens on an ACCEPTED read — past
+                            // the headroom refusal and past project lookup —
+                            // and closes once the stream has finished or
+                            // failed, so what it measures is the assembly
+                            // cost, never a rejection. Markers only: on device
+                            // `lp_perf` compiles to the no-op sink.
+                            lp_perf::emit_begin!(lp_perf::EVENT_PROJECT_READ);
                             let stream_result =
                                 source.stream_project_read_events(request, &mut sink).await;
-                            match stream_result {
-                                Ok(()) => {
-                                    sink.finish()
-                                        .await
-                                        .map_err(|error| ServerError::Core(format!("{error}")))?;
-                                }
+                            // Every arm below records its outcome and falls
+                            // through to one `emit_end!`: an early `?` here
+                            // would leave the window open forever.
+                            let finish_result = match stream_result {
+                                Ok(()) => sink
+                                    .finish()
+                                    .await
+                                    .map_err(|error| ServerError::Core(format!("{error}"))),
                                 Err(error) => {
                                     // Signalable failures (event too large for an
                                     // empty frame, other serialization/budget
@@ -734,13 +743,16 @@ impl LpServer {
                                                      {send_error}"
                                                 );
                                             }
+                                            Ok(())
                                         }
                                         ProjectReadStreamOutcome::Fatal(server_error) => {
-                                            return Err(server_error);
+                                            Err(server_error)
                                         }
                                     }
                                 }
-                            }
+                            };
+                            lp_perf::emit_end!(lp_perf::EVENT_PROJECT_READ);
+                            finish_result?;
                             response_count += 1;
                         }
                         msg => {

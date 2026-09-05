@@ -1,0 +1,292 @@
+{
+ "schema_version": 1,
+ "timestamp": "2026-09-04T22:21:28.925295+00:00",
+ "project": "Basic",
+ "workload": "examples/basic",
+ "clock_source": "emu_estimated",
+ "mode": "startup",
+ "cycle_model": "esp32c6",
+ "max_cycles": 200000000,
+ "cycles_used": 193701099,
+ "terminated_by": "profile_stop",
+ "collectors": {
+  "alloc": {
+   "heap_size": 327680,
+   "heap_start": 2147483648
+  }
+ },
+ "note": "trimmed P3 cross-check fixture: symbols reduced to those the retained rows resolve to",
+ "symbols": [
+  {
+   "addr": 34,
+   "name": "_RINvNtCsbgr8V9fYQSs_4core3ptr13drop_in_placeINtNtCs6Jb0PNN2XwX_9lp_shader11compile_job18ShaderCompileStateNtNtNtCscmCShiqnN4P_11lpvm_native6rt_jit6engine15NativeJitEngineEECsbSzErDlYO6r_6fw_emu",
+   "size": 538
+  },
+  {
+   "addr": 33954,
+   "name": "_RINvNvMs2_NtCsdeuDu0AakVC_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECsbSzErDlYO6r_6fw_emu",
+   "size": 120
+  },
+  {
+   "addr": 88120,
+   "name": "_RINvXNvNtNtCseYJ2Ua2Wm1c_8lpc_wire6server6fs_apis_1__NtB5_9FsRequestNtNtCsiE2ORQtrChs_10serde_core2de11Deserialize11deserializeQINtNtCsbtP8FF09ckR_10serde_json2de12DeserializerNtNtB27_4read7StrReadEECsbSzErDlYO6r_6fw_emu",
+   "size": 15310
+  },
+  {
+   "addr": 103430,
+   "name": "_RINvXNvNtNtCseYJ2Ua2Wm1c_8lpc_wire7message6clients1_1__NtB5_13ClientRequestNtNtCsiE2ORQtrChs_10serde_core2de11Deserialize11deserializeQINtNtCsbtP8FF09ckR_10serde_json2de12DeserializerNtNtB2e_4read7StrReadEECsbSzErDlYO6r_6fw_emu",
+   "size": 878
+  },
+  {
+   "addr": 196474,
+   "name": "_RNvMs3_NtCsdeuDu0AakVC_5alloc7raw_vecINtB5_6RawVecNtNtNtCseYJ2Ua2Wm1c_8lpc_wire7message8envelope7MessageE8grow_oneCsbSzErDlYO6r_6fw_emu",
+   "size": 94
+  },
+  {
+   "addr": 197126,
+   "name": "_RNvMs4_NtCsdeuDu0AakVC_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsbSzErDlYO6r_6fw_emu",
+   "size": 344
+  },
+  {
+   "addr": 261908,
+   "name": "_RINvNvMs2_NtCsdeuDu0AakVC_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalEBa_",
+   "size": 146
+  },
+  {
+   "addr": 262054,
+   "name": "_RNvMs4_NtCsdeuDu0AakVC_5alloc7raw_vecNtB5_11RawVecInner11finish_growB7_",
+   "size": 304
+  },
+  {
+   "addr": 262410,
+   "name": "_RNvMs3_NtCsdeuDu0AakVC_5alloc7raw_vecINtB5_6RawVechE8grow_oneB7_",
+   "size": 88
+  },
+  {
+   "addr": 262570,
+   "name": "_RNvNvNtCsdeuDu0AakVC_5alloc3fmt6format12format_inner",
+   "size": 410
+  },
+  {
+   "addr": 263126,
+   "name": "_RNvXsZ_NtCsdeuDu0AakVC_5alloc6stringNtB5_6StringNtNtCsbgr8V9fYQSs_4core3fmt5Write9write_str",
+   "size": 100
+  },
+  {
+   "addr": 263630,
+   "name": "_RNvXs4_NtCsdeuDu0AakVC_5alloc6stringNtB5_6StringNtNtCsbgr8V9fYQSs_4core5clone5Clone5clone",
+   "size": 184
+  },
+  {
+   "addr": 268168,
+   "name": "_RNvNtCsbgr8V9fYQSs_4core3fmt5write",
+   "size": 470
+  },
+  {
+   "addr": 282608,
+   "name": "_RNvXs8_NtNtNtCsbgr8V9fYQSs_4core3fmt3num3impmNtB9_7Display3fmt",
+   "size": 362
+  },
+  {
+   "addr": 313858,
+   "name": "_RNvXNtNtCsdT8o3cYwlYt_7fw_core3log3emuNtB2_9EmuLoggerNtCset4PXGU9hes_3log3Log3log",
+   "size": 256
+  },
+  {
+   "addr": 441888,
+   "name": "_RINvNtCseYJ2Ua2Wm1c_8lpc_wire12serde_base6417deserialize_smartQINtNtCsbtP8FF09ckR_10serde_json2de12DeserializerNtNtB14_4read7StrReadEECsbSzErDlYO6r_6fw_emu",
+   "size": 672
+  },
+  {
+   "addr": 567844,
+   "name": "_lp_main",
+   "size": 12298
+  },
+  {
+   "addr": 584016,
+   "name": "_RNvNtCsbSzErDlYO6r_6fw_emu11server_loop15run_server_loop",
+   "size": 20918
+  },
+  {
+   "addr": 607144,
+   "name": "_RNCNvXs0_NtNtCsdT8o3cYwlYt_7fw_core9transport6serialINtB7_15SerialTransportNtNtCsbSzErDlYO6r_6fw_emu6serial15SyscallSerialIoENtNtNtCselrqE3b8Qzk_10lpc_shared9transport6server15ServerTransport4send0B1f_",
+   "size": 1798
+  },
+  {
+   "addr": 608942,
+   "name": "_RINvNtCsbgr8V9fYQSs_4core3ptr13drop_in_placeNtNtNtCseYJ2Ua2Wm1c_8lpc_wire7message8envelope13ServerMessageECsbSzErDlYO6r_6fw_emu.2026",
+   "size": 3464
+  },
+  {
+   "addr": 708038,
+   "name": "_RINvXs4_NtCsbtP8FF09ckR_10serde_json2deQINtB6_12DeserializerNtNtB8_4read7StrReadENtNtCsiE2ORQtrChs_10serde_core2de12Deserializer18deserialize_stringNtNtB1j_5impls13StringVisitorECsbSzErDlYO6r_6fw_emu",
+   "size": 400
+  },
+  {
+   "addr": 736318,
+   "name": "_RINvXsb_NtCsbtP8FF09ckR_10serde_json2deINtB6_13VariantAccessNtNtB8_4read7StrReadENtNtCsiE2ORQtrChs_10serde_core2de13VariantAccess14struct_variantNtNvXs0_NvXNvNtNtCseYJ2Ua2Wm1c_8lpc_wire7message6clients1_1__NtB2w_13ClientRequestNtB1j_11Deserialize11deserializeNtB2r_9___VisitorNtB1j_7Visitor10visit_enum9___VisitorECsbSzErDlYO6r_6fw_emu",
+   "size": 1534
+  },
+  {
+   "addr": 780274,
+   "name": "_RNvCs8KB9cOwApJh_7___rustc12___rust_alloc",
+   "size": 142
+  },
+  {
+   "addr": 780440,
+   "name": "_RNvMNtCsi3EDCJ4sQDq_18lp_riscv_emu_guest9allocatorNtB2_17TrackingAllocator19trace_event_aligned",
+   "size": 46
+  },
+  {
+   "addr": 780600,
+   "name": "_RNvMNtCsi3EDCJ4sQDq_18lp_riscv_emu_guest9allocatorNtB2_17TrackingAllocator19trace_realloc_event",
+   "size": 52
+  },
+  {
+   "addr": 781128,
+   "name": "_RNvCs8KB9cOwApJh_7___rustc17rust_begin_unwind",
+   "size": 84
+  },
+  {
+   "addr": 838668,
+   "name": "_RNvMs4_NtCsdeuDu0AakVC_5alloc7raw_vecNtB5_11RawVecInner11finish_growCs5HyhoNTIhux_10lpa_server",
+   "size": 344
+  },
+  {
+   "addr": 839170,
+   "name": "_RINvMs2_NtCs31aJqNmjEsE_4lpfs7lp_pathNtB6_9LpPathBuf4joinRNtNtCsdeuDu0AakVC_5alloc6string6StringECs5HyhoNTIhux_10lpa_server",
+   "size": 378
+  },
+  {
+   "addr": 845910,
+   "name": "_RNvMNtCs5HyhoNTIhux_10lpa_server15project_managerNtB2_14ProjectManager12load_project",
+   "size": 4706
+  },
+  {
+   "addr": 850616,
+   "name": "_RINvMs2_NtCs31aJqNmjEsE_4lpfs7lp_pathNtB6_9LpPathBuf4joinReECs5HyhoNTIhux_10lpa_server",
+   "size": 378
+  },
+  {
+   "addr": 916128,
+   "name": "_RNvMs3_NtCsdeuDu0AakVC_5alloc7raw_vecINtB5_6RawVecNtNtCsbChpQvP661n_9lpc_model7feature9LpFeatureE8grow_oneCs5HyhoNTIhux_10lpa_server",
+   "size": 92
+  },
+  {
+   "addr": 1051788,
+   "name": "_RNvNtCs5HyhoNTIhux_10lpa_server8handlers21handle_client_message",
+   "size": 18304
+  },
+  {
+   "addr": 1074856,
+   "name": "_RNvNtCs5HyhoNTIhux_10lpa_server9file_sync18handle_write_chunk",
+   "size": 744
+  },
+  {
+   "addr": 1935534,
+   "name": "_RNvMNtCsgofQXZUBCba_12lpc_hardware9hw_systemNtB2_14HardwareSystem20with_virtual_drivers",
+   "size": 1974
+  },
+  {
+   "addr": 1962612,
+   "name": "_RNvMs4_NtCsdeuDu0AakVC_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsgofQXZUBCba_12lpc_hardware",
+   "size": 344
+  },
+  {
+   "addr": 1963090,
+   "name": "_RNvMs3_NtCsdeuDu0AakVC_5alloc7raw_vecINtB5_6RawVecINtNtB7_5boxed3BoxDNtNtNtNtCsgofQXZUBCba_12lpc_hardware7drivers5radio12radio_driver11RadioDriverEL_EE8grow_oneB1d_",
+   "size": 92
+  },
+  {
+   "addr": 1963368,
+   "name": "_RNvMs3_NtCsdeuDu0AakVC_5alloc7raw_vecINtB5_6RawVecNtNtNtCsgofQXZUBCba_12lpc_hardware8resource11hw_resource10HwResourceE8grow_oneBS_",
+   "size": 94
+  },
+  {
+   "addr": 2300560,
+   "name": "_RNvMNtCsbChpQvP661n_9lpc_model22hardware_endpoint_specNtB2_14HwEndpointSpec11from_static",
+   "size": 330
+  },
+  {
+   "addr": 2850470,
+   "name": "_RNvXs0_NtNtCs31aJqNmjEsE_4lpfs5impls9lp_fs_memNtB5_10LpFsMemoryNtNtB9_5lp_fs4LpFs10write_file",
+   "size": 1554
+  },
+  {
+   "addr": 2852024,
+   "name": "_RNvXs0_NtNtCs31aJqNmjEsE_4lpfs5impls9lp_fs_memNtB5_10LpFsMemoryNtNtB9_5lp_fs4LpFs11append_file",
+   "size": 1648
+  },
+  {
+   "addr": 2859140,
+   "name": "_RNvXs0_NtNtCs31aJqNmjEsE_4lpfs5impls9lp_fs_memNtB5_10LpFsMemoryNtNtB9_5lp_fs4LpFs9file_size",
+   "size": 758
+  },
+  {
+   "addr": 2868442,
+   "name": "_RNvMs3_NtCsjdTLSGRpw7j_9hashbrown3mapINtB5_7HashMapNtNtCs31aJqNmjEsE_4lpfs7lp_path9LpPathBufTNtNtBR_8fs_event9FsVersionNtB1v_11FsEventKindEE6insertBR_",
+   "size": 700
+  },
+  {
+   "addr": 2877294,
+   "name": "_RINvMs6_NtCsjdTLSGRpw7j_9hashbrown3rawINtB6_8RawTableTNtNtCs31aJqNmjEsE_4lpfs7lp_path9LpPathBufINtNtCsdeuDu0AakVC_5alloc3vec3VechEEE14reserve_rehashNCINvNtB8_3map11make_hasherBQ_B1v_NtNtCs62XftSlV0OE_8foldhash4fast11RandomStateE0EBU_",
+   "size": 2056
+  },
+  {
+   "addr": 2879482,
+   "name": "_RINvMs6_NtCsjdTLSGRpw7j_9hashbrown3rawINtB6_8RawTableTNtNtCs31aJqNmjEsE_4lpfs7lp_path9LpPathBufTNtNtBU_8fs_event9FsVersionNtB1y_11FsEventKindEEE14reserve_rehashNCINvNtB8_3map11make_hasherBQ_B1v_NtNtCs62XftSlV0OE_8foldhash4fast11RandomStateE0EBU_",
+   "size": 2146
+  },
+  {
+   "addr": 2886774,
+   "name": "_RNvNtCs31aJqNmjEsE_4lpfs7lp_path9normalize",
+   "size": 2006
+  },
+  {
+   "addr": 2889212,
+   "name": "_RINvNvMs2_NtCsdeuDu0AakVC_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECs31aJqNmjEsE_4lpfs",
+   "size": 134
+  },
+  {
+   "addr": 2889346,
+   "name": "_RNvMs4_NtCsdeuDu0AakVC_5alloc7raw_vecNtB5_11RawVecInner11finish_growCs31aJqNmjEsE_4lpfs",
+   "size": 344
+  },
+  {
+   "addr": 3509302,
+   "name": "_RNvMs4_NtCsdeuDu0AakVC_5alloc7raw_vecNtB5_11RawVecInner11finish_growCscmCShiqnN4P_11lpvm_native",
+   "size": 344
+  },
+  {
+   "addr": 3541222,
+   "name": "_RNvMs3_NtCsdeuDu0AakVC_5alloc7raw_vecINtB5_6RawVecNtNtCs6qA2GANKGQR_10lp_emu_abi16jit_symbol_entry14JitSymbolEntryE8grow_oneCscmCShiqnN4P_11lpvm_native",
+   "size": 92
+  },
+  {
+   "addr": 3619084,
+   "name": "_RNvMs_NtCs1yVsr6I7uhJ_13lp_collection3mapINtB4_6VecMapNtNtCsdeuDu0AakVC_5alloc6string6StringjE6insertCscmCShiqnN4P_11lpvm_native",
+   "size": 488
+  },
+  {
+   "addr": 3680730,
+   "name": "_RINvNvMs2_NtCsdeuDu0AakVC_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECsbtP8FF09ckR_10serde_json",
+   "size": 120
+  },
+  {
+   "addr": 3680850,
+   "name": "_RNvMs4_NtCsdeuDu0AakVC_5alloc7raw_vecNtB5_11RawVecInner11finish_growCsbtP8FF09ckR_10serde_json",
+   "size": 344
+  },
+  {
+   "addr": 3686424,
+   "name": "_RNvXs4_NtCsbtP8FF09ckR_10serde_json4readNtB5_7StrReadNtB5_4Read9parse_str",
+   "size": 484
+  },
+  {
+   "addr": 3687270,
+   "name": "_RINvNtCsbtP8FF09ckR_10serde_json4read12parse_escapeNtB2_9SliceReadEB4_",
+   "size": 460
+  }
+ ],
+ "dynamic_symbols": []
+}
