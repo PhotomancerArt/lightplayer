@@ -256,6 +256,31 @@ and fault. IDF makes IRAM byte-accessible only by trapping and emulating.
 High payoff, high effort; a plan of its own if the first five levers are not
 enough.
 
+## What the headroom buys (device numbers from PR #516)
+
+The fragmentation research session measured the same 186,368 B heap on the
+desk DOM-Z-102 over the serial heartbeat (2026-09-05, first-fit build; log in
+its planning dir under `bench/bench-llff-reload.csv.log`):
+
+| state | used | free | largest block |
+|---|---:|---:|---:|
+| idle, no project | 16,036 | 170,332 | 94,780 |
+| `/projects/studio` loaded | ~57,900 | | |
+| … after its shader compile, at rest | ~152,900 | ~33,400 | ~25,500 |
+| after `stopAllProjects` | | ~166,000 | ~39,700 (4.6 KB of leftovers pin it) |
+
+The resting state is what refuses Studio's reads (`largest free block
+25511 B < 32768 B`), and the post-unload state is what refuses the 64 KiB
+`LoadProject` gate until a power cycle
+(`docs/defects/2026-09-04-unload-leaves-classic-unloadable-until-power-cycle.md`).
+Both are ceiling problems as much as fragmentation problems: the studio
+project's own residency is ~137 KB after compile, against a ceiling of 182.
+Levers 1–3 and 5 add ~80 KB, which would leave that project resting with
+~113 KB free rather than 33 — and, since the new SRAM1 regions are separate
+first-fit regions, the arena's largest block is no longer the only one that
+counts. Region-add order decides the packing, so lever 2 should be planned
+together with PR #516's residents-first finding rather than after it.
+
 ## Not levers
 
 - The APP-core half of the flash cache (32 KB at `0x4007_8000`) is freed by
