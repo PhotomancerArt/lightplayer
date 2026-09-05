@@ -494,6 +494,21 @@ into its auto-loaded project before hand-back.
 
 ## Follow-ups
 
+**Companion report — the ceiling side.** This report is about what the
+heap does with the 186,368 B it has. The sibling
+`docs/reports/2026-09-04-classic-ram-budget.md` (PR #519, branch
+`claude/esp32v3-ram-analysis-940c42`) is about why the classic's heap is
+182 KB of 520 KB of SRAM, and ranks its own levers (JIT region to SRAM0,
+reclaiming esp-hal's ROM-stack reservation as two ~15 KB esp-alloc regions,
+switch tables back to flash, a measured main stack, the RTC fast tail —
+≈ +80 KB together). Two couplings between the reports: the reclaimed
+regions, if registered **before** the arena, are lever 1 below achieved by
+placement rather than by allocation order — plan the two together, not
+sequentially; and the unload defect in section 6 is partly a ceiling
+problem, since with more regions the arena's largest block stops being the
+only number the load gate can see.
+
+
 In rank order. Each line: the number it should move, and the instrument that
 will show it.
 

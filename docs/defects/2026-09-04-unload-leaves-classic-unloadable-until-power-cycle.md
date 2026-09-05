@@ -49,7 +49,10 @@ an unload that proxy is at its worst while the heap has more free bytes
 than at any time since boot.
 
 **Fix direction** — two levers from the report, either of which clears
-this: residents-first packing so load-time residents land at the front
+this (and a third from the ceiling-side report,
+`docs/reports/2026-09-04-classic-ram-budget.md` / PR #519: reclaimed SRAM1
+regions registered before the arena, so the residents that pin this heap
+land somewhere other than the middle of region 0): residents-first packing so load-time residents land at the front
 (report lever 1), or a fallible load path that attempts the load and fails
 cleanly on the allocation that cannot be served instead of pre-refusing on
 a proxy (the same shape as lever 7 for reads). A cheaper stopgap is to
