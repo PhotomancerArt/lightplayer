@@ -186,6 +186,14 @@ them **before** the arena so small residents land there and the arena stays
 whole — that is the residents-first packing PR #516 found to be the top
 allocator lever, obtained by placement rather than by allocator changes.
 
+What this lever does **not** do: the heartbeat's `largest_free_block` is a
+trial-allocation bisection across all regions, and both the 32 KiB read gate
+and the 64 KiB `LoadProject` gate compare against that one number. Two
+15 KB regions therefore raise packing headroom (and keep the arena's big
+block whole for longer) without ever satisfying a gate on their own — the
+gates' fallible-path rework is PR #516's follow-up. Levers 1 and 4 are the
+ones that grow a single contiguous block.
+
 Keep-out: the two ROM data blocks (1,088 + 1,072 B) are read by ROM routines
 the image still calls (the patched `esp_rom_spiflash_*` family calls into
 ROM). esp-hal's `software_reset` re-enters ROM on the ROM stack, but by then
