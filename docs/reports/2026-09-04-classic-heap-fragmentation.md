@@ -127,7 +127,7 @@ so the trace carries a `project-read` window).
 scripts/frag-table.sh            # all three projects, discounted, every lever
 ```
 
-**The silicon bench (P5).** `bench/bench.py` in the planning directory — see section 6; parked.
+**The silicon bench (P5).** `bench/bench.py` in the planning directory — see section 6; run on the desk classic, both allocators.
 
 ### Fidelity policy, stated as numbers
 
@@ -150,8 +150,11 @@ The replay's own numbers also agree with the ratchet record exactly — e.g.
 zook `project-load E` 224,352 B / 22 holes, `frame E` 165,768 / 18,
 `shader-compile E` 146,888 / 22 — because both read the same guest walk.
 
-**Silicon fidelity is not established.** No classic-layout prediction has
-been checked against a board; see section 6.
+**Silicon fidelity is established for the gate's own numbers, not for the
+replay's absolutes.** The desk classic reproduces the opening failure to the
+byte class (largest 25,509–25,536 B with its startup project resident) and
+shows a second state the emulator cannot: after that project is unloaded the
+board keeps 166 KB free in pieces no larger than 39.7 KB. See section 6.
 
 ## 3. What the heap looks like
 
@@ -393,8 +396,9 @@ The `basic` rows are the case the gate gets wrong: **57 KB free, largest ask
 4 KB, whole transient 24 KB, refused.** That 25,168 B happens to land within
 343 B of the 25,511 B the desk classic reported in the failure that opened
 this plan — a rhyme, not a correspondence: different project, different
-board, and the silicon arm that would make such a comparison meaningful has
-not run (section 6).
+board. The silicon arm (section 6) measured the desk classic's own number
+directly: 25,509–25,536 B with `/projects/studio` resident, every staged
+read refused.
 
 The `shader-link B` row is the case the gate gets right, and it is why the
 answer is a fallible path rather than simply lowering the constant: at 70
@@ -402,60 +406,91 @@ holes with 46,872 B free, a 23,723 B transient of ~600 allocations is
 genuinely at risk, and the honest way to find out is to try and fail, not to
 guess from one scalar.
 
-## 6. Silicon arm — PARKED, not skipped
+## 6. Silicon arm — measured on the desk classic
 
-The bench arm (P5) is built and blocked on the port, not abandoned.
+Run 2026-09-05 00:06–01:27 on DOM-Z-102 (`/dev/cu.wchusbserial1320`,
+CH340, firmware built from this branch at `5c870f6c1` + the lp-perf marker
+changes), once the port was released. Artifacts in the planning directory
+under `bench/`: `bench.py`, `fw-esp32v3-llff`, `fw-esp32v3-tlsf`, and the
+CSV + full serial log per run (`bench-llff.csv`, `bench-llff-reload.csv`,
+`bench-tlsf.csv`, each with a `.log`).
 
-**Ready on disk** — in the planning directory,
-`lp2025/2026-09-04-1358-classic-heap-fragmentation-research/bench/`
-(copied there from the session scratchpad; rebuild from the recipe below if
-the tree has moved on, since both ELFs were built at `5c870f6c1` + this
-branch's lp-perf marker changes).
+**Script.** `bench.py` opens the port once (raw fd, then `stty` at 921600 —
+⚠️ in that order: macOS reverts a tty's settings when its last descriptor
+closes, so `stty` before `open` configures nothing), clears the recovery
+ledger, reboots, and records every heartbeat's `MemoryStats` with a phase
+label through: boot with the stamped startup project auto-loading →
+Studio's staged reads against it (skeleton, slot pages, one probe) →
+`stopAllProjects` → `LoadProject` of a target → idle. Only `/projects/studio`
+exists on this board (`/projects/zook-dome` does not; the first run's
+refusal of it came from the load gate before the path was checked).
 
+### First-fit (stock build): the failure, byte for byte, and a second one
 
-- `bench.py` — opens `/dev/cu.wchusbserial1320` once at 921600 (raw fd +
-  `stty`), records every heartbeat's `MemoryStats` (`free_bytes`,
-  `used_bytes`, `largest_free_block`, `oom_retry_saves`) with a timestamp
-  and a phase label, and drives reboot → boot-idle → `LoadProject` → compile
-  settle → skeleton read → 16-node slot pages → binding-graph probe → 60 s
-  idle. Output CSV `t_s,phase,free,used,largest,retry_saves,note`.
-- `fw-esp32v3-llff` — stock first-fit ELF, 2,964,704 B.
-- `fw-esp32v3-tlsf` — `just build-fw-esp32v3` with
-  `ESP_ALLOC_CONFIG_HEAP_ALGORITHM=TLSF` in the environment (esp-config's
-  key form is `<CRATE>_CONFIG_<NAME>`), 2,970,448 B (**+5,744 B**). Verified
-  by symbols (`llvm-nm`): the TLSF ELF carries `rlsf` symbols and no
-  `linked_list_allocator`; the stock ELF the reverse.
+| phase | free | largest | what happened |
+|---|---:|---:|---|
+| boot, before auto-load | 170,332 | 94,780 | idle used 16,036 B (two regions, arena nearly whole) |
+| `studio` loaded, before compile | 132,028 | 73,716 | region 0 already carved; largest is region 1 |
+| after compile (131 ms, 1,584 B GLSL) | 33,776 | 25,512 | compile transient 35 k → 32 k; largest 35,679 → 25,512 |
+| steady, project resident | 34,160–34,288 | 25,509–25,536 | **every staged read refused** (`< 32768`) — skeleton, slots, probe alike |
+| after `stopAllProjects` | 165,436–166,300 | 39,655–39,736 | used 20,624–20,932 B: 4.6 KB of leftovers pin the free space into ≤ 39.7 KB pieces |
+| `LoadProject /projects/studio` (reload) | — | — | **refused** by the 64 KiB load gate (`39,663 B < 65,536 B`) |
 
-**Why it is parked.** `/dev/cu.wchusbserial1320` is held exclusively by
-Brave — Yona's live Studio session against the desk classic (confirmed
-again at the time of writing: `lsof` shows Brave, pid 46887, fd 337u). A
-serial port has one owner, and we do not take one from under a user. No
-substitute was run: the emulator is not the classic, and saying otherwise
-would be the kind of overstated fidelity the gate doc warns about.
+Two silicon facts the emulator could not produce:
 
-**What the capture will measure when the port frees.**
+1. **The opening failure is the board's normal resting state.** With its
+   stamped startup project resident, the desk classic sits at ~34 KB free
+   and a ~25.5 KB largest block from the first compiled frame onward. Studio
+   connects into exactly this state, and its narrowest possible reads are all
+   refused. The read that failed in section 1 was not unlucky; it is the
+   only outcome this board can produce until something changes.
+2. **One load/compile/unload cycle leaves the heap unloadable until a power
+   cycle.** After `stopAllProjects`, 166 KB is free but the largest block is
+   39.7 KB — below the 64 KiB load gate — so the board cannot even reload the
+   project it just unloaded. At boot the same heap offered a 94.8 KB block.
+   The difference is 4.6 KB of residents born during the load and compile
+   (the emulator's pinning table names their kind: JIT link metadata, the
+   project-manager map entry, the fs-event map) left standing in the middle
+   of region 0. This is lever 1's mechanism on silicon, and it is a
+   user-visible defect in its own right (registered below).
 
-1. **Does the replay predict silicon?** The classic-layout replay predicts
-   largest free block at `project-load E` (73,728 B), first `frame E`
-   (49,728 B) and `shader-compile E` (41,528 B) for zook. The bench reads
-   `largest_free_block` at those same phases. The emulator carries ~52 KB of
-   harness baseline the firmware does not, so the comparison is **deltas
-   between markers**, not absolute free. If those deltas match, every
-   counterfactual Δ in section 5 can be read as an absolute byte figure on
-   the classic; if they do not, the whole table is relative-only and needs a
-   fidelity caveat on top.
-2. **What TLSF actually costs and buys.** Same script, same phases, on the
-   TLSF build: the honest replacement for the pessimistic bound in lever 5.
-   ⚠️ `largest_free_block` (bisection by trial allocation) still measures
-   under TLSF, but `free_list_shape` (1-byte walk, 8 B step) will overcount
-   runs against TLSF's larger minimum block — record what the OOM path
-   prints, do not trust its hole count.
-3. Stock build reflashed and the heartbeat confirmed back to first-fit
-   numbers before the board is handed back.
+**Replay fidelity, checked where it can be.** The emulator's discounted
+classic-layout replay predicts region 1's 73,728 B as the largest block
+after `project-load E` on zook; the board shows 73,716 B after loading
+`studio` (a different project, so only the *shape* of the claim transfers:
+region 0 is spent by the load and the largest block is region 1's). The
+compile drop is the same order on both (emulator zook: 73,728 → 42,428 B
+across the compile window; board studio: 73,716 → 25,512 B). Absolute
+figures do not transfer — the emulator carries ~52 KB of harness baseline
+and a different project — so section 5's Δ column stays **relative**, as
+the gate doc already says.
 
-**Until then, lever 5 carries no ranking.** The TLSF row exists so the
-question is on the table with its geometry caveat attached, and the follow-up
-below is explicitly gated on this capture.
+### TLSF build: a boot-loop, not a config flip
+
+The TLSF image (`ESP_ALLOC_CONFIG_HEAP_ALGORITHM=TLSF`, verified by
+symbols) **panics during the startup project's load**, three boots in a
+row, until the recovery ledger disables the project:
+
+```
+Detected a write to the stack guard value on ProCpu
+PC 0x40210ebc  lpfs::lp_path::normalize
+A0 0x402148d2  <lpfs::lp_fs_view::LpFsView as lpfs::lp_fs::LpFs>::read_file
+```
+
+esp-hal's stack-guard watchpoint fires from ordinary path normalization
+inside a project-file read — either the TLSF pool overlaps the guard word
+(rlsf's pool bookkeeping reaching bytes first-fit never touched) or the TLSF
+build's stack depth crosses the guard where first-fit's did not. Diagnosing
+which is the TLSF session's first task. With the project disabled the TLSF
+build idles at 167,024 B free / **88,047 B** largest (first-fit idle:
+170,332 / 94,780 — TLSF's static bookkeeping costs ~3.5 KB of used heap and
+~6.7 KB of largest block before anything is allocated), and the image is
++5,744 B. **Lever 5 therefore still carries no ranking**, and now for a
+harder reason than geometry: the flip does not boot a project on the
+classic today.
+
+The stock build was reflashed, the ledger cleared, and the board rebooted
+into its auto-loaded project before hand-back.
 
 ## Follow-ups
 
@@ -493,10 +528,12 @@ will show it.
    23,723 B `project-read` transient at 8 KiB. Instrument: the
    `project-read` window's `transient` figure under
    `--workload studio-sync`. Do this *after* (2), which may make it moot.
-7. **TLSF flip on device firmware — gated on the silicon arm.** No ranking
-   until the bench runs; the emulator row is a pessimistic bound.
-   Instrument: `bench.py` on both ELFs, largest free block per phase, plus
-   the +5,744 B image cost against `just fw-esp32v3-size-check`.
+7. **TLSF on device firmware — first fix the boot panic, then measure.**
+   The TLSF build hits the stack-guard watchpoint during project load
+   (section 6, defect `2026-09-04-tlsf-build-hits-stack-guard-at-project-load`).
+   Until it boots a project, no ranking. Instrument once it does: `bench.py`
+   on both ELFs, largest free block per phase, plus the +5,744 B image cost
+   against `just fw-esp32v3-size-check`.
 8. **Narrow the emulator board manifest to something device-shaped.**
    Retires two standing `--frag-discount-site` flags and un-poisons the
    ratchet's `frame.transient` / `frame.largest_alloc`. It moves recorded
@@ -520,7 +557,13 @@ bytes contiguous"), that is the ADR, and it belongs to that session.
 ## Registers touched
 
 - `docs/defects/2026-09-04-read-gate-refuses-on-largest-block-proxy.md` (new,
-  open) — the failure in section 1, with section 5's evidence.
+  open) — the failure in section 1, with section 5's evidence and section
+  6's silicon reproduction.
+- `docs/defects/2026-09-04-unload-leaves-classic-unloadable-until-power-cycle.md`
+  (new, open) — section 6's second finding: after `stopAllProjects` the
+  largest block is 39.7 KB and the 64 KiB load gate refuses every load.
+- `docs/defects/2026-09-04-tlsf-build-hits-stack-guard-at-project-load.md`
+  (new, open) — the TLSF image's boot panic; owned by the TLSF session.
 - `docs/defects/2026-08-29-shader-jit-compile-transient-starves-classic-heap.md`
   — the compile window's classic-layout numbers and the scratch-arena
   counterfactual; stays open on the silicon bracket.

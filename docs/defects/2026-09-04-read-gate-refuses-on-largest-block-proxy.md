@@ -26,6 +26,16 @@ The board is healthy, the connection stays up, the engine keeps ticking.
 Studio simply never syncs, and the error tells the user to do three things
 Studio is already doing.
 
+**Reproduced on silicon (2026-09-05, desk classic DOM-Z-102, first-fit
+build from the same branch)** — with the stamped startup project
+`/projects/studio` resident, the board rests at 34,160–34,288 B free and a
+25,509–25,536 B largest block from its first compiled frame on, and every
+one of Studio's staged reads is refused: the skeleton, the slot pages and
+the single probe alike. Studio connects into this state; the failure is the
+board's normal resting state, not a race. Capture and log:
+`bench/bench-llff-reload.csv` in the planning directory
+`lp2025/2026-09-04-1358-classic-heap-fragmentation-research`.
+
 **Mechanism** — two mismatches, one on each side of the sentence.
 
 *The gate measures contiguity; the read needs volume.*
