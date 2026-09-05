@@ -102,6 +102,17 @@ could only estimate. Its `largest_alloc` is the permissive 256-resource
 hardware manifest's `Vec<HwResource>` (36,864 B on 2026-09-04). Collection is
 already enabled at `profile:start`, so no gate change was needed.
 
+⚠️ **The free-list figures are exact, so anything host-ordered shows up in
+them.** `transient`/`retained` survive a reordering of the same allocations;
+`largest_free_at_close` and `holes_at_close` do not. The first CI run of the
+figures differed from the Mac baseline by 1–7 holes because the profile
+workload deployed project files in `read_dir` order (sorted on APFS, hashed
+on ext4). The deploy walk now sorts (`collect_project_deploy_files`). If the
+figures ever differ between hosts again, look for another host-ordered
+input reaching the guest (directory walks, HashMap iteration over host-side
+data, wall-clock time — the profile already runs the guest on
+`TimeMode::Simulated(0)`), not for tolerance to add.
+
 ⚠️ **A marker name the host does not know is dropped silently.** The
 emulator run loop interns guest perf-event names against
 `lp_emu_core::profile::perf_event::KNOWN_EVENT_NAMES`; a new

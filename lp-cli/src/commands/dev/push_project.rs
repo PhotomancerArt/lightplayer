@@ -57,9 +57,16 @@ pub async fn deploy_project_async(
 
 pub fn collect_project_deploy_files(local_fs: &dyn LpFs) -> Result<Vec<ProjectDeployFile>> {
     // List all files recursively in the project directory
-    let entries = local_fs
+    let mut entries = local_fs
         .list_dir("/".as_path(), true)
         .map_err(|e| anyhow::anyhow!("Failed to list project files: {e}"))?;
+    // Deploy in path order, not directory-listing order. `read_dir` order is
+    // a filesystem detail (APFS hands back one order, ext4 another), and the
+    // order files reach the server is the order the server allocates their
+    // paths and contents — the heap-budget gate's free-list figures
+    // (`largest_free_at_close`, `holes_at_close`) differed between a Mac and
+    // CI's Linux runner by exactly that reordering (2026-09-04).
+    entries.sort();
 
     let mut files = Vec::new();
 
