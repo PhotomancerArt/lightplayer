@@ -698,34 +698,29 @@ impl OutputNode {
         samples.resize(coverage.total_samples as usize, 0);
 
         let mut spans = Vec::new();
-        // Pass 1 — render, product by product, the first time each appears:
-        // once per product per frame, however many runs the patch cut it
-        // into. The layout is kept once per product for the spans below.
-        let mut layouts: Vec<(ControlProduct, ControlLayout)> = Vec::new();
-        for fragment in fragments {
-            if layouts
-                .iter()
-                .any(|(product, _)| *product == fragment.product)
-            {
-                continue;
+        // The planner emits all of a producer's runs together, so a product
+        // is one consecutive group of fragments. Each group renders ONCE —
+        // however many runs the patch cut it into — and places its spans
+        // before the next group starts: spans stay in fragment order, and
+        // nothing is kept per frame to remember which product rendered.
+        let mut first = 0;
+        while first < fragments.len() {
+            let product = fragments[first].product;
+            let end = first
+                + fragments[first..]
+                    .iter()
+                    .take_while(|fragment| fragment.product == product)
+                    .count();
+            let group = &fragments[first..end];
+            if let Some(layout) = self.render_product(ctx, group, samples)? {
+                for fragment in group
+                    .iter()
+                    .filter(|fragment| fragment_is_placed(fragment, samples.len()))
+                {
+                    place_spans(&layout, fragment, &mut spans);
+                }
             }
-            if let Some(layout) = self.render_product(ctx, fragments, fragment.product, samples)? {
-                layouts.push((fragment.product, layout));
-            }
-        }
-        // Pass 2 — spans in FRAGMENT order, which is the order a reader of
-        // the published layout sees.
-        for fragment in fragments {
-            if !fragment_is_placed(fragment, samples.len()) {
-                continue;
-            }
-            let Some((_, layout)) = layouts
-                .iter()
-                .find(|(product, _)| *product == fragment.product)
-            else {
-                continue;
-            };
-            place_spans(layout, fragment, &mut spans);
+            first = end;
         }
 
         for (start, end) in coverage.gaps.iter().chain(coverage.contested.iter()) {
@@ -743,34 +738,36 @@ impl OutputNode {
         Ok(())
     }
 
-    /// Render one product for every fragment that takes it — once, however
-    /// many runs it was cut into — and apply each placed run's reversal and
-    /// rotation in place.
+    /// Render one product for `group` — its consecutive fragments, all the
+    /// same product — once, however many runs it was cut into, and apply
+    /// each placed run's reversal and rotation in place.
     ///
-    /// Contiguous when the product is one whole-covering fragment: the
+    /// Contiguous when the group is one whole-covering fragment: the
     /// unpatched path, byte-identical to before placement existed. Scattered
     /// otherwise: the producer renders whole through a target that routes
     /// every sample to the run that claims it, straight into the buffer — no
     /// whole-product scratch, nothing copied
     /// (`docs/adr/2026-09-06-control-render-targets-scatter.md`).
     ///
-    /// `None` when no fragment of the product fits the buffer: nothing is
+    /// `None` when no fragment of the group fits the buffer: nothing is
     /// rendered, exactly as before. A run that fits the buffer but reaches
     /// past its product is left out of the placement (its lamps stay dark
     /// rather than shifting the wire) while the product still renders.
     fn render_product(
         &mut self,
         ctx: &mut TickContext<'_>,
-        fragments: &[OutputFragment],
-        product: ControlProduct,
+        group: &[OutputFragment],
         samples: &mut [u16],
     ) -> Result<Option<ControlLayout>, NodeError> {
+        let Some(product) = group.first().map(|fragment| fragment.product) else {
+            return Ok(None);
+        };
         let buffer_len = samples.len();
         let extent = product.preferred_extent();
         let request = ControlRenderRequest::unorm16(extent);
-        let mut fitting = fragments.iter().filter(|fragment| {
-            fragment.product == product && fragment_fits_buffer(fragment, buffer_len)
-        });
+        let mut fitting = group
+            .iter()
+            .filter(|fragment| fragment_fits_buffer(fragment, buffer_len));
         let Some(first) = fitting.next() else {
             return Ok(None);
         };
@@ -787,9 +784,9 @@ impl OutputNode {
             ctx.render_control(product, &request, target)?
         } else {
             let placed = || {
-                fragments.iter().filter(move |fragment| {
-                    fragment.product == product && fragment_is_placed(fragment, buffer_len)
-                })
+                group
+                    .iter()
+                    .filter(move |fragment| fragment_is_placed(fragment, buffer_len))
             };
             ensure_scratch_len(
                 &mut self.scatter_runs,
@@ -813,9 +810,10 @@ impl OutputNode {
             ctx.render_control(product, &request, target)?
         };
 
-        for fragment in fragments.iter().filter(|fragment| {
-            fragment.product == product && fragment_is_placed(fragment, buffer_len)
-        }) {
+        for fragment in group
+            .iter()
+            .filter(|fragment| fragment_is_placed(fragment, buffer_len))
+        {
             let start = fragment.offset_samples as usize;
             let end = fragment.end_samples() as usize;
             if fragment.reversed {
