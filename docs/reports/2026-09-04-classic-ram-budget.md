@@ -32,16 +32,19 @@ Ranked levers, each independently landable:
 | # | lever | heap gained | effort | risk |
 |---|---|---:|---|---|
 | 1 | Move the JIT code region to idle SRAM0 IRAM | +24,576 | medium | medium (new install path, emulator parity) |
-| 2 | Reclaim the ROM stacks and gaps in SRAM1 as heap regions | +30,608 | low | low-medium (IDF precedent; order after APP-core start) |
-| 3 | Constant pools and switch tables to flash, except the ISR path's | +17,896 (as stack, then arena) | low | medium (3 tables land in the WS281x refill ISR if done bluntly) |
-| 4 | Measure the main stack, then hand the surplus to the arena | unknown, up to ~tens of KB | low to measure | none until the number exists |
+| 2 | Reclaim the ROM stacks and gaps in SRAM1 as heap regions | **+30,608, DONE 2026-09-05** | low | low-medium (IDF precedent; order after APP-core start) |
+| 3 | Constant pools and switch tables to flash, except the ISR path's | **+10,000, DONE 2026-09-05 — all of it as stack** | low | medium (3 tables land in the WS281x refill ISR if done bluntly) |
+| 4 | Measure the main stack, then hand the surplus to the arena | **+0, MEASURED 2026-09-05 — there is no surplus** | low to measure | none until the number exists |
 | 5 | RTC fast RAM tail as a heap region | +7,216 | low | low |
 | 6 | Static 16 KB serial frame buffer off SRAM2 | up to 16,656 | medium | medium (its placement is a recorded lesson) |
 | 7 | SRAM0 as a word-only data pool (sample buffers, packed frames) | up to ~90,000 | high | high (byte access faults) |
 
 Levers 1 + 2 + 3 + 5 together take the heap from 182 KB to about **260 KB**
 without touching the stack, and lever 4 is the one that says how much further
-it can go. That is the "more headroom" the question asked for; the number the
+it can go. ⚠️ **It said "no further" — see the results section below.** The
+stack had 2,928 B of headroom, not a surplus, so lever 3's bytes went to the
+stack and lever 4 yielded nothing; the heap after levers 2 and 3 is 216,976 B,
+and reaching 260 KB now depends on levers 1 and 5 alone. That is the "more headroom" the question asked for; the number the
 old S3 memory refers to (≈300 KB of heap being hard) was the S3's 341,760 B
 `dram_seg`, which the classic has never had.
 
@@ -79,7 +82,9 @@ ELF PR #516 built (2,964,704 B), so its numbers apply to that work too.
 is the residual, and it has been shrinking as `.data`/`.bss` grew: 42,888 B
 in the 2026-08-01 ADR, 35,600 B today.
 
-The heap is two `esp_alloc` regions:
+The heap is two `esp_alloc` regions — this and the section-size table above are
+the **pre-change** state that motivated the levers; the shipped numbers are in
+the results section below:
 
 | region | span | bytes |
 |---|---|---:|
@@ -236,6 +241,58 @@ read/write from Studio. Whatever the high-water leaves above a margin
 (fw-esp32s3 runs at 52,896 B and has never been the constraint) converts
 directly into `HEAP_SIZE`. Levers 2 and 3 land as stack first, so this is
 also what turns them into heap.
+
+### Results, 2026-09-05 — levers 4, 2 and 3 shipped (track A, PR #521)
+
+Measured on the desk DOM-Z-102. Levers 2, 3 and 4 are done; lever 1 is track B.
+
+| figure | before | after |
+|---|---:|---:|
+| `.data` | 22,220 B | **12,220 B** |
+| `.bss` | 138,352 B | 138,352 B |
+| `.stack` | 35,520 B | **45,520 B** |
+| main-stack high-water (boot + startup project) | 32,608 B | 33,008 B |
+| stack headroom at that mark | **2,928 B** | **12,512 B** |
+| heap total | 186,368 B | **216,976 B** |
+| heap free at idle | 170,332 B | 200,940 B |
+| largest free block at idle | 94,780 B | **109,446 B** |
+| largest free block after `stopAllProjects` | 40,448 B | 48,048 B |
+
+**Lever 4 does not exist.** The premise — a stack surplus to convert into
+`HEAP_SIZE` — is refuted by the first measurement it produced: the shipping
+image reached within **2,928 B** of the bottom of its own stack just by booting
+and auto-loading the project already on the board, reproducibly to the byte.
+The sizing rule adopted for this pass (floor = `max(1.5 × hw, hw + 12 KiB)`
+rounded up to 4 KiB) asks for 49,152 B, which is 13,616 B *more* stack than the
+image had. `HEAP_SIZE` was left at 110 KiB and the margin was bought from
+lever 3 instead. The probe stays in the image; it is the instrument this chip
+was missing.
+
+**Lever 3 landed as stack, not as arena**, and that is the right outcome rather
+than a shortfall: `.stack` takes `dram_seg`'s residual, so all 10,000 B of
+`.data` savings became headroom at the place the measurement says the chip is
+tight. The targeted hook (option one above) is what shipped —
+`lp-fw/fw-esp32v3/rwdata_hook.x`, globbing *input-section* names because LTO
+leaves one object file and nothing can be selected by object. The side finding
+in this section became a standing gate: `just iram-flash-literals-esp32v3`
+counts per-function flash literals in RAM-resident text against a committed
+baseline, and this change left all 82 of them exactly where they were.
+
+**Lever 2 landed as predicted, including the packing claim.** Registering the
+15,072 B ROM PRO-CPU span *before* the arena lifted the largest free block at
+idle by 14,666 B — nearly the whole region — which is only possible if boot
+residents moved out of the arena into it. Residents-first by placement, on
+silicon. It needed a vendored esp-alloc (upstream caps an allocator at three
+regions) and the ROM APP-CPU span had to be registered after
+`start_app_core_isr`, both as this section anticipated.
+
+**And this section's caveat held exactly.** Two 15 KB regions raise packing
+headroom without satisfying a gate: after `stopAllProjects` the largest free
+block is 48,048 B against the 64 KiB `LoadProject` gate — up 7,600 B, still a
+refusal. `examples/basic` and `examples/zook-dome` could therefore not be
+loaded on this board at all, which is why the stack table above has no
+compile-heavy row. The gates' fallible-path rework (PR #516's follow-up) is
+what unblocks that, not more bytes.
 
 ### 5. RTC fast RAM tail (+7,216 B)
 

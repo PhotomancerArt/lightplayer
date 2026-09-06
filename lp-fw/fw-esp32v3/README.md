@@ -263,6 +263,44 @@ it to the region's end, so a resize that forgets the boundary fails to compile.
 Total heap is `HEAP_SIZE + 65,536` = 178,176 B; see
 `docs/adr/2026-08-01-esp32v3-flash-budget.md`.
 
+### Amended 2026-09-05 — the stack is measured, and the heap is four regions
+
+Everything above about the stack was inference. It is now measured.
+`src/stack_probe.rs` paints the unused main stack at boot and the heartbeat
+reports the watermark:
+
+```text
+[INIT] main stack 45520 B
+[stack] heartbeat: high-water 33008 B of 45520 B (12512 B headroom)
+```
+
+The line appears only when the mark **grows**, so a quiet steady state means
+the workload never went deeper. The reading that matters: before this pass, on
+a 35,520 B stack, booting and auto-loading the startup project reached
+**32,608 B — 2,928 B of headroom**, reproducibly, to the byte. The paragraphs
+above worry about whether 43,400 B is enough margin; the answer was that the
+image had already been shipping on about 3 KB of it.
+
+Two changes followed, and neither is the "trade stack for heap" lever above:
+
+- **`.data` 22,220 → 12,220 B.** esp-hal's `place-switch-tables-in-ram` default
+  is off and `rwdata_hook.x` names what stays: the interrupt-handler tables,
+  the merged `.rodata.cst*` pools, and the jump tables of the crates with code
+  in IRAM. `.stack` takes the residual automatically, so all 10,000 B became
+  stack headroom rather than arena. `just iram-flash-literals-esp32v3` is the
+  guard that no interrupt-path function started reading a constant out of
+  flash — run it after touching either config key, and see `rwdata_hook.x` for
+  what the exception list is and why.
+- **Heap 178,176 → 216,976 B, in four regions.** esp-hal's two ROM *stack*
+  reservations in SRAM1 are dead once each core is handed over (esp-idf
+  reclaims the same span), so they are heap now: 15,072 B registered **before**
+  the arena — first-fit order makes it where boot residents land, which lifted
+  the largest free block at idle from 94,780 to 109,446 B — and 15,536 B
+  registered **after** `start_app_core_isr`, because that span is live while
+  the second core boots through the ROM. The two ROM *data* blocks stay
+  reserved. This needed a vendored esp-alloc: upstream caps an allocator at
+  three regions (`third_party/esp-alloc/README-LP.md`).
+
 ## Flashing
 
 ```bash
