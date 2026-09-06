@@ -63,6 +63,11 @@ pub const BRIDGE_READY_PREFIX: &str = "UART-BRIDGE READY ";
 /// with a cargo feature.
 pub const ROM_CONSOLE_BAUD: u32 = 115_200;
 
+/// The rate `fw-esp32c6`'s `spike_uart0_link` driver runs UART0 at, and the
+/// rate the bridge must match when the far side is that driver rather than the
+/// ROM. Named here so the two never drift apart in someone's head at a desk.
+pub const SPIKE_LINK_BAUD: u32 = 921_600;
+
 /// The ESP32-C6's default U0TXD pad — `D6` on the XIAO silkscreen.
 pub const UART0_TX_GPIO: u8 = 16;
 

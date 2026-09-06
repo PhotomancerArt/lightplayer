@@ -159,6 +159,8 @@ mod tests {
     pub mod test_rmt;
     #[cfg(feature = "test_usb")]
     pub mod test_usb;
+    #[cfg(feature = "test_uart_bridge")]
+    pub mod uart_bridge;
 }
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -513,6 +515,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::test_gpio_calibrate::run_gpio_calibration_test;
         run_gpio_calibration_test(spawner).await;
+    }
+
+    #[cfg(feature = "test_uart_bridge")]
+    {
+        use tests::uart_bridge::run_uart_bridge;
+        run_uart_bridge(spawner).await;
     }
 
     #[cfg(feature = "test_button")]
