@@ -214,6 +214,16 @@ A harness that overstates its fidelity is worse than none. This gate does
   markers is ratcheted at all. A workload can hold both figures and still
   fail on device mid-window. The fragmentation and counterfactual sections
   below are the tools for that question; they are reports, not ratchets.
+- **A capture the cycle cap ended.** Every session runs under
+  `--max-cycles` (`MAX_CYCLES` in `scripts/heap-budget-check.sh`, 400M).
+  A window still open when the cap falls has no `"E"`, and its figures are
+  whatever the collector held at that instant — a function of where the cap
+  fell, not of what the window costs. Meteor's startup capture did exactly
+  that under the profiler's 200M default for a month, recording its
+  `shader-compile` window as zeros and its cold-start `frame` as frame 1
+  alone (`docs/defects/2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md`).
+  The script now refuses a session whose `meta.json` says
+  `terminated_by: max_cycles`; raise `MAX_CYCLES` rather than record it.
 - **Two-region arenas / contiguity.** The guest heap is a single region. The
   classic's post-#288 arena is two regions, where a large allocation can fail
   while total free is ample. The `largest_alloc` ratchet is the proxy: it
