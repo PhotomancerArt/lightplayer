@@ -160,14 +160,18 @@ pub const MSTATUS_RESET: u32 = MSTATUS_MPP;
 /// the core with `mstatus.MIE = 1` already set").
 pub const MSTATUS_BOOT: u32 = MSTATUS_MPP | MSTATUS_MPIE | MSTATUS_MIE;
 
-/// The value [`MISA`] reads: `MXL = 1` (RV32) plus `A`, `C`, `I`, `M`.
+/// The value [`MISA`] reads: `MXL = 1` (RV32) plus `A`, `C`, `I`, `M`
+/// (spec §3.1.1, `Machine ISA Register`; extension letter `n` is bit
+/// `n - 'A'`, so `A` = 1, `C` = 4, `I` = 0x100, `M` = 0x1000).
 ///
-/// This is the constant the P2 brief specifies verbatim. Note bit 20 (`U`)
-/// is set in it, which claims a user mode this hart does not implement —
-/// harmless, because nothing in the esp-hal stack reads `misa` at all (the
-/// discovery found no `misa` site), and quietly clearing it would be an
-/// unreported deviation from the brief. Flagged in the phase report instead.
-pub const MISA_VALUE: u32 = 0x4010_1105;
+/// **No `U` bit.** M is the only privilege mode this hart implements —
+/// `mstatus.MPP` is WARL-pinned to 3 and there is no S/U state anywhere in
+/// `mach` — so claiming user mode would be a plausible fiction of exactly
+/// the kind the rest of this file refuses. Nothing in the esp-hal stack
+/// reads `misa` at all (the M3 discovery found no site), so the bit was
+/// unobservable either way; it is cleared because it was untrue, not
+/// because something noticed.
+pub const MISA_VALUE: u32 = 0x4000_1105;
 
 /// `mtvec.MODE == 1` (Vectored): interrupt `n` vectors to `base + 4*n`
 /// (spec §3.1.7). `enable_direct` asserts this mode reads back
@@ -339,6 +343,27 @@ mod tests {
         csr.write_mstatus(0);
         assert_eq!(csr.mstatus, MSTATUS_MPP);
         assert!(!csr.mie_enabled());
+    }
+
+    #[test]
+    fn misa_says_rv32imac_and_claims_no_user_mode() {
+        assert_eq!(MISA_VALUE >> 30, 1, "MXL = 1: XLEN is 32");
+        // Extension letter `n` is bit `n - 'A'`.
+        for (letter, bit) in [('A', 0), ('C', 2), ('I', 8), ('M', 12)] {
+            assert!(
+                MISA_VALUE & (1 << bit) != 0,
+                "{letter} must be present in misa"
+            );
+        }
+        assert_eq!(
+            MISA_VALUE & (1 << 20),
+            0,
+            "U must be clear: M is the only privilege mode this hart implements"
+        );
+        // F/D/Q: no FPU on this hart, and the RV32F opcodes are illegal.
+        for bit in [3, 5, 16] {
+            assert_eq!(MISA_VALUE & (1 << bit), 0, "no float extension");
+        }
     }
 
     #[test]
