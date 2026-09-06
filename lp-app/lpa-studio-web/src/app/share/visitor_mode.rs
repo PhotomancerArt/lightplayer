@@ -1,16 +1,17 @@
 //! Who is looking at the project in the address bar — the P6 mode split.
 //!
 //! One `GetProject` answer decides everything (the same anti-oracle shape
-//! `project_share_control` documents):
+//! [`super::project_roster`] documents):
 //!
 //! - `members: Some(_)` is the service saying "you are on the roster" —
-//!   the owner/editor surface (the P5 Share pill, no banner).
+//!   the administering surface (the project popover's Access section, no
+//!   banner).
 //! - `members: None` on a successful answer is a **link-holder**: the
 //!   project resolved for this caller only because its general access said
 //!   so. What kind of visitor they are is the access level itself.
-//! - An error (`NotFound` included) is no mode at all: no pill, no banner,
-//!   no visitor door. Private, archived-to-visitors, and absent are one
-//!   indistinguishable case, on purpose.
+//! - An error (`NotFound` included) is no mode at all: no roster, no
+//!   banner, nothing to administer. Private, archived-to-visitors, and
+//!   absent are one indistinguishable case, on purpose.
 //!
 //! Note the owner-signed-out case falls out honestly: their own project
 //! answers them as a link-holder, because signed out that is exactly what
