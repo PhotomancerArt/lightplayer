@@ -58,10 +58,11 @@ cannot bypass placement. Reversal and rotation within a run stay post-passes
 the output applies in place after the render, exactly as when the run was a
 copy.
 
-The output renders product by product: the first time a product appears in
-the fragment set it renders once — contiguous when its single fragment
-covers the whole product, scattered otherwise — and spans are then placed in
-fragment order. The runs live in one resident `Vec` on the output node,
+The output renders per consecutive product group — the planner emits all of
+a producer's runs together — so each product renders once (contiguous when
+its single fragment covers the whole product, scattered otherwise) and
+places its spans before the next group starts; spans stay in fragment order
+and nothing is kept per frame. The runs live in one resident `Vec` on the output node,
 sized fallibly (`ensure_scratch_len`), so after the first frame at a given
 run count the patched path allocates nothing.
 
@@ -117,5 +118,7 @@ and nothing is materialized beside it.
   the PRODUCER — the product's own home — would render once for every
   output; a different plan.
 - The O(runs) per-frame Vecs in the output's render path (products,
-  placements, fragments, spans, per-product layouts) are small and could
-  become resident scratches on the node.
+  placements, fragments, spans) are small and could become resident
+  scratches on the node. The resident runs Vec itself costs each output node
+  one Vec header at load (+8 B on RV32, re-baselined in the heap-budget
+  record with this change).
