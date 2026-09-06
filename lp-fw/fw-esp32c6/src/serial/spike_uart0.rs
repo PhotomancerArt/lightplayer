@@ -1,10 +1,11 @@
 //! `spike_uart0_link` — the host link over UART0 instead of USB-Serial-JTAG.
 //!
 //! Test scaffolding for the 2026-09-06 esp-emu spike, never shipped. Under
-//! Espressif's binary emulator the USB-Serial-JTAG block never raises SOF
-//! (`usb_connection.rs` therefore reports "cable unplugged" forever) and
-//! bytes written to its FIFO vanish — the emulator reports
-//! `SERIAL_IN_EP_DATA_FREE` set and delivers nothing. Its only host-visible
+//! Espressif's binary emulator the USB-Serial-JTAG block asserts SOF
+//! permanently and reports `SERIAL_IN_EP_DATA_FREE` forever (measured via
+//! its gdb stub, `INT_RAW = 0xA`, `INT_CLR` ignored), so `usb_connection.rs`
+//! believes a draining host is attached while every byte written vanishes
+//! and nothing ever arrives. Its only host-visible
 //! serial is UART0, bridged to stdout or `--uart-tcp`. This module gives the
 //! firmware a UART0 path so the wire protocol and the harnesses can be
 //! exercised there:

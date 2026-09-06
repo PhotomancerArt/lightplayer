@@ -97,10 +97,11 @@ test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1
 fixture-old-proto = ["lpa-server/fixture-old-proto"]
 
 # esp-emu SPIKE scaffolding (docs/reports/2026-09-07-esp-emu-c6-spike.md),
-# OFF by default, never shipped. Espressif's binary emulator has no USB host:
-# USB-Serial-JTAG never sees SOF (the connection monitor then reports "cable
-# unplugged" forever) and its FIFO swallows every byte, while UART0 is bridged
-# to the host. This moves the host link to UART0 (GPIO16/17, 921600 8N1) and
+# OFF by default, never shipped. Espressif's binary emulator has no USB host
+# behind its USB-Serial-JTAG model: SOF is asserted forever and the EP1 FIFO
+# always reports "data free" (the connection monitor therefore believes a
+# draining host is attached) while every byte written vanishes; UART0 is the
+# serial it bridges to the host. This moves the host link to UART0 (GPIO16/17, 921600 8N1) and
 # tees the harnesses' `Esp32UsbSerialIo` output there through the ROM, so the
 # wire protocol and `test_*` harnesses can run under the emulator. Costs the
 # shipping image nothing: every hunk is `cfg`'d out. `touch src/main.rs`
