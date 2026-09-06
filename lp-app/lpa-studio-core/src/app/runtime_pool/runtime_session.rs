@@ -28,7 +28,7 @@ use std::rc::Rc;
 use lpa_client::BackoffPolicy;
 use lpa_link::{LinkConnection, LinkConnector, LinkSession};
 
-use crate::app::runtime_pool::card_feed::CardFeedState;
+use crate::app::frame_feed::card_feed::CardFeedState;
 use crate::app::studio::refresh_cadence::{
     DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL, PASSIVE_REFRESH_BACKOFF_BASE,
     PASSIVE_REFRESH_BACKOFF_MAX, REFRESH_DUE_SLACK, RefreshCadence,

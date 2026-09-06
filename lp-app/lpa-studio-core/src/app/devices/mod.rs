@@ -43,6 +43,7 @@ pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
 pub mod devices_op;
+pub mod shared_link_client_io;
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use browser_transport::BrowserSerialTransport;
@@ -75,3 +76,4 @@ pub use device_transport::{
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 pub use devices_op::DevicesOp;
+pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};

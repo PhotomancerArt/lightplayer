@@ -32,7 +32,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::time::Duration;
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::rc::{Rc, Weak};
 
 use lpa_devices::activity::{ActivityKind, ActivityOutcome};
@@ -43,6 +43,7 @@ use lpa_devices::record::DeviceRecord;
 use lpa_devices::time::TimerId;
 
 use super::device_transport::{DeviceEffectCall, DeviceTransport, GrantedLink};
+use super::shared_link_client_io::{ConversationInbox, SharedLinkClientIo};
 
 /// A spawned task. `?Send` like everything else in the studio.
 pub type DeviceTaskFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
@@ -165,6 +166,9 @@ struct LinkSlot {
     /// borrow ends, so the effect's own conversation is the only reader.
     /// This is the executor's half of the exclusive-borrow discipline.
     borrowed: BorrowToken,
+    /// Replies to app conversations on this wire (the card's frame feed),
+    /// routed here by the pump instead of to the fold.
+    inbox: ConversationInbox,
 }
 
 /// A link that arrived from a spawned future, waiting to join the routing map.
@@ -173,6 +177,7 @@ struct Arrival {
     info: LinkInfo,
     handle: Rc<RefCell<Box<dyn Link>>>,
     borrowed: BorrowToken,
+    inbox: ConversationInbox,
 }
 
 /// Owns the links, the platform seams, and the spawning.
@@ -297,15 +302,23 @@ impl DeviceEffects {
         }
         let info = slot.info.clone();
         let borrowed = Rc::clone(&slot.borrowed);
+        let inbox = Rc::clone(&slot.inbox);
         let tap: super::device_transport::LensLineTap = {
             let sink = Rc::clone(&sink);
             Rc::new(move |event: super::device_transport::LensTapEvent| {
                 use super::device_transport::LensTapEvent;
                 match event {
-                    LensTapEvent::Line(line) => sink(Input::link(
-                        link,
-                        lpa_link::device_link::demux::demux_line(&line),
-                    )),
+                    // The pump's classification, replayed: a conversation's
+                    // straggler (a pull in flight when the lens took the
+                    // wire) reaches its inbox, and the fold never hears it.
+                    LensTapEvent::Line(line) => {
+                        match lpa_link::device_link::demux::demux_line(&line) {
+                            lpa_devices::link::LinkEvent::Passthrough { request_id, line } => {
+                                inbox.borrow_mut().push_back((request_id, line));
+                            }
+                            event => sink(Input::link(link, event)),
+                        }
+                    }
                     // The pump's mark-gone rule, replayed for the lens: a
                     // port error means the port died underneath us, so the
                     // fold hears the error, the close — and the DEPARTURE.
@@ -371,6 +384,29 @@ impl DeviceEffects {
             .is_some_and(|slot| slot.borrowed.get() == Some(LENS_EFFECT_ID))
     }
 
+    /// Whether ANY holder — a coarse effect or the lens — has this link's
+    /// wire. While it does the pump is paused, so a shared-link
+    /// conversation could not be answered: the frame feed asks this before
+    /// every pull.
+    pub fn wire_borrowed(&self, link: LinkId) -> bool {
+        self.links
+            .get(&link)
+            .is_some_and(|slot| slot.borrowed.get().is_some())
+    }
+
+    /// An `lpa-client` io on this link's SHARED wire (the card's frame
+    /// feed). `None` when the link is gone or the timer seam is not
+    /// installed. See `shared_link_client_io` for what it does not do.
+    pub fn conversation_io(&self, link: LinkId) -> Option<SharedLinkClientIo> {
+        let slot = self.links.get(&link)?;
+        let timer = self.timer.clone()?;
+        Some(SharedLinkClientIo::new(
+            Rc::downgrade(&slot.link),
+            Rc::clone(&slot.inbox),
+            timer,
+        ))
+    }
+
     /// Record writes to perform, taken by the roster sub-controller.
     pub fn take_writes(&mut self) -> PendingWrites {
         self.writes
@@ -391,6 +427,7 @@ impl DeviceEffects {
                     info: arrival.info,
                     link: arrival.handle,
                     borrowed: arrival.borrowed,
+                    inbox: arrival.inbox,
                 },
             );
         }
@@ -811,11 +848,13 @@ impl DeviceEffects {
             let info = granted.info.clone();
             let handle = Rc::new(RefCell::new(granted.link));
             let borrowed: BorrowToken = Rc::new(Cell::new(None));
+            let inbox: ConversationInbox = Rc::new(RefCell::new(VecDeque::new()));
             arrivals.borrow_mut().push(Arrival {
                 link,
                 info: info.clone(),
                 handle: Rc::clone(&handle),
                 borrowed: Rc::clone(&borrowed),
+                inbox: Rc::clone(&inbox),
             });
             if let (Some(spawn), Some(timer)) = (spawn.clone(), timer.clone()) {
                 spawn_pump(
@@ -824,6 +863,7 @@ impl DeviceEffects {
                     link,
                     Rc::downgrade(&handle),
                     borrowed,
+                    inbox,
                     Rc::clone(&sink),
                 );
             }
@@ -843,12 +883,18 @@ impl DeviceEffects {
 /// the pump on its next tick without a cancellation channel. While a coarse
 /// effect holds the `borrowed` flag the pump does not touch the wire at all —
 /// the effect's own conversation is the only reader (exclusive borrow).
+///
+/// An app conversation's reply (`LinkEvent::Passthrough`, classified by the
+/// transport's demux) goes to the link's `inbox`, never to the fold: frames
+/// are not evidence, and the conversation that asked is the only party that
+/// can read the body.
 fn spawn_pump(
     spawn: &Rc<dyn Fn(DeviceTaskFuture)>,
     timer: &Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>,
     link: LinkId,
     handle: Weak<RefCell<Box<dyn Link>>>,
     borrowed: BorrowToken,
+    inbox: ConversationInbox,
     sink: Rc<dyn Fn(Input)>,
 ) {
     let timer = Rc::clone(timer);
@@ -861,6 +907,10 @@ fn spawn_pump(
             while borrowed.get().is_none() {
                 let next = strong.borrow_mut().poll_event();
                 let Some(event) = next else { break };
+                if let lpa_devices::link::LinkEvent::Passthrough { request_id, line } = event {
+                    inbox.borrow_mut().push_back((request_id, line));
+                    continue;
+                }
                 // The browser controller's own death notices ("The device
                 // has been lost", "Serial port disconnected") are a
                 // departure, not a closed port: the port object is gone
@@ -1205,6 +1255,7 @@ mod tests {
                 info: LinkInfo::default(),
                 link: Rc::new(RefCell::new(Box::new(QuietLink(LinkInfo::default())))),
                 borrowed: Rc::new(Cell::new(None)),
+                inbox: Rc::new(RefCell::new(VecDeque::new())),
             },
         );
         (effects, inputs, taps)

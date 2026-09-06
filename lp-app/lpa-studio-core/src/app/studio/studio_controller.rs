@@ -23,6 +23,7 @@ use std::rc::Rc;
 
 use lpa_client::{CancelSignal, ProgressDeadline};
 
+use crate::app::frame_feed::output_frame_entries::output_frame_entries;
 use crate::app::home::home_view_builder::HomeInputs;
 use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
 use crate::app::library::{CatalogOp, LibraryHost};
@@ -4644,56 +4645,6 @@ fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> Ui
 }
 
 /// Constructor-default randomness: clock-derived bytes. Unique enough
-/// The published-frame entries carried by a card-feed read's event stream.
-///
-/// The feed asks for exactly one probe, so this walks the stream for probe
-/// index 0 and reassembles it: a small result arrives whole, and a
-/// dome-scale frame arrives as a header plus bounded chunks the transport
-/// already validated for coverage. Anything else in the stream (the
-/// begin/end revision markers) is not this read's business.
-///
-/// A malformed stream yields no entries rather than an error: the feed's
-/// answer to "no frame this time" is to keep the last one, and there is no
-/// user-facing failure to raise for a picture that did not arrive.
-fn output_frame_entries(events: &[lpc_wire::ProjectReadEvent]) -> Vec<lpc_wire::OutputFrameEntry> {
-    use lpc_wire::{
-        OutputFrameProbeResult, ProjectProbeResult, ProjectProbeResultHeader, ProjectReadEvent,
-        ProjectReadProbeEvent,
-    };
-
-    let mut pending: Option<(ProjectProbeResultHeader, Vec<u8>)> = None;
-    for event in events {
-        let ProjectReadEvent::Probe { event, .. } = event else {
-            continue;
-        };
-        match event {
-            ProjectReadProbeEvent::Result(ProjectProbeResult::OutputFrame(
-                OutputFrameProbeResult::Frame { outputs },
-            )) => return outputs.clone(),
-            ProjectReadProbeEvent::ResultBegin { header, .. } => {
-                pending = Some((header.clone(), Vec::new()));
-            }
-            ProjectReadProbeEvent::ResultBytes { bytes, .. } => {
-                if let Some((_, buffer)) = pending.as_mut() {
-                    buffer.extend_from_slice(bytes);
-                }
-            }
-            ProjectReadProbeEvent::ResultEnd => {
-                let Some((header, bytes)) = pending.take() else {
-                    continue;
-                };
-                if let ProjectProbeResult::OutputFrame(OutputFrameProbeResult::Frame { outputs }) =
-                    header.into_result(bytes)
-                {
-                    return outputs;
-                }
-            }
-            _ => {}
-        }
-    }
-    Vec::new()
-}
-
 /// for tests; the web shell replaces it with crypto randomness via
 /// [`StudioController::set_random`].
 fn clock_fallback_random() -> [u8; 16] {

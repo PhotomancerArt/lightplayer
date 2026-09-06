@@ -66,6 +66,17 @@ The model never calls a transport, and no transport classifies a device —
 the hello gate, boot-line diagnosis and foreign-firmware detection all
 live in the fold, which is what makes verdicts non-sticky.
 
+**App conversations ride the shared link, and frames are not evidence.**
+Request ids at or above `link::APP_CONVERSATION_ID_BASE` belong to an
+`lpa-client` conversation the effects layer runs beside the model's own
+frames (the device card's live frame feed is the first). The transport
+classifies a reply by its id before the mirror: one in that range surfaces
+as `LinkEvent::Passthrough { request_id, line }` — the raw `M!` line — and
+the effects layer routes it to the conversation that asked. The fold has
+an arm for it that does nothing: no terminal line, no freshness, no
+anomaly count. What a board is *running* still reaches the model on the
+heartbeat; the bytes of what it is *showing* never enter here.
+
 **Non-sticky verdicts.** `Classification` is not a transition target; it
 is recomputed from the current observation window on every fold. Opening a
 port, a successful reset, and a detach all clear the window. A board that

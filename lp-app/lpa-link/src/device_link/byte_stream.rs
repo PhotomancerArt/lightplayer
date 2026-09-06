@@ -425,6 +425,52 @@ mod tests {
         assert!(link.stream.written_text().is_empty());
     }
 
+    /// An app conversation's reply comes off the same wire as the model's
+    /// frames and is told apart by its id alone: it surfaces as a
+    /// passthrough carrying the raw line, while a model-range reply on the
+    /// very next line is mirrored as usual.
+    #[test]
+    fn an_app_range_reply_passes_through_beside_model_frames() {
+        let mut stream = ScriptedStream::default();
+        stream.say("M!{\"id\":1073741824,\"msg\":\"unloadProject\"}\n");
+        stream.say("M!{\"id\":7,\"msg\":\"unloadProject\"}\n");
+        let mut link = link(stream);
+        link.submit(LinkCommand::Open { baud: 921_600 });
+        assert!(matches!(link.poll_event(), Some(LinkEvent::Opened { .. })));
+
+        assert_eq!(
+            link.poll_event(),
+            Some(LinkEvent::Passthrough {
+                request_id: lpa_devices::link::APP_CONVERSATION_ID_BASE,
+                line: "M!{\"id\":1073741824,\"msg\":\"unloadProject\"}".to_string(),
+            })
+        );
+        assert!(matches!(
+            link.poll_event(),
+            Some(LinkEvent::Frame(frame)) if frame.request_id == 7
+        ));
+        assert_eq!(link.poll_event(), None);
+    }
+
+    /// A conversation's request is a raw line the link writes verbatim
+    /// (plus the newline), so an `lpa-client` speaking through `SendLine`
+    /// puts exactly one framed message on the wire.
+    #[test]
+    fn a_raw_line_goes_out_with_one_newline() {
+        let mut link = link(ScriptedStream::default());
+        link.submit(LinkCommand::Open { baud: 921_600 });
+        while link.poll_event().is_some() {}
+
+        link.submit(LinkCommand::SendLine(
+            "M!{\"id\":1073741824,\"msg\":\"hello\"}".to_string(),
+        ));
+
+        assert_eq!(
+            link.stream.written_text(),
+            "M!{\"id\":1073741824,\"msg\":\"hello\"}\n"
+        );
+    }
+
     /// Cancelling identification is "give the port back, tell me when it is
     /// back". An unanswered close makes the model burn its whole cancel grace.
     #[test]

@@ -8,6 +8,7 @@
 //! | `ServerMsgBody::Heartbeat` at id 0 | [`ServerFrameBody::Heartbeat`](lpa_devices::wire::ServerFrameBody::Heartbeat): loaded-project report (with each project's fault) and recovery state included |
 //! | `ServerMsgBody::ListLoadedProjects` | [`ServerFrameBody::Loaded`](lpa_devices::wire::ServerFrameBody::Loaded) |
 //! | everything else | [`ServerFrameBody::Other`](lpa_devices::wire::ServerFrameBody::Other) with a stable label |
+//! | any message whose id ≥ `APP_CONVERSATION_ID_BASE` | never mirrored: `LinkEvent::Passthrough` carries the raw line to the app conversation that asked (the card's frame feed) — see [`demux`](crate::device_link::demux) |
 //!
 //! and the other direction, [`ClientFrame`] → `lpc_wire::ClientMessage`.
 //!
@@ -77,9 +78,14 @@ pub fn link_info(endpoint: &LinkEndpoint, usb_vid_pid: Option<(u16, u16)>) -> Li
 /// The error is a message, not a type: its only destination is
 /// `LinkEvent::Error`, which the fold counts as an anomaly.
 pub fn decode_server_frame(frame_json: &str) -> Result<ServerFrame, String> {
-    let message: WireServerMessage = lpc_wire::json::from_str(frame_json)
-        .map_err(|error| format!("malformed M! frame: {error}"))?;
-    Ok(server_frame(&message))
+    Ok(server_frame(&decode_server_message(frame_json)?))
+}
+
+/// Decode one `M!` frame body into the wire's own message, before any
+/// mirroring — the demux reads the id off it to tell a model frame from an
+/// app conversation's reply.
+pub fn decode_server_message(frame_json: &str) -> Result<WireServerMessage, String> {
+    lpc_wire::json::from_str(frame_json).map_err(|error| format!("malformed M! frame: {error}"))
 }
 
 /// Map one decoded wire message into the model's frame vocabulary.

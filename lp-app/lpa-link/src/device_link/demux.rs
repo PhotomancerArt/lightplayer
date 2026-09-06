@@ -10,9 +10,9 @@
 
 use std::collections::VecDeque;
 
-use lpa_devices::link::LinkEvent;
+use lpa_devices::link::{APP_CONVERSATION_ID_BASE, LinkEvent};
 
-use crate::device_link::wire::decode_server_frame;
+use crate::device_link::wire::{decode_server_message, server_frame};
 
 /// Demux one whole serial line into the event it is.
 ///
@@ -24,13 +24,31 @@ use crate::device_link::wire::decode_server_frame;
 /// (logs and frames share the wire). When decoding fails and another `M!`
 /// marker is embedded further along, decoding resyncs at it, mirroring the
 /// shipped browser line wire's behavior.
+///
+/// A frame whose id is at or above
+/// [`APP_CONVERSATION_ID_BASE`](lpa_devices::link::APP_CONVERSATION_ID_BASE)
+/// is an app conversation's reply, not the model's: it is handed on as
+/// [`LinkEvent::Passthrough`] with the ORIGINAL line (resynced, if it had
+/// to be) so the conversation decodes it with the full wire vocabulary
+/// the mirror deliberately drops. The classification happens here, once,
+/// so the pump and the lens tap cannot disagree about which frames the
+/// fold hears.
 pub fn demux_line(line: &str) -> LinkEvent {
     let Some(mut frame_json) = line.strip_prefix("M!") else {
         return LinkEvent::Line(line.to_string());
     };
     loop {
-        match decode_server_frame(frame_json) {
-            Ok(frame) => return LinkEvent::Frame(frame),
+        match decode_server_message(frame_json) {
+            Ok(message) if message.id >= u64::from(APP_CONVERSATION_ID_BASE) => {
+                return LinkEvent::Passthrough {
+                    // Wire ids are `u64`, the model's `u32`; saturating
+                    // keeps a pathological id from aliasing (the same rule
+                    // `server_frame` applies).
+                    request_id: u32::try_from(message.id).unwrap_or(u32::MAX),
+                    line: format!("M!{frame_json}"),
+                };
+            }
+            Ok(message) => return LinkEvent::Frame(server_frame(&message)),
             Err(error) => match frame_json.find("M!").filter(|offset| *offset > 0) {
                 Some(offset) => frame_json = &frame_json[offset + 2..],
                 None => return LinkEvent::Error(error),
@@ -168,6 +186,51 @@ mod tests {
             panic!("expected a resynced frame, got {event:?}");
         };
         assert_eq!(frame.request_id, 9);
+    }
+
+    /// An app conversation's reply is classified by its id and handed on
+    /// whole — the conversation decodes it, the mirror never sees it.
+    #[test]
+    fn a_reply_in_the_app_range_passes_through_verbatim() {
+        let line = "M!{\"id\":1073741825,\"msg\":\"unloadProject\"}";
+
+        let event = demux_line(line);
+
+        assert_eq!(
+            event,
+            LinkEvent::Passthrough {
+                request_id: APP_CONVERSATION_ID_BASE + 1,
+                line: line.to_string(),
+            }
+        );
+    }
+
+    /// The last id below the base is still the model's.
+    #[test]
+    fn a_reply_just_below_the_app_range_is_a_model_frame() {
+        let event = demux_line("M!{\"id\":1073741823,\"msg\":\"unloadProject\"}");
+
+        let LinkEvent::Frame(frame) = event else {
+            panic!("expected a mirrored frame, got {event:?}");
+        };
+        assert_eq!(frame.request_id, APP_CONVERSATION_ID_BASE - 1);
+    }
+
+    /// A resync inside an app-range line hands on the resynced frame, not
+    /// the spliced garbage before it.
+    #[test]
+    fn a_passthrough_resyncs_like_any_frame() {
+        let event = demux_line(
+            "M!{\"id\":0,\"msM![INIT] logM!{\"id\":1073741826,\"msg\":\"unloadProject\"}",
+        );
+
+        assert_eq!(
+            event,
+            LinkEvent::Passthrough {
+                request_id: APP_CONVERSATION_ID_BASE + 2,
+                line: "M!{\"id\":1073741826,\"msg\":\"unloadProject\"}".to_string(),
+            }
+        );
     }
 
     #[test]

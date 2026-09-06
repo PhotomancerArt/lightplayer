@@ -31,7 +31,6 @@ pub mod export_lint;
 pub mod loaded_project_choice;
 pub mod node;
 pub mod node_card_ui_state;
-pub(crate) mod output_frame_cache;
 pub(crate) mod patch_bay_derivation;
 pub mod patch_preview;
 pub mod patch_pulse;
