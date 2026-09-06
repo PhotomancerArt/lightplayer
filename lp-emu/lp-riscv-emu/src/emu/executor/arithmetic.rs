@@ -4,15 +4,15 @@ extern crate alloc;
 
 use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog};
-use lp_emu_core::Memory;
+use lp_emu_core::Bus;
 use lp_riscv_inst::{Gpr, format::TypeR};
 
 /// Decode and execute R-type arithmetic instructions.
-pub(super) fn decode_execute_rtype<M: LoggingMode>(
+pub(super) fn decode_execute_rtype<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    _memory: &mut Memory,
+    _memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let r = TypeR::from_riscv(inst_word);
     let rd = Gpr::new(r.rd);
@@ -1564,7 +1564,7 @@ mod tests {
         //            0x00    0x02  0x01  0x0 0x03  0x33
         let inst_word = 0x002081b3; // ADD x3, x1, x2
         let result =
-            decode_execute_rtype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_rtype::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 30);
         assert!(result.log.is_none());
@@ -1580,7 +1580,7 @@ mod tests {
         // Test ADD instruction: add x3, x1, x2
         let inst_word = 0x002081b3; // ADD x3, x1, x2
         let result =
-            decode_execute_rtype::<LoggingEnabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_rtype::<LoggingEnabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 30);
         assert!(result.log.is_some());
@@ -1600,7 +1600,7 @@ mod tests {
         // Encoding: 0100000 00010 00001 000 00011 0110011
         let inst_word = 0x402081b3; // SUB x3, x1, x2
         let result =
-            decode_execute_rtype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_rtype::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 20);
         assert!(result.log.is_none());
@@ -1617,7 +1617,7 @@ mod tests {
         // Encoding: 0000001 00010 00001 000 00011 0110011
         let inst_word = 0x022081b3; // MUL x3, x1, x2
         let result =
-            decode_execute_rtype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_rtype::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 42);
         assert!(result.log.is_none());
@@ -1635,7 +1635,7 @@ mod tests {
         // Expected: -111412 >> 16 = -2 (arithmetic shift with sign extension)
         let inst_word = encode::sra(Gpr::new(3), Gpr::new(1), Gpr::new(2));
         let result =
-            decode_execute_rtype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_rtype::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         // Should be -2, not 65534 (which would be logical shift)
         assert_eq!(
@@ -1656,7 +1656,7 @@ mod tests {
         // Test SRA: -1 >> 1 should be -1 (sign extension)
         let inst_word = encode::sra(Gpr::new(3), Gpr::new(1), Gpr::new(2));
         let result =
-            decode_execute_rtype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_rtype::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], -1, "SRA should sign-extend: -1 >> 1 = -1");
         assert!(result.log.is_none());

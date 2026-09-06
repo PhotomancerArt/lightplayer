@@ -4,18 +4,18 @@ extern crate alloc;
 
 use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog};
-use lp_emu_core::Memory;
+use lp_emu_core::Bus;
 use lp_riscv_inst::{
     Gpr,
     format::{TypeI, TypeS},
 };
 
 /// Decode and execute load instructions (I-type, opcode 0x03).
-pub(super) fn decode_execute_load<M: LoggingMode>(
+pub(super) fn decode_execute_load<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let i = TypeI::from_riscv(inst_word);
     let rd = Gpr::new(i.rd);
@@ -24,11 +24,11 @@ pub(super) fn decode_execute_load<M: LoggingMode>(
     let imm = i.imm;
 
     match funct3 {
-        0x0 => execute_lb::<M>(rd, rs1, imm, inst_word, pc, regs, memory),
-        0x1 => execute_lh::<M>(rd, rs1, imm, inst_word, pc, regs, memory),
-        0x2 => execute_lw::<M>(rd, rs1, imm, inst_word, pc, regs, memory),
-        0x4 => execute_lbu::<M>(rd, rs1, imm, inst_word, pc, regs, memory),
-        0x5 => execute_lhu::<M>(rd, rs1, imm, inst_word, pc, regs, memory),
+        0x0 => execute_lb::<M, B>(rd, rs1, imm, inst_word, pc, regs, memory),
+        0x1 => execute_lh::<M, B>(rd, rs1, imm, inst_word, pc, regs, memory),
+        0x2 => execute_lw::<M, B>(rd, rs1, imm, inst_word, pc, regs, memory),
+        0x4 => execute_lbu::<M, B>(rd, rs1, imm, inst_word, pc, regs, memory),
+        0x5 => execute_lhu::<M, B>(rd, rs1, imm, inst_word, pc, regs, memory),
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
@@ -41,11 +41,11 @@ pub(super) fn decode_execute_load<M: LoggingMode>(
 }
 
 /// Decode and execute store instructions (S-type, opcode 0x23).
-pub(super) fn decode_execute_store<M: LoggingMode>(
+pub(super) fn decode_execute_store<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let s = TypeS::from_riscv(inst_word);
     let rs1 = Gpr::new(s.rs1);
@@ -54,9 +54,9 @@ pub(super) fn decode_execute_store<M: LoggingMode>(
     let imm = s.imm;
 
     match funct3 {
-        0x0 => execute_sb::<M>(rs1, rs2, imm, inst_word, pc, regs, memory),
-        0x1 => execute_sh::<M>(rs1, rs2, imm, inst_word, pc, regs, memory),
-        0x2 => execute_sw::<M>(rs1, rs2, imm, inst_word, pc, regs, memory),
+        0x0 => execute_sb::<M, B>(rs1, rs2, imm, inst_word, pc, regs, memory),
+        0x1 => execute_sh::<M, B>(rs1, rs2, imm, inst_word, pc, regs, memory),
+        0x2 => execute_sw::<M, B>(rs1, rs2, imm, inst_word, pc, regs, memory),
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
@@ -67,14 +67,14 @@ pub(super) fn decode_execute_store<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_lb<M: LoggingMode>(
+fn execute_lb<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs1: Gpr,
     imm: i32,
     instruction_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let base = read_reg(regs, rs1);
     let address = base.wrapping_add(imm) as u32;
@@ -116,14 +116,14 @@ fn execute_lb<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_lh<M: LoggingMode>(
+fn execute_lh<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs1: Gpr,
     imm: i32,
     instruction_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let base = read_reg(regs, rs1);
     let address = base.wrapping_add(imm) as u32;
@@ -165,14 +165,14 @@ fn execute_lh<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_lw<M: LoggingMode>(
+fn execute_lw<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs1: Gpr,
     imm: i32,
     instruction_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let base = read_reg(regs, rs1);
     let address = base.wrapping_add(imm) as u32;
@@ -213,14 +213,14 @@ fn execute_lw<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_lbu<M: LoggingMode>(
+fn execute_lbu<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs1: Gpr,
     imm: i32,
     instruction_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let base = read_reg(regs, rs1);
     let address = base.wrapping_add(imm) as u32;
@@ -262,14 +262,14 @@ fn execute_lbu<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_lhu<M: LoggingMode>(
+fn execute_lhu<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs1: Gpr,
     imm: i32,
     instruction_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let base = read_reg(regs, rs1);
     let address = base.wrapping_add(imm) as u32;
@@ -311,14 +311,14 @@ fn execute_lhu<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_sb<M: LoggingMode>(
+fn execute_sb<M: LoggingMode, B: Bus>(
     rs1: Gpr,
     rs2: Gpr,
     imm: i32,
     instruction_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let base = read_reg(regs, rs1);
     let value = read_reg(regs, rs2);
@@ -361,14 +361,14 @@ fn execute_sb<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_sh<M: LoggingMode>(
+fn execute_sh<M: LoggingMode, B: Bus>(
     rs1: Gpr,
     rs2: Gpr,
     imm: i32,
     instruction_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let base = read_reg(regs, rs1);
     let value = read_reg(regs, rs2);
@@ -411,14 +411,14 @@ fn execute_sh<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_sw<M: LoggingMode>(
+fn execute_sw<M: LoggingMode, B: Bus>(
     rs1: Gpr,
     rs2: Gpr,
     imm: i32,
     instruction_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let base = read_reg(regs, rs1);
     let value = read_reg(regs, rs2);
@@ -482,7 +482,7 @@ mod tests {
 
         let inst_word = encode::lw(Gpr::new(3), Gpr::new(1), 0);
         let result =
-            decode_execute_load::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_load::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 0x12345678);
         assert!(result.log.is_none());
@@ -498,7 +498,7 @@ mod tests {
 
         let inst_word = encode::lw(Gpr::new(3), Gpr::new(1), 0);
         let result =
-            decode_execute_load::<LoggingEnabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_load::<LoggingEnabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 0x12345678);
         assert!(result.log.is_some());
@@ -517,7 +517,7 @@ mod tests {
 
         let inst_word = encode::sw(Gpr::new(1), Gpr::new(2), 0);
         let result =
-            decode_execute_store::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_store::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(memory.read_word(ram_addr).unwrap(), 0x12345678);
         assert!(result.log.is_none());

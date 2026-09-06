@@ -4,15 +4,15 @@ extern crate alloc;
 
 use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog};
-use lp_emu_core::Memory;
+use lp_emu_core::Bus;
 use lp_riscv_inst::{Gpr, format::TypeI};
 
 /// Decode and execute I-type immediate instructions.
-pub(super) fn decode_execute_itype<M: LoggingMode>(
+pub(super) fn decode_execute_itype<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    _memory: &mut Memory,
+    _memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let i = TypeI::from_riscv(inst_word);
     let rd = Gpr::new(i.rd);
@@ -1064,7 +1064,7 @@ mod tests {
         // Test ADDI instruction: addi x3, x1, 5
         let inst_word = encode::addi(Gpr::new(3), Gpr::new(1), 5);
         let result =
-            decode_execute_itype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_itype::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 15);
         assert!(result.log.is_none());
@@ -1078,7 +1078,7 @@ mod tests {
 
         let inst_word = encode::addi(Gpr::new(3), Gpr::new(1), 5);
         let result =
-            decode_execute_itype::<LoggingEnabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_itype::<LoggingEnabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 15);
         assert!(result.log.is_some());
@@ -1096,7 +1096,7 @@ mod tests {
         // Test SLLI instruction: slli x3, x1, 2
         let inst_word = encode::slli(Gpr::new(3), Gpr::new(1), 2);
         let result =
-            decode_execute_itype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_itype::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 20); // 5 << 2 = 20
         assert!(result.log.is_none());
@@ -1111,7 +1111,7 @@ mod tests {
         // Test SRLI instruction: srli x3, x1, 2
         let inst_word = encode::srli(Gpr::new(3), Gpr::new(1), 2);
         let result =
-            decode_execute_itype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_itype::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 5); // 20 >> 2 = 5
         assert!(result.log.is_none());
@@ -1126,7 +1126,7 @@ mod tests {
         // Test ANDI instruction: andi x3, x1, 0b1010
         let inst_word = encode::andi(Gpr::new(3), Gpr::new(1), 0b1010);
         let result =
-            decode_execute_itype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_itype::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], 0b1010); // 0b1111 & 0b1010 = 0b1010
         assert!(result.log.is_none());
@@ -1143,7 +1143,7 @@ mod tests {
         // Expected: -111412 >> 16 = -2 (arithmetic shift with sign extension)
         let inst_word = encode::srai(Gpr::new(10), Gpr::new(27), 16);
         let result =
-            decode_execute_itype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_itype::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         // Should be -2, not 65534 (which would be logical shift)
         assert_eq!(
@@ -1163,7 +1163,7 @@ mod tests {
         // Test SRAI: -1 >> 1 should be -1 (sign extension)
         let inst_word = encode::srai(Gpr::new(3), Gpr::new(1), 1);
         let result =
-            decode_execute_itype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_itype::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[3], -1, "SRAI should sign-extend: -1 >> 1 = -1");
         assert!(result.log.is_none());
@@ -1178,7 +1178,7 @@ mod tests {
         // Test SRAI: 0x7FFFFFFF >> 16 = 0x00007FFF (arithmetic shift for positive)
         let inst_word = encode::srai(Gpr::new(3), Gpr::new(1), 16);
         let result =
-            decode_execute_itype::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_itype::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(
             regs[3], 0x7FFF,

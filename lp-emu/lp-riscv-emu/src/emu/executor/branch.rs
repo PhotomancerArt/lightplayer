@@ -4,15 +4,15 @@ extern crate alloc;
 
 use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog};
-use lp_emu_core::Memory;
+use lp_emu_core::Bus;
 use lp_riscv_inst::{Gpr, format::TypeB};
 
 /// Decode and execute branch instructions (B-type, opcode 0x63).
-pub(super) fn decode_execute_branch<M: LoggingMode>(
+pub(super) fn decode_execute_branch<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    _memory: &mut Memory,
+    _memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let b = TypeB::from_riscv(inst_word);
     let rs1 = Gpr::new(b.rs1);
@@ -337,7 +337,7 @@ mod tests {
 
         let inst_word = encode::beq(Gpr::new(1), Gpr::new(2), 4);
         let result =
-            decode_execute_branch::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_branch::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(result.new_pc, Some(4));
         assert!(result.log.is_none());
@@ -352,7 +352,7 @@ mod tests {
 
         let inst_word = encode::beq(Gpr::new(1), Gpr::new(2), 4);
         let result =
-            decode_execute_branch::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_branch::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(result.new_pc, None);
         assert!(result.log.is_none());
@@ -367,7 +367,7 @@ mod tests {
 
         let inst_word = encode::beq(Gpr::new(1), Gpr::new(2), 4);
         let result =
-            decode_execute_branch::<LoggingEnabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_branch::<LoggingEnabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(result.new_pc, Some(4));
         assert!(result.log.is_some());

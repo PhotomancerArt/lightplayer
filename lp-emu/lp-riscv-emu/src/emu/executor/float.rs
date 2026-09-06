@@ -65,7 +65,7 @@ use crate::emu::{
     error::EmulatorError,
     fp_regs::{FFLAG_DZ, FFLAG_NV, FFLAG_NX, FFLAG_OF, FFLAG_UF, FpRegs, RoundingMode},
 };
-use lp_emu_core::Memory;
+use lp_emu_core::Bus;
 use lp_riscv_inst::Gpr;
 
 /// Opcode `LOAD-FP`: `FLW` (with `funct3` = `010`).
@@ -106,16 +106,16 @@ const MAX_FINITE: u32 = 0x7f7f_ffff;
 ///
 /// Dispatched from [`super::decode_execute`] for the five F-extension opcodes.
 /// `lp-riscv-inst` has no F support, so the instruction word is decoded here.
-pub(super) fn decode_execute_float<M: LoggingMode>(
+pub(super) fn decode_execute_float<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
     fp: &mut FpRegs,
 ) -> Result<ExecutionResult, EmulatorError> {
     match (inst_word & 0x7f) as u8 {
-        OPCODE_LOAD_FP => execute_flw::<M>(inst_word, pc, regs, memory, fp),
-        OPCODE_STORE_FP => execute_fsw::<M>(inst_word, pc, regs, memory, fp),
+        OPCODE_LOAD_FP => execute_flw::<M, B>(inst_word, pc, regs, memory, fp),
+        OPCODE_STORE_FP => execute_fsw::<M, B>(inst_word, pc, regs, memory, fp),
         OPCODE_MADD | OPCODE_MSUB | OPCODE_NMSUB | OPCODE_NMADD => {
             execute_fma_family::<M>(inst_word, pc, regs, fp)
         }
@@ -137,11 +137,11 @@ pub(super) fn decode_execute_float<M: LoggingMode>(
 ///
 /// The spec is explicit that `FLW` does not modify the bits it loads: with
 /// FLEN = 32 it is a plain 32-bit move from memory into `f[rd]`.
-fn execute_flw<M: LoggingMode>(
+fn execute_flw<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
     fp: &mut FpRegs,
 ) -> Result<ExecutionResult, EmulatorError> {
     let funct3 = ((inst_word >> 12) & 0x7) as u8;
@@ -169,11 +169,11 @@ fn execute_flw<M: LoggingMode>(
 }
 
 /// `FSW rs2, offset(rs1)` — opcode `STORE-FP`, `funct3` = `010`, S-type.
-fn execute_fsw<M: LoggingMode>(
+fn execute_fsw<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
     fp: &mut FpRegs,
 ) -> Result<ExecutionResult, EmulatorError> {
     let funct3 = ((inst_word >> 12) & 0x7) as u8;
@@ -2331,7 +2331,7 @@ mod tests {
         }
 
         fn try_run(&mut self, inst_word: u32) -> Result<ExecutionResult, EmulatorError> {
-            decode_execute::<LoggingDisabled>(
+            decode_execute::<LoggingDisabled, _>(
                 inst_word,
                 0,
                 &mut self.regs,
