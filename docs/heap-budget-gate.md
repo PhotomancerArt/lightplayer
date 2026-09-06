@@ -164,7 +164,7 @@ per owner in `docs/reports/2026-09-02-per-lamp-memory-table.md`; the host
 probe `lp-core/lpc-engine/tests/per_lamp_memory_table.rs` pins the slopes.
 `examples/small-dome` (6,310 lamps) is not in the record: it halts the 320 K
 guest in its first frame on the dome fixture's sample-points buffer (a
-47,600 B ask — 8 B × 5,950 lamps — with ~33 KB free, after #523 removed the
+47,600 B ask — 8 B × 5,950 lamps — with ~12 KB free, after #523 removed the
 35,700 B whole-product scratch that used to halt it first).
 
 ## Ratchet, not ceiling

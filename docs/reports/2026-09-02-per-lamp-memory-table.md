@@ -276,9 +276,11 @@ Still open from the list above: the classic's `DisplayPipeline` copies.
 > *scattered* target straight into the runtime buffer. Host steady tick
 > transient: small-dome 42,278 → 5,834 B; a new `zook-patched` probe row
 > (zook's 1,500 lamps cut into five runs) 10,548 → 1,352 B against
-> unpatched zook's 839. Emulator: the 35,700 B ask is gone from the first
-> frame (its largest ask is now 23,800 = 4 × 5,950, `ensure_direct_channels`),
-> and small-dome then halts on the next one — **47,600 B** (= 8 × 5,950) from
-> `LpvmGraphics::create_sample_points` in the dome's first `render_control`,
-> with 32,923 B free. That sample-points buffer is what small-dome needs
-> next; still not in the record.
+> unpatched zook's 839 (1,352 → 1,192 after the per-group loop; the
+> zook-patched row lands at 1,192). Emulator, measured on the tree merged
+> with the identity-channels change above: the 35,700 B ask is gone from the
+> first frame, and small-dome then halts on the next one — **47,600 B**
+> (= 8 × 5,950), the dome's sample points (`create_sample_points`, a fallible
+> Vec inside `FixtureNode::render_control`), with 12,445 B free. That
+> sample-points buffer is what small-dome needs next; still not in the
+> record.
