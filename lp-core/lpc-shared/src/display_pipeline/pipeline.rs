@@ -155,6 +155,37 @@ impl DisplayPipeline {
         })
     }
 
+    /// The options this pipeline was built with — what `new` actually
+    /// allocated for, which is what a caller re-tiering ports compares.
+    pub fn options(&self) -> &DisplayPipelineOptions {
+        &self.options
+    }
+
+    /// Lamps this pipeline renders.
+    pub fn num_leds(&self) -> u32 {
+        self.num_leds
+    }
+
+    /// Bytes held per lamp by the option-gated buffers, as `new` sized them:
+    /// `prev` + `next` (12) with interpolation, the dither carry (3) with
+    /// dithering, on top of the 6 `current` always holds. The number the
+    /// board-manifest smoothing limits trade on — kept next to the
+    /// allocation so the two cannot drift apart.
+    pub fn bytes_per_lamp(&self) -> usize {
+        let current = 3 * core::mem::size_of::<u16>();
+        let interpolation = if self.prev.is_empty() {
+            0
+        } else {
+            6 * core::mem::size_of::<u16>()
+        };
+        let dithering = if self.dither_overflow.is_empty() {
+            0
+        } else {
+            core::mem::size_of::<[i8; 3]>()
+        };
+        current + interpolation + dithering
+    }
+
     /// Resize pipeline to new LED count. Clears frame state; old data is lost.
     pub fn resize(&mut self, num_leds: u32) {
         if num_leds == 0 {
@@ -803,5 +834,43 @@ mod tests {
         pipeline.tick(500, &mut out);
         assert_eq!(out[1], 255);
         assert_eq!(out[5], 255);
+    }
+
+    /// The bytes the board-manifest smoothing limits trade on: per lamp,
+    /// `current` costs 6 always, interpolation adds 12 (`prev` + `next`),
+    /// dithering adds 3 — 6 / 9 / 18 / 21 per tier. Proven against the
+    /// buffers' actual lengths so a change to `new`'s sizing moves this
+    /// test, and `bytes_per_lamp` stays honest with it.
+    #[test]
+    fn option_gated_buffers_cost_exactly_their_documented_bytes_per_lamp() {
+        const NUM_LEDS: u32 = 1500;
+        for (interpolation_enabled, dithering_enabled, expected) in [
+            (false, false, 6usize),
+            (false, true, 9),
+            (true, false, 18),
+            (true, true, 21),
+        ] {
+            let options = DisplayPipelineOptions {
+                interpolation_enabled,
+                dithering_enabled,
+                ..DisplayPipelineOptions::default()
+            };
+            let pipeline = DisplayPipeline::new(NUM_LEDS, options).expect("pipeline");
+            let held = pipeline.current.len() * 2
+                + pipeline.prev.len() * 2
+                + pipeline.next.len() * 2
+                + pipeline.dither_overflow.len() * 3;
+            assert_eq!(
+                held,
+                expected * NUM_LEDS as usize,
+                "interpolation={interpolation_enabled} dithering={dithering_enabled}"
+            );
+            assert_eq!(pipeline.bytes_per_lamp(), expected);
+            assert_eq!(
+                pipeline.options().interpolation_enabled,
+                interpolation_enabled
+            );
+            assert_eq!(pipeline.num_leds(), NUM_LEDS);
+        }
     }
 }

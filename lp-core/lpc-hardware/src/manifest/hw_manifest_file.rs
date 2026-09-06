@@ -414,17 +414,24 @@ mod tests {
             "vendor": "vendor",
             "product": "board",
             "soft_limits": {
-                "totalLeds": { "value": 1500, "measured": "2026-08-05 soak" }
+                "totalLeds": { "value": 1500, "measured": "2026-08-05 soak" },
+                "interpolationLeds": { "value": 500, "measured": "derived" },
+                "ditheringLeds": { "value": 1000, "measured": "derived" }
             }
         }"#;
         let file = HardwareManifestFile::read_json(json).unwrap();
-        let limit = file
-            .soft_limits
-            .as_ref()
-            .and_then(|limits| limits.total_leds.as_ref())
-            .expect("the record must parse");
+        let limits = file.soft_limits.as_ref().expect("the block must parse");
+        let limit = limits.total_leds.as_ref().expect("the record must parse");
         assert_eq!(limit.value, 1500);
         assert_eq!(limit.measured, "2026-08-05 soak");
+        assert_eq!(
+            limits.interpolation_leds.as_ref().map(|limit| limit.value),
+            Some(500)
+        );
+        assert_eq!(
+            limits.dithering_leds.as_ref().map(|limit| limit.value),
+            Some(1000)
+        );
 
         let runtime = file.to_manifest().unwrap();
         assert_eq!(

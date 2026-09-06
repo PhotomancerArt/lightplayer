@@ -1,4 +1,5 @@
 use crate::display_pipeline::DisplayPipelineOptions;
+use crate::output::OutputPortSmoothing;
 use lpc_hardware::HwEndpointSpec;
 use lpc_hardware::OutputError;
 
@@ -111,5 +112,20 @@ pub trait OutputProvider {
     /// [`open`]: OutputProvider::open
     fn hardware_generation(&self) -> u64 {
         0
+    }
+
+    /// What this provider did to the port's smoothing, relative to the
+    /// options it was opened with — `Some` only while frame interpolation
+    /// or temporal dithering is running OFF although the author asked for
+    /// it, because the board's measured lamp-count limits said so.
+    ///
+    /// Read by the engine once per flush per wire (a lookup, never a
+    /// virtual write path cost) so the output node's status can say the
+    /// wall is rougher on purpose. The default answers "nothing reduced",
+    /// correct for every provider that never degrades — the host and
+    /// emulator providers among them.
+    fn port_smoothing(&self, handle: OutputPortHandle) -> Option<OutputPortSmoothing> {
+        let _ = handle;
+        None
     }
 }

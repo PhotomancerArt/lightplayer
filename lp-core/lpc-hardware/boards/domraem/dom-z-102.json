@@ -8,6 +8,14 @@
     "totalLeds": {
       "value": 1500,
       "measured": "2026-08-05: 5 wires x 300 LEDs (1500 total) at 29.99 fps, zero guard trips/skips/errors, 240 s telemetry soak on the dual-core pusher build (plan 2026-08-05-0901-pinmux-8wire-overlap, G1 pass incl. scope check). The binding resource is the heap, not frame time: ~89.5 B/LED of duplication across engine and output stages, and the classic's heap is two regions - watch largest_free. 8 wires must be read against this envelope (8 x ~200), never as 8 x dome strips."
+    },
+    "interpolationLeds": {
+      "value": 500,
+      "measured": "2026-09-06: DERIVED, not soaked. Slope measured in docs/reports/2026-09-02-per-lamp-memory-table.md: frame interpolation holds prev+next = 12 B/LED per port on the classic (the largest remaining per-LED line, and the only one that is a quality feature). At 500 LEDs that is 6,000 B (3.2% of the 186,368 B arena the table was measured against); at zook's 1,500 it would be 18,000 B. Yona 2026-09-02: 'it's fine at 100 LEDs' - keep smoothing on small fixtures, degrade at scale. Replace this provenance with a [mem] bracket at the limit when the classic is next on the bench."
+    },
+    "ditheringLeds": {
+      "value": 1000,
+      "measured": "2026-09-06: DERIVED, not soaked. Temporal dithering holds a 3 B/LED carry per port (same table). Kept on to 1,000 LEDs (3,000 B) because it is a quarter of interpolation's bytes and no second write_frame per tick; above that zook's 1,500 sheds a further 4,500 B. Same bench follow-up as interpolationLeds."
     }
   },
   "board_label": [
