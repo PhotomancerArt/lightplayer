@@ -52,11 +52,11 @@ use crate::dataflow::resolver::QueryKey;
 use crate::engine::FaultPresentation;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PatchedRun,
-    PressureLevel, TickContext, err_ctx,
+    PressureLevel, TickContext, ensure_scratch_len, err_ctx,
 };
 use crate::products::control::{
     ControlHint, ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
-    ControlSampleFormat, ControlSpan,
+    ControlSampleFormat, ControlSpan, ControlTargetRun,
 };
 use crate::resource::{
     RuntimeBuffer, RuntimeBufferId, RuntimeBufferKind, RuntimeBufferMetadata,
@@ -207,10 +207,12 @@ impl OutputFragment {
 
     /// Does this fragment take the producer's whole product?
     ///
-    /// The yes case renders straight into the output buffer, which is the
-    /// path every unpatched project takes and the one whose bytes the golden
-    /// oracle pins. A partial run cannot: rendering materializes a whole
-    /// product, so a slice of one has to come out of a scratch buffer.
+    /// The yes case renders straight into its sub-slice of the output buffer
+    /// through a contiguous target — the path every unpatched project takes
+    /// and the one whose bytes the golden oracle pins. A partial run renders
+    /// through a SCATTERED target instead: the producer still renders whole,
+    /// and the target routes each sample to the run that claims it
+    /// (`docs/adr/2026-09-06-control-render-targets-scatter.md`).
     #[must_use]
     fn covers_whole_product(&self) -> bool {
         self.source_offset_samples == 0
@@ -305,6 +307,11 @@ pub struct OutputNode {
     /// moment a port closes elsewhere and the feature comes back, the
     /// badge stops explaining a roughness that is no longer there.
     smoothing: Option<OutputPortSmoothing>,
+    /// The runs a scattered render places a patched product through — one
+    /// product at a time, reused across products and frames. Resident, sized
+    /// by [`ensure_scratch_len`]: the only allocation is the high-water one,
+    /// so the patched path costs the tick nothing per frame.
+    scatter_runs: Vec<ControlTargetRun>,
 }
 
 impl OutputNode {
@@ -322,6 +329,7 @@ impl OutputNode {
             placement_revision: Revision::default(),
             fault_pattern_nodes: None,
             smoothing: None,
+            scatter_runs: Vec::new(),
         }
     }
 
@@ -700,51 +708,29 @@ impl OutputNode {
         samples.resize(coverage.total_samples as usize, 0);
 
         let mut spans = Vec::new();
-        let mut scratch = ProductScratch::default();
-        for fragment in fragments {
-            let start = fragment.offset_samples as usize;
-            let end = fragment.end_samples() as usize;
-            if samples.get(start..end).is_none() {
-                // Unreachable while the buffer is sized from the same
-                // coverage; a fragment that cannot be placed is skipped
-                // rather than allowed to panic mid-frame.
-                continue;
+        // The planner emits all of a producer's runs together, so a product
+        // is one consecutive group of fragments. Each group renders ONCE —
+        // however many runs the patch cut it into — and places its spans
+        // before the next group starts: spans stay in fragment order, and
+        // nothing is kept per frame to remember which product rendered.
+        let mut first = 0;
+        while first < fragments.len() {
+            let product = fragments[first].product;
+            let end = first
+                + fragments[first..]
+                    .iter()
+                    .take_while(|fragment| fragment.product == product)
+                    .count();
+            let group = &fragments[first..end];
+            if let Some(layout) = self.render_product(ctx, group, samples)? {
+                for fragment in group
+                    .iter()
+                    .filter(|fragment| fragment_is_placed(fragment, samples.len()))
+                {
+                    place_spans(&layout, fragment, &mut spans);
+                }
             }
-            let extent = fragment.product.preferred_extent();
-            let layout = if fragment.covers_whole_product() {
-                let target_samples = &mut samples[start..end];
-                let request = ControlRenderRequest::unorm16(extent);
-                let target =
-                    ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, target_samples);
-                let layout = ctx.render_control(fragment.product, &request, target)?;
-                if fragment.reversed {
-                    reverse_lamps(&mut samples[start..end]);
-                }
-                rotate_lamps(&mut samples[start..end], fragment.rotation_samples);
-                layout
-            } else {
-                // A partial run: the producer renders whole (once per frame,
-                // however many runs it was cut into), and each run is copied
-                // out of that. The copy is the price of a patched fixture and
-                // nobody else pays it.
-                let rendered = scratch.render(ctx, fragment.product)?;
-                let source_start = fragment.source_offset_samples as usize;
-                let source_end = source_start.saturating_add(fragment.len_samples as usize);
-                let Some(source) = rendered.samples.get(source_start..source_end) else {
-                    // A run past the end of its own product — the patch was
-                    // resolved against a different lamp count than the one
-                    // that just rendered. Leave those lamps dark rather than
-                    // shifting the rest of the wire to cover it up.
-                    continue;
-                };
-                samples[start..end].copy_from_slice(source);
-                if fragment.reversed {
-                    reverse_lamps(&mut samples[start..end]);
-                }
-                rotate_lamps(&mut samples[start..end], fragment.rotation_samples);
-                rendered.layout.clone()
-            };
-            place_spans(&layout, fragment, &mut spans);
+            first = end;
         }
 
         for (start, end) in coverage.gaps.iter().chain(coverage.contested.iter()) {
@@ -760,6 +746,92 @@ impl OutputNode {
             self.placement_revision = ctx.revision();
         }
         Ok(())
+    }
+
+    /// Render one product for `group` — its consecutive fragments, all the
+    /// same product — once, however many runs it was cut into, and apply
+    /// each placed run's reversal and rotation in place.
+    ///
+    /// Contiguous when the group is one whole-covering fragment: the
+    /// unpatched path, byte-identical to before placement existed. Scattered
+    /// otherwise: the producer renders whole through a target that routes
+    /// every sample to the run that claims it, straight into the buffer — no
+    /// whole-product scratch, nothing copied
+    /// (`docs/adr/2026-09-06-control-render-targets-scatter.md`).
+    ///
+    /// `None` when no fragment of the group fits the buffer: nothing is
+    /// rendered, exactly as before. A run that fits the buffer but reaches
+    /// past its product is left out of the placement (its lamps stay dark
+    /// rather than shifting the wire) while the product still renders.
+    fn render_product(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+        group: &[OutputFragment],
+        samples: &mut [u16],
+    ) -> Result<Option<ControlLayout>, NodeError> {
+        let Some(product) = group.first().map(|fragment| fragment.product) else {
+            return Ok(None);
+        };
+        let buffer_len = samples.len();
+        let extent = product.preferred_extent();
+        let request = ControlRenderRequest::unorm16(extent);
+        let mut fitting = group
+            .iter()
+            .filter(|fragment| fragment_fits_buffer(fragment, buffer_len));
+        let Some(first) = fitting.next() else {
+            return Ok(None);
+        };
+        let whole = fitting.next().is_none() && first.covers_whole_product();
+
+        let layout = if whole {
+            let start = first.offset_samples as usize;
+            let end = first.end_samples() as usize;
+            let target = ControlRenderTarget::new(
+                extent,
+                ControlSampleFormat::Unorm16,
+                &mut samples[start..end],
+            );
+            ctx.render_control(product, &request, target)?
+        } else {
+            let placed = || {
+                group
+                    .iter()
+                    .filter(move |fragment| fragment_is_placed(fragment, buffer_len))
+            };
+            ensure_scratch_len(
+                &mut self.scatter_runs,
+                placed().count(),
+                "output scatter runs",
+            )?;
+            for (run, fragment) in self.scatter_runs.iter_mut().zip(placed()) {
+                *run = ControlTargetRun {
+                    source_offset: fragment.source_offset_samples,
+                    offset: fragment.offset_samples,
+                    len: fragment.len_samples,
+                };
+            }
+            let target = ControlRenderTarget::scattered(
+                extent,
+                ControlSampleFormat::Unorm16,
+                samples,
+                &self.scatter_runs,
+            )
+            .map_err(|error| NodeError::msg(format!("output scatter target: {error}")))?;
+            ctx.render_control(product, &request, target)?
+        };
+
+        for fragment in group
+            .iter()
+            .filter(|fragment| fragment_is_placed(fragment, buffer_len))
+        {
+            let start = fragment.offset_samples as usize;
+            let end = fragment.end_samples() as usize;
+            if fragment.reversed {
+                reverse_lamps(&mut samples[start..end]);
+            }
+            rotate_lamps(&mut samples[start..end], fragment.rotation_samples);
+        }
+        Ok(Some(layout))
     }
 
     /// Hand the rendered samples back to the runtime buffer and mark it dirty
@@ -1104,49 +1176,25 @@ impl<'a> ChannelOrders<'a> {
     }
 }
 
-/// One product rendered whole, for the fragments that only want part of it.
-struct RenderedProduct {
-    product: ControlProduct,
-    samples: Vec<u16>,
-    layout: ControlLayout,
-}
-
-/// Per-frame cache of whole-product renders.
+/// Does the buffer have room for this fragment's range?
 ///
-/// A patched fixture is cut into several runs, and every one of them wants the
-/// same rendered product. Rendering it once per frame rather than once per run
-/// is the difference between a patch costing a copy and a patch costing a
-/// whole extra shader sample pass per range.
-#[derive(Default)]
-struct ProductScratch {
-    rendered: Vec<RenderedProduct>,
+/// Unreachable while the buffer is sized from the same coverage; a fragment
+/// that cannot be placed is skipped rather than allowed to panic mid-frame.
+fn fragment_fits_buffer(fragment: &OutputFragment, buffer_len: usize) -> bool {
+    fragment.end_samples() as usize <= buffer_len
 }
 
-impl ProductScratch {
-    fn render(
-        &mut self,
-        ctx: &mut TickContext<'_>,
-        product: ControlProduct,
-    ) -> Result<&RenderedProduct, NodeError> {
-        if let Some(index) = self
-            .rendered
-            .iter()
-            .position(|rendered| rendered.product == product)
-        {
-            return Ok(&self.rendered[index]);
-        }
-        let extent = product.preferred_extent();
-        let mut samples = alloc::vec![0u16; extent.sample_count() as usize];
-        let request = ControlRenderRequest::unorm16(extent);
-        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
-        let layout = ctx.render_control(product, &request, target)?;
-        self.rendered.push(RenderedProduct {
-            product,
-            samples,
-            layout,
-        });
-        Ok(self.rendered.last().expect("just pushed"))
-    }
+/// Is this fragment placed this frame: room in the buffer, AND a source
+/// window inside its product? A run past the end of its own product means
+/// the patch was resolved against a different lamp count than the one that
+/// just rendered — its lamps are left dark rather than shifting the rest of
+/// the wire to cover it up, and it contributes no spans.
+fn fragment_is_placed(fragment: &OutputFragment, buffer_len: usize) -> bool {
+    fragment_fits_buffer(fragment, buffer_len)
+        && fragment
+            .source_offset_samples
+            .saturating_add(fragment.len_samples)
+            <= fragment.product.preferred_extent().sample_count()
 }
 
 /// Rebase one fragment's share of its producer's layout into the output
@@ -1827,7 +1875,7 @@ mod tests {
             &mut self,
             product: ControlProduct,
             _request: &ControlRenderRequest,
-            target: ControlRenderTarget<'_>,
+            mut target: ControlRenderTarget<'_>,
         ) -> Result<ControlSampleLayout, ResolveError> {
             self.render_control_calls += 1;
             if self.render_control_fails {
@@ -1835,16 +1883,19 @@ mod tests {
                     "shader fuel exhausted: render_samples sample 0 exceeded 100000 iterations",
                 )));
             }
-            for (index, sample) in target.samples.iter_mut().enumerate() {
-                *sample = if self.paint_by_product {
+            // Through the target's API, like a real producer: a scattered
+            // target routes each sample to wherever its run landed.
+            for index in 0..target.product_len() {
+                let sample = if self.paint_by_product {
                     (product.output() as u16) * 100 + index as u16
                 } else {
                     self.graph_color[index % 3]
                 };
+                target.write(index, &[sample]);
             }
             // One span covering the whole fragment, in the fragment's OWN
             // coordinates — the output is what rebases it.
-            let len = target.samples.len() as u32;
+            let len = target.product_len() as u32;
             Ok(ControlSampleLayout {
                 spans: vec![lpc_model::ControlSampleSpan {
                     row: 0,
@@ -3674,8 +3725,44 @@ mod tests {
         assert_eq!(node.runtime_status(), None, "the runs tile the wire");
     }
 
+    /// A patched product renders ONCE, straight into the buffer through its
+    /// runs — reversal and rotation applied per run in place — with the
+    /// bytes the copy-out-of-a-scratch path produced. The literal is the
+    /// fake's `paint_by_product` formula (`100 + product sample`) laid down
+    /// by hand: wire lamps 0–2 are source lamps 3–5 rotated right by one,
+    /// wire lamps 3–5 are source lamps 0–2 end-first.
+    #[test]
+    fn a_patched_product_renders_once_straight_into_the_buffer() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.paint_by_product = true;
+        let body = product(1, ControlExtent::new(1, 18));
+        let rotated = PatchedRun {
+            offset: 1,
+            ..run(3, 3, 0, false)
+        };
+
+        render_fragments_at(
+            &mut node,
+            &mut resolver,
+            Revision::new(1),
+            &plan_fragments(&[patched(body, &[run(0, 3, 3, true), rotated])]),
+        )
+        .expect("render");
+
+        assert_eq!(resolver.render_control_calls, 1, "one render for two runs");
+        assert_eq!(
+            resolver.published_samples(),
+            vec![
+                115, 116, 117, 109, 110, 111, 112, 113, 114, // lamps 5, 3, 4
+                106, 107, 108, 103, 104, 105, 100, 101, 102, // lamps 2, 1, 0
+            ],
+        );
+        assert_eq!(node.runtime_status(), None, "the runs tile the wire");
+    }
+
     /// One render per producer per frame, however many runs it was cut into —
-    /// a patch costs a copy, not an extra sample pass per range.
+    /// a patch costs a placement, not an extra sample pass per range.
     #[test]
     fn a_producer_cut_into_several_runs_still_renders_once() {
         let mut node = output_node();
