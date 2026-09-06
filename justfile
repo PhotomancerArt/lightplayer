@@ -801,6 +801,34 @@ clippy-fw-esp32s3:
     cargo clippy --release --no-default-features \
         --features esp32s3,server,test_xt_jit_corpus -- --no-deps -D warnings
 
+# The ISR-in-RAM guard for fw-esp32v3: which RAM-resident functions load a
+# constant out of FLASH.
+#
+# Putting a function in IRAM is only half of the ISR-in-RAM rule (see the memory
+# note `isr-path-in-ram-rule`). On Xtensa the constants it cannot encode as
+# immediates come through `l32r`, and that literal pool can be in flash even
+# when the code is not — a cache miss in the middle of an interrupt, which is
+# precisely what the rule forbids. Attributes do not answer this at
+# `opt-level=z`; the linked image does.
+#
+# The committed table next to it is the contract. `.data` placement decisions
+# (esp-hal's `place-switch-tables-in-ram`, the `rwdata_hook.x` beside it) are
+# allowed to move constants to flash — but never a constant that an
+# interrupt-path function reads. Run this after any such change; a nonzero exit
+# names the functions that regressed.
+#
+#   just iram-flash-literals-esp32v3                     # check against the baseline
+#   just iram-flash-literals-esp32v3 --write-baseline    # re-bless it, deliberately
+iram-flash-literals-esp32v3 *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    python3 scripts/iram-flash-literals.py {{ fw_esp32v3_elf }} \
+        --baseline {{ fw_esp32v3_dir }}/iram-flash-literals.baseline.txt {{ args }}
+
 # Lint gate for fw-esp32v3, mirroring clippy-fw-esp32s3. Separate from
 # `clippy-host` for the same reason as the S3: the crate is excluded there
 # (it cross-compiles for Xtensa under a different toolchain), so nothing else

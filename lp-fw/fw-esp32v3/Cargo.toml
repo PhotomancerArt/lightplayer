@@ -213,6 +213,12 @@ esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32"] }
 # allocator in every feature combination, `radio_ram_probe` included.
 esp-alloc = { version = "0.10.0", default-features = false, features = ["compat", "internal-heap-stats"] }
 
+# Direct dep for `stack_probe::paint`, which masks interrupts while it writes
+# the paint pattern into the unused main stack. The implementation comes from
+# esp-hal (already in the tree); this is the trait crate, mirroring
+# fw-esp32c6, whose probe this one is ported from.
+critical-section = "1"
+
 # UART variant, not `jtag-serial`: classic ESP32 has no USB-Serial-JTAG
 # peripheral. `esp-println`'s `uart` feature only writes UART0's FIFO — it
 # never programs the baud divisor itself (esp-rs/esp-hal; confirmed on this

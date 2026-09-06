@@ -620,6 +620,85 @@ reference shader remains out of budget at dome scale — the max-GLSL-size
 constraint stands. fps at 1500 is sequential-flush-bound (45 ms of the
 76 ms tick); concurrent flush is the standing lever.
 
+### Amendment 2026-09-05 — the stack is measured; heap 216,976 B in four regions
+
+Track A of the RAM work in `docs/reports/2026-09-04-classic-ram-budget.md`
+(levers 4, 2 and 3; the JIT region is track B's). Everything below is measured
+on the desk DOM-Z-102.
+
+**The stack was never measured, and the number inverts this ADR's premise.**
+`.stack` is the residual of `dram_seg`, and every paragraph above reasons about
+it by comparison with fw-esp32s3's "proven 52,896 B" rather than by
+observation. `lp-fw/fw-esp32v3/src/stack_probe.rs` (ported from the C6) now
+paints the unused stack at boot and the heartbeat reports the watermark. On the
+shipping image — 35,520 B of stack — booting and auto-loading the startup
+project reaches **32,608 B, leaving 2,928 B**, reproducibly to the byte across
+boots. The board has been running on ~3 KB of margin, not on the comfortable
+headroom the "as high as it links is not the ceiling" argument assumes.
+
+The sizing rule this pass adopted (floor = `max(1.5 × high-water,
+high-water + 12 KiB)`, rounded up to 4 KiB) puts the floor at 49,152 B —
+13,616 B *more* than the image had. `HEAP_SIZE` was therefore **not** changed:
+shrinking the arena by 13.6 KB costs more than the margin buys on a chip whose
+binding constraint is heap residency, and the image has demonstrably been
+running at the lower margin. The margin was bought elsewhere instead.
+
+**Anonymous constants: `.data` 22,220 → 12,220 B, all of it to the stack.**
+esp-hal's `place-switch-tables-in-ram` defaults on and put every match jump
+table, the interrupt-handler tables and the merged `.rodata.cst*` pools in
+`.data`. Turning it off wholesale is unsafe here — it sends `lp_ws281x`'s
+refill jump tables and esp-hal's `INTERRUPT_EDGE` to flash, against the
+ISR-in-RAM rule — so the default is off and `lp-fw/fw-esp32v3/rwdata_hook.x`
+names the exceptions that stay in RAM. Because `.stack` takes the residual,
+all 10,000 B became stack: **45,520 B, 12,512 B of headroom** at the same
+33,008 B high-water. None of it was taken as arena.
+
+⚠️ The globs in that hook are *input-section* names, not object-file names:
+LTO merges the image into one codegen unit, so an object-file glob matches
+nothing, while the section name rustc derives from the mangled symbol survives.
+`just iram-flash-literals-esp32v3` is the standing guard — it counts, per
+RAM-resident function, the `l32r`s that load a flash-resident literal, and
+fails if any function's count grows against the committed baseline. Attributes
+are not evidence at `opt-level=z`; the linked image is.
+
+**The ROM's boot stacks are heap: 186,368 → 216,976 B, four regions.** esp-hal
+reserves 32,304 B of SRAM1 for the ROM and never returns it; esp-idf gives the
+two per-core boot *stacks* back to its heap once the ROM is out of them, and
+this firmware now does too. The two ROM *data* blocks stay reserved.
+
+| # | region | span | bytes |
+|---|---|---|---|
+| 0 | ROM PRO-CPU boot stack + hole | `0x3FFE_0440..0x3FFE_3F20` | 15,072 |
+| 1 | `dram_seg` arena | `.bss` | 112,640 |
+| 2 | SRAM1 tail above the JIT region | `0x3FFE_E000..0x4000_0000` | 73,728 |
+| 3 | ROM APP-CPU boot stack + hole + `dram2_seg` head | `0x3FFE_4350..0x3FFE_8000` | 15,536 |
+
+Registration order is load-bearing in both directions. Region 0 goes first
+because esp-alloc is first-fit in registration order, so it is where boot
+residents land — PR #516's residents-first packing achieved by placement rather
+than policy, and the device agrees: the largest free block at idle rose
+94,780 → **109,446 B**, a 14,666 B gain out of a 15,072 B region, because the
+arena stopped being peppered with long-lived small objects. Region 3 goes last
+because its span is live while the APP core boots through the ROM; it is
+registered after `start_app_core_isr` returns, outside the branch, since a core
+that never started never used its ROM stack either.
+
+Upstream esp-alloc 0.10 caps an allocator at three regions, so it is vendored
+at `third_party/esp-alloc` with the cap named once and raised to five — the
+same `[patch.crates-io]` arrangement as esp-storage. See its `README-LP.md`;
+the cap had to be *named* rather than bumped in place, because `stats()` writes
+`region_stats[id]` for every occupied slot and a longer region array behind a
+three-slot stats array would panic on the fourth region's first heartbeat.
+
+**What this does not fix.** The PR #516 unload/reload refusal survives. After
+`stopAllProjects` the largest free block is 48,048 B against the loader's
+65,536 B gate — better than the 40,448 B it was, and still a refusal. The gate
+is fragmentation-shaped, not capacity-shaped, and 30 KB of extra regions does
+not change that. Consequently the compile-heavy stack workloads (`examples/basic`,
+`examples/zook-dome`) could not be loaded on this board to measure against: the
+32,608 B figure is boot plus the startup project, and remains the high-water on
+record.
+
 ## Consequences
 
 - Any 4 MB N4-class classic module is supported. No hardware narrowing.
