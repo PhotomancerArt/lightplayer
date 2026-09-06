@@ -138,7 +138,112 @@ What the numbers say:
 
 ## 4. Per-node cost
 
-_(P3 — filled in below when the attribution lands.)_
+Full tables, diffs, the replay scripts and the host output:
+`bench/per-node/` in the planning dir (`table.md` is the write-up this
+section condenses). Two instruments on the same four project shapes,
+generated from `examples/basic` (1 clock, 1 shader, one 241-lamp Direct
+fixture on a 10×10 canvas, one output with interpolation and LUT on) so that
+nothing but the node count differs:
+
+| project | pairs k | lamps/pair | total lamps |
+|---|---:|---:|---:|
+| `examples/basic` | 1 | 241 | 241 |
+| `projects/test/basic-2n` | 2 | 241 | 482 |
+| `projects/test/basic-4n` | 4 | 241 | 964 |
+| `projects/test/basic-2n-half` | 2 | 121 | 242 |
+
+`projects/test/basic-2n/generate.py` writes all three (rules in its README:
+pair *i* = the parent's fixture/map2d/output with its own `bus:control.out/chI`
+and the next pin on the XIAO `D10/D9/D8/D7` ladder). `basic-2n-half` has
+`basic-2n`'s node count at half the lamps, so `2n − 2n-half` is this tree's
+per-lamp figure on the same instrument and subtracting it from the per-pair
+slope leaves the node.
+
+**Headline: one fixture+output pair costs ≈ 19.5 KB of node-level heap plus
+40 B per lamp on the device, all resident after startup.** A 241-lamp pair is
+≈ 29 KB, 12 % of the classic's 241,552 B heap. Of the 19.5 KB, **72 % is
+shared bookkeeping** (loader/runtime spine, registry inventory, resolver
+cache and interning, bindings) and 26 % the two node structs' own slot shapes
+and buffers.
+
+### Device width — emulator alloc-diff by callsite
+
+`lp-cli profile --collect alloc --mode startup` on each project (four-region
+replay, the two manifest discounts); the full live set at end of trace
+replayed from `heap-trace.jsonl` (the report's own table is capped at 20
+rows) and diffed `4n − 2n` ÷ 2. `2n − 1n` gives the same shape one step
+lower (fixture 3,990 / output 1,152 / shared 13,585) but `examples/basic`
+compiles in frame 2 where the siblings compile in frame 1 — with ≥ 2
+fixtures the shader's second render of frame 1 already clears the compile
+deferral flag — so `4n − 2n` is the headline.
+
+| figure (per pair) | all-in | per-lamp part (40 B × 241) | per-node remainder |
+|---|---:|---:|---:|
+| `project-load` retained | 12,279 | 1,838 | 10,441 |
+| `frame` retained | 17,921 | 7,712 | 10,210 |
+| `shader-compile` | 0 | 0 | 0 — byte-identical on all four; the compile is a property of the shader |
+| **live at end of startup** | 27,236 (30,133 engine-only) | 10,670 | **19,463** |
+
+| side | scale | owner | B/pair |
+|---|---|---|---:|
+| shared | node | project loader / runtime spine | 4,699 |
+| shared | node | registry inventory (`NodeDefEntry`, `ProjectNode`, def clones) | 4,369 |
+| shared | node | resolver: cache, interning, productions | 3,773 |
+| shared | node | dataflow bindings + node binding index | 1,175 |
+| fixture | node | `FixtureDef` slot shape (compiled accessors) | 2,682 |
+| fixture | node | `FixtureNode` resolve/produce (query keys, def reads) | 1,308 |
+| output | node | `OutputDef` slot shape | 1,152 |
+| output | port | per-port fixed (provider + driver frame headers) | 240 |
+| fixture | lamps | sample points 1,992 + sample target 1,960 + mapping 1,952 + `direct_channels` 964 | 6,868 |
+| output | lamps | `OutputNode` u16 runtime buffer 2,356 + 8-bit port frame 963 + emulator-only provider buffer 723 | 4,042 |
+| emulator | artifact | RAM filesystem holding the project text (excluded) | −2,945 |
+
+Nothing in `4n − 2n` is unattributed. Rolled up per pair: fixture node
+3,990, output node 1,392, **shared 14,016**, lamp-scaled 10,670.
+
+**Per lamp on the same instrument** (`2n − 2n-half` ÷ 240): mapping 8,
+sample points 8, sample target 8, `direct_channels` 4, output u16 6, 8-bit
+port frame 3 = **37 B/lamp**, owner for owner the device figure of
+`docs/reports/2026-09-02-per-lamp-memory-table.md`, on an unrelated project
+shape; +3 for the emulator's own per-port write buffer. On the classic add
+`DisplayPipeline` (6, +12 interpolation, +3 dither) → ~55 B/lamp.
+
+### Host — tracking-allocator probe
+
+`cargo test -p lpc-engine --test per_node_memory_table -- --nocapture`
+(`-p lpc-engine` only; the test regenerates its own temp copies of the four
+shapes from `examples/basic` by the same rules as the committed projects,
+after a discarded warm-up run):
+
+| figure (per pair) | all-in resident | B/lamp | per-node resident |
+|---|---:|---:|---:|
+| load project (`2n → 4n`) | 17,159 | 8.00 | **15,231** |
+| install graphics + provider | 0 | 0 | 0 (a flat 87,211 B per process) |
+| steady frames | 0 | 0 | 0 |
+
+The host's load leg is 1.4× the emulator's `project-load` retained (std
+collection growth, same 4-byte pointers on both). Its per-lamp load figure,
+8.00 B/lamp resident, is the mapping — the same 8 the emulator and the
+per-lamp report see. **The host cannot resolve the frame leg**: its shader
+compile is wasmtime's (0.55–1.02 MB resident, ±200 KB run to run) and for
+k ≥ 2 it lands in tick 1 with the frame's buffers; a ~10 KB/pair signal is
+not readable under that. The frame leg is the emulator column.
+
+### Against the debt entry's estimate
+
+`docs/debt/per-lamp-data-stored-three-times.md` put "roughly 14 KB on each
+fixture+output pair" from a cross-image comparison of `examples/basic` vs
+`quad60-v3` on 2026-08-02. Measured on one image: **19.5 KB per pair at end
+of startup (10.4 KB of it at load, ~10 KB more in the first frame)**, so the
+estimate was right in magnitude and low by a third — and its conclusion holds
+harder than it said: on a four-channel show the node cost (4 × 19.5 = 78 KB)
+exceeds the per-lamp cost of a 1,500-lamp project (60 KB) before the first
+lamp, and three quarters of it is not in either node but in the shared
+bookkeeping that every node pays into. `basic-4n` (4 pairs, 964 lamps) ends
+startup with a 14,088 B largest free block on the classic's four-region
+layout — under both gates. Cross-check with §3: zook (1 pair, 1,500 lamps,
+5 ports) is lamp-dominated; the classic's next constraint at zook scale is
+the output path (§3.4), at quad-channel scale it is this table.
 
 ## 5. What this changes
 
