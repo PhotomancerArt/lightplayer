@@ -4035,6 +4035,10 @@ mod tests {
         fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {
             self.inner.clear_sample_out(out)
         }
+
+        fn sample_batch_capacity(&self) -> u32 {
+            self.inner.sample_batch_capacity()
+        }
     }
 
     struct CountingShader(u8);

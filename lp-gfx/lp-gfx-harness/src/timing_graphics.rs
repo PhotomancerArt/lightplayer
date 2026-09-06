@@ -152,6 +152,10 @@ impl LpGraphics for TimingGraphics {
     fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {
         self.inner.clear_sample_out(out)
     }
+
+    fn sample_batch_capacity(&self) -> u32 {
+        self.inner.sample_batch_capacity()
+    }
 }
 
 /// Shader decorator recording call durations.
@@ -176,15 +180,21 @@ impl LpShader for TimingShader {
         result
     }
 
-    fn sample_rgba16(
+    fn bind_uniforms(&mut self, uniforms: &LpsValueF32) -> Result<(), GfxError> {
+        self.inner.bind_uniforms(uniforms)
+    }
+
+    // The timed call is the bound sample: the engine's frame path binds once
+    // per stream and samples per batch, and this entry sees every batch.
+    // `sample_rgba16` (the default: bind + bound) lands here too.
+    fn sample_rgba16_bound(
         &mut self,
         points: &mut SamplePointsHandle,
         out: &mut SampleOutHandle,
-        uniforms: &LpsValueF32,
+        count: u32,
     ) -> Result<(), GfxError> {
-        let count = points.count();
         let start = Instant::now();
-        let result = self.inner.sample_rgba16(points, out, uniforms);
+        let result = self.inner.sample_rgba16_bound(points, out, count);
         self.timings
             .samples
             .lock()

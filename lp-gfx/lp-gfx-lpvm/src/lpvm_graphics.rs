@@ -329,7 +329,20 @@ where
         sample_out_buf_mut(out)?.data_mut().fill(0);
         Ok(())
     }
+
+    fn sample_batch_capacity(&self) -> u32 {
+        CPU_SAMPLE_BATCH_POINTS
+    }
 }
+
+/// Points per sampling call on every CPU engine (native JIT, wasmtime,
+/// browser): 128 = 1 KB of Q16 pairs in, 1 KB of RGBA16 out, and ~8 calls
+/// per 1,000 lamps. A call costs a guest entry (globals reset, fuel arm, the
+/// synthesised point loop) — a few hundred cycles, under 1% of the shader
+/// work in a batch — while the window it bounds replaces 16 B per lamp of
+/// resident sample buffers with 3 KB per consumer
+/// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
+pub const CPU_SAMPLE_BATCH_POINTS: u32 = 128;
 
 /// The LPIR numeric mode a requested [`ShaderSemantics`] tier means for this
 /// CPU backend.

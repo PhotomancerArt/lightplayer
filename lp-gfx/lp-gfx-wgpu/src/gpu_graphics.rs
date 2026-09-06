@@ -1057,6 +1057,58 @@ void tick() {
     }
 
     #[test]
+    fn sample_rgba16_bound_prefix_leaves_the_tail() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let options =
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        let mut shader = graphics
+            .compile_shader(
+                "vec4 render_2d(vec2 pos) { return vec4(pos.x / 16.0, 0.0, 0.0, 1.0); }",
+                &options,
+            )
+            .expect("compiles");
+        let uniforms = LpsValueF32::Struct {
+            name: None,
+            fields: vec![],
+        };
+        // Sampling before any bind is refused, not silently run on stale uniforms.
+        let mut points = graphics.create_sample_points(6).expect("points");
+        let mut out = graphics.create_sample_out(6).expect("out");
+        assert!(shader.sample_rgba16_bound(&mut points, &mut out, 6).is_err());
+
+        let coords: Vec<i32> = (0..12)
+            .map(|i| if i % 2 == 0 { (i / 2) << 16 } else { 0 })
+            .collect();
+        graphics
+            .write_sample_points(&mut points, &coords)
+            .expect("write points");
+        let poison = [0xBEEFu16; 24];
+        graphics.write_sample_out(&mut out, &poison).expect("poison");
+
+        shader.bind_uniforms(&uniforms).expect("bind");
+        shader
+            .sample_rgba16_bound(&mut points, &mut out, 4)
+            .expect("samples a prefix");
+        let sampled = graphics.read_sample_out(&out).expect("read out");
+        for i in 0..4 {
+            let expected = (i as f32 / 16.0 * 65535.0).round() as u16;
+            assert_eq!(sampled[i * 4], expected, "point {i} r");
+        }
+        assert_eq!(&sampled[16..], &poison[16..], "the tail past count is untouched");
+        assert!(
+            shader
+                .sample_rgba16_bound(&mut points, &mut out, 7)
+                .is_err(),
+            "count past the window is refused"
+        );
+        // The GPU backend samples whole products: it advertises no batch.
+        assert_eq!(graphics.sample_batch_capacity(), u32::MAX);
+    }
+
+    #[test]
     fn sample_rgba16_reuses_the_pass_across_count_changes() {
         let Some(graphics) = test_graphics() else {
             eprintln!("SKIP: no GPU adapter available");
