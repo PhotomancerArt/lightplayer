@@ -72,7 +72,7 @@
 //! |---|---|
 //! | info line | 17px, one line, ellipsised, `title` = the full text |
 //! | bar slot | 4px, unlit when its zone has no activity |
-//! | preview slot | 120px, the picture or an honest sentence (AC10) |
+//! | preview slot | 120px, the board's own picture (aspect-fit, letterboxed) or an honest sentence (AC10) |
 //! | verb row | 30px, whether it holds verbs or nothing |
 //!
 //! A board event — a heartbeat, a fault, a lost link, a new terminal line —
@@ -117,16 +117,19 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceAction, DeviceActivityView, DeviceEscape, DeviceLoadedProject, DeviceStatus, DeviceView,
-    DevicesOp, FirmwareVerb, PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiStatus,
-    device_escape_action, device_firmware_line, device_identity_line, device_status_kind,
-    firmware_face_preview_sentence, firmware_verb, pending_escape_action, pending_firmware_line,
+    DeviceAction, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp,
+    DeviceLoadedProject, DeviceStatus, DeviceView, DevicesOp, FeedLiveness, FirmwareVerb,
+    PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiStatus, device_escape_action,
+    device_firmware_line, device_identity_line, device_status_kind, firmware_face_preview_sentence,
+    firmware_verb, pending_escape_action, pending_firmware_line,
 };
 
 use super::device_pick_popover::{
     BoardPickMode, BoardPickPopover, ChipSource, ProjectPickPopover, joined_chip,
 };
 use super::device_terminal::DeviceTerminal;
+use super::play_feed_text::frame_age_label;
+use crate::app::node::lamp_view::LampView;
 use crate::core::{ActionButton, ActionButtonVariant, StatusChip};
 
 /// One device card.
@@ -153,9 +156,19 @@ pub(crate) fn DeviceRosterCard(
     /// verb.
     #[props(default)]
     open_uid: Option<String>,
+    /// The board's own picture and its treatment, joined at the app view.
+    /// `None` = nothing honest to draw: the slot keeps its sentence.
+    #[props(default)]
+    feed: Option<DeviceCardFeedView>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let device = card.id;
+    // The mount lease: a card on screen wants its board's picture; a card
+    // leaving the page stops the pull (frames nobody sees are serial time
+    // the board would rather spend elsewhere). The feed keeps the last
+    // frame across the unmount.
+    use_effect(move || on_action.call(DeviceFeedOp::action_for(device, true)));
+    use_drop(move || on_action.call(DeviceFeedOp::action_for(device, false)));
     let status = UiStatus {
         label: card.state_label.clone(),
         kind: device_status_kind(card.status),
@@ -251,16 +264,12 @@ pub(crate) fn DeviceRosterCard(
             // ── zone 2: PROJECT — what is on the board ──────────────────
             section { class: zone_class(false),
                 div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:gap-2",
-                    // preview slot (120px, AC10). No feed yet — the honest
-                    // sentence instead of a fake picture. The
-                    // `ux-play-pill` liveness slot belongs top-right inside
-                    // this frame; the feed milestone drops it in without
-                    // moving anything, because the frame's height is fixed.
-                    div { class: preview_frame_class(),
-                        div { class: "ux-play-empty",
-                            p { class: "tw:m-0", "{preview_sentence(&card)}" }
-                        }
-                    }
+                    // preview slot (120px, AC10): the board's own published
+                    // frames when the feed has them, the honest sentence
+                    // otherwise — never a fake picture. The liveness pill
+                    // sits top-right INSIDE the frame, so the picture
+                    // arriving moves nothing: the frame's height is fixed.
+                    {preview_slot(&card, feed.as_ref())}
                     // info line (17px, one line, full text on hover)
                     p {
                         class: if project_line_is_fault { fault_line_class() } else { info_line_class() },
@@ -923,6 +932,123 @@ fn preview_frame_class() -> &'static str {
     "ux-play-frame ux-play-frame-slot"
 }
 
+/// The preview slot's content, in precedence order:
+///
+/// 1. An activity — the picture is gone while the board is being flashed
+///    or written to, and the activity sentence says so (D2).
+/// 2. A frame WITH geometry: the lamp field, aspect-fit and letterboxed
+///    inside the slot (the slot never follows the layout's aspect — a
+///    fixed row is the height rule), plus the liveness pill. Offline and
+///    lens frames are dimmed: last known, not current.
+/// 3. A frame WITHOUT geometry: the board's layout exceeded the wire's
+///    read budget — said in words, since a wordless blank reads as a
+///    defect.
+/// 4. A feed that is pulling but has no frame yet: waiting.
+/// 5. Otherwise the card's own sentence ([`preview_sentence`]).
+fn preview_slot(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -> Element {
+    let frame_class = feed_frame_class(card, feed);
+    let pill = feed_pill(card, feed);
+    let picture = card
+        .activity
+        .is_none()
+        .then(|| feed.and_then(|feed| feed.frame.clone()))
+        .flatten();
+    let sentence = preview_slot_sentence(card, feed);
+    rsx! {
+        div { class: "{frame_class}",
+            if let Some(frame) = picture
+                && frame.display_layout.is_some()
+            {
+                div { class: "ux-play-lamps",
+                    LampView { preview: frame }
+                }
+            }
+            if let Some(sentence) = sentence {
+                div { class: "ux-play-empty",
+                    p { class: "tw:m-0", "{sentence}" }
+                }
+            }
+            if let Some((family, text)) = pill {
+                span { class: "ux-play-pill {family}",
+                    span { class: "ux-play-dot" }
+                    "{text}"
+                }
+            }
+        }
+    }
+}
+
+/// The frame's classes: the fixed slot, dimmed when the picture is last
+/// known rather than current.
+fn feed_frame_class(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -> String {
+    let mut class = preview_frame_class().to_string();
+    if card.activity.is_none()
+        && feed.is_some_and(|feed| {
+            feed.frame.is_some()
+                && matches!(feed.liveness, FeedLiveness::Offline | FeedLiveness::Lens)
+        })
+    {
+        class.push_str(" ux-play-frame-dim");
+    }
+    class
+}
+
+/// The liveness pill: its tint family and its text, or none. Says where the
+/// picture came from and how old it is (the honest-preview ADR) — and
+/// nothing while an activity owns the slot or no frame exists.
+fn feed_pill(
+    card: &DeviceView,
+    feed: Option<&DeviceCardFeedView>,
+) -> Option<(&'static str, String)> {
+    if card.activity.is_some() {
+        return None;
+    }
+    let feed = feed?;
+    feed.frame.as_ref()?;
+    let age = || frame_age_label(feed.frame_age_secs.unwrap_or_default());
+    Some(match feed.liveness {
+        FeedLiveness::Waiting => return None,
+        // fps is the BOARD's engine rate off its heartbeat; a board that
+        // has not reported one says "live" and nothing more rather than
+        // inventing a number.
+        FeedLiveness::Live => (
+            "ux-play-pill-live",
+            match feed.engine_fps {
+                Some(fps) => format!("live · {fps} fps"),
+                None => "live".to_string(),
+            },
+        ),
+        FeedLiveness::Stale => ("ux-play-pill-stale", format!("last frame · {}", age())),
+        FeedLiveness::Offline => ("ux-play-pill-offline", format!("last frame · {}", age())),
+        FeedLiveness::Lens => ("ux-play-pill-offline", "editor has the wire".to_string()),
+    })
+}
+
+/// The sentence in the slot, when the picture is not the whole story.
+fn preview_slot_sentence(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -> Option<String> {
+    if card.activity.is_some() {
+        return Some(preview_sentence(card));
+    }
+    let Some(feed) = feed else {
+        return Some(preview_sentence(card));
+    };
+    match &feed.frame {
+        Some(frame) if frame.display_layout.is_some() => None,
+        // Frames without geometry: the board declined the display layout
+        // (over the link's read budget at this scale). Say so instead of
+        // painting nothing.
+        Some(_) => Some(
+            "Frames are flowing, but this project's lamp layout is too large to preview over \
+             this link."
+                .to_string(),
+        ),
+        None => Some(match feed.liveness {
+            FeedLiveness::Waiting => "Waiting for the first frame…".to_string(),
+            _ => preview_sentence(card),
+        }),
+    }
+}
+
 /// A zone's verb row: 30px, always, whether it holds verbs or (during
 /// another zone's activity) nothing.
 ///
@@ -1249,6 +1375,131 @@ mod tests {
             ..card_fixture()
         };
         assert_eq!(device_line_text(&bare, None), "");
+    }
+
+    fn feed_fixture(liveness: FeedLiveness, with_layout: bool) -> DeviceCardFeedView {
+        use std::rc::Rc;
+        let layout = with_layout.then(|| {
+            Rc::new(lpc_model::ControlDisplayLayout::Layout2d(
+                lpc_model::ControlLayout2d::new(lpc_model::Revision::new(7), 4, 1, Vec::new()),
+            ))
+        });
+        DeviceCardFeedView {
+            frame: (liveness != FeedLiveness::Waiting).then(|| {
+                lpa_studio_core::UiControlProductPreview {
+                    revision: 3,
+                    extent: lpc_model::ControlExtent::new(1, 12),
+                    sample_format: lpa_studio_core::UiControlSampleFormat::U16,
+                    sample_layout: lpc_model::ControlSampleLayout { spans: Vec::new() },
+                    display_layout: layout,
+                    bytes: Rc::from(vec![0u8; 24]),
+                }
+            }),
+            frame_age_secs: Some(12.0),
+            engine_fps: Some(43),
+            liveness,
+        }
+    }
+
+    /// The pill says where the picture came from and how old it is — and
+    /// says nothing over an activity or an empty slot.
+    #[test]
+    fn the_pill_names_the_pictures_provenance_and_age() {
+        let card = card_fixture();
+        let pill = |liveness| feed_pill(&card, Some(&feed_fixture(liveness, true)));
+        assert_eq!(
+            pill(FeedLiveness::Live),
+            Some(("ux-play-pill-live", "live · 43 fps".to_string()))
+        );
+        assert_eq!(
+            pill(FeedLiveness::Stale),
+            Some(("ux-play-pill-stale", "last frame · 12 s ago".to_string()))
+        );
+        assert_eq!(
+            pill(FeedLiveness::Offline),
+            Some(("ux-play-pill-offline", "last frame · 12 s ago".to_string()))
+        );
+        assert_eq!(
+            pill(FeedLiveness::Lens),
+            Some(("ux-play-pill-offline", "editor has the wire".to_string()))
+        );
+        assert_eq!(pill(FeedLiveness::Waiting), None);
+        assert_eq!(feed_pill(&card, None), None);
+
+        let mut no_fps = feed_fixture(FeedLiveness::Live, true);
+        no_fps.engine_fps = None;
+        assert_eq!(
+            feed_pill(&card, Some(&no_fps)),
+            Some(("ux-play-pill-live", "live".to_string()))
+        );
+
+        let mut busy = card_fixture();
+        busy.activity = Some(DeviceActivityView {
+            kind: lpa_studio_core::DeviceActivityKind::Flash,
+            label: "Flashing firmware…".to_string(),
+            percent: None,
+            cancellable: true,
+            cancel_requested: false,
+        });
+        assert_eq!(
+            feed_pill(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
+            None,
+            "an activity owns the slot"
+        );
+    }
+
+    /// The slot's sentence yields to a picture with geometry, names a
+    /// picture without one, waits honestly, and otherwise stays the card's
+    /// own — an activity always wins.
+    #[test]
+    fn the_slot_sentence_yields_to_the_picture() {
+        let card = card_fixture();
+        assert_eq!(
+            preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Live, true))),
+            None
+        );
+        assert!(
+            preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Live, false)))
+                .is_some_and(|s| s.contains("too large to preview")),
+        );
+        assert_eq!(
+            preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Waiting, true))),
+            Some("Waiting for the first frame…".to_string())
+        );
+        assert_eq!(
+            preview_slot_sentence(&card, None),
+            Some(preview_sentence(&card))
+        );
+
+        let mut busy = card_fixture();
+        busy.activity = Some(DeviceActivityView {
+            kind: lpa_studio_core::DeviceActivityKind::Flash,
+            label: "Flashing firmware…".to_string(),
+            percent: None,
+            cancellable: true,
+            cancel_requested: false,
+        });
+        assert_eq!(
+            preview_slot_sentence(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
+            Some(preview_sentence(&busy))
+        );
+        assert_eq!(
+            feed_frame_class(&busy, Some(&feed_fixture(FeedLiveness::Offline, true))),
+            preview_frame_class(),
+            "no dimming under an activity"
+        );
+        assert!(
+            feed_frame_class(&card, Some(&feed_fixture(FeedLiveness::Offline, true)))
+                .ends_with("ux-play-frame-dim")
+        );
+        assert!(
+            feed_frame_class(&card, Some(&feed_fixture(FeedLiveness::Lens, true)))
+                .ends_with("ux-play-frame-dim")
+        );
+        assert_eq!(
+            feed_frame_class(&card, Some(&feed_fixture(FeedLiveness::Stale, true))),
+            preview_frame_class()
+        );
     }
 
     /// AC10: every state's preview slot says something honest, and no state

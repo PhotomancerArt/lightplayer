@@ -9,6 +9,7 @@
 //! covers the library pages and the live sim card.
 
 use dioxus::prelude::*;
+use lpa_studio_core::{DeviceCardFeedView, FeedLiveness};
 use lpa_studio_web_story_macros::story;
 
 use lpa_studio_core::app::library::PackageHealth;
@@ -534,6 +535,55 @@ fn devices_card_states() -> Element {
                             // The real gallery lists, so the empty face
                             // shows the pick trigger it actually wears
                             // rather than the "nothing to offer" note.
+                            projects: packages(),
+                            examples: examples(),
+                            on_action: |_| {},
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The preview slot with the live feed (plan 2026-09-06 device-card-live-feed): the same Running card five times at 400px, each with the board's own published frame (a canned 72-lamp sign) joined at the app view. LIVE — calm green pill \"live · 43 fps\" (the board's engine rate off its heartbeat); STALE — the frame stays, amber \"last frame · 12 s ago\" past the 5 s threshold; OFFLINE — the last in-session frame dimmed and desaturated, neutral \"last frame · 12 s ago\" (last known, not current); LENS — the editor holds the wire, the feed is paused, the last frame dimmed with \"editor has the wire\"; NO LAYOUT — frames arrive but the board's lamp layout exceeded the wire's read budget, so the slot says so instead of painting nothing. The lamp field is aspect-fit and letterboxed INSIDE the fixed 120px slot — the slot never follows the layout's aspect — so all five cards measure exactly the height of `devices_card_states`' cards: the picture arriving moves nothing. Compare against `devices_card_states` for the never-fed sentence."
+)]
+fn devices_card_live_feed() -> Element {
+    let running = card_state_fixtures().remove(0);
+    let (_, card, open_uid) = running;
+    let frame = thumb_lamp_frame();
+    let feed = |liveness: FeedLiveness, with_layout: bool| DeviceCardFeedView {
+        frame: Some(match with_layout {
+            true => frame.clone(),
+            false => UiControlProductPreview {
+                display_layout: None,
+                ..frame.clone()
+            },
+        }),
+        frame_age_secs: Some(12.0),
+        engine_fps: Some(43),
+        liveness,
+    };
+    let looks = [
+        ("Live", feed(FeedLiveness::Live, true)),
+        ("Stale", feed(FeedLiveness::Stale, true)),
+        ("Offline", feed(FeedLiveness::Offline, true)),
+        ("Lens", feed(FeedLiveness::Lens, true)),
+        ("No layout", feed(FeedLiveness::Live, false)),
+    ];
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(3,400px)] tw:items-start tw:gap-3",
+                for (label , feed) in looks {
+                    div { key: "{label}", class: "tw:grid tw:gap-2",
+                        p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
+                            "{label}"
+                        }
+                        DeviceRosterCard {
+                            card: card.clone(),
+                            open_uid: open_uid.clone(),
+                            feed: Some(feed),
                             projects: packages(),
                             examples: examples(),
                             on_action: |_| {},
