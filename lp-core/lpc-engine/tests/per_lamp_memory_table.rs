@@ -100,10 +100,37 @@ struct Fixture {
 /// projects — under `WS281X_MAX_LEDS_PER_PORT` (1,024) so no wire is capped.
 const SYNTHETIC_LAMPS_PER_PORT: u32 = 1000;
 
+/// The patch that cuts a five-sector zook into five runs, one per sector,
+/// laid on the wire in REVERSE sector order so no run auto-flows: one run is
+/// reversed and one rotated, the two placements a patched install actually
+/// uses. Every fragment is then a partial run of the product — the path a
+/// patched fixture pays for and an unpatched one never sees.
+///
+/// Rows are `[path, out#, lamp, flags?, offset?]` (`lpc_mapping::patch`);
+/// `-1` = the default output, so the single unnamed output takes them all.
+const ZOOK_PATCH: &str = r#"{
+  "format": 2,
+  "entries": [
+    ["/sector/0", -1, 1200],
+    ["/sector/1", -1, 900, "r"],
+    ["/sector/2", -1, 600, "", 40],
+    ["/sector/3", -1, 300],
+    ["/sector/4", -1, 0]
+  ]
+}
+"#;
+
 /// Generate a zook-shaped project in a temp dir: `strands` rotated copies of
 /// a `per_strand`-lamp path, and output ports summing to exactly that many
-/// lamps. Everything else (shader, clock, fixture settings) is zook's.
-fn synthetic_from_zook(label: &'static str, strands: u32, per_strand: u32) -> Fixture {
+/// lamps. Everything else (shader, clock, fixture settings) is zook's. With
+/// `patch`, the fixture also carries that patch document, so its product
+/// reaches the output as partial runs instead of one auto-flowed whole.
+fn synthetic_from_zook(
+    label: &'static str,
+    strands: u32,
+    per_strand: u32,
+    patch: Option<&str>,
+) -> Fixture {
     let src = workspace_dir().join("examples/zook-dome");
     let dir = std::env::temp_dir().join(format!(
         "lp-per-lamp-{}-{label}-{strands}x{per_strand}",
@@ -151,6 +178,21 @@ fn synthetic_from_zook(label: &'static str, strands: u32, per_strand: u32) -> Fi
     );
     std::fs::write(dir.join("output.json"), output).expect("write output.json");
 
+    if let Some(patch) = patch {
+        std::fs::write(dir.join("fixture.patch.json"), patch).expect("write patch");
+        // A text edit, not a `Value` round trip, for the same reason as the
+        // output above: `kind` has to stay the first key.
+        let fixture = std::fs::read_to_string(src.join("fixture.json")).expect("read fixture");
+        let anchor = "\"kind\": \"Fixture\",";
+        assert!(fixture.contains(anchor), "zook fixture.json starts with its kind");
+        let fixture = fixture.replacen(
+            anchor,
+            "\"kind\": \"Fixture\",\n  \"patch\": { \"kind\": \"File\", \"source\": \"fixture.patch.json\" },",
+            1,
+        );
+        std::fs::write(dir.join("fixture.json"), fixture).expect("write fixture.json");
+    }
+
     Fixture { label, dir, lamps }
 }
 
@@ -161,14 +203,17 @@ fn fixtures() -> Vec<Fixture> {
             dir: workspace_dir().join("examples/zook-dome"),
             lamps: 1500,
         },
-        synthetic_from_zook("zook-2x", 10, 300),
+        synthetic_from_zook("zook-2x", 10, 300, None),
+        // zook's own shape and lamp count, cut into runs by a patch: the
+        // difference from the `zook` row is what a patch costs per frame.
+        synthetic_from_zook("zook-patched", 5, 300, Some(ZOOK_PATCH)),
         Fixture {
             label: "small-dome",
             dir: workspace_dir().join("examples/small-dome"),
             lamps: 6310,
         },
-        synthetic_from_zook("dome-scale", 190, 119),
-        synthetic_from_zook("dome-scale-2x", 380, 119),
+        synthetic_from_zook("dome-scale", 190, 119, None),
+        synthetic_from_zook("dome-scale-2x", 380, 119, None),
     ]
 }
 
