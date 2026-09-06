@@ -113,7 +113,10 @@ pub fn App() -> Element {
     // The shell loader's dismissal (index.html `__lpShell`): the first
     // effect after the first committed render, i.e. the moment real chrome
     // exists to look at. An effect, not a hook — a hook runs before the DOM
-    // insert and would drop the overlay onto a still-empty page.
+    // insert and would drop the overlay onto a still-empty page. The shell
+    // does not drop it here either: the Tailwind `<link>` below lands in
+    // an effect queued BEHIND this one, so `done()` waits for that sheet
+    // (and the fonts it wakes) before the overlay goes.
     #[cfg(target_arch = "wasm32")]
     use_effect(dismiss_shell_loader);
 
@@ -1695,7 +1698,9 @@ pub(crate) fn make_device_timers() -> lpa_link::DeviceTimers {
 /// cache is the whole job. (Dev caveat: a `dx serve` rebuild invalidates
 /// the cache entries mid-session — harmless, the next demand re-fetches.)
 /// Tell the shell loader (index.html) the app has rendered: call
-/// `window.__lpShell.done()` if it is there. Tolerant of its absence —
+/// `window.__lpShell.done()` if it is there (the shell drops its overlay
+/// once the stylesheets and fonts that render leans on have loaded, so
+/// this is a request, not the removal). Tolerant of its absence —
 /// stories, tests, and any document predating the shell script have no
 /// overlay to dismiss (and the shell's own MutationObserver on `#main`
 /// backstops surfaces that never get here).
