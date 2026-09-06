@@ -284,9 +284,14 @@ mod tests {
         let mut fp = FpRegs::new();
 
         let inst_word = encode::ecall();
-        let result =
-            decode_execute_system::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory, &mut fp)
-                .unwrap();
+        let result = decode_execute_system::<LoggingDisabled, _>(
+            inst_word,
+            0,
+            &mut regs,
+            &mut memory,
+            &mut fp,
+        )
+        .unwrap();
 
         assert!(result.syscall);
         assert!(!result.should_halt);
@@ -300,9 +305,14 @@ mod tests {
         let mut fp = FpRegs::new();
 
         let inst_word = encode::ebreak();
-        let result =
-            decode_execute_system::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory, &mut fp)
-                .unwrap();
+        let result = decode_execute_system::<LoggingDisabled, _>(
+            inst_word,
+            0,
+            &mut regs,
+            &mut memory,
+            &mut fp,
+        )
+        .unwrap();
 
         assert!(!result.syscall);
         assert!(result.should_halt);
@@ -316,9 +326,14 @@ mod tests {
         let mut fp = FpRegs::new();
 
         let inst_word = encode::ecall();
-        let result =
-            decode_execute_system::<LoggingEnabled, _>(inst_word, 0, &mut regs, &mut memory, &mut fp)
-                .unwrap();
+        let result = decode_execute_system::<LoggingEnabled, _>(
+            inst_word,
+            0,
+            &mut regs,
+            &mut memory,
+            &mut fp,
+        )
+        .unwrap();
 
         assert!(result.syscall);
         assert!(result.log.is_some());
@@ -332,7 +347,8 @@ mod tests {
         let mut regs = [0i32; 32];
         regs[5] = 0x1234_5678u32 as i32; // x5, used as the rs1 source below
         let mut memory = Memory::with_default_addresses(vec![], vec![]);
-        decode_execute_system::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory, fp).unwrap();
+        decode_execute_system::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory, fp)
+            .unwrap();
         regs[rd as usize]
     }
 

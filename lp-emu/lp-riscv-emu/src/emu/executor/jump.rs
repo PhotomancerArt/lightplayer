@@ -293,7 +293,8 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![], vec![]);
         let inst = encode::jalr(Gpr::new(5), Gpr::new(6), 0);
         let result =
-            decode_execute_jalr::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+            decode_execute_jalr::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory)
+                .unwrap();
         assert_eq!(result.class, InstClass::JalrCall);
         assert_eq!(result.inst_size, 4);
     }
@@ -305,7 +306,8 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![], vec![]);
         let inst = 0x0000_8067;
         let result =
-            decode_execute_jalr::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+            decode_execute_jalr::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory)
+                .unwrap();
         assert_eq!(result.class, InstClass::JalrReturn);
         assert_eq!(result.inst_size, 4);
     }
@@ -317,7 +319,8 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![], vec![]);
         let inst = 0x0002_8067;
         let result =
-            decode_execute_jalr::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+            decode_execute_jalr::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory)
+                .unwrap();
         assert_eq!(result.class, InstClass::JalrIndirect);
         assert_eq!(result.inst_size, 4);
     }
@@ -329,7 +332,8 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![], vec![]);
         let inst = 0x0040_8067;
         let result =
-            decode_execute_jalr::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+            decode_execute_jalr::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory)
+                .unwrap();
         assert_eq!(result.class, InstClass::JalrIndirect);
         assert_eq!(result.inst_size, 4);
     }

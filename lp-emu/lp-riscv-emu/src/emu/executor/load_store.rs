@@ -488,7 +488,8 @@ mod tests {
 
         let inst_word = encode::lw(Gpr::new(3), Gpr::new(1), 0);
         let result =
-            decode_execute_load::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_load::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory)
+                .unwrap();
 
         assert_eq!(regs[3], 0x12345678);
         assert!(result.log.is_none());
@@ -523,7 +524,8 @@ mod tests {
 
         let inst_word = encode::sw(Gpr::new(1), Gpr::new(2), 0);
         let result =
-            decode_execute_store::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_store::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory)
+                .unwrap();
 
         assert_eq!(memory.read_word(ram_addr).unwrap(), 0x12345678);
         assert!(result.log.is_none());

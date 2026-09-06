@@ -337,7 +337,8 @@ mod tests {
 
         let inst_word = encode::beq(Gpr::new(1), Gpr::new(2), 4);
         let result =
-            decode_execute_branch::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_branch::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory)
+                .unwrap();
 
         assert_eq!(result.new_pc, Some(4));
         assert!(result.log.is_none());
@@ -352,7 +353,8 @@ mod tests {
 
         let inst_word = encode::beq(Gpr::new(1), Gpr::new(2), 4);
         let result =
-            decode_execute_branch::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_branch::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory)
+                .unwrap();
 
         assert_eq!(result.new_pc, None);
         assert!(result.log.is_none());
@@ -367,7 +369,8 @@ mod tests {
 
         let inst_word = encode::beq(Gpr::new(1), Gpr::new(2), 4);
         let result =
-            decode_execute_branch::<LoggingEnabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_branch::<LoggingEnabled, _>(inst_word, 0, &mut regs, &mut memory)
+                .unwrap();
 
         assert_eq!(result.new_pc, Some(4));
         assert!(result.log.is_some());
