@@ -40,8 +40,8 @@ const STORY_NOW: f64 = 1_800_000_000.0;
 
 fn examples() -> Vec<UiExampleCard> {
     vec![UiExampleCard {
-        id: "examples/basic".to_string(),
-        name: "Basic".to_string(),
+        id: "catalog/plasma".to_string(),
+        name: "Plasma".to_string(),
         kind: "Module".to_string(),
     }]
 }
@@ -263,7 +263,7 @@ fn live_thumb_states() -> Element {
             }
             article { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card",
                 CardThumb {
-                    seed: "examples/basic".to_string(),
+                    seed: "catalog/plasma".to_string(),
                     label: "failed".to_string(),
                     static_badge: Some(ThumbPreviewBadge::Error {
                         reason: "deploy: shader compile failed".to_string(),
@@ -1597,7 +1597,7 @@ fn pick_popover_examples() -> Vec<UiExampleCard> {
     ]
     .into_iter()
     .map(|name| UiExampleCard {
-        id: format!("examples/{}", name.to_lowercase().replace(' ', "-")),
+        id: format!("catalog/{}", name.to_lowercase().replace(' ', "-")),
         name: name.to_string(),
         kind: "Module".to_string(),
     })

@@ -20,7 +20,7 @@
 use lpa_devices::identity::DeviceId;
 use lpa_devices::view::DeviceView;
 
-use crate::app::home::embedded_example::embedded_examples;
+use crate::app::home::embedded_example::embedded_example;
 use crate::app::home::{UiExampleCard, UiPackageCard};
 
 /// Where a pushed project comes from.
@@ -176,11 +176,13 @@ fn starter_board(board_id: Option<&str>) -> Result<String, String> {
     Ok(board.board_id.clone())
 }
 
-/// The example the walk reaches for when nothing else is picked: the first
-/// bundled one. Exists so the fake-device bench and the page agree on what
-/// "the starter example" means.
+/// The example the walk reaches for when nothing else is picked: the
+/// Studio demo project, by id — not "the first table row", which the
+/// bucket-then-slug registry order would otherwise decide. Exists so the
+/// fake-device bench and the page agree on what "the starter example"
+/// means.
 pub fn first_bundled_example_id() -> Option<&'static str> {
-    embedded_examples().first().map(|example| example.id)
+    embedded_example(crate::STUDIO_DEMO_PROJECT_ID).map(|example| example.id)
 }
 
 /// The app-level "prepare a project and put it on this board" gesture.
@@ -245,6 +247,7 @@ impl crate::ControllerOp for DevicePushOp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::home::embedded_example::embedded_examples;
     use lpa_devices::view::LoadedProject;
 
     fn card(board_id: Option<&str>) -> DeviceView {
@@ -304,7 +307,7 @@ mod tests {
         let offer = push_offer(
             &card(None),
             &[project("prj_1", "2026-08-30-porch")],
-            &[example("examples/plasma", "Plasma")],
+            &[example("catalog/plasma", "Plasma")],
         );
 
         assert_eq!(offer.choices.len(), 2, "{offer:?}");

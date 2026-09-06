@@ -51,7 +51,7 @@ fn docs_panel() -> lpa_studio_core::UiPanelGroup {
 }
 
 /// The source the article's editor embed shows, trimmed to the lines the
-/// article points at (the whole file is `examples/plasma-duo/shader.glsl`).
+/// article points at (the whole file is `catalog/plasma-duo/shader.glsl`).
 const DOCS_GLSL: &str = "\
 layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float phase;
@@ -263,7 +263,7 @@ fn editor_compile_error() -> Element {
 fn open_in_studio_inert() -> Element {
     rsx! {
         div { class: ARTICLE,
-            OpenInStudioButton { example_id: "examples/plasma".to_string() }
+            OpenInStudioButton { example_id: "catalog/plasma".to_string() }
         }
     }
 }
@@ -280,7 +280,7 @@ fn open_in_studio_live() -> Element {
     rsx! {
         div { class: ARTICLE,
             OpenInStudioButton {
-                example_id: "examples/plasma".to_string(),
+                example_id: "catalog/plasma".to_string(),
                 label: "Open the plasma shader".to_string(),
             }
         }

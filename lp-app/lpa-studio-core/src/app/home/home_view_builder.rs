@@ -499,7 +499,7 @@ mod tests {
                     br#"{"format":10,"name":"Basic"}"#.to_vec(),
                 )],
                 PackageProvenance::SeededFrom {
-                    source: "examples/fyeah-sign".to_string(),
+                    source: "catalog/fyeah-sign".to_string(),
                 },
                 20.0,
             )

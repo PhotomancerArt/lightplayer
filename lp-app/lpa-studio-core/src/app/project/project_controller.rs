@@ -422,7 +422,7 @@ struct ActiveLibraryProject {
 /// layer needs to address the session honestly (a bare `/p/<slug>`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TransientOrigin {
-    /// An embedded example, by id (`examples/fyeah-sign`).
+    /// An embedded example, by id (`catalog/fyeah-sign`).
     Example { id: String },
     /// Someone else's View-access shared project (P5): the session runs
     /// the cloud document's own uid over fetched content; a fork mints a
@@ -2602,7 +2602,7 @@ impl ProjectController {
         self.mark_opening_project();
         let files = crate::app::preview_host::example_deploy_files(example_id)
             .map_err(UiError::MissingSession)?;
-        // `examples/plasma` → `docs-plasma`: a filesystem-safe storage id.
+        // `catalog/plasma` → `docs-plasma`: a filesystem-safe storage id.
         let short = example_id.rsplit('/').next().unwrap_or(example_id);
         let storage_id = format!("docs-{short}");
         let loaded = server
@@ -9890,7 +9890,7 @@ mod tests {
     #[test]
     fn the_project_title_prefers_the_manifests_name_over_the_tree_root_label() {
         assert_eq!(
-            project_display_title(Some("Fyeah Sign"), Some("Studio"), "examples/fyeah-sign"),
+            project_display_title(Some("Fyeah Sign"), Some("Studio"), "catalog/fyeah-sign"),
             "Fyeah Sign"
         );
         // No package behind the project (device projects, fixture servers):

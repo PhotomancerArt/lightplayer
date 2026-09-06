@@ -21,7 +21,7 @@ pub(crate) mod home_gallery_stories;
 pub mod home_landing;
 #[cfg(feature = "stories")]
 pub(crate) mod home_landing_stories;
-/// The `examples/logo-sign` mapping generator plus its drift gate. Test-only:
+/// The `catalog/logo-sign` mapping generator plus its drift gate. Test-only:
 /// the running app reads the committed document, never this.
 #[cfg(test)]
 mod logo_sign_gen;

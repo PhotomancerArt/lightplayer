@@ -54,18 +54,18 @@ use crate::base::logo_mark::{BrandWord, fillet_tri_path};
 /// The landing hero's example and cadence. A constant on purpose: the
 /// future fixture-hero plan swaps this surface's source, not its shape.
 /// `pub(crate)` because the landing's "Edit the logo" pill opens it.
-/// It is the brand's own artwork (`examples/logo-sign`): the triangle and
+/// It is the brand's own artwork (`catalog/logo-sign`): the triangle and
 /// the letters the hero cuts its windows from are the same objects that
 /// example maps to lamps, so the pill hands the visitor exactly the piece
 /// they were just watching.
-pub(crate) const HERO_EXAMPLE: &str = "examples/logo-sign";
+pub(crate) const HERO_EXAMPLE: &str = "catalog/logo-sign";
 /// Present cadence for the hero — the visitor is watching this one.
 const HERO_FPS: f32 = 30.0;
 
 /// The triangle window in CSS pixels, and the triangle inside it:
 /// circumradius and center, from the spike's landing mock (250×232,
 /// r = h/2, cx = 0.46w).
-/// `pub(crate)` from here down: the `examples/logo-sign` map2d generator
+/// `pub(crate)` from here down: the `catalog/logo-sign` map2d generator
 /// (`app::home::logo_sign_gen`) lays its canvas out on exactly this stage,
 /// so the artwork the pencil opens is the artwork the hero shows.
 pub(crate) const HERO_BOX: (f32, f32) = (250.0, 232.0);

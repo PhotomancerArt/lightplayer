@@ -6,9 +6,9 @@ use crate::app::home::embedded_example::{ExampleFile, FYEAH_SIGN_FILES};
 pub const DEMO_PROJECT_ID: &str = STUDIO_DEMO_PROJECT_ID;
 pub const DEMO_PROJECT_STORAGE_ID: &str = "studio";
 
-/// The Studio demo project — `examples/fyeah-sign`.
+/// The Studio demo project — `catalog/fyeah-sign`.
 ///
-/// Chosen over the minimal `examples/basic` so the demo exercises the full
+/// Chosen over the minimal `catalog/plasma` so the demo exercises the full
 /// bus: a clock (time), a button + radio bridge (both writing `bus:trigger`),
 /// and a playlist switching between idle and blast visuals. The button/radio
 /// are virtual in the browser sim, so nothing physically fires, but every
@@ -36,7 +36,7 @@ mod tests {
 
     #[test]
     fn demo_project_identity_uses_fyeah_sign() {
-        assert_eq!(DEMO_PROJECT_ID, "examples/fyeah-sign");
+        assert_eq!(DEMO_PROJECT_ID, "catalog/fyeah-sign");
         assert_eq!(DEMO_PROJECT_STORAGE_ID, "studio");
     }
 
@@ -54,7 +54,7 @@ mod tests {
                 .find(|(path, _)| *path == "project.json")
                 .unwrap()
                 .1,
-            include_bytes!("../../../../../examples/fyeah-sign/project.json")
+            include_bytes!("../../../../../catalog/projects/fyeah-sign/project.json")
         );
         assert_eq!(
             files
@@ -62,7 +62,7 @@ mod tests {
                 .find(|(path, _)| *path == "module.json")
                 .unwrap()
                 .1,
-            include_bytes!("../../../../../examples/fyeah-sign/module.json")
+            include_bytes!("../../../../../catalog/projects/fyeah-sign/module.json")
         );
         // The fixture's mapping document must deploy with the project — its
         // absence fails the fixture at load (found the hard way when the M2

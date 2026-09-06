@@ -285,8 +285,8 @@ fn readme_home_view() -> UiHomeView {
         sim,
         projects,
         examples: vec![UiExampleCard {
-            id: "examples/basic".to_string(),
-            name: "Basic".to_string(),
+            id: "catalog/plasma".to_string(),
+            name: "Plasma".to_string(),
             kind: "Module".to_string(),
         }],
         devices: Default::default(),

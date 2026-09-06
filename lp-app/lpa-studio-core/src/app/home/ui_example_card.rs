@@ -5,7 +5,7 @@
 /// window-shopper path.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiExampleCard {
-    /// Stable example id, e.g. `examples/basic` — doubles as the seed-once
+    /// Stable example id, e.g. `catalog/plasma` — doubles as the seed-once
     /// provenance source.
     pub id: String,
     pub name: String,

@@ -680,7 +680,7 @@ fn load_project_tolerates_library_artifacts() {
                 next_request_id(&mut next_id),
                 ClientRequest::Filesystem(FsRequest::Write {
                     path: format!("/projects/{label}/.lp/meta.json").as_path_buf(),
-                    data: br#"{"provenance":{"seededFrom":{"source":"examples/basic"}},"createdAt":1.0}"#.to_vec(),
+                    data: br#"{"provenance":{"seededFrom":{"source":"catalog/plasma"}},"createdAt":1.0}"#.to_vec(),
                 }),
                 1,
             );

@@ -177,4 +177,4 @@ pub use lpa_devices::{
     TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
 };
 
-pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";
+pub const STUDIO_DEMO_PROJECT_ID: &str = "catalog/fyeah-sign";

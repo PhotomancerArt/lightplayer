@@ -8,7 +8,7 @@
 //! shader drifting out of date.
 //!
 //! ⚠️ **Highlight ranges are hand-authored line numbers and do not track
-//! edits to the included file.** Change `examples/*/shader.glsl` and the
+//! edits to the included file.** Change `catalog/*/shader.glsl` and the
 //! ranges below must be re-checked — the tests at the bottom pin what each
 //! range is supposed to be pointing at, so an edit that moves a line fails
 //! here rather than silently washing the wrong row violet.
@@ -58,9 +58,9 @@ pub(crate) const FIGURES: &[DocsCodeFigure] = &[
     DocsCodeFigure {
         id: "plasma-shader",
         title: "plasma / shader.glsl",
-        code: include_str!("../../../../../examples/plasma/shader.glsl"),
+        code: include_str!("../../../../../catalog/patterns/plasma/shader.glsl"),
         // Line 3 declares `scale`, the uniform the example binds to `bus:scale`
-        // (see `examples/plasma/shader.json`) and therefore the one the Scale
+        // (see `catalog/plasma/shader.json`) and therefore the one the Scale
         // knob drives — the beat the article is making: turn the knob, this
         // line's value changes.
         highlights: &[DocsCodeHighlight {
@@ -73,7 +73,7 @@ pub(crate) const FIGURES: &[DocsCodeFigure] = &[
     DocsCodeFigure {
         id: "peach-body-patch",
         title: "peach-1d / body/peach_body.patch.json",
-        code: include_str!("../../../../../examples/peach-1d/body/peach_body.patch.json"),
+        code: include_str!("../../../../../catalog/projects/peach-1d/body/peach_body.patch.json"),
         // Line 5 is the second half of the body: the range that lands after
         // the leaves and arrives at the wire from its far end. `reversed` is
         // the word the article spends a section on, so the eye should find
