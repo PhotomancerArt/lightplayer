@@ -1,7 +1,8 @@
 //! The Home landing page (`/`, vision D14; landing-cohesion spike, ruled
 //! 2026-08-30): the centered brand hero, then ONE 880px sectioned column —
 //! centered dividers, a four-door "Get started" row (device, simulator,
-//! docs, boards), the full example grid, and a quiet reference footer.
+//! docs, boards), the catalog grouped by kind (Projects, then Patterns),
+//! and a quiet reference footer.
 //! Still no marketing depth — but
 //! the stub's static lockup is gone: [`BrandHero`] makes the mark's
 //! triangle a window onto a live engine shader, so the landing demonstrates
@@ -13,7 +14,7 @@
 //! `2026-08-24-1100-logo-triangle-chip` plan, D1, and `brand_hero.rs`.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{HomeOp, UiAction, UiHomeView};
+use lpa_studio_core::{HomeOp, UiAction, UiHomeView, example_groups};
 
 use crate::app::home::brand_hero::BrandHero;
 use crate::app::home::example_card::{ExampleCard, embedded_example_cards};
@@ -117,25 +118,30 @@ pub fn HomePage(
                     }
                 }
             }
-            // The example grid (D5, widened at G1 to ALL examples): real,
-            // running content one click deep — viewing is stateless (D2),
-            // and the card copy's "becomes yours on first save" is
-            // literally the model now. Rendered dispatcher-less too
-            // (stories, host mounts): the cards are compiled-in content
-            // and clicks just no-op there.
-            section { class: "tw:grid tw:w-[min(880px,100%)] tw:gap-4",
-                SectionDivider { title: "Examples" }
-                p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-muted-foreground",
-                    "Explore an example in the simulator. Customize it, share it, and flash it to hardware to see it in action."
-                }
-                div { class: "{crate::app::home::card_grid_class()} tw:text-left",
-                    for card in examples {
-                        ExampleCard {
-                            key: "{card.id}",
-                            opening: opening.as_deref() == Some(card.id.as_str()),
-                            busy,
-                            card,
-                            on_action: on_action.unwrap_or_else(|| EventHandler::new(|_| {})),
+            // The catalog, grouped by kind (catalog content tree D17): real
+            // pieces first, then patterns — core derives the sections and
+            // their words, this page only lays them out. Still ALL of it
+            // (G1 ruling 2026-08-29: "scrolling is better than
+            // navigating"); the headings are the organization the one
+            // undifferentiated grid lacked. Real, running content one
+            // click deep — viewing is stateless (D2). Rendered
+            // dispatcher-less too (stories, host mounts): the cards are
+            // compiled-in content and clicks just no-op there.
+            for group in example_groups(&examples) {
+                section { key: "{group.key}", class: "tw:grid tw:w-[min(880px,100%)] tw:gap-4",
+                    SectionDivider { title: group.label }
+                    p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-muted-foreground",
+                        "{group.lede}"
+                    }
+                    div { class: "{crate::app::home::card_grid_class()} tw:text-left",
+                        for card in group.cards {
+                            ExampleCard {
+                                key: "{card.id}",
+                                opening: opening.as_deref() == Some(card.id.as_str()),
+                                busy,
+                                card,
+                                on_action: on_action.unwrap_or_else(|| EventHandler::new(|_| {})),
+                            }
                         }
                     }
                 }

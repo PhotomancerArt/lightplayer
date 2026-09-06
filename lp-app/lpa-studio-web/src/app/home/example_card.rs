@@ -15,11 +15,7 @@ use crate::app::home::project_opening_frame::OpeningProgressLine;
 pub(crate) fn embedded_example_cards() -> Vec<UiExampleCard> {
     lpa_studio_core::app::home::embedded_examples()
         .iter()
-        .map(|example| UiExampleCard {
-            id: example.id.to_string(),
-            name: example.name.to_string(),
-            kind: lpa_studio_core::app::home::ui_example_card::EXAMPLE_CARD_KIND.to_string(),
-        })
+        .map(UiExampleCard::from_embedded)
         .collect()
 }
 
@@ -73,15 +69,20 @@ pub(crate) fn ExampleCard(
                 mode: ThumbMode::PosterFirst,
             }
             // The face is the art; the words are one shallow glass bar
-            // (card-overlay redesign). Title ONLY — no menu, no glyphs,
-            // no "Example" label (the shelf's section header already
-            // says it), and no authored blurb: examples are just shared
-            // projects, and their cards wear the same quiet title-only
-            // bar a project card does (landing round 2026-08-29). Any
-            // per-example words will come from project DATA when the
-            // content system lands, not a compiled-in table.
+            // (card-overlay redesign): the title, and under it the entry's
+            // own one-line blurb — project DATA (`project.json`
+            // `description`, catalog content tree D7), never a compiled-in
+            // table. Clamped to two lines so a long sentence cannot grow
+            // the bar over the art; absent entirely when the entry authors
+            // none. No menu, no glyphs, no "Example" label (the section
+            // heading already says it).
             CardGlassFooter {
                 title: card.name.clone(),
+                if !card.description.is_empty() {
+                    p { class: "tw:m-0 tw:mt-px tw:line-clamp-2 tw:text-xs tw:leading-snug tw:text-muted-foreground",
+                        "{card.description}"
+                    }
+                }
                 if opening {
                     // The live pipeline, not a static "Opening…": an example
                     // open never routes to the full opening frame, so on a
