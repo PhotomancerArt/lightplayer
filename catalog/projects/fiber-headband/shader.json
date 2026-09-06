@@ -5,6 +5,9 @@
   "bindings": {
     "output": {
       "target": "bus:visual.out"
+    },
+    "phase": {
+      "source": "bus:speed"
     }
   },
   "consumed": {
@@ -16,6 +19,7 @@
         "waveform": "ramp",
         "phase_offset": 0.0
       },
+      "default_bind": "bus:speed",
       "default": 0,
       "label": "Phase",
       "description": "Rainbow cycle position (0-1)"
