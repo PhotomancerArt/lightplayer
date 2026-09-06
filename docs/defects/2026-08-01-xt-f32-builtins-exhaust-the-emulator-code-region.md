@@ -74,7 +74,7 @@ the **whole** SRAM code region. The region did not grow — 128 KiB on the S3,
 files (6336/6336 tests) *with* float-f32, and `xtlpn.q32` to 849/849
 (6385/6385); `scripts/build-builtins-xt.sh` now asserts the image's segment
 addresses, so a `link.ld` regression fails at the source rather than as a
-loader error 300 files later; `lp-xt/lp-xt-emu/tests/call_range.rs` covers the
+loader error 300 files later; `lp-emu/lp-xt-emu/tests/call_range.rs` covers the
 bug class below.
 
 ## The corrected classic-ESP32 conclusion

@@ -2,7 +2,7 @@
 status: fixed
 found: 2026-07-31      # how: ci
 fixed: this change
-area: lp-riscv/lp-riscv-inst, lp-riscv/lp-riscv-emu
+area: lp-riscv/lp-riscv-inst, lp-emu/lp-riscv-emu
 class: invented-encoding
 related:
   - docs/defects/2026-07-31-elf-loader-riscv-reloc-numbering.md

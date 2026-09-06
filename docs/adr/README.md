@@ -192,6 +192,7 @@ holds the full context.
 | Preview FEED for the device card's 120px slot (a standing frame conversation that yields to verbs; aspect-fit sizing returns with it) | `2026-09-03-device-card-fixed-height-and-disconnect-disappears` | The M5 editor-lens tap (or a successor) is ready to carry a live frame into the card |
 | Bench-soaked smoothing limits for DOM-Z-102 (today's `interpolationLeds` 500 / `ditheringLeds` 1000 are DERIVED from the per-lamp memory table, and the provenance says so) | `2026-09-06-smoothing-degrades-by-measured-lamp-limits` | The classic is on the bench: a `[mem]` bracket at each limit replaces value and provenance together |
 | Device-card aggregation of output `Warn` statuses (the smoothing badge lives on the output node only; the heartbeat mirror carries no node status) | `2026-09-06-smoothing-degrades-by-measured-lamp-limits`; `2026-09-02-fault-is-never-black` | The heartbeat mirror gains node statuses (a wire change) |
+| Whether the ISA/ELF crates (`lp-riscv-inst`, `lp-riscv-elf`, `lp-xt-inst`, `lp-xt-elf`, `lp-xt-fp-vectors`) flip to MIT too — they are the reason the `lp-emu/` MIT unit is not externally self-contained; likewise `lp-recovery` / `lp-perf` on the rv32 guest's edges | `2026-09-06-lp-emu-home-and-mit-fence` | Gate G1 of the esp-emulator plan, or any move to extract/publish `lp-emu/` |
 
 ## Relationship To Shared Planning
 
