@@ -21,6 +21,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
 use embedded_io_async::{Read, Write};
+#[cfg(not(feature = "spike_uart0_link"))]
 use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use fw_core::message_router::MessageRouter;
 use fw_esp32_common::serial::chunked_write::{ChunkedWriter, WritePolicy};
@@ -101,9 +102,20 @@ fn link_writer<W: Write>(tx: &mut W) -> ChunkedWriter<'_, W, impl FnMut(), embas
 pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
     let router = MessageRouter::new(&INCOMING_MSG, &OUTGOING_MSG);
 
-    let usb_serial = UsbSerialJtag::new(usb_device);
-    let usb_serial_async = usb_serial.into_async();
-    let (mut rx, mut tx) = usb_serial_async.split();
+    #[cfg(not(feature = "spike_uart0_link"))]
+    let (mut rx, mut tx) = {
+        let usb_serial = UsbSerialJtag::new(usb_device);
+        let usb_serial_async = usb_serial.into_async();
+        usb_serial_async.split()
+    };
+    // esp-emu spike: the same task over UART0. Everything below this point
+    // is generic over `embedded_io_async::{Read, Write}`, so only the halves
+    // change; see `serial::spike_uart0`.
+    #[cfg(feature = "spike_uart0_link")]
+    let (mut rx, mut tx) = {
+        let _ = usb_device;
+        crate::serial::spike_uart0::link().split()
+    };
 
     Timer::after(Duration::from_millis(100)).await;
 

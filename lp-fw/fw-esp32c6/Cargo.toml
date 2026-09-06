@@ -95,6 +95,19 @@ test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1
 # ⚠️ Never enable either in a released image: they exist to make a device
 # LIE about its wire protocol.
 fixture-old-proto = ["lpa-server/fixture-old-proto"]
+
+# esp-emu SPIKE scaffolding (docs/reports/2026-09-07-esp-emu-c6-spike.md),
+# OFF by default, never shipped. Espressif's binary emulator has no USB host:
+# USB-Serial-JTAG never sees SOF (the connection monitor then reports "cable
+# unplugged" forever) and its FIFO swallows every byte, while UART0 is bridged
+# to the host. This moves the host link to UART0 (GPIO16/17, 921600 8N1) and
+# tees the harnesses' `Esp32UsbSerialIo` output there through the ROM, so the
+# wire protocol and `test_*` harnesses can run under the emulator. Costs the
+# shipping image nothing: every hunk is `cfg`'d out. `touch src/main.rs`
+# after flipping.
+#
+#   cargo build --profile release-esp32 --features esp32c6,server,radio,spike_uart0_link
+spike_uart0_link = []
 fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core/fixture-no-hello"]
 
 [dependencies]
