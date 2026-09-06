@@ -581,19 +581,18 @@ impl FixtureNode {
     }
 }
 
-/// The Direct path's sampling window: one batch of sample points, one batch
-/// of RGBA16 results, and the host-side coordinate scratch the batch is
-/// filled from, all sized to `capacity = min(lamps,
+/// The Direct path's sampling window: one batch of sample points and one
+/// batch of RGBA16 results, both sized to `capacity = min(lamps,
 /// LpGraphics::sample_batch_capacity())` — 128 points on the CPU backends,
 /// the whole product on the GPU. Allocated once per capacity and kept for
 /// the node's life; the coordinates are regenerated from the mapping every
-/// render (the mapping is their one home), so nothing here carries a key
-/// and a memory-pressure drop of the window loses nothing but the
-/// allocation (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
+/// render straight into the point handle (the mapping is their one home),
+/// so nothing here carries a key and a memory-pressure drop of the window
+/// loses nothing but the allocation
+/// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
 struct SampleBatch {
     points: SamplePointsHandle,
     samples: SampleOutHandle,
-    coords: alloc::vec::Vec<i32>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct FixtureDisplayLayoutKey {
@@ -1428,17 +1427,7 @@ fn ensure_sample_batch<'a>(
         let samples = graphics
             .create_sample_out(capacity)
             .map_err(err_ctx("fixture sample target allocation"))?;
-        let mut coords = alloc::vec::Vec::new();
-        ensure_scratch_len(
-            &mut coords,
-            capacity as usize * 2,
-            "fixture sample coordinates",
-        )?;
-        *current = Some(SampleBatch {
-            points,
-            samples,
-            coords,
-        });
+        *current = Some(SampleBatch { points, samples });
     }
     current
         .as_mut()
@@ -1825,17 +1814,12 @@ fn stream_direct_lamps<I: Iterator<Item = u32>>(
         );
         Ok(())
     };
-    let SampleBatch {
-        points,
-        samples,
-        coords,
-    } = batch;
+    let SampleBatch { points, samples } = batch;
     ctx.sample_visual_into(
         visual_product,
         crate::products::visual::VisualSampleStream {
             points,
             samples,
-            coords: coords.as_mut_slice(),
             fill: &mut fill_batch,
             consume: &mut consume,
             output_width,
@@ -2591,7 +2575,7 @@ mod tests {
             for _ in 0..stream.capacity() {
                 window.extend_from_slice(&self.color);
             }
-            stream.drive(graphics, |_, _, samples, _| {
+            stream.drive(graphics, |_, samples, _| {
                 graphics
                     .write_sample_out(samples, &window)
                     .expect("write test samples");
@@ -2679,8 +2663,11 @@ mod tests {
             let mut seen = Vec::new();
             let mut offset = 0usize;
             let mut window = vec![0u16; capacity * 4];
-            stream.drive(graphics, |coords, _, samples, n| {
+            stream.drive(graphics, |points, samples, n| {
                 let n = n as usize;
+                let coords = graphics
+                    .sample_points_data_mut(points)
+                    .expect("borrow test points");
                 seen.extend_from_slice(&coords[..n * 2]);
                 for (slot, color) in window
                     .chunks_exact_mut(4)
@@ -2784,7 +2771,6 @@ mod tests {
         let batch = ensure_sample_batch(&mut current, 2, &ctx).expect("first ensure");
         assert_eq!(batch.points.count(), 2);
         assert_eq!(batch.samples.count(), 2);
-        assert_eq!(batch.coords.len(), 4, "two points of [x, y]");
         graphics
             .write_sample_points(&mut batch.points, &[111, 222, 333, 444])
             .expect("poke");
@@ -2798,7 +2784,6 @@ mod tests {
 
         let batch = ensure_sample_batch(&mut current, 3, &ctx).expect("grown ensure");
         assert_eq!(batch.points.count(), 3);
-        assert_eq!(batch.coords.len(), 6);
         assert_eq!(
             graphics.read_sample_points(&batch.points).expect("read"),
             vec![0; 6],
@@ -5485,7 +5470,6 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         let coords = fixture_strip_point_coords(COUNT, false);
         let mut points = graphics.create_sample_points(COUNT).expect("points");
         let mut samples = graphics.create_sample_out(COUNT).expect("samples");
-        let mut window = vec![0i32; COUNT as usize * 2];
         let mut filled = false;
         let mut fill = |out: &mut [i32]| {
             if filled {
@@ -5510,7 +5494,6 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
                     VisualSampleStream {
                         points: &mut points,
                         samples: &mut samples,
-                        coords: &mut window,
                         fill: &mut fill,
                         consume: &mut consume,
                         output_width: COUNT,

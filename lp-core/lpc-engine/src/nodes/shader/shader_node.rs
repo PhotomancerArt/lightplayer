@@ -111,10 +111,6 @@ pub struct ShaderNode {
     /// 2026-08-29-flash-write-wedges-under-zook-playback: per-frame reads
     /// reuse a caller-owned buffer, never a fresh `Vec`.
     projected_channels: Vec<u16>,
-    /// Coordinate scratch for projected direct sampling — one batch of the
-    /// stream's window, mapped into this shader's space before upload.
-    /// Sized to the window, never to the product.
-    projected_coords: Vec<i32>,
     /// What the compiled program's uniforms are currently bound for, or
     /// `None` when the next sample stream must bind again. A stream binds
     /// once and samples every batch bound; the crossfade's per-batch inner
@@ -204,7 +200,6 @@ impl ShaderNode {
             projected_points: None,
             projected_samples: None,
             projected_channels: Vec::new(),
-            projected_coords: Vec::new(),
             bound_uniforms: None,
             stream_decision: None,
             visual_uniforms,
@@ -882,7 +877,6 @@ impl NodeRuntime for ShaderNode {
         drop(self.projected_points.take());
         drop(self.projected_samples.take());
         self.projected_channels = Vec::new();
-        self.projected_coords = Vec::new();
         Ok(())
     }
 
@@ -1747,17 +1741,9 @@ impl RenderNode for ShaderNode {
         let graphics = ctx
             .graphics()
             .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
-        if projection.is_some() {
-            ensure_scratch_len(
-                &mut self.projected_coords,
-                capacity as usize * 2,
-                "projected sample coordinates",
-            )?;
-        }
         let Self {
             shader,
             projected_points,
-            projected_coords,
             ..
         } = self;
         let shader = shader
@@ -1766,22 +1752,28 @@ impl RenderNode for ShaderNode {
 
         // Sample index of the batch's first point, for a fuel trap's report.
         let mut streamed = 0u32;
-        stream.drive(graphics, |coords, points, samples, n| {
+        stream.drive(graphics, |points, samples, n| {
             let result = match projection {
                 None => shader.sample_rgba16_bound(points, samples, n),
                 Some(projection) => {
+                    // Map the batch host-side, straight from the stream's
+                    // window into the projected window: two distinct
+                    // handles, both borrowed in place, nothing copied.
+                    let projected = ensure_projected_points(projected_points, graphics, capacity)?;
+                    let source = graphics
+                        .sample_points_data_mut(points)
+                        .map_err(err_ctx("stream sample points"))?;
+                    let mapped = graphics
+                        .sample_points_data_mut(projected)
+                        .map_err(err_ctx("projected sample points"))?;
                     project_batch(
                         projection,
-                        coords,
+                        source,
                         n as usize,
                         output_width,
                         output_height,
-                        projected_coords,
+                        mapped,
                     );
-                    let projected = ensure_projected_points(projected_points, graphics, capacity)?;
-                    graphics
-                        .write_sample_points(projected, projected_coords)
-                        .map_err(err_ctx("write projected sample points"))?;
                     shader.sample_rgba16_bound(projected, samples, n)
                 }
             };
@@ -3239,7 +3231,6 @@ mod tests {
         let count = (coords.len() / space.coord_lanes()) as u32;
         let mut points = graphics.create_sample_points(count).expect("points");
         let mut samples = graphics.create_sample_out(count).expect("samples");
-        let mut window = vec![0i32; count as usize * 2];
         let mut filled = false;
         let mut fill = |out: &mut [i32]| {
             if filled {
@@ -3259,7 +3250,6 @@ mod tests {
             VisualSampleStream {
                 points: &mut points,
                 samples: &mut samples,
-                coords: &mut window,
                 fill: &mut fill,
                 consume: &mut consume,
                 output_width,
@@ -4143,6 +4133,13 @@ mod tests {
 
         fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {
             self.inner.clear_sample_out(out)
+        }
+
+        fn sample_points_data_mut<'a>(
+            &self,
+            points: &'a mut SamplePointsHandle,
+        ) -> Result<&'a mut [i32], GfxError> {
+            self.inner.sample_points_data_mut(points)
         }
 
         fn sample_batch_capacity(&self) -> u32 {

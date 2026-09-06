@@ -244,8 +244,11 @@ impl RenderNode for FluidNode {
             "fluid sample scratch",
         )?;
         let (output_width, output_height) = (stream.output_width, stream.output_height);
-        stream.drive(graphics, |coords, _points, samples, n| {
+        stream.drive(graphics, |points, samples, n| {
             let n = n as usize;
+            let coords = graphics
+                .sample_points_data_mut(points)
+                .map_err(err_ctx("fluid sample points"))?;
             for (point, sample) in coords[..n * 2]
                 .chunks_exact(2)
                 .zip(sample_scratch.chunks_exact_mut(4))

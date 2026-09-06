@@ -289,6 +289,13 @@ where
         Ok(sample_points_buf(points)?.data().to_vec())
     }
 
+    fn sample_points_data_mut<'a>(
+        &self,
+        points: &'a mut SamplePointsHandle,
+    ) -> Result<&'a mut [i32], GfxError> {
+        Ok(sample_points_buf_mut(points)?.data_mut())
+    }
+
     fn create_sample_out(&self, count: u32) -> Result<SampleOutHandle, GfxError> {
         let buffer = self
             .shared

@@ -190,6 +190,13 @@ impl LpGraphics for CappedGraphics {
         self.inner.clear_sample_out(out)
     }
 
+    fn sample_points_data_mut<'a>(
+        &self,
+        points: &'a mut SamplePointsHandle,
+    ) -> Result<&'a mut [i32], GfxError> {
+        self.inner.sample_points_data_mut(points)
+    }
+
     fn sample_batch_capacity(&self) -> u32 {
         self.capacity
     }

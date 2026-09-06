@@ -81,14 +81,15 @@ impl PublishedPaths {
 
 /// The crossfade sample path's buffers, alive for one transition.
 ///
-/// The two input sample-outs (graphics memory, 8 B/lamp each, read in place
-/// through `LpGraphics::sample_out_data`) and the blended host scratch
-/// (`4 × point count` `u16`s). Allocated on a transition's first frame,
-/// keyed on the point count like the fixture's `sample_target`, and dropped
-/// when the transition ends — never per frame. Before 2026-09-06 the two
-/// handles were created and freed every frame: 16 B/lamp of churn through
-/// the classic's infallible allocator, and on the host a leak outright, since
-/// the wasmtime backend's bump allocator never frees.
+/// One window-sized sample-out (graphics memory, read in place through
+/// `LpGraphics::sample_out_data`) and the blended host scratch (`4 × window`
+/// `u16`s). Allocated on a transition's first frame, keyed on the stream's
+/// window like the fixture's `SampleBatch`, and dropped when the transition
+/// ends — never per frame. Before 2026-09-06 two count-sized handles were
+/// created and freed every frame: 16 B/lamp of churn through the classic's
+/// infallible allocator, and on the host a leak outright, since the wasmtime
+/// backend's bump allocator never frees; then they lived for the transition;
+/// now the window bounds them (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
 #[derive(Default)]
 struct CrossfadeScratch {
     /// One window of an entry's samples — both entries answer into it in
@@ -489,14 +490,23 @@ impl RenderNode for PlaylistNode {
 
         // This node drives the outer loop: each batch of the consumer's
         // coordinates is handed to BOTH entries through a one-batch inner
-        // stream over the same window (the inner `fill` yields the batch
-        // once and never touches the coordinates), the two answers are
-        // blended in place, and the blend goes to the consumer. The entries
+        // stream over the same point window (the inner `fill` yields the
+        // batch's count once and leaves the words as the consumer filled
+        // them), the two answers are blended in place, and the blend goes to
+        // the consumer. The entries
         // bind their uniforms once per frame — their bound-uniforms key
         // survives across these inner streams.
         let mut continuation = false;
         loop {
-            let n = (stream.fill)(stream.coords);
+            let n = {
+                let graphics = ctx
+                    .graphics()
+                    .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+                let words = graphics
+                    .sample_points_data_mut(stream.points)
+                    .map_err(err_ctx("playlist crossfade sample points"))?;
+                (stream.fill)(words)
+            };
             if n == 0 {
                 return Ok(());
             }
@@ -513,7 +523,6 @@ impl RenderNode for PlaylistNode {
                     VisualSampleStream {
                         points: &mut *stream.points,
                         samples: &mut *samples,
-                        coords: &mut *stream.coords,
                         fill: &mut fill,
                         consume: &mut consume,
                         output_width: stream.output_width,
@@ -536,7 +545,6 @@ impl RenderNode for PlaylistNode {
                     VisualSampleStream {
                         points: &mut *stream.points,
                         samples: &mut *samples,
-                        coords: &mut *stream.coords,
                         fill: &mut fill,
                         consume: &mut consume,
                         output_width: stream.output_width,

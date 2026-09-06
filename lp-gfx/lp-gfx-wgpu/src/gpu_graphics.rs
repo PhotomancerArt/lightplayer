@@ -410,6 +410,13 @@ impl LpGraphics for GpuGraphics {
         Ok(sample_points(points)?.0.clone())
     }
 
+    fn sample_points_data_mut<'a>(
+        &self,
+        points: &'a mut SamplePointsHandle,
+    ) -> Result<&'a mut [i32], GfxError> {
+        Ok(&mut sample_points_mut(points)?.0)
+    }
+
     fn create_sample_out(&self, count: u32) -> Result<SampleOutHandle, GfxError> {
         Ok(SampleOutHandle::from_backend_parts(
             count,

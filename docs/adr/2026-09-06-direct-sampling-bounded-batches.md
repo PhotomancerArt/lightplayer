@@ -52,19 +52,24 @@ producer.**
   a call there is a function call, and 128 points is 1 KB in, 1 KB out,
   ~8 calls per 1,000 lamps).
 - The engine's sampling request is `VisualSampleStream`: the consumer owns a
-  **window** — a points handle, a sample-out handle, and a host-side
-  coordinate scratch, all of one capacity `min(lamps, sample_batch_capacity)` —
-  and two closures. The producer drives the loop (`VisualSampleStream::drive`):
-  `fill` writes the next batch of coordinates into the scratch, the producer
-  uploads it, samples the first `n` points bound, and hands `n × 4` RGBA16
-  words to `consume` through the in-place `sample_out_data` borrow. Nothing
-  sized to the product exists on either side.
+  **window** — a points handle and a sample-out handle of one capacity
+  `min(lamps, sample_batch_capacity)` — and two closures. The producer drives
+  the loop (`VisualSampleStream::drive`): `fill` writes the next batch of
+  coordinates straight into the point handle (every backend keeps it
+  host-visible, `LpGraphics::sample_points_data_mut` — no scratch, no upload,
+  no per-batch copy), the producer samples the first `n` points bound, and
+  hands `n × 4` RGBA16 words to `consume` through the in-place
+  `sample_out_data` borrow. Nothing sized to the product exists on either
+  side.
 - The shader node binds once per stream, keyed on `(output_width,
   output_height, time bits)` and reset by `produce`, texture renders and
   recompiles, so the playlist crossfade's per-batch one-batch inner streams
-  bind once per frame per entry. Projection (a request whose space differs
-  from the shader's) maps each batch host-side from the stream's own scratch
-  into a window-sized resident scratch — no read-back, no per-frame Vec.
+  bind once per frame per entry; a `continuation` flag on those inner streams
+  keeps one compile decision per frame (the compile-window deferral counts
+  render calls, and a second call in the same frame would compile without
+  the window the engine opens). Projection (a request whose space differs
+  from the shader's) maps each batch host-side from the stream's window into
+  a window-sized projected handle — no read-back, no per-frame Vec.
 - The fixture's coordinates come from `lpc_model::nodes::fixture::mapping_centers`,
   a resumable iterator over the mapping in the visitor's order (pinned
   against `for_each_mapping_point`), converted per batch to pixel-space
@@ -84,10 +89,10 @@ borrows a window.**
 - **Per-lamp residency on every device drops by 16 B/lamp** (Direct path:
   33 → 17 B/lamp; mapping 8 at load + output samples 6 + 8-bit frame 3),
   and the 8 B/lamp coordinate transient at first render is gone. Each
-  Direct fixture with ≥ 128 lamps holds a 3 KB window instead
-  (`3 × 1,024 B`); smaller fixtures size the window to their count, as they
+  Direct fixture with ≥ 128 lamps holds a 2 KB window instead
+  (`2 × 1,024 B`); smaller fixtures size the window to their count, as they
   sized the buffers before. On small-dome that is −100,960 B resident and
-  −47,600 B transient in the first frame; on zook −24,000 + 3,072 B. The
+  −47,600 B transient in the first frame; on zook −24,000 + 2,048 B. The
   measured device-width figures are in the plan's report ("After").
 - **Coordinates are regenerated every render** — the per-lamp cost the
   window buys its bytes with. `normalized_f32_to_q16` is integer bit-exact

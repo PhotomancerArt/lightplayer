@@ -179,8 +179,16 @@ pub fn normalized_f32_to_q16(value: f32) -> i32 {
     }
 }
 
+/// Normalized Q16.16 → pixel-space Q16.16 for a target `extent` pixels
+/// wide, saturating. On the per-render coordinate path a normalized value
+/// is in `0..=65536` and every render extent is far below 32,768, so the
+/// product fits an `i32` and the 64-bit multiply (three instructions plus
+/// two compares on a 32-bit part) is skipped — the answer is the same.
 #[must_use]
 pub fn normalized_q16_to_pixel_q16(value: i32, extent: u32) -> i32 {
+    if (0..=Q16_ONE).contains(&value) && extent <= 32_767 {
+        return value * extent as i32;
+    }
     let scaled = i64::from(value) * i64::from(extent);
     scaled.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }

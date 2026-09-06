@@ -243,6 +243,20 @@ pub trait LpGraphics: Send + Sync {
     /// Read all `count × 2` Q16.16 point coordinates back.
     fn read_sample_points(&self, points: &SamplePointsHandle) -> Result<Vec<i32>, GfxError>;
 
+    /// Borrow all `count × 2` coordinate words of `points` in place, to
+    /// write.
+    ///
+    /// Every backend keeps the point buffer host-visible (the CPU backend's
+    /// is engine memory the host addresses directly; the GPU backend's is a
+    /// CPU-side `Vec` its sample pass uploads from), so a consumer streaming
+    /// a product fills each batch straight into the handle — no scratch of
+    /// its own and no per-batch copy (`write_sample_points` is the one-shot
+    /// form). The slice borrows the handle, not the backend.
+    fn sample_points_data_mut<'a>(
+        &self,
+        points: &'a mut SamplePointsHandle,
+    ) -> Result<&'a mut [i32], GfxError>;
+
     /// Allocate a zeroed buffer for `count` RGBA16 sample results.
     fn create_sample_out(&self, count: u32) -> Result<SampleOutHandle, GfxError>;
 

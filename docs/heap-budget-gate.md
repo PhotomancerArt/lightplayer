@@ -94,6 +94,17 @@ profile is unaffected). Not sampled down: a fragmentation figure that skips
 holes to save time is a figure that can miss the one hole a later window
 needed.
 
+The walk also scales the run's **cycle count** with the guest's free heap:
+every byte a change frees is another unit for every marker's walk to take
+and give back. `lp-cli profile`'s `--max-cycles` safety cap defaults to
+200 M, and zook-dome's `startup` run crossed it mid-walk on 2026-09-06
+(the bounded sample window freed ~21 KB of the guest heap), which ends the
+trace before the compile window's `"t":"F"` row — its two free-list figures
+then read as missing rather than failing. `heap-budget-check.sh` passes
+`--max-cycles 400000000` for that reason; a run that ends with a
+`max-cycles` warning is a run whose last window's figures cannot be
+trusted.
+
 **`server-boot`** brackets fw-emu's boot from recovery init through server
 and transport construction, before the first tick (`lp-fw/fw-emu/src/main.rs`).
 Its `retained` figure is what the server holds before any project exists —
