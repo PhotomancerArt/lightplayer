@@ -13,7 +13,6 @@ lp-emu-abi = { path = "../lp-emu-abi" }
 lp-perf = { path = "../../lp-base/lp-perf", features = ["syscall"], optional = true }
 lp-recovery = { workspace = true }
 critical-section = { workspace = true }
-lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 log = { workspace = true, default-features = false }
 
 [features]
