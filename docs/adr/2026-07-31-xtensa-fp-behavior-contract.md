@@ -38,11 +38,11 @@ exhaustively, 5 328 helper probes, and the toolchain's real divide and
 square-root sequences run end-to-end on both sides. **The emulator now
 matches the desk S3 on every corpus row — result bits and FSR — with zero
 divergence**, and the captures replay boardlessly forever
-(`lp-xt/lp-xt-emu/tests/fp_silicon_replay.rs`).
+(`lp-emu/lp-xt-emu/tests/fp_silicon_replay.rs`).
 
 Board: XIAO-class ESP32-S3, chip rev v0.2, MAC `d8:3b:da:47:29:70`, 16 MB
 flash (`--flash-size 8mb`), espup toolchain `esp-14.2.0_20240906`. Captures:
-`lp-xt/lp-xt-emu/tests/fixtures/fp/captures/`.
+`lp-emu/lp-xt-emu/tests/fixtures/fp/captures/`.
 
 ## 2. The emitted subset
 
@@ -238,7 +238,7 @@ Stated, not implied away:
   So everything in this document — including the fitted `divn.s` model whose
   limits the entry below quantifies — applies to the LX6 without a per-chip arm.
   Captures and full provenance:
-  `lp-xt/lp-xt-emu/tests/fixtures/fp/captures/README.md`.
+  `lp-emu/lp-xt-emu/tests/fixtures/fp/captures/README.md`.
 
   ⚠️ **This is a numeric-behavior result, not a performance one.** An f32 shader
   on the classic renders ~17 % *slower* than the same shader in Q32 (20 fps vs

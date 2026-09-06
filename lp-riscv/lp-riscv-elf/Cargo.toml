@@ -22,7 +22,7 @@ std = ["log/std"]  # This crate always requires std, but feature flag for consis
 
 [dev-dependencies]
 lp-emu-core = { path = "../../lp-emu/lp-emu-core", features = ["std"] }
-lp-riscv-emu = { path = "../lp-riscv-emu", features = ["std"] }
+lp-riscv-emu = { path = "../../lp-emu/lp-riscv-emu", features = ["std"] }
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
 cranelift-frontend = { workspace = true }
 cranelift-module = { workspace = true }

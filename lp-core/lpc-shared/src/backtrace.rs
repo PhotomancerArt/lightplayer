@@ -136,7 +136,7 @@ fn capture_frames_arch(_buf: &mut [u32]) -> usize {
 //     check. That is what [`force_window_spill`] exploits.
 //
 // The same placement is what `lp-xt-emu`'s window machinery models
-// (`lp-xt/lp-xt-emu/src/executor/window.rs`, `save_slot`), which was dual-run
+// (`lp-emu/lp-xt-emu/src/executor/window.rs`, `save_slot`), which was dual-run
 // against S3 silicon to depth 100 in the Xtensa backport spike.
 
 // ---------------------------------------------------------------------------

@@ -1141,7 +1141,7 @@ fwtest-loopback-esp32s3 port="":
 # family or grid; 0 runs all of it.
 #
 # ORDERING RULE, same as fwtest-xt-jit-esp32s3 and for the same reason: the host
-# predictions in `lp-xt/lp-xt-emu/tests/fixtures/fp/` are committed FIRST, by
+# predictions in `lp-emu/lp-xt-emu/tests/fixtures/fp/` are committed FIRST, by
 # `cargo test -p lp-xt-emu --test fp_conformance`, which needs no board. A
 # device disagreement is a finding to triage — never a reason to edit a golden.
 # Regenerating a prediction from device output turns the whole campaign into a
@@ -1388,7 +1388,7 @@ fwtest-xt-fp-esp32v3 port="" family="" limit="0":
       just fp-diff "$out"
     else
       echo "$mode capture done; compare it against the S3's committed capture in"
-      echo "lp-xt/lp-xt-emu/tests/fixtures/fp/captures/ — there is no host prediction."
+      echo "lp-emu/lp-xt-emu/tests/fixtures/fp/captures/ — there is no host prediction."
     fi
 
 # Diff an FP conformance capture against the committed host predictions.
@@ -1595,7 +1595,7 @@ esp-stack-sizes pattern="": install-rv32-target
 
 # riscv32: emu-guest-test-app
 build-rv32-emu-guest-test-app: install-rv32-target
-    cd lp-riscv/lp-riscv-emu-guest-test-app && RUSTFLAGS="-C target-feature=-c" cargo build --target {{ rv32_target }} --release
+    cd lp-emu/lp-riscv-emu-guest-test-app && RUSTFLAGS="-C target-feature=-c" cargo build --target {{ rv32_target }} --release
 
 # riscv32: fw-emu (firmware that runs in RISC-V emulator)
 build-fw-emu: install-rv32-target
@@ -1770,7 +1770,7 @@ check-lpc-engine-gates:
 
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
-    cd lp-riscv/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
+    cd lp-emu/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
 
 clippy: clippy-host clippy-rv32
 
@@ -1969,7 +1969,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-upgrade-fw lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2013,6 +2013,12 @@ lint-schemars-fw:
 # refuses old project formats, it never migrates them; see script).
 lint-upgrade-fw:
     ./scripts/check-upgrade-fw.sh
+
+# The lp-emu MIT fence: everything under lp-emu/ declares MIT and imports no
+# AGPL product crate. Vision D2 / plan PD2; the allowlist of edges out of the
+# fence lives in the script, one line of reason each.
+lint-emu-fence:
+    ./scripts/check-emu-fence.sh
 
 # Build RV32 builtins before check/build/test so host crates that embed the
 # builtins ELF do not compile a stale "builtins missing" artifact.

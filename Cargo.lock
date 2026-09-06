@@ -5789,7 +5789,6 @@ dependencies = [
  "lp-emu-abi",
  "lp-perf",
  "lp-recovery",
- "lpc-shared",
 ]
 
 [[package]]

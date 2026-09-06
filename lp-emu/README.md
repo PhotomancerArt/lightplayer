@@ -1,24 +1,109 @@
-# LightPlayer emulator substrate
+# `lp-emu/` — the emulation family
 
-Architecture-neutral emulator infrastructure shared by LightPlayer's
-architecture emulators (today `lp-riscv/lp-riscv-emu`; the Xtensa emulator
-`lp-xt-emu` is the planned second consumer).
+Every emulator LightPlayer owns lives here, and everything here is **MIT**
+(`LICENSE-MIT`), while the rest of the repository is AGPL-3.0-or-later. That
+is the point of the directory: it is a home *and* a licence fence, and
+`just lint-emu-fence` is what keeps the fence real. See
+`docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
+
+## Layout
+
+```text
+lp-emu/
+  LICENSE-MIT                   the licence for everything below
+  lp-emu-core/                  arch-neutral host substrate
+  lp-emu-abi/                   host <-> guest protocol
+  lp-riscv-emu/                 RV32IMAC+F executors
+  lp-riscv-emu-guest/           rv32 guest-side runtime
+  lp-riscv-emu-guest-test-app/  a guest binary the rv32 tests run
+  lp-xt-emu/                    Xtensa LX6/LX7 executors, board maps, FP
+  lp-xt-emu-guest/              Xtensa guest-side runtime (device-target)
+  esp/                          SoC crates land here (see below)
+```
+
+**Crates are namespaced by vendor, not flattened** (vision D9). The
+architecture cores sit at the root because an ISA outlives any one chip; a
+SoC layer — machines, buses, peripherals, vendored ROM images — goes in a
+vendor directory. `esp/` is the first, because ESP32 is the focus now, not
+forever; a Raspberry Pi Zero would get `rpi/` beside it, and only the vendor
+directories are allowed to assume MMIO at all.
+
+## What each crate is
 
 - **`lp-emu-core`** — host-side emulator machinery: guest memory
-  (`Memory`/`MemoryError`), the run-loop result contract
-  (`StepResult`, `TrapCode`), logging levels, cycle-cost accounting
-  (`CycleModel`/`InstClass`), serial plumbing, time control, and the
-  host-side profiler (`profile/`, behind the `std` feature). `no_std` + alloc.
+  (`Memory`/`MemoryError`), the run-loop result contract (`StepResult`,
+  `TrapCode`), logging levels, cycle-cost accounting (`CycleModel`/
+  `InstClass`), serial plumbing, time control, and the host-side profiler
+  (`profile/`, behind the `std` feature). `no_std` + alloc.
 
 - **`lp-emu-abi`** — the host↔guest protocol: syscall numbers, guest serial
   framing, the recovery handshake, and JIT symbol entries. Depended on by
-  both the host emulators and guest-side runtimes (`lp-riscv-emu-guest`,
-  firmware).
+  both the host emulators and the guest-side runtimes.
 
-**Arch-neutrality rule:** these crates must not depend on cranelift or on any
-`lp-riscv-*` / `lp-xt-*` crate. Architecture specifics enter by injection —
-e.g. the profiler's `StackUnwinder` fn pointer and `CpuCollector`'s
-`ram_start`, or the per-arch `trap_code_from_cranelift` conversion that lives
-in the arch emulator, not here.
+- **`lp-riscv-emu`** — the RV32 emulator: instruction executors, register
+  file, run loops, `EmulatorError`, and the rv32 frame-pointer backtrace
+  walk. `lp-riscv-inst` decodes for it; it never re-implements decoding.
 
-See `docs/adr/2026-07-28-emu-core-crate-family.md` for the decision record.
+- **`lp-riscv-emu-guest`** / **`lp-riscv-emu-guest-test-app`** — the
+  guest-side runtime (entry, syscalls, allocator, panic, logging) for code
+  running inside `lp-riscv-emu`, and a test binary built against it.
+  `fw-emu` and `lps-builtins-emu-app` link the guest for its `memory.ld`.
+
+- **`lp-xt-emu`** — the Xtensa emulator: windowed-register machinery,
+  per-board memory maps (`BoardProfile::esp32s3()` / `esp32()`), the
+  host-shared data window and full-argument call path that let a host engine
+  run compiled shader code against a vmctx in host memory, and an FPU proven
+  equal to real ESP32-S3 silicon behind an explicit policy layer. Its FP
+  predictions and silicon captures live in `tests/fixtures/fp/` and are
+  committed **before** any hardware run.
+
+- **`lp-xt-emu-guest`** — the `no_std` Xtensa guest runtime. A DEVICE-target
+  crate: excluded from the host workspace and built as a member of the
+  `lp-xt/fixtures` esp-toolchain workspace.
+
+**Arch-neutrality rule:** `lp-emu-core` and `lp-emu-abi` must not depend on
+cranelift or on any `lp-riscv-*` / `lp-xt-*` crate. Architecture specifics
+enter by injection — the profiler's `StackUnwinder` fn pointer and
+`CpuCollector`'s `ram_start`, or the per-arch `trap_code_from_cranelift` that
+lives in the arch emulator. See
+`docs/adr/2026-07-28-emu-core-crate-family.md`.
+
+## The fence
+
+`scripts/check-emu-fence.sh`, run by `just lint-emu-fence` and by
+`just check-lint` (so by CI's `Lint (x64)` job), asserts two things:
+
+1. every package under `lp-emu/` declares exactly `license = "MIT"`;
+2. none of them reaches a workspace-local crate outside `lp-emu/`,
+   transitively, except the crates listed in the script's `ALLOWED_OUTSIDE`
+   table — each with a one-line reason.
+
+The walk uses **declared** dependencies, optional and dev ones included, not
+the resolved graph: a dependency behind a cargo feature is still an import.
+
+If a new dependency trips it, the first move is to delete the dependency.
+Allowlisting is the fallback, and it means accepting that the MIT unit is not
+self-contained on that edge.
+
+## What lives elsewhere, and why
+
+- **`lp-riscv/lp-riscv-inst`, `lp-riscv-elf`, `lp-xt/lp-xt-inst`,
+  `lp-xt-elf`** — instruction models and ELF loaders. They are
+  **compiler-backend** infrastructure, shared with `lpvm-native`'s codegen
+  and `rt_emu`, not emulator infrastructure; they stay where the compiler
+  can reach them (vision Q3). They are AGPL today, which is why the MIT unit
+  is not yet externally self-contained. Whether they should flip too is
+  open (director-log E1).
+
+- **`lp-xt/lp-xt-fp-vectors`, `lp-xt-fp-harness`, `lps-builtins-xt-*`** —
+  the FP conformance corpus, the on-silicon rig that runs it, and the Xtensa
+  builtins image. Hardware-validation and compiler assets, not emulation.
+
+- **`lp-fw/fw-emu`** — firmware that *runs inside* `lp-riscv-emu`. It is a
+  product image, so it stays with the other firmware.
+
+## Roadmap
+
+The ESP32-C6 SoC emulator, its validation system and the vendored ROM images
+arrive under `esp/` and `lp-emu-validate/` across the milestones in the
+2026-09-06 esp-emulator plan. Nothing in `esp/` exists yet.

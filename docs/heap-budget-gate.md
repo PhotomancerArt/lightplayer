@@ -212,7 +212,7 @@ margin over. **Never widen the margin to make the gate pass.**
 
 ## Why deltas, not absolutes
 
-The guest heap (`lp-riscv/lp-riscv-emu-guest/memory.ld`, `HEAP_SIZE`) is
+The guest heap (`lp-emu/lp-riscv-emu-guest/memory.ld`, `HEAP_SIZE`) is
 deliberately **not** the device arena. Measured 2026-08-02: the guest carries
 ~52 KB of harness baseline the firmware does not (63,596 B live at
 project-load start vs ~10,936 B idle on a classic ESP32), so a device-sized

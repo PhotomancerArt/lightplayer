@@ -32,6 +32,14 @@ LightPlayer is AGPL-3.0 **by choice**; relicensing stays possible only while
 provenance is provable. See
 `docs/adr/2026-07-29-license-provenance-discipline.md`.
 
+**One exception, and it is fenced: everything under `lp-emu/` is MIT**
+(`lp-emu/LICENSE-MIT`) — the emulator family is meant to be usable outside
+this product. `just lint-emu-fence` (in `check-lint`, so in CI) fails if a
+crate there stops declaring MIT or grows a dependency on a workspace crate
+outside `lp-emu/` that is not on the script's allowlist. When you add a
+dependency to an `lp-emu/` crate, the first question is whether it can be
+avoided. See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
+
 - **NEVER copy, transliterate, or line-by-line adapt GPL source** into this
   repo. QEMU, binutils/GDB, and GCC are **behavioral references only** — run
   them, read them to understand semantics, then implement independently from
@@ -227,6 +235,14 @@ runtime.
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
+| `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
+| `lp-xt-emu`      | Xtensa emulator (host) — in `lp-emu/`  | yes (+std feat)  |
+
+Every emulator crate lives under **`lp-emu/`** and is **MIT**, not AGPL —
+see the license rule above and `lp-emu/README.md`. The rv32/Xtensa
+*instruction models and ELF loaders* (`lp-riscv/lp-riscv-inst`,
+`lp-riscv-elf`, `lp-xt/lp-xt-inst`, `lp-xt-elf`) are compiler-backend
+crates and stay outside that fence, AGPL like the rest of the product.
 
 ## Native backends (`lpvm-native`)
 

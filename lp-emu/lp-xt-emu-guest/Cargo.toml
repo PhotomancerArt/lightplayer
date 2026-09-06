@@ -2,9 +2,11 @@
 name = "lp-xt-emu-guest"
 version = "0.1.0"
 edition = "2021"
-license = "AGPL-3.0-or-later"
+# MIT as a unit with the rest of `lp-emu/`, NOT the workspace's AGPL.
+# See lp-emu/LICENSE-MIT and `just lint-emu-fence`.
+license = "MIT"
 # Member of the fixtures device-target workspace (esp toolchain), NOT the
 # host workspace — cargo's ancestor walk finds the root workspace, so point
 # at the right one explicitly.
-workspace = "../fixtures"
+workspace = "../../lp-xt/fixtures"
 description = "no_std guest runtime (entry/print/exit/panic/allocator) for programs running inside lp-xt-emu."

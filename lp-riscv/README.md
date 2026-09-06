@@ -1,20 +1,26 @@
 # LightPlayer RISC-V 32-bit utilities
 
-This directory contains the low-level utilities for the RISC-V 32-bit architecture that are
-used by the rest of LightPlayer, mostly for testing.
+The low-level RISC-V 32 architecture crates the rest of LightPlayer builds
+on: the instruction model and the ELF loader that both the shader compiler's
+rv32 backend (`lpvm-native`) and the emulator use.
 
-The main feature is a riscv32 emulator optimized for debugging and testing.
-
-- **`lp-riscv-emu`** — the RISC-V 32 emulator: instruction executors, register
-  file, run loops, `EmulatorError`, and the rv32 frame-pointer backtrace walk.
-  The arch-neutral machinery it builds on (memory model, `StepResult`/`TrapCode`,
-  serial, time, cycle accounting, profiler) lives in `lp-emu/lp-emu-core`.
 - **`lp-riscv-inst`** — RISC-V instruction encoding/decoding.
 - **`lp-riscv-elf`** — ELF loading/linking (symbols, relocations, GOT) for
   JIT-compiled guest code.
-- **`lp-riscv-emu-guest`** / **`lp-riscv-emu-guest-test-app`** — guest-side
-  runtime (syscalls, memory, logging) for code running inside the emulator.
 - **`lp-riscv-tools`** — deprecated umbrella crate; use the crates above.
+
+## What moved
+
+The rv32 **emulator** crates — `lp-riscv-emu`, `lp-riscv-emu-guest`,
+`lp-riscv-emu-guest-test-app` — now live in `lp-emu/`, with the rest of the
+emulation family, under its MIT fence. Crate names did not change. The
+arch-neutral machinery they build on (`lp-emu-core`, `lp-emu-abi`) has always
+been there. See `lp-emu/README.md` and
+`docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
+
+The crates in this directory stayed: they are compiler-backend
+infrastructure, not emulator infrastructure, and they are AGPL like the rest
+of the product (vision Q3).
 
 The host↔guest protocol crate formerly here (`lp-riscv-emu-shared`) is now
 `lp-emu/lp-emu-abi`; see `docs/adr/2026-07-28-emu-core-crate-family.md`.

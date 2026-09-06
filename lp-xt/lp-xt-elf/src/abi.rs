@@ -14,7 +14,7 @@
 //! window's registers on both sides.
 //!
 //! The guest-side mirror of these constants lives in
-//! `lp-xt/lp-xt-emu-guest/src/syscall.rs` — the two must stay in sync (the
+//! `lp-emu/lp-xt-emu-guest/src/syscall.rs` — the two must stay in sync (the
 //! fixture tests catch drift: every fixture prints and exits through this ABI).
 
 /// Terminate the run. `a3` = exit code; the run completes with

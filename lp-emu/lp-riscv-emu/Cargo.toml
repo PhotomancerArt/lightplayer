@@ -3,16 +3,18 @@ name = "lp-riscv-emu"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-license.workspace = true
+# MIT as a unit with the rest of `lp-emu/`, NOT the workspace's AGPL.
+# See lp-emu/LICENSE-MIT and `just lint-emu-fence`.
+license = "MIT"
 description = "RISC-V 32-bit emulator runtime"
 
 [lints]
 workspace = true
 
 [dependencies]
-lp-emu-core = { path = "../../lp-emu/lp-emu-core" }
-lp-riscv-inst = { path = "../lp-riscv-inst" }
-lp-emu-abi = { path = "../../lp-emu/lp-emu-abi" }
+lp-emu-core = { path = "../lp-emu-core" }
+lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
+lp-emu-abi = { path = "../lp-emu-abi" }
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
 hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
@@ -35,5 +37,5 @@ lp-riscv-emu = { path = ".", features = ["std"] }
 cranelift-codegen = { workspace = true, features = ["riscv32"] }
 cranelift-frontend = { workspace = true }
 cranelift-module = { workspace = true }
-lp-riscv-elf = { path = "../lp-riscv-elf", features = ["std"] }
+lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
 tempfile = "3"
