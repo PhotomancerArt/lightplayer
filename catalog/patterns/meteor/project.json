@@ -1,4 +1,8 @@
 {
   "format": 10,
-  "name": "Meteor"
+  "name": "Meteor",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
 }

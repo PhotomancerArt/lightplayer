@@ -1,4 +1,8 @@
 {
   "format": 10,
-  "name": "Pulse"
+  "name": "Pulse",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
 }

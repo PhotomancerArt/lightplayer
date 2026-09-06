@@ -951,8 +951,8 @@ mod tests {
         let examples_root =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../catalog/patterns/meteor");
 
-        let shader_text = std::fs::read_to_string(examples_root.join("render.json"))
-            .expect("read catalog/patterns/meteor/render.json");
+        let shader_text = std::fs::read_to_string(examples_root.join("effect/render.json"))
+            .expect("read catalog/patterns/meteor/effect/render.json");
         let shader = NodeDef::read_json(&registry, &shader_text).expect("parse meteor shader");
         let NodeDef::Shader(shader) = shader else {
             panic!("expected shader");

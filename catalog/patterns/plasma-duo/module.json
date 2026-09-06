@@ -10,14 +10,14 @@
     "disc_out": {
       "ref": "./disc_out.json"
     },
+    "effect": {
+      "ref": "./effect/module.json"
+    },
     "grid": {
       "ref": "./grid.json"
     },
     "grid_out": {
       "ref": "./grid_out.json"
-    },
-    "shader": {
-      "ref": "./shader.json"
     }
   },
   "provenance": {

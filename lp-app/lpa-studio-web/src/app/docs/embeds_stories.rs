@@ -51,7 +51,7 @@ fn docs_panel() -> lpa_studio_core::UiPanelGroup {
 }
 
 /// The source the article's editor embed shows, trimmed to the lines the
-/// article points at (the whole file is `catalog/plasma-duo/shader.glsl`).
+/// article points at (the whole file is `catalog/patterns/plasma-duo/effect/shader.glsl`).
 const DOCS_GLSL: &str = "\
 layout(binding = 0) uniform vec2 outputSize;
 layout(binding = 1) uniform float phase;

@@ -335,7 +335,7 @@ mod tests {
         let duo = embedded_example("catalog/plasma-duo").expect("plasma-duo is embedded");
         let plasma_files: std::collections::BTreeMap<_, _> = plasma.files().into_iter().collect();
         let duo_files: std::collections::BTreeMap<_, _> = duo.files().into_iter().collect();
-        for shared in ["shader.glsl", "shader.json", "clock.json"] {
+        for shared in ["effect/shader.glsl", "effect/shader.json", "clock.json"] {
             assert_eq!(
                 plasma_files[&shared.to_string()],
                 duo_files[&shared.to_string()],

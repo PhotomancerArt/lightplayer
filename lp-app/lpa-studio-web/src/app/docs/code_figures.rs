@@ -8,7 +8,7 @@
 //! shader drifting out of date.
 //!
 //! ⚠️ **Highlight ranges are hand-authored line numbers and do not track
-//! edits to the included file.** Change `catalog/*/shader.glsl` and the
+//! edits to the included file.** Change `catalog/patterns/*/effect/shader.glsl` and the
 //! ranges below must be re-checked — the tests at the bottom pin what each
 //! range is supposed to be pointing at, so an edit that moves a line fails
 //! here rather than silently washing the wrong row violet.
@@ -58,7 +58,7 @@ pub(crate) const FIGURES: &[DocsCodeFigure] = &[
     DocsCodeFigure {
         id: "plasma-shader",
         title: "plasma / shader.glsl",
-        code: include_str!("../../../../../catalog/patterns/plasma/shader.glsl"),
+        code: include_str!("../../../../../catalog/patterns/plasma/effect/shader.glsl"),
         // Line 3 declares `scale`, the uniform the example binds to `bus:scale`
         // (see `catalog/plasma/shader.json`) and therefore the one the Scale
         // knob drives — the beat the article is making: turn the knob, this

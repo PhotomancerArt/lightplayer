@@ -1,4 +1,8 @@
 {
   "format": 10,
-  "name": "Plasma"
+  "name": "Plasma",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
 }

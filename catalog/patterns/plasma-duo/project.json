@@ -1,4 +1,8 @@
 {
   "format": 10,
-  "name": "Plasma Duo"
+  "name": "Plasma Duo",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
 }

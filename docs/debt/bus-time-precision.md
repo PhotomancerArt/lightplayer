@@ -36,7 +36,7 @@ forever and Q16.16 has room to spare (a u32 cycle counter is exact for
 every periodic animation onto phasors — the win is a real
 device-overnight bug fixed, not only continuity feel. The residual risk
 is exactly the surface phasors could **not** absorb: the sanctioned
-integrators (`catalog/patterns/meteor/sim.json`, `projects/test/events/event_{a,b}`)
+integrators (`catalog/patterns/meteor/effect/sim.json`, `projects/test/events/event_{a,b}`)
 and the noise-advance halves of the split conversions, all of which
 genuinely want unbounded seconds.
 
@@ -70,7 +70,7 @@ outlive its own range.
 - Where seconds are genuinely needed, integrate a **delta** and keep
   the accumulator inside the consumer's own state at whatever
   resolution it needs, rather than differencing two large seconds
-  values (`catalog/patterns/meteor/sim.glsl` is the shape to copy — it is
+  values (`catalog/patterns/meteor/effect/sim.glsl` is the shape to copy — it is
   still subject to the 9.1 h ceiling on its *input*, but it does not
   compound the f32 rot).
 - To reproduce without waiting: write `transport.scrub_offset_seconds`

@@ -1,4 +1,8 @@
 {
   "format": 10,
-  "name": "Fault demo"
+  "name": "Fault demo",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
 }

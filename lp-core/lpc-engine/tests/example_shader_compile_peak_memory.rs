@@ -385,8 +385,8 @@ fn example_shader_compile_peaks() {
     );
 
     assert!(
-        rows.iter().any(|r| r.label == "meteor/sim.glsl"),
-        "meteor/sim.glsl (the flagship compute case) was not measured"
+        rows.iter().any(|r| r.label == "meteor/effect/sim.glsl"),
+        "meteor/effect/sim.glsl (the flagship compute case) was not measured"
     );
     assert!(
         rows.iter().any(|r| r.label == "zook-dome/shader.glsl"),

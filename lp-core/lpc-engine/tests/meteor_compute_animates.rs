@@ -89,8 +89,9 @@ fn meteor0_pos_x(rt: &LoadedProjectRuntime) -> Option<f32> {
 /// example, which is what a future sweep would be tempted to "finish".
 #[test]
 fn meteor_sim_keeps_an_unbounded_seconds_uniform() {
-    let def = std::fs::read_to_string(workspace_dir().join("catalog/patterns/meteor/sim.json"))
-        .expect("read catalog/patterns/meteor/sim.json");
+    let def =
+        std::fs::read_to_string(workspace_dir().join("catalog/patterns/meteor/effect/sim.json"))
+            .expect("read catalog/patterns/meteor/effect/sim.json");
     let def: serde_json::Value = serde_json::from_str(&def).expect("parse sim.json");
     let time = &def["consumed"]["time"];
 

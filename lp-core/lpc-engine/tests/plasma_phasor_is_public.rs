@@ -28,8 +28,9 @@ fn workspace_dir() -> PathBuf {
 /// future sweep would be tempted to "tidy".
 #[test]
 fn plasma_phase_keeps_an_authored_binding() {
-    let def = std::fs::read_to_string(workspace_dir().join("catalog/patterns/plasma/shader.json"))
-        .expect("read catalog/patterns/plasma/shader.json");
+    let def =
+        std::fs::read_to_string(workspace_dir().join("catalog/patterns/plasma/effect/shader.json"))
+            .expect("read catalog/patterns/plasma/effect/shader.json");
     let def: serde_json::Value = serde_json::from_str(&def).expect("parse shader.json");
 
     assert_eq!(

@@ -140,13 +140,13 @@ pub fn generate_board_project(board_id: &str) -> Result<GeneratedProject, Genera
             "output.json".to_string(),
             output_json(endpoint.as_str()).into_bytes(),
         ),
-        ("effect/module.json".to_string(), EFFECT_MODULE.into()),
     ];
-    // The effect's node artifacts and shaders ride verbatim from the
-    // embedded example — the gallery's meteor and the generated one are
-    // the same bytes by construction.
-    for name in ["sim.json", "sim.glsl", "render.json", "render.glsl"] {
-        files.push((format!("effect/{name}"), meteor_file(name).to_vec()));
+    // The effect rides verbatim from the catalog's meteor: its exported
+    // `effect/` folder — module, node artifacts, shaders, provenance — is
+    // vendored whole, so the gallery's meteor and the generated one are
+    // the same bytes by construction (modules.md §6 copy-to-own).
+    for (path, bytes) in meteor_export_files() {
+        files.push((path.to_string(), bytes.to_vec()));
     }
 
     Ok(GeneratedProject {
@@ -160,12 +160,18 @@ pub fn generate_board_project(board_id: &str) -> Result<GeneratedProject, Genera
 /// The catalog id of the pattern the generated project vendors.
 const METEOR_ID: &str = "catalog/meteor";
 
-/// One file of the embedded meteor example, by package-relative name.
-fn meteor_file(name: &str) -> &'static [u8] {
+/// The folder the pattern exports (`project.json` `exports`), vendored as
+/// `effect/` in the generated project too.
+const METEOR_EXPORT: &str = "effect/";
+
+/// Every file of meteor's exported `effect/` folder, package-relative.
+fn meteor_export_files() -> impl Iterator<Item = (&'static str, &'static [u8])> {
     embedded_example(METEOR_ID)
         .unwrap_or_else(|| panic!("{METEOR_ID} is in the catalog"))
-        .file(name)
-        .unwrap_or_else(|| panic!("the embedded meteor example ships {name}"))
+        .files
+        .iter()
+        .copied()
+        .filter(|(path, _)| path.starts_with(METEOR_EXPORT))
 }
 
 /// Root module: the four fixed nodes of a first project.
@@ -211,27 +217,6 @@ const PLAYLIST: &[u8] = br#"{
         "ref": "./effect/module.json"
       }
     }
-  }
-}
-"#;
-
-/// The vendored meteor module: the compute/render pair and nothing else
-/// (the example's own clock/fixture/output are the host project's job).
-/// Provenance is copied per modules.md R14 — vendoring keeps attribution.
-const EFFECT_MODULE: &[u8] = br#"{
-  "kind": "Module",
-  "nodes": {
-    "sim": {
-      "ref": "./sim.json"
-    },
-    "render": {
-      "ref": "./render.json"
-    }
-  },
-  "provenance": {
-    "author": "Photomancer",
-    "version": "1",
-    "license": "CC0-1.0"
   }
 }
 "#;
@@ -374,14 +359,24 @@ mod tests {
     #[test]
     fn the_effect_files_are_the_embedded_examples_bytes() {
         let project = generate_board_project("seeed/xiao-esp32-c6").expect("xiao");
-        for name in ["sim.glsl", "render.glsl", "sim.json", "render.json"] {
-            let generated = file_bytes(&project, &format!("effect/{name}"));
+        let mut vendored = 0;
+        for (path, bytes) in meteor_export_files() {
             assert_eq!(
-                generated,
-                meteor_file(name),
-                "effect/{name} must be the embedded meteor's own bytes"
+                file_bytes(&project, path),
+                bytes,
+                "{path} must be the embedded meteor's own bytes"
             );
+            vendored += 1;
         }
+        assert!(
+            vendored >= 5,
+            "meteor exports a module plus its sim/render pair"
+        );
+        // The vendored module carries the pattern's own provenance — the
+        // export lint's warning-free shape (modules.md R14).
+        let module = file_text(&project, "effect/module.json");
+        assert!(module.contains("\"provenance\""), "{module}");
+        assert!(module.contains("\"license\""), "{module}");
     }
 
     #[test]
