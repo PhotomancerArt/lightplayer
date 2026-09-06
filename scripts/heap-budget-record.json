@@ -1,28 +1,28 @@
 {
-  "comment": "Measured heap-budget record — a ratchet, not a target. These are what the projects cost TODAY on the RV32 emulator, not what any product may use. Per project and profile mode; steady-render records only the frame window. Regenerate with `just heap-budget-baseline`; see docs/heap-budget-gate.md.",
-  "recorded": "2026-09-04",
-  "commit": "393a18bde",
+  "comment": "Measured heap-budget record \u2014 a ratchet, not a target. These are what the projects cost TODAY on the RV32 emulator, not what any product may use. Per project and profile mode; steady-render records only the frame window. Regenerate with `just heap-budget-baseline`; see docs/heap-budget-gate.md.",
+  "recorded": "2026-09-06",
+  "commit": "fed1bb134",
   "projects": {
     "examples/basic": {
       "modes": {
         "startup": {
           "windows": {
             "server-boot": {
-              "transient": 47648,
-              "retained": 47648,
+              "transient": 47680,
+              "retained": 47680,
               "largest_alloc": 36864,
               "alloc_count": 928,
-              "alloc_bytes": 86507,
+              "alloc_bytes": 86539,
               "largest_free_at_close": 253976,
               "holes_at_close": 3
             },
             "project-load": {
-              "transient": 41336,
-              "retained": 36542,
+              "transient": 41352,
+              "retained": 36558,
               "largest_alloc": 4365,
               "alloc_count": 3680,
-              "alloc_bytes": 227410,
-              "largest_free_at_close": 215368,
+              "alloc_bytes": 227426,
+              "largest_free_at_close": 215320,
               "holes_at_close": 25
             },
             "frame": {
@@ -31,7 +31,7 @@
               "largest_alloc": 20480,
               "alloc_count": 3163,
               "alloc_bytes": 152502,
-              "largest_free_at_close": 177544,
+              "largest_free_at_close": 177496,
               "holes_at_close": 10
             },
             "shader-compile": {
@@ -40,7 +40,7 @@
               "largest_alloc": 13092,
               "alloc_count": 2305,
               "alloc_bytes": 274380,
-              "largest_free_at_close": 130592,
+              "largest_free_at_close": 130544,
               "holes_at_close": 17
             },
             "shader-link": {
@@ -49,7 +49,7 @@
               "largest_alloc": 8192,
               "alloc_count": 17,
               "alloc_bytes": 8844,
-              "largest_free_at_close": 130592,
+              "largest_free_at_close": 130544,
               "holes_at_close": 51
             }
           }
@@ -62,7 +62,7 @@
               "largest_alloc": 400,
               "alloc_count": 204,
               "alloc_bytes": 6029,
-              "largest_free_at_close": 130592,
+              "largest_free_at_close": 130544,
               "holes_at_close": 31
             }
           }
@@ -74,22 +74,22 @@
         "startup": {
           "windows": {
             "server-boot": {
-              "transient": 47648,
-              "retained": 47648,
+              "transient": 47680,
+              "retained": 47680,
               "largest_alloc": 36864,
               "alloc_count": 928,
-              "alloc_bytes": 86507,
+              "alloc_bytes": 86539,
               "largest_free_at_close": 253976,
               "holes_at_close": 3
             },
             "project-load": {
-              "transient": 46795,
-              "retained": 43483,
+              "transient": 46811,
+              "retained": 43499,
               "largest_alloc": 3584,
               "alloc_count": 4579,
-              "alloc_bytes": 280284,
-              "largest_free_at_close": 215248,
-              "holes_at_close": 31
+              "alloc_bytes": 280300,
+              "largest_free_at_close": 215224,
+              "holes_at_close": 32
             },
             "frame": {
               "transient": 96465,
@@ -97,7 +97,7 @@
               "largest_alloc": 20480,
               "alloc_count": 3555,
               "alloc_bytes": 162106,
-              "largest_free_at_close": 175512,
+              "largest_free_at_close": 175464,
               "holes_at_close": 9
             },
             "shader-compile": {
@@ -117,7 +117,7 @@
               "largest_alloc": 560,
               "alloc_count": 636,
               "alloc_bytes": 30047,
-              "largest_free_at_close": 137144,
+              "largest_free_at_close": 137096,
               "holes_at_close": 58
             }
           }
@@ -129,22 +129,22 @@
         "startup": {
           "windows": {
             "server-boot": {
-              "transient": 47648,
-              "retained": 47648,
+              "transient": 47680,
+              "retained": 47680,
               "largest_alloc": 36864,
               "alloc_count": 928,
-              "alloc_bytes": 86507,
+              "alloc_bytes": 86539,
               "largest_free_at_close": 253976,
               "holes_at_close": 3
             },
             "project-load": {
-              "transient": 46288,
-              "retained": 41663,
+              "transient": 46304,
+              "retained": 41679,
               "largest_alloc": 12000,
               "alloc_count": 3569,
-              "alloc_bytes": 225114,
-              "largest_free_at_close": 224352,
-              "holes_at_close": 23
+              "alloc_bytes": 225130,
+              "largest_free_at_close": 224304,
+              "holes_at_close": 24
             },
             "frame": {
               "transient": 114808,
@@ -152,7 +152,7 @@
               "largest_alloc": 20480,
               "alloc_count": 9890,
               "alloc_bytes": 528103,
-              "largest_free_at_close": 165768,
+              "largest_free_at_close": 165720,
               "holes_at_close": 18
             },
             "shader-compile": {
@@ -161,7 +161,7 @@
               "largest_alloc": 7424,
               "alloc_count": 615,
               "alloc_bytes": 84359,
-              "largest_free_at_close": 146888,
+              "largest_free_at_close": 146840,
               "holes_at_close": 22
             },
             "shader-link": {
@@ -170,7 +170,7 @@
               "largest_alloc": 2780,
               "alloc_count": 6,
               "alloc_bytes": 2911,
-              "largest_free_at_close": 146888,
+              "largest_free_at_close": 146840,
               "holes_at_close": 29
             }
           }
@@ -183,7 +183,7 @@
               "largest_alloc": 384,
               "alloc_count": 175,
               "alloc_bytes": 5826,
-              "largest_free_at_close": 146888,
+              "largest_free_at_close": 146840,
               "holes_at_close": 29
             }
           }
