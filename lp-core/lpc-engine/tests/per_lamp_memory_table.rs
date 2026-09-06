@@ -184,7 +184,10 @@ fn synthetic_from_zook(
         // output above: `kind` has to stay the first key.
         let fixture = std::fs::read_to_string(src.join("fixture.json")).expect("read fixture");
         let anchor = "\"kind\": \"Fixture\",";
-        assert!(fixture.contains(anchor), "zook fixture.json starts with its kind");
+        assert!(
+            fixture.contains(anchor),
+            "zook fixture.json starts with its kind"
+        );
         let fixture = fixture.replacen(
             anchor,
             "\"kind\": \"Fixture\",\n  \"patch\": { \"kind\": \"File\", \"source\": \"fixture.patch.json\" },",
