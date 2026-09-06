@@ -635,6 +635,13 @@ Rules of the desk:
 - Passive listing can't tell an S3 from a C6 — Espressif native USB shares
   one PID (`303a:1001`). The USB serial number (the MAC) does distinguish
   individual boards; chip identity needs `--probe`.
+- With **two boards of the same chip** on the bus, "the C6" is not an answer
+  and `fwcheck port --chip esp32c6` cannot become one. Name the board by MAC
+  and resolve it passively: `scripts/emu/board-port.py <MAC>` (or `--list`).
+  The rest of `scripts/emu/` is the bench-instrument kit — a reader that
+  never touches DTR/RTS (`tty-capture.py`, because `stty` and `screen` assert
+  it on open and that is the reset sequence), and the UART-bridge flash and
+  wiring-check procedures. See `lp-emu/README.md`.
 
 ## Hardware validation — one system, no board most days
 

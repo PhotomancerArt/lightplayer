@@ -27,6 +27,11 @@ description = "The G3 desk batch: the compile harness plus the GPIO calibration 
 payloads = ["shader-compile-stress", "gpio-calibrate"]
 
 [[set]]
+name = "lab-tap"
+description = "The bridge harness that turns a spare board into the lab's USB-to-UART tap. Not a measurement of a device under test — the instrument that makes one possible (g3-desk-batch.md step 4)."
+payloads = ["uart-bridge"]
+
+[[set]]
 name = "pins"
 description = "Payloads that make a claim about a pin."
 payloads = ["gpio-calibrate"]

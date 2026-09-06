@@ -2364,6 +2364,21 @@ fwtest-gpio-calibrate-esp32c6: install-rv32-target
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
+# Build the UART bridge harness, the lab's USB-to-UART tap (fast=1 -> 921,600)
+fwtest-uart-bridge-esp32c6 fast="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # BUILD ONLY, and the missing flash step is the point: the bench that wants
+    # this has TWO identical C6s on it, and `fwcheck port` can only say that a
+    # C6 is present, not which one. Putting the bridge on the board under test
+    # destroys the measurement in silence, so the flash lives in
+    # scripts/emu/uart-bridge-flash.sh, which takes a MAC and refuses to guess.
+    features="test_uart_bridge,esp32c6"
+    if [[ -n "{{ fast }}" ]]; then features="$features,uart_bridge_fast"; fi
+    cd lp-fw/fw-esp32c6 && cargo build --features "$features" --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+    echo "built {{ fw_esp32c6_elf }} with $features"
+    echo "flash it with: scripts/emu/uart-bridge-flash.sh <bridge-MAC>"
+
 # Flash GPIO calibration firmware, then run the host-side GPIO calibration prompt
 calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target
     #!/usr/bin/env bash

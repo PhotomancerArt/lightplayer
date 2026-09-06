@@ -124,6 +124,49 @@ fn the_gpio_payloads_series_parses_the_line_the_firmware_prints() {
     assert_eq!(&caps["duty"], "20");
 }
 
+/// The bridge's sentinel is the prefix `fw-checks` renders, and the series the
+/// host parses is the line the firmware prints — including the hardware-overrun
+/// value, which is the one number in it that must never be quietly reformatted.
+#[test]
+fn the_uart_bridges_ready_line_is_the_line_the_firmware_prints() {
+    use fw_checks::checks::uart_bridge::{
+        BRIDGE_READY_PREFIX, ROM_CONSOLE_BAUD, ReadyLine, UART0_RX_GPIO, UART0_TX_GPIO,
+    };
+
+    let payload = ALL_PAYLOADS
+        .iter()
+        .find(|p| p.name == "uart-bridge")
+        .expect("uart-bridge is registered");
+    assert_eq!(payload.sentinel, Sentinel::Ready(BRIDGE_READY_PREFIX));
+
+    let spec = payload.series.first().expect("uart-bridge has a series");
+    for (prev_to_uart, prev_to_usb) in [(0, 0), (7, u32::MAX)] {
+        let line = format!(
+            "{}",
+            ReadyLine {
+                baud: ROM_CONSOLE_BAUD,
+                tx_gpio: UART0_TX_GPIO,
+                rx_gpio: UART0_RX_GPIO,
+                prev_drop_to_uart: prev_to_uart,
+                prev_drop_to_usb: prev_to_usb,
+            }
+        );
+        assert!(
+            line.starts_with(payload.sentinel.marker()),
+            "`{line}` should start with the sentinel"
+        );
+        let caps = spec
+            .regex()
+            .captures(&line)
+            .unwrap_or_else(|| panic!("series `{}` should parse `{line}`", spec.name));
+        assert_eq!(&caps["baud"], "115200");
+        assert_eq!(&caps["tx"], "16");
+        assert_eq!(&caps["rx"], "17");
+        assert_eq!(caps["prev_drop_to_uart"], *prev_to_uart.to_string());
+        assert_eq!(caps["prev_drop_to_usb"], *prev_to_usb.to_string());
+    }
+}
+
 /// The two prefixes must not collide, and the header schema must match.
 #[test]
 fn the_wire_prefixes_and_schema_agree_across_the_fence() {

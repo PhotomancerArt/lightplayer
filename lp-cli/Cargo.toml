@@ -61,6 +61,7 @@ fw-checks = { path = "../lp-fw/fw-checks", features = [
     "std",
     "check-shader-compile",
     "check-gpio-calibrate",
+    "check-uart-bridge",
 ] }
 lp-emu-validate = { path = "../lp-emu/lp-emu-validate" }
 lpir = { path = "../lp-shader/lpir" }

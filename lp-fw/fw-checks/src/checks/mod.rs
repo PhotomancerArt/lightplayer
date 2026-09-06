@@ -7,3 +7,5 @@
 pub mod gpio_calibrate;
 #[cfg(feature = "check-shader-compile")]
 pub mod shader_compile;
+#[cfg(any(feature = "check-uart-bridge", test))]
+pub mod uart_bridge;
