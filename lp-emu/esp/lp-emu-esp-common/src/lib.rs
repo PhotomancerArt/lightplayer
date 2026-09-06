@@ -40,10 +40,14 @@
 
 pub mod host;
 pub mod periph;
+pub mod regfile;
+pub mod regnames;
 pub mod trace;
 
 pub use host::{ByteLog, ByteSink, ByteSource, HostSinks, ScriptedSource, StreamId};
 pub use periph::{BusCx, IrqLines, Peripheral, Width};
+pub use regfile::RegFile;
+pub use regnames::RegNames;
 pub use trace::{Access, MmioEvent, Trace};
 
 // The crate is `std` (it hosts stdout sinks now and sockets from M6), but
