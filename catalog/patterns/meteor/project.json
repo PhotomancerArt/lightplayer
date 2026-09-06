@@ -1,6 +1,7 @@
 {
   "format": 10,
   "name": "Meteor",
+  "description": "A compute/render pair: the sim integrates meteor heads into a persistent map and the render shader draws their tails from it.",
   "kind": "pattern",
   "exports": [
     "effect"

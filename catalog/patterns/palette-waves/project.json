@@ -1,6 +1,7 @@
 {
   "format": 10,
   "name": "Palette Waves",
+  "description": "A palette ramp travelling the strip under a slow swell, projected radially so it lands on the disc as rings. Ported from WLED's Colorwaves.",
   "kind": "pattern",
   "exports": [
     "effect"

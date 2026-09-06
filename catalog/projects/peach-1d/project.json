@@ -1,4 +1,5 @@
 {
   "format": 10,
-  "name": "Peach (1D)"
+  "name": "Peach (1D)",
+  "description": "The patching example: body and leaves share one 56-lamp wire through hand-authored patch files, each running a 1D shader along the strand."
 }

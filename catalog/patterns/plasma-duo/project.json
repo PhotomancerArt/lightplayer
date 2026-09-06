@@ -1,6 +1,7 @@
 {
   "format": 10,
   "name": "Plasma Duo",
+  "description": "One plasma shader and one palette feeding two fixtures at once, a disc and a 16×16 grid, each with its own output.",
   "kind": "pattern",
   "exports": [
     "effect"

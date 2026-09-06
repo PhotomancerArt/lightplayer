@@ -135,6 +135,32 @@ fn copying_manifest_matches_the_tree_both_ways() -> Result<()> {
     Ok(())
 }
 
+/// Every entry carries the one-line blurb its card shows (`project.json`
+/// `description`): present, one sentence's worth, never over the card's
+/// clamp.
+#[test]
+fn every_entry_has_a_one_line_description() -> Result<()> {
+    const MAX_CHARS: usize = 160;
+    let mut failures = Vec::new();
+    for entry in entries()? {
+        match entry.manifest.description.as_deref().map(str::trim) {
+            None | Some("") => failures.push(format!(
+                "catalog/{}/{}: project.json has no description (the card blurb)",
+                entry.bucket, entry.slug
+            )),
+            Some(description) if description.chars().count() > MAX_CHARS => failures.push(format!(
+                "catalog/{}/{}: description is {} chars, over the {MAX_CHARS} the card clamps at",
+                entry.bucket,
+                entry.slug,
+                description.chars().count()
+            )),
+            Some(_) => {}
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    Ok(())
+}
+
 /// The module whose `provenance` speaks for the entry: each exported
 /// module for a pattern, the root module for everything else. Returns
 /// `(project-relative path, license)` per carrying module.

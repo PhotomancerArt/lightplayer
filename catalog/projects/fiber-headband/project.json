@@ -1,4 +1,5 @@
 {
   "format": 10,
-  "name": "fiber-headband"
+  "name": "fiber-headband",
+  "description": "A real, live piece and the only battery-powered project here: two LEDs feeding fiber-optic strands on a headband, cycling a slow rainbow."
 }
