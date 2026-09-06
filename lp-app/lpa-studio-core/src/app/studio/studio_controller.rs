@@ -682,7 +682,15 @@ impl StudioController {
 
     /// The devices surface's projection.
     pub fn device_roster_view(&self) -> crate::DeviceRosterView {
-        self.devices.view(self.device_now())
+        let mut view = self.devices.view(self.device_now());
+        view.feeds = crate::device_card_feed_views(
+            self.devices.roster(),
+            &view.roster.devices,
+            &self.device_feeds,
+            self.devices.effects(),
+            (self.now_secs)(),
+        );
+        view
     }
 
     /// Install the platform's user-settings persistence sink (localStorage
@@ -2023,6 +2031,11 @@ impl StudioController {
         if node_id.as_str() == crate::DevicePushOp::NODE_ID {
             let op = action.into_op::<crate::DevicePushOp>()?;
             return self.execute_device_push_op(op).await;
+        }
+        if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {
+            let op = action.into_op::<crate::DeviceFeedOp>()?;
+            self.set_device_feed_wanted(op.device, op.wanted);
+            return Ok(UiNotices::new());
         }
         if node_id == project_node_id {
             // Slot edits and node-level reverts target the project node too

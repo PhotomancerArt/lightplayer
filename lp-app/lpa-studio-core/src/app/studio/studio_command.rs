@@ -60,6 +60,9 @@ pub enum StudioCommand {
     /// A `navigator.serial` hotplug edge. Not a model input: it makes the
     /// effects layer go looking, and what it finds becomes `Device` commands.
     DeviceHotplug(DeviceHotplug),
+    /// The page went hidden or came back (`document.visibilityState`). The
+    /// device cards' live feeds pull only while it is visible. Latest wins.
+    PageVisibility { visible: bool },
     /// The library changed under us (another tab's catalog transaction or
     /// save, via the host's BroadcastChannel). Coalescable like
     /// `RefreshTick`: the actor schedules one gallery re-hydration.

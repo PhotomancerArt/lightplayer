@@ -34,7 +34,9 @@
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_transport;
 pub mod device_affordance;
+pub mod device_card_feed_view;
 pub mod device_effects;
+pub mod device_feed_op;
 pub mod device_firmware_face;
 pub mod device_flash;
 pub mod device_frame_feed;
@@ -49,10 +51,14 @@ pub mod shared_link_client_io;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use browser_transport::BrowserSerialTransport;
 pub use device_affordance::{device_escape_action, device_status_kind, pending_escape_action};
+pub use device_card_feed_view::{
+    DeviceCardFeedView, FeedLiveness, device_card_feed_view, device_card_feed_views, feed_liveness,
+};
 pub use device_effects::{
     CompletedPush, DeviceEffects, DeviceTaskFuture, DeviceTimerFuture, PendingWrites, PushPayload,
     StagedPush,
 };
+pub use device_feed_op::DeviceFeedOp;
 pub use device_firmware_face::{
     device_firmware_line, firmware_face_preview_sentence, pending_firmware_line,
 };

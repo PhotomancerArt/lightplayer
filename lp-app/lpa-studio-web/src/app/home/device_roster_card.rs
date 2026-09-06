@@ -1091,6 +1091,7 @@ mod tests {
             remembered_firmware: None,
             degraded: None,
             loaded_project: DeviceLoadedProject::Unknown,
+            engine_fps: None,
             can_receive_project: false,
             can_remove_project: false,
             activity: None,

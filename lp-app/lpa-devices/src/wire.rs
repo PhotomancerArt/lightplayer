@@ -58,6 +58,7 @@ impl ServerFrame {
                 identity,
                 loaded: None,
                 recovery: None,
+                engine_fps: None,
             },
         }
     }
@@ -88,8 +89,19 @@ impl ServerFrame {
                 identity,
                 loaded,
                 recovery,
+                engine_fps: None,
             },
         }
+    }
+
+    /// Stamp a heartbeat with the engine's reported frame rate. A no-op on
+    /// any other frame.
+    #[must_use]
+    pub fn with_engine_fps(mut self, fps: Option<u16>) -> Self {
+        if let ServerFrameBody::Heartbeat { engine_fps, .. } = &mut self.body {
+            *engine_fps = fps;
+        }
+        self
     }
 
     /// An answer to "what have you got loaded?" — the same fact, asked for
@@ -198,6 +210,14 @@ pub enum ServerFrameBody {
         /// empty/unknown split exists to avoid.
         #[serde(default)]
         recovery: Option<RecoveryFacts>,
+        /// The engine's reported frame rate, rounded — the one always-
+        /// changing heartbeat fact the mirror carries, because the card's
+        /// live-feed pill says "live · N fps" with it. It is deliberately
+        /// NOT part of the terminal line (`wire_summary`), which must stay
+        /// collapsible across identical heartbeats. `None` from firmware
+        /// that does not report it.
+        #[serde(default)]
+        engine_fps: Option<u16>,
     },
     /// A `ListLoadedProjects` answer. The one non-hello response body the
     /// mirror decodes rather than labels, because the empty-vs-running face

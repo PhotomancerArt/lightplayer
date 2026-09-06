@@ -88,6 +88,10 @@ pub struct DeviceView {
     /// face are the two answers; [`LoadedProject::Unknown`] is the third,
     /// and it offers neither rather than guessing.
     pub loaded_project: LoadedProject,
+    /// The engine's reported frame rate off the latest heartbeat this
+    /// window (the card's live-feed pill: "live · N fps"). `None` until a
+    /// heartbeat carried one; a window reset drops it, honestly.
+    pub engine_fps: Option<u16>,
     /// Whether a project could be sent to this board right now: a
     /// proto-compatible LightPlayer, on a link, with nothing else running.
     /// The empty face's primary verb is drawn only when this is true.
@@ -303,6 +307,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             && device.evidence.presence.is_open()
             && device.activity.is_none(),
         loaded_project: loaded,
+        engine_fps: device.evidence.engine_fps(),
         // An OPEN port, not merely an attached one: the push conversation
         // talks over this port, and a verb that could only fail is worse
         // than no verb. (The fold already implies it — closing a port

@@ -111,6 +111,9 @@ pub enum Step {
         uid: Option<String>,
         #[serde(default)]
         mac: Option<String>,
+        /// The engine's reported frame rate, when the heartbeat carries it.
+        #[serde(default)]
+        fps: Option<u16>,
     },
     /// The board's answer to "what have you got loaded?" — the fact the
     /// empty and running faces are made of. An EMPTY list is the interesting
@@ -274,7 +277,17 @@ impl Step {
             link,
             uid: None,
             mac: None,
+            fps: None,
         }
+    }
+
+    /// Stamp a heartbeat step with the engine's reported frame rate.
+    pub fn fps(mut self, value: u16) -> Self {
+        match &mut self {
+            Self::Heartbeat { fps, .. } => *fps = Some(value),
+            _ => panic!("fps() only applies to heartbeat steps"),
+        }
+        self
     }
 
     pub fn hello(link: u64) -> Self {
@@ -350,9 +363,16 @@ impl Step {
                 },
             ),
             Self::Line { link, text } => Input::link(LinkId(link), LinkEvent::Line(text)),
-            Self::Heartbeat { link, uid, mac } => Input::link(
+            Self::Heartbeat {
+                link,
+                uid,
+                mac,
+                fps,
+            } => Input::link(
                 LinkId(link),
-                LinkEvent::Frame(ServerFrame::heartbeat(peer_identity(uid, mac, None))),
+                LinkEvent::Frame(
+                    ServerFrame::heartbeat(peer_identity(uid, mac, None)).with_engine_fps(fps),
+                ),
             ),
             Self::Loaded { link, projects } => Input::link(
                 LinkId(link),
@@ -496,6 +516,8 @@ pub struct Expect {
     pub device_title: Option<String>,
     pub device_detail_contains: Option<String>,
     pub freshness_contains: Option<String>,
+    /// The engine fps the card's live pill would show.
+    pub engine_fps: Option<u16>,
     pub busy: Option<bool>,
     pub activity: Option<ActivityKind>,
     pub cancel_requested: Option<bool>,
@@ -526,6 +548,11 @@ impl Expect {
 
     pub fn pending(mut self, count: usize) -> Self {
         self.pending = Some(count);
+        self
+    }
+
+    pub fn engine_fps(mut self, fps: u16) -> Self {
+        self.engine_fps = Some(fps);
         self
     }
 
@@ -630,6 +657,14 @@ impl Expect {
         if let Some(expected) = &self.device_state {
             require(&device.state_label == expected, || {
                 format!("expected state {expected:?}, saw {:?}", device.state_label)
+            })?;
+        }
+        if let Some(expected) = self.engine_fps {
+            require(device.engine_fps == Some(expected), || {
+                format!(
+                    "expected engine fps {expected}, saw {:?}",
+                    device.engine_fps
+                )
             })?;
         }
         if let Some(expected) = self.needs_firmware {

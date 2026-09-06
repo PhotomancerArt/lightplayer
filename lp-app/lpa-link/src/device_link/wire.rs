@@ -106,12 +106,14 @@ pub fn server_frame(message: &WireServerMessage) -> ServerFrame {
             identity,
             loaded_projects,
             recovery,
+            fps,
             ..
         } if message.id == 0 => ServerFrame::heartbeat_report(
             identity.as_ref().map(heartbeat_identity),
             Some(loaded_projects.iter().map(loaded_project_facts).collect()),
             recovery.as_ref().map(recovery_facts),
-        ),
+        )
+        .with_engine_fps(engine_fps(fps.avg)),
         // The one non-hello RESPONSE body the mirror decodes rather than
         // labels: whether a board has a project on it is what the empty and
         // running faces are made of (M3), and a label cannot carry it.
@@ -131,6 +133,13 @@ pub fn server_frame(message: &WireServerMessage) -> ServerFrame {
 /// `since_ms` is dropped: it is the DEVICE's frame clock, and this side has
 /// nothing to subtract it from. How long a card has looked degraded is a
 /// freshness question, and the fold already owns freshness.
+/// The heartbeat's average engine rate as the mirror's rounded integer;
+/// a rate the firmware has not measured yet (0, NaN) is "did not say".
+fn engine_fps(avg: f32) -> Option<u16> {
+    let rounded = avg.round();
+    (rounded.is_finite() && rounded >= 1.0).then(|| rounded.min(f32::from(u16::MAX)) as u16)
+}
+
 fn loaded_project_facts(project: &lpc_wire::server::LoadedProject) -> LoadedProjectFacts {
     match &project.fault {
         None => LoadedProjectFacts::new(project.path.as_str()),

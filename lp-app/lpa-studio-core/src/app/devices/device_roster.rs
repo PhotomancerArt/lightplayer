@@ -56,6 +56,11 @@ pub struct DeviceRosterView {
     /// handle → the registry uid `/device/<uid>` opens it by. A device
     /// without a row (still identifying) has no honest address and no Open.
     pub open_addresses: std::collections::BTreeMap<u64, String>,
+    /// Each fed device's picture and its treatment, joined at the app view
+    /// (frames are not evidence; the model's projection stays verbatim).
+    /// Absent for a card with nothing honest to draw — it keeps its
+    /// sentence.
+    pub feeds: std::collections::BTreeMap<lpa_devices::DeviceId, super::DeviceCardFeedView>,
 }
 
 impl Default for DeviceRosterView {
@@ -67,6 +72,7 @@ impl Default for DeviceRosterView {
             },
             transport_available: false,
             open_addresses: std::collections::BTreeMap::new(),
+            feeds: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -306,6 +312,8 @@ impl DeviceRoster {
             roster: roster_view(&self.roster, now),
             transport_available: self.effects.is_wired(),
             open_addresses: self.keys.clone(),
+            // Filled by the controller, which owns the feeds.
+            feeds: std::collections::BTreeMap::new(),
         }
     }
 
@@ -462,6 +470,7 @@ mod tests {
             remembered_firmware: None,
             degraded: None,
             loaded_project: lpa_devices::view::LoadedProject::Unknown,
+            engine_fps: None,
             can_receive_project: false,
             can_remove_project: false,
             activity: None,
@@ -487,6 +496,7 @@ mod tests {
             remembered_firmware: None,
             degraded: None,
             loaded_project: lpa_devices::view::LoadedProject::Empty,
+            engine_fps: None,
             can_receive_project: true,
             can_remove_project: false,
             activity: None,
@@ -513,6 +523,7 @@ mod tests {
             },
             transport_available: true,
             open_addresses: Default::default(),
+            feeds: std::collections::BTreeMap::new(),
         };
 
         let split = split_roster(&view);
@@ -547,6 +558,7 @@ mod tests {
             },
             transport_available: true,
             open_addresses: Default::default(),
+            feeds: std::collections::BTreeMap::new(),
         };
 
         let split = split_roster(&view);

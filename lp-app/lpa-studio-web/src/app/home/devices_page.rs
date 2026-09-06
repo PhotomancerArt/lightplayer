@@ -405,6 +405,7 @@ mod tests {
             roster,
             transport_available,
             open_addresses: Default::default(),
+            feeds: Default::default(),
         }
     }
 
@@ -660,6 +661,7 @@ mod tests {
             remembered_firmware: None,
             degraded: None,
             loaded_project: lpa_studio_core::DeviceLoadedProject::Unknown,
+            engine_fps: None,
             can_receive_project: false,
             can_remove_project: false,
             activity: None,

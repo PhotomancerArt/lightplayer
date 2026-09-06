@@ -277,6 +277,12 @@ impl Evidence {
     /// `None` means it never said — an embedder with no recovery region
     /// (browser sim, host server) or firmware too old to report. It is NOT
     /// "green", and no caller may render it as healthy.
+    /// The engine's reported frame rate, off the latest heartbeat this
+    /// window that carried one.
+    pub fn engine_fps(&self) -> Option<u16> {
+        self.observations.engine_fps
+    }
+
     pub fn recovery(&self) -> Option<&RecoveryFacts> {
         self.observations.recovery.as_ref()
     }
@@ -760,6 +766,10 @@ struct Observations {
     /// for the same reason, and — like `loaded` — only REPLACED by a frame
     /// that carries one.
     recovery: Option<RecoveryFacts>,
+    /// The engine's reported frame rate off the latest heartbeat that
+    /// carried one. Window-scoped; read by the card's live-feed pill.
+    #[serde(default)]
+    engine_fps: Option<u16>,
     /// The wire-version notice has been journaled for this window.
     #[serde(default)]
     wire_mismatch_noted: bool,
@@ -790,9 +800,15 @@ impl Observations {
             // Absorbed, never condemned: a running server heartbeats, so a
             // mid-stream attach sees frames before any hello answer.
             ServerFrameBody::Heartbeat {
-                loaded, recovery, ..
+                loaded,
+                recovery,
+                engine_fps,
+                ..
             } => {
                 self.frames_seen += 1;
+                if engine_fps.is_some() {
+                    self.engine_fps = *engine_fps;
+                }
                 // Only a heartbeat that CARRIES the report replaces it:
                 // older firmware sends none, and treating its silence as
                 // "nothing loaded" would offer to overwrite a live project.

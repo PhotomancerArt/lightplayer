@@ -1478,6 +1478,17 @@ fn a_running_board_feeds_its_card_over_the_shared_link() {
     }
     assert!(advanced, "the revision never moved past {}", first.revision);
 
+    // The app view joins the picture beside the card: live, with the
+    // board's own picture and no dimming.
+    let feeds = bench.controller.device_roster_view().feeds;
+    let feed_view = feeds.get(&device).expect("the fed card has a feed view");
+    assert_eq!(
+        feed_view.liveness,
+        crate::FeedLiveness::Live,
+        "{feed_view:?}"
+    );
+    assert!(feed_view.frame.is_some());
+
     // The card is untouched, and the journal never saw a conversation frame.
     let card = &bench.view().devices[0];
     assert!(card.activity.is_none(), "{card:?}");

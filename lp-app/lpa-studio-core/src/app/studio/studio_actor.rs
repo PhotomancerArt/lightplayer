@@ -297,6 +297,9 @@ where
         if plan.library_changed {
             self.controller.request_library_refresh();
         }
+        if let Some(visible) = plan.page_visibility {
+            self.controller.set_device_feeds_page_visible(visible);
+        }
         for command in plan.console {
             self.controller.apply_console_command(command);
         }
@@ -634,6 +637,8 @@ struct CommandPlan {
     /// Coalesced cross-tab library-change pings: schedule one gallery
     /// re-hydration for the whole batch.
     library_changed: bool,
+    /// The page's latest visibility edge in the batch (latest wins).
+    page_visibility: Option<bool>,
 }
 
 /// One planned device step: fold an input, or make the effects layer look.
@@ -653,12 +658,14 @@ impl CommandPlan {
         let mut shutdown = false;
         let mut attach_library = None;
         let mut library_changed = false;
+        let mut page_visibility = None;
         for command in batch {
             match command {
                 StudioCommand::AttachLibrary(attachment) => attach_library = Some(attachment),
                 StudioCommand::Device(input) => device.push(DeviceStep::Input(input)),
                 StudioCommand::DeviceHotplug(edge) => device.push(DeviceStep::Hotplug(edge)),
                 StudioCommand::LibraryChanged => library_changed = true,
+                StudioCommand::PageVisibility { visible } => page_visibility = Some(visible),
                 StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
                 // Not a local console mutation: a runtime-level change is
                 // a server round-trip, so convert it into the equivalent
@@ -694,6 +701,7 @@ impl CommandPlan {
             shutdown,
             attach_library,
             library_changed,
+            page_visibility,
         }
     }
 }

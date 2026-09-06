@@ -548,6 +548,45 @@ fn an_anonymous_entry_merges_into_the_record_matched_device() {
     );
 }
 
+/// The engine's frame rate rides the heartbeat into the card (the live
+/// feed's pill), is window-scoped like every observation, and never shows
+/// up on the terminal line — which stays collapsible across heartbeats.
+#[test]
+fn engine_fps_rides_the_heartbeat_and_drops_with_the_window() {
+    let fixture = Script::new()
+        .at(0, Step::attach(1, "usb-1"))
+        .at(10, Step::opened(1))
+        .at(100, Step::hello(1).uid("dev_fps"))
+        .at(200, Step::heartbeat(1))
+        .expect(Expect::new().devices(1).device_state("Ready"))
+        .at(2_200, Step::heartbeat(1).fps(43))
+        .expect(Expect::new().engine_fps(43))
+        // A heartbeat without the fact leaves the last report standing.
+        .at(4_200, Step::heartbeat(1))
+        .expect(Expect::new().engine_fps(43))
+        .into_fixture("engine fps");
+    let mut replay = Replay::new(RosterConfig::default());
+    replay.run(&fixture).expect("scenario");
+
+    let card = replay.view().devices[0].clone();
+    assert_eq!(card.engine_fps, Some(43));
+    let wire_lines: Vec<&str> = card
+        .terminal
+        .iter()
+        .filter(|line| line.kind == lpa_devices::TerminalKind::Wire)
+        .map(|line| line.text.as_str())
+        .collect();
+    assert!(
+        wire_lines.iter().all(|text| !text.contains("43")),
+        "fps must not reach the terminal line: {wire_lines:?}"
+    );
+
+    // A reopen is a new window: the rate is a live report, not a memory.
+    replay.step(Millis(5_000), Step::closed(1));
+    replay.step(Millis(5_100), Step::opened(1));
+    assert_eq!(replay.view().devices[0].engine_fps, None);
+}
+
 #[test]
 fn a_lossy_wire_never_flaps_the_timeline() {
     let config = RosterConfig::default();

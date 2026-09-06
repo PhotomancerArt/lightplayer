@@ -210,6 +210,10 @@ pub enum TerminalKind { Rom, Board, Wire, Studio, Outcome, Failure, Recovery }
     turn every heartbeat into a new line instead of one collapsing with a
     repeat count.
   - `Loaded` → `loaded · {n} project(s)`, names joined by `, `.
+  - The one always-changing heartbeat fact the mirror DOES carry is the
+    engine's rounded frame rate (`engine_fps`, for the device card's live
+    feed pill): it lands on `Evidence::engine_fps()` / `DeviceView.engine_fps`
+    and deliberately never on the line.
   - `Other` → the label, verbatim.
 
 ## Board id and chip: learned, never cleared

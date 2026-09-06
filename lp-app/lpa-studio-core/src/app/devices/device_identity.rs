@@ -172,6 +172,7 @@ mod tests {
             remembered_firmware: None,
             degraded: None,
             loaded_project: LoadedProject::Empty,
+            engine_fps: None,
             can_receive_project: true,
             can_remove_project: false,
             activity: None,

@@ -698,6 +698,7 @@ fn roster_fixture() -> DeviceRosterView {
                     degraded: None,
                     // The RUNNING face (M3): what the board itself reports,
                     // named by the storage dir it runs from.
+                    engine_fps: None,
                     loaded_project: DeviceLoadedProject::Running {
                         label: "2026-07-09-1421-porch-sign".to_string(),
                     },
@@ -757,6 +758,7 @@ fn roster_fixture() -> DeviceRosterView {
                     remembered_firmware: None,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
+                    engine_fps: None,
                     // Busy: one activity per device, so no second verb.
                     can_receive_project: false,
                     can_remove_project: false,
@@ -799,6 +801,7 @@ fn roster_fixture() -> DeviceRosterView {
                     remembered_firmware: None,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
+                    engine_fps: None,
                     can_receive_project: false,
                     can_remove_project: false,
                     activity: None,
@@ -846,6 +849,7 @@ fn roster_fixture() -> DeviceRosterView {
                     remembered_firmware: None,
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Empty,
+                    engine_fps: None,
                     can_receive_project: true,
                     // Nothing on it to remove — the empty face's picker is
                     // the verb here.
@@ -904,6 +908,7 @@ fn roster_fixture() -> DeviceRosterView {
                     remembered_firmware: Some("fw-esp32c6 abc1234".to_string()),
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
+                    engine_fps: None,
                     can_receive_project: false,
                     can_remove_project: false,
                     activity: None,
@@ -1028,6 +1033,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             },
         },
         degraded: Some("Recovery red: /studio.show/s disabled after repeated crashes".to_string()),
+        engine_fps: None,
         loaded_project: DeviceLoadedProject::Running {
             label: "studio".to_string(),
         },
@@ -1124,6 +1130,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         remembered_firmware: None,
         degraded: None,
         loaded_project: DeviceLoadedProject::Unknown,
+        engine_fps: None,
         can_receive_project: false,
         can_remove_project: false,
         activity: None,
@@ -1222,6 +1229,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         remembered_firmware: Some("fw-esp32v3 7c80a27".to_string()),
         degraded: None,
         loaded_project: DeviceLoadedProject::Unknown,
+        engine_fps: None,
         can_receive_project: false,
         can_remove_project: false,
         activity: None,
