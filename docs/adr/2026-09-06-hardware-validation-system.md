@@ -180,7 +180,11 @@ so the same file can be read under different rules forever.
   its portable half is a `WireServerMessage`, and dragging the product's wire
   types into the check crate is the wrong direction. It becomes a
   shipped-image scenario instead.
-- **Open:** the timed USB-Serial-JTAG negative control (plan G3) needs a
-  firmware build this repository does not have — the USB-SJ host link
-  unchanged, the log sink also on UART0. `spike_uart0_link` does the opposite.
-  Recorded in `g3-desk-batch.md` and assigned to M6.
+- **Open:** the timed USB-Serial-JTAG negative control (plan G3) needs two
+  pieces this repository does not have. A `uart0_console` firmware build — the
+  USB-SJ host link unchanged, the log sink *also* on UART0; `spike_uart0_link`
+  does the opposite. And a UART0 tap: there is no USB-to-UART adapter on the
+  bench, so it is a **second XIAO C6 running a bridge harness** (its own USB-SJ
+  to the host, UART0 to the board under test). Both are small, neither is
+  useful without the other, and both are recorded in `g3-desk-batch.md` and
+  assigned to M6's first phase.
