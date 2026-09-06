@@ -230,3 +230,43 @@ every patched product, every frame — small-dome's 35,700 B largest ask in
 its frame window); the classic's `DisplayPipeline` copies; the playlist
 crossfade's two per-frame sample-outs; `direct_channels` (identity for a
 plain map2d fixture — a 4 B/lamp candidate).
+
+## After (2026-09-06): identity direct channels, resident crossfade sample-outs
+
+Two of the "still per-lamp and per-frame" items above are closed (plan
+`2026-09-06-0049-direct-channels-crossfade-resident`):
+
+- **`FixtureNode.direct_channels` → `DirectChannels::Identity(count)`** for
+  every document-resolved mapping (the resolver's spans are a running
+  cursor, so the channel list is `0..n` by construction); only a
+  hand-authored `PathPoints` with offset or sparse keys keeps the explicit
+  4 B/lamp list. Host slope (`per_lamp_memory_table`, zook 1,500 → 3,000):
+  tick 1 resident **21.7 → 17.72 B/lamp**, transient 17.44; load unchanged
+  at 8.0. Device-side that is −6,000 B on zook and −25,240 B on small-dome
+  of resident heap. The owner table's `direct_channels` row is now 4 B per
+  fixture, not per lamp: Direct-path residents are mapping 8 + sample
+  points 8 + sample target 8 + output samples 6 + 8-bit frame 3 =
+  **33 B/lamp** (was 37).
+- **Playlist crossfade.** The two per-frame `create_sample_out` calls (16
+  B/lamp/frame in graphics memory — churn on the classic, a leak on the
+  host's bump-allocated wasmtime backend) are now two handles resident on
+  the node for the transition's life, freed when it ends. New probe
+  `lp-core/lpc-engine/tests/playlist_crossfade_memory.rs`
+  (`examples/button-playlist` scaled ×10 = 2,401 lamps and ×20 = 4,801,
+  transition driven through `PlaylistActivateEntry`, a counting
+  `LpGraphics` decorator):
+
+  | scale | first transition frame | every later transition frame | host steady transient |
+  |---|---:|---:|---:|
+  | ×10 | 2 calls, 38,416 B (= 2 × 2,401 × 8) | 0 calls, 0 B | 1,187 B |
+  | ×20 | 2 calls, 76,816 B (= 2 × 4,801 × 8) | 0 calls, 0 B | 1,187 B |
+
+  A second transition between two warm entries opens with exactly two
+  calls again, proving the first one's end freed them; the tick after a
+  transition ends frees the blend scratch (host resident −19,288 B at ×10,
+  −38,488 B at ×20). Counted rather than weighed: the wasmtime backend's
+  sample-outs live in wasm linear memory, outside the host tracker.
+
+Still open from the list above: `ProductScratch.rendered` (sibling plan
+`2026-09-06-0048-output-scratch-resident`) and the classic's
+`DisplayPipeline` copies.

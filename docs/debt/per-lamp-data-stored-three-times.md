@@ -153,6 +153,12 @@ Three separable steps, cheapest first:
   retained 82,864 → 52,864 B; the classic reads ≈43 B/LED all-in with
   interpolation off. The remaining lamp-scaled copy is the classic's
   `DisplayPipeline.current` (6 B/LED, +12 with interpolation).
+- **2026-09-06** — `direct_channels` encodes as `DirectChannels::Identity(n)`
+  for every document-resolved mapping (4 B/lamp → 4 B per fixture; zook tick
+  1 host slope 21.7 → 17.7 B/LED), and the playlist crossfade's two per-frame
+  sample-outs are resident for the transition (0 B/lamp/frame of graphics
+  churn while a fade runs). Report addendum:
+  `docs/reports/2026-09-02-per-lamp-memory-table.md` "After (2026-09-06)".
 - **2026-08-03** — step 1 paid down in PR #303 (−8 B/LED resident, −8 B/LED
   per-frame transient churn). Step 2 is deferred while PR #301's P2 rewrites
   the flush path it would touch; the u16→u8 copy it targets gained a third
