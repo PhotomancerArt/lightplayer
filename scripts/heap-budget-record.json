@@ -3,7 +3,7 @@
   "recorded": "2026-09-06",
   "commit": "dd25c4af5",
   "projects": {
-    "examples/basic": {
+    "projects/test/basic": {
       "modes": {
         "startup": {
           "windows": {
@@ -69,7 +69,7 @@
         }
       }
     },
-    "examples/meteor": {
+    "catalog/patterns/meteor": {
       "modes": {
         "startup": {
           "windows": {
@@ -135,7 +135,7 @@
         }
       }
     },
-    "examples/zook-dome": {
+    "catalog/projects/zook-dome": {
       "modes": {
         "startup": {
           "windows": {

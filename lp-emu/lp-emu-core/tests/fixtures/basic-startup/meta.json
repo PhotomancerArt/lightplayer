@@ -2,7 +2,7 @@
  "schema_version": 1,
  "timestamp": "2026-09-04T22:21:28.925295+00:00",
  "project": "Basic",
- "workload": "examples/basic",
+ "workload": "projects/test/basic",
  "clock_source": "emu_estimated",
  "mode": "startup",
  "cycle_model": "esp32c6",

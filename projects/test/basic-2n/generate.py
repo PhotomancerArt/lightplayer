@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the `basic-{2n,4n,2n-half}` node-count siblings from `examples/basic`.
+"""Generate the `basic-{2n,4n,2n-half}` node-count siblings from `projects/test/basic`.
 
 These three projects exist to measure what *one fixture+output pair* costs the
 engine, by taking a slope over node count instead of over lamp count (that is
@@ -34,7 +34,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parents[3]
-PARENT = WORKSPACE / "examples" / "basic"
+PARENT = WORKSPACE / "projects" / "test" / "basic"
 OUT_ROOT = WORKSPACE / "projects" / "test"
 
 # Files copied verbatim from the parent into every generated project.
@@ -50,7 +50,7 @@ PINS = ("D10", "D9", "D8", "D7")
 POINTER = (
     "# {title}\n"
     "\n"
-    "Generated from `examples/basic` by `projects/test/basic-2n/generate.py`;\n"
+    "Generated from `projects/test/basic` by `projects/test/basic-2n/generate.py`;\n"
     "see [`../basic-2n/README.md`](../basic-2n/README.md) for the rules, the\n"
     "regeneration command, and the report that uses these projects.\n"
 )
