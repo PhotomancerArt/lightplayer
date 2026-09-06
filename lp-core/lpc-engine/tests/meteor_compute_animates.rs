@@ -36,9 +36,10 @@ fn workspace_dir() -> PathBuf {
 }
 
 fn load_meteor() -> LoadedProjectRuntime {
-    let fs = LpFsStd::new(workspace_dir().join("examples/meteor"));
+    let fs = LpFsStd::new(workspace_dir().join("catalog/patterns/meteor"));
     let services = EngineServices::new(TreePath::parse("/meteor.show").expect("root path"));
-    let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load examples/meteor");
+    let mut rt =
+        ProjectLoader::load_from_root(&fs, services).expect("load catalog/patterns/meteor");
     rt.engine_mut()
         .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,
@@ -88,8 +89,8 @@ fn meteor0_pos_x(rt: &LoadedProjectRuntime) -> Option<f32> {
 /// example, which is what a future sweep would be tempted to "finish".
 #[test]
 fn meteor_sim_keeps_an_unbounded_seconds_uniform() {
-    let def = std::fs::read_to_string(workspace_dir().join("examples/meteor/sim.json"))
-        .expect("read examples/meteor/sim.json");
+    let def = std::fs::read_to_string(workspace_dir().join("catalog/patterns/meteor/sim.json"))
+        .expect("read catalog/patterns/meteor/sim.json");
     let def: serde_json::Value = serde_json::from_str(&def).expect("parse sim.json");
     let time = &def["consumed"]["time"];
 

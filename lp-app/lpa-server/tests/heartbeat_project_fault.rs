@@ -6,7 +6,7 @@
 //! above is decoration (2026-09-01 bench: a C6 read "Running" for two days
 //! while its only shader was quarantined).
 //!
-//! `examples/fault-demo` is the subject on purpose: a shader that compiles
+//! `catalog/patterns/fault-demo` is the subject on purpose: a shader that compiles
 //! and then traps on fuel every frame, deterministic on every backend and
 //! incapable of crashing a board.
 
@@ -32,7 +32,7 @@ fn workspace_dir() -> PathBuf {
         .to_path_buf()
 }
 
-/// A server whose project store IS the checked-in `examples/` directory, so
+/// A server whose project store IS the checked-in `catalog/patterns/` directory, so
 /// `/fault-demo` loads the real example rather than a rebuilt lookalike.
 fn server_over_examples() -> (
     LpServer,
@@ -42,7 +42,7 @@ fn server_over_examples() -> (
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
-    let base_fs = Box::new(LpFsStd::new(workspace_dir().join("examples")));
+    let base_fs = Box::new(LpFsStd::new(workspace_dir().join("catalog/patterns")));
     let server = LpServer::new(
         output_provider.clone(),
         base_fs,

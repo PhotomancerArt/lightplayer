@@ -11,7 +11,7 @@
 //!
 //! It runs the same pipeline the device runs — `lps-glsl` frontend, the two
 //! synthesised render wrappers, `compile_module` for
-//! [`IsaTarget::Xtensa`] in Q32 — over every `.glsl` in `examples/` and
+//! [`IsaTarget::Xtensa`] in Q32 — over every `.glsl` in `catalog/` and
 //! `projects/`, and reports the emitted image size of each. The device path
 //! then does exactly one thing with that number: `arena.alloc(total)`. So the
 //! sizes printed here ARE the region's occupancy, byte for byte.
@@ -126,7 +126,7 @@ fn measure(glsl: &str) -> Result<(u32, usize), String> {
 
     // `fuel: true` is `NativeCompileOptions`'s default and what the device
     // actually compiles with — measuring without it understates every figure
-    // here by ~9 % (checked against the board: `examples/shader-oracle`
+    // here by ~9 % (checked against the board: `projects/test/shader-oracle`
     // emitted 2,244 B fuel-off but the classic reported 2,444 B for the same
     // shader). Sizing a region from a fuel-off number would build that error
     // straight into the safety factor.
@@ -247,7 +247,7 @@ fn an_oversized_shader_is_a_clean_toolarge_not_a_wild_write() {
 fn real_shaders_fit_the_classic_code_region_with_margin() {
     let root = repo_root();
     let mut files = Vec::new();
-    glsl_files(&root.join("examples"), &mut files);
+    glsl_files(&root.join("catalog"), &mut files);
     glsl_files(&root.join("projects"), &mut files);
     files.sort();
     assert!(

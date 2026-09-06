@@ -11,7 +11,7 @@
 //! host server (and the browser sim) installs no recovery region at all, so
 //! `false` there is the honest answer rather than a failure.
 //!
-//! `examples/fault-demo` is the engine-side subject for the same reason the
+//! `catalog/patterns/fault-demo` is the engine-side subject for the same reason the
 //! heartbeat test uses it: a shader that compiles and then traps on fuel
 //! every frame, deterministic on every backend and incapable of crashing a
 //! board.
@@ -46,14 +46,14 @@ fn graphics() -> Arc<dyn LpGraphics> {
     Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND))
 }
 
-/// A server whose project store IS the checked-in `examples/` directory.
+/// A server whose project store IS the checked-in `catalog/patterns/` directory.
 fn server_over_examples() -> (
     LpServer,
     Rc<RefCell<dyn lpc_shared::output::OutputProvider>>,
 ) {
     let output_provider: Rc<RefCell<dyn lpc_shared::output::OutputProvider>> =
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let base_fs = Box::new(LpFsStd::new(workspace_dir().join("examples")));
+    let base_fs = Box::new(LpFsStd::new(workspace_dir().join("catalog/patterns")));
     let server = LpServer::new(
         output_provider.clone(),
         base_fs,

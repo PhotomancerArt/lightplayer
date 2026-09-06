@@ -22,12 +22,12 @@ use std::path::PathBuf;
 ///
 /// ## What the fixture is
 ///
-/// `examples/basic` in `startup` mode, cut after the `project-load` open
+/// `projects/test/basic` in `startup` mode, cut after the `project-load` open
 /// marker's free-list-shape rows, with `meta.json` reduced to the symbols the
 /// retained rows resolve to. ~1,300 rows, three walked markers, 144 KB.
 ///
 /// ⚠️ It is a prefix, not the whole run, and that is a size decision, not a
-/// fidelity one: `examples/basic` startup is 17,670 events and 3.4 MB, and
+/// fidelity one: `projects/test/basic` startup is 17,670 events and 3.4 MB, and
 /// still 1.35 MB with every `frames` array stripped out — there is no cut that
 /// keeps every marker and stays a reasonable thing to check into a repo. The
 /// cut point is chosen to cover the marker where the pre-alignment replay

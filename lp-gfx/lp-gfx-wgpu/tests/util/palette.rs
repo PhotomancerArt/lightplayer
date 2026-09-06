@@ -1,6 +1,6 @@
 //! Palette strips for corpus shaders that declare a `sampler2D` uniform.
 //!
-//! `examples/fyeah-sign/idle.glsl` reads its colors from an authored palette
+//! `catalog/projects/fyeah-sign/idle.glsl` reads its colors from an authored palette
 //! (palette roadmap M5), so the conformance corpus is no longer
 //! sampler-free. The strip a corpus shader sees is baked here by the engine's
 //! own [`bake_gradient_into`](lpc_engine::color::bake_gradient_into) from the

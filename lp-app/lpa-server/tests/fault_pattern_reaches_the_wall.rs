@@ -1,7 +1,7 @@
 //! The fault pattern must reach the OUTPUT PROVIDER — the wall — not just
 //! the engine's published buffer.
 //!
-//! G1 bench, 2026-09-02: `examples/fault-demo` breathed red in the browser
+//! G1 bench, 2026-09-02: `catalog/patterns/fault-demo` breathed red in the browser
 //! sim and stayed DARK on the C6. The sim reads the output node's published
 //! buffer; the LEDs get whatever `Engine::tick` flushes to the provider,
 //! and a tick whose walk failed used to return before the flush. The frame
@@ -33,14 +33,14 @@ fn workspace_dir() -> PathBuf {
         .to_path_buf()
 }
 
-/// A server over the checked-in `examples/` with a memory provider we keep a
+/// A server over the checked-in `catalog/patterns/` with a memory provider we keep a
 /// CONCRETE handle to, so the bytes it was handed can be read back.
 fn server_with_memory_provider() -> (LpServer, Rc<RefCell<MemoryOutputProvider>>) {
     let memory = Rc::new(RefCell::new(MemoryOutputProvider::new_permissive()));
     let as_provider: Rc<RefCell<dyn OutputProvider>> = memory.clone();
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
-    let base_fs = Box::new(LpFsStd::new(workspace_dir().join("examples")));
+    let base_fs = Box::new(LpFsStd::new(workspace_dir().join("catalog/patterns")));
     let server = LpServer::new(as_provider, base_fs, "/".as_path(), None, None, graphics);
     (server, memory)
 }

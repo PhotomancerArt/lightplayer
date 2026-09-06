@@ -28,8 +28,8 @@ fn workspace_dir() -> PathBuf {
 /// future sweep would be tempted to "tidy".
 #[test]
 fn plasma_phase_keeps_an_authored_binding() {
-    let def = std::fs::read_to_string(workspace_dir().join("examples/plasma/shader.json"))
-        .expect("read examples/plasma/shader.json");
+    let def = std::fs::read_to_string(workspace_dir().join("catalog/patterns/plasma/shader.json"))
+        .expect("read catalog/patterns/plasma/shader.json");
     let def: serde_json::Value = serde_json::from_str(&def).expect("parse shader.json");
 
     assert_eq!(
@@ -46,9 +46,10 @@ fn plasma_phase_keeps_an_authored_binding() {
 /// the phasor slot as its consumer, so the panel has a channel to present.
 #[test]
 fn plasma_publishes_its_phasor_config_channel() {
-    let fs = LpFsStd::new(workspace_dir().join("examples/plasma"));
+    let fs = LpFsStd::new(workspace_dir().join("catalog/patterns/plasma"));
     let services = EngineServices::new(TreePath::parse("/plasma.show").expect("root path"));
-    let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load examples/plasma");
+    let mut rt =
+        ProjectLoader::load_from_root(&fs, services).expect("load catalog/patterns/plasma");
     rt.engine_mut()
         .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,

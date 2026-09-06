@@ -949,10 +949,10 @@ mod tests {
     fn existing_meteor_example_loads_unchanged_with_space_defaults() {
         let registry = registry();
         let examples_root =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/meteor");
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../catalog/patterns/meteor");
 
         let shader_text = std::fs::read_to_string(examples_root.join("render.json"))
-            .expect("read examples/meteor/render.json");
+            .expect("read catalog/patterns/meteor/render.json");
         let shader = NodeDef::read_json(&registry, &shader_text).expect("parse meteor shader");
         let NodeDef::Shader(shader) = shader else {
             panic!("expected shader");
@@ -960,7 +960,7 @@ mod tests {
         assert!(matches!(shader.space.value(), ShaderSpace::TwoD { .. }));
 
         let fixture_text = std::fs::read_to_string(examples_root.join("fixture.json"))
-            .expect("read examples/meteor/fixture.json");
+            .expect("read catalog/patterns/meteor/fixture.json");
         let fixture = NodeDef::read_json(&registry, &fixture_text).expect("parse meteor fixture");
         let NodeDef::Fixture(fixture) = fixture else {
             panic!("expected fixture");
