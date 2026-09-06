@@ -195,14 +195,16 @@ about where the *bytes* live, not what is emitted. Two placements exist
 | -------------------- | ------------ | ---------------------------------------------------------------------- |
 | host, ESP32-C6       | in place     | identity (`exec_addr`)                                                  |
 | ESP32-S3 (LX7)       | in place     | `+0x6F_0000` inside SRAM1's dual-mapped window (`exec_addr`)            |
-| classic ESP32 (LX6)  | **placed**   | none — heap has no I-bus view; code is installed into a fixed SRAM1 region through the word-mirrored D-bus walk (`codemem_esp32`), linked against its final address by `link::link_jit_at` |
+| classic ESP32 (LX6)  | **placed**   | none — heap has no I-bus view; code is installed word by word into a fixed region of SRAM0 (identity address, word-only bus; the legacy SRAM1 placement wrote through the word-mirrored D-bus walk — `codemem_esp32`), linked against its final address by `link::link_jit_at` |
 
 The classic path is `compile_module_jit_placed`: reserve a span in the
 `codemem_esp32::CodeArena` (real `TooLarge` capacity edge), link at the span's
-I-bus base, install via the descending mirrored word walk, sync. The region
-constants are pinned against `lp-xt-emu`'s `BoardProfile::esp32()` and the
-whole install-then-execute path runs on the host in
-`tests/xt_classic_profile.rs`.
+I-bus base, install via the placement's word walk (ascending identity words
+into SRAM0; the descending mirrored walk for the legacy SRAM1 region), sync.
+The region constants are pinned against `lp-xt-emu`'s `BoardProfile::esp32()`
+/ `esp32_sram1_legacy()` and the whole install-then-execute path runs on the
+host in `tests/xt_classic_profile.rs` for both placements. See
+`docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.md`.
 
 **3. Each backend is a Cargo feature, and firmware pays only for its own.**
 `isa-rv32` and `isa-xt` gate the modules, the `IsaTarget` variants, and every

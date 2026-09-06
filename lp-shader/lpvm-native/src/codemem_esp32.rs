@@ -1,23 +1,43 @@
-//! Classic-ESP32 (LX6) JIT code memory: a fixed SRAM1 region written through
-//! the word-**mirrored** D-bus view.
+//! Classic-ESP32 (LX6) JIT code memory: a fixed region of internal SRAM that
+//! the heap cannot use, written word by word at a placement-specific address.
 //!
 //! Unlike the S3 (uniform `+0x6F_0000` alias — "the heap is executable", see
 //! [`crate::exec_addr`]), the classic chip's heap (SRAM2/dram_seg) has **no
 //! I-bus view at all** — executing a D-bus address faults with EXCCAUSE=2.
-//! Dynamically written code must go to a fixed region of SRAM1, whose dual
-//! mapping is word-mirrored (hardware-measured, all 5 sentinels; the linear
-//! hypothesis matched none):
+//! Dynamically written code must go to a fixed region, and the chip offers
+//! two ([`Placement`]):
 //!
-//! ```text
-//! iram = 0x400B_FFFC − (dram − 0x3FFE_0000)     (word granularity)
-//! ```
+//! - **SRAM0** (`0x4008_0000..0x400A_0000`, the instruction RAM that holds
+//!   `.vectors` and `.rwtext`) — the default since 2026-09-05. It has **no
+//!   D-bus view**: the write address *is* the I-bus address, aligned 32-bit
+//!   stores only, byte access faults (`LoadStoreError`, EXCCAUSE 3). Measured
+//!   on the dig2go by `fw-esp32v3`'s `test_sram0_exec` rig: word-written code
+//!   at `0x4008_8000` and at the region top executes on the PRO core, and
+//!   3 × 1,000 rewrite-then-call iterations found **no barrier necessary**
+//!   (none / `memw` / `memw`+`isync` all 0 stale). Nothing else can use this
+//!   memory — a heap needs byte access — so the JIT costs the heap nothing
+//!   here, and the whole SRAM1 tail goes to the allocator instead
+//!   ([`CodeRegion::reclaimable_heap_span`]).
+//! - **SRAM1**, written through its word-**mirrored** D-bus view
+//!   (hardware-measured, all 5 sentinels; the linear hypothesis matched none):
 //!
-//! The two windows run in opposite directions: writing I-bus-contiguous code
-//! means walking the D-bus **downward** word by word. Everything here is keyed
-//! on the I-bus layout — byte `4*i` of an installed image is fetchable at
-//! `span_base + 4*i` — and the write address is computed per word, which
-//! absorbs the mirroring in one line of address math. Bytes within each
-//! little-endian 32-bit word are verbatim — no byte swap.
+//!   ```text
+//!   iram = 0x400B_FFFC − (dram − 0x3FFE_0000)     (word granularity)
+//!   ```
+//!
+//!   The two windows run in opposite directions, so writing I-bus-contiguous
+//!   code means walking the D-bus **downward** word by word. This was the
+//!   placement from the 2026-07-28 bring-up until 2026-09-05, and it is kept
+//!   as [`CodeRegion::ESP32_SRAM1_LEGACY`] so the mirrored path stays tested
+//!   — it spends byte-addressable heap-grade memory, which is the reason it
+//!   is no longer the default (`docs/reports/2026-09-04-classic-ram-budget.md`,
+//!   lever 1).
+//!
+//! Everything here is keyed on the I-bus layout — byte `4*i` of an installed
+//! image is fetchable at `span_base + 4*i` — and the write address is computed
+//! per word by [`CodeRegion::write_addr`], which absorbs the placement in one
+//! line of address math. Bytes within each little-endian 32-bit word are
+//! verbatim — no byte swap.
 //!
 //! # Consequences for the JIT pipeline
 //!
@@ -26,21 +46,22 @@
 //! copy**: reserve a span in the region ([`CodeArena::alloc`]), patch
 //! intra-module call targets against the span's I-bus base
 //! ([`crate::link::link_jit_at`]), then install the staged bytes through the
-//! mirrored walk ([`install`]). [`crate::rt_jit::JitBuffer`]'s `Placed`
-//! variant then names the installed code by its I-bus address directly —
+//! word walk ([`install`]). [`crate::rt_jit::JitBuffer`]'s `Placed` variant
+//! then names the installed code by its I-bus address directly —
 //! [`crate::exec_addr`]'s in-place rule is never consulted.
 //!
 //! The default region ([`CodeRegion::ESP32_DEFAULT`]) matches
 //! `lp-xt-emu`'s `BoardProfile::esp32()` **by construction**, and the
-//! emulator models the mirrored alias from the same silicon measurements, so
-//! the whole install-then-execute path is testable on the host
-//! (`tests/xt_classic_profile.rs`). A region change that breaks emulator
-//! parity fails the pinned const-asserts below.
+//! emulator models SRAM0's identity alias and word-only access from the same
+//! silicon measurements, so the whole install-then-execute path is testable
+//! on the host (`tests/xt_classic_profile.rs`). A region change that breaks
+//! emulator parity fails the pinned const-asserts below.
 //!
 //! The firmware crate owns the *reservation* of the region (keeping the
-//! linker out of it); this module owns the address math and the write
-//! discipline. Word-aligned volatile writes are the safe default on this chip
-//! (mandatory on SRAM0's word-only bus; harmless on SRAM1).
+//! linker out of it — for SRAM0 that is a boot-time assert that `.rwtext`
+//! ends below the region); this module owns the address math and the write
+//! discipline. Word-aligned volatile writes are the only access SRAM0 takes
+//! and are harmless on SRAM1.
 
 use alloc::vec::Vec;
 
@@ -50,6 +71,14 @@ pub const SRAM1_DRAM_BASE: u32 = 0x3FFE_0000;
 pub const SRAM1_IRAM_TOP: u32 = 0x400B_FFFC;
 /// D-bus end (exclusive) of SRAM1's dual-mapped window.
 pub const SRAM1_DRAM_END: u32 = 0x4000_0000;
+
+/// First I-bus address of SRAM0 a JIT region may use: esp-hal's `iram_seg`
+/// origin (`ld/esp32/memory.x`), i.e. the byte after the 1 KiB `.vectors`.
+/// `.rwtext` starts here and grows upward; the firmware asserts at boot that
+/// it ends below [`CodeRegion::ESP32_DEFAULT`]'s base.
+pub const SRAM0_IRAM_BASE: u32 = 0x4008_0400;
+/// End (exclusive) of SRAM0's instruction bus.
+pub const SRAM0_IRAM_END: u32 = 0x400A_0000;
 
 /// `(base, len)` of the SRAM1 span esp-hal reserves for the ROM's **PRO-CPU**
 /// boot stack, plus the unreserved hole beside it: `0x3FFE_0440..0x3FFE_3F20`.
@@ -71,8 +100,8 @@ pub const SRAM1_ROM_PRO_STACK_SPAN: (u32, u32) = (0x3FFE_0440, 0x3FFE_3F20 - 0x3
 /// second ROM data block.
 ///
 /// Only the base is a constant. The span's *end* is the lowest address anything
-/// else claims in SRAM1, which today is the JIT code region's
-/// [`CodeRegion::dbus_base`] — so the span also swallows the 464 B head of
+/// else claims in SRAM1 — the JIT-or-heap-span boundary
+/// ([`CodeRegion::reclaimable_heap_span`]'s base) — so the span also swallows the 464 B head of
 /// `dram2_seg` that sits below the region. Deriving the end rather than writing
 /// it down is what lets the JIT region move without a second edit here: when it
 /// leaves SRAM1, this span and the reclaimable heap tail become contiguous.
@@ -96,7 +125,7 @@ const _: () = {
     assert!(pro_base + pro_len == 0x3FFE_3F20);
     // ... which is where the APP span's base is one 1,072 B data block later.
     assert!(SRAM1_ROM_APP_STACK_BASE == 0x3FFE_3F20 + 1072);
-    assert!(SRAM1_ROM_APP_STACK_BASE < CodeRegion::ESP32_DEFAULT.dbus_base);
+    assert!(SRAM1_ROM_APP_STACK_BASE < CodeRegion::ESP32_DEFAULT.sram1_claim_base());
     // The two spans are separated by that data block, so they can never be
     // mistaken for one run by a free-list walk that recovers regions by address
     // contiguity (`fw-esp32v3`'s `free_list_shape` does exactly that).
@@ -137,38 +166,66 @@ impl core::fmt::Display for CodeMemError {
     }
 }
 
-/// A fixed SRAM1 code region, named by its D-bus placement.
+/// Where a [`CodeRegion`] lives, and therefore how its words are written.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Placement {
+    /// SRAM1, written through the word-mirrored D-bus view. `dbus_base` is
+    /// the region's D-bus base (word-aligned, inside SRAM1's window); the
+    /// I-bus image is derived through the mirror rule, and the write walk
+    /// runs downward.
+    Sram1Mirrored { dbus_base: u32 },
+    /// SRAM0 IRAM: no D-bus view; written with aligned word stores at the
+    /// I-bus address itself. `ibus_base` is the region's I-bus base
+    /// (word-aligned, inside [`SRAM0_IRAM_BASE`]`..`[`SRAM0_IRAM_END`]).
+    Sram0 { ibus_base: u32 },
+}
+
+/// A fixed code region, named by its placement and length.
 ///
 /// The firmware crate picks the region (and must keep the linker from placing
-/// sections in it); everything else derives from these two numbers.
+/// sections in it); everything else derives from these two values.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CodeRegion {
-    /// D-bus base of the region (word-aligned, inside SRAM1's window).
-    pub dbus_base: u32,
+    /// Which SRAM the region is in, and its base there.
+    pub placement: Placement,
     /// Region length in bytes (word multiple).
     pub len_bytes: u32,
 }
 
 impl CodeRegion {
-    /// The classic-ESP32 default: D-bus `0x3FFE_8000` + **24 KiB**, I-bus
-    /// image `0x400B_2000..0x400B_8000`. Sits inside esp-hal's `dram2_seg`
-    /// free span and clear of the ROM data/stack reservations lower in SRAM1
-    /// (the last of them, `reserved_rom_stack_app`, ends exactly at
-    /// `dram2_seg`'s origin `0x3FFE_7E30`); hardware-proven by the experiment
-    /// repo's payload runner, and modeled exactly by `lp-xt-emu`'s
-    /// `BoardProfile::esp32()`.
+    /// The classic-ESP32 default: **SRAM0**, I-bus `0x4008_8000..0x4009_8000`,
+    /// **64 KiB**, written at the I-bus address itself.
     ///
-    /// # Why 24 KiB (was 32 KiB until 2026-08-04, 92 KiB before 2026-08-02)
+    /// # Why SRAM0 (since 2026-09-05)
     ///
-    /// The 92 KiB was picked as "a comfortable span", never measured, and it
-    /// was expensive: this region is the sole reason `dram2_seg` cannot join
-    /// the heap, on a chip whose measured binding constraint is main-heap
-    /// residency (`docs/adr/2026-08-01-esp32v3-flash-budget.md`, and the
-    /// 2026-08-04 dome bracket: 1500 LEDs is ~8 KB short of the arena).
+    /// SRAM0's 128 KiB of IRAM held `.vectors` (1 KiB) and `.rwtext` (~15 KiB
+    /// on the app image) and nothing else: ~112 KiB idle, and idle for good
+    /// reason — it has no D-bus view and takes aligned word accesses only, so
+    /// no heap can live there. A JIT code installer is the one consumer that
+    /// wants exactly that. Moving the region here returns the 24 KiB it used
+    /// to occupy in SRAM1 to the heap, where
+    /// `docs/reports/2026-09-04-classic-ram-budget.md` measured every byte
+    /// mattering (lever 1). Facts measured on the dig2go by `fw-esp32v3`'s
+    /// `test_sram0_exec`: word stores across the whole `0x4008_8000..
+    /// 0x400A_0000` land and read back; a byte access faults (EXCCAUSE 3);
+    /// word-written code at both ends of this region executes on the PRO
+    /// core; no barrier is needed.
     ///
-    /// `tests/xt_classic_codemem_corpus.rs` measures the real cost by
-    /// compiling every shader in `examples/` and `projects/` through the
-    /// device's own pipeline, at the device's own settings (Q32, fuel on):
+    /// # Why this base and size
+    ///
+    /// 32 KiB into IRAM: `.rwtext` ends at `0x4008_142C` on the harness image
+    /// and `0x4008_3DF0` on the app image, so the linker has 16,400 B of
+    /// headroom below this base before the firmware's boot-time assert
+    /// (`fw-esp32v3/src/main.rs`) refuses to install the arena. 64 KiB is
+    /// 2.7× the SRAM1 region it replaces and leaves 32 KiB spare above for
+    /// growth; it is generous because SRAM0 costs the heap nothing, not
+    /// because the corpus asks for it (see below).
+    ///
+    /// # What the corpus says (measured, unchanged by the move)
+    ///
+    /// `tests/xt_classic_codemem_corpus.rs` compiles every shader in
+    /// `examples/` and `projects/` through the device's own pipeline, at the
+    /// device's own settings (Q32, fuel on):
     ///
     /// | figure | measured |
     /// |---|---|
@@ -181,38 +238,49 @@ impl CodeRegion {
     /// reported 2,444 B for `examples/shader-oracle`, M3 measured 2,032 B for
     /// `quad-strips-v3`, and the 2026-08-04 dome walk measured 2,116 B for
     /// `zook-dome-1500` — the corpus test reproduces all of them exactly.
-    ///
     /// 16,776 B is the peak model, because `shader_node.rs` holds the old
-    /// program while the new one compiles ("Old + new coexist for the
-    /// compile duration"). 24 KiB is **1.46×** that, and still holds the
-    /// peak model *plus one more largest-in-repo shader* (23,292 B) — the
-    /// corpus test's guard asserts exactly that headroom, so a shader
-    /// growing past it fails the suite rather than the field. The freed
-    /// 8 KiB (72 KiB total) goes to the heap (`fw-esp32v3`'s `main.rs`),
-    /// where the dome measurements say every byte matters.
-    ///
-    /// What shrinking gives up honestly: 32 KiB was 5× the largest single
-    /// shader; this is 3.8×. `[JIT]` telemetry (`peak`, `peak_spans`,
-    /// `fails`) is the field tripwire, and [`ArenaStats::alloc_failures`]
-    /// nonzero is the signal a shrink went too far.
+    /// program while the new one compiles ("Old + new coexist for the compile
+    /// duration"); the corpus test's guard asserts the region holds that plus
+    /// one more largest-in-repo shader.
     ///
     /// Nothing here is a hard bound: a shader is unbounded in principle, and
     /// [`CodeMemError::TooLarge`] is the real backstop — a project whose
     /// shader will not fit fails *that node* with a compile error while
-    /// keep-last-good keeps the previous program rendering. Raising this
-    /// number is a one-line change if the corpus ever demands it, and the
-    /// corpus test is what will say so.
+    /// keep-last-good keeps the previous program rendering. `[JIT]` telemetry
+    /// (`peak`, `peak_spans`, `fails`) is the field tripwire.
     pub const ESP32_DEFAULT: CodeRegion = CodeRegion {
-        dbus_base: 0x3FFE_8000,
+        placement: Placement::Sram0 {
+            ibus_base: 0x4008_8000,
+        },
+        len_bytes: 0x0001_0000,
+    };
+
+    /// The SRAM1 placement the classic used from 2026-07-28 to 2026-09-05:
+    /// D-bus `0x3FFE_8000` + **24 KiB**, I-bus image `0x400B_2000..0x400B_8000`
+    /// (92 KiB until 2026-08-02, 32 KiB until 2026-08-04, both measured down
+    /// by the corpus test). Sits inside esp-hal's `dram2_seg` and clear of the
+    /// ROM data/stack reservations lower in SRAM1 (the last of them,
+    /// `reserved_rom_stack_app`, ends exactly at `dram2_seg`'s origin
+    /// `0x3FFE_7E30`); hardware-proven by the experiment repo's payload
+    /// runner and the 2026-08 hardware walks.
+    ///
+    /// Not the default any more — see [`CodeRegion::ESP32_DEFAULT`] — but
+    /// kept so the mirrored write walk stays exercised by `mod tests` and
+    /// `tests/xt_classic_profile.rs` against `lp-xt-emu`'s
+    /// `BoardProfile::esp32_sram1_legacy()`.
+    pub const ESP32_SRAM1_LEGACY: CodeRegion = CodeRegion {
+        placement: Placement::Sram1Mirrored {
+            dbus_base: 0x3FFE_8000,
+        },
         len_bytes: 0x0000_6000,
     };
 
-    /// D-bus end (exclusive) of `dram2_seg`, and so of the span the region is
-    /// carved from: esp-hal's `dram2_seg` is `0x3FFE_7E30 + 98,768 B`, which
-    /// ends exactly at SRAM1's top.
+    /// D-bus end (exclusive) of `dram2_seg`, and so of the span an SRAM1
+    /// region is carved from: esp-hal's `dram2_seg` is `0x3FFE_7E30 +
+    /// 98,768 B`, which ends exactly at SRAM1's top.
     ///
-    /// Everything between [`CodeRegion::dbus_end`] and here is what the
-    /// firmware may hand to the allocator as a second heap region — see
+    /// Everything between a region's D-bus end and here is what the firmware
+    /// may hand to the allocator as a second heap region — see
     /// [`CodeRegion::reclaimable_heap_span`].
     pub const ESP32_DRAM2_END: u32 = 0x4000_0000;
 
@@ -221,8 +289,21 @@ impl CodeRegion {
     /// `reserved_rom_stack_pro/app`), the last of which ends exactly here.
     pub const ESP32_DRAM2_BASE: u32 = 0x3FFE_7E30;
 
-    /// The `(base, len)` of SRAM1 this region leaves over for the heap: from
-    /// the region's D-bus end up to [`CodeRegion::ESP32_DRAM2_END`].
+    /// D-bus base of the SRAM1 tail the JIT no longer uses under the SRAM0
+    /// placement: where [`CodeRegion::ESP32_SRAM1_LEGACY`] started. The
+    /// 464 B between [`CodeRegion::ESP32_DRAM2_BASE`] and here are left to
+    /// the ROM-stack reclaim (track A of the 2026-09-05 RAM work), whose
+    /// chunk ends at [`CodeRegion::reclaimable_heap_span`]`().0` and so
+    /// fuses with this tail into one region.
+    pub const ESP32_SRAM1_TAIL_BASE: u32 = 0x3FFE_8000;
+
+    /// The `(base, len)` of SRAM1 this region leaves over for the heap —
+    /// "the SRAM1 bytes the JIT does not use".
+    ///
+    /// For an SRAM0 region that is the whole tail
+    /// [`CodeRegion::ESP32_SRAM1_TAIL_BASE`]`..`[`CodeRegion::ESP32_DRAM2_END`]
+    /// (98,304 B). For an SRAM1 region it is from the region's D-bus end up
+    /// to [`CodeRegion::ESP32_DRAM2_END`].
     ///
     /// This exists so the boundary the firmware must respect is *computed
     /// from* the region rather than restated beside it. The two were prose
@@ -231,41 +312,66 @@ impl CodeRegion {
     /// change silently hand the allocator and the JIT the same bytes.
     ///
     /// # Panics
-    /// If the region does not start inside `dram2_seg`. The result feeds an
-    /// `unsafe esp_alloc::HeapRegion::new`, so answering for a region placed
-    /// lower in SRAM1 would hand the allocator the ROM's stacks and data —
-    /// memory the ROM still uses after boot, whose corruption would present
-    /// as an unattributable fault far from here. Refusing is the only safe
-    /// answer, and in the `ESP32_DEFAULT` case it is checked at compile time
-    /// by the const-assert below.
+    /// If an SRAM1 region does not start inside `dram2_seg`. The result feeds
+    /// an `unsafe esp_alloc::HeapRegion::new`, so answering for a region
+    /// placed lower in SRAM1 would hand the allocator the ROM's stacks and
+    /// data — memory the ROM still uses after boot, whose corruption would
+    /// present as an unattributable fault far from here. Refusing is the only
+    /// safe answer, and for the two named regions it is checked at compile
+    /// time by the const-asserts below.
     #[must_use]
     pub const fn reclaimable_heap_span(&self) -> (u32, u32) {
-        assert!(
-            self.dbus_base >= Self::ESP32_DRAM2_BASE,
-            "code region starts below dram2_seg — its leftover span would \
-             include the ROM's data/stack reservations, which must never \
-             reach the allocator"
-        );
-        let base = self.dbus_base + self.len_bytes;
-        assert!(
-            base <= Self::ESP32_DRAM2_END,
-            "code region ends above SRAM1"
-        );
-        (base, Self::ESP32_DRAM2_END - base)
+        match self.placement {
+            Placement::Sram0 { .. } => (
+                Self::ESP32_SRAM1_TAIL_BASE,
+                Self::ESP32_DRAM2_END - Self::ESP32_SRAM1_TAIL_BASE,
+            ),
+            Placement::Sram1Mirrored { dbus_base } => {
+                assert!(
+                    dbus_base >= Self::ESP32_DRAM2_BASE,
+                    "code region starts below dram2_seg — its leftover span would \
+                     include the ROM's data/stack reservations, which must never \
+                     reach the allocator"
+                );
+                let base = dbus_base + self.len_bytes;
+                assert!(
+                    base <= Self::ESP32_DRAM2_END,
+                    "code region ends above SRAM1"
+                );
+                (base, Self::ESP32_DRAM2_END - base)
+            }
+        }
     }
 
-    /// D-bus end (exclusive) of the region.
+    /// The lowest SRAM1 D-bus address the JIT or its reclaimable heap span
+    /// claims — the ceiling for anything else that wants to carve SRAM1
+    /// below the tail (the ROM-stack reclaim of the 2026-09-05 RAM work
+    /// registers its ROM-APP-stack chunk as `0x3FFE_4350..` this).
+    ///
+    /// Under SRAM0 placement the JIT claims nothing in SRAM1, so this is the
+    /// heap span's base ([`CodeRegion::ESP32_SRAM1_TAIL_BASE`]); under the
+    /// mirrored placement it is the region's own D-bus base. Distinct from
+    /// [`CodeRegion::reclaimable_heap_span`]`().0`, which is the heap span's
+    /// base — the two coincide only for SRAM0.
     #[must_use]
-    pub const fn dbus_end(&self) -> u32 {
-        self.dbus_base + self.len_bytes
+    pub const fn sram1_claim_base(&self) -> u32 {
+        match self.placement {
+            Placement::Sram0 { .. } => self.reclaimable_heap_span().0,
+            Placement::Sram1Mirrored { dbus_base } => dbus_base,
+        }
     }
 
     /// I-bus address of byte 0 of the region's executable image — the
-    /// *lowest* I-bus address, which under the mirrored rule is the image of
-    /// the D-bus **last** word.
+    /// *lowest* I-bus address. Under the mirrored rule that is the image of
+    /// the D-bus **last** word; under SRAM0 it is the base itself.
     #[must_use]
     pub const fn ibus_base(&self) -> u32 {
-        SRAM1_IRAM_TOP - ((self.dbus_base + self.len_bytes - 4) - SRAM1_DRAM_BASE)
+        match self.placement {
+            Placement::Sram0 { ibus_base } => ibus_base,
+            Placement::Sram1Mirrored { dbus_base } => {
+                SRAM1_IRAM_TOP - ((dbus_base + self.len_bytes - 4) - SRAM1_DRAM_BASE)
+            }
+        }
     }
 
     /// I-bus end (exclusive) of the executable image.
@@ -274,55 +380,128 @@ impl CodeRegion {
         self.ibus_base() + self.len_bytes
     }
 
-    /// The D-bus address through which the word at I-bus address `ibus` is
-    /// written: the inverse of the mirrored rule. As `ibus` ascends, this
-    /// walks the D-bus **downward**.
+    /// The address through which the word at I-bus address `ibus` is
+    /// written: the I-bus address itself for SRAM0 (no D-bus view exists),
+    /// the inverse of the mirrored rule for SRAM1 — where, as `ibus`
+    /// ascends, this walks the D-bus **downward**.
     #[must_use]
-    pub const fn dbus_write_addr(&self, ibus: u32) -> u32 {
-        SRAM1_DRAM_BASE + (SRAM1_IRAM_TOP - ibus)
+    pub const fn write_addr(&self, ibus: u32) -> u32 {
+        match self.placement {
+            Placement::Sram0 { .. } => ibus,
+            Placement::Sram1Mirrored { .. } => SRAM1_DRAM_BASE + (SRAM1_IRAM_TOP - ibus),
+        }
     }
 
-    /// Panics unless the region is word-aligned and inside SRAM1's
-    /// dual-mapped window. Called by [`CodeArena::new`]; call directly when
-    /// constructing a custom region.
+    /// Panics unless the region is word-aligned and inside its placement's
+    /// window: SRAM1's dual-mapped window for [`Placement::Sram1Mirrored`],
+    /// [`SRAM0_IRAM_BASE`]`..`[`SRAM0_IRAM_END`] for [`Placement::Sram0`].
+    /// Called by [`CodeArena::new`]; call directly when constructing a custom
+    /// region.
+    ///
+    /// What this cannot check is the linker: an SRAM0 region must also sit
+    /// above `.rwtext`'s end, which only the firmware knows — `fw-esp32v3`
+    /// asserts it at boot against the link-time `_rwtext_len` symbol before
+    /// installing the arena.
     pub fn validate(&self) {
         assert!(
-            self.dbus_base % 4 == 0 && self.len_bytes % 4 == 0 && self.len_bytes > 0,
-            "code region {:#x}+{:#x} not word-aligned",
-            self.dbus_base,
+            self.len_bytes % 4 == 0 && self.len_bytes > 0,
+            "code region {:?}+{:#x} length not a word multiple",
+            self.placement,
             self.len_bytes
         );
-        assert!(
-            self.dbus_base >= SRAM1_DRAM_BASE
-                && (self.dbus_base as u64 + self.len_bytes as u64) <= SRAM1_DRAM_END as u64,
-            "code region {:#x}+{:#x} outside SRAM1's dual-mapped window",
-            self.dbus_base,
-            self.len_bytes
-        );
+        match self.placement {
+            Placement::Sram0 { ibus_base } => {
+                assert!(
+                    ibus_base % 4 == 0,
+                    "code region {:?}+{:#x} not word-aligned",
+                    self.placement,
+                    self.len_bytes
+                );
+                assert!(
+                    ibus_base >= SRAM0_IRAM_BASE
+                        && (ibus_base as u64 + self.len_bytes as u64) <= SRAM0_IRAM_END as u64,
+                    "code region {:?}+{:#x} outside SRAM0's IRAM window",
+                    self.placement,
+                    self.len_bytes
+                );
+            }
+            Placement::Sram1Mirrored { dbus_base } => {
+                assert!(
+                    dbus_base % 4 == 0,
+                    "code region {:?}+{:#x} not word-aligned",
+                    self.placement,
+                    self.len_bytes
+                );
+                assert!(
+                    dbus_base >= SRAM1_DRAM_BASE
+                        && (dbus_base as u64 + self.len_bytes as u64) <= SRAM1_DRAM_END as u64,
+                    "code region {:?}+{:#x} outside SRAM1's dual-mapped window",
+                    self.placement,
+                    self.len_bytes
+                );
+            }
+        }
     }
 }
 
 // Pin the default so a change that breaks emulator parity is loud; the
-// emulator's classic profile derives 0x400A_1000 from the same numbers
-// (cross-checked against `lp-xt-emu` itself in `tests/xt_classic_profile.rs`).
-const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_base() == 0x400B_2000);
-const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_end() == 0x400B_8000);
+// emulator's classic profile names the same SRAM0 window (cross-checked
+// against `lp-xt-emu` itself in `tests/xt_classic_profile.rs`).
+const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_base() == 0x4008_8000);
+const _: () = assert!(CodeRegion::ESP32_DEFAULT.ibus_end() == 0x4009_8000);
+// SRAM0 writes are identity: the write address is the I-bus address, at both
+// region ends.
+const _: () = {
+    let r = CodeRegion::ESP32_DEFAULT;
+    assert!(r.write_addr(r.ibus_base()) == r.ibus_base());
+    assert!(r.write_addr(r.ibus_end() - 4) == r.ibus_end() - 4);
+};
+// The region lies inside SRAM0's IRAM, above `.vectors`. Where `.rwtext` ends
+// is a link-time fact the firmware asserts at boot; what can be pinned here
+// is that the base leaves it room (32 KiB from the IRAM origin) and that
+// nothing runs past the bus end.
+const _: () = {
+    let r = CodeRegion::ESP32_DEFAULT;
+    assert!(r.ibus_base() >= SRAM0_IRAM_BASE);
+    assert!(r.ibus_base() - SRAM0_IRAM_BASE == 0x7C00);
+    assert!(r.ibus_end() <= SRAM0_IRAM_END);
+};
+// Under the SRAM0 placement the heap gets the WHOLE SRAM1 tail — the span
+// the legacy region used to be carved from, 96 KiB, ending at SRAM1's top.
+// This is the invariant `fw-esp32v3/src/main.rs` hands to `esp_alloc`; a
+// placement change that forgets the heap boundary cannot compile.
+const _: () = {
+    let (heap_base, heap_len) = CodeRegion::ESP32_DEFAULT.reclaimable_heap_span();
+    assert!(heap_base == 0x3FFE_8000);
+    assert!(heap_len == 0x0001_8000); // 98,304 B returned to the allocator
+    assert!(heap_base + heap_len == CodeRegion::ESP32_DRAM2_END);
+    assert!(heap_base == CodeRegion::ESP32_SRAM1_TAIL_BASE);
+    // The tail starts at or above dram2_seg's origin — never over the ROM's
+    // data/stack reservations.
+    assert!(heap_base >= CodeRegion::ESP32_DRAM2_BASE);
+    // Nothing of the JIT's is below the tail: the lowest SRAM1 address the
+    // JIT-or-heap claims IS the tail base (what the ROM-stack reclaim ends at).
+    assert!(CodeRegion::ESP32_DEFAULT.sram1_claim_base() == 0x3FFE_8000);
+    assert!(CodeRegion::ESP32_SRAM1_LEGACY.sram1_claim_base() == 0x3FFE_8000);
+};
+// The legacy SRAM1 region keeps the numbers it was measured with, so the
+// mirrored path is still tested against the map the 2026-08 walks proved.
+const _: () = assert!(CodeRegion::ESP32_SRAM1_LEGACY.ibus_base() == 0x400B_2000);
+const _: () = assert!(CodeRegion::ESP32_SRAM1_LEGACY.ibus_end() == 0x400B_8000);
 // The mirror rule round-trips at both region ends.
 const _: () = {
-    let r = CodeRegion::ESP32_DEFAULT;
-    assert!(r.dbus_write_addr(r.ibus_base()) == r.dbus_base + r.len_bytes - 4);
-    assert!(r.dbus_write_addr(r.ibus_end() - 4) == r.dbus_base);
-};
-// The heap span and the code region partition `0x3FFE_8000..0x4000_0000`
-// exactly: they abut, they do not overlap, and nothing between them is lost.
-// This is the invariant the ⚠️ in `fw-esp32v3/src/main.rs` used to assert in
-// prose — a shrink that forgets to move the heap boundary cannot compile.
-const _: () = {
-    let r = CodeRegion::ESP32_DEFAULT;
+    let r = CodeRegion::ESP32_SRAM1_LEGACY;
+    let Placement::Sram1Mirrored { dbus_base } = r.placement else {
+        panic!("legacy region is SRAM1")
+    };
+    assert!(r.write_addr(r.ibus_base()) == dbus_base + r.len_bytes - 4);
+    assert!(r.write_addr(r.ibus_end() - 4) == dbus_base);
+    // Its heap span and the region partition `0x3FFE_8000..0x4000_0000`
+    // exactly: they abut, they do not overlap, nothing between them is lost.
     let (heap_base, heap_len) = r.reclaimable_heap_span();
-    assert!(heap_base == r.dbus_end());
+    assert!(heap_base == dbus_base + r.len_bytes);
     assert!(heap_base + heap_len == CodeRegion::ESP32_DRAM2_END);
-    assert!(heap_len == 0x0001_2000); // 72 KiB returned to the allocator
+    assert!(heap_len == 0x0001_2000); // 72 KiB — the pre-SRAM0 figure
 };
 // The reclaimed span must not be able to ABUT the `dram_seg` arena, which is
 // the firmware's other heap region. Adjacent regions are indistinguishable
@@ -330,9 +509,10 @@ const _: () = {
 // contiguity — `fw-esp32v3`'s `free_list_shape` walks runs exactly that way,
 // and two abutting regions would merge into one run whose reported `largest`
 // names a block no single allocation can ever get. `dram_seg` ends at
-// `0x3FFE_0000`; `dram2_seg` starts 32,304 B above it, and the region can
-// only be carved from `dram2_seg`, so a gap always exists. Asserted rather
-// than assumed because this file is where the boundary moves.
+// `0x3FFE_0000`; the tail starts 32 KiB above it, so a gap always exists.
+// Asserted rather than assumed because this file is where the boundary
+// moves. (Track A's ROM-stack chunk fills part of that gap deliberately, as
+// a region of its own that ends at the tail's base — see its ADR.)
 const _: () = {
     const DRAM_SEG_END: u32 = 0x3FFE_0000;
     let (heap_base, _) = CodeRegion::ESP32_DEFAULT.reclaimable_heap_span();
@@ -344,13 +524,15 @@ const _: () = {
 };
 
 /// Where installed words go. The device implementation writes through the
-/// mirrored D-bus addresses; tests hand in an `lp-xt-emu` memory (or a plain
-/// map) so the walk is verified against the silicon-measured alias model
-/// without hardware.
+/// address [`CodeRegion::write_addr`] names — the I-bus address itself for
+/// SRAM0, the mirrored D-bus address for SRAM1; tests hand in an `lp-xt-emu`
+/// memory (or a plain map) so the walk is verified against the
+/// silicon-measured alias model without hardware.
 pub trait CodeSink {
-    fn write_word(&mut self, dbus_addr: u32, word: u32);
+    fn write_word(&mut self, write_addr: u32, word: u32);
     /// Make installed code visible to the fetch path. Belt-and-braces on the
-    /// classic chip (internal SRAM is uncached; measured), so default no-op.
+    /// classic chip (internal SRAM is uncached; measured on both placements),
+    /// so default no-op.
     fn sync(&mut self) {}
 }
 
@@ -361,23 +543,27 @@ pub trait CodeSink {
 /// it on the S3 would be a wiring bug (the S3 pipeline is heap-in-place).
 ///
 /// No `isync` here, deliberately: internal SRAM is uncached on this chip and
-/// the experiment repo measured (C2n) that freshly written SRAM1 code
-/// executes with **no barriers at all**. The `fence` (LLVM lowers `SeqCst`
-/// to `memw` on Xtensa) is kept as free insurance, but `isync` would need
-/// inline asm, which is `asm_experimental_arch` on Xtensa — and this crate's
-/// app path deliberately never enables that feature (see fw-esp32s3's
-/// `board/esp32s3/mod.rs` for the same posture). If silicon ever proves an
-/// `isync` necessary, the firmware crate supplies its own [`CodeSink`] with
-/// the asm, feature-gated there, rather than this crate taking the feature.
+/// silicon says freshly written code executes with **no barriers at all** —
+/// the experiment repo measured it for SRAM1 (C2n), and `fw-esp32v3`'s
+/// `test_sram0_exec` measured it for SRAM0 on 2026-09-05 (1,000
+/// rewrite-then-call iterations each with no barrier, with this fence, and
+/// with fence + `isync`: 0 stale results in all three). The `fence` (LLVM
+/// lowers `SeqCst` to `memw` on Xtensa) is kept as free insurance, but
+/// `isync` would need inline asm, which is `asm_experimental_arch` on Xtensa
+/// — and this crate's app path deliberately never enables that feature (see
+/// fw-esp32s3's `board/esp32s3/mod.rs` for the same posture). If silicon
+/// ever proves an `isync` necessary, the firmware crate supplies its own
+/// [`CodeSink`] with the asm, feature-gated there, rather than this crate
+/// taking the feature.
 #[cfg(target_arch = "xtensa")]
 pub struct DeviceCodeSink;
 
 #[cfg(target_arch = "xtensa")]
 impl CodeSink for DeviceCodeSink {
-    fn write_word(&mut self, dbus_addr: u32, word: u32) {
-        // SAFETY: `install` only hands out word-aligned D-bus addresses
+    fn write_word(&mut self, write_addr: u32, word: u32) {
+        // SAFETY: `install` only hands out word-aligned write addresses
         // inside a validated region the firmware reserved for JIT code.
-        unsafe { (dbus_addr as *mut u32).write_volatile(word) };
+        unsafe { (write_addr as *mut u32).write_volatile(word) };
     }
 
     fn sync(&mut self) {
@@ -385,11 +571,12 @@ impl CodeSink for DeviceCodeSink {
     }
 }
 
-/// Install `code` at I-bus address `ibus_base` inside `region`, walking the
-/// mirrored D-bus write addresses word by word. Trailing bytes of the final
-/// word are zero-padded (they sit after the final instruction and are never
-/// executed). Does NOT call [`CodeSink::sync`]; the caller syncs once after
-/// all installs for a module.
+/// Install `code` at I-bus address `ibus_base` inside `region`, one word at a
+/// time through [`CodeRegion::write_addr`] (upward through SRAM0, downward
+/// through SRAM1's mirror). Trailing bytes of the final word are zero-padded
+/// (they sit after the final instruction and are never executed). Does NOT
+/// call [`CodeSink::sync`]; the caller syncs once after all installs for a
+/// module.
 pub fn install(
     region: &CodeRegion,
     ibus_base: u32,
@@ -412,10 +599,7 @@ pub fn install(
         let end = (start + 4).min(code.len());
         let mut w = [0u8; 4];
         w[..end - start].copy_from_slice(&code[start..end]);
-        sink.write_word(
-            region.dbus_write_addr(ibus_base + i * 4),
-            u32::from_le_bytes(w),
-        );
+        sink.write_word(region.write_addr(ibus_base + i * 4), u32::from_le_bytes(w));
     }
     Ok(())
 }
@@ -675,9 +859,11 @@ mod tests {
     #[test]
     fn mirror_formula_matches_the_hardware_sentinels() {
         // iram = 0x400B_FFFC − (dram − 0x3FFE_0000), exercised via the
-        // region's inverse map: dbus_write_addr(iram) == dram.
+        // region's inverse map: write_addr(iram) == dram.
         let r = CodeRegion {
-            dbus_base: SRAM1_DRAM_BASE,
+            placement: Placement::Sram1Mirrored {
+                dbus_base: SRAM1_DRAM_BASE,
+            },
             len_bytes: 0x2_0000,
         };
         for (dram, iram) in [
@@ -687,99 +873,198 @@ mod tests {
             (0x3FFF_EFFC, 0x400A_1000),
             (0x3FFF_FFFC, 0x400A_0000),
         ] {
-            assert_eq!(r.dbus_write_addr(iram), dram, "iram {iram:#x}");
+            assert_eq!(r.write_addr(iram), dram, "iram {iram:#x}");
         }
     }
 
+    /// The default is SRAM0: 64 KiB at `0x4008_8000`, identity writes, and a
+    /// heap span that is the whole SRAM1 tail — the 2026-09-05 placement,
+    /// measured on the dig2go.
     #[test]
-    fn default_region_is_the_runner_region() {
+    fn default_region_is_sram0_with_identity_writes() {
         let r = CodeRegion::ESP32_DEFAULT;
         r.validate();
-        // 24 KiB at D-bus 0x3FFE_8000 since 2026-08-04 (32 KiB from
-        // 2026-08-02, 92 KiB / I-bus base 0x400A_1000 before that). The
-        // D-bus base is unchanged, so shrinking moved the I-bus BASE up
-        // while the I-bus END stayed put — that asymmetry is the mirror,
-        // and it is the thing most worth pinning here.
+        assert_eq!(
+            r.placement,
+            Placement::Sram0 {
+                ibus_base: 0x4008_8000
+            }
+        );
+        assert_eq!(r.len_bytes, 64 * 1024);
+        assert_eq!(r.ibus_base(), 0x4008_8000);
+        assert_eq!(r.ibus_end(), 0x4009_8000);
+        // No mirror: every word is written where it is fetched, and the walk
+        // ascends with the I-bus address.
+        let mut ibus = r.ibus_base();
+        while ibus < r.ibus_end() {
+            assert_eq!(r.write_addr(ibus), ibus);
+            ibus += 4;
+        }
+        assert_eq!(
+            r.write_addr(r.ibus_base() + 4),
+            r.write_addr(r.ibus_base()) + 4
+        );
+    }
+
+    /// The legacy SRAM1 region keeps the numbers the 2026-08 walks proved: the
+    /// D-bus base is the region's top word on the I-bus, and shrinking it
+    /// moved the I-bus BASE up while the END stayed put — that asymmetry is
+    /// the mirror, and it is the thing most worth pinning here.
+    #[test]
+    fn legacy_region_is_the_runner_region() {
+        let r = CodeRegion::ESP32_SRAM1_LEGACY;
+        r.validate();
         assert_eq!(r.ibus_base(), 0x400B_2000);
         assert_eq!(r.ibus_end(), 0x400B_8000);
         // Word 0 writes through the D-bus LAST word; the last word writes
         // through the D-bus base — the descending walk.
-        assert_eq!(r.dbus_write_addr(r.ibus_base()), 0x3FFE_DFFC);
-        assert_eq!(r.dbus_write_addr(r.ibus_end() - 4), 0x3FFE_8000);
+        assert_eq!(r.write_addr(r.ibus_base()), 0x3FFE_DFFC);
+        assert_eq!(r.write_addr(r.ibus_end() - 4), 0x3FFE_8000);
     }
 
-    /// The heap span and the code region tile `0x3FFE_8000..0x4000_0000`
-    /// without gap or overlap — the property `fw-esp32v3` relies on when it
-    /// hands the leftover to `esp_alloc`.
+    /// Under SRAM0 the heap gets the whole SRAM1 tail: 98,304 B from where
+    /// the legacy region used to start, up to SRAM1's top.
     #[test]
-    fn reclaimable_heap_span_abuts_the_region() {
-        let r = CodeRegion::ESP32_DEFAULT;
+    fn sram0_region_reclaims_the_whole_sram1_tail() {
+        let (base, len) = CodeRegion::ESP32_DEFAULT.reclaimable_heap_span();
+        assert_eq!(base, 0x3FFE_8000);
+        assert_eq!(len, 96 * 1024);
+        assert_eq!(base + len, CodeRegion::ESP32_DRAM2_END);
+        // The tail is exactly the legacy region plus its own leftover — the
+        // 24 KiB the move returns to the heap is the legacy region's length.
+        let legacy = CodeRegion::ESP32_SRAM1_LEGACY;
+        let (legacy_base, legacy_len) = legacy.reclaimable_heap_span();
+        assert_eq!(len - legacy_len, legacy.len_bytes);
+        assert_eq!(legacy_base - base, legacy.len_bytes);
+        // Both placements claim SRAM1 from the same floor: the SRAM0 region
+        // through its heap span, the legacy region through its own base.
+        assert_eq!(CodeRegion::ESP32_DEFAULT.sram1_claim_base(), base);
+        assert_eq!(legacy.sram1_claim_base(), base);
+        assert_ne!(legacy.sram1_claim_base(), legacy_base);
+    }
+
+    /// The legacy heap span and the legacy region tile
+    /// `0x3FFE_8000..0x4000_0000` without gap or overlap — the property the
+    /// firmware relied on when this placement was the default.
+    #[test]
+    fn legacy_heap_span_abuts_the_legacy_region() {
+        let r = CodeRegion::ESP32_SRAM1_LEGACY;
+        let Placement::Sram1Mirrored { dbus_base } = r.placement else {
+            panic!("legacy region is SRAM1")
+        };
         let (base, len) = r.reclaimable_heap_span();
-        assert_eq!(base, r.dbus_end());
+        assert_eq!(base, dbus_base + r.len_bytes);
         assert_eq!(base, 0x3FFE_E000);
         assert_eq!(len, 72 * 1024);
         assert_eq!(base + len, CodeRegion::ESP32_DRAM2_END);
-        // Nothing of the region is inside the heap span.
-        assert!(r.dbus_base + r.len_bytes <= base);
     }
 
-    /// A region below `dram2_seg` must refuse to name a heap span rather than
-    /// offer one that contains the ROM's stacks and data.
+    /// An SRAM1 region below `dram2_seg` must refuse to name a heap span
+    /// rather than offer one that contains the ROM's stacks and data.
     #[test]
     #[should_panic(expected = "below dram2_seg")]
     fn reclaimable_heap_span_refuses_a_region_over_the_rom_reservations() {
         let rogue = CodeRegion {
-            dbus_base: SRAM1_DRAM_BASE, // 0x3FFE_0000 — ROM data lives here
+            placement: Placement::Sram1Mirrored {
+                dbus_base: SRAM1_DRAM_BASE, // 0x3FFE_0000 — ROM data lives here
+            },
             len_bytes: 0x1000,
         };
         let _ = rogue.reclaimable_heap_span();
     }
 
+    /// An SRAM0 region must sit inside the IRAM window, above `.vectors`.
+    #[test]
+    #[should_panic(expected = "outside SRAM0's IRAM window")]
+    fn validate_refuses_an_sram0_region_over_the_vectors() {
+        CodeRegion {
+            placement: Placement::Sram0 {
+                ibus_base: 0x4008_0000,
+            },
+            len_bytes: 0x1000,
+        }
+        .validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "outside SRAM0's IRAM window")]
+    fn validate_refuses_an_sram0_region_past_the_bus_end() {
+        CodeRegion {
+            placement: Placement::Sram0 {
+                ibus_base: SRAM0_IRAM_END - 0x800,
+            },
+            len_bytes: 0x1000,
+        }
+        .validate();
+    }
+
     struct MapSink(alloc::collections::BTreeMap<u32, u32>);
     impl CodeSink for MapSink {
-        fn write_word(&mut self, dbus_addr: u32, word: u32) {
-            assert_eq!(dbus_addr % 4, 0);
-            self.0.insert(dbus_addr, word);
+        fn write_word(&mut self, write_addr: u32, word: u32) {
+            assert_eq!(write_addr % 4, 0);
+            self.0.insert(write_addr, word);
         }
     }
 
     #[test]
-    fn install_walks_downward_and_pads_the_tail() {
+    fn install_walks_upward_through_sram0_and_pads_the_tail() {
         let r = CodeRegion::ESP32_DEFAULT;
         let mut sink = MapSink(Default::default());
         // 6 bytes → 2 words, second word tail-padded with zeros.
         install(&r, r.ibus_base(), &[1, 2, 3, 4, 5, 6], &mut sink).unwrap();
         assert_eq!(
-            sink.0.get(&r.dbus_write_addr(r.ibus_base())),
+            sink.0.get(&r.ibus_base()),
             Some(&u32::from_le_bytes([1, 2, 3, 4]))
         );
         assert_eq!(
-            sink.0.get(&r.dbus_write_addr(r.ibus_base() + 4)),
+            sink.0.get(&(r.ibus_base() + 4)),
+            Some(&u32::from_le_bytes([5, 6, 0, 0]))
+        );
+        assert_eq!(sink.0.len(), 2, "exactly the two words, nowhere else");
+    }
+
+    #[test]
+    fn install_walks_downward_through_the_sram1_mirror() {
+        let r = CodeRegion::ESP32_SRAM1_LEGACY;
+        let mut sink = MapSink(Default::default());
+        install(&r, r.ibus_base(), &[1, 2, 3, 4, 5, 6], &mut sink).unwrap();
+        assert_eq!(
+            sink.0.get(&r.write_addr(r.ibus_base())),
+            Some(&u32::from_le_bytes([1, 2, 3, 4]))
+        );
+        assert_eq!(
+            sink.0.get(&r.write_addr(r.ibus_base() + 4)),
             Some(&u32::from_le_bytes([5, 6, 0, 0]))
         );
         // Downward: word 1's write address is 4 BELOW word 0's.
         assert_eq!(
-            r.dbus_write_addr(r.ibus_base() + 4),
-            r.dbus_write_addr(r.ibus_base()) - 4
+            r.write_addr(r.ibus_base() + 4),
+            r.write_addr(r.ibus_base()) - 4
         );
     }
 
     #[test]
     fn install_rejects_out_of_region_spans() {
-        let r = CodeRegion::ESP32_DEFAULT;
-        let mut sink = MapSink(Default::default());
-        // Would overhang the region end by one word.
-        let near_end = r.ibus_end() - 4;
-        assert!(matches!(
-            install(&r, near_end, &[0; 8], &mut sink),
-            Err(CodeMemError::BadSpan { .. })
-        ));
-        // Unaligned base.
-        assert!(matches!(
-            install(&r, r.ibus_base() + 2, &[0; 4], &mut sink),
-            Err(CodeMemError::BadSpan { .. })
-        ));
-        assert!(sink.0.is_empty(), "nothing written on rejection");
+        for r in [CodeRegion::ESP32_DEFAULT, CodeRegion::ESP32_SRAM1_LEGACY] {
+            let mut sink = MapSink(Default::default());
+            // Would overhang the region end by one word.
+            let near_end = r.ibus_end() - 4;
+            assert!(matches!(
+                install(&r, near_end, &[0; 8], &mut sink),
+                Err(CodeMemError::BadSpan { .. })
+            ));
+            // Unaligned base.
+            assert!(matches!(
+                install(&r, r.ibus_base() + 2, &[0; 4], &mut sink),
+                Err(CodeMemError::BadSpan { .. })
+            ));
+            // Below the base.
+            assert!(matches!(
+                install(&r, r.ibus_base() - 4, &[0; 4], &mut sink),
+                Err(CodeMemError::BadSpan { .. })
+            ));
+            assert!(sink.0.is_empty(), "nothing written on rejection");
+        }
     }
 
     #[test]

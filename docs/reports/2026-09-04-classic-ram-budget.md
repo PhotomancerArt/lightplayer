@@ -31,7 +31,7 @@ Ranked levers, each independently landable:
 
 | # | lever | heap gained | effort | risk |
 |---|---|---:|---|---|
-| 1 | Move the JIT code region to idle SRAM0 IRAM | +24,576 | medium | medium (new install path, emulator parity) |
+| 1 | Move the JIT code region to idle SRAM0 IRAM — **done 2026-09-05 (PR #522)** | +24,576 | medium | medium (new install path, emulator parity) |
 | 2 | Reclaim the ROM stacks and gaps in SRAM1 as heap regions | **+30,608, DONE 2026-09-05** | low | low-medium (IDF precedent; order after APP-core start) |
 | 3 | Constant pools and switch tables to flash, except the ISR path's | **+10,000, DONE 2026-09-05 — all of it as stack** | low | medium (3 tables land in the WS281x refill ISR if done bluntly) |
 | 4 | Measure the main stack, then hand the surplus to the arena | **+0, MEASURED 2026-09-05 — there is no surplus** | low to measure | none until the number exists |
@@ -154,7 +154,17 @@ SRAM1 in full, low to high:
 
 ### 1. JIT code region → SRAM0 (+24,576 B heap, and a bigger JIT region)
 
-Today `codemem_esp32` links each shader at a span of the SRAM1 region and
+> **Result (2026-09-05, PR #522, `docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.md`):
+> pulled.** Region = 64 KiB of SRAM0 at `0x4008_8000` (identity writes, no
+> barrier needed — measured 0 stale in 3 × 1,000 rewrite-then-call
+> iterations); heap region 1 = the whole tail `0x3FFE_8000..0x4000_0000`,
+> 98,304 B. Idle heap on the dig2go: `free=194892 used=16052` = **210,944 B
+> total** (was 186,368), `[JIT] cap=65536`. The probe's one surprise:
+> esp-hal's `_rwtext_len` is section-relative (address = `.rwtext` end +
+> len), so the boot assert decodes it; `.rwtext` ends at `0x4008_3E00` on the
+> app image, 16,896 B below the region.
+
+Before this, `codemem_esp32` linked each shader at a span of the SRAM1 region and
 installs it through the word-mirrored D-bus walk, because that is the only
 way to write SRAM1's I-bus image. SRAM0 needs no mirror: aligned 32-bit
 stores to `0x4008_xxxx` land directly (this is how IDF's IRAM heap and

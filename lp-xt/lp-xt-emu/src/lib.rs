@@ -26,7 +26,9 @@
 //! The memory map is a [`BoardProfile`] ([`board`]): [`Emulator::new`] is the
 //! ESP32-S3 map (the default; every pre-profile consumer is unchanged), and
 //! [`Emulator::with_profile`]`(BoardProfile::esp32())` models the classic
-//! ESP32's word-mirrored SRAM1 (FINDINGS C2).
+//! ESP32 with JIT code in word-only, identity-mapped SRAM0 (measured
+//! 2026-09-05); `BoardProfile::esp32_sram1_legacy()` keeps its word-mirrored
+//! SRAM1 placement (FINDINGS C2).
 
 //! ## Floating point
 //!

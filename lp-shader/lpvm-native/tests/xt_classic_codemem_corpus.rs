@@ -5,7 +5,9 @@
 //! ([`CodeRegion::ESP32_DEFAULT`]) — memory that cannot be heap, on a chip
 //! whose entire heap is 110 KB. That size was never measured; it was chosen as
 //! "a comfortable span inside `dram2_seg`". This test supplies the missing
-//! number.
+//! number. (Since 2026-09-05 the region lives in SRAM0, which no heap can use
+//! — the corpus figures still decide how much of it is *needed*, and the
+//! oversized-shader backstop below is sized from the region either way.)
 //!
 //! It runs the same pipeline the device runs — `lps-glsl` frontend, the two
 //! synthesised render wrappers, `compile_module` for
@@ -144,9 +146,9 @@ fn measure(glsl: &str) -> Result<(u32, usize), String> {
 /// A shader too big for the region must be a clean [`CodeMemError::TooLarge`]
 /// carrying diagnosable numbers — never a partial install or a wild write.
 ///
-/// This is the backstop the whole sizing argument leans on: 32 KiB is not a
-/// proof that every shader fits, it is a bet that real ones do, and this is
-/// what happens when the bet loses. On the device the error surfaces as a
+/// This is the backstop the whole sizing argument leans on: the region size
+/// is not a proof that every shader fits, it is a bet that real ones do, and
+/// this is what happens when the bet loses. On the device the error surfaces as a
 /// `NativeError` from the compile, which `shader_node.rs` turns into a node
 /// status while keep-last-good keeps the previous program rendering — one
 /// node fails, the board does not.
@@ -166,7 +168,10 @@ fn measure(glsl: &str) -> Result<(u32, usize), String> {
 /// data happened to be convenient.
 #[test]
 fn an_oversized_shader_is_a_clean_toolarge_not_a_wild_write() {
-    const HELPERS: usize = 160;
+    // 160 helpers compiled to 48,152 B — enough to outgrow the 24 KiB SRAM1
+    // region, not the 64 KiB SRAM0 one (2026-09-05); ~301 B per helper, so
+    // 240 lands near 72 KB.
+    const HELPERS: usize = 240;
     let mut body = String::new();
     for i in 0..HELPERS {
         body.push_str(&format!(

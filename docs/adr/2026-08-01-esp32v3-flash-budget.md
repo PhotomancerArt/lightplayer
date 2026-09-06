@@ -136,6 +136,12 @@ out of `.stack`, 504 B.
 Everything above concerns `dram_seg`, and every byte in it is zero-sum with
 `.stack`. It is no longer the whole heap.
 
+> **2026-09-05:** the JIT code region described below has since left SRAM1
+> for SRAM0 (64 KiB at `0x4008_8000`), and the *whole* `dram2_seg` tail
+> `0x3FFE_8000..0x4000_0000` (98,304 B) is heap region 1 — total heap
+> 210,944 B. The corpus figures below still stand; the placement story is in
+> `2026-09-05-classic-jit-code-lives-in-sram0.md`.
+
 esp-hal also declares **`dram2_seg`** (`0x3FFE_7E30`, 98,768 B), which no
 linker section targets — esp-idf uses the same span as heap. This image could
 not, because `lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT` sat in the

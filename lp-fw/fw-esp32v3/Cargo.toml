@@ -195,6 +195,16 @@ test_xt_fp_conformance = ["dep:lp-xt-fp-harness"]
 # Empty on purpose: it rides the default features' dependency cohort (esp-rtos,
 # embassy) and only swaps the entrypoint — run `just fwtest-iexec-esp32v3`.
 test_interrupt_executor = []
+# SRAM0 execute probe (classic RAM track B): does word-written code at
+# `0x4008_8000` execute on the PRO core, does a byte access there fault, is a
+# barrier needed, and what does esp-hal's `_rwtext_len` symbol mean. The
+# measured facts behind `codemem_esp32`'s SRAM0 placement. Empty on purpose,
+# like the interrupt-executor rig: it only swaps the entrypoint — run
+# `just fwtest-sram0-esp32v3 <port>`. Build (touch src/main.rs first when
+# flipping features — same caveat as the probe features above):
+#   cargo build --profile release-esp32v3 --no-default-features \
+#       --features esp32,test_sram0_exec
+test_sram0_exec = []
 
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`

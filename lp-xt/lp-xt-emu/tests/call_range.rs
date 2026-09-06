@@ -59,10 +59,10 @@ const CALL_OFFSET_MAX: i64 = (1 << 17) - 1;
 /// On the S3, IROM (`0x4200_0000`) is ~29 MB above the SRAM1 I-bus window: a
 /// direct call cannot name it, by three orders of magnitude.
 ///
-/// On classic, flash IROM (`0x400D_0000`) sits directly above the SRAM1 I-bus
-/// window (`0x400A_0000..0x400C_0000`) — ~192 KiB away, comfortably inside the
-/// ±512 KiB field. A direct call from JIT'd code to a builtin would *work*
-/// there. That is a trap for anyone who "optimizes" the indirect form away
+/// On classic, flash IROM (`0x400D_0000`) sits 288 KiB above the SRAM0 code
+/// region (`0x4008_8000`; it was ~192 KiB above the legacy SRAM1 I-bus window
+/// `0x400A_0000..0x400C_0000`) — comfortably inside the ±512 KiB field. A
+/// direct call from JIT'd code to a builtin would *work* there. That is a trap for anyone who "optimizes" the indirect form away
 /// after testing on one board, so it is pinned rather than left to be
 /// rediscovered: the emitter must stay indirect because the S3 requires it, not
 /// because every Xtensa target does.
@@ -86,7 +86,7 @@ fn only_the_s3_puts_flash_out_of_direct_call_range() {
     assert!(
         (CALL_OFFSET_MIN..=CALL_OFFSET_MAX).contains(&d),
         "classic: IROM {:#010x} was expected within direct-call reach of the \
-         SRAM1 I-bus window (displacement {d}); if the map moved, the comment \
+         SRAM0 code region (displacement {d}); if the map moved, the comment \
          above needs rewriting, not this assertion relaxing",
         classic.irom_base,
     );
