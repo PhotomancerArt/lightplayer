@@ -10,24 +10,24 @@ use crate::emu::{
     error::EmulatorError,
     logging::{InstLog, SystemKind},
 };
-use lp_emu_core::Memory;
+use lp_emu_core::Bus;
 use lp_riscv_inst::Gpr;
 
 /// Decode and execute compressed instructions (16-bit, bits [1:0] != 0b11).
-pub(super) fn decode_execute_compressed<M: LoggingMode>(
+pub(super) fn decode_execute_compressed<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let inst_16 = inst_word as u16;
     let opcode = inst_16 & 0x3; // bits [1:0]
     let funct3 = ((inst_16 >> 13) & 0x7) as u8; // bits [15:13]
 
     match opcode {
-        0b00 => decode_execute_c0::<M>(inst_16, funct3, pc, regs, memory),
-        0b01 => decode_execute_c1::<M>(inst_16, funct3, pc, regs, memory),
-        0b10 => decode_execute_c2::<M>(inst_16, funct3, pc, regs, memory),
+        0b00 => decode_execute_c0::<M, B>(inst_16, funct3, pc, regs, memory),
+        0b01 => decode_execute_c1::<M, B>(inst_16, funct3, pc, regs, memory),
+        0b10 => decode_execute_c2::<M, B>(inst_16, funct3, pc, regs, memory),
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
             instruction: inst_word,
@@ -38,12 +38,12 @@ pub(super) fn decode_execute_compressed<M: LoggingMode>(
 }
 
 /// Decode quadrant 0 (opcode = 0b00)
-fn decode_execute_c0<M: LoggingMode>(
+fn decode_execute_c0<M: LoggingMode, B: Bus>(
     inst: u16,
     funct3: u8,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     match funct3 {
         0b000 => {
@@ -73,7 +73,7 @@ fn decode_execute_c0<M: LoggingMode>(
             let uimm = ((inst >> 7) & 0x38)   // uimm[5:3] from inst[12:10]
                 | ((inst >> 4) & 0x4)          // uimm[2] from inst[6]
                 | ((inst << 1) & 0x40); // uimm[6] from inst[5]
-            execute_c_lw::<M>(rd, rs, uimm as i32, inst as u32, pc, regs, memory)
+            execute_c_lw::<M, B>(rd, rs, uimm as i32, inst as u32, pc, regs, memory)
         }
         0b110 => {
             // C.SW: mem[rs1' + uimm] = rs2'
@@ -84,7 +84,7 @@ fn decode_execute_c0<M: LoggingMode>(
             let uimm = ((inst >> 7) & 0x38)   // uimm[5:3] from inst[12:10]
                 | ((inst >> 4) & 0x4)          // uimm[2] from inst[6]
                 | ((inst << 1) & 0x40); // uimm[6] from inst[5]
-            execute_c_sw::<M>(rs1, rs2, uimm as i32, inst as u32, pc, regs, memory)
+            execute_c_sw::<M, B>(rs1, rs2, uimm as i32, inst as u32, pc, regs, memory)
         }
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
@@ -96,12 +96,12 @@ fn decode_execute_c0<M: LoggingMode>(
 }
 
 /// Decode quadrant 1 (opcode = 0b01)
-fn decode_execute_c1<M: LoggingMode>(
+fn decode_execute_c1<M: LoggingMode, B: Bus>(
     inst: u16,
     funct3: u8,
     pc: u32,
     regs: &mut [i32; 32],
-    _memory: &mut Memory,
+    _memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     match funct3 {
         0b000 => {
@@ -251,12 +251,12 @@ fn decode_execute_c1<M: LoggingMode>(
 }
 
 /// Decode quadrant 2 (opcode = 0b10)
-fn decode_execute_c2<M: LoggingMode>(
+fn decode_execute_c2<M: LoggingMode, B: Bus>(
     inst: u16,
     funct3: u8,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     match funct3 {
         0b000 => {
@@ -289,7 +289,7 @@ fn decode_execute_c2<M: LoggingMode>(
             let uimm = ((inst >> 7) & 0x20)   // uimm[5] from inst[12]
                 | ((inst >> 2) & 0x1c)         // uimm[4:2] from inst[6:4]
                 | ((inst << 4) & 0xc0); // uimm[7:6] from inst[3:2]
-            execute_c_lwsp::<M>(rd_gpr, uimm as i32, inst as u32, pc, regs, memory)
+            execute_c_lwsp::<M, B>(rd_gpr, uimm as i32, inst as u32, pc, regs, memory)
         }
         0b100 => {
             // C.MISC_CR: C.JR, C.MV, C.JALR, C.ADD
@@ -340,7 +340,7 @@ fn decode_execute_c2<M: LoggingMode>(
             let rs = Gpr::new(rs2);
             let uimm = ((inst >> 7) & 0x3c)   // uimm[5:2] from inst[12:9]
                 | ((inst >> 1) & 0xc0); // uimm[7:6] from inst[8:7]
-            execute_c_swsp::<M>(rs, uimm as i32, inst as u32, pc, regs, memory)
+            execute_c_swsp::<M, B>(rs, uimm as i32, inst as u32, pc, regs, memory)
         }
         _ => Err(EmulatorError::InvalidInstruction {
             pc,
@@ -396,14 +396,14 @@ fn execute_c_addi4spn<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_c_lw<M: LoggingMode>(
+fn execute_c_lw<M: LoggingMode, B: Bus>(
     rd: Gpr,
     rs: Gpr,
     offset: i32,
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let base = read_reg(regs, rs);
     let address = base.wrapping_add(offset) as u32;
@@ -445,14 +445,14 @@ fn execute_c_lw<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_c_sw<M: LoggingMode>(
+fn execute_c_sw<M: LoggingMode, B: Bus>(
     rs1: Gpr,
     rs2: Gpr,
     offset: i32,
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let base = read_reg(regs, rs1);
     let value = read_reg(regs, rs2);
@@ -460,7 +460,9 @@ fn execute_c_sw<M: LoggingMode>(
 
     let error_regs = *regs;
     let old_value = if M::ENABLED {
-        memory.read_word(address).unwrap_or(0)
+        memory
+            .read_word(address)
+            .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?
     } else {
         0
     };
@@ -1161,13 +1163,13 @@ fn execute_c_slli<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_c_lwsp<M: LoggingMode>(
+fn execute_c_lwsp<M: LoggingMode, B: Bus>(
     rd: Gpr,
     offset: i32,
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let sp_val = read_reg(regs, Gpr::Sp);
     let address = sp_val.wrapping_add(offset) as u32;
@@ -1362,13 +1364,13 @@ fn execute_c_add<M: LoggingMode>(
 }
 
 #[inline(always)]
-fn execute_c_swsp<M: LoggingMode>(
+fn execute_c_swsp<M: LoggingMode, B: Bus>(
     rs: Gpr,
     offset: i32,
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    memory: &mut Memory,
+    memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let sp_val = read_reg(regs, Gpr::Sp);
     let value = read_reg(regs, rs);
@@ -1376,7 +1378,9 @@ fn execute_c_swsp<M: LoggingMode>(
 
     let error_regs = *regs;
     let old_value = if M::ENABLED {
-        memory.read_word(address).unwrap_or(0)
+        memory
+            .read_word(address)
+            .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?
     } else {
         0
     };
@@ -1500,7 +1504,7 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
 
         let inst = 0x0515u16; // C.ADDI x10, 5
-        let result = decode_execute_compressed::<LoggingEnabled>(
+        let result = decode_execute_compressed::<LoggingEnabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1520,7 +1524,7 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
 
         let inst = 0x0001u16; // C.NOP
-        let result = decode_execute_compressed::<LoggingEnabled>(
+        let result = decode_execute_compressed::<LoggingEnabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1538,7 +1542,7 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
 
         let inst = 0x4515u16; // C.LI x10, 5
-        let result = decode_execute_compressed::<LoggingEnabled>(
+        let result = decode_execute_compressed::<LoggingEnabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1557,7 +1561,7 @@ mod tests {
 
         // C.J with offset = 4 (encoded in instruction)
         let inst = 0xa001u16; // Simplified encoding for testing
-        let result = decode_execute_compressed::<LoggingEnabled>(
+        let result = decode_execute_compressed::<LoggingEnabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1576,7 +1580,7 @@ mod tests {
 
         // C.BEQZ x8, offset
         let inst = 0xc001u16; // Simplified encoding
-        let result = decode_execute_compressed::<LoggingEnabled>(
+        let result = decode_execute_compressed::<LoggingEnabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1595,7 +1599,7 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
 
         let inst = 0x0515u16; // C.ADDI x10, 5
-        let result = decode_execute_compressed::<LoggingDisabled>(
+        let result = decode_execute_compressed::<LoggingDisabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1612,7 +1616,7 @@ mod tests {
         let mut regs = [0i32; 32];
         let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
         let inst = 0xa011u16;
-        let result = decode_execute_compressed::<LoggingDisabled>(
+        let result = decode_execute_compressed::<LoggingDisabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1629,7 +1633,7 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
         // Same CJ offset layout as `c.j +8` in `0xa011`, but `funct3` = `001` (`C.JAL`).
         let inst = (0xa011 & !(0x7u16 << 13)) | (0b001u16 << 13);
-        let result = decode_execute_compressed::<LoggingDisabled>(
+        let result = decode_execute_compressed::<LoggingDisabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1646,7 +1650,7 @@ mod tests {
         regs[1] = 0x2000;
         let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
         let inst = 0x8082u16;
-        let result = decode_execute_compressed::<LoggingDisabled>(
+        let result = decode_execute_compressed::<LoggingDisabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1663,7 +1667,7 @@ mod tests {
         regs[5] = 0x3000;
         let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
         let inst = 0x8282u16;
-        let result = decode_execute_compressed::<LoggingDisabled>(
+        let result = decode_execute_compressed::<LoggingDisabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1680,7 +1684,7 @@ mod tests {
         regs[5] = 0x4000;
         let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
         let inst = 0x9282u16;
-        let result = decode_execute_compressed::<LoggingDisabled>(
+        let result = decode_execute_compressed::<LoggingDisabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1697,7 +1701,7 @@ mod tests {
         regs[1] = 0x5000;
         let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
         let inst = 0x9082u16;
-        let result = decode_execute_compressed::<LoggingDisabled>(
+        let result = decode_execute_compressed::<LoggingDisabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1714,7 +1718,7 @@ mod tests {
         regs[8] = 0;
         let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
         let inst = 0xc001u16;
-        let result = decode_execute_compressed::<LoggingDisabled>(
+        let result = decode_execute_compressed::<LoggingDisabled, _>(
             inst as u32,
             0x1000,
             &mut regs,
@@ -1730,7 +1734,7 @@ mod tests {
         regs[10] = 5;
         let mut memory = Memory::with_default_addresses(vec![0u8; 1024], vec![]);
         let inst = 0x0515u16;
-        let result = decode_execute_compressed::<LoggingDisabled>(
+        let result = decode_execute_compressed::<LoggingDisabled, _>(
             inst as u32,
             0x1000,
             &mut regs,

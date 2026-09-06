@@ -2,18 +2,18 @@
 
 use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
 use crate::emu::{error::EmulatorError, logging::InstLog};
-use lp_emu_core::Memory;
+use lp_emu_core::Bus;
 use lp_riscv_inst::{
     Gpr,
     format::{TypeI, TypeJ, TypeU},
 };
 
 /// Decode and execute JAL instruction (J-type, opcode 0x6f).
-pub(super) fn decode_execute_jal<M: LoggingMode>(
+pub(super) fn decode_execute_jal<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    _memory: &mut Memory,
+    _memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let j = TypeJ::from_riscv(inst_word);
     let rd = Gpr::new(j.rd);
@@ -22,11 +22,11 @@ pub(super) fn decode_execute_jal<M: LoggingMode>(
 }
 
 /// Decode and execute JALR instruction (I-type, opcode 0x67).
-pub(super) fn decode_execute_jalr<M: LoggingMode>(
+pub(super) fn decode_execute_jalr<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    _memory: &mut Memory,
+    _memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let i = TypeI::from_riscv(inst_word);
     let rd = Gpr::new(i.rd);
@@ -36,11 +36,11 @@ pub(super) fn decode_execute_jalr<M: LoggingMode>(
 }
 
 /// Decode and execute LUI instruction (U-type, opcode 0x37).
-pub(super) fn decode_execute_lui<M: LoggingMode>(
+pub(super) fn decode_execute_lui<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    _memory: &mut Memory,
+    _memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let u = TypeU::from_riscv(inst_word);
     let rd = Gpr::new(u.rd);
@@ -49,11 +49,11 @@ pub(super) fn decode_execute_lui<M: LoggingMode>(
 }
 
 /// Decode and execute AUIPC instruction (U-type, opcode 0x17).
-pub(super) fn decode_execute_auipc<M: LoggingMode>(
+pub(super) fn decode_execute_auipc<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    _memory: &mut Memory,
+    _memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let u = TypeU::from_riscv(inst_word);
     let rd = Gpr::new(u.rd);
@@ -255,7 +255,7 @@ mod tests {
 
         let inst_word = encode::jal(Gpr::new(1), 8);
         let result =
-            decode_execute_jal::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_jal::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[1], 4); // PC + 4
         assert_eq!(result.new_pc, Some(8));
@@ -270,7 +270,7 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![], vec![]);
         let inst = 0x0080_00ef;
         let result =
-            decode_execute_jal::<LoggingDisabled>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+            decode_execute_jal::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory).unwrap();
         assert_eq!(result.class, InstClass::JalCall);
         assert_eq!(result.inst_size, 4);
     }
@@ -281,7 +281,7 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![], vec![]);
         let inst = 0x0080_006f;
         let result =
-            decode_execute_jal::<LoggingDisabled>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+            decode_execute_jal::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory).unwrap();
         assert_eq!(result.class, InstClass::JalTail);
         assert_eq!(result.inst_size, 4);
     }
@@ -293,7 +293,8 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![], vec![]);
         let inst = encode::jalr(Gpr::new(5), Gpr::new(6), 0);
         let result =
-            decode_execute_jalr::<LoggingDisabled>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+            decode_execute_jalr::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory)
+                .unwrap();
         assert_eq!(result.class, InstClass::JalrCall);
         assert_eq!(result.inst_size, 4);
     }
@@ -305,7 +306,8 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![], vec![]);
         let inst = 0x0000_8067;
         let result =
-            decode_execute_jalr::<LoggingDisabled>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+            decode_execute_jalr::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory)
+                .unwrap();
         assert_eq!(result.class, InstClass::JalrReturn);
         assert_eq!(result.inst_size, 4);
     }
@@ -317,7 +319,8 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![], vec![]);
         let inst = 0x0002_8067;
         let result =
-            decode_execute_jalr::<LoggingDisabled>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+            decode_execute_jalr::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory)
+                .unwrap();
         assert_eq!(result.class, InstClass::JalrIndirect);
         assert_eq!(result.inst_size, 4);
     }
@@ -329,7 +332,8 @@ mod tests {
         let mut memory = Memory::with_default_addresses(vec![], vec![]);
         let inst = 0x0040_8067;
         let result =
-            decode_execute_jalr::<LoggingDisabled>(inst, 0x1000, &mut regs, &mut memory).unwrap();
+            decode_execute_jalr::<LoggingDisabled, _>(inst, 0x1000, &mut regs, &mut memory)
+                .unwrap();
         assert_eq!(result.class, InstClass::JalrIndirect);
         assert_eq!(result.inst_size, 4);
     }
@@ -342,7 +346,7 @@ mod tests {
         // LUI x1, 0x12345 -> x1 = 0x12345000
         let inst_word = encode::lui(Gpr::new(1), 0x12345000);
         let result =
-            decode_execute_lui::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory).unwrap();
+            decode_execute_lui::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory).unwrap();
 
         assert_eq!(regs[1], 0x12345000);
         assert!(result.log.is_none());

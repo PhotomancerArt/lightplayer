@@ -50,6 +50,16 @@ pub enum EmulatorError {
         pc: u32,
         regs: [i32; 32],
     },
+    /// A hardware watchpoint fired before the access. The user-mode
+    /// emulator's `Memory` never returns this (it has no watchpoints to
+    /// arm); the privileged hart (P2) turns it into a debug exception.
+    Watchpoint {
+        address: u32,
+        kind: MemoryAccessKind,
+        slot: u8,
+        pc: u32,
+        regs: [i32; 32],
+    },
     /// Unknown or unsupported opcode.
     UnknownOpcode {
         opcode: u8,
@@ -111,6 +121,17 @@ impl EmulatorError {
                 pc,
                 regs,
             },
+            MemoryError::Watchpoint {
+                address,
+                kind,
+                slot,
+            } => EmulatorError::Watchpoint {
+                address,
+                kind,
+                slot,
+                pc,
+                regs,
+            },
         }
     }
 }
@@ -132,6 +153,7 @@ impl EmulatorError {
             EmulatorError::InvalidMemoryAccess { pc, .. } => *pc,
             EmulatorError::InvalidInstruction { pc, .. } => *pc,
             EmulatorError::UnalignedAccess { pc, .. } => *pc,
+            EmulatorError::Watchpoint { pc, .. } => *pc,
             EmulatorError::UnknownOpcode { pc, .. } => *pc,
             EmulatorError::InvalidRegister { pc, .. } => *pc,
             EmulatorError::Trap { pc, .. } => *pc,
@@ -148,6 +170,7 @@ impl EmulatorError {
             EmulatorError::InvalidMemoryAccess { regs, .. } => Some(regs),
             EmulatorError::InvalidInstruction { regs, .. } => Some(regs),
             EmulatorError::UnalignedAccess { regs, .. } => Some(regs),
+            EmulatorError::Watchpoint { regs, .. } => Some(regs),
             EmulatorError::UnknownOpcode { regs, .. } => Some(regs),
             EmulatorError::InvalidRegister { .. } => None,
             EmulatorError::Trap { regs, .. } => Some(regs),
@@ -216,6 +239,23 @@ impl core::fmt::Display for EmulatorError {
                 "Unaligned memory access at address 0x{address:08x} (requires {alignment} byte alignment) at PC \
                  0x{pc:08x}"
             ),
+            EmulatorError::Watchpoint {
+                address,
+                kind,
+                slot,
+                pc,
+                ..
+            } => {
+                let kind_str = match kind {
+                    MemoryAccessKind::Read => "read",
+                    MemoryAccessKind::Write => "write",
+                    MemoryAccessKind::InstructionFetch => "instruction fetch",
+                };
+                write!(
+                    f,
+                    "Watchpoint {slot} fired on {kind_str} at address 0x{address:08x} at PC 0x{pc:08x}"
+                )
+            }
             EmulatorError::UnknownOpcode {
                 opcode,
                 pc,

@@ -8,15 +8,15 @@ use crate::emu::{
     fp_regs::FpRegs,
     logging::{InstLog, SystemKind},
 };
-use lp_emu_core::Memory;
+use lp_emu_core::Bus;
 use lp_riscv_inst::{Gpr, format::TypeI};
 
 /// Decode and execute system instructions (I-type, opcode 0x73).
-pub(super) fn decode_execute_system<M: LoggingMode>(
+pub(super) fn decode_execute_system<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     regs: &mut [i32; 32],
-    _memory: &mut Memory,
+    _memory: &mut B,
     fp: &mut FpRegs,
 ) -> Result<ExecutionResult, EmulatorError> {
     let i = TypeI::from_riscv(inst_word);
@@ -195,11 +195,11 @@ fn execute_ebreak<M: LoggingMode>(
 }
 
 /// Decode and execute FENCE/FENCE.I instructions (opcode 0x0f).
-pub(super) fn decode_execute_fence<M: LoggingMode>(
+pub(super) fn decode_execute_fence<M: LoggingMode, B: Bus>(
     inst_word: u32,
     pc: u32,
     _regs: &mut [i32; 32],
-    _memory: &mut Memory,
+    _memory: &mut B,
 ) -> Result<ExecutionResult, EmulatorError> {
     let funct3 = ((inst_word >> 12) & 0x7) as u8;
     let imm = ((inst_word >> 20) & 0xfff) as u16;
@@ -284,9 +284,14 @@ mod tests {
         let mut fp = FpRegs::new();
 
         let inst_word = encode::ecall();
-        let result =
-            decode_execute_system::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory, &mut fp)
-                .unwrap();
+        let result = decode_execute_system::<LoggingDisabled, _>(
+            inst_word,
+            0,
+            &mut regs,
+            &mut memory,
+            &mut fp,
+        )
+        .unwrap();
 
         assert!(result.syscall);
         assert!(!result.should_halt);
@@ -300,9 +305,14 @@ mod tests {
         let mut fp = FpRegs::new();
 
         let inst_word = encode::ebreak();
-        let result =
-            decode_execute_system::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory, &mut fp)
-                .unwrap();
+        let result = decode_execute_system::<LoggingDisabled, _>(
+            inst_word,
+            0,
+            &mut regs,
+            &mut memory,
+            &mut fp,
+        )
+        .unwrap();
 
         assert!(!result.syscall);
         assert!(result.should_halt);
@@ -316,9 +326,14 @@ mod tests {
         let mut fp = FpRegs::new();
 
         let inst_word = encode::ecall();
-        let result =
-            decode_execute_system::<LoggingEnabled>(inst_word, 0, &mut regs, &mut memory, &mut fp)
-                .unwrap();
+        let result = decode_execute_system::<LoggingEnabled, _>(
+            inst_word,
+            0,
+            &mut regs,
+            &mut memory,
+            &mut fp,
+        )
+        .unwrap();
 
         assert!(result.syscall);
         assert!(result.log.is_some());
@@ -332,7 +347,8 @@ mod tests {
         let mut regs = [0i32; 32];
         regs[5] = 0x1234_5678u32 as i32; // x5, used as the rs1 source below
         let mut memory = Memory::with_default_addresses(vec![], vec![]);
-        decode_execute_system::<LoggingDisabled>(inst_word, 0, &mut regs, &mut memory, fp).unwrap();
+        decode_execute_system::<LoggingDisabled, _>(inst_word, 0, &mut regs, &mut memory, fp)
+            .unwrap();
         regs[rd as usize]
     }
 

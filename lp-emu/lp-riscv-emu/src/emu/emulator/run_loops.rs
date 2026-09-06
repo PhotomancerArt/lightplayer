@@ -278,7 +278,7 @@ impl Riscv32Emulator {
 
             let pc = self.pc;
             // Execute using fast path (no logging)
-            let exec_result = decode_execute::<LoggingDisabled>(
+            let exec_result = decode_execute::<LoggingDisabled, _>(
                 inst_word,
                 pc,
                 &mut self.regs,
@@ -368,7 +368,7 @@ impl Riscv32Emulator {
 
             let pc = self.pc;
             // Execute using logging path
-            let exec_result = decode_execute::<LoggingEnabled>(
+            let exec_result = decode_execute::<LoggingEnabled, _>(
                 inst_word,
                 pc,
                 &mut self.regs,
