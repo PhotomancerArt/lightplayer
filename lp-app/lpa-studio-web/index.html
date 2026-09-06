@@ -27,16 +27,24 @@
           wasm boots lives here: dx's injected glue fetches a multi-MB wasm
           with no UI of its own, so this script wraps `fetch` to watch that
           download and narrates it into the #lp-shell overlay in <body>.
-          The app dismisses the overlay on its first mounted render
+          The app asks for dismissal on its first mounted render
           (`__lpShell.done()` from web_app.rs); a MutationObserver on #main
           is the belt-and-braces dismissal if that call ever goes missing.
+          Dismissal itself waits for the styling that first render leans
+          on: the Tailwind sheet is a <link> the app appends to <head> in a
+          post-render effect that runs AFTER its done() effect, and the
+          bundled fonts (font-display: block) only start downloading once
+          that sheet applies. Dropping the overlay on the bare render paints
+          a frame of unstyled, text-less chrome on every cold cache.
 
           `window.__lpShell` is a page-internal contract (ADR: static asset
           serving and the shell loader):
 
             observe(response, onProgress) -> Response  byte-counting tee
             phase(text)                                headline swap
-            done() / fail(message)                     dismiss / dead end
+            done() / fail(message)                     dismiss (once the
+                                                       styling settles) /
+                                                       dead end
 
           The engine handoff extends it with `engineFetch` (see the
           engine-manifest script below and lpa-link's engine_cache).
@@ -122,9 +130,65 @@
                         shell.phase(`${label}… ${mb(received)} MB`);
                     }
                 };
+                // Every stylesheet <link> that lands in <head> — the app
+                // appends its Tailwind sheet on boot — with a promise that
+                // settles on load OR error (an error must not strand the
+                // overlay; the page just shows unstyled, as before).
+                // Watching insertions, not polling `link.sheet`, because
+                // `sheet` is null-until-loaded in Chromium but not
+                // everywhere. The observer is armed at DOMContentLoaded,
+                // long before the wasm boots and appends anything.
+                const sheets = new Map();
+                const watchSheet = (link) => {
+                    if (sheets.has(link)) return;
+                    sheets.set(
+                        link,
+                        new Promise((resolve) => {
+                            link.addEventListener("load", resolve, { once: true });
+                            link.addEventListener("error", resolve, { once: true });
+                        }),
+                    );
+                };
+                const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
+                const stylingSettled = async () => {
+                    // The head <link>s land in effects queued behind the
+                    // app's done() effect, in the same task; one task
+                    // later they are in the DOM and being watched. A
+                    // task, NOT a frame: requestAnimationFrame never
+                    // fires in a background tab, and a Studio opened
+                    // from a cmd-click must settle before it is looked
+                    // at. Re-check after each wait — a sheet a later
+                    // render appends joins the set.
+                    await nextTask();
+                    let awaited = 0;
+                    while (awaited < sheets.size) {
+                        awaited = sheets.size;
+                        await Promise.all(sheets.values());
+                    }
+                    // Font requests start at the first layout that USES a
+                    // face. Force that layout now the sheets apply, then
+                    // wait out the loads; `ready` resolves at once when
+                    // nothing is loading, so re-check the status once.
+                    void document.body.offsetHeight;
+                    const fonts = document.fonts;
+                    if (!fonts) return;
+                    await fonts.ready;
+                    if (fonts.status === "loading") await fonts.ready;
+                };
+                // A stuck asset (a sheet that never answers, a font that
+                // hangs) degrades to the old behaviour — an unstyled beat
+                // — rather than an overlay that never leaves. Nothing
+                // here needs a frame: a hidden tab settles too (the
+                // forced layout starts the font loads, `fonts.ready`
+                // resolves once they land), so a cmd-clicked Studio is
+                // ready by the time it is looked at.
+                const SETTLE_CAP_MS = 10000;
                 shell.done = () => {
+                    if (dismissed) return;
                     dismissed = true;
-                    el("lp-shell")?.remove();
+                    const remove = () => el("lp-shell")?.remove();
+                    const cap = new Promise((resolve) => setTimeout(resolve, SETTLE_CAP_MS));
+                    Promise.race([stylingSettled(), cap]).then(remove, remove);
                 };
                 shell.fail = (message) => {
                     if (dismissed) return;
@@ -233,6 +297,16 @@
                 });
                 addEventListener("DOMContentLoaded", () => {
                     el("lp-shell-reload").onclick = () => location.reload();
+                    // Insertions only: a static <link> in this file would
+                    // have fired its load before this arms (do not add one
+                    // to the watch — its promise would wait out the cap).
+                    new MutationObserver((records) => {
+                        for (const record of records) {
+                            for (const node of record.addedNodes) {
+                                if (node.matches?.('link[rel~="stylesheet"]')) watchSheet(node);
+                            }
+                        }
+                    }).observe(document.head, { childList: true });
                     // Anything rendered into #main means the app is up —
                     // the fallback for surfaces that never call done()
                     // (story book, standalone editor pages).
