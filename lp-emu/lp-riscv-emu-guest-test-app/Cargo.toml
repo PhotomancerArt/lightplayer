@@ -2,7 +2,9 @@
 name = "lp-riscv-emu-guest-test-app"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+# MIT as a unit with the rest of `lp-emu/`, NOT the workspace's AGPL.
+# See lp-emu/LICENSE-MIT and `just lint-emu-fence`.
+license = "MIT"
 
 [[bin]]
 name = "lp-riscv-emu-guest-test-app"

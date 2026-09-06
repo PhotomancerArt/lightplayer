@@ -3,7 +3,9 @@ name = "lp-emu-core"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-license.workspace = true
+# MIT as a unit with the rest of `lp-emu/`, NOT the workspace's AGPL.
+# See lp-emu/LICENSE-MIT and `just lint-emu-fence`.
+license = "MIT"
 description = "Architecture-neutral emulator infrastructure shared by LightPlayer emulators"
 
 [lints]
