@@ -401,6 +401,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | deadline-margin-by-accident | 2026-09-02 | [c6-ws281x-first-three-leds-then-stale](2026-09-02-c6-ws281x-first-three-leds-then-stale.md) | fixed | fw-esp32c6 output/rmt + lp-ws281x refill path placement |
 | untested-path | 2026-09-02 | [studio-flasher-cannot-recover-a-boot-looping-c6](2026-09-02-studio-flasher-cannot-recover-a-boot-looping-c6.md) | **open** | lpa-studio-web device card flash flow (esptool-js ladder) |
 | lifecycle-ownership | 2026-09-02 | [same-gpio-rebind-disconnects-the-pad](2026-09-02-same-gpio-rebind-disconnects-the-pad.md) | fixed | fw-esp32c6 + fw-esp32s3 output/rmt `bind_channel` (esp-hal `with_pin` guard order) |
+| untested-path | 2026-09-06 | [emu-transport-drops-unprefixed-client-lines](2026-09-06-emu-transport-drops-unprefixed-client-lines.md) | fixed | lpa-client transport_serial/emulator (async `M!` framing) + lp-cli `emu` host spec |
 
 ## Predecessor: `docs/bugs/`
 

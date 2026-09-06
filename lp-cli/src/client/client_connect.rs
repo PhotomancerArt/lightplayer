@@ -93,11 +93,15 @@ pub fn client_connect(spec: HostSpecifier) -> Result<Box<dyn ClientTransport>> {
         }
         #[cfg(feature = "serial")]
         HostSpecifier::Emulator => {
-            // Build fw-emu binary
+            // Build fw-emu binary on the same profile the fw-tests emulator
+            // tests use (`release-emu`, opt-level 3): the workspace Cargo.toml
+            // documents Cranelift codegen faults in the guest under the plain
+            // `release` profile's opt-level `z`, and sharing the profile means
+            // `lp-cli ... emu` runs the exact guest binary CI validates.
             let fw_emu_path = ensure_binary_built(
                 BinaryBuildConfig::new("fw-emu")
                     .with_target("riscv32imac-unknown-none-elf")
-                    .with_profile("release")
+                    .with_profile("release-emu")
                     .with_backtrace_support(true),
             )
             .map_err(|e| anyhow::anyhow!("Failed to build fw-emu: {e}"))?;

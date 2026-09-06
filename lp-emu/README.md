@@ -13,6 +13,8 @@ lp-emu/
   LICENSE-MIT                   the licence for everything below
   lp-emu-core/                  arch-neutral host substrate
   lp-emu-abi/                   host <-> guest protocol
+  lp-emu-validate/              the hardware-validation system (host)
+  transcripts/                  committed, verbatim payload captures
   lp-riscv-emu/                 RV32IMAC+F executors
   lp-riscv-emu-guest/           rv32 guest-side runtime
   lp-riscv-emu-guest-test-app/  a guest binary the rv32 tests run
@@ -35,6 +37,22 @@ directories are allowed to assume MMIO at all.
   `TrapCode`), logging levels, cycle-cost accounting (`CycleModel`/
   `InstClass`), serial plumbing, time control, and the host-side profiler
   (`profile/`, behind the `std` feature). `no_std` + alloc.
+
+- **`lp-emu-validate`** — the hardware-validation system's host half:
+  payloads, configurations, transcripts, masking, provenance grading and
+  replay, plus the runner behind `lp-cli validate`. It knows what a committed
+  capture means and what each configuration is trusted for. It deliberately
+  **mirrors** `lp-fw/fw-checks`'s payload registry rather than importing it —
+  `fw-checks` is AGPL and outside this fence — and `lp-cli` owns the parity
+  test that keeps the two from drifting. See its README.
+
+- **`transcripts/`** — committed, verbatim payload captures, one directory per
+  chip and payload, each `.txt` beside a `.txt.meta.json` sidecar carrying its
+  provenance header. Not a crate; covered by `LICENSE-MIT` like everything
+  else here. A local `.gitattributes` marks them `-text`, so the repository's
+  `core.autocrlf = input` cannot edit a byte of them on the way in.
+  **Never edit a transcript**: a mismatch is a regression or a re-capture,
+  never a fixture to refresh.
 
 - **`lp-emu-abi`** — the host↔guest protocol: syscall numbers, guest serial
   framing, the recovery handshake, and JIT symbol entries. Depended on by
@@ -104,6 +122,11 @@ self-contained on that edge.
 
 ## Roadmap
 
-The ESP32-C6 SoC emulator, its validation system and the vendored ROM images
-arrive under `esp/` and `lp-emu-validate/` across the milestones in the
-2026-09-06 esp-emulator plan. Nothing in `esp/` exists yet.
+`lp-emu-validate/` and the first two transcripts landed with M2 of the
+2026-09-06 esp-emulator plan. The ESP32-C6 SoC emulator and the vendored ROM
+images arrive under `esp/` from M3 on; nothing in `esp/` exists yet.
+
+`lp-cli validate list` already names `lp-emu:esp32c6:t1`, and says
+`unavailable until M3`. That is deliberate: the configuration exists as a name
+and a seam (`lp_emu_validate::driver::ConfigurationDriver`), so M3 implements
+one trait and nothing else in the validation system changes.

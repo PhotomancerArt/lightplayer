@@ -1,0 +1,7 @@
+# Transcripts are verbatim captures. Git must not touch a single byte of them.
+#
+# The repository sets `core.autocrlf = input`, which would strip the carriage
+# returns esp-emu emits — and a "verbatim" capture that git edited on the way in
+# is not a capture. The ANSI escapes, the espflash progress bars and the CRs are
+# all part of the bytes under test.
+*.txt -text

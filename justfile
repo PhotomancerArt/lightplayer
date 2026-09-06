@@ -2278,6 +2278,14 @@ fixture-fw variant port="":
 device-scenario *args:
     node scripts/device-scenario.mjs {{ args }}
 
+# The hardware-validation system: payloads, configurations, transcripts,
+# replay. `just validate list` with no other args; `replay <transcript>
+# --against <transcript|configuration>`; `run <set> --config <name> --port …
+# [--dry-run]`; `record <set> --config <name> --commit …`. See
+# lp-emu/lp-emu-validate/README.md. Never opens a port on `list` or `replay`.
+validate *args:
+    cargo run -q -p lp-cli -- validate {{ args }}
+
 # ============================================================================
 # Demo projects
 # ============================================================================
