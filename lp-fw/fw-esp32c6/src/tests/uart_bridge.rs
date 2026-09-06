@@ -46,9 +46,7 @@ use embedded_io_async::{Read, Write};
 use esp_hal::Async;
 use esp_hal::uart::{Config, Uart, UartRx, UartTx};
 use esp_hal::usb_serial_jtag::{UsbSerialJtag, UsbSerialJtagRx, UsbSerialJtagTx};
-use fw_checks::checks::uart_bridge::{
-    ByteRing, ReadyLine, UART0_RX_GPIO, UART0_TX_GPIO, pump,
-};
+use fw_checks::checks::uart_bridge::{ByteRing, ReadyLine, UART0_RX_GPIO, UART0_TX_GPIO, pump};
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
 
@@ -164,11 +162,7 @@ pub async fn run_uart_bridge(_: embassy_executor::Spawner) -> ! {
     let (uart_rx, uart_tx) = uart0().split();
 
     // From here on the bridge says nothing of its own, forever.
-    join(
-        usb_to_uart(usb_rx, uart_tx),
-        uart_to_usb(uart_rx, usb_tx),
-    )
-    .await;
+    join(usb_to_uart(usb_rx, uart_tx), uart_to_usb(uart_rx, usb_tx)).await;
     unreachable!("both halves loop forever")
 }
 
@@ -285,11 +279,7 @@ async fn uart_read(
 /// [`USB_STALL_TIMEOUT`] and not the run.
 async fn endpoint_free(usb_tx: &mut UsbSerialJtagTx<'static, Async>) -> bool {
     matches!(
-        select(
-            Timer::after(USB_STALL_TIMEOUT),
-            Write::flush(&mut *usb_tx)
-        )
-        .await,
+        select(Timer::after(USB_STALL_TIMEOUT), Write::flush(&mut *usb_tx)).await,
         Either::Second(_)
     )
 }

@@ -141,13 +141,16 @@ fn the_uart_bridges_ready_line_is_the_line_the_firmware_prints() {
 
     let spec = payload.series.first().expect("uart-bridge has a series");
     for (prev_to_uart, prev_to_usb) in [(0, 0), (7, u32::MAX)] {
-        let line = format!("{}", ReadyLine {
-            baud: ROM_CONSOLE_BAUD,
-            tx_gpio: UART0_TX_GPIO,
-            rx_gpio: UART0_RX_GPIO,
-            prev_drop_to_uart: prev_to_uart,
-            prev_drop_to_usb: prev_to_usb,
-        });
+        let line = format!(
+            "{}",
+            ReadyLine {
+                baud: ROM_CONSOLE_BAUD,
+                tx_gpio: UART0_TX_GPIO,
+                rx_gpio: UART0_RX_GPIO,
+                prev_drop_to_uart: prev_to_uart,
+                prev_drop_to_usb: prev_to_usb,
+            }
+        );
         assert!(
             line.starts_with(payload.sentinel.marker()),
             "`{line}` should start with the sentinel"

@@ -122,11 +122,7 @@ pub struct PumpStep {
 /// That is deliberate and it is why the firmware half only ever hands them to
 /// a sink whose write commits the bytes to a hardware FIFO before it yields:
 /// "emitted" means delivered or queued in silicon, never "still ours".
-pub fn pump<const N: usize>(
-    queue: &mut ByteRing<N>,
-    incoming: &[u8],
-    out: &mut [u8],
-) -> PumpStep {
+pub fn pump<const N: usize>(queue: &mut ByteRing<N>, incoming: &[u8], out: &mut [u8]) -> PumpStep {
     let accepted = queue.push(incoming);
     let emitted = queue.pop_into(out);
     PumpStep {
@@ -212,11 +208,14 @@ mod tests {
         pump(&mut queue, b"abc", &mut nowhere);
         let mut out = [0u8; 8];
         let step = pump(&mut queue, &[], &mut out);
-        assert_eq!(step, PumpStep {
-            accepted: 0,
-            dropped: 0,
-            emitted: 3
-        });
+        assert_eq!(
+            step,
+            PumpStep {
+                accepted: 0,
+                dropped: 0,
+                emitted: 3
+            }
+        );
         assert_eq!(&out[..3], b"abc");
     }
 
