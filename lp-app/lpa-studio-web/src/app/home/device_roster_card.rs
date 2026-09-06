@@ -12,7 +12,8 @@
 //! # One box, four zones (D3 — full-bleed separators; P9's section identities)
 //!
 //! ```text
-//!   header      title · status chip · board · chip · MAC · firmware
+//!   header      title · status chip
+//!               board · chip  /  MAC · firmware  (two fixed mono rows)
 //!   ──────────── (full bleed)
 //!   Project     preview slot (120) · info (17) · bar (4) · verbs (30)
 //!   ────────────
@@ -121,7 +122,7 @@ use lpa_studio_core::{
     DeviceLoadedProject, DeviceStatus, DeviceView, DevicesOp, FeedLiveness, FirmwareVerb,
     PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiStatus, device_escape_action,
     device_firmware_line, device_identity_line, device_status_kind, firmware_face_preview_sentence,
-    firmware_verb, pending_escape_action, pending_firmware_line,
+    firmware_verb, pending_escape_action, pending_firmware_line, pending_identity_rows,
 };
 
 use super::device_pick_popover::{
@@ -221,6 +222,8 @@ pub(crate) fn DeviceRosterCard(
 
     let identity_line = device_identity_line(&card);
     let identity = identity_line.display();
+    let identity_rows = identity_line.rows();
+    let memory_mark = identity_line.firmware.memory_mark();
     // Which zone owns the running activity, if any: its bar lights, its
     // verb row holds Cancel, and every other verb row withdraws (D9).
     let busy_zone = card
@@ -255,9 +258,22 @@ pub(crate) fn DeviceRosterCard(
                         }
                         StatusChip { status }
                     }
-                    // board · chip · MAC · firmware (AC3), joined in core so
-                    // a hello-only board still names its chip.
-                    p { class: mono_line_class(), title: "{identity}", "{identity}" }
+                    // board · chip / MAC · firmware (AC3), split in core so
+                    // a hello-only board still names its chip — two FIXED
+                    // rows, because one line ellipsised every card at
+                    // "… · fw fw-esp…" and lost the firmware clause on the
+                    // card it exists for. The memory mark is the same
+                    // selectable text in the dim tone: memory reads as
+                    // memory at a glance.
+                    div { class: identity_rows_class(), title: "{identity}",
+                        p { class: mono_line_class(), "{identity_rows.board}" }
+                        p { class: mono_line_class(),
+                            "{identity_rows.firmware}"
+                            if let Some(mark) = memory_mark {
+                                span { class: "tw:text-dim-foreground", " · {mark}" }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -542,13 +558,12 @@ pub(crate) fn PendingLinkCard(
         label: "Identifying".to_string(),
         kind: lpa_studio_core::UiStatusKind::Working,
     };
-    // The identity a link that has said nothing yet actually has: the chip
-    // off the boot banner, and the honest statement that nothing else is
-    // knowable until firmware runs on it.
-    let identity = match pending.detected_chip.as_deref() {
-        Some(chip) => format!("chip: {chip} · no identity until flashed"),
-        None => "no identity yet".to_string(),
-    };
+    // The identity a link that has said nothing yet actually has, in the
+    // settled card's two-row grammar (chip above, MAC · firmware below) —
+    // decided in core per identification stage, so a pending card reads
+    // like the cards beside it rather than one sentence in a two-row slot.
+    let identity_rows = pending_identity_rows(&pending);
+    let identity = identity_rows.display();
     let state_line = match pending.detail.as_deref() {
         Some(detail) => format!("{} · {detail}", pending.state_label),
         None => pending.state_label.clone(),
@@ -569,7 +584,13 @@ pub(crate) fn PendingLinkCard(
                         }
                         StatusChip { status }
                     }
-                    p { class: mono_line_class(), title: "{identity}", "{identity}" }
+                    // The same two-row slot as the settled card's identity,
+                    // filled the same way, so a pending card's header
+                    // measures — and reads — the same as its neighbours'.
+                    div { class: identity_rows_class(), title: "{identity}",
+                        p { class: mono_line_class(), "{identity_rows.board}" }
+                        p { class: mono_line_class(), "{identity_rows.firmware}" }
+                    }
                 }
             }
 
@@ -1080,7 +1101,15 @@ pub(super) fn row_note_class() -> &'static str {
 }
 
 fn mono_line_class() -> &'static str {
-    "tw:m-0 tw:truncate tw:font-mono tw:text-[0.68rem] tw:text-subtle-foreground"
+    "tw:m-0 tw:h-4 tw:truncate tw:font-mono tw:text-[0.68rem] tw:leading-4 tw:text-subtle-foreground"
+}
+
+/// The header's identity slot: TWO fixed 16px mono rows (32px), whether the
+/// second holds anything or not — the header is 90px in every state (ADR
+/// 2026-09-03, amended 2026-09-04), and a card whose identity is one row
+/// short stays level with its neighbours rather than sitting 16px higher.
+fn identity_rows_class() -> &'static str {
+    "tw:grid tw:h-8 tw:min-w-0 tw:content-start"
 }
 
 #[cfg(test)]

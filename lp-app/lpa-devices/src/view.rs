@@ -187,6 +187,12 @@ pub struct PendingLinkView {
     pub firmware_face: FirmwareFace,
     /// Chip read off the boot banner, normalized ("esp32c6").
     pub detected_chip: Option<String>,
+    /// The MAC, once something has read it — the flash preflight's probe
+    /// is the one source for a link that has never said hello. Only the
+    /// MAC, never the endpoint: a port name is where the link is, not who
+    /// the board is, and the pending card's identity row must not pass one
+    /// off as the other.
+    pub mac: Option<String>,
     /// Dismiss, expressed as [`Escape::Forget`].
     pub escapes: Vec<Escape>,
 }
@@ -584,6 +590,7 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
             None => FirmwareFace::Unknown,
         },
         detected_chip: entry.evidence().detected_chip().map(str::to_string),
+        mac: entry.identity().mac.as_ref().map(|mac| mac.0.clone()),
         escapes: vec![Escape::Forget],
     }
 }

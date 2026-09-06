@@ -31,7 +31,7 @@ use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::device_pick_popover::{
     BoardPickMode, BoardPickPopover, ChipSource, ProjectPickPopover,
 };
-use crate::app::home::device_roster_card::DeviceRosterCard;
+use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
 use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
@@ -598,6 +598,71 @@ fn devices_card_live_feed() -> Element {
 }
 
 #[story(
+    description = "The pending card at each identification stage, beside a settled neighbour (follow-up filed at the ship of PR #518). The header's identity is the SAME two fixed mono rows the settled card prints — hardware above, binding · firmware below — decided in core per stage (`pending_identity_rows`), so a link still identifying reads like the cards around it instead of one sentence sitting in a two-row slot. NOTHING HEARD (a board parked in ROM or saying nothing): \"chip unknown\" over \"no identity until flashed\" — neither row blank, because an empty first row under an Identifying chip reads as a fault. CHIP ONLY (the boot banner named it, still identifying): \"esp32c6\" over the same sentence, exactly the row a settled pre-hello board prints. CHIP + MAC (the flash preflight probed it, verdict settled blank): \"esp32c6\" over \"60:55:f9:0a:0b:0c · no firmware\" — the settled card's own words the moment a binding exists, and never \"until flashed\" beside a MAC. SETTLED (the running neighbour from devices_card_states) is here for the level check: headers stay 90px, so a pending card's zones start where its neighbour's do (ADR 2026-09-03, amended 2026-09-04). The pending card keeps its own zone set — FIRMWARE + terminal and DEVICE, no project zone — so it is shorter by design; what must line up is the header."
+)]
+fn devices_card_pending() -> Element {
+    let stages = pending_stage_fixtures();
+    let (settled_label, settled, settled_open) = card_state_fixtures()
+        .into_iter()
+        .next()
+        .expect("the state sheet's first card is the running neighbour");
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(2,400px)] tw:items-start tw:gap-3",
+                for (label , pending) in stages {
+                    div { key: "{label}", class: "tw:grid tw:gap-2",
+                        p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
+                            "{label}"
+                        }
+                        PendingLinkCard { pending, on_action: |_| {} }
+                    }
+                }
+                div { key: "settled", class: "tw:grid tw:gap-2",
+                    p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
+                        "settled neighbour · {settled_label}"
+                    }
+                    DeviceRosterCard {
+                        card: settled,
+                        open_uid: settled_open,
+                        projects: packages(),
+                        examples: examples(),
+                        on_action: |_| {},
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The three identification stages of `devices_card_pending`, labelled.
+fn pending_stage_fixtures() -> Vec<(&'static str, PendingLinkView)> {
+    let identifying = roster_fixture().roster.pending[0].clone();
+    let blank = roster_fixture().roster.pending[1].clone();
+    vec![
+        (
+            "nothing heard",
+            PendingLinkView {
+                link: DeviceLinkId(5),
+                device: DeviceId(105),
+                title: "Fake ESP32 (usb-5)".to_string(),
+                detail: Some("found 4 s ago".to_string()),
+                detected_chip: None,
+                mac: None,
+                ..identifying.clone()
+            },
+        ),
+        ("chip only", identifying),
+        (
+            "chip + mac",
+            PendingLinkView {
+                mac: Some("60:55:f9:0a:0b:0c".to_string()),
+                ..blank
+            },
+        ),
+    ]
+}
+
+#[story(
     description = "The quiet state: a board whose port is open and which has stopped saying anything (NotResponding). It is deliberately undramatic — the chip reads Not responding in the neutral tone, and the DEVICE zone's info line carries the honest staleness (\"last heard 4 min ago\") rather than an invented failure, with the way out beside it: Reset · Retry (re-run identification, no replug needed) · Disconnect … Forget. Nothing is claimed about what is loaded: the board has not said, so the PROJECT zone's info line stays empty at its height and the preview slot says the feed has nothing to show. The FIRMWARE zone still names the firmware and board the record remembers — going quiet does not unlearn what the board already said."
 )]
 fn devices_card_not_responding() -> Element {
@@ -716,6 +781,7 @@ fn roster_fixture() -> DeviceRosterView {
                     // Mid-identification: no settled verdict, no flash face.
                     firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
                     detected_chip: Some("esp32c6".to_string()),
+                    mac: None,
                     escapes: vec![DeviceEscape::Forget],
                 },
                 PendingLinkView {
@@ -729,6 +795,7 @@ fn roster_fixture() -> DeviceRosterView {
                     // Flash) rides this pending card.
                     firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
                     detected_chip: Some("esp32c6".to_string()),
+                    mac: None,
                     escapes: vec![DeviceEscape::Forget],
                 },
             ],
@@ -1031,7 +1098,7 @@ fn roster_page_fixture() -> DeviceRosterView {
 /// story is that an activity changes what the rows say and never how tall
 /// they are.
 #[story(
-    description = "One card per FIRMWARE FACE — the sheet that did not exist when an older board shipped drawn as a blank chip (bench 2026-09-04: a proto-19 classic on a proto-20 Studio read \"Blank flash — needs firmware\" and \"no firmware\" while its terminal decoded the hello naming fw-esp32v3 and a heartbeat carrying a red fault). Eight cards in 400px columns, each in ITS OWN words, decided in core and tested per variant. Two VERBS for two situations (ruled 2026-09-04): a running LightPlayer offers UPDATE FIRMWARE, matching its line's \"update recommended\"; a needs-firmware face offers FLASH FIRMWARE with the board pick, since nothing is known. OLDER (a running LightPlayer one wire version behind — still Ready, the project and its fault still on the project line, the firmware line reading \"<firmware> · <board> — older than Studio, update recommended\", and Update firmware as ONE click because the registry knows the board: offered, never forced — warn, then proceed); OLDER, BOARD UNKNOWN (the bench classic verbatim: its hello says `?` because the board id comes from the manifest Studio stamps at flash and this board was flashed from the CLI, the registry has no board either, and a classic chip fits several boards — so the SAME Update verb opens the pick once, and the panel says why); NEWER (the same the other way, no recommendation); PRE-HELLO (speaks the framing, never said hello); FOREIGN (a recognised factory firmware, named); BOOTLOADER (parked in ROM download mode); SILENT (open port, nothing heard, Retry beside Reset); and ATTACHED — NOT LISTENING (the older classic after Disconnect, bench 2026-09-04: the window restarted so the Firmware zone says \"No firmware reported yet\", while the header keeps the chip, board and firmware the record remembers — \"fw fw-esp32v3 7c80a27 (last seen)\", memory marked as memory, never a live claim). The chip is the STATUS, unchanged by the wire version; the face's sentence lives in the Firmware zone — and every card measures the same height (AC2)."
+    description = "One card per FIRMWARE FACE — the sheet that did not exist when an older board shipped drawn as a blank chip (bench 2026-09-04: a proto-19 classic on a proto-20 Studio read \"Blank flash — needs firmware\" and \"no firmware\" while its terminal decoded the hello naming fw-esp32v3 and a heartbeat carrying a red fault). Eight cards in 400px columns, each in ITS OWN words, decided in core and tested per variant. Two VERBS for two situations (ruled 2026-09-04): a running LightPlayer offers UPDATE FIRMWARE, matching its line's \"update recommended\"; a needs-firmware face offers FLASH FIRMWARE with the board pick, since nothing is known. OLDER (a running LightPlayer one wire version behind — still Ready, the project and its fault still on the project line, the firmware line reading \"<firmware> · <board> — older than Studio, update recommended\", and Update firmware as ONE click because the registry knows the board: offered, never forced — warn, then proceed); OLDER, BOARD UNKNOWN (the bench classic verbatim: its hello says `?` because the board id comes from the manifest Studio stamps at flash and this board was flashed from the CLI, the registry has no board either, and a classic chip fits several boards — so the SAME Update verb opens the pick once, and the panel says why); NEWER (the same the other way, no recommendation); PRE-HELLO (speaks the framing, never said hello); FOREIGN (a recognised factory firmware, named); BOOTLOADER (parked in ROM download mode); SILENT (open port, nothing heard, Retry beside Reset); and ATTACHED — NOT LISTENING (the older classic after Disconnect, bench 2026-09-04: the window restarted so the Firmware zone says \"No firmware reported yet\", while the header keeps the chip, board and firmware the record remembers — \"fw-esp32v3 7c80a27 · last seen\", memory marked as memory in the dim tone, never a live claim). The header's identity is TWO fixed mono rows (board · chip, then MAC · firmware — spike device-card-identity-line, 2026-09-04) because one truncated line ellipsised every card here at \"… · fw fw-esp…\" and hid exactly that clause. The chip is the STATUS, unchanged by the wire version; the face's sentence lives in the Firmware zone — and every card measures the same height (AC2)."
 )]
 fn devices_card_firmware_faces() -> Element {
     let faces = firmware_face_fixtures();
@@ -1267,7 +1334,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
     // handed back. The window restarted, so the face is Unknown and the
     // Firmware zone honestly says nothing was reported — while the header
     // keeps the identity the board already earned: chip and board from the
-    // record, and the firmware it last ran, marked "(last seen)" rather
+    // record, and the firmware it last ran, marked "· last seen" rather
     // than passed off as live.
     let attached_closed = DeviceView {
         id: DeviceId(37),

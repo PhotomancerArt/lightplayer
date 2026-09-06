@@ -70,17 +70,14 @@ fn serial_thread_loop(
 
         // Process incoming client messages (non-blocking)
         while let Ok(msg) = client_rx.try_recv() {
-            // Serialize message to JSON
-            let json = match lpc_wire::json::to_string(&msg) {
-                Ok(j) => j,
+            // Frame as one `M!{json}\n` line (the shared framer).
+            let data = match lpc_wire::json::to_serial_line(&msg) {
+                Ok(line) => line.into_bytes(),
                 Err(e) => {
                     log::warn!("Serial thread: Failed to serialize client message: {e}");
                     continue;
                 }
             };
-
-            // Add M! prefix and newline
-            let data = format!("M!{json}\n").into_bytes();
 
             log::debug!(
                 "Serial thread: Writing client message id={} ({} bytes) to serial",

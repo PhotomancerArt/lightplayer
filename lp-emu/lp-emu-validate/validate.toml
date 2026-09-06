@@ -1,0 +1,123 @@
+# The validation system's policy table.
+#
+# `[[set]]`  — named lists of payloads, so a desk session is "run this set on
+#              this port" and nothing else (vision D10: quick turnaround is the
+#              design goal).
+# `[[configuration]]`
+#            — the named reference implementations (plan PD4) and, per field
+#              class, what each is trusted for. Trust is stated, never inferred:
+#              a class with no entry is `modeled`, because silence is not trust.
+#
+# The payload registry is NOT here — it lives in `src/payload.rs`, because it
+# carries regexes and field classes that a TOML file could only hold as strings
+# nobody checks. This file is policy; that file is parsing.
+
+# ---------------------------------------------------------------------------
+# Sets
+# ---------------------------------------------------------------------------
+
+[[set]]
+name = "compile-parity"
+description = "The incremental-compile harness: heap parity and the cycle-model measurement (spike report §11.1)."
+payloads = ["shader-compile-stress"]
+
+[[set]]
+name = "g3-desk"
+description = "The G3 desk batch: the compile harness plus the GPIO calibration payload, captured in one sitting."
+payloads = ["shader-compile-stress", "gpio-calibrate"]
+
+[[set]]
+name = "lab-tap"
+description = "The bridge harness that turns a spare board into the lab's USB-to-UART tap. Not a measurement of a device under test — the instrument that makes one possible (g3-desk-batch.md step 4)."
+payloads = ["uart-bridge"]
+
+[[set]]
+name = "pins"
+description = "Payloads that make a claim about a pin."
+payloads = ["gpio-calibrate"]
+
+# ---------------------------------------------------------------------------
+# Configurations
+# ---------------------------------------------------------------------------
+
+[[configuration]]
+# Identity is the CHIP, not the board (Yona, G2 2026-09-06): this is chip
+# simulation, not board simulation, and the board is not something the runner
+# can determine programmatically anyway. Which board a capture came from lives
+# in that transcript's sidecar as `board`, beside `mac` and `silicon_rev`.
+name = "silicon:esp32c6"
+description = "Real ESP32-C6 silicon on a serial port. The desk board is a XIAO ESP32-C6 (chip revision v0.2, MAC a0:f2:62:87:b4:8c), which each transcript records in its own sidecar."
+chip = "esp32c6"
+
+[[configuration.trust]]
+class = "memory"
+grade = "measured"
+because = "the board is the ground truth; nothing models it"
+
+[[configuration.trust]]
+class = "timing"
+grade = "measured"
+because = "a real clock on real flash with real wait states"
+
+[[configuration.trust]]
+class = "pin"
+grade = "measured"
+because = "a scope or a logic analyser on the header pin is the definition of what the pin did"
+
+[[configuration.trust]]
+class = "usb-serial-jtag"
+grade = "measured"
+because = "a real host really attaches, or really does not"
+
+[[configuration.trust]]
+class = "boot-log"
+grade = "measured"
+because = "the real ROM and the real IDF bootloader printed it"
+
+[[configuration.trust]]
+class = "wire"
+grade = "measured"
+because = "real bytes over a real port"
+
+[[configuration]]
+name = "esp-emu:0.42.0"
+description = "Espressif's binary emulator, 0.42.0. A second oracle for the C6 only where the desk validated it (spike report §11)."
+chip = "esp32c6"
+
+[[configuration.trust]]
+class = "memory"
+grade = "measured"
+because = "byte-equal to silicon on the same image: harness peak/resident/after-drop 48,132/18,932/3,976 B and all 184 per-tick values (spike report §11.1); meteor load gate 216,056 B (§11.2)"
+
+[[configuration.trust]]
+class = "boot-log"
+grade = "documented"
+because = "same words and values as silicon, different columns — the intercepted ROM printf drops width and zero-pad flags (spike report §11.1)"
+
+[[configuration.trust]]
+class = "timing"
+grade = "modeled"
+because = "no cycle model. Compile ticks run 2.37x faster than silicon and log-bearing ticks 14.5x, because the ROM UART drains for free; the harness's own 5 ms slice budget passes here and FAILS on the board (spike report §11.1)"
+
+[[configuration.trust]]
+class = "usb-serial-jtag"
+grade = "modeled"
+because = "asserts SOF forever and reports EP1 free forever, so the firmware serves into the void believing a host is attached (spike report §4). Never trust a USB-SJ claim from here"
+
+[[configuration.trust]]
+class = "pin"
+grade = "modeled"
+because = "no pin observation: RMT frames are produced and vanish. IO_MUX is modeled only to GPIO15, and the WS281x pin is GPIO18 (spike report §8)"
+
+[[configuration.trust]]
+class = "wire"
+grade = "measured"
+because = "the masked UART0 walk transcript is content-identical to silicon's (spike report §11.3)"
+
+[[configuration]]
+name = "lp-emu:esp32c6:t1"
+description = "Our own C6 machine at time grade 1. Unavailable until M3 — listed so the seam has a name."
+chip = "esp32c6"
+# No trust entries: nothing has been measured, so everything is `modeled`.
+# M3 earns the memory entry the same way esp-emu did — with a committed
+# transcript that this crate replays.

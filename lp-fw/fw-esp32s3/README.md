@@ -86,7 +86,7 @@ a disagreement there means the two sides ran different vectors and every
 comparison after it is meaningless.
 
 **The harness decides nothing.** No `PASS`, no `FAIL`, no comparison. The
-predictions live in `lp-xt/lp-xt-emu/tests/fixtures/fp/` and were committed
+predictions live in `lp-emu/lp-xt-emu/tests/fixtures/fp/` and were committed
 before any board ran (M6 D2); classification is the host's job. A device that
 graded itself would be the tautology the whole milestone is arranged to avoid —
 so, as with `test_xt_jit_corpus`, **a disagreement is a finding to triage and

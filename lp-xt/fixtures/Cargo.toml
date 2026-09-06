@@ -2,11 +2,11 @@
 #
 # This is its own workspace precisely so the root (stable, host-only) workspace
 # never tries to build it; the root Cargo.toml lists it (and the guest crate,
-# which lives one level up as a product crate — see the BACKPORT landing table)
-# in its exclude list. Build with ./build.sh (or `cargo build --release` here).
+# which lives under `lp-emu/` with the rest of the emulation family) in its
+# exclude list. Build with ./build.sh (or `cargo build --release` here).
 [workspace]
 resolver = "2"
-members = ["../lp-xt-emu-guest", "../lps-builtins-xt-app", "corpus"]
+members = ["../../lp-emu/lp-xt-emu-guest", "../lps-builtins-xt-app", "corpus"]
 
 [profile.release]
 opt-level = "s"

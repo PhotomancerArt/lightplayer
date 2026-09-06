@@ -17,7 +17,7 @@ workspace = true
 reloc = ["dep:lp-xt-inst"]
 
 [dependencies]
-lp-xt-emu = { path = "../lp-xt-emu" }
+lp-xt-emu = { path = "../../lp-emu/lp-xt-emu" }
 lp-xt-inst = { path = "../lp-xt-inst", optional = true }
 object = { version = "0.36", default-features = false, features = ["read", "std", "elf"] }
 

@@ -37,6 +37,30 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_records: true,
     },
     FwCheckConfig {
+        check: FwCheck::GpioCalibrate,
+        display_name: "Host-driven GPIO square-wave calibration",
+        firmware_features: &["test_gpio_calibrate"],
+        // The payload serves until the host stops asking; it never finishes.
+        // Its sentinel is the readiness line `CAL READY target=`, which
+        // lp-emu-validate's payload registry carries as `Sentinel::Ready`.
+        done_marker: None,
+        trace_slug: "gpio-calibrate",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+    },
+    FwCheckConfig {
+        check: FwCheck::UartBridge,
+        display_name: "Transparent USB-Serial-JTAG <-> UART0 bridge",
+        firmware_features: &["test_uart_bridge"],
+        // The bridge serves until it is unplugged; it never finishes. Its
+        // sentinel is the readiness line `UART-BRIDGE READY `, which
+        // lp-emu-validate's payload registry carries as `Sentinel::Ready`.
+        done_marker: None,
+        trace_slug: "uart-bridge",
+        supported_targets: ESP32_ONLY,
+        emits_records: false,
+    },
+    FwCheckConfig {
         check: FwCheck::JitMathPerf,
         display_name: "JIT Q32 math perf",
         firmware_features: &["test_jit_math_perf"],

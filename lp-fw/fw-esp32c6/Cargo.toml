@@ -68,7 +68,26 @@ stress_s3 = ["radio"]  # ESP-NOW broadcast chatter, max payload, back to back
 test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lpc-shared)
 test_gpio = []  # Test GPIO pin toggle
-test_gpio_calibrate = []  # Host-driven GPIO square-wave calibration mode
+# Host-driven GPIO square-wave calibration. The line protocol and the duty
+# ramp live in fw-checks as the `gpio-calibrate` payload; this feature is the
+# alias that keeps `just fwtest-gpio-calibrate-esp32c6` and `just
+# calibrate-gpio` working (Q12 retirement ledger, notes.md).
+test_gpio_calibrate = ["dep:fw-checks", "fw-checks/check-gpio-calibrate"]
+# The lab's USB-to-UART tap: this board becomes a transparent bridge between
+# its own USB-Serial-JTAG link and UART0 (GPIO16/17), so a SECOND board's UART0
+# console reaches the Mac. The queue and the pump step live in fw-checks as the
+# `uart-bridge` payload; this feature is the firmware alias, and `just
+# fwtest-uart-bridge-esp32c6` builds it.
+#
+# ⚠️ Flash it only onto the board you mean to use as the bridge. It replaces the
+# app entry point, so the board serves no projects while it carries this image.
+test_uart_bridge = ["dep:fw-checks", "fw-checks/check-uart-bridge"]
+# `test_uart_bridge` at 921,600 instead of the ROM's 115,200 — for a far side
+# that is `spike_uart0_link`'s driver rather than the mask ROM. Meaningless on
+# its own; use it WITH `test_uart_bridge`. Deliberately does NOT imply
+# `spike_uart0_link`: that feature moves the shipped image's host link and tees
+# the harness logger, and the bridge wants neither — only its baud rate.
+uart_bridge_fast = []
 test_button = ["server"]  # Test root-owned GPIO button input with internal pull-up
 test_usb = []  # Test USB serial communication
 test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat via OUTGOING_SERVER_MSG)
@@ -95,6 +114,20 @@ test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1
 # ⚠️ Never enable either in a released image: they exist to make a device
 # LIE about its wire protocol.
 fixture-old-proto = ["lpa-server/fixture-old-proto"]
+
+# esp-emu SPIKE scaffolding (docs/reports/2026-09-07-esp-emu-c6-spike.md),
+# OFF by default, never shipped. Espressif's binary emulator has no USB host
+# behind its USB-Serial-JTAG model: SOF is asserted forever and the EP1 FIFO
+# always reports "data free" (the connection monitor therefore believes a
+# draining host is attached) while every byte written vanishes; UART0 is the
+# serial it bridges to the host. This moves the host link to UART0 (GPIO16/17, 921600 8N1) and
+# tees the harnesses' `Esp32UsbSerialIo` output there through the ROM, so the
+# wire protocol and `test_*` harnesses can run under the emulator. Costs the
+# shipping image nothing: every hunk is `cfg`'d out. `touch src/main.rs`
+# after flipping.
+#
+#   cargo build --profile release-esp32 --features esp32c6,server,radio,spike_uart0_link
+spike_uart0_link = []
 fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core/fixture-no-hello"]
 
 [dependencies]

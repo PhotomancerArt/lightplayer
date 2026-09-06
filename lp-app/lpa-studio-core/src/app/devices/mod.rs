@@ -68,8 +68,8 @@ pub use device_flash::{
 };
 pub use device_frame_feed::{DEVICE_FEED_PARK_AFTER_FAILURES, DeviceFrameFeed, DeviceFrameFeeds};
 pub use device_identity::{
-    DeviceIdentityLine, IdentityFirmware as DeviceIdentityFirmware, device_chip,
-    device_identity_line,
+    DeviceIdentityLine, IdentityFirmware as DeviceIdentityFirmware, IdentityRows, device_chip,
+    device_identity_line, pending_identity_rows,
 };
 pub use device_push::{
     DevicePushOp, PushOffer, PushSource, PushSourceChoice, PushSourceGroup,

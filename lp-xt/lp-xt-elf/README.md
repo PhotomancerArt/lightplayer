@@ -27,7 +27,7 @@ Defined in [`src/abi.rs`](src/abi.rs): the guest executes the `SYSCALL`
 instruction with the syscall number in `a2` and arguments in `a3..a5`; the
 host writes the result into `a2` and resumes (or terminates the run for
 `SYS_EXIT` / `SYS_PANIC`). The guest-side mirror is
-`lp-xt/lp-xt-emu-guest`; the two constants files must stay in sync.
+`lp-emu/lp-xt-emu-guest`; the two constants files must stay in sync.
 
 Address expectations for fixtures (see `fixtures/link.ld`): `.text` at
 `0x40378000` (the I-bus alias of SRAM1 `0x3FC88000`), data at D-bus

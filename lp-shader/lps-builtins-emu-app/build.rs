@@ -1,15 +1,15 @@
 fn main() {
     // Use the linker script from lp-riscv-emu-guest crate
     // CARGO_MANIFEST_DIR points to lps-builtins-emu-app directory
-    // We need to go up to apps/, then to lp-shader/, then to root, then to lp-riscv/lp-riscv-emu-guest
+    // We need to go up to apps/, then to lp-shader/, then to root, then to lp-emu/lp-riscv-emu-guest
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
 
-    // Go from lp-shader/lps-builtins-emu-app to lp-riscv/lp-riscv-emu-guest
+    // Go from lp-shader/lps-builtins-emu-app to lp-emu/lp-riscv-emu-guest
     let emu_guest_path = std::path::Path::new(&manifest_dir)
         .parent() // lp-shader/
         .and_then(|p| p.parent()) // root/
         .and_then(|p| {
-            p.join("lp-riscv")
+            p.join("lp-emu")
                 .join("lp-riscv-emu-guest")
                 .canonicalize()
                 .ok()

@@ -11,7 +11,7 @@ use crate::{
     LinkManagementRequest, LinkManagementResult, LinkProvider, LinkServerConnection, LinkSession,
     LinkSessionStatus,
 };
-use lpa_client::stream::SerialPortByteStream;
+use lpa_client::stream::{SerialPortByteStream, TcpByteStream};
 use lpa_client::transport_serial::{
     HardwareSerialOptions, SerialLineObserver, create_hardware_serial_transport_pair_with_options,
 };
@@ -381,8 +381,20 @@ impl LinkProvider for HostSerialEsp32Provider {
         // the device console feed. An app-supplied observer still sees
         // every line too.
         let observed_lines = Arc::new(std::sync::Mutex::new(Vec::new()));
+        // `tcp://host:port` (from the `serial:tcp://host:port` host
+        // specifier — documented in `lp-cli/README.md`) names a device
+        // link over TCP instead of a real serial port: an emulator's UART
+        // (esp-emu `--uart-tcp`, QEMU `-serial tcp::PORT,server`), and the
+        // only way to reach one on macOS, where a pty cannot stand in for
+        // a serial port (`serialport` sets the baud rate through
+        // `IOSSIOSPEED`, which a pty driver refuses with `ENOTTY`). No
+        // modem lines, so no reset on open — the readiness hello request
+        // establishes the session instead. Permanent as of D4
+        // (`~/.photomancer/planning/lp2025/2026-09-06-1001-esp-emulator/vision.md`),
+        // not a spike.
+        let tcp_addr = endpoint.port_name.strip_prefix("tcp://");
         let serial_options = HardwareSerialOptions {
-            reset_after_open: self.options.reset_after_open,
+            reset_after_open: self.options.reset_after_open && tcp_addr.is_none(),
             line_observer: Some(Arc::new(TeeLineObserver {
                 buffer: Arc::clone(&observed_lines),
                 inner: self.options.line_observer.clone(),
@@ -391,14 +403,22 @@ impl LinkProvider for HostSerialEsp32Provider {
         // Port opening happens here (the provider owns the endpoint→port
         // mapping); the transport machinery below the byte-stream seam is
         // port-agnostic and shared with the fake device.
-        let stream =
-            SerialPortByteStream::open(&endpoint.port_name, baud_rate).map_err(|error| {
+        let stream: Box<dyn lpa_client::DeviceByteStream> = match tcp_addr {
+            Some(addr) => Box::new(TcpByteStream::connect(addr).map_err(|error| {
                 LinkError::ConnectionFailed {
                     message: error.to_string(),
                 }
-            })?;
+            })?),
+            None => Box::new(
+                SerialPortByteStream::open(&endpoint.port_name, baud_rate).map_err(|error| {
+                    LinkError::ConnectionFailed {
+                        message: error.to_string(),
+                    }
+                })?,
+            ),
+        };
         let transport = create_hardware_serial_transport_pair_with_options(
-            Box::new(stream),
+            stream,
             &endpoint.port_name,
             serial_options,
         )

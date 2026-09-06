@@ -3,6 +3,8 @@ use core::fmt;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FwCheck {
     ShaderCompileStress,
+    GpioCalibrate,
+    UartBridge,
     JitMathPerf,
     Json,
     Rmt,
@@ -15,6 +17,8 @@ impl FwCheck {
     pub const fn slug(self) -> &'static str {
         match self {
             Self::ShaderCompileStress => "shader-compile-stress",
+            Self::GpioCalibrate => "gpio-calibrate",
+            Self::UartBridge => "uart-bridge",
             Self::JitMathPerf => "jit-math-perf",
             Self::Json => "json",
             Self::Rmt => "rmt",

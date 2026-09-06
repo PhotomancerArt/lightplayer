@@ -101,7 +101,7 @@ correctly reframed as a flash-budget and unprobed-LX6-FPU question.
 > flash nor numerics but **speed**: ~17 % slower than Q32 at 1500 LEDs.
 
 And the
-SRAM→flash call reach is now testable, which `lp-xt/lp-xt-emu/tests/call_range.rs`
+SRAM→flash call reach is now testable, which `lp-emu/lp-xt-emu/tests/call_range.rs`
 does.
 
 That test also found something worth having: on **classic**, IROM sits only

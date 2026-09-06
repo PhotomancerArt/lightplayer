@@ -4,7 +4,7 @@ The **M6 Xtensa FP conformance corpus**: a deterministic, float-free, `no_std`
 generator for the vectors `lp-xt-emu` predicts and the desk ESP32-S3 answers.
 
 This crate holds no expected results. It generates *inputs*. The predictions
-live in `lp-xt/lp-xt-emu/tests/fixtures/fp/`, and the silicon answers arrive in
+live in `lp-emu/lp-xt-emu/tests/fixtures/fp/`, and the silicon answers arrive in
 M6 P6.
 
 ## Why it is shaped this way

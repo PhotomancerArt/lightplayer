@@ -164,7 +164,7 @@ reliable. Not needed: `run == depth` holds exactly at three depths on silicon.
 No GPL source was read or adapted. The windowed-ABI facts above come from the
 Xtensa ISA Reference Manual's Windowed Register Option and the ESP32-S3 TRM's
 address map, cross-checked against `lp-xt-emu`'s own window machinery
-(`lp-xt/lp-xt-emu/src/executor/window.rs`), which is LightPlayer code that was
+(`lp-emu/lp-xt-emu/src/executor/window.rs`), which is LightPlayer code that was
 dual-run against S3 silicon to depth 100 during the Xtensa backport spike.
 `esp-backtrace` (MIT/Apache-2.0) was read as a behavioral cross-check on the
 save-area offsets after the layout had been derived; no code was copied from
