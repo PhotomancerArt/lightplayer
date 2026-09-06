@@ -29,15 +29,15 @@ fn a_bound_prefix_leaves_the_tail_and_keeps_the_binding() {
     let graphics = TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl);
     assert_eq!(graphics.sample_batch_capacity(), CPU_SAMPLE_BATCH_POINTS);
     let options = ShaderCompileOptions::new(ShaderSemantics::Q32, ShaderFrontend::LpsGlsl);
-    let mut shader = graphics
-        .compile_shader(SHADER, &options)
-        .expect("compiles");
+    let mut shader = graphics.compile_shader(SHADER, &options).expect("compiles");
 
     // A 10-point window; the tail (points 7..10) is poisoned so an overrun shows.
     let mut points = graphics.create_sample_points(10).expect("points");
     let mut out = graphics.create_sample_out(10).expect("out");
     let poison = [0xBEEFu16; 40];
-    graphics.write_sample_out(&mut out, &poison).expect("poison");
+    graphics
+        .write_sample_out(&mut out, &poison)
+        .expect("poison");
 
     // First batch: x = 4 px at gain 1 → r = 0.25.
     let mut coords = vec![0i32; 20];
@@ -57,7 +57,11 @@ fn a_bound_prefix_leaves_the_tail_and_keeps_the_binding() {
         assert_eq!(data[i * 4], 16384, "point {i} r at gain 1");
         assert_eq!(data[i * 4 + 3], u16::MAX, "point {i} a");
     }
-    assert_eq!(&data[28..], &poison[28..], "the tail past count is untouched");
+    assert_eq!(
+        &data[28..],
+        &poison[28..],
+        "the tail past count is untouched"
+    );
 
     // Second batch with new coordinates and NO rebind: the binding persists.
     for pair in coords.chunks_exact_mut(2).take(3) {

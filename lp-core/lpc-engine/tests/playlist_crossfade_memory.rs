@@ -1,21 +1,25 @@
 //! The playlist crossfade's per-frame cost, measured across a transition.
 //!
-//! While a transition runs, the playlist samples both entries into two
-//! RGBA16 sample-outs and blends them. Until 2026-09-06 it created and freed
-//! both sample-outs EVERY frame — 16 B/lamp of churn through the classic's
+//! While a transition runs, the playlist samples both entries and blends
+//! them. Until 2026-09-06 it created and freed two count-sized RGBA16
+//! sample-outs EVERY frame — 16 B/lamp of churn through the classic's
 //! infallible allocator (the shape of
 //! `docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.md`), and
 //! on the host a leak outright, because the wasmtime backend's bump
-//! allocator never frees. The handles now live on the node for the
-//! transition's life.
+//! allocator never frees. Then the handles lived on the node for the
+//! transition's life; since bounded sample batches
+//! (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`) the playlist
+//! holds ONE window-sized sample-out (`min(lamps, 128) × 8` B) and blends
+//! batch by batch, so the transition's residency stopped scaling with lamps
+//! as well.
 //!
 //! What this probe pins: across every steady frame of a transition, the
 //! graphics backend receives **zero** `create_sample_out` calls, at two lamp
 //! counts — so the per-frame transient no longer scales with lamps. The
-//! transition's first frame allocates the two handles (plus whatever the
+//! transition's first frame allocates the window (plus whatever the
 //! newly-activated entry's own shader keeps resident on first use); a later
-//! transition between two warm entries allocates exactly two, proving the
-//! previous transition's end freed them.
+//! transition between two warm entries allocates exactly one window-sized
+//! handle, proving the previous transition's end freed it.
 //!
 //! Counted, not weighed: the host graphics backend is wasmtime and its
 //! sample-outs live in wasm linear memory, which the tracking allocator
@@ -487,16 +491,26 @@ fn playlist_crossfade_memory() {
 
     for scale in [10u32, 20] {
         let (lamps, first, second) = measure(scale);
-        let per_handle = lamps as usize * 8;
+        // The crossfade holds ONE window-sized sample-out, not two
+        // count-sized ones: sampling streams through a bounded batch
+        // (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`), so the
+        // handle is `min(lamps, batch capacity) × 8` bytes — 1,024 B at
+        // every scale here — and the per-transition cost stopped scaling
+        // with lamps at all.
+        let window = lamps.min(lp_gfx_lpvm::CPU_SAMPLE_BATCH_POINTS) as usize;
+        let per_handle = window * 8;
+        assert!(
+            window < lamps as usize,
+            "x{scale}: the probe must run past one window to prove the point"
+        );
 
-        // The transition's first frame allocates the playlist's two handles
-        // (and possibly the freshly-compiled entry's own resident buffers).
+        // The transition's first frame allocates the playlist's window (and
+        // possibly the freshly-compiled entry's own resident buffers).
         let opening = first[0];
         assert!(
-            opening.sample_out_calls >= 2 && opening.sample_out_bytes >= 2 * per_handle,
-            "x{scale}: the first transition frame must allocate the two crossfade sample-outs \
-             ({opening:?}, expected ≥ 2 calls / ≥ {} B)",
-            2 * per_handle
+            opening.sample_out_calls >= 1 && opening.sample_out_bytes >= per_handle,
+            "x{scale}: the first transition frame must allocate the crossfade window \
+             ({opening:?}, expected ≥ 1 call / ≥ {per_handle} B)"
         );
         // Every later frame of the transition: zero. This is the claim —
         // the per-frame graphics transient does not scale with lamps.
@@ -508,13 +522,13 @@ fn playlist_crossfade_memory() {
         }
 
         // Between two warm entries the opening frame allocates EXACTLY the
-        // two handles — which also proves the previous transition's end
-        // freed them — and nothing after.
+        // one window — which also proves the previous transition's end
+        // freed it — and nothing after.
         let opening = second[0];
         assert_eq!(
             (opening.sample_out_calls, opening.sample_out_bytes),
-            (2, 2 * per_handle),
-            "x{scale}: active→idle must open with exactly two {per_handle}-byte sample-outs \
+            (1, per_handle),
+            "x{scale}: active→idle must open with exactly one {per_handle}-byte sample-out \
              ({opening:?})"
         );
         for (index, tick) in second.iter().enumerate().skip(1) {

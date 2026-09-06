@@ -164,13 +164,16 @@ pub struct FixtureNode {
     /// into each tick. A fresh full-texture `Vec` per tick is a device OOM
     /// on large fixtures (flash-write-wedge defect, remaining exposure).
     read_back_scratch: alloc::vec::Vec<u8>,
-    sample_points: Option<FixtureSamplePoints>,
-    /// The Direct path's RGBA16 sample-out. Read in place every frame
-    /// through [`lp_gfx::LpGraphics::sample_out_data`] — no per-tick copy
-    /// (a fresh `Vec` per tick OOM-reset the classic under zook playback,
-    /// defect 2026-08-29-flash-write-wedges-under-zook-playback) and no
-    /// 8 B/lamp scratch to land it in.
-    sample_target: Option<SampleOutHandle>,
+    /// The Direct path's sampling window ([`SampleBatch`]): `min(lamps,
+    /// backend batch capacity)` points of coordinates, results and scratch,
+    /// resident for the node's life. Nothing per lamp lives here — the
+    /// coordinates are regenerated from the mapping every render, and each
+    /// batch's results are read in place through
+    /// [`lp_gfx::LpGraphics::sample_out_data`] and written straight into the
+    /// control target (no per-tick copy: a fresh `Vec` per tick OOM-reset the
+    /// classic under zook playback, defect
+    /// 2026-08-29-flash-write-wedges-under-zook-playback).
+    sample_batch: Option<SampleBatch>,
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
     /// Channel list for Direct sampling — the ONLY per-lamp data that stays
@@ -231,8 +234,7 @@ impl FixtureNode {
             last_settings: None,
             render_target: None,
             read_back_scratch: alloc::vec::Vec::new(),
-            sample_points: None,
-            sample_target: None,
+            sample_batch: None,
             precomputed: None,
             direct_channels: None,
             display_layout_revision: None,
@@ -478,8 +480,8 @@ impl FixtureNode {
             // (16 B/lamp, plus its doubling peak) — and encoded away entirely
             // when the list is the identity, which every document-resolved
             // mapping is. The coordinates the sampler needs are regenerated
-            // transiently in `ensure_fixture_sample_points` when its buffer
-            // key changes.
+            // from the mapping every render, one window at a time
+            // (`DirectCoordFill`).
             let channels = DirectChannels::from_mapping(self.mapping.as_mapping_ref());
             self.direct_channels = Some((mapping_ver, channels));
         }
@@ -579,35 +581,20 @@ impl FixtureNode {
     }
 }
 
-/// The persistent graphics-side sample-point buffer for Direct sampling,
-/// carrying the key its coordinates were last written for. Coordinates are
-/// derived purely from (mapping, render size), so the buffer is rewritten
-/// only when that key changes — not per frame. The key lives INSIDE the
-/// Option so a memory-pressure drop of the buffer drops the key with it and
-/// a recreated buffer is always rewritten; a detached key that survived the
-/// drop would claim freshly-zeroed coordinates were current, which is the
-/// silent-staleness failure this subsystem keeps re-learning
-/// (docs/debt/s3-frame-cost-scales-per-fixture.md).
-struct FixtureSamplePoints {
-    handle: SamplePointsHandle,
-    mapping_version: Revision,
-    width: u32,
-    height: u32,
-    /// The space these coordinates were generated for. A 1D batch is a
-    /// different *packing* as well as different numbers, so a space change
-    /// must rewrite the buffer.
-    space: VisualSpace,
-    /// The policy the request carried. It does not change these
-    /// coordinates today, but it is part of what the producer was asked —
-    /// keeping it in the key means a policy edit can never be served from
-    /// a buffer written under the old one.
-    policy: ConsumerPolicy,
-    /// The wire direction the 1D coordinates were generated for. Unlike
-    /// `policy` this DOES change the numbers (the strip reads back to
-    /// front), so a flip must rewrite the buffer.
-    wire_reversed: bool,
+/// The Direct path's sampling window: one batch of sample points, one batch
+/// of RGBA16 results, and the host-side coordinate scratch the batch is
+/// filled from, all sized to `capacity = min(lamps,
+/// LpGraphics::sample_batch_capacity())` — 128 points on the CPU backends,
+/// the whole product on the GPU. Allocated once per capacity and kept for
+/// the node's life; the coordinates are regenerated from the mapping every
+/// render (the mapping is their one home), so nothing here carries a key
+/// and a memory-pressure drop of the window loses nothing but the
+/// allocation (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
+struct SampleBatch {
+    points: SamplePointsHandle,
+    samples: SampleOutHandle,
+    coords: alloc::vec::Vec<i32>,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct FixtureDisplayLayoutKey {
     mapping_version: Revision,
@@ -1214,16 +1201,14 @@ impl FixtureNode {
             fixture_carries_2d_coords(self.mapping.as_mapping_ref(), area_rows),
         );
         if self.sampling == FixtureSamplingConfig::Direct {
-            let (channels_version, channels) = self
+            let channels = self
                 .direct_channels
                 .as_ref()
-                .map(|(ver, channels)| (*ver, channels))
+                .map(|(_, channels)| channels)
                 .ok_or_else(|| NodeError::msg("fixture direct render missing cached channels"))?;
             return render_direct_fixture_control(
-                &mut self.sample_points,
-                &mut self.sample_target,
+                &mut self.sample_batch,
                 self.mapping.as_mapping_ref(),
-                channels_version,
                 channels,
                 visual_product,
                 request,
@@ -1422,151 +1407,153 @@ fn ensure_fixture_render_target<'a>(
         .ok_or_else(|| NodeError::msg("fixture render target missing after allocation"))
 }
 
-fn ensure_fixture_sample_target<'a>(
-    current: &'a mut Option<SampleOutHandle>,
-    count: u32,
+fn ensure_sample_batch<'a>(
+    current: &'a mut Option<SampleBatch>,
+    capacity: u32,
     ctx: &ControlRenderContext<'_>,
-) -> Result<&'a mut SampleOutHandle, NodeError> {
+) -> Result<&'a mut SampleBatch, NodeError> {
     let stale = current
         .as_ref()
-        .is_none_or(|samples| samples.count() != count);
+        .is_none_or(|batch| batch.points.count() != capacity);
     if stale {
         let graphics = ctx
             .graphics()
-            .ok_or_else(|| NodeError::msg("fixture sample target allocation requires graphics"))?;
+            .ok_or_else(|| NodeError::msg("fixture sample window allocation requires graphics"))?;
+        // Drop (free) the stale window before allocating its replacement so
+        // the backend can reuse the memory.
         drop(current.take());
+        let points = graphics
+            .create_sample_points(capacity)
+            .map_err(err_ctx("fixture sample point allocation"))?;
         let samples = graphics
-            .create_sample_out(count)
+            .create_sample_out(capacity)
             .map_err(err_ctx("fixture sample target allocation"))?;
-        *current = Some(samples);
+        let mut coords = alloc::vec::Vec::new();
+        ensure_scratch_len(
+            &mut coords,
+            capacity as usize * 2,
+            "fixture sample coordinates",
+        )?;
+        *current = Some(SampleBatch {
+            points,
+            samples,
+            coords,
+        });
     }
     current
         .as_mut()
-        .ok_or_else(|| NodeError::msg("fixture sample target missing after allocation"))
+        .ok_or_else(|| NodeError::msg("fixture sample window missing after allocation"))
 }
 
-fn ensure_fixture_sample_points<'a>(
-    current: &'a mut Option<FixtureSamplePoints>,
-    mapping: MappingRef<'_>,
-    mapping_version: Revision,
-    count: u32,
-    output_width: u32,
-    output_height: u32,
-    space: VisualSpace,
-    policy: ConsumerPolicy,
-    wire_reversed: bool,
-    ctx: &ControlRenderContext<'_>,
-) -> Result<&'a mut SamplePointsHandle, NodeError> {
-    let current_matches = current.as_ref().is_some_and(|sp| {
-        sp.handle.count() == count
-            && sp.mapping_version == mapping_version
-            && sp.width == output_width
-            && sp.height == output_height
-            && sp.space == space
-            && sp.policy == policy
-            && sp.wire_reversed == wire_reversed
-    });
-    if current_matches {
-        return Ok(&mut current.as_mut().expect("checked above").handle);
-    }
+/// The coordinate source of one Direct render: a resumable cursor over the
+/// mapping (2D) or the strip (1D) that fills the sampling window one batch
+/// at a time, in mapping visit order. This is the one place the sampler's
+/// coordinates exist — computed per render from the mapping, never stored
+/// per lamp.
+enum DirectCoordFill<'a> {
+    /// Interleaved `[x, y]` pixel-space Q16 coordinates of the mapping's
+    /// lamp centres.
+    TwoD {
+        centers: lpc_model::nodes::fixture::MappingCenters<'a>,
+        output_width: u32,
+        output_height: u32,
+    },
+    /// 1-lane pixel-space Q16 coordinates of a strip request: lamp `k` sits
+    /// at the centre of texel `k` of an `(N, 1)` target.
+    ///
+    /// **This ignores the mapping, by design.** Strip position is the wire
+    /// order — the same visit order the 2D fill walks and the same order the
+    /// channel list was built in — and a fixture only ever receives a 1D
+    /// request when it declared that its strip order means something
+    /// (vision D1: fire2012 on a ring-mapped scarf runs along the scarf,
+    /// not around the ring). Pixel centres (`k + 0.5`) rather than `k`, so
+    /// sampling the strip and rendering an `(N, 1)` texture of it land on
+    /// the same points.
+    OneD {
+        next: u32,
+        count: u32,
+        wire_reversed: bool,
+    },
+}
 
-    let graphics = ctx
-        .graphics()
-        .ok_or_else(|| NodeError::msg("fixture sample point allocation requires graphics"))?;
-    // Reuse the buffer when only the key changed; recreate when the count did.
-    let mut handle = match current.take() {
-        Some(sp) if sp.handle.count() == count => sp.handle,
-        _ => graphics
-            .create_sample_points(count)
-            .map_err(err_ctx("fixture sample point allocation"))?,
-    };
-
-    // Regenerate coordinates transiently from the mapping — this is the one
-    // place they exist; the resident per-lamp state is the channel list
-    // alone. Runs only when the (mapping, size, count) key changes, never
-    // per frame. Streamed straight into the exactly-sized coords buffer: the
-    // point list is never materialized.
-    let generated_count = lpc_model::nodes::fixture::mapping_point_count(mapping);
-    if generated_count as u32 != count {
-        return Err(NodeError::msg(format!(
-            "fixture sample points out of sync with channels: mapping generated {generated_count} points for {count} channels"
-        )));
-    }
-    match space {
-        VisualSpace::TwoD => {
-            let coords = fixture_sample_point_coords(mapping, output_width, output_height);
-            graphics
-                .write_sample_points(&mut handle, &coords)
-                .map_err(err_ctx("fixture sample point write"))?;
+impl DirectCoordFill<'_> {
+    /// Write the next batch into `coords` (a window of `coords.len() / 2`
+    /// points) and return how many points it holds; `0` when the product is
+    /// exhausted.
+    fn fill(&mut self, coords: &mut [i32]) -> u32 {
+        match self {
+            Self::TwoD {
+                centers,
+                output_width,
+                output_height,
+            } => {
+                let mut n = 0u32;
+                for pair in coords.chunks_exact_mut(2) {
+                    let Some([x, y]) = centers.next() else {
+                        break;
+                    };
+                    pair[0] = normalized_q16_to_pixel_q16(normalized_f32_to_q16(x), *output_width);
+                    pair[1] = normalized_q16_to_pixel_q16(normalized_f32_to_q16(y), *output_height);
+                    n += 1;
+                }
+                n
+            }
+            Self::OneD {
+                next,
+                count,
+                wire_reversed,
+            } => {
+                let capacity = (coords.len() / 2) as u32;
+                let n = capacity.min(count.saturating_sub(*next));
+                for (slot, index) in coords.iter_mut().zip(*next..*next + n) {
+                    *slot = strip_point_coord(index, *count, *wire_reversed);
+                }
+                *next += n;
+                n
+            }
         }
-        VisualSpace::OneD => {
-            let coords = fixture_strip_point_coords(count, wire_reversed);
-            graphics
-                .write_sample_points_1d(&mut handle, &coords)
-                .map_err(err_ctx("fixture strip point write"))?;
-        }
     }
-
-    *current = Some(FixtureSamplePoints {
-        handle,
-        mapping_version,
-        width: output_width,
-        height: output_height,
-        space,
-        policy,
-        wire_reversed,
-    });
-    Ok(&mut current.as_mut().expect("just stored").handle)
 }
 
 /// The interleaved `[x, y]` pixel-space Q16 sample coordinates the graphics
-/// backend samples the visual at, in mapping visit order.
-///
-/// Exact-capacity and streamed: the point list is never materialized. Split
-/// out of `ensure_fixture_sample_points` so the mapping-representation
-/// differential test can compare the coordinates themselves without a
-/// graphics backend.
+/// backend samples the visual at, in mapping visit order — the whole
+/// product in one buffer, as [`DirectCoordFill::TwoD`] streams it batch by
+/// batch. Test-facing: the mapping-representation differential test
+/// compares the coordinates themselves without a graphics backend.
+#[cfg(test)]
 fn fixture_sample_point_coords(
     mapping: MappingRef<'_>,
     output_width: u32,
     output_height: u32,
 ) -> Vec<i32> {
-    let mut coords =
-        Vec::with_capacity(lpc_model::nodes::fixture::mapping_point_count(mapping) * 2);
-    lpc_model::nodes::fixture::for_each_mapping_point(mapping, 1, 1, |_, point| {
-        coords.push(normalized_q16_to_pixel_q16(
-            normalized_f32_to_q16(point.center[0]),
-            output_width,
-        ));
-        coords.push(normalized_q16_to_pixel_q16(
-            normalized_f32_to_q16(point.center[1]),
-            output_height,
-        ));
-    });
+    let count = lpc_model::nodes::fixture::mapping_point_count(mapping);
+    let mut coords = alloc::vec![0i32; count * 2];
+    let mut fill = DirectCoordFill::TwoD {
+        centers: lpc_model::nodes::fixture::mapping_centers(mapping),
+        output_width,
+        output_height,
+    };
+    let filled = fill.fill(&mut coords);
+    debug_assert_eq!(filled as usize, count);
     coords
 }
 
-/// The 1-lane pixel-space Q16 coordinates of a strip request: lamp `k`
-/// sits at the centre of texel `k` of an `(N, 1)` target.
-///
-/// **This ignores the mapping, by design.** Strip position is the wire
-/// order — the same visit order `fixture_sample_point_coords` walks and
-/// the same order the channel list was built in — and a fixture only ever
-/// receives a 1D request when it declared that its strip order means
-/// something (vision D1: fire2012 on a ring-mapped scarf runs along the
-/// scarf, not around the ring). Pixel centres (`k + 0.5`) rather than
-/// `k`, so sampling the strip and rendering an `(N, 1)` texture of it
-/// land on the same points.
+/// Strip position of lamp `index` on a `count`-lamp wire, as a pixel-space
+/// Q16 texel centre (see [`DirectCoordFill::OneD`]).
+fn strip_point_coord(index: u32, count: u32, wire_reversed: bool) -> i32 {
+    let index = if wire_reversed {
+        count - 1 - index
+    } else {
+        index
+    } as i32;
+    (index << 16) + (crate::products::visual::coordinates::Q16_ONE / 2)
+}
+/// Every strip coordinate of a `count`-lamp 1D request in one buffer —
+/// [`DirectCoordFill::OneD`] in a single batch. Test-facing.
+#[cfg(test)]
 fn fixture_strip_point_coords(count: u32, wire_reversed: bool) -> Vec<i32> {
     (0..count)
-        .map(|index| {
-            let index = if wire_reversed {
-                count - 1 - index
-            } else {
-                index
-            } as i32;
-            (index << 16) + (crate::products::visual::coordinates::Q16_ONE / 2)
-        })
+        .map(|index| strip_point_coord(index, count, wire_reversed))
         .collect()
 }
 
@@ -1697,10 +1684,8 @@ fn fixture_carries_2d_coords(mapping: MappingRef<'_>, area_rows: Option<u32>) ->
 }
 
 fn render_direct_fixture_control(
-    sample_points: &mut Option<FixtureSamplePoints>,
-    sample_target: &mut Option<SampleOutHandle>,
+    sample_batch: &mut Option<SampleBatch>,
     mapping: MappingRef<'_>,
-    mapping_version: Revision,
     channels: &DirectChannels,
     visual_product: VisualProduct,
     request: &ControlRenderRequest,
@@ -1728,67 +1713,80 @@ fn render_direct_fixture_control(
             "control render target is smaller than requested extent",
         ));
     }
+    let count = channels.len() as u32;
+    let generated_count = lpc_model::nodes::fixture::mapping_point_count(mapping);
+    if generated_count as u32 != count {
+        return Err(NodeError::msg(format!(
+            "fixture sample points out of sync with channels: mapping generated {generated_count} points for {count} channels"
+        )));
+    }
 
     // A 1D request's target is the strip itself: `outputSize` is
     // `(lamp count, 1)`, so `pos / outputSize.x` reads as strip position.
     let (output_width, output_height) = match space {
-        VisualSpace::OneD => (channels.len() as u32, 1),
+        VisualSpace::OneD => (count, 1),
         VisualSpace::TwoD => (settings.width, settings.height),
     };
-    let point_buf = ensure_fixture_sample_points(
-        sample_points,
-        mapping,
-        mapping_version,
-        channels.len() as u32,
-        output_width,
-        output_height,
-        space,
-        settings.consume_policy,
-        settings.wire_reversed,
-        ctx,
-    )?;
-    let sample_buf = ensure_fixture_sample_target(sample_target, channels.len() as u32, ctx)?;
-    ctx.sample_visual_into(
-        visual_product,
-        crate::products::visual::VisualSampleBufferRequest {
-            points: point_buf,
-            output_width,
-            output_height,
-            time_seconds: ctx.time_seconds(),
-            space,
-            policy: settings.consume_policy,
-        },
-        crate::products::visual::VisualSampleTarget {
-            samples: sample_buf,
-        },
-    )?;
-    let sampled = ctx
-        .graphics()
-        .ok_or_else(|| NodeError::msg("fixture direct sampling requires graphics"))?
-        .sample_out_data(sample_buf)
-        .map_err(err_ctx("fixture sample read"))?;
 
     target.clear();
-    // One match on the channel encoding, then a loop monomorphized on that
+    if count == 0 {
+        return Ok(ControlLayout {
+            spans: fixture_control_spans(mapping, settings.color_order, 0),
+        });
+    }
+
+    // The sampling window: `capacity` points at a time through the graphics
+    // backend, coordinates regenerated from the mapping as the stream asks
+    // for them, samples written straight into the target as they come back.
+    let capacity = {
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("fixture direct sampling requires graphics"))?;
+        count.min(graphics.sample_batch_capacity()).max(1)
+    };
+    let batch = ensure_sample_batch(sample_batch, capacity, ctx)?;
+    let mut fill = match space {
+        VisualSpace::TwoD => DirectCoordFill::TwoD {
+            centers: lpc_model::nodes::fixture::mapping_centers(mapping),
+            output_width,
+            output_height,
+        },
+        VisualSpace::OneD => DirectCoordFill::OneD {
+            next: 0,
+            count,
+            wire_reversed: settings.wire_reversed,
+        },
+    };
+    // One match on the channel encoding, then a stream monomorphized on that
     // form's iterator — the identity case walks `0..n` with no per-lamp
     // branch and no list to read.
     let written_samples = match channels {
-        DirectChannels::Identity(count) => write_direct_lamps(
+        DirectChannels::Identity(count) => stream_direct_lamps(
             0..*count,
-            sampled,
+            &mut fill,
+            batch,
             &mut target,
             expected_samples,
             &settings,
             power,
-        ),
-        DirectChannels::Explicit(list) => write_direct_lamps(
+            visual_product,
+            (output_width, output_height),
+            space,
+            ctx,
+        )?,
+        DirectChannels::Explicit(list) => stream_direct_lamps(
             list.iter().copied(),
-            sampled,
+            &mut fill,
+            batch,
             &mut target,
             expected_samples,
             &settings,
             power,
-        ),
+            visual_product,
+            (output_width, output_height),
+            space,
+            ctx,
+        )?,
     };
 
     Ok(ControlLayout {
@@ -1796,21 +1794,80 @@ fn render_direct_fixture_control(
     })
 }
 
-/// Encode each sampled lamp into its channel's three control samples,
-/// skipping lamps whose channel falls past the requested extent. Returns
-/// the sample index one past the last write, for the control layout's
-/// span report.
+/// Sample the visual through the window and encode each batch's lamps into
+/// the target as it arrives. Returns the sample index one past the last
+/// write, for the control layout's span report.
+fn stream_direct_lamps<I: Iterator<Item = u32>>(
+    mut channels: I,
+    fill: &mut DirectCoordFill<'_>,
+    batch: &mut SampleBatch,
+    target: &mut ControlRenderTarget<'_>,
+    expected_samples: usize,
+    settings: &FixtureRenderSettings,
+    power: &mut PowerPass,
+    visual_product: VisualProduct,
+    (output_width, output_height): (u32, u32),
+    space: VisualSpace,
+    ctx: &mut ControlRenderContext<'_>,
+) -> Result<usize, NodeError> {
+    let time_seconds = ctx.time_seconds();
+    let mut written_samples = 0usize;
+    let mut fill_batch = |coords: &mut [i32]| fill.fill(coords);
+    let mut consume = |sampled: &[u16]| -> Result<(), NodeError> {
+        write_direct_lamps(
+            &mut channels,
+            sampled,
+            target,
+            expected_samples,
+            settings,
+            power,
+            &mut written_samples,
+        );
+        Ok(())
+    };
+    let SampleBatch {
+        points,
+        samples,
+        coords,
+    } = batch;
+    ctx.sample_visual_into(
+        visual_product,
+        crate::products::visual::VisualSampleStream {
+            points,
+            samples,
+            coords: coords.as_mut_slice(),
+            fill: &mut fill_batch,
+            consume: &mut consume,
+            output_width,
+            output_height,
+            time_seconds,
+            space,
+            policy: settings.consume_policy,
+            continuation: false,
+        },
+    )?;
+    Ok(written_samples)
+}
+
+/// Encode one batch of sampled lamps into their channels' three control
+/// samples, skipping lamps whose channel falls past the requested extent.
+/// `channels` is the render's running cursor — it resumes where the previous
+/// batch left it — and `written_samples` accumulates the sample index one
+/// past the last write across batches.
 fn write_direct_lamps(
-    channels: impl Iterator<Item = u32>,
+    channels: &mut impl Iterator<Item = u32>,
     sampled: &[u16],
     target: &mut ControlRenderTarget<'_>,
     expected_samples: usize,
     settings: &FixtureRenderSettings,
     power: &mut PowerPass,
-) -> usize {
+    written_samples: &mut usize,
+) {
     let brightness = settings.brightness.to_q32() / 255.to_q32();
-    let mut written_samples = 0usize;
-    for (channel, rgba) in channels.zip(sampled.chunks_exact(4)) {
+    // The samples drive the zip. `Zip` pulls its LEFT side first, so with
+    // the channel cursor on the left the lamp after a batch's last sample
+    // would be pulled and dropped at every batch boundary.
+    for (rgba, channel) in sampled.chunks_exact(4).zip(channels) {
         let base = (channel as usize).saturating_mul(3);
         if base + 3 > expected_samples {
             continue;
@@ -1839,11 +1896,9 @@ fn write_direct_lamps(
         let b = power.channel(b);
         let ordered = ordered_rgb_u16(settings.color_order, r, g, b);
         target.write(base, &ordered);
-        written_samples = written_samples.max(base + 3);
+        *written_samples = (*written_samples).max(base + 3);
     }
-    written_samples
 }
-
 fn render_fixture_diagnostic_control(
     request: &ControlRenderRequest,
     mut target: ControlRenderTarget<'_>,
@@ -2460,9 +2515,7 @@ mod tests {
     #[cfg(feature = "node-shader")]
     use crate::nodes::shader_output_path;
     #[cfg(feature = "node-shader")]
-    use crate::products::visual::{
-        TextureRenderProduct, VisualProduct, VisualSampleBufferRequest, VisualSampleTarget,
-    };
+    use crate::products::visual::{TextureRenderProduct, VisualProduct, VisualSampleStream};
     use lpc_model::SlotShapeRegistry;
     #[cfg(feature = "node-shader")]
     use lpc_model::{ShaderState, SlotAccess, SlotShapeRegistryError};
@@ -2530,22 +2583,20 @@ mod tests {
         fn sample_visual_into(
             &mut self,
             _product: VisualProduct,
-            request: VisualSampleBufferRequest<'_>,
-            target: VisualSampleTarget<'_>,
+            mut stream: VisualSampleStream<'_>,
             ctx: &mut RenderContext<'_>,
         ) -> Result<(), NodeError> {
-            if request.points.count() != target.samples.count() {
-                return Err(NodeError::msg("sample point/output count mismatch"));
-            }
             let graphics = ctx.graphics().expect("test graphics");
-            let mut channels = Vec::with_capacity(target.samples.count() as usize * 4);
-            for _ in 0..target.samples.count() {
-                channels.extend_from_slice(&self.color);
+            let mut window = Vec::with_capacity(stream.capacity() as usize * 4);
+            for _ in 0..stream.capacity() {
+                window.extend_from_slice(&self.color);
             }
-            graphics
-                .write_sample_out(target.samples, &channels)
-                .expect("write test samples");
-            Ok(())
+            stream.drive(graphics, |_, _, samples, _| {
+                graphics
+                    .write_sample_out(samples, &window)
+                    .expect("write test samples");
+                Ok(())
+            })
         }
     }
 
@@ -2615,27 +2666,36 @@ mod tests {
         fn sample_visual_into(
             &mut self,
             _product: VisualProduct,
-            request: VisualSampleBufferRequest<'_>,
-            target: VisualSampleTarget<'_>,
+            mut stream: VisualSampleStream<'_>,
             ctx: &mut RenderContext<'_>,
         ) -> Result<(), NodeError> {
             let graphics = ctx.graphics().expect("test graphics");
-            assert_eq!(request.output_width, self.expected_width);
-            assert_eq!(request.output_height, self.expected_height);
-            assert_eq!(
+            assert_eq!(stream.output_width, self.expected_width);
+            assert_eq!(stream.output_height, self.expected_height);
+            // The stream hands the product over in batches; what it hands
+            // over, concatenated, must be exactly the expected coordinates,
+            // and the colours go back in the same order.
+            let capacity = stream.capacity() as usize;
+            let mut seen = Vec::new();
+            let mut offset = 0usize;
+            let mut window = vec![0u16; capacity * 4];
+            stream.drive(graphics, |coords, _, samples, n| {
+                let n = n as usize;
+                seen.extend_from_slice(&coords[..n * 2]);
+                for (slot, color) in window
+                    .chunks_exact_mut(4)
+                    .zip(&self.colors[offset..offset + n])
+                {
+                    slot.copy_from_slice(color);
+                }
+                offset += n;
                 graphics
-                    .read_sample_points(request.points)
-                    .expect("read test points"),
-                self.expected_points
-            );
-            assert_eq!(target.samples.count() as usize, self.colors.len());
-            let mut channels = Vec::with_capacity(self.colors.len() * 4);
-            for color in &self.colors {
-                channels.extend_from_slice(color);
-            }
-            graphics
-                .write_sample_out(target.samples, &channels)
-                .expect("write test samples");
+                    .write_sample_out(samples, &window)
+                    .expect("write test samples");
+                Ok(())
+            })?;
+            assert_eq!(seen, self.expected_points);
+            assert_eq!(offset, self.colors.len());
             Ok(())
         }
     }
@@ -2672,15 +2732,14 @@ mod tests {
         TextureRenderProduct::new(width, height, format, pixels).map_err(err_ctx("solid texture"))
     }
 
-    /// Coordinates are written only when the (mapping, size, count) key
-    /// changes — never per frame — and a size change MUST rewrite them.
-    /// Stale coordinates here fail silently as subtly-wrong sampling, the
-    /// failure mode of `docs/debt/s3-frame-cost-scales-per-fixture.md`; the
-    /// per-frame rewrite this replaced was also ~8 B/LED of transient churn
-    /// every frame.
+    /// The sampling window is allocated once per capacity and never
+    /// rewritten by an ensure at the same capacity — the per-render
+    /// coordinate fill is the only writer. A capacity change (a mapping that
+    /// grew past the window, a backend with a different batch size) frees
+    /// the old window and allocates the new one.
     #[test]
     #[cfg(feature = "node-shader")]
-    fn sample_point_coords_rewrite_only_when_the_key_changes() {
+    fn the_sample_window_is_allocated_once_per_capacity() {
         struct NoServices;
         impl crate::node::TimebaseRead for NoServices {}
         impl crate::node::ControlRenderServices for NoServices {
@@ -2702,8 +2761,7 @@ mod tests {
             fn sample_visual_into(
                 &mut self,
                 _product: VisualProduct,
-                _request: VisualSampleBufferRequest<'_>,
-                _target: VisualSampleTarget<'_>,
+                _stream: VisualSampleStream<'_>,
             ) -> Result<(), NodeError> {
                 Err(NodeError::msg("unused"))
             }
@@ -2721,101 +2779,102 @@ mod tests {
             None,
             &mut services,
         );
-        let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::point_list(0, [[0.5, 0.5], [1.0, 0.5]])],
-            2.0,
-        );
-        let ver = Revision::new(7);
         let mut current = None;
 
-        let handle = ensure_fixture_sample_points(
-            &mut current,
-            MappingRef::Slots(&mapping),
-            ver,
-            2,
-            4,
-            4,
-            VisualSpace::TwoD,
-            ConsumerPolicy::default(),
-            false,
-            &ctx,
-        )
-        .expect("first ensure");
-        assert_eq!(
-            graphics.read_sample_points(handle).expect("read"),
-            vec![2 * 65536, 2 * 65536, 4 * 65536, 2 * 65536],
-            "fresh buffer carries pixel-space coords for 4x4"
-        );
-
-        // Poke garbage in, then re-ensure with the SAME key: nothing may be
-        // rewritten. (A rewrite here would silently restore the old
-        // every-frame churn.)
+        let batch = ensure_sample_batch(&mut current, 2, &ctx).expect("first ensure");
+        assert_eq!(batch.points.count(), 2);
+        assert_eq!(batch.samples.count(), 2);
+        assert_eq!(batch.coords.len(), 4, "two points of [x, y]");
         graphics
-            .write_sample_points(handle, &[111, 222, 333, 444])
+            .write_sample_points(&mut batch.points, &[111, 222, 333, 444])
             .expect("poke");
-        let handle = ensure_fixture_sample_points(
-            &mut current,
-            MappingRef::Slots(&mapping),
-            ver,
-            2,
-            4,
-            4,
-            VisualSpace::TwoD,
-            ConsumerPolicy::default(),
-            false,
-            &ctx,
-        )
-        .expect("same-key ensure");
+
+        let batch = ensure_sample_batch(&mut current, 2, &ctx).expect("same-capacity ensure");
         assert_eq!(
-            graphics.read_sample_points(handle).expect("read"),
+            graphics.read_sample_points(&batch.points).expect("read"),
             vec![111, 222, 333, 444],
-            "an unchanged key must not rewrite the buffer"
+            "an ensure at the same capacity keeps the window"
         );
 
-        // A render-size change is part of the key and must rewrite.
-        let handle = ensure_fixture_sample_points(
-            &mut current,
-            MappingRef::Slots(&mapping),
-            ver,
-            2,
-            4,
-            8,
-            VisualSpace::TwoD,
-            ConsumerPolicy::default(),
-            false,
-            &ctx,
-        )
-        .expect("resized ensure");
+        let batch = ensure_sample_batch(&mut current, 3, &ctx).expect("grown ensure");
+        assert_eq!(batch.points.count(), 3);
+        assert_eq!(batch.coords.len(), 6);
         assert_eq!(
-            graphics.read_sample_points(handle).expect("read"),
-            vec![2 * 65536, 4 * 65536, 4 * 65536, 4 * 65536],
-            "a height change must rescale the y coordinates"
-        );
-
-        // A mapping-version change must rewrite too.
-        graphics
-            .write_sample_points(handle, &[9, 9, 9, 9])
-            .expect("poke");
-        let handle = ensure_fixture_sample_points(
-            &mut current,
-            MappingRef::Slots(&mapping),
-            Revision::new(8),
-            2,
-            4,
-            8,
-            VisualSpace::TwoD,
-            ConsumerPolicy::default(),
-            false,
-            &ctx,
-        )
-        .expect("remapped ensure");
-        assert_eq!(
-            graphics.read_sample_points(handle).expect("read"),
-            vec![2 * 65536, 4 * 65536, 4 * 65536, 4 * 65536],
-            "a mapping change must regenerate the coordinates"
+            graphics.read_sample_points(&batch.points).expect("read"),
+            vec![0; 6],
+            "a new capacity is a fresh window"
         );
     }
 
+    /// The coordinate fill streams the whole product across batches, in
+    /// visit order, in the packing the request's space declares: `[x, y]`
+    /// pairs scaled to the render size for 2D, single strip-centre words
+    /// (wire order, optionally reversed) for 1D — and a window never yields
+    /// more than it holds, nor anything after the product ends.
+    #[test]
+    fn the_direct_coordinate_fill_streams_the_product_in_batches() {
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::point_list(
+                0,
+                [
+                    [0.5, 0.5],
+                    [1.0, 0.5],
+                    [0.25, 1.0],
+                    [0.0, 0.0],
+                    [0.75, 0.25],
+                ],
+            )],
+            2.0,
+        );
+        let mut fill = DirectCoordFill::TwoD {
+            centers: lpc_model::nodes::fixture::mapping_centers(MappingRef::Slots(&mapping)),
+            output_width: 4,
+            output_height: 8,
+        };
+        let mut window = [0i32; 4];
+        assert_eq!(fill.fill(&mut window), 2);
+        assert_eq!(window, [2 << 16, 4 << 16, 4 << 16, 4 << 16]);
+        assert_eq!(fill.fill(&mut window), 2);
+        assert_eq!(window, [1 << 16, 8 << 16, 0, 0]);
+        assert_eq!(fill.fill(&mut window), 1, "the tail batch");
+        assert_eq!(&window[..2], &[3 << 16, 2 << 16]);
+        assert_eq!(fill.fill(&mut window), 0, "exhausted");
+        assert_eq!(fill.fill(&mut window), 0, "stays exhausted");
+
+        let whole = fixture_sample_point_coords(MappingRef::Slots(&mapping), 4, 8);
+        assert_eq!(
+            whole,
+            vec![
+                2 << 16,
+                4 << 16,
+                4 << 16,
+                4 << 16,
+                1 << 16,
+                8 << 16,
+                0,
+                0,
+                3 << 16,
+                2 << 16
+            ],
+            "the one-buffer collector is the batches concatenated"
+        );
+
+        let mut strip = DirectCoordFill::OneD {
+            next: 0,
+            count: 3,
+            wire_reversed: true,
+        };
+        let mut window = [0i32; 4];
+        assert_eq!(strip.fill(&mut window), 2);
+        assert_eq!(&window[..2], &[(2 << 16) + 32768, (1 << 16) + 32768]);
+        assert_eq!(strip.fill(&mut window), 1);
+        assert_eq!(window[0], 32768);
+        assert_eq!(strip.fill(&mut window), 0);
+        assert_eq!(
+            fixture_strip_point_coords(3, true),
+            vec![(2 << 16) + 32768, (1 << 16) + 32768, 32768]
+        );
+    }
     /// A ticked engine holding one directly-sampled two-lamp fixture fed by
     /// [`FixtureExpectedSampleProducer`], with NO power budget — so anything
     /// that scales its output came from somewhere else.
@@ -4643,9 +4702,7 @@ mod space_negotiation {
     use super::*;
     use crate::node::{ControlNode, RenderContext, RenderNode, TimebaseRead};
     use crate::nodes::ShaderNode;
-    use crate::products::visual::{
-        ProductSpaceInfo, ProjectionShape, VisualSampleBufferRequest, VisualSampleTarget,
-    };
+    use crate::products::visual::{ProductSpaceInfo, ProjectionShape, VisualSampleStream};
 
     /// An authored factored answer cell: `Project { shape, mirror, flip }`.
     fn authored_project(
@@ -4806,12 +4863,10 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         fn sample_visual_into(
             &mut self,
             product: VisualProduct,
-            request: VisualSampleBufferRequest<'_>,
-            target: VisualSampleTarget<'_>,
+            stream: VisualSampleStream<'_>,
         ) -> Result<(), NodeError> {
             let mut ctx = self.ctx();
-            self.node
-                .sample_visual_into(product, request, target, &mut ctx)
+            self.node.sample_visual_into(product, stream, &mut ctx)
         }
     }
 
@@ -5407,123 +5462,6 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         assert!(fixture_carries_2d_coords(MappingRef::Slots(&mapped), None));
     }
 
-    /// The sample-point cache is keyed on the request space and policy as
-    /// well as the geometry: a 1D batch is a different packing AND
-    /// different numbers, and serving it from a 2D-era buffer is the
-    /// silent-staleness failure this subsystem keeps re-learning.
-    #[test]
-    fn the_sample_point_cache_key_notices_a_space_or_policy_change() {
-        struct NoServices;
-        impl TimebaseRead for NoServices {}
-        impl crate::node::ControlRenderServices for NoServices {
-            fn render_texture(
-                &mut self,
-                _product: VisualProduct,
-                _request: &RenderTextureRequest,
-            ) -> Result<TextureRenderProduct, NodeError> {
-                Err(NodeError::msg("unused"))
-            }
-            fn render_texture_into(
-                &mut self,
-                _product: VisualProduct,
-                _request: &RenderTextureRequest,
-                _target: &mut lp_gfx::TextureHandle,
-            ) -> Result<(), NodeError> {
-                Err(NodeError::msg("unused"))
-            }
-            fn sample_visual_into(
-                &mut self,
-                _product: VisualProduct,
-                _request: VisualSampleBufferRequest<'_>,
-                _target: VisualSampleTarget<'_>,
-            ) -> Result<(), NodeError> {
-                Err(NodeError::msg("unused"))
-            }
-        }
-
-        let graphics = graphics();
-        let mut services = NoServices;
-        let ctx = ControlRenderContext::new(
-            NodeId::new(1),
-            Revision::new(1),
-            Some(graphics.clone()),
-            0.0,
-            None,
-            &mut services,
-        );
-        let mapping = MappingConfig::path_points_vec(
-            vec![PathSpec::point_list(0, [[0.5, 0.5], [1.0, 0.5]])],
-            2.0,
-        );
-        let version = Revision::new(7);
-        let mut current = None;
-
-        let handle = ensure_fixture_sample_points(
-            &mut current,
-            MappingRef::Slots(&mapping),
-            version,
-            2,
-            4,
-            4,
-            VisualSpace::TwoD,
-            ConsumerPolicy::AUTO,
-            false,
-            &ctx,
-        )
-        .expect("2D ensure");
-        assert_eq!(
-            graphics.read_sample_points(handle).expect("read"),
-            vec![2 * 65536, 2 * 65536, 4 * 65536, 2 * 65536],
-            "2D coordinates are mapping pixel positions"
-        );
-
-        // Same geometry, 1D request: a different packing entirely.
-        let handle = ensure_fixture_sample_points(
-            &mut current,
-            MappingRef::Slots(&mapping),
-            version,
-            2,
-            2,
-            1,
-            VisualSpace::OneD,
-            ConsumerPolicy::AUTO,
-            false,
-            &ctx,
-        )
-        .expect("1D ensure");
-        assert_eq!(
-            graphics.read_sample_points(handle).expect("read"),
-            vec![32768, 98304, 0, 0],
-            "1D coordinates are strip texel centres, tail zeroed"
-        );
-
-        // A policy change with everything else equal must still rewrite.
-        graphics
-            .write_sample_points(handle, &[111, 222, 333, 444])
-            .expect("poke");
-        let handle = ensure_fixture_sample_points(
-            &mut current,
-            MappingRef::Slots(&mapping),
-            version,
-            2,
-            2,
-            1,
-            VisualSpace::OneD,
-            ConsumerPolicy {
-                default_1d_to_2d: cellp(ProjectionShape::Radial, false, false),
-                force: true,
-            },
-            false,
-            &ctx,
-        )
-        .expect("policy ensure");
-        assert_eq!(
-            graphics.read_sample_points(handle).expect("read"),
-            vec![32768, 98304, 0, 0],
-            "a policy change must not be served from the old buffer"
-        );
-    }
-
     /// A 1D consumer on a 2D producer gets the CENTRE SCANLINE (vision
     /// D8): `t` runs along x, `v` is pinned to 0.5.
     ///
@@ -5544,12 +5482,24 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         let product = producer.product();
         let graphics = producer.graphics.clone();
 
-        let mut points = graphics.create_sample_points(COUNT).expect("points");
         let coords = fixture_strip_point_coords(COUNT, false);
-        graphics
-            .write_sample_points_1d(&mut points, &coords)
-            .expect("write strip points");
+        let mut points = graphics.create_sample_points(COUNT).expect("points");
         let mut samples = graphics.create_sample_out(COUNT).expect("samples");
+        let mut window = vec![0i32; COUNT as usize * 2];
+        let mut filled = false;
+        let mut fill = |out: &mut [i32]| {
+            if filled {
+                return 0;
+            }
+            filled = true;
+            out[..coords.len()].copy_from_slice(&coords);
+            COUNT
+        };
+        let mut channels = Vec::new();
+        let mut consume = |data: &[u16]| {
+            channels.extend_from_slice(data);
+            Ok(())
+        };
 
         {
             let mut ctx = producer.ctx();
@@ -5557,23 +5507,23 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
                 .node
                 .sample_visual_into(
                     product,
-                    VisualSampleBufferRequest {
+                    VisualSampleStream {
                         points: &mut points,
+                        samples: &mut samples,
+                        coords: &mut window,
+                        fill: &mut fill,
+                        consume: &mut consume,
                         output_width: COUNT,
                         output_height: 1,
                         time_seconds: 0.0,
                         space: VisualSpace::OneD,
                         policy: ConsumerPolicy::AUTO,
-                    },
-                    VisualSampleTarget {
-                        samples: &mut samples,
+                        continuation: false,
                     },
                     &mut ctx,
                 )
                 .expect("scanline sample");
         }
-
-        let channels = graphics.read_sample_out(&samples).expect("read samples");
         for (index, rgba) in channels.chunks_exact(4).enumerate() {
             let t = (index as f32 + 0.5) / COUNT as f32;
             assert_near(rgba[0], t, "scanline u");

@@ -16,9 +16,7 @@ use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
     RenderContext, RenderNode, RuntimeStateShape, TickContext, ensure_scratch_len, err_ctx,
 };
-use crate::products::visual::{
-    RenderTextureRequest, TextureRenderProduct, VisualSampleBufferRequest, VisualSampleTarget,
-};
+use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualSampleStream};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaylistRuntimeEntry {
@@ -93,22 +91,22 @@ impl PublishedPaths {
 /// the wasmtime backend's bump allocator never frees.
 #[derive(Default)]
 struct CrossfadeScratch {
-    previous: Option<SampleOutHandle>,
-    active: Option<SampleOutHandle>,
+    /// One window of an entry's samples — both entries answer into it in
+    /// turn, and the blend accumulates in `blended`.
+    samples: Option<SampleOutHandle>,
     blended: Vec<u16>,
 }
 
 impl CrossfadeScratch {
     /// Free everything. Handles release their graphics memory on drop.
     fn clear(&mut self) {
-        self.previous = None;
-        self.active = None;
+        self.samples = None;
         self.blended = Vec::new();
     }
 
     #[cfg(test)]
     fn holds_buffers(&self) -> bool {
-        self.previous.is_some() || self.active.is_some() || !self.blended.is_empty()
+        self.samples.is_some() || !self.blended.is_empty()
     }
 }
 
@@ -451,106 +449,115 @@ impl RenderNode for PlaylistNode {
     fn sample_visual_into(
         &mut self,
         _product: lpc_model::VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        mut stream: VisualSampleStream<'_>,
         ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
         let Some(active) = self.active_product else {
-            ctx.graphics()
-                .ok_or_else(|| NodeError::msg("missing graphics backend"))?
-                .clear_sample_out(target.samples)
-                .map_err(err_ctx("playlist clear samples"))?;
-            return Ok(());
+            let graphics = ctx
+                .graphics()
+                .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+            return stream
+                .drive_cleared(graphics)
+                .map_err(err_ctx("playlist clear samples"));
         };
         let Some(alpha) = self.transition_alpha(ctx.time_seconds()) else {
-            return ctx.sample_visual_into(active, request, target);
+            return ctx.sample_visual_into(active, stream);
         };
         let Some(previous) = self.previous_product else {
-            return ctx.sample_visual_into(active, request, target);
+            return ctx.sample_visual_into(active, stream);
         };
-        let point_count = request.points.count();
-        if target.samples.count() != point_count {
-            return Err(NodeError::msg("playlist sample target count mismatch"));
-        }
+        let capacity = stream.validate()?;
 
         // Resident for the transition: allocated on its first frame (or when
-        // the point count moves), reused every frame after, freed by
-        // `end_transition`.
+        // the window's capacity moves), reused every frame after, freed by
+        // `end_transition`. Sized to the window, never to the product.
         ensure_crossfade_sample_out(
-            &mut self.crossfade_scratch.previous,
-            point_count,
+            &mut self.crossfade_scratch.samples,
+            capacity,
             ctx,
-            "playlist previous samples",
+            "playlist crossfade samples",
         )?;
-        ensure_crossfade_sample_out(
-            &mut self.crossfade_scratch.active,
-            point_count,
-            ctx,
-            "playlist active samples",
+        ensure_scratch_len(
+            &mut self.crossfade_scratch.blended,
+            capacity as usize * 4,
+            "playlist blended samples",
         )?;
-        let CrossfadeScratch {
-            previous: previous_samples,
-            active: active_samples,
-            blended,
-        } = &mut self.crossfade_scratch;
-        let previous_samples = previous_samples
+        let CrossfadeScratch { samples, blended } = &mut self.crossfade_scratch;
+        let samples = samples
             .as_mut()
-            .ok_or_else(|| NodeError::msg("playlist previous samples missing after allocation"))?;
-        let active_samples = active_samples
-            .as_mut()
-            .ok_or_else(|| NodeError::msg("playlist active samples missing after allocation"))?;
+            .ok_or_else(|| NodeError::msg("playlist crossfade samples missing after allocation"))?;
 
-        let points = request.points;
-        ctx.sample_visual_into(
-            previous,
-            VisualSampleBufferRequest {
-                points: &mut *points,
-                output_width: request.output_width,
-                output_height: request.output_height,
-                time_seconds: request.time_seconds,
-                space: request.space,
-                policy: request.policy,
-            },
-            VisualSampleTarget {
-                samples: &mut *previous_samples,
-            },
-        )?;
-        ctx.sample_visual_into(
-            active,
-            VisualSampleBufferRequest {
-                points: &mut *points,
-                output_width: request.output_width,
-                output_height: request.output_height,
-                time_seconds: request.time_seconds,
-                space: request.space,
-                policy: request.policy,
-            },
-            VisualSampleTarget {
-                samples: &mut *active_samples,
-            },
-        )?;
-        let graphics = ctx
-            .graphics()
-            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
-        let channel_len = point_count as usize * 4;
-        ensure_scratch_len(blended, channel_len, "playlist blended samples")?;
-        let previous_data = graphics
-            .sample_out_data(previous_samples)
-            .map_err(err_ctx("playlist previous sample read"))?;
-        let active_data = graphics
-            .sample_out_data(active_samples)
-            .map_err(err_ctx("playlist active sample read"))?;
-        blend_rgba16_samples(previous_data, active_data, alpha, blended)?;
-        graphics
-            .write_sample_out(target.samples, blended)
-            .map_err(err_ctx("playlist crossfade sample write"))
+        // This node drives the outer loop: each batch of the consumer's
+        // coordinates is handed to BOTH entries through a one-batch inner
+        // stream over the same window (the inner `fill` yields the batch
+        // once and never touches the coordinates), the two answers are
+        // blended in place, and the blend goes to the consumer. The entries
+        // bind their uniforms once per frame — their bound-uniforms key
+        // survives across these inner streams.
+        let mut continuation = false;
+        loop {
+            let n = (stream.fill)(stream.coords);
+            if n == 0 {
+                return Ok(());
+            }
+            let words = n as usize * 4;
+            {
+                let mut once = Some(n);
+                let mut fill = |_: &mut [i32]| once.take().unwrap_or(0);
+                let mut consume = |data: &[u16]| -> Result<(), NodeError> {
+                    blended[..words].copy_from_slice(data);
+                    Ok(())
+                };
+                ctx.sample_visual_into(
+                    previous,
+                    VisualSampleStream {
+                        points: &mut *stream.points,
+                        samples: &mut *samples,
+                        coords: &mut *stream.coords,
+                        fill: &mut fill,
+                        consume: &mut consume,
+                        output_width: stream.output_width,
+                        output_height: stream.output_height,
+                        time_seconds: stream.time_seconds,
+                        space: stream.space,
+                        policy: stream.policy,
+                        continuation,
+                    },
+                )?;
+            }
+            {
+                let mut once = Some(n);
+                let mut fill = |_: &mut [i32]| once.take().unwrap_or(0);
+                let mut consume = |data: &[u16]| -> Result<(), NodeError> {
+                    blend_rgba16_samples_in_place(&mut blended[..words], data, alpha)
+                };
+                ctx.sample_visual_into(
+                    active,
+                    VisualSampleStream {
+                        points: &mut *stream.points,
+                        samples: &mut *samples,
+                        coords: &mut *stream.coords,
+                        fill: &mut fill,
+                        consume: &mut consume,
+                        output_width: stream.output_width,
+                        output_height: stream.output_height,
+                        time_seconds: stream.time_seconds,
+                        space: stream.space,
+                        policy: stream.policy,
+                        continuation,
+                    },
+                )?;
+            }
+            (stream.consume)(&blended[..words])?;
+            continuation = true;
+        }
     }
 }
-
-/// Size one crossfade input sample-out to `count` points, allocating only
-/// when it is missing or the count moved — the fixture's
-/// `ensure_fixture_sample_target` rule. Allocation is fallible through the
-/// backend; a failure degrades this frame and the next one retries.
+/// Size the crossfade's sample-out to `count` points (the stream's window,
+/// never the product), allocating only when it is missing or the count
+/// moved — the fixture's `ensure_sample_batch` rule. Allocation is fallible
+/// through the backend; a failure degrades this frame and the next one
+/// retries.
 fn ensure_crossfade_sample_out(
     current: &mut Option<SampleOutHandle>,
     count: u32,
@@ -641,18 +648,20 @@ fn resolve_entry_product(
 // Texture crossfade blending moved behind `LpGraphics::blend_textures`
 // (GPU-resident op family); the sample-channel blend below stays CPU-side
 // for now — sample buffers are the GPU-sample-points milestone's domain.
-fn blend_rgba16_samples(
-    previous: &[u16],
+/// Blend the incoming entry's samples over the outgoing entry's, in place:
+/// the batched crossfade holds one window, samples the outgoing entry into
+/// it, then mixes the incoming entry's answer in per channel.
+fn blend_rgba16_samples_in_place(
+    previous_then_out: &mut [u16],
     active: &[u16],
     alpha: f32,
-    target: &mut [u16],
 ) -> Result<(), NodeError> {
-    if previous.len() != active.len() || previous.len() != target.len() {
+    if previous_then_out.len() != active.len() {
         return Err(NodeError::msg("playlist crossfade sample length mismatch"));
     }
     let alpha = clamp01(alpha);
-    for ((prev, next), out) in previous.iter().zip(active).zip(target.iter_mut()) {
-        *out = mix_u16(*prev as f32, *next as f32, alpha);
+    for (out, next) in previous_then_out.iter_mut().zip(active) {
+        *out = mix_u16(*out as f32, *next as f32, alpha);
     }
     Ok(())
 }
@@ -849,9 +858,7 @@ mod tests {
     fn seed_crossfade_buffers(node: &mut PlaylistNode, points: u32) {
         use lp_gfx::LpGraphics;
         let graphics = test_graphics();
-        node.crossfade_scratch.previous =
-            Some(graphics.create_sample_out(points).expect("previous"));
-        node.crossfade_scratch.active = Some(graphics.create_sample_out(points).expect("active"));
+        node.crossfade_scratch.samples = Some(graphics.create_sample_out(points).expect("samples"));
         node.crossfade_scratch.blended = alloc::vec![0u16; points as usize * 4];
     }
 }

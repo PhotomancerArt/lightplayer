@@ -34,11 +34,11 @@ use crate::node::{
     PressureLevel, ProduceResult, RenderContext, RenderNode, RuntimeStateShape, TickContext,
     ensure_scratch_len, err_ctx,
 };
+use crate::products::visual::VisualSampleStream;
 use crate::products::visual::{
     CellProjection, ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
     VisualSpace, coordinates, resolve_1d_to_2d_with_origin,
 };
-use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
 use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
 
 use super::authored_field_keys::{AuthoredField, AuthoredFieldKeys, UniformFieldKeys};
@@ -111,6 +111,21 @@ pub struct ShaderNode {
     /// 2026-08-29-flash-write-wedges-under-zook-playback: per-frame reads
     /// reuse a caller-owned buffer, never a fresh `Vec`.
     projected_channels: Vec<u16>,
+    /// Coordinate scratch for projected direct sampling — one batch of the
+    /// stream's window, mapped into this shader's space before upload.
+    /// Sized to the window, never to the product.
+    projected_coords: Vec<i32>,
+    /// What the compiled program's uniforms are currently bound for, or
+    /// `None` when the next sample stream must bind again. A stream binds
+    /// once and samples every batch bound; the crossfade's per-batch inner
+    /// streams hit this key after their first batch. Reset by anything else
+    /// that writes the program's uniforms: `produce`, a texture render, a
+    /// recompile.
+    bound_uniforms: Option<BoundUniformsKey>,
+    /// The frame a sample stream last asked `ensure_compiled`, and its
+    /// answer — what a continuation batch of the same frame reuses (see
+    /// `VisualSampleStream::continuation`).
+    stream_decision: Option<(Revision, bool)>,
     visual_uniforms: Vec<VisualUniform>,
     /// The last successfully compiled program. Kept through source/config
     /// refreshes and failed recompiles (keep-last-good); replaced only by
@@ -189,6 +204,9 @@ impl ShaderNode {
             projected_points: None,
             projected_samples: None,
             projected_channels: Vec::new(),
+            projected_coords: Vec::new(),
+            bound_uniforms: None,
+            stream_decision: None,
             visual_uniforms,
             shader: None,
             compilation_error: None,
@@ -364,6 +382,8 @@ impl ShaderNode {
                 // the replacement exists. Old + new coexist for the compile
                 // duration — the transient memory cost of keep-last-good.
                 self.shader = Some(shader);
+                // A fresh program has nothing bound yet.
+                self.bound_uniforms = None;
                 // Recovered: the next failure deserves to be reported at once.
                 self.black_fallback_frames = 0;
                 log::info!(
@@ -608,97 +628,6 @@ impl ShaderNode {
         }
     }
 
-    /// Sample a request whose space disagrees with this shader's — the
-    /// producer-side half of the negotiation (plan D18).
-    ///
-    /// Both directions are pure coordinate mapping onto a scratch point
-    /// buffer; no new codegen, no fourth ABI surface. `outputSize` stays
-    /// the *request's* dims in both directions, which is what makes the
-    /// mapped coordinate mean the same thing to the program as a native
-    /// one would.
-    fn sample_projected(
-        &mut self,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
-        uniforms: &LpsValueF32,
-        ctx: &mut RenderContext<'_>,
-    ) -> Result<(), NodeError> {
-        let graphics = ctx
-            .graphics()
-            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
-        let count = request.points.count() as usize;
-        let source = graphics
-            .read_sample_points(request.points)
-            .map_err(err_ctx("read request sample points"))?;
-
-        match (self.declared_space(), request.space) {
-            (VisualSpace::OneD, VisualSpace::TwoD) => {
-                let (cell, _origin) =
-                    resolve_1d_to_2d_with_origin(self.space_info(), request.policy);
-                let mut mapped = Vec::with_capacity(count);
-                for index in 0..count {
-                    let x = source.get(index * 2).copied().unwrap_or(0);
-                    let y = source.get(index * 2 + 1).copied().unwrap_or(0);
-                    let u = pixel_q16_to_normalized_f32(x, request.output_width);
-                    let v = pixel_q16_to_normalized_f32(y, request.output_height);
-                    let t = coordinates::project_2d_to_1d(cell, u, v);
-                    mapped.push(normalized_f32_to_pixel_q16(t, request.output_width));
-                }
-                let points = ensure_projected_points(
-                    &mut self.projected_points,
-                    graphics,
-                    request.points.count(),
-                )?;
-                graphics
-                    .write_sample_points_1d(points, &mapped)
-                    .map_err(err_ctx("write projected sample points"))?;
-            }
-            (VisualSpace::TwoD, VisualSpace::OneD) => {
-                // Centre scanline (vision D8): a 1D request's points are
-                // 1-lane `t` words in the first `count` words of the buffer.
-                let mut mapped = Vec::with_capacity(count * 2);
-                for index in 0..count {
-                    let t = source.get(index).copied().unwrap_or(0);
-                    let (u, v) = coordinates::centre_scanline(pixel_q16_to_normalized_f32(
-                        t,
-                        request.output_width,
-                    ));
-                    mapped.push(normalized_f32_to_pixel_q16(u, request.output_width));
-                    mapped.push(normalized_f32_to_pixel_q16(v, request.output_height));
-                }
-                let points = ensure_projected_points(
-                    &mut self.projected_points,
-                    graphics,
-                    request.points.count(),
-                )?;
-                graphics
-                    .write_sample_points(points, &mapped)
-                    .map_err(err_ctx("write scanline sample points"))?;
-            }
-            (native, requested) => {
-                return Err(NodeError::msg(format!(
-                    "no projection from {} shader to {} request",
-                    native.label(),
-                    requested.label()
-                )));
-            }
-        }
-
-        let points = self
-            .projected_points
-            .as_mut()
-            .ok_or_else(|| NodeError::msg("projected sample points missing after write"))?;
-        let shader = self
-            .shader
-            .as_mut()
-            .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
-        match shader.sample_rgba16(points, target.samples, uniforms) {
-            Ok(()) => Ok(()),
-            Err(GfxError::FuelExhausted(trap)) => fuel_exhausted_failure(&trap),
-            Err(error) => Err(err_ctx("shader projected sample")(error)),
-        }
-    }
-
     /// Fill a texture target whose space disagrees with this shader's.
     ///
     /// Implemented as a **request mapping**, not a synthesized second
@@ -896,6 +825,9 @@ impl NodeRuntime for ShaderNode {
         self.update_config_from_view(ctx)?;
         self.update_consumed_slots_from_view(ctx)?;
         self.update_visual_uniforms(ctx)?;
+        // The uniform values may have moved (time, authored edits, palette
+        // rebakes): the next sample stream binds them again.
+        self.bound_uniforms = None;
         self.state
             .output
             .set_with_version(ctx.revision(), VisualProduct::new(self.node_id, 0));
@@ -950,6 +882,7 @@ impl NodeRuntime for ShaderNode {
         drop(self.projected_points.take());
         drop(self.projected_samples.take());
         self.projected_channels = Vec::new();
+        self.projected_coords = Vec::new();
         Ok(())
     }
 
@@ -1704,6 +1637,9 @@ impl RenderNode for ShaderNode {
         }
         self.ensure_palette_uniforms(ctx)?;
         let uniforms = build_uniforms(request.width, request.height, &self.visual_uniforms);
+        // Both arms below bind the program's uniforms for a texture-sized
+        // `outputSize`: whatever a sample stream had bound is gone.
+        self.bound_uniforms = None;
         if self.declared_space() != request.space {
             return self.render_projected_texture(request, target, &uniforms, ctx);
         }
@@ -1721,21 +1657,29 @@ impl RenderNode for ShaderNode {
     fn sample_visual_into(
         &mut self,
         product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        mut stream: VisualSampleStream<'_>,
         ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
         validate_shader_visual_product(self.node_id, product)?;
-        if target.samples.count() != request.points.count() {
-            return Err(NodeError::msg(format!(
-                "shader sample target count {} does not match request count {}",
-                target.samples.count(),
-                request.points.count()
-            )));
-        }
+        let capacity = stream.validate()?;
 
-        if !self.ensure_compiled(ctx)? {
-            if self.note_black_fallback() {
+        // One compile decision per frame per streamed product. A
+        // continuation batch reuses the first batch's answer instead of
+        // asking `ensure_compiled` again: its deferral is "at most once per
+        // compile", counted in render calls, and a second call in the same
+        // frame would compile without the window the engine opens — and
+        // light lamps the first batch left black.
+        let frame = ctx.revision();
+        let compiled = match self.stream_decision {
+            Some((decided, compiled)) if stream.continuation && decided == frame => compiled,
+            _ => {
+                let compiled = self.ensure_compiled(ctx)?;
+                self.stream_decision = Some((frame, compiled));
+                compiled
+            }
+        };
+        if !compiled {
+            if !stream.continuation && self.note_black_fallback() {
                 log::warn!(
                     "[shader-node] sampling black fallback (node={:?}, frame {}): {}",
                     self.node_id,
@@ -1743,30 +1687,112 @@ impl RenderNode for ShaderNode {
                     self.compile_reason()
                 );
             }
-            ctx.graphics()
-                .ok_or_else(|| NodeError::msg("missing graphics backend"))?
-                .clear_sample_out(target.samples)
-                .map_err(err_ctx("clear sample target"))?;
-            return Ok(());
+            let graphics = ctx
+                .graphics()
+                .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+            return stream
+                .drive_cleared(graphics)
+                .map_err(err_ctx("clear sample target"));
         }
         self.ensure_palette_uniforms(ctx)?;
-        let uniforms = build_uniforms(
-            request.output_width,
-            request.output_height,
-            &self.visual_uniforms,
-        );
-        if self.declared_space() != request.space {
-            return self.sample_projected(request, target, &uniforms, ctx);
+
+        // Bind once per stream, not per batch: binding walks and formats
+        // the uniform paths (an allocation per member on the CPU tier, a
+        // bind group on the GPU tier). The key survives across the
+        // crossfade's one-batch inner streams within a frame; `produce`,
+        // texture renders and recompiles reset it.
+        let key = BoundUniformsKey {
+            output_width: stream.output_width,
+            output_height: stream.output_height,
+            time_bits: stream.time_seconds.to_bits(),
+        };
+        if self.bound_uniforms != Some(key) {
+            let uniforms = build_uniforms(
+                stream.output_width,
+                stream.output_height,
+                &self.visual_uniforms,
+            );
+            let shader = self
+                .shader
+                .as_mut()
+                .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
+            shader
+                .bind_uniforms(&uniforms)
+                .map_err(err_ctx("shader bind uniforms"))?;
+            self.bound_uniforms = Some(key);
         }
-        let shader = self
-            .shader
+
+        let declared = self.declared_space();
+        let requested = stream.space;
+        let projection = if declared == requested {
+            None
+        } else {
+            Some(match (declared, requested) {
+                (VisualSpace::OneD, VisualSpace::TwoD) => {
+                    let (cell, _origin) =
+                        resolve_1d_to_2d_with_origin(self.space_info(), stream.policy);
+                    BatchProjection::TwoDRequestOnOneDShader { cell }
+                }
+                (VisualSpace::TwoD, VisualSpace::OneD) => BatchProjection::OneDRequestOnTwoDShader,
+                (native, requested) => {
+                    return Err(NodeError::msg(format!(
+                        "no projection from {} shader to {} request",
+                        native.label(),
+                        requested.label()
+                    )));
+                }
+            })
+        };
+        let (output_width, output_height) = (stream.output_width, stream.output_height);
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+        if projection.is_some() {
+            ensure_scratch_len(
+                &mut self.projected_coords,
+                capacity as usize * 2,
+                "projected sample coordinates",
+            )?;
+        }
+        let Self {
+            shader,
+            projected_points,
+            projected_coords,
+            ..
+        } = self;
+        let shader = shader
             .as_mut()
             .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
-        match shader.sample_rgba16(request.points, target.samples, &uniforms) {
-            Ok(()) => Ok(()),
-            Err(GfxError::FuelExhausted(trap)) => fuel_exhausted_failure(&trap),
-            Err(error) => Err(err_ctx("shader sample")(error)),
-        }
+
+        // Sample index of the batch's first point, for a fuel trap's report.
+        let mut streamed = 0u32;
+        stream.drive(graphics, |coords, points, samples, n| {
+            let result = match projection {
+                None => shader.sample_rgba16_bound(points, samples, n),
+                Some(projection) => {
+                    project_batch(
+                        projection,
+                        coords,
+                        n as usize,
+                        output_width,
+                        output_height,
+                        projected_coords,
+                    );
+                    let projected = ensure_projected_points(projected_points, graphics, capacity)?;
+                    graphics
+                        .write_sample_points(projected, projected_coords)
+                        .map_err(err_ctx("write projected sample points"))?;
+                    shader.sample_rgba16_bound(projected, samples, n)
+                }
+            };
+            let result = match result {
+                Ok(()) => Ok(()),
+                Err(GfxError::FuelExhausted(trap)) => fuel_exhausted_failure_at(&trap, streamed),
+                Err(error) => Err(err_ctx("shader sample")(error)),
+            };
+            streamed += n;
+            result
+        })
     }
 
     fn visual_space(
@@ -1776,6 +1802,69 @@ impl RenderNode for ShaderNode {
     ) -> Result<ProductSpaceInfo, NodeError> {
         validate_shader_visual_product(self.node_id, product)?;
         Ok(self.space_info())
+    }
+}
+
+/// The uniforms a sample stream binds, as the key that lets the next
+/// stream in the same frame skip the bind (see `ShaderNode::bound_uniforms`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BoundUniformsKey {
+    output_width: u32,
+    output_height: u32,
+    time_bits: u32,
+}
+
+/// How a batch of a stream whose space disagrees with the shader's is
+/// mapped onto the shader's own coordinates — the producer-side half of
+/// the negotiation (plan D18). Both directions are pure coordinate mapping
+/// onto a scratch point buffer; no new codegen, no fourth ABI surface.
+/// `outputSize` stays the *request's* dims in both directions, which is
+/// what makes the mapped coordinate mean the same thing to the program as
+/// a native one would.
+#[derive(Clone, Copy, Debug)]
+enum BatchProjection {
+    /// A 2D request on a 1D shader: each `[x, y]` pair projects through the
+    /// negotiated cell to a single `t` word.
+    TwoDRequestOnOneDShader { cell: CellProjection },
+    /// A 1D request on a 2D shader: each `t` word samples the centre
+    /// scanline (vision D8) as an `[x, y]` pair.
+    OneDRequestOnTwoDShader,
+}
+
+/// Map the first `n` points of a batch (`coords`, packed for the request's
+/// space) into `out` (packed for the shader's space). The tail of `out`
+/// past the mapped words is zeroed, so a 1D upload's slack reads as the
+/// zero-padded packing `write_sample_points_1d` would have produced.
+fn project_batch(
+    projection: BatchProjection,
+    coords: &[i32],
+    n: usize,
+    output_width: u32,
+    output_height: u32,
+    out: &mut [i32],
+) {
+    match projection {
+        BatchProjection::TwoDRequestOnOneDShader { cell } => {
+            for index in 0..n {
+                let x = coords[index * 2];
+                let y = coords[index * 2 + 1];
+                let u = pixel_q16_to_normalized_f32(x, output_width);
+                let v = pixel_q16_to_normalized_f32(y, output_height);
+                let t = coordinates::project_2d_to_1d(cell, u, v);
+                out[index] = normalized_f32_to_pixel_q16(t, output_width);
+            }
+            out[n..].fill(0);
+        }
+        BatchProjection::OneDRequestOnTwoDShader => {
+            for index in 0..n {
+                let t = coords[index];
+                let (u, v) =
+                    coordinates::centre_scanline(pixel_q16_to_normalized_f32(t, output_width));
+                out[index * 2] = normalized_f32_to_pixel_q16(u, output_width);
+                out[index * 2 + 1] = normalized_f32_to_pixel_q16(v, output_height);
+            }
+            out[n * 2..].fill(0);
+        }
     }
 }
 
@@ -1806,6 +1895,21 @@ impl RenderNode for ShaderNode {
 /// *heal* an existing yellow, so simply recording blame is not enough on its own.
 fn fuel_exhausted_failure(trap: &lp_gfx::ShaderFuelTrap) -> Result<(), NodeError> {
     Err(NodeError::msg(format!("{trap}")))
+}
+
+/// [`fuel_exhausted_failure`] for a batched stream: the trap's sample index
+/// is batch-relative, so the report carries the batch's first product
+/// sample too.
+fn fuel_exhausted_failure_at(
+    trap: &lp_gfx::ShaderFuelTrap,
+    batch_base: u32,
+) -> Result<(), NodeError> {
+    if batch_base == 0 {
+        return fuel_exhausted_failure(trap);
+    }
+    Err(NodeError::msg(format!(
+        "{trap} (sample stream batch starting at product sample {batch_base})"
+    )))
 }
 
 /// The uniform set a shader renders with before its first tick.
@@ -2672,8 +2776,8 @@ mod tests {
     #[cfg(feature = "node-texture")]
     use crate::nodes::TextureNode;
     use crate::products::visual::{
-        TextureSampleBatch, TextureUvSamplePoint, VisualProduct, VisualSampleBufferRequest,
-        VisualSampleTarget, texel_center_to_uv_q16,
+        TextureSampleBatch, TextureUvSamplePoint, VisualProduct, VisualSampleStream,
+        texel_center_to_uv_q16,
     };
     use lp_gfx::{GfxError, LpGraphics, SampleOutHandle, SamplePointsHandle, TextureData};
     use lp_gfx_lpvm::TargetLpvmGraphics;
@@ -3120,6 +3224,57 @@ mod tests {
         assert!(sample.samples[0].rgba_unorm16[0] < 40_000);
     }
 
+    /// Sample `node` once over a window holding all of `coords` (packed for
+    /// `space`) and return the RGBA16 words — the one-shot shape the
+    /// streaming contract replaced, for tests that check values.
+    fn sample_once(
+        node: &mut ShaderNode,
+        product: VisualProduct,
+        graphics: &dyn LpGraphics,
+        coords: &[i32],
+        (output_width, output_height): (u32, u32),
+        space: VisualSpace,
+        ctx: &mut crate::node::RenderContext<'_>,
+    ) -> Vec<u16> {
+        let count = (coords.len() / space.coord_lanes()) as u32;
+        let mut points = graphics.create_sample_points(count).expect("points");
+        let mut samples = graphics.create_sample_out(count).expect("samples");
+        let mut window = vec![0i32; count as usize * 2];
+        let mut filled = false;
+        let mut fill = |out: &mut [i32]| {
+            if filled {
+                return 0;
+            }
+            filled = true;
+            out[..coords.len()].copy_from_slice(coords);
+            count
+        };
+        let mut got = Vec::new();
+        let mut consume = |data: &[u16]| {
+            got.extend_from_slice(data);
+            Ok(())
+        };
+        node.sample_visual_into(
+            product,
+            VisualSampleStream {
+                points: &mut points,
+                samples: &mut samples,
+                coords: &mut window,
+                fill: &mut fill,
+                consume: &mut consume,
+                output_width,
+                output_height,
+                time_seconds: 0.0,
+                space,
+                policy: ConsumerPolicy::default(),
+                continuation: false,
+            },
+            ctx,
+        )
+        .expect("sample visual");
+        got
+    }
+
     #[test]
     fn shader_direct_sampling_uses_requested_output_size_uniform() {
         let graphics = Arc::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl));
@@ -3143,30 +3298,15 @@ mod tests {
             0.0,
         );
 
-        let mut points = graphics.create_sample_points(1).expect("points");
-        graphics
-            .write_sample_points(&mut points, &[5 * 65536, 8 * 65536])
-            .expect("write points");
-        let mut samples = graphics.create_sample_out(1).expect("samples");
-
-        node.sample_visual_into(
+        let got = sample_once(
+            &mut node,
             VisualProduct::new(NodeId::new(1), 0),
-            VisualSampleBufferRequest {
-                points: &mut points,
-                output_width: 10,
-                output_height: 16,
-                time_seconds: 0.0,
-                space: VisualSpace::TwoD,
-                policy: ConsumerPolicy::default(),
-            },
-            VisualSampleTarget {
-                samples: &mut samples,
-            },
+            &*graphics,
+            &[5 * 65536, 8 * 65536],
+            (10, 16),
+            VisualSpace::TwoD,
             &mut ctx,
-        )
-        .expect("sample visual");
-
-        let got = graphics.read_sample_out(&samples).expect("read samples");
+        );
         assert!((i32::from(got[0]) - 32768).abs() <= 16, "{got:?}");
         assert!((i32::from(got[1]) - 32768).abs() <= 16, "{got:?}");
         assert_eq!(got[2], 0);
@@ -3221,30 +3361,17 @@ mod tests {
             time_seconds: 0.0,
         });
 
-        let mut points = graphics.create_sample_points(1).expect("points");
-        graphics
-            .write_sample_points(&mut points, &[(2 * 65536) + 32768, (3 * 65536) + 32768])
-            .expect("write points");
-        let mut samples = graphics.create_sample_out(1).expect("samples");
-        node.sample_visual_into(
+        let direct = sample_once(
+            &mut node,
             product,
-            VisualSampleBufferRequest {
-                points: &mut points,
-                output_width: width,
-                output_height: height,
-                time_seconds: 0.0,
-                space: VisualSpace::TwoD,
-                policy: ConsumerPolicy::default(),
-            },
-            VisualSampleTarget {
-                samples: &mut samples,
-            },
+            &*graphics,
+            &[(2 * 65536) + 32768, (3 * 65536) + 32768],
+            (width, height),
+            VisualSpace::TwoD,
             &mut ctx,
-        )
-        .expect("sample visual");
+        );
 
         let rendered = texture_sample.expect("host product samples").samples[0].rgba_unorm16;
-        let direct = graphics.read_sample_out(&samples).expect("read samples");
         for channel in 0..4 {
             assert!(
                 (i32::from(rendered[channel]) - i32::from(direct[channel])).abs() <= 16,
@@ -3528,35 +3655,17 @@ mod tests {
                 .all(|byte| *byte == 0)
         );
 
-        let mut points = graphics.create_sample_points(1).expect("points");
-        graphics
-            .write_sample_points(&mut points, &[0, 0])
-            .expect("write points");
-        let mut samples = graphics.create_sample_out(1).expect("samples");
-        node.sample_visual_into(
+        let sampled = sample_once(
+            &mut node,
             product,
-            VisualSampleBufferRequest {
-                points: &mut points,
-                output_width: 4,
-                output_height: 4,
-                time_seconds: 0.0,
-                space: VisualSpace::TwoD,
-                policy: ConsumerPolicy::default(),
-            },
-            VisualSampleTarget {
-                samples: &mut samples,
-            },
+            &*graphics,
+            &[0, 0],
+            (4, 4),
+            VisualSpace::TwoD,
             &mut ctx,
-        )
-        .expect("fallback sample");
-        assert_eq!(graphics.compile_count(), 1);
-        assert!(
-            graphics
-                .read_sample_out(&samples)
-                .expect("read samples")
-                .iter()
-                .all(|channel| *channel == 0)
         );
+        assert_eq!(graphics.compile_count(), 1);
+        assert!(sampled.iter().all(|channel| *channel == 0));
     }
 
     /// The authored `float_mode` pin decides which tier the node asks the

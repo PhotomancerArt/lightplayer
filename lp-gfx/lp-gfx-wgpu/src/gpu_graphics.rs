@@ -1077,7 +1077,11 @@ void tick() {
         // Sampling before any bind is refused, not silently run on stale uniforms.
         let mut points = graphics.create_sample_points(6).expect("points");
         let mut out = graphics.create_sample_out(6).expect("out");
-        assert!(shader.sample_rgba16_bound(&mut points, &mut out, 6).is_err());
+        assert!(
+            shader
+                .sample_rgba16_bound(&mut points, &mut out, 6)
+                .is_err()
+        );
 
         let coords: Vec<i32> = (0..12)
             .map(|i| if i % 2 == 0 { (i / 2) << 16 } else { 0 })
@@ -1086,7 +1090,9 @@ void tick() {
             .write_sample_points(&mut points, &coords)
             .expect("write points");
         let poison = [0xBEEFu16; 24];
-        graphics.write_sample_out(&mut out, &poison).expect("poison");
+        graphics
+            .write_sample_out(&mut out, &poison)
+            .expect("poison");
 
         shader.bind_uniforms(&uniforms).expect("bind");
         shader
@@ -1097,7 +1103,11 @@ void tick() {
             let expected = (i as f32 / 16.0 * 65535.0).round() as u16;
             assert_eq!(sampled[i * 4], expected, "point {i} r");
         }
-        assert_eq!(&sampled[16..], &poison[16..], "the tail past count is untouched");
+        assert_eq!(
+            &sampled[16..],
+            &poison[16..],
+            "the tail past count is untouched"
+        );
         assert!(
             shader
                 .sample_rgba16_bound(&mut points, &mut out, 7)

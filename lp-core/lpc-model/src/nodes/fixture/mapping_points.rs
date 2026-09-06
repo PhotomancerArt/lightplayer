@@ -153,6 +153,70 @@ fn for_each_compact_mapping_point(
     }
 }
 
+/// The lamp centres of `mapping` in visit order, unclamped, one at a time —
+/// the streaming twin of [`for_each_mapping_point`] for consumers that only
+/// need coordinates and cannot afford the per-point clamp (the fixture's
+/// per-render batch fill on a part with no FPU; its Q16 conversion clamps on
+/// the bit pattern instead, to the same answer). Same visit order — paths in
+/// `paths.entries.values()` order, points in point-list entry order; spans
+/// in channel-assignment order, points in span order, clamped to the point
+/// list — pinned by `mapping_centers_visits_what_for_each_mapping_point_visits`.
+///
+/// Resumable, unlike the visitor: a batched consumer takes `capacity` points
+/// at a time across as many calls as the product needs.
+pub fn mapping_centers<'a>(mapping: impl Into<MappingRef<'a>>) -> MappingCenters<'a> {
+    let inner = match mapping.into() {
+        MappingRef::Slots(MappingConfig::PathPoints { paths, .. }) => CentersInner::Slots {
+            paths: paths.entries.iter(),
+            current: None,
+        },
+        MappingRef::Slots(MappingConfig::Unset | MappingConfig::Map2d { .. }) => {
+            CentersInner::Empty
+        }
+        MappingRef::Compact(compact) => CentersInner::Compact {
+            points: compact.points[..compact.lamp_count()].iter(),
+        },
+    };
+    MappingCenters { inner }
+}
+
+/// See [`mapping_centers`].
+pub struct MappingCenters<'a> {
+    inner: CentersInner<'a>,
+}
+
+enum CentersInner<'a> {
+    Empty,
+    Compact {
+        points: core::slice::Iter<'a, [f32; 2]>,
+    },
+    Slots {
+        paths: lp_collection::VecMapIter<'a, u32, crate::EnumSlot<PathSpec>>,
+        current: Option<lp_collection::VecMapIter<'a, u32, crate::XySlot>>,
+    },
+}
+
+impl Iterator for MappingCenters<'_> {
+    type Item = [f32; 2];
+
+    fn next(&mut self) -> Option<[f32; 2]> {
+        match &mut self.inner {
+            CentersInner::Empty => None,
+            CentersInner::Compact { points } => points.next().copied(),
+            CentersInner::Slots { paths, current } => loop {
+                if let Some(points) = current {
+                    if let Some((_, point)) = points.next() {
+                        return Some(point.value().0);
+                    }
+                }
+                let (_, path_spec) = paths.next()?;
+                let PathSpec::PointList { points, .. } = path_spec.value();
+                *current = Some(points.entries.iter());
+            },
+        }
+    }
+}
+
 /// Generate mapping points from either mapping representation.
 ///
 /// A thin exact-capacity wrapper over [`for_each_mapping_point`] — kept for
@@ -263,6 +327,60 @@ mod tests {
         let mut out = alloc::vec::Vec::new();
         for_each_mapping_point(mapping, w, h, |index, point| out.push((index, point)));
         out
+    }
+
+    /// The streaming twin yields the same centres in the same order as the
+    /// visitor — before the visitor's clamp, which is the one difference by
+    /// design — for every mapping shape, including the sparse/out-of-order
+    /// slot keys, a compact carrier, and one whose span total overshoots
+    /// its point list.
+    #[test]
+    fn mapping_centers_visits_what_for_each_mapping_point_visits() {
+        let sparse = config_with_path_keys(&[
+            (4, path_with_keys(100, &[(0, [0.1, 0.1]), (7, [0.2, 0.2])])),
+            (
+                1,
+                path_with_keys(10, &[(3, [0.3, 0.3]), (2, [1.4, -0.4]), (9, [0.5, 0.5])]),
+            ),
+            (9, path_with_keys(0, &[])),
+            (2, path_with_keys(u32::MAX - 1, &[(5, [0.6, 0.6])])),
+        ]);
+        let compact = ResolvedMappingCompact {
+            spans: vec![
+                ResolvedSpan {
+                    object: 0,
+                    first_channel: 0,
+                    count: 2,
+                },
+                ResolvedSpan {
+                    object: 1,
+                    first_channel: 2,
+                    count: 5,
+                },
+            ],
+            points: vec![[0.1, 0.9], [0.2, 0.8], [0.3, 0.7], [-0.5, 1.5]],
+            sample_diameter: 2.0,
+        };
+        let cases: alloc::vec::Vec<(&str, MappingRef<'_>)> = vec![
+            ("unset", MappingRef::Slots(&MappingConfig::Unset)),
+            ("sparse slots", MappingRef::Slots(&sparse)),
+            ("compact, spans overshoot", MappingRef::Compact(&compact)),
+        ];
+        for (name, mapping) in cases {
+            let streamed: alloc::vec::Vec<[f32; 2]> = mapping_centers(mapping)
+                .map(|[x, y]| [x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)])
+                .collect();
+            let visited: alloc::vec::Vec<[f32; 2]> = visited(mapping, 10, 10)
+                .into_iter()
+                .map(|(_, point)| point.center)
+                .collect();
+            assert_eq!(streamed, visited, "{name}");
+            assert_eq!(
+                streamed.len(),
+                mapping_point_count(mapping),
+                "{name}: count"
+            );
+        }
     }
 
     /// The ordering contract, pinned two ways:

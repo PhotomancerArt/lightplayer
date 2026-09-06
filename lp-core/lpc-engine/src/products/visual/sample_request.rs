@@ -2,7 +2,10 @@
 
 use alloc::vec::Vec;
 
+use lp_gfx::{LpGraphics, SampleOutHandle, SamplePointsHandle};
+
 use super::{ConsumerPolicy, VisualSpace};
+use crate::node::{NodeError, err_ctx};
 
 /// Texture UV sample point encoded as Q16.16.
 ///
@@ -22,30 +25,123 @@ pub struct TextureSampleBatch {
     pub time_seconds: f32,
 }
 
-/// Direct visual sampling request backed by a reusable backend point buffer.
+/// A visual product sampled in bounded batches.
 ///
-/// `points` are shader pixel-space Q16.16 coordinates, packed for `space`:
-/// `[x, y]` pairs for [`VisualSpace::TwoD`], tightly packed single `t`
-/// words for [`VisualSpace::OneD`] (written through
-/// `LpGraphics::write_sample_points_1d`). `output_width` and
-/// `output_height` define the shader `outputSize` uniform for those points
-/// — `(N, 1)` for a 1D request.
+/// The consumer owns a **window** — `points` and `samples` of one capacity,
+/// plus a host-side coordinate scratch of `capacity × 2` words — and two
+/// closures. The PRODUCER drives the loop (see [`Self::drive`]): it calls
+/// `fill` for the next batch, uploads the scratch through
+/// [`LpGraphics::write_sample_points`], samples the first `n` points with
+/// the uniforms it bound once for the whole stream, and hands `n × 4` RGBA16
+/// words to `consume`. Nothing O(product) is materialized on either side:
+/// the coordinates' home is the consumer's mapping, the samples' home is
+/// wherever `consume` writes them, and the window between is bounded by
+/// [`LpGraphics::sample_batch_capacity`]
+/// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
 ///
-/// `space` and `policy` default to `TwoD` / no policy, which is what every
-/// consumer sent before spaces existed.
-pub struct VisualSampleBufferRequest<'a> {
-    pub points: &'a mut lp_gfx::SamplePointsHandle,
+/// `fill` writes at most `capacity` points into the scratch in the packing
+/// `space` declares — `[x, y]` pairs for [`VisualSpace::TwoD`], single `[t]`
+/// words for [`VisualSpace::OneD`] (the tail of the scratch is slack the
+/// producer uploads but nothing reads) — and returns the point count; `0`
+/// ends the stream. `output_width` and `output_height` define the shader
+/// `outputSize` uniform for those points — `(N, 1)` for a 1D request.
+pub struct VisualSampleStream<'a> {
+    pub points: &'a mut SamplePointsHandle,
+    pub samples: &'a mut SampleOutHandle,
+    pub coords: &'a mut [i32],
+    pub fill: &'a mut dyn FnMut(&mut [i32]) -> u32,
+    pub consume: &'a mut dyn FnMut(&[u16]) -> Result<(), NodeError>,
     pub output_width: u32,
     pub output_height: u32,
     pub time_seconds: f32,
-    /// Space the consumer is asking in, and the lane packing of `points`.
+    /// Space the consumer is asking in, and the lane packing of `coords`.
     pub space: VisualSpace,
     /// The consumer's projection policy, honored by the producer when the
     /// spaces disagree.
     pub policy: ConsumerPolicy,
+    /// This stream is a later batch of a product the consumer is walking
+    /// through repeated calls this frame (the playlist crossfade drives its
+    /// own loop and hands each batch to both entries). A producer made its
+    /// frame's decisions on the first call — compile now, keep the last good
+    /// program, or render black — and must hold them: a compile that was
+    /// deferred on batch 0 stays deferred on batch 1, exactly as it would
+    /// have across the one call the whole product used to be.
+    pub continuation: bool,
 }
 
-/// Caller-owned target for packed RGBA16 sample results.
-pub struct VisualSampleTarget<'a> {
-    pub samples: &'a mut lp_gfx::SampleOutHandle,
+impl VisualSampleStream<'_> {
+    /// Points per batch: the window's size.
+    #[must_use]
+    pub fn capacity(&self) -> u32 {
+        self.points.count()
+    }
+
+    /// Check the window's three parts agree before a producer relies on them.
+    pub fn validate(&self) -> Result<u32, NodeError> {
+        let capacity = self.capacity();
+        if self.samples.count() != capacity {
+            return Err(NodeError::msg(alloc::format!(
+                "sample stream: {capacity}-point window with a {}-point sample-out",
+                self.samples.count()
+            )));
+        }
+        if self.coords.len() != capacity as usize * 2 {
+            return Err(NodeError::msg(alloc::format!(
+                "sample stream: {capacity}-point window with a {}-word coordinate scratch",
+                self.coords.len()
+            )));
+        }
+        Ok(capacity)
+    }
+
+    /// Run the loop for a producer: fill → upload → `sample_batch(coords,
+    /// points, samples, n)` → consume, until `fill` yields `0`.
+    ///
+    /// `sample_batch` sees the scratch the batch was filled from (the
+    /// projection paths read it host-side instead of reading the handle
+    /// back), the uploaded point handle, and the sample-out to write; after
+    /// it returns, the first `n × 4` words of the sample-out are handed to
+    /// `consume` through [`LpGraphics::sample_out_data`] — a borrow, never a
+    /// copy.
+    pub fn drive(
+        &mut self,
+        graphics: &dyn LpGraphics,
+        mut sample_batch: impl FnMut(
+            &[i32],
+            &mut SamplePointsHandle,
+            &mut SampleOutHandle,
+            u32,
+        ) -> Result<(), NodeError>,
+    ) -> Result<(), NodeError> {
+        let capacity = self.validate()?;
+        loop {
+            let n = (self.fill)(self.coords);
+            if n == 0 {
+                return Ok(());
+            }
+            if n > capacity {
+                return Err(NodeError::msg(alloc::format!(
+                    "sample stream: fill wrote {n} points into a {capacity}-point window"
+                )));
+            }
+            graphics
+                .write_sample_points(self.points, self.coords)
+                .map_err(err_ctx("sample stream point upload"))?;
+            sample_batch(self.coords, self.points, self.samples, n)?;
+            let data = graphics
+                .sample_out_data(self.samples)
+                .map_err(err_ctx("sample stream read"))?;
+            (self.consume)(&data[..n as usize * 4])?;
+        }
+    }
+
+    /// Drive the stream with the sample-out already holding every batch's
+    /// answer — the producers' "black" path: clear the window once, then
+    /// let every batch consume zeros.
+    pub fn drive_cleared(&mut self, graphics: &dyn LpGraphics) -> Result<(), NodeError> {
+        graphics
+            .clear_sample_out(self.samples)
+            .map_err(err_ctx("sample stream clear"))?;
+        self.drive(graphics, |_, _, _, _| Ok(()))
+    }
 }
