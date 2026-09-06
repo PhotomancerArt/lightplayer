@@ -324,14 +324,16 @@ fn execute_sb<M: LoggingMode, B: Bus>(
     let value = read_reg(regs, rs2);
     let address = base.wrapping_add(imm) as u32;
 
+    let error_regs = *regs;
     let old_byte = if M::ENABLED {
-        memory.read_byte(address).unwrap_or(0)
+        memory
+            .read_byte(address)
+            .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?
     } else {
         0
     };
     let old_value = old_byte as i32;
 
-    let error_regs = *regs;
     memory
         .write_byte(address, value as i8)
         .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
@@ -374,14 +376,16 @@ fn execute_sh<M: LoggingMode, B: Bus>(
     let value = read_reg(regs, rs2);
     let address = base.wrapping_add(imm) as u32;
 
+    let error_regs = *regs;
     let old_half = if M::ENABLED {
-        memory.read_halfword(address).unwrap_or(0)
+        memory
+            .read_halfword(address)
+            .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?
     } else {
         0
     };
     let old_value = old_half as i32;
 
-    let error_regs = *regs;
     memory
         .write_halfword(address, value as i16)
         .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
@@ -424,13 +428,15 @@ fn execute_sw<M: LoggingMode, B: Bus>(
     let value = read_reg(regs, rs2);
     let address = base.wrapping_add(imm) as u32;
 
+    let error_regs = *regs;
     let old_value = if M::ENABLED {
-        memory.read_word(address).unwrap_or(0)
+        memory
+            .read_word(address)
+            .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?
     } else {
         0
     };
 
-    let error_regs = *regs;
     memory
         .write_word(address, value)
         .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;

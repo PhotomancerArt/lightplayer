@@ -460,7 +460,9 @@ fn execute_c_sw<M: LoggingMode, B: Bus>(
 
     let error_regs = *regs;
     let old_value = if M::ENABLED {
-        memory.read_word(address).unwrap_or(0)
+        memory
+            .read_word(address)
+            .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?
     } else {
         0
     };
@@ -1376,7 +1378,9 @@ fn execute_c_swsp<M: LoggingMode, B: Bus>(
 
     let error_regs = *regs;
     let old_value = if M::ENABLED {
-        memory.read_word(address).unwrap_or(0)
+        memory
+            .read_word(address)
+            .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?
     } else {
         0
     };
