@@ -120,7 +120,9 @@ impl IdentityFirmware {
 /// under 50 (spike round 1, longest-board case).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IdentityRows {
-    /// board · chip — empty when neither is known.
+    /// board · chip — empty when neither is known; the chip alone when
+    /// only it is; the board alone when its name already states the chip
+    /// ([`DeviceIdentityLine::chip_clause`]).
     pub board: String,
     /// MAC · firmware label (the label always; the MAC when known). The
     /// memory mark is NOT in here — [`IdentityFirmware::memory_mark`]
@@ -129,9 +131,30 @@ pub struct IdentityRows {
 }
 
 impl DeviceIdentityLine {
+    /// The chip clause row 1 actually prints: the joined chip, unless the
+    /// board name already states it.
+    ///
+    /// "XIAO ESP32-C6 · esp32c6" and "ESP32-S3-DevKitC-1 · esp32s3" pay
+    /// twice for one fact on the row with the least room to spare;
+    /// "QuinLED-Dig-Uno · esp32" does not, because the name says nothing
+    /// about the chip. The rule (spike `device-card-identity-line`, the
+    /// "drop chip when the board name says it" toggle): lowercase the
+    /// board name, strip everything but letters and digits, and drop the
+    /// chip when that string contains the chip family — so the name's
+    /// "ESP32-C6" matches the family's "esp32c6" across the dash. A banner
+    /// that names a DIFFERENT chip than the board name ("XIAO ESP32-C6"
+    /// booting as esp32s3) keeps its chip: then the two are not one fact.
+    pub fn chip_clause(&self) -> Option<&str> {
+        let chip = self.chip.as_deref()?;
+        match self.board.as_deref() {
+            Some(board) if board_name_states_chip(board, chip) => None,
+            _ => Some(chip),
+        }
+    }
+
     /// The two rows the header prints ([`IdentityRows`]).
     pub fn rows(&self) -> IdentityRows {
-        let board = [self.board.as_deref(), self.chip.as_deref()]
+        let board = [self.board.as_deref(), self.chip_clause()]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
@@ -190,6 +213,20 @@ fn identity_firmware(view: &DeviceView) -> IdentityFirmware {
         (Some(firmware), true) => IdentityFirmware::Remembered(firmware.clone()),
         _ => IdentityFirmware::None,
     }
+}
+
+/// Whether a board name already states the chip family: the name
+/// lowercased and stripped to letters and digits contains the family
+/// ("xiaoesp32c6" contains "esp32c6"; "quinleddiguno" does not contain
+/// "esp32"). See [`DeviceIdentityLine::chip_clause`].
+fn board_name_states_chip(board: &str, chip: &str) -> bool {
+    let flat: String = board
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    let chip: String = chip.to_ascii_lowercase();
+    !chip.is_empty() && flat.contains(&chip)
 }
 
 /// A board id's catalog display name, or the raw id when it does not
@@ -262,35 +299,138 @@ mod tests {
         assert_eq!(device_chip(&card()), None);
     }
 
+    /// A board whose name says nothing about its chip prints every
+    /// clause: board · chip above, MAC · firmware below.
     #[test]
     fn the_full_identity_line_joins_every_part() {
         let mut view = card();
-        view.board_id = Some("seeed/xiao-esp32-c6".to_string());
-        view.detected_chip = Some("esp32c6".to_string());
-        view.identity_label = Some("60:55:f9:0a:0b:0c".to_string());
+        view.board_id = Some("quinled/dig-uno".to_string());
+        view.detected_chip = Some("esp32".to_string());
+        view.identity_label = Some("30:76:f5:ec:f6:34".to_string());
         view.firmware_face = lpa_devices::view::FirmwareFace::LightPlayer {
-            firmware: Some("fw-esp32c6 abc1234".to_string()),
+            firmware: Some("fw-esp32v3 7c80a27".to_string()),
             wire: lpa_devices::WireVersion::Match,
         };
 
         let line = device_identity_line(&view);
-        assert_eq!(line.board.as_deref(), Some("XIAO ESP32-C6"));
-        assert_eq!(line.chip.as_deref(), Some("esp32c6"));
-        assert_eq!(line.mac.as_deref(), Some("60:55:f9:0a:0b:0c"));
+        assert_eq!(line.board.as_deref(), Some("QuinLED-Dig-Uno"));
+        assert_eq!(line.chip.as_deref(), Some("esp32"));
+        assert_eq!(line.chip_clause(), Some("esp32"));
+        assert_eq!(line.mac.as_deref(), Some("30:76:f5:ec:f6:34"));
         assert_eq!(
             line.firmware,
-            IdentityFirmware::Reported("fw-esp32c6 abc1234".to_string())
+            IdentityFirmware::Reported("fw-esp32v3 7c80a27".to_string())
         );
         assert_eq!(
             line.rows(),
             IdentityRows {
-                board: "XIAO ESP32-C6 · esp32c6".to_string(),
-                firmware: "60:55:f9:0a:0b:0c · fw-esp32c6 abc1234".to_string(),
+                board: "QuinLED-Dig-Uno · esp32".to_string(),
+                firmware: "30:76:f5:ec:f6:34 · fw-esp32v3 7c80a27".to_string(),
             }
         );
         assert_eq!(
             line.display(),
-            "XIAO ESP32-C6 · esp32c6 · 60:55:f9:0a:0b:0c · fw-esp32c6 abc1234"
+            "QuinLED-Dig-Uno · esp32 · 30:76:f5:ec:f6:34 · fw-esp32v3 7c80a27"
+        );
+    }
+
+    /// The follow-up to PR #518: a board whose catalog name already
+    /// states the chip prints the name alone on row 1 — the chip stays
+    /// joined on the line (every other decision still reads it), it just
+    /// does not print twice. Both catalog spellings of the fact are
+    /// covered: "ESP32-C6" against `esp32c6`, "ESP32-S3-DevKitC-1"
+    /// against `esp32s3`. `display()` is the rows joined, so it agrees.
+    #[test]
+    fn a_board_name_that_states_the_chip_drops_the_chip_clause() {
+        for (board_id, name, chip) in [
+            ("seeed/xiao-esp32-c6", "XIAO ESP32-C6", "esp32c6"),
+            (
+                "espressif/esp32-s3-devkitc-1",
+                "ESP32-S3-DevKitC-1",
+                "esp32s3",
+            ),
+            (
+                "espressif/esp32-c6-devkitc-1",
+                "ESP32-C6-DevKitC-1",
+                "esp32c6",
+            ),
+        ] {
+            let mut view = card();
+            view.board_id = Some(board_id.to_string());
+            view.detected_chip = Some(chip.to_string());
+            view.identity_label = Some("60:55:f9:0a:0b:0c".to_string());
+            view.firmware_face = lpa_devices::view::FirmwareFace::LightPlayer {
+                firmware: Some("fw-esp32c6 abc1234".to_string()),
+                wire: lpa_devices::WireVersion::Match,
+            };
+
+            let line = device_identity_line(&view);
+            assert_eq!(line.chip.as_deref(), Some(chip), "{board_id}");
+            assert_eq!(line.chip_clause(), None, "{board_id}");
+            let rows = line.rows();
+            assert_eq!(rows.board, name, "{board_id}");
+            assert_eq!(rows.firmware, "60:55:f9:0a:0b:0c · fw-esp32c6 abc1234");
+            assert_eq!(
+                line.display(),
+                format!("{name} · 60:55:f9:0a:0b:0c · fw-esp32c6 abc1234"),
+                "{board_id}"
+            );
+        }
+    }
+
+    /// A board name that says nothing about the chip keeps the chip —
+    /// including a name that merely contains a prefix of the family's
+    /// letters somewhere unrelated (the DOM-Z-102's "4-Channel" is not
+    /// "esp32").
+    #[test]
+    fn a_board_name_that_does_not_state_the_chip_keeps_it() {
+        for (board_id, name) in [
+            ("quinled/dig-uno", "QuinLED-Dig-Uno"),
+            ("quinled/dig2go", "QuinLED-dig2go"),
+            ("domraem/dom-z-102", "WLED LAN 4-Channel (DOM-Z-102)"),
+        ] {
+            let mut view = card();
+            view.board_id = Some(board_id.to_string());
+            view.detected_chip = Some("esp32".to_string());
+
+            let line = device_identity_line(&view);
+            assert_eq!(line.board.as_deref(), Some(name), "{board_id}");
+            assert_eq!(line.chip_clause(), Some("esp32"), "{board_id}");
+            assert_eq!(line.rows().board, format!("{name} · esp32"), "{board_id}");
+        }
+    }
+
+    /// The name states ONE chip; a banner that names another is a second
+    /// fact, not a repeat — an XIAO ESP32-C6 record whose boot banner
+    /// reads esp32s3 keeps its chip on the row.
+    #[test]
+    fn a_banner_that_disagrees_with_the_board_name_keeps_the_chip() {
+        let mut view = card();
+        view.board_id = Some("seeed/xiao-esp32-c6".to_string());
+        view.detected_chip = Some("esp32s3".to_string());
+
+        let line = device_identity_line(&view);
+        assert_eq!(line.chip_clause(), Some("esp32s3"));
+        assert_eq!(line.rows().board, "XIAO ESP32-C6 · esp32s3");
+    }
+
+    /// The rule reads the string on the row, so an unresolved id that
+    /// happens to spell its chip is deduplicated the same way — and one
+    /// that does not is not.
+    #[test]
+    fn the_dedupe_reads_the_raw_id_when_the_board_does_not_resolve() {
+        let mut view = card();
+        view.board_id = Some("nobody/esp32-c6-thing".to_string());
+        view.detected_chip = Some("esp32c6".to_string());
+        assert_eq!(
+            device_identity_line(&view).rows().board,
+            "nobody/esp32-c6-thing"
+        );
+
+        view.board_id = Some("nobody/nothing".to_string());
+        assert_eq!(
+            device_identity_line(&view).rows().board,
+            "nobody/nothing · esp32c6"
         );
     }
 
@@ -303,7 +443,7 @@ mod tests {
 
         let line = device_identity_line(&view);
         assert_eq!(line.firmware, IdentityFirmware::None);
-        assert_eq!(line.display(), "XIAO ESP32-C6 · esp32c6 · no firmware");
+        assert_eq!(line.display(), "XIAO ESP32-C6 · no firmware");
         assert_eq!(line.rows().firmware, "no firmware");
     }
 
@@ -320,7 +460,7 @@ mod tests {
 
         let display = device_identity_line(&view).display();
         assert!(!display.contains(" ·  ·"), "{display}");
-        assert_eq!(display, "XIAO ESP32-C6 · esp32c6 · fw-esp32c6 abc1234");
+        assert_eq!(display, "XIAO ESP32-C6 · fw-esp32c6 abc1234");
     }
 
     /// A pre-hello board (a chip and nothing else) still prints both rows:
