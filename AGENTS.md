@@ -646,8 +646,10 @@ four nouns:
 - a **payload** is a module in `fw-checks` behind a cargo feature, runnable
   many per image, printing a header, records and parseable log lines;
 - a **configuration** is the named thing it ran on —
-  `silicon:seeed/xiao-esp32-c6`, `esp-emu:0.42.0`, `lp-emu:esp32c6:t1` —
-  carrying, per field class, what it is trusted for **and why**;
+  `silicon:esp32c6`, `esp-emu:0.42.0`, `lp-emu:esp32c6:t1` —
+  carrying, per field class, what it is trusted for **and why**.
+  **Identity is the chip, not the board**: this is chip simulation, and a board
+  cannot be determined programmatically anyway. The board is sidecar metadata;
 - a **transcript** is the verbatim bytes, committed under
   `lp-emu/transcripts/<chip>/<payload>/`, with a `.meta.json` sidecar for its
   provenance;

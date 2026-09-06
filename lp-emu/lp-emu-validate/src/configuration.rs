@@ -5,10 +5,20 @@
 //! "which thing produced this number" is never a matter of remembering.
 //!
 //! ```text
-//! silicon:seeed/xiao-esp32-c6     a board on the desk
+//! silicon:esp32c6                 real silicon, that chip
 //! esp-emu:0.42.0                  Espressif's binary emulator, that version
 //! lp-emu:esp32c6:t1               our machine, time grade 1
 //! ```
+//!
+//! **Identity is the chip, not the board** (Yona, G2 2026-09-06). This is
+//! chip simulation, not board simulation: what an emulator has to get right is
+//! the SoC, and a board is a pinout and a USB bridge around it. The board is
+//! also not something the runner can determine programmatically — a XIAO C6
+//! and any other C6 enumerate identically — so making it part of the key would
+//! have meant a human typing it correctly every time for no gain. It stays in
+//! the transcript's sidecar as optional metadata, beside `mac` and
+//! `silicon_rev`, where it is a fact about one capture rather than part of the
+//! name.
 
 use std::fmt;
 use std::str::FromStr;
@@ -47,9 +57,9 @@ impl fmt::Display for ConfigurationKind {
 
 /// A parsed configuration name.
 ///
-/// `detail` is the board id for silicon, the version for esp-emu, and the chip
-/// for our own machine; `qualifier` carries our machine's time grade (`t1`),
-/// which nothing else uses.
+/// `detail` is the chip for silicon and for our own machine, and the version
+/// for esp-emu; `qualifier` carries our machine's time grade (`t1`), which
+/// nothing else uses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Configuration {
     pub kind: ConfigurationKind,
@@ -66,7 +76,7 @@ impl Configuration {
             Some("lp-emu") => ConfigurationKind::LpEmu,
             Some(other) => bail!(
                 "unknown configuration kind `{other}` in `{s}` \
-                 (expected silicon:<board>, esp-emu:<version>, or lp-emu:<chip>[:<time-grade>])"
+                 (expected silicon:<chip>, esp-emu:<version>, or lp-emu:<chip>[:<time-grade>])"
             ),
             None => bail!("empty configuration name"),
         };
@@ -74,7 +84,7 @@ impl Configuration {
             Some(d) if !d.is_empty() => d.to_string(),
             _ => bail!(
                 "configuration `{s}` needs a detail: \
-                 silicon:<board>, esp-emu:<version>, lp-emu:<chip>[:<time-grade>]"
+                 silicon:<chip>, esp-emu:<version>, lp-emu:<chip>[:<time-grade>]"
             ),
         };
         let qualifier = parts.next().map(str::to_string);
@@ -83,6 +93,16 @@ impl Configuration {
         }
         if qualifier.is_some() && kind != ConfigurationKind::LpEmu {
             bail!("only `lp-emu:<chip>:<time-grade>` takes a third part; got `{s}`");
+        }
+        // Identity is the chip. A `/` in a silicon or lp-emu detail is somebody
+        // reaching for a board id, which is the thing G2 ruled out — refuse it
+        // here rather than let it reach a filename.
+        if kind != ConfigurationKind::EspEmu && detail.contains('/') {
+            bail!(
+                "configuration `{s}`: `{detail}` looks like a board id. Identity is the \
+                 CHIP (`{kind}:esp32c6`); the board belongs in the transcript's sidecar \
+                 as `board`, beside `mac` and `silicon_rev`."
+            );
         }
         Ok(Self {
             kind,
@@ -101,8 +121,10 @@ impl Configuration {
 
     /// The filename-safe form used in `<configuration>-<date>-<short>.txt`.
     ///
-    /// `:` and `/` both become `-`, so `silicon:seeed/xiao-esp32-c6` files as
-    /// `silicon-seeed-xiao-esp32-c6`.
+    /// `:` and `/` both become `-`, so `silicon:esp32c6` files as
+    /// `silicon-esp32c6` and `lp-emu:esp32c6:t1` as `lp-emu-esp32c6-t1`. `/`
+    /// no longer appears in a configuration name now that identity is the
+    /// chip, but the rule stays: a name is not allowed to invent a directory.
     pub fn slug(&self) -> String {
         self.name().replace([':', '/'], "-")
     }
@@ -198,9 +220,9 @@ mod tests {
 
     #[test]
     fn parses_the_three_kinds() {
-        let s = Configuration::parse("silicon:seeed/xiao-esp32-c6").unwrap();
+        let s = Configuration::parse("silicon:esp32c6").unwrap();
         assert_eq!(s.kind, ConfigurationKind::Silicon);
-        assert_eq!(s.detail, "seeed/xiao-esp32-c6");
+        assert_eq!(s.detail, "esp32c6");
         assert_eq!(s.qualifier, None);
 
         let e = Configuration::parse("esp-emu:0.42.0").unwrap();
@@ -216,7 +238,7 @@ mod tests {
     #[test]
     fn names_round_trip() {
         for name in [
-            "silicon:seeed/xiao-esp32-c6",
+            "silicon:esp32c6",
             "esp-emu:0.42.0",
             "lp-emu:esp32c6:t1",
             "lp-emu:esp32c6",
@@ -228,10 +250,8 @@ mod tests {
     #[test]
     fn slugs_are_filename_safe() {
         assert_eq!(
-            Configuration::parse("silicon:seeed/xiao-esp32-c6")
-                .unwrap()
-                .slug(),
-            "silicon-seeed-xiao-esp32-c6"
+            Configuration::parse("silicon:esp32c6").unwrap().slug(),
+            "silicon-esp32c6"
         );
         assert_eq!(
             Configuration::parse("lp-emu:esp32c6:t1").unwrap().slug(),
@@ -244,7 +264,7 @@ mod tests {
         for bad in [
             "silicon",
             "qemu:esp32c6",
-            "silicon:board:extra",
+            "silicon:esp32c6:extra",
             "esp-emu:",
             "lp-emu:esp32c6:t1:more",
         ] {
@@ -253,6 +273,22 @@ mod tests {
                 "`{bad}` should not parse"
             );
         }
+    }
+
+    /// G2, 2026-09-06: identity is the chip, not the board. A board id in the
+    /// key is refused with the reason and the replacement.
+    #[test]
+    fn a_board_id_is_not_a_configuration() {
+        let err = Configuration::parse("silicon:seeed/xiao-esp32-c6")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("board id"), "{err}");
+        assert!(err.contains("silicon:esp32c6"), "{err}");
+        assert!(err.contains("sidecar"), "{err}");
+
+        // The version string of a third-party emulator is not a board id, and
+        // nothing stops it carrying whatever punctuation upstream chose.
+        assert!(Configuration::parse("esp-emu:0.42.0/rc1").is_ok());
     }
 
     #[test]

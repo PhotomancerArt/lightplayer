@@ -36,8 +36,12 @@ payloads = ["gpio-calibrate"]
 # ---------------------------------------------------------------------------
 
 [[configuration]]
-name = "silicon:seeed/xiao-esp32-c6"
-description = "The desk XIAO ESP32-C6 (chip revision v0.2, MAC a0:f2:62:87:b4:8c) on its USB-Serial-JTAG port."
+# Identity is the CHIP, not the board (Yona, G2 2026-09-06): this is chip
+# simulation, not board simulation, and the board is not something the runner
+# can determine programmatically anyway. Which board a capture came from lives
+# in that transcript's sidecar as `board`, beside `mac` and `silicon_rev`.
+name = "silicon:esp32c6"
+description = "Real ESP32-C6 silicon on a serial port. The desk board is a XIAO ESP32-C6 (chip revision v0.2, MAC a0:f2:62:87:b4:8c), which each transcript records in its own sidecar."
 chip = "esp32c6"
 
 [[configuration.trust]]

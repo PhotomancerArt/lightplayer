@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn silicon_refuses_without_a_port() {
-        let req = request("silicon:seeed/xiao-esp32-c6", "shader-compile-stress", None);
+        let req = request("silicon:esp32c6", "shader-compile-stress", None);
         let err = format!("{:#}", SiliconDriver.plan(&req).unwrap_err());
         assert!(err.contains("--port"), "{err}");
         assert!(err.contains("candidates[0]"), "{err}");
@@ -478,7 +478,7 @@ mod tests {
     #[test]
     fn silicon_plan_uses_the_desk_step_script_and_the_sentinel() {
         let req = request(
-            "silicon:seeed/xiao-esp32-c6",
+            "silicon:esp32c6",
             "shader-compile-stress",
             Some("/dev/cu.usbmodem1433201"),
         );
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn silicon_does_not_add_the_spike_uart_feature() {
         let req = request(
-            "silicon:seeed/xiao-esp32-c6",
+            "silicon:esp32c6",
             "shader-compile-stress",
             Some("/dev/cu.usbmodem1433201"),
         );

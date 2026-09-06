@@ -31,10 +31,20 @@ cannot drift silently.
 The named reference implementation a payload ran on (plan PD4):
 
 ```text
-silicon:seeed/xiao-esp32-c6     a board on the desk
+silicon:esp32c6                 real silicon, that chip
 esp-emu:0.42.0                  Espressif's binary emulator, that version
 lp-emu:esp32c6:t1               our machine, time grade 1 (M3)
 ```
+
+**Identity is the chip, not the board** (Yona, G2 2026-09-06). This is chip
+simulation, not board simulation: what an emulator has to get right is the SoC.
+The board is also not something the runner can determine programmatically — a
+XIAO C6 and any other C6 enumerate identically — so putting it in the key would
+have meant a human typing it correctly every time for no gain. Which board a
+capture came from lives in that transcript's sidecar as `board`, beside `mac`
+and `silicon_rev`, where it is a fact about one capture rather than part of a
+name. `Configuration::parse` refuses a `/` in a silicon or `lp-emu` detail for
+exactly this reason.
 
 `validate.toml` says what each is trusted for, per field class, **with a
 reason**. A class with no entry is `modeled`: silence is not trust. That table

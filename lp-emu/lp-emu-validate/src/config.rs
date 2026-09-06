@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn silicon_is_measured_everywhere_it_claims_anything() {
         let cfg = ValidateConfig::embedded();
-        let s = cfg.configuration("silicon:seeed/xiao-esp32-c6").unwrap();
+        let s = cfg.configuration("silicon:esp32c6").unwrap();
         for class in [
             FieldClass::Memory,
             FieldClass::Timing,

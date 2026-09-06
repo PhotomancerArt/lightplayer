@@ -391,7 +391,7 @@ mod tests {
         assert!(out.contains("shader-compile-stress"), "{out}");
         assert!(out.contains("gpio-calibrate"), "{out}");
         assert!(out.contains("compile-parity"), "{out}");
-        assert!(out.contains("silicon:seeed/xiao-esp32-c6"), "{out}");
+        assert!(out.contains("silicon:esp32c6"), "{out}");
         assert!(out.contains("unavailable until M3"), "{out}");
         assert!(out.contains("timing=modeled"), "{out}");
         assert!(out.contains("(none)"), "{out}");
@@ -472,7 +472,7 @@ mod tests {
             run_set(
                 &cfg,
                 "compile-parity",
-                "silicon:seeed/xiao-esp32-c6",
+                "silicon:esp32c6",
                 None,
                 90,
                 Path::new("/repo"),

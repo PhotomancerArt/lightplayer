@@ -2,7 +2,7 @@
   "schema": 1,
   "payload": "shader-compile-stress",
   "chip": "esp32c6",
-  "configuration": "silicon:seeed/xiao-esp32-c6",
+  "configuration": "silicon:esp32c6",
   "date": "2026-09-06",
   "firmware_commit": "d6cfaa2051ae",
   "firmware_features": [

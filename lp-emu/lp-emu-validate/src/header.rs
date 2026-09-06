@@ -44,7 +44,7 @@ pub struct TranscriptHeader {
     /// Payload name, as in the registry (`shader-compile-stress`).
     pub payload: String,
     pub chip: String,
-    /// The configuration name (PD4): `silicon:seeed/xiao-esp32-c6`.
+    /// The configuration name (PD4): `silicon:esp32c6`.
     pub configuration: String,
     /// Capture date, `YYYY-MM-DD`.
     pub date: String,
@@ -60,8 +60,18 @@ pub struct TranscriptHeader {
     /// board — that disagreement is a fact worth carrying).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub silicon_rev: Option<String>,
+    /// The board the chip is on (`seeed/xiao-esp32-c6`).
+    ///
+    /// **Metadata, never part of the configuration key.** Identity is the chip
+    /// (Yona, G2 2026-09-06): this is chip simulation, not board simulation,
+    /// and the board is not something the runner can determine
+    /// programmatically. It is a fact about one capture, recorded here beside
+    /// `mac` and `silicon_rev`, and useful exactly when a specific bench setup
+    /// turns out to matter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board: Option<String>,
+    /// The chip's MAC, which is the only thing that distinguishes two boards
+    /// of the same model on one desk.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mac: Option<String>,
     /// Tool name -> version. espflash, esp-emu, the host toolchain.
@@ -263,7 +273,7 @@ mod tests {
             schema: HEADER_SCHEMA,
             payload: "shader-compile-stress".into(),
             chip: "esp32c6".into(),
-            configuration: "silicon:seeed/xiao-esp32-c6".into(),
+            configuration: "silicon:esp32c6".into(),
             date: "2026-09-06".into(),
             firmware_commit: "d6cfaa2051ae".into(),
             firmware_features: vec![
@@ -288,11 +298,11 @@ mod tests {
         let h = header();
         assert_eq!(
             h.file_stem().unwrap(),
-            "silicon-seeed-xiao-esp32-c6-2026-09-06-d6cfaa205"
+            "silicon-esp32c6-2026-09-06-d6cfaa205"
         );
         assert_eq!(
             h.relative_path().unwrap(),
-            "esp32c6/shader-compile-stress/silicon-seeed-xiao-esp32-c6-2026-09-06-d6cfaa205.txt"
+            "esp32c6/shader-compile-stress/silicon-esp32c6-2026-09-06-d6cfaa205.txt"
         );
     }
 

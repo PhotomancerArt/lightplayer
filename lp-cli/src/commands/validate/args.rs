@@ -47,7 +47,7 @@ pub struct ReplayArgs {
 pub struct RunArgs {
     /// Set name, for example `compile-parity`.
     pub set: String,
-    /// Configuration name, for example `silicon:seeed/xiao-esp32-c6`.
+    /// Configuration name, for example `silicon:esp32c6`.
     #[arg(long = "config")]
     pub configuration: String,
     /// Serial port, for silicon configurations. Never defaulted: resolve it

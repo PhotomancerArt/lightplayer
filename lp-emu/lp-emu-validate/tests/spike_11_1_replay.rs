@@ -23,7 +23,7 @@ use lp_emu_validate::replay::{ReplayOptions, replay};
 use lp_emu_validate::transcript::Transcript;
 use lp_emu_validate::{TranscriptHeader, payload};
 
-const SILICON: &str = "silicon-seeed-xiao-esp32-c6-2026-09-06-d6cfaa205.txt";
+const SILICON: &str = "silicon-esp32c6-2026-09-06-d6cfaa205.txt";
 const ESP_EMU: &str = "esp-emu-0.42.0-2026-09-06-d6cfaa205.txt";
 
 fn dir() -> PathBuf {
@@ -61,7 +61,7 @@ fn the_pair_carries_its_provenance() {
     let s = load(SILICON);
     let e = load(ESP_EMU);
 
-    assert_eq!(s.header.configuration, "silicon:seeed/xiao-esp32-c6");
+    assert_eq!(s.header.configuration, "silicon:esp32c6");
     assert_eq!(e.header.configuration, "esp-emu:0.42.0");
     assert_eq!(s.header.firmware_commit, e.header.firmware_commit);
     assert_eq!(s.header.firmware_features, e.header.firmware_features);

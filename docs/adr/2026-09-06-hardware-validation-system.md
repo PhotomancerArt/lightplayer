@@ -54,7 +54,7 @@ recipes keep working while the payload becomes the real thing.
 A named value, not a mood (plan PD4):
 
 ```text
-silicon:seeed/xiao-esp32-c6
+silicon:esp32c6
 esp-emu:0.42.0
 lp-emu:esp32c6:t1
 ```
@@ -63,6 +63,25 @@ It appears in the transcript header, in the runner's table, and in the
 transcript's filename. Configurations that do not exist yet are **listed as
 unavailable** rather than omitted — `lp-emu:*` says `unavailable until M3` —
 so the seam has a name before it has an implementation.
+
+**Identity is the chip, not the board** (Yona, at G2, 2026-09-06; the key
+first shipped as `silicon:seeed/xiao-esp32-c6` and was changed before merge).
+Two reasons, and the second is the practical one:
+
+1. The goal is **chip simulation, not board simulation**. What an emulator has
+   to get right is the SoC; a board is a pinout and a USB bridge around it.
+2. The board **cannot be determined programmatically** — a XIAO C6 and any
+   other C6 enumerate identically (`303a:1001`) — so a board-keyed
+   configuration means a human typing it correctly on every capture, with
+   nothing to catch a mistake.
+
+The board stays as **optional sidecar metadata** (`board`, beside `mac` and
+`silicon_rev`), where it is a fact about one capture and useful exactly when a
+specific bench setup turns out to matter. `Configuration::parse` refuses a `/`
+in a silicon or `lp-emu` detail so the old shape cannot come back by habit.
+
+The cost of the ruling is real and worth naming: `silicon:esp32c6` cannot
+distinguish two C6s on one desk. Only the sidecar's `mac` can, and it does.
 
 ### Trust is per field class, stated, with a reason
 
