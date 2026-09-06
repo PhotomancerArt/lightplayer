@@ -52,7 +52,13 @@ command -v jq >/dev/null 2>&1 || {
 # Run one profile session; prints the profile output directory.
 run_profile() {
     local project="$1" mode="$2"
-    cargo run -q -p lp-cli -- profile "$project" --collect alloc --mode "$mode" 2>/dev/null | tail -1
+    # The safety cap is raised over lp-cli's 200 M default: the per-marker
+    # free-list walk grows with the guest's free heap, and a startup run of
+    # zook-dome crossed 200 M cycles mid-walk on 2026-09-06 (after the sample
+    # window change freed ~21 KB), which silently drops the last window's
+    # free-list figures. See docs/heap-budget-gate.md "Cost".
+    cargo run -q -p lp-cli -- profile "$project" --collect alloc --mode "$mode" \
+        --max-cycles 400000000 2>/dev/null | tail -1
 }
 
 budget_for() {

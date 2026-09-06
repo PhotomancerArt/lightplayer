@@ -212,6 +212,13 @@ impl LpGraphics for NullGraphics {
         Err(unsupported("borrow sample outputs"))
     }
 
+    fn sample_points_data_mut<'a>(
+        &self,
+        _points: &'a mut SamplePointsHandle,
+    ) -> Result<&'a mut [i32], GfxError> {
+        Err(unsupported("borrow sample points"))
+    }
+
     fn clear_sample_out(&self, _out: &mut SampleOutHandle) -> Result<(), GfxError> {
         Err(unsupported("clear a sample-output buffer"))
     }

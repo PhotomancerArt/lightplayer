@@ -3,8 +3,7 @@
 use lp_gfx::TextureHandle;
 
 use crate::products::visual::{
-    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
-    VisualSampleBufferRequest, VisualSampleTarget,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleStream,
 };
 
 use super::{NodeError, RenderContext, err_ctx};
@@ -67,8 +66,7 @@ pub trait RenderNode {
     fn sample_visual_into(
         &mut self,
         _product: VisualProduct,
-        _request: VisualSampleBufferRequest<'_>,
-        _target: VisualSampleTarget<'_>,
+        _stream: VisualSampleStream<'_>,
         _ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
         Err(NodeError::msg(

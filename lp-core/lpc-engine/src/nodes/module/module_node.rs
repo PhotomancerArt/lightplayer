@@ -22,9 +22,7 @@ use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
     RenderContext, RenderNode, ScopeRef, TickContext, err_ctx,
 };
-use crate::products::visual::{
-    RenderTextureRequest, TextureRenderProduct, VisualSampleBufferRequest, VisualSampleTarget,
-};
+use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualSampleStream};
 use lpc_model::{SlotAccess, SlotShapeRegistry, SlotShapeRegistryError};
 
 use super::ModuleMirrorState;
@@ -200,17 +198,17 @@ impl RenderNode for ModuleNode {
     fn sample_visual_into(
         &mut self,
         _product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        mut stream: VisualSampleStream<'_>,
         ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
         let Some(mirrored) = self.mirrored else {
-            return ctx
+            let graphics = ctx
                 .graphics()
-                .ok_or_else(|| NodeError::msg("missing graphics backend"))?
-                .clear_sample_out(target.samples)
+                .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+            return stream
+                .drive_cleared(graphics)
                 .map_err(err_ctx("module mirror clear samples"));
         };
-        ctx.sample_visual_into(mirrored, request, target)
+        ctx.sample_visual_into(mirrored, stream)
     }
 }

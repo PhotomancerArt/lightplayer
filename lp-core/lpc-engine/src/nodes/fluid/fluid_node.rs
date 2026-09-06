@@ -15,11 +15,11 @@ use lps_shared::TextureStorageFormat;
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
-    RenderContext, RenderNode, RuntimeStateShape, TickContext, err_ctx,
+    RenderContext, RenderNode, RuntimeStateShape, TickContext, ensure_scratch_len, err_ctx,
 };
 use crate::products::visual::{
-    RenderTextureRequest, TextureRenderProduct, VisualSampleBufferRequest, VisualSampleTarget,
-    pixel_q16_to_normalized_q16, texel_center_to_uv_q16,
+    RenderTextureRequest, TextureRenderProduct, VisualSampleStream, pixel_q16_to_normalized_q16,
+    texel_center_to_uv_q16,
 };
 
 use super::{MsaFluidSolver, sample_rgba16_bilinear_q16, stamp_emitter};
@@ -31,6 +31,9 @@ pub struct FluidNode {
     solver: Option<MsaFluidSolver>,
     solver_config: Option<FluidSolverConfig>,
     last_step_time_seconds: Option<f32>,
+    /// One sample-stream batch of RGBA16 words, kept for the node's life so a
+    /// per-frame sample allocates nothing (`node::scratch`).
+    sample_scratch: Vec<u16>,
 }
 
 impl FluidNode {
@@ -41,6 +44,7 @@ impl FluidNode {
             solver: None,
             solver_config: None,
             last_step_time_seconds: None,
+            sample_scratch: Vec::new(),
         }
     }
 
@@ -214,34 +218,49 @@ impl RenderNode for FluidNode {
     fn sample_visual_into(
         &mut self,
         _product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        mut stream: VisualSampleStream<'_>,
         ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
-        let point_count = request.points.count();
-        if target.samples.count() != point_count {
-            return Err(NodeError::msg("fluid sample target count mismatch"));
-        }
+        let capacity = stream.validate()?;
         let graphics = ctx
             .graphics()
             .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
-        let Some(solver) = &self.solver else {
-            return graphics
-                .clear_sample_out(target.samples)
+        let Self {
+            solver,
+            sample_scratch,
+            ..
+        } = self;
+        let Some(solver) = solver else {
+            return stream
+                .drive_cleared(graphics)
                 .map_err(err_ctx("fluid clear samples"));
         };
-        let points = graphics
-            .read_sample_points(request.points)
-            .map_err(err_ctx("fluid sample point read"))?;
-        let mut channels = vec![0u16; point_count as usize * 4];
-        for (point, sample) in points.chunks_exact(2).zip(channels.chunks_exact_mut(4)) {
-            let x = pixel_q16_to_normalized_q16(point[0], request.output_width);
-            let y = pixel_q16_to_normalized_q16(point[1], request.output_height);
-            sample.copy_from_slice(&sample_rgba16_bilinear_q16(solver, x, y));
-        }
-        graphics
-            .write_sample_out(target.samples, &channels)
-            .map_err(err_ctx("fluid sample write"))
+        // One batch of RGBA16 words, resident: the stream's coordinates are
+        // read host-side, sampled on the CPU here, and written back per
+        // batch — nothing sized to the product.
+        ensure_scratch_len(
+            sample_scratch,
+            capacity as usize * 4,
+            "fluid sample scratch",
+        )?;
+        let (output_width, output_height) = (stream.output_width, stream.output_height);
+        stream.drive(graphics, |points, samples, n| {
+            let n = n as usize;
+            let coords = graphics
+                .sample_points_data_mut(points)
+                .map_err(err_ctx("fluid sample points"))?;
+            for (point, sample) in coords[..n * 2]
+                .chunks_exact(2)
+                .zip(sample_scratch.chunks_exact_mut(4))
+            {
+                let x = pixel_q16_to_normalized_q16(point[0], output_width);
+                let y = pixel_q16_to_normalized_q16(point[1], output_height);
+                sample.copy_from_slice(&sample_rgba16_bilinear_q16(solver, x, y));
+            }
+            graphics
+                .write_sample_out(samples, sample_scratch)
+                .map_err(err_ctx("fluid sample write"))
+        })
     }
 }
 

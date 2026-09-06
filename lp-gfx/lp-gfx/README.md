@@ -21,6 +21,14 @@ engine (`lpc-engine`) and shader execution backends.
   keeps it host-visible, so `sample_out_data` borrows it in place and a
   frame path reads its samples without a copy (the fixture node's per-frame
   read is that borrow — no 8 B/lamp scratch).
+- **Sampling is a bound stream**: `LpShader::bind_uniforms` once, then
+  `sample_rgba16_bound(points, out, count)` per batch — the first `count`
+  points of a window whose size the consumer picks from
+  `LpGraphics::sample_batch_capacity()` (CPU backends: 128 points; GPU:
+  unbounded, one call per product, because a call there is a device round
+  trip). Binding is the part that allocates, so it is paid per stream, not
+  per batch. `sample_rgba16(points, out, uniforms)` is the one-shot form for
+  tests and parity checks. Decorators forward all three.
 - **`ShaderCompileOptions`** with an explicit `ShaderSemantics` tier
   (`Q32 | F32Gpu`) and **`GfxError`**.
 

@@ -27,16 +27,54 @@ pub trait LpShader: Send + Sync {
         uniforms: &LpsValueF32,
     ) -> Result<(), GfxError>;
 
-    /// Run the shader at caller-provided Q16.16 pixel-space points.
-    fn sample_rgba16(
+    /// Bind `uniforms` for the sampling calls that follow.
+    ///
+    /// Binding is the part of a sample that allocates (uniform paths on the
+    /// CPU tier, bind groups on the GPU tier), so a consumer streaming a
+    /// product in batches binds once per stream and then samples each batch
+    /// with [`Self::sample_rgba16_bound`]. The binding stays in effect until
+    /// the next `bind_uniforms` or [`Self::render`] call on this shader.
+    fn bind_uniforms(&mut self, _uniforms: &LpsValueF32) -> Result<(), GfxError> {
+        Err(GfxError::Render(String::from(
+            "shader backend does not support direct sampling",
+        )))
+    }
+
+    /// Run the shader at the first `count` points of `points` with the
+    /// uniforms last bound, writing the first `count` results of `out`.
+    ///
+    /// `count ≤ points.count()` and `count ≤ out.count()`; the tails of both
+    /// buffers are untouched. The point packing follows the shader's declared
+    /// space (see [`SamplePointsHandle`]).
+    fn sample_rgba16_bound(
         &mut self,
         _points: &mut SamplePointsHandle,
         _out: &mut SampleOutHandle,
-        _uniforms: &LpsValueF32,
+        _count: u32,
     ) -> Result<(), GfxError> {
         Err(GfxError::Render(String::from(
             "shader backend does not support direct sampling",
         )))
+    }
+
+    /// Run the shader at every point of `points`: bind `uniforms`, then
+    /// sample the whole buffer. The one-shot form for tests, probes and
+    /// parity checks; frame paths stream through the two halves.
+    fn sample_rgba16(
+        &mut self,
+        points: &mut SamplePointsHandle,
+        out: &mut SampleOutHandle,
+        uniforms: &LpsValueF32,
+    ) -> Result<(), GfxError> {
+        let count = points.count();
+        if out.count() != count {
+            return Err(GfxError::Render(alloc::format!(
+                "sample_rgba16: point count {count} does not match output count {}",
+                out.count()
+            )));
+        }
+        self.bind_uniforms(uniforms)?;
+        self.sample_rgba16_bound(points, out, count)
     }
 
     fn compile_stats(&self) -> Option<ShaderCompileStats> {
