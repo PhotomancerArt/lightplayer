@@ -40,7 +40,7 @@
     {
       "class": "pin",
       "grade": "measured",
-      "because": "the pin is the pin"
+      "because": "a scope or a logic analyser on the header pin is the definition of what the pin did"
     },
     {
       "class": "usb-serial-jtag",

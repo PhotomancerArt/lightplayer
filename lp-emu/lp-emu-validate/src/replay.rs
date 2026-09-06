@@ -44,6 +44,10 @@ pub struct FieldCompare {
     pub equal: bool,
     /// `left / right`, when both parse as numbers and the right is non-zero.
     pub ratio: Option<f64>,
+    /// True when this came from a line series rather than a structured record.
+    /// Series comparisons are aggregated in the rendered report — 92 ticks of
+    /// per-field detail is a wall, and the sums are the readable claim.
+    pub from_series: bool,
 }
 
 /// A series' aggregate, per field.
@@ -162,7 +166,14 @@ impl ReplayReport {
             );
         }
 
-        let timing: Vec<_> = self.differences_in(FieldClass::Timing).collect();
+        let timing: Vec<_> = self
+            .differences_in(FieldClass::Timing)
+            .filter(|c| !c.from_series)
+            .collect();
+        let series_timing = self
+            .differences_in(FieldClass::Timing)
+            .filter(|c| c.from_series)
+            .count();
         if !timing.is_empty() {
             let _ = writeln!(s, "\n  timing divergence (left / right):");
             for c in timing {
@@ -187,6 +198,13 @@ impl ReplayReport {
                     }
                 }
             }
+        }
+
+        if series_timing > 0 {
+            let _ = writeln!(
+                s,
+                "    (+ {series_timing} per-sample timing differences in the series below)"
+            );
         }
 
         if !self.series_summaries.is_empty() {
@@ -304,7 +322,7 @@ pub fn replay(
                 };
                 let lv = l.get(field).map(render_json).unwrap_or_default();
                 let rv = r.get(field).map(render_json).unwrap_or_default();
-                comparisons.push(compare(&scope, field, class, lv, rv));
+                comparisons.push(compare(&scope, field, class, lv, rv, false));
             }
         }
     }
@@ -335,7 +353,14 @@ pub fn replay(
             for (field, class) in spec.fields {
                 let lv = l.get(*field).cloned().unwrap_or_default();
                 let rv = r.get(*field).cloned().unwrap_or_default();
-                let c = compare(&format!("{}[{key}]", spec.name), field, *class, lv, rv);
+                let c = compare(
+                    &format!("{}[{key}]", spec.name),
+                    field,
+                    *class,
+                    lv,
+                    rv,
+                    true,
+                );
                 let entry = acc.entry(field).or_insert((0, 0, Some(0.0), Some(0.0)));
                 entry.0 += 1;
                 entry.1 += usize::from(c.equal);
@@ -428,6 +453,7 @@ fn compare(
     class: FieldClass,
     left: String,
     right: String,
+    from_series: bool,
 ) -> FieldCompare {
     let equal = left == right;
     let ratio = match (left.parse::<f64>(), right.parse::<f64>()) {
@@ -442,6 +468,7 @@ fn compare(
         right,
         equal,
         ratio,
+        from_series,
     }
 }
 

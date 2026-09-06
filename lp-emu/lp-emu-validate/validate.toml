@@ -53,7 +53,7 @@ because = "a real clock on real flash with real wait states"
 [[configuration.trust]]
 class = "pin"
 grade = "measured"
-because = "the pin is the pin"
+because = "a scope or a logic analyser on the header pin is the definition of what the pin did"
 
 [[configuration.trust]]
 class = "usb-serial-jtag"
