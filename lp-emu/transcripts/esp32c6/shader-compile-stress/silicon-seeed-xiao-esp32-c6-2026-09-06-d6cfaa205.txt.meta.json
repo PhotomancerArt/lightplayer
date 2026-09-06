@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "payload": "shader-compile-stress",
+  "chip": "esp32c6",
+  "configuration": "silicon:seeed/xiao-esp32-c6",
+  "date": "2026-09-06",
+  "firmware_commit": "d6cfaa2051ae",
+  "firmware_features": [
+    "test_shader_compile_incremental",
+    "esp32c6",
+    "spike_uart0_link"
+  ],
+  "firmware_dirty": false,
+  "silicon_rev": "v0.2",
+  "board": "seeed/xiao-esp32-c6",
+  "mac": "a0:f2:62:87:b4:8c",
+  "tools": {
+    "espflash": "3.3.0",
+    "port": "/dev/cu.usbmodem1433201"
+  },
+  "source": "docs/reports/2026-09-07-esp-emu-c6-spike.md §11.1; the spike planning directory's desk-captures/step1-harness.txt, which is the ANSI-stripped step1-harness.cap",
+  "capture": "espflash flash --monitor of harness/5/fw.elf — the very ELF the emulator ran — in the FOREGROUND under script(1) through a python SIG_DFL exec shim, stopped by `kill -INT <its own espflash pid>` once `=== DONE ===` appeared. One step at a time, port released between steps, lsof/pgrep empty before every open. `=== DONE ===` after 31 s including the flash. The espflash progress bar at the head of the file is part of the capture and is deliberately not trimmed.",
+  "note": "This transcript predates the in-band [fw-checks-header] line, so this sidecar is the whole header. It is the silicon half of the parity claim in spike report §11.1: memory byte-equal to esp-emu, time is not. The board's eFuse reports chip revision v0.2; esp-emu's synthetic eFuse says v0.3 for the same board, which is why silicon_rev differs across the pair.",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states — the 5 ms slice budget fails here at 11,724 us"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real ROM and the real IDF bootloader printed it"
+    },
+    {
+      "class": "pin",
+      "grade": "measured",
+      "because": "the pin is the pin"
+    },
+    {
+      "class": "usb-serial-jtag",
+      "grade": "measured",
+      "because": "a real host really attaches, or really does not"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real port"
+    }
+  ]
+}

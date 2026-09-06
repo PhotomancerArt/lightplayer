@@ -176,6 +176,11 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fields: &[
             FieldSpec {
                 record: "case-summary",
+                field: "check",
+                class: FieldClass::Structural,
+            },
+            FieldSpec {
+                record: "case-summary",
                 field: "case",
                 class: FieldClass::Structural,
             },
@@ -213,6 +218,11 @@ pub static ALL_PAYLOADS: &[Payload] = &[
                 record: "case-summary",
                 field: "after_drop_used",
                 class: FieldClass::Memory,
+            },
+            FieldSpec {
+                record: "total-summary",
+                field: "check",
+                class: FieldClass::Structural,
             },
             FieldSpec {
                 record: "total-summary",
