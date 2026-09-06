@@ -696,6 +696,7 @@ fn degraded_card_fixture() -> DeviceView {
 fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         transport_available: true,
+        feeds: Default::default(),
         // The running card has earned a registry row, so it has an editor
         // address and the running face wears Open (round-2 M5).
         open_addresses: [(1, "dev000000daqf6dvvqz".to_string())]
@@ -1010,6 +1011,7 @@ fn roster_page_fixture() -> DeviceRosterView {
     let running = devices.remove(0);
     DeviceRosterView {
         transport_available: true,
+        feeds: Default::default(),
         open_addresses: full.open_addresses,
         roster: RosterView {
             // The blank board's link, the one a fresh plug actually looks
