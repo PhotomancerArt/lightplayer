@@ -6,9 +6,12 @@ Brief: `~/.photomancer/planning/lp2025/2026-09-06-2330-esp-emu-c6-spike/brief.md
 Companion: `docs/reports/2026-09-07-esp-emu-c6-peripheral-inventory.md` (the register inventory — the spec an in-house C6 emulator would need)
 Scripts: `scripts/spike/esp-emu/`
 
-Host-only. No board was touched, no serial port opened; every desk number
-below is quoted from `docs/adr/2026-09-02-esp32c6-ram-split.md` and its
-neighbours. The firmware is `fw-esp32c6` at `d6cfaa205` (main), default
+§1–§10 are host-only: no board was touched, no serial port opened, and
+every desk number in them is quoted from
+`docs/adr/2026-09-02-esp32c6-ram-split.md` and its neighbours. §11 is the
+desk half, run the next morning on a XIAO ESP32-C6 with the *same images*
+the emulator booted; the Verdict rows below carry its numbers where they
+changed. The firmware is `fw-esp32c6` at `d6cfaa205` (main), default
 features `esp32c6,server,radio`, built with the repo's own recipe.
 
 ## Verdict
@@ -20,23 +23,27 @@ features `esp32c6,server,radio`, built with the repo's own recipe.
 | USB-Serial-JTAG (our shipped host link) | **lies** | SOF permanently asserted, EP1 always "data free", `INT_CLR` ignored: the firmware believes a draining host is attached and every frame vanishes; nothing ever arrives (§4) |
 | UART0 (esp-hal async `Uart`, spike feature) | **works** | full wire protocol: hello, `stopAllProjects`, 10 filesystem writes, `loadProject`, `projectRead` stream, heartbeats — `lp-cli upload` exits 0 in 3 s (§5) |
 | SPI flash + littlefs (`lpfs` partition) | **works** | blank flash → "Mount failed, formatting" → 7 project files written and read back; second boot in the same run not tested (`--save-state` exists) |
-| eFuse / chip identity | **works, synthetic** | `baseMac 24:0a:c4:00:00:01`, `chipRevision 0.3`, `eui64 24:0a:c4:00:00:01:00:00` |
-| esp-radio WiFi blob init + ESP-NOW driver | **works (does not hang)** | `WiFi RX config: enabled=true` in the emulator trace; firmware logs `ESP-NOW radio ready: device_id= channel=11` — note the **empty `device_id`**, unverified against the desk |
+| eFuse / chip identity | **works, synthetic** | `baseMac 24:0a:c4:00:00:01`, `chipRevision 0.3`, `eui64 24:0a:c4:00:00:01:00:00` (the desk board is `v0.2`, `rst:0x15 (USB_UART_HPSYS)` — §11) |
+| esp-radio WiFi blob init + ESP-NOW driver | **works (does not hang)** | `WiFi RX config: enabled=true` in the emulator trace; firmware logs `ESP-NOW radio ready: device_id= channel=11` — the **empty `device_id` is what silicon prints too** (§11.4), a firmware fact, not an emulator one |
 | On-device shader JIT (`lpvm-native rt_jit`) | **works** | examples/basic: 573 LPIR → 2,048 native insts, 8,192 B code, 52 ms; meteor compute+shader 53 + 27 ms; renders every frame after |
 | RMT WS281x output | **not observable** | driver opens (`gpio=/gpio/18 ws281x_ch=0 rmt_slot=0 bytes=723`), frames are produced at ~100 fps, but esp-emu shows nothing for RMT unless an offset is unknown (none was). `--rmt-loopback TX:RX` exists and is the lever to observe the waveform — not exercised |
-| Heap ledger (`[mem]`, heartbeat `memory`, `largestFreeBlock`) | **works, faithful** | meteor: after-load 216,056 B vs 220,384 B on the desk (−2.0 %); after both compiles 148–152 KB vs ~150 KB (§6) |
-| Stack probe | **works, faithful** | meteor steady state 35,768 B vs 36,936 B on the desk (−3.2 %) |
-| Frame rate / cycle timing | **lies** | meteor 100 fps (tick 8 ms) vs 26 fps on the XIAO C6: no cache, no flash wait states, ~1 insn/cycle (§7) |
+| Heap ledger (`[mem]`, heartbeat `memory`) | **works, byte-faithful** | same image on the desk (§11.2): meteor `[mem] load_project after` **216,056 B on both**, steady heartbeat `freeBytes` 152,320 vs 152,316 (−4 B), harness `peak/resident/after_drop` 48,132 / 18,932 / 3,976 B identical across all 92 ticks (§11.1). The §6 "−2.0 %" was the firmware-commit caveat, now removed |
+| `largestFreeBlock` | **proxy only** | 77,488 B emulated vs 65,522 B on silicon for meteor — but the emulator's own basic walk reported 65,522; it follows allocation order, not the chip (§11.2) |
+| Stack probe | **works, byte-faithful** | same image: meteor high-water **35,768 B on both**, basic **35,468 B on both** (§11.2); the −3.2 % in §6 was the firmware commit |
+| Frame rate / cycle timing | **lies** | measured at the same image (§11): meteor 100 fps / 8 ms tick emulated vs **32 fps / 30 ms on the XIAO C6** (3.1× / 3.75×); shader-compile slices **2.4×** faster emulated (ticks without a log line); on-device JIT `elapsed` 1.5–2.3× faster; the harness's 5 ms slice budget **passes emulated, fails on silicon** (11,724 µs) — no cache, no flash wait states, ~1 insn/cycle (§7) |
+| Boot-log text | **values right, columns wrong** | the intercepted ROM `printf` drops width/zero-pad flags: `paddr=10020 … (70428)` for silicon's `paddr=00010020 … ( 70428)`, partition rows unpadded (§11.1) |
+| Wire transcript (`lp-cli upload examples/basic`) | **works, content-identical** | masked diff vs silicon: only host-write interleaving, heartbeats the short emulated clock never reached, and the project frame counter (`revision` 4 vs 9) with its two time-driven slot values — the 16 KB node-tree frame is byte-identical (§11.3) |
 | Wall-clock speed | **slow** | 68.6 M insns/s idle (0.43× a 160 MHz core); 5 s of emulated meteor rendering took 36.4 s of wall time (§7) |
-| Determinism | **works** | two identical runs: boot bytes identical through the hello; the only diffs are heap-count digits that follow the host's connect timing (§7) |
+| Determinism | **works** | two identical runs: boot bytes identical through the hello; the only diffs are heap-count digits that follow the host's connect timing (§7) — silicon drifts the same way (64 B between a bridged and a direct connect, §11.2) |
 | Hardware harnesses (`test_rmt`, `test_dither`, `test_json`, `test_gpio`, `test_shader_compile_incremental`, `memory_fs`) | **all boot and run** | `test_shader_compile_incremental` completes to `=== DONE ===` with real numbers; the RMT/dither ones run their loops silently as designed (§5.4) |
 | GDB | **exists** (the brief assumed not) | `--gdb PORT` + Apple's `lldb` (riscv32-aware): registers, backtrace, memory read/write on the live image — how §4 was proven |
 | Peripheral trace as an inventory source | **partial** | esp-emu logs UART, PCR ("SYSTEM"), LP_* ("RTC_CNTL"), eFuse, SPI-mem, ext-mem MMU, WiFi MAC and every *unhandled* address; GPIO, RMT, TIMG, SYSTIMER, INTPRI/PLIC, GDMA and USB_JTAG are modeled but silent, so the inventory's second source is a static scan of the ELF (§8) |
 
 Bottom line for the (a)/(b) decision: esp-emu runs the whole product path
 — boot, flash filesystem, wire protocol, on-device JIT, render loop — with
-a heap and stack picture within 2–3 % of silicon, **provided the host link
-is UART0**. It cannot stand in for the C6 on anything cycle-shaped (fps,
+a heap and stack picture that is **byte-equal to silicon at the same image**
+(§11; the 2–3 % in §6 was two firmware commits apart), **provided the host
+link is UART0**. It cannot stand in for the C6 on anything cycle-shaped (fps,
 refill deadlines, WiFi-scan truncation), it shows no pin, and its
 USB-Serial-JTAG model is the one place it actively deceives the firmware.
 The inventory in the companion report is what an in-house emulator would
@@ -367,6 +374,10 @@ heartbeat memory={"freeBytes":152320,"usedBytes":173216,"totalBytes":325536,"lar
 [stack] heartbeat: high-water 35768 B of 71328 B (35560 B headroom)
 ```
 
+(Superseded by §11.2: at the same image the after-load figure is
+byte-equal and the stack high-water is byte-equal; the deltas in this
+table are the two firmware commits.)
+
 Reading: the allocator is the firmware's own (`esp_alloc`, two regions,
 325,536 B total — the emulator reports exactly the ADR's heap total), the
 RAM map is the real one (the bootloader's `dram2_seg` reclaim shows up as
@@ -543,7 +554,10 @@ uses DMA), TRACE, TEE/APM beyond the reads esp-hal does at init.
 
 Passive check by the coordinator: no Espressif USB device attached. These
 are the comparisons one board would settle in the morning, each a
-one-liner against artifacts already in the scratchpad:
+one-liner against artifacts already in the scratchpad. **Run 2026-09-07
+morning — results in §11**: items 1–4 run as written (1 → §11.1, 2 →
+§11.2, 3 → §11.3, 4 → §11.4); item 5 not run as specified (no UART0
+adapter), its positive half observed indirectly (§11.5).
 
 1. **Same harness, silicon vs emulator.** Flash `harness/5/fw.elf`
    (`test_shader_compile_incremental,esp32c6,spike_uart0_link` — the tee
@@ -598,6 +612,234 @@ esp-emu --chip esp32c6 --firmware harness.bin --timeout 90s --exit-on '=== DONE 
 # 5. shipped image unchanged
 just fw-esp32c6-size-check
 ```
+
+## 11. Desk results (2026-09-07, XIAO C6 A0:F2:62:87:B4:8C)
+
+Board: XIAO ESP32-C6 on `/dev/cu.usbmodem1433201` (USB-Serial-JTAG,
+`rst:0x15 (USB_UART_HPSYS)` after every espflash `--after hard-reset`,
+`chip revision: v0.2` — the emulator's synthetic eFuse says v0.3). Every
+raw capture is in the session scratchpad under `desk/` (`step1-harness.cap`,
+`step2-upload-meteor.log`, `step2-dev-meteor.log`, `meteor.uart.bin`,
+`basic.uart.bin`, the `.flash.cap`/`.cli.log`/`.bridge.log` per walk).
+Method, so the numbers can be read for what they are:
+
+- One step at a time, port released between steps, `lsof`/`pgrep` empty
+  before every open. espflash ran in the foreground under `script(1)`
+  through a `python3 -c 'signal(SIGINT, SIG_DFL); execvp(...)'` shim (a
+  `&` child of a non-interactive bash inherits `SIG_IGN`; without the shim
+  the monitor cannot be freed by SIGINT) and was stopped by `kill -INT
+  <its own pid>` once the sentinel appeared.
+- Item 1 flashed `harness/5/fw.elf` — the very ELF the emulator ran.
+- Items 2–4 flashed `merged-default.bin` — the very 4 MiB image the
+  emulator booted in §3 — with `espflash write-bin 0x0` (11 s over USB-SJ),
+  so firmware bytes *and* flash state (blank `lpfs`, blank `nvs`/`phy_init`)
+  were identical to the emulator's. The board's previous lpfs content was
+  overwritten by this. The HEAD build of the same default features is not
+  byte-identical to that image (embedded commit `ec4a95aacc58` vs
+  `d6cfaa2051ae`, 20,941 B in 588 clusters of relayout), which is why the
+  image was reused rather than rebuilt.
+- To get a device-side transcript in the emulator walk's own format, the
+  walks ran lp-cli over `serial:tcp://` through the same transcribing proxy
+  (`uart-tcp-proxy.py`), fronted by a new raw tty↔TCP bridge
+  (`scripts/spike/esp-emu/usb-tcp-bridge.py`, `os.open` + `termios`, never
+  touches DTR/RTS). The bridge's open does **not** reboot the board — the
+  first bytes are always `[io_task] host draining again; resuming protocol
+  writes`. lp-cli's own `serial:/dev/…` open **does** reboot it (the direct
+  upload log carries the boot log from `esp_image: segment 4` on, and
+  `[RECOVERY] boot: cause=user-reset … prior_boot_complete=true`).
+
+### 11.1 Harness parity (§9 item 1) — memory byte-equal, time is not
+
+Same ELF (`test_shader_compile_incremental,esp32c6,spike_uart0_link`),
+`=== DONE ===` on silicon after 31 s including the flash. Memory fields
+first, every one identical:
+
+| field | esp-emu (`harness/5/run.stdout`) | silicon (`desk/step1-harness.cap`) |
+|---|---:|---:|
+| `heap_start` | 321600 free / 3936 used | 321600 free / 3936 used |
+| `peak_used` | 48,132 | **48,132** |
+| `resident_used` | 18,932 | **18,932** |
+| `after_drop_used` | 3,976 | **3,976** |
+| `ticks` | 92 | 92 |
+| per-tick `mem_before`/`mem_after`, all 92 ticks | — | **identical, all 184 values** (diff empty after masking `slice_cycles`/`slice_us`) |
+
+```
+silicon: [fw-check-json] {"kind":"case-summary","check":"shader-compile-stress","case":"examples-basic","build_us":568757,"ticks":92,"max_slice_us":11724,"max_slice_stage":"","peak_used":48132,"resident_used":18932,"after_drop_used":3976}
+esp-emu: [fw-check-json] {"kind":"case-summary","check":"shader-compile-stress","case":"examples-basic","build_us":54361,"ticks":92,"max_slice_us":4625,"max_slice_stage":"","peak_used":48132,"resident_used":18932,"after_drop_used":3976}
+```
+
+Timing fields, the cycle-model measurement:
+
+| field | esp-emu | silicon | silicon ÷ emu |
+|---|---:|---:|---:|
+| `build_us` (all 92 ticks) | 54,361 | 568,757 | **10.5×** (contaminated, see below) |
+| `max_slice_us` | 4,625 (tick 17) | 11,724 (tick 92, `AssembleModule`) | 2.5× |
+| ticks 1–18, sum (no log line inside the slice) | 18,003 | 42,663 | **2.37×** (per tick 1.5×–5.3×) |
+| ticks 19–92, sum (one `[native-compile] function=N stage= done` line inside each slice) | 36,312 | 526,048 | 14.5× — silicon mean 7,109 µs/tick |
+| slice-budget gate (`5000us`) | passes | **fails**: `exceeded target slice budget: 11724us > 5000us` | — |
+
+The ~7.0 ms floor under ticks 19–92 is the spike build's tee, not the
+compiler: each of those slices logs an 81-byte line, and `rom_tx_bytes`
+pushes it byte-by-byte through the ROM's `uart_tx_one_char` at the ROM's
+115,200 baud — 81 × 10 bits / 115,200 = 7.03 ms, which is the observed
+7,006–7,121 µs. Under esp-emu the UART drains for free. The clean number
+for "how much faster does the emulator think the C6 is" is therefore the
+ticks-1–18 ratio, **2.4×** on shader-compile work (flash-resident code,
+cache misses, real flash wait states), and the concrete consequence is in
+the last row: the harness's own 5 ms slice budget **passes under esp-emu
+and fails on silicon**. A host gate built on emulated `slice_us` would be
+green for a build that the desk rejects.
+
+Boot-log fidelity, same image both sides (`step1-harness.cap` vs
+`harness/5/run.stdout`, timestamps masked): the emulator's intercepted ROM
+`printf` drops width and zero-pad flags. Silicon prints
+`I (100) esp_image: segment 0: paddr=00010020 vaddr=42000020 size=1131ch ( 70428) map`
+and `I (N) boot:  0 nvs              WiFi data        01 02 00009000 00005000`;
+esp-emu prints `paddr=10020 … (70428)` and `0 nvs WiFi data 1 2 9000 5000`.
+Same words, same values, different columns — a line-oriented log matcher
+would need to normalise whitespace and leading zeros. Bootloader
+timestamps are 4–51 ms emulated vs 23–235 ms on silicon (flash at 40 MHz
+is not free).
+
+### 11.2 Meteor heap ledger at the same image (§9 item 2)
+
+Silicon on `merged-default.bin` (commit `d6cfaa2051ae`, `dirty=false`,
+blank lpfs); emulator on `merged-spike.bin` (same commit + the
+`spike_uart0_link` feature; `walks/meteor.uart.bin`). The residual is the
+`Uart` driver the spike adds — 216 B of `.bss` (main stack 71,328 vs 71,544 B)
+and nothing measurable on the heap:
+
+| figure | esp-emu (§6) | silicon, bridged walk (`desk/meteor.uart.bin`) | silicon, direct `serial:/dev/…` upload | delta |
+|---|---:|---:|---:|---:|
+| `[mem] stop_all_projects before` | 264,716 B | 264,652 B | 264,716 B | 0 / −64 B |
+| `[mem] load_project before` | 261,100 B | 261,036 B | 261,100 B | 0 / −64 B |
+| `[mem] load_project after` | 216,056 B | 215,992 B | **216,056 B** | **0** / −64 B |
+| `[mem] compute shader compile before → after` | 167k → 163k | 166k → 163k | 166k → 163k | ≤ 1k |
+| `[mem] shader compile before → after` | 155k → 148k | 154k → 147k | 154k → 147k | 1k |
+| heartbeat `freeBytes`, steady (Meteor loaded) | 152,320 | 152,316 | — | **−4 B** |
+| heartbeat `totalBytes` | 325,536 | 325,536 | — | 0 |
+| heartbeat `largestFreeBlock`, steady | 77,488 | 65,522 | — | −11,966 B (see note) |
+| heartbeat `freeBytes`, idle before load | 265,392 | 263,748 (`largestFreeBlock` 196,699) | — | −1,644 B |
+| main stack (`of N B`) | 71,328 | 71,544 | — | +216 B (spike `.bss`) |
+| `[stack] high-water`, Meteor steady | 35,768 | **35,768** | — | **0** |
+| `[stack] high-water`, idle | — | 18,676 | — | — |
+| fps / `tick` | 100 / 8 ms | **32 / 30 ms** | 32 / 29–30 ms | **3.1× fps, 3.75× tick** |
+| compute shader compile `elapsed` | 53 ms | 84 ms | 78 ms | 1.5–1.6× |
+| shader compile `elapsed` | 27 ms | 59 ms | 60 ms | 2.2× |
+
+```
+silicon, direct upload:
+[serial] [INFO] lpa_server::handlers: [mem] stop_all_projects before: 264716 B free / 60820 B used (258k / 59k)
+[serial] [INFO] lpa_server::handlers: [mem] load_project after: 216056 B free / 109480 B used (210k / 106k)
+silicon, bridged walk, heartbeats 20–60 s:
+"memory":{"freeBytes":152316,"usedBytes":173220,"totalBytes":325536,"largestFreeBlock":65522}
+[INFO] fw_esp32_common::server_loop: [perf] frame=9813 fps=32 elapsed=5028ms recv=0ms tick=30ms send=0ms total=30ms responses=0
+[INFO] fw_esp32c6::stack_probe: [stack] heartbeat: high-water 35768 B of 71544 B (35776 B headroom)
+```
+
+Readings. (1) The §6 "−2.0 %" was entirely the firmware-commit caveat:
+at the same image the load-gate figure is **byte-equal** on the direct
+upload and 64 B off on the bridged walk — the same host-connect-timing
+drift §7 saw between two emulator runs (det1/det2: 2,560 B). (2) The stack
+high-water is byte-equal too. (3) `largestFreeBlock` is the one heap figure
+that does not transfer: it depends on allocation *order*, and the
+emulator's own two projects already disagree with each other by the same
+amount (its basic walk reported 65,522 — silicon's meteor value — while
+its meteor walk reported 77,488). Treat it as a proxy, as
+`classic-heap-fragmentation-research` already says. (4) fps on silicon at
+this commit is 32 (tick 30 ms), not the ADR's 26 (older firmware); the
+emulator's 100 fps / 8 ms tick is 3.1× / 3.75× off, consistent with the
+2.4× on compile work in §11.1 — the render loop is more memory-bound than
+the compiler. (5) On-device JIT compile times run 1.5–2.2× longer on
+silicon; the *outputs* (`lpir_inst_count`, `final_inst_count`,
+`final_code_size=1556`/`3192 bytes`) are identical.
+
+For `examples/basic` (bridged walk, `desk/basic.uart.bin` vs the emulator's
+`walkD-tcp`/`det1`): `[stack] high-water 35468 B` on both — byte-equal;
+steady `freeBytes` 160,824 vs 160,828 (−4 B); `largestFreeBlock` 65,520 vs
+65,522; JIT compile `elapsed=120ms` vs 52 ms (2.3×); silicon 32 fps.
+
+### 11.3 Same serial script, diffed (§9 item 3)
+
+`lp-cli upload examples/basic serial:tcp://…` against the proxy, silicon
+behind the bridge vs emulator (`walks/det1.uart.bin`), both from a blank
+lpfs, both transcripts masked (`desk/mask.sh`: heap byte counts, `Nk`
+figures, `freeBytes`/`usedBytes`/`largestFreeBlock`, `uptime_ms`,
+`frame=`/`fps=`/`tick=`/`elapsed=`, high-water bytes, bootloader
+timestamps → `N`) and compared from the hello request onward (the silicon
+transcript starts at the bridge's open, after boot; the boot section is
+compared in §11.1). Result, in full — 44 diff lines, all of four kinds:
+
+1. **Host-write interleaving**: `<<HOST M!{"id":1,"msg":"stopAllProjects"}`
+   lands before the hello reply on the emulator and after it on silicon,
+   and `<<HOST … "projectRead" …` lands before `[mem] project new after
+   graphics` on silicon and after it on the emulator. The proxy stamps
+   host bytes when *it* forwards them; where they fall against device
+   output is host wall-clock, not device behaviour.
+2. **Heartbeats present only on silicon** (`M!{"id":0,"msg":{"heartbeat"…`,
+   `[perf]`, `[stack]` at 10 s and 15 s uptime): the emulator walk's
+   transcript ended before its emulated clock reached the first heartbeat
+   (three emulators shared the host; 18.7 s of wall time covered < 5 s of
+   emulated time — §7's 0.14× real time).
+3. **`projectRead` stream, three frames of 16,179 / 16,139 / 13,126 B**:
+   frame 1 (`seq` 1, the node tree) is **byte-identical**; frames 0 and 2
+   differ only in the project's frame counter — `"revision":4` and every
+   `"changed_at":4` / `"change_frame":4` read `9` on silicon — and in the
+   two time-derived slot values that counter drives (`"value":0.095` →
+   `0.40500003`, `0.012000009` → `0.032000005`). Silicon had rendered nine
+   frames between `loadProject` and the read; the emulator four. Frame-
+   count-shaped, i.e. timing again.
+4. Nothing else. Every `[mem]` line, every `[INFO]`/`[WARN]` line, every
+   filesystem write acknowledgement, the `loadProject` → `{"handle":1}`
+   answer and the `fin`/`seq` framing are identical in order and content.
+
+Verbatim, the content diff after removing kinds 1 and 2 (`<` emulator,
+`>` silicon, lines cut at 120 columns):
+
+```
+83c89
+< M!{"id":12,"fin":false,"msg":{"projectRead":{"events":[{"begin":{"revision":4}},{"query":{"index":0,"event":{"shapes":{"b
+> M!{"id":12,"fin":false,"msg":{"projectRead":{"events":[{"begin":{"revision":9}},{"query":{"index":0,"event":{"shapes":{"b
+87c93
+< M!{"id":12,"seq":2,"msg":{"projectRead":{"events":[{"query":{"index":1,"event":{"nodes":{"tree_deltas":{"deltas":[{"crea
+> M!{"id":12,"seq":2,"msg":{"projectRead":{"events":[{"query":{"index":1,"event":{"nodes":{"tree_deltas":{"deltas":[{"crea
+   field-level: "revision":4→9, "change_frame":4→9 (×4), "changed_at":4→9 (×8), "value":0.095→0.40500003, "value":0.012000009→0.032000005
+```
+
+One asymmetry of the *spike*, not the emulator, for whoever repeats this:
+the `[INIT] …` boot lines (`esp_println`, USB-SJ only) are on silicon's
+USB stream and absent from the emulator's UART0 transcript, because the
+tee covers `Esp32UsbSerialIo::write` only.
+
+### 11.4 `device_id=` on the desk (§9 item 4)
+
+```
+silicon: [serial] [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+esp-emu: [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+```
+
+Identical — the empty `device_id` is what the firmware prints at this
+commit, not an emulator artefact. (A firmware observation to take
+elsewhere: the ESP-NOW ready line has nothing to identify the node by.)
+
+### 11.5 USB-SJ negative control (§9 item 5)
+
+Not run as specified — no UART0 adapter on the desk, so the "port closed
+by every host program" log could not be watched. Observed indirectly
+instead: after every `write-bin … --after hard-reset` the board ran ~2 s
+with the port closed, and the first bytes on the bridge's open were, every
+time, `[io_task] host draining again; resuming protocol writes` — the
+connection monitor *had* entered the not-draining state and dropped
+protocol writes while no host read, which is exactly the state esp-emu
+can never enter (§4: SOF forever, EP1 always free). The positive half of
+the control is on the desk; the timed negative half still needs UART0.
+
+### 11.6 Board state
+
+Left on `merged-default.bin` (the shipped default-features image at
+`d6cfaa2051ae`), lpfs holding `Basic` as `startup_project`, port free
+(`lsof` empty, no espflash). No reset needed: every flash came back on its
+own `hard-reset`, no `NoSerialOutput`, no silent boot.
 
 ## Appendix A — `esp-emu --help` (0.42.0), abridged to the options
 
