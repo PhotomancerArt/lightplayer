@@ -1302,12 +1302,21 @@ fwtest-sram0-esp32v3 port="":
     fi
     echo "capturing to $out"
     : > "$out"
+    # The SIGINT is scoped to THIS port when one was given: an unscoped
+    # `pkill -f 'espflash flash'` kills every espflash on the machine,
+    # including another board's mid-write flash (two classic lanes ran in
+    # parallel on 2026-09-05 and found out).
+    if [[ -n "{{ port }}" ]]; then
+      pkill_pattern='espflash flash.*--port {{ port }}'
+    else
+      pkill_pattern='espflash flash.*--chip esp32'
+    fi
     (
       for _ in $(seq 1 180); do
         if grep -q 'END-SRAM0' "$out" 2>/dev/null; then break; fi
         sleep 1
       done
-      pkill -INT -f 'espflash flash.*--chip esp32' || true
+      pkill -INT -f "$pkill_pattern" || true
     ) &
     watcher=$!
     script -q "$out" espflash flash "${args[@]}" {{ fw_esp32v3_elf }} || true

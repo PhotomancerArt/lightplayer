@@ -343,6 +343,24 @@ impl CodeRegion {
         }
     }
 
+    /// The lowest SRAM1 D-bus address the JIT or its reclaimable heap span
+    /// claims — the ceiling for anything else that wants to carve SRAM1
+    /// below the tail (the ROM-stack reclaim of the 2026-09-05 RAM work
+    /// registers its ROM-APP-stack chunk as `0x3FFE_4350..` this).
+    ///
+    /// Under SRAM0 placement the JIT claims nothing in SRAM1, so this is the
+    /// heap span's base ([`CodeRegion::ESP32_SRAM1_TAIL_BASE`]); under the
+    /// mirrored placement it is the region's own D-bus base. Distinct from
+    /// [`CodeRegion::reclaimable_heap_span`]`().0`, which is the heap span's
+    /// base — the two coincide only for SRAM0.
+    #[must_use]
+    pub const fn sram1_claim_base(&self) -> u32 {
+        match self.placement {
+            Placement::Sram0 { .. } => self.reclaimable_heap_span().0,
+            Placement::Sram1Mirrored { dbus_base } => dbus_base,
+        }
+    }
+
     /// I-bus address of byte 0 of the region's executable image — the
     /// *lowest* I-bus address. Under the mirrored rule that is the image of
     /// the D-bus **last** word; under SRAM0 it is the base itself.
@@ -461,6 +479,10 @@ const _: () = {
     // The tail starts at or above dram2_seg's origin — never over the ROM's
     // data/stack reservations.
     assert!(heap_base >= CodeRegion::ESP32_DRAM2_BASE);
+    // Nothing of the JIT's is below the tail: the lowest SRAM1 address the
+    // JIT-or-heap claims IS the tail base (what the ROM-stack reclaim ends at).
+    assert!(CodeRegion::ESP32_DEFAULT.sram1_claim_base() == 0x3FFE_8000);
+    assert!(CodeRegion::ESP32_SRAM1_LEGACY.sram1_claim_base() == 0x3FFE_8000);
 };
 // The legacy SRAM1 region keeps the numbers it was measured with, so the
 // mirrored path is still tested against the map the 2026-08 walks proved.
@@ -914,6 +936,11 @@ mod tests {
         let (legacy_base, legacy_len) = legacy.reclaimable_heap_span();
         assert_eq!(len - legacy_len, legacy.len_bytes);
         assert_eq!(legacy_base - base, legacy.len_bytes);
+        // Both placements claim SRAM1 from the same floor: the SRAM0 region
+        // through its heap span, the legacy region through its own base.
+        assert_eq!(CodeRegion::ESP32_DEFAULT.sram1_claim_base(), base);
+        assert_eq!(legacy.sram1_claim_base(), base);
+        assert_ne!(legacy.sram1_claim_base(), legacy_base);
     }
 
     /// The legacy heap span and the legacy region tile
