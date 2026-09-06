@@ -5,17 +5,9 @@ use lpfs::LpFsStd;
 use std::path::{Path, PathBuf};
 
 #[test]
-fn checked_in_examples_load_as_core_projects() -> Result<()> {
+fn checked_in_projects_load_as_core_projects() -> Result<()> {
     let workspace_dir = workspace_dir();
-    let examples_dir = workspace_dir.join("examples");
-    let mut project_dirs = Vec::new();
-    collect_project_dirs(&examples_dir, &mut project_dirs)?;
-    project_dirs.sort();
-
-    assert!(
-        !project_dirs.is_empty(),
-        "expected at least one checked-in example project"
-    );
+    let project_dirs = checked_in_project_dirs(&workspace_dir, GATE_ROOTS)?;
 
     let mut failures = Vec::new();
     for project_dir in project_dirs {
@@ -33,7 +25,7 @@ fn checked_in_examples_load_as_core_projects() -> Result<()> {
 
     if !failures.is_empty() {
         anyhow::bail!(
-            "checked-in example projects failed to load:\n{}",
+            "checked-in projects failed to load:\n{}",
             failures.join("\n")
         );
     }
@@ -42,7 +34,7 @@ fn checked_in_examples_load_as_core_projects() -> Result<()> {
 }
 
 #[test]
-fn checked_in_examples_rewrite_byte_identically() -> Result<()> {
+fn checked_in_projects_rewrite_byte_identically() -> Result<()> {
     // Mitosis invariant: loading and re-writing an unchanged project
     // produces identical bytes for BOTH split files — the container
     // manifest through `ProjectManifest::write_json`, the root module
@@ -50,10 +42,7 @@ fn checked_in_examples_rewrite_byte_identically() -> Result<()> {
     use lpc_model::{NodeDef, ProjectManifest, SlotShapeRegistry};
 
     let workspace_dir = workspace_dir();
-    let examples_dir = workspace_dir.join("examples");
-    let mut project_dirs = Vec::new();
-    collect_project_dirs(&examples_dir, &mut project_dirs)?;
-    project_dirs.sort();
+    let project_dirs = checked_in_project_dirs(&workspace_dir, GATE_ROOTS)?;
     let registry = SlotShapeRegistry::default();
 
     let mut failures = Vec::new();
@@ -90,12 +79,38 @@ fn checked_in_examples_rewrite_byte_identically() -> Result<()> {
 
     if !failures.is_empty() {
         anyhow::bail!(
-            "example projects failed the byte-identity rewrite:\n{}",
+            "checked-in projects failed the byte-identity rewrite:\n{}",
             failures.join("\n")
         );
     }
     Ok(())
 }
+
+/// Every checked-in project under `roots`, recursively (a root may nest
+/// its projects one directory deep). Every root must
+/// contribute at least one project — a wrong path would otherwise make a
+/// gate vacuous.
+fn checked_in_project_dirs(workspace_dir: &Path, roots: &[&str]) -> Result<Vec<PathBuf>> {
+    let mut project_dirs = Vec::new();
+    for root in roots {
+        let before = project_dirs.len();
+        collect_project_dirs(&workspace_dir.join(root), &mut project_dirs)?;
+        assert!(
+            project_dirs.len() > before,
+            "expected at least one checked-in project under {root}/"
+        );
+    }
+    project_dirs.sort();
+    Ok(project_dirs)
+}
+
+/// Roots both gates walk: the checked-in examples (the content Studio
+/// embeds) and every hardware/measurement rig under `projects/test/`. Both
+/// trees must load, and both must already be in the canonical writers'
+/// byte order — a project that fails the byte gate is rewritten once
+/// through `ProjectManifest::write_json` / `NodeDef::write_json` (no
+/// semantic change) rather than exempted.
+const GATE_ROOTS: &[&str] = &["examples", "projects/test"];
 
 fn workspace_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
