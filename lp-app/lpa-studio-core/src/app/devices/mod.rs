@@ -59,8 +59,8 @@ pub use device_flash::{
     flash_offer_for, reflash_choice, taken_device_titles,
 };
 pub use device_identity::{
-    DeviceIdentityLine, IdentityFirmware as DeviceIdentityFirmware, device_chip,
-    device_identity_line,
+    DeviceIdentityLine, IdentityFirmware as DeviceIdentityFirmware, IdentityRows, device_chip,
+    device_identity_line, pending_identity_rows,
 };
 pub use device_push::{
     DevicePushOp, PushOffer, PushSource, PushSourceChoice, PushSourceGroup,
