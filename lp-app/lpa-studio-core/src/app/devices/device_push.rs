@@ -67,6 +67,10 @@ pub struct PushSourceChoice {
     pub title: String,
     /// One terse consequence line for the option card.
     pub blurb: String,
+    /// The section heading this choice sits under inside its group, when
+    /// the group is subdivided: the catalog's kind sections ("Projects",
+    /// "Patterns") for examples; `None` for the library and the starter.
+    pub section: Option<&'static str>,
     pub group: PushSourceGroup,
     pub source: PushSource,
 }
@@ -99,29 +103,40 @@ pub fn push_offer(
             key: format!("new:{board_id}"),
             title: "Start something new".to_string(),
             blurb: "A starter project wired for this board.".to_string(),
+            section: None,
             group: PushSourceGroup::New,
             source: PushSource::NewForBoard { board_id },
         }),
         Err(reason) => new_project_unavailable = Some(reason),
     }
-    for example in examples {
-        choices.push(PushSourceChoice {
-            key: format!("example:{}", example.id),
-            title: example.name.clone(),
-            // Examples lost their blurbs in the card-overlay slim (#470);
-            // the kind chip label is what identifies one now.
-            blurb: example.kind.clone(),
-            group: PushSourceGroup::Example,
-            source: PushSource::Example {
-                example_id: example.id.clone(),
-            },
-        });
+    // The catalog in its kind sections, real pieces first: a walk wants a
+    // real piece (or pulse) on the board, so those come before the
+    // patterns (catalog content tree D17).
+    for group in crate::app::home::example_groups(examples) {
+        for example in group.cards {
+            let blurb = if example.description.is_empty() {
+                example.kind_label().to_string()
+            } else {
+                example.description.clone()
+            };
+            choices.push(PushSourceChoice {
+                key: format!("example:{}", example.id),
+                title: example.name.clone(),
+                blurb,
+                section: Some(group.label),
+                group: PushSourceGroup::Example,
+                source: PushSource::Example {
+                    example_id: example.id.clone(),
+                },
+            });
+        }
     }
     for project in projects {
         choices.push(PushSourceChoice {
             key: format!("library:{}", project.uid),
             title: project.slug.clone(),
             blurb: project.project_kind.clone(),
+            section: None,
             group: PushSourceGroup::Library,
             source: PushSource::Library {
                 project_uid: project.uid.clone(),
@@ -279,7 +294,8 @@ mod tests {
         UiExampleCard {
             id: id.to_string(),
             name: name.to_string(),
-            kind: "Module".to_string(),
+            kind: lpc_model::ProjectKind::General,
+            description: String::new(),
         }
     }
 

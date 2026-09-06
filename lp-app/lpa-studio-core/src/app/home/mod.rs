@@ -16,6 +16,7 @@ pub mod home_view_builder;
 pub mod pattern_from_export;
 pub mod template_project;
 pub mod ui_example_card;
+pub mod ui_example_groups;
 pub mod ui_home_view;
 pub mod ui_package_card;
 pub mod ui_sim_card;
@@ -33,6 +34,7 @@ pub use home_view_builder::{HomePoolEvidence, HomeSimEvidence, importable_patter
 pub use pattern_from_export::project_files_from_export;
 pub use template_project::template_project_files;
 pub use ui_example_card::UiExampleCard;
+pub use ui_example_groups::{PATTERNS_LABEL, PROJECTS_LABEL, UiExampleGroup, example_groups};
 pub use ui_home_view::UiHomeView;
 pub use ui_package_card::UiPackageCard;
 pub use ui_sim_card::{SIM_CARD_KEY, UiSimCard, UiSimProjectChip};

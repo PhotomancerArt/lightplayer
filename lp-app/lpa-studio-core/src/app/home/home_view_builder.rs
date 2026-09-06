@@ -141,11 +141,7 @@ pub fn build_home_view(
     let examples = dedupe_by_key(
         embedded_examples()
             .iter()
-            .map(|example| UiExampleCard {
-                id: example.id.to_string(),
-                name: example.name.to_string(),
-                kind: super::ui_example_card::EXAMPLE_CARD_KIND.to_string(),
-            })
+            .map(UiExampleCard::from_embedded)
             .collect(),
         |card| card.id.clone(),
         "example",
