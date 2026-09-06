@@ -1,23 +1,32 @@
-# Example projects
+# Catalog: built-in patterns and projects
 
-Each directory is one project in the ratified two-file layout
+The checked-in content Studio embeds and lists on the home page, Explore
+and the device card's project picker — user-facing word: *Explore*. Two
+buckets: `patterns/` (single-effect pattern projects) and `projects/`
+(real pieces). Engine and bench test rigs live under `../projects/test/`,
+not here.
+
+Each entry directory is one project in the ratified two-file layout
 (`docs/design/modules.md` §6): a `project.json` container manifest
 carrying workspace identity (`format`, `name`, provenance), beside a
 `module.json` root module node carrying the technical spec. Every other
 file is a node artifact or an asset the module references.
 
 These are checked-in fixtures as much as they are content:
-`cargo test -p lp-cli` walks every directory here and fails if one does
-not load (`checked_in_examples_load_as_core_projects`) or does not
+`cargo test -p lp-cli` walks every entry here (and every rig under
+`../projects/test/`) and fails if one does not load
+(`checked_in_catalog_entries_load_as_core_projects`) or does not
 survive a load → write round trip byte-for-byte
-(`checked_in_examples_rewrite_byte_identically`).
+(`checked_in_catalog_entries_rewrite_byte_identically`).
 
 ## In the Studio gallery
 
 Fourteen are compiled into the app and listed in the gallery's *Examples*
 section — `fyeah-sign`, `logo-sign`, `plasma`, `meteor`, `comet`,
 `palette-waves`, `fire2012`, `plasma-duo`, `zook-dome`, `small-dome`,
-`peach-1d`, `peach-2d`, `pulse`, `fault-demo`.
+`peach-1d`, `peach-2d`, `pulse`, `fault-demo`. Their Studio ids are
+bucket-free (`catalog/<slug>`; the pre-catalog `examples/<slug>` spelling
+still resolves for libraries seeded before the move).
 Their file lists live in
 `lp-app/lpa-studio-core/src/app/home/embedded_example.rs`
 (`include_bytes!` against this directory), so a change here reaches
@@ -46,13 +55,7 @@ authored binding to a bus channel
 | `small-dome` | `speed`, `bands`, `warmth` (per submodule) | Yona's real 16' 2V dome at FULL scale — the patching archetype and the desktop-class sim stress fixture (6,310 lamps). Ten panel-position objects, each a 5-way repeat of a closed 119-lamp polygon (50 suspended lucite panels — the 40 2V faces plus the riser rung's 10 downward triangles), and ONE always-lit 360-lamp chevron door, scattered across TWO named outputs ("1", "Box 2": the build's two control boxes, 13 ports each) with the door sharing a box-1 port tail — many-to-many. The `.patch.json` files are format-2 path-identity rows (`/band-a/3`) carrying the as-built install — one panel reversed, one rotated a side, the door turned a leg; ALL six wiring artifacts regenerate via `cargo run -p lpt-geodome`. See [patching the dome](../docs/user-guide/patching-the-dome.md) and [the three domes](../docs/use-cases/2026-08-28-three-domes.md) |
 | `pulse` | `speed` | the plainest possible shader — one colour breathing on a phasor. The hardware-walk test subject: if a strip is dark under `pulse`, that is the wiring or a fault, never the content |
 | `fault-demo` | `speed` | a shader that compiles but FAULTS at run time (fuel exhaustion) — the demo for "a fault is never black": the outputs show the red breathe and the device card reads Degraded |
-| `basic`, `basic2` | — | the minimum viable project; `basic2` adds a texture |
-| `button` | — | input nodes and playlist triggering |
-| `button-playlist`, `button-sign`, `fyeah-button` | `palette` | input nodes and playlist triggering, on authored palettes |
-| `events` | — | compute shaders publishing control messages |
-| `fluid` | — | the fluid solver driven by compute-shader emitters |
 | `fiber-headband`, `rocaille` | — | real fixtures with real 2D mappings |
-| `fast`, `perf`, `shader-oracle` | — | benchmark and oracle rigs, not showcase content |
 
 Sample content in this repository is CC0 unless a project's
 `module.json` provenance says otherwise.

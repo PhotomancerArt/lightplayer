@@ -1,7 +1,7 @@
 // Peach body — a pink plane, blushing from the bottom up, with a sheen
 // sweeping across it.
 //
-// The same artwork as `examples/peach-1d`, declared the other way. This is a
+// The same artwork as `catalog/projects/peach-1d`, declared the other way. This is a
 // picture painted over the whole peach, and the fixture's mapping decides
 // which part of it each lamp gets. Nothing here knows the strand order, and
 // the sheen crosses the two legs of the body at the same moment because they

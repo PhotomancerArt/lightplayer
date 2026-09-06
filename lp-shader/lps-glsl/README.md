@@ -118,7 +118,7 @@ diagnostics, supports resumable compilation, and avoids pulling unused GPU
 compiler machinery into the app image.
 
 The initial vertical slice compared the existing Naga-backed path with
-`lps-glsl` on the same ESP32-C6 native backend and the same `examples/basic`
+`lps-glsl` on the same ESP32-C6 native backend and the same `projects/test/basic`
 shader.
 
 | Path | App image | App partition | Shader bytes | Compile time |

@@ -183,7 +183,7 @@ The core is IO-free state machines; async belongs to platform edges. See
   could not be read" — because the classifier had no version to key an
   upgrade on. The drill: `just format-bump` (snapshot + step scaffold),
   bump `PROJECT_FORMAT_VERSION`, write the `lpa-upgrade` step, bless the
-  corpus goldens, and migrate `examples/` + `projects/` in the same change.
+  corpus goldens, and migrate `catalog/` + `projects/` in the same change.
   The v5→v6 step (`lp-app/lpa-upgrade/src/steps/v5_to_v6.rs`) is the
   worked example — value-preserving transcode, keyed off shape, never off
   field names.

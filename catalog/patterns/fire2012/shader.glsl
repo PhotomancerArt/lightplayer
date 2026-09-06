@@ -40,7 +40,7 @@ layout(binding = 4) uniform sampler2D palette;
 // The ember field repeats every CELLS units of its own domain. Every scroll
 // term below is a whole multiple of CELLS per phasor turn, so all three
 // layers wrap together with `rise` and the fire never seams — the same
-// whole-multiple discipline `examples/plasma` documents for its phasors.
+// whole-multiple discipline `catalog/patterns/plasma` documents for its phasors.
 const float CELLS = 32.0;
 
 // One ember: a hashed value at an integer cell, wrapped into the repeat.

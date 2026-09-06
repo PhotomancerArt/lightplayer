@@ -15,7 +15,7 @@
 // across frames (`sHue16`, `sPseudotime`) advanced by beat-driven
 // increments, so its motion is a function of how often the effect ran. Both
 // are pure functions of time, so here they are one phasor and whole
-// multiples of it — the same discipline `examples/plasma` documents: a
+// multiples of it — the same discipline `catalog/patterns/plasma` documents: a
 // whole multiple wraps on a whole number of cycles, so the rewrite is exact
 // at the phasor's own wrap.
 //

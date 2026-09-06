@@ -1,4 +1,4 @@
-# Basic 2n (and 4n, 2n-half) — node-count siblings of `examples/basic`
+# Basic 2n (and 4n, 2n-half) — node-count siblings of `projects/test/basic`
 
 Three generated projects that exist for one measurement: **what does one
 fixture+output pair cost the engine?** `per_lamp_memory_table.rs` answers the
@@ -11,7 +11,7 @@ per-*lamp* question by taking a slope over lamp count; these take a slope over
 | [`basic-4n`](../basic-4n) | 4 | 241 | 964 | slope point |
 | [`basic-2n-half`](../basic-2n-half) | 2 | 121 | 242 | same node count as `basic-2n`, half the lamps — subtracting it isolates the per-lamp part of the per-pair slope |
 
-The parent, `examples/basic`, is the 1-pair point: one clock, one shader, one
+The parent, `projects/test/basic`, is the 1-pair point: one clock, one shader, one
 fixture (241 lamps: a 1×1 centre grid plus a 240-lamp 8-ring disc on a 10×10
 canvas, Direct sampling), one output (interpolation on, LUT on).
 
@@ -38,7 +38,7 @@ canvas, Direct sampling), one output (interpolation on, LUT on).
 
 ## Regenerating
 
-**Change `examples/basic` → regenerate.** The whole point is that the three
+**Change `projects/test/basic` → regenerate.** The whole point is that the three
 siblings differ from the parent only in node count; a hand edit here breaks
 the slope silently.
 
@@ -56,5 +56,5 @@ order and never sorts keys.
 attribution section (bytes per fixture+output pair per owner, device width
 from `lp-cli profile --collect alloc` and host slopes from
 `lp-core/lpc-engine/tests/per_node_memory_table.rs`). That test regenerates its
-own temp copies from `examples/basic` by these same rules, so the two
+own temp copies from `projects/test/basic` by these same rules, so the two
 instruments cannot drift.

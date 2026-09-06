@@ -18,7 +18,7 @@ layout(binding = 2) uniform float decay;
 // The uniform array is indexed with CONSTANT indices at the call site and
 // its fields arrive as scalars/vectors: a runtime index into a uniform
 // struct array has no uniform element address to lower against.
-// `examples/events/shader.glsl` carries the same shape for the same reason.
+// `projects/test/events/shader.glsl` carries the same shape for the same reason.
 vec3 drawMeteor(vec3 accum, uint id, vec2 head, vec3 color, float intensity, vec2 uv) {
     if (id == 0u) {
         return accum;

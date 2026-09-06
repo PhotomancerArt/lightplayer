@@ -87,7 +87,7 @@ measurement (older lp-cli?)"`.
 
 ⚠️ **Cost.** The walk allocates the whole free heap in 8 B units — up to
 ~40 K alloc+free pairs per marker at 320 K, roughly a dozen markers per
-startup profile. Measured 2026-09-04 on `examples/zook-dome --mode
+startup profile. Measured 2026-09-04 on `catalog/projects/zook-dome --mode
 startup`: 6.6 s wall without the walk (no alloc collector), 8.9 s with it —
 about +35%, all of it inside the already-`--collect alloc` path (a cpu-only
 profile is unaffected). Not sampled down: a fragmentation figure that skips
@@ -143,7 +143,7 @@ allocated at tick/output-open time, so a per-LED regression shows up as
 ```json
 {
   "projects": {
-    "examples/basic": {
+    "projects/test/basic": {
       "modes": {
         "startup":       { "windows": { "server-boot": {…}, "project-load": {…}, "shader-compile": {…}, "shader-link": {…}, "frame": {…} } },
         "steady-render": { "windows": { "frame": { "transient": …, "retained": …, "largest_alloc": …, "alloc_count": …, "alloc_bytes": … } } }
@@ -161,9 +161,9 @@ measurement fails (the instrument or the instrumented path broke).
 
 To add a project, add its key under `projects` (an empty object is enough)
 and run `just heap-budget-baseline`; the baseline reads the project list from
-the record. Recorded today: `examples/basic` (the smallest real project),
-`examples/meteor` (a compute-shader project with a struct-valued map slot —
-the per-frame churn case) and `examples/zook-dome` (1,500 lamps on four
+the record. Recorded today: `projects/test/basic` (the smallest real project),
+`catalog/patterns/meteor` (a compute-shader project with a struct-valued map slot —
+the per-frame churn case) and `catalog/projects/zook-dome` (1,500 lamps on four
 strips — the per-lamp case, and the classic ESP32's target envelope).
 
 ### Reading a figure per lamp
@@ -175,7 +175,7 @@ that lands in `project-load`). Which struct owns each of those bytes, and
 what the classic adds on top (its `DisplayPipeline` buffers), is measured
 per owner in `docs/reports/2026-09-02-per-lamp-memory-table.md`; the host
 probe `lp-core/lpc-engine/tests/per_lamp_memory_table.rs` pins the slopes.
-`examples/small-dome` (6,310 lamps) is not in the record: it halts the 320 K
+`catalog/projects/small-dome` (6,310 lamps) is not in the record: it halts the 320 K
 guest in its first frame. Since #527 (bounded sample windows — the two 8 B/lamp
 graphics buffers and the coordinate transient are gone) it gets past every
 per-lamp ask and halts in the frame's port opens on the emulator-only
@@ -256,7 +256,7 @@ A harness that overstates its fidelity is worse than none. This gate does
   re-materialises every unbound default each frame: its `frame` churn is
   higher and its `frame.retained` lower than these figures. What the gate does
   price is the payload table itself — turning the cache on moved
-  `examples/basic` `frame.retained` by the bytes the table costs, in the record
+  `projects/test/basic` `frame.retained` by the bytes the table costs, in the record
   diff — which is the byte number that debt entry asked for.
 - **The emulator's hardware manifest.** `fw-emu` runs the permissive
   256-resource board profile; the classic's manifest has 34. Every port
@@ -291,14 +291,14 @@ holes open — attributed to the call site that allocated them.
 
 ```bash
 # the classic's two regions (the default), 10 holes attributed per marker
-cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup
+cargo run -p lp-cli -- profile catalog/projects/zook-dome --collect alloc --mode startup
 
 # the guest's own single region — the only layout the cross-check means anything on
-cargo run -p lp-cli -- profile examples/basic --collect alloc --mode startup \
+cargo run -p lp-cli -- profile projects/test/basic --collect alloc --mode startup \
     --frag-layout guest
 
 # an arbitrary region list, in registration order
-cargo run -p lp-cli -- profile examples/basic --collect alloc \
+cargo run -p lp-cli -- profile projects/test/basic --collect alloc \
     --frag-regions 112640,73728 --frag-top 20
 ```
 
@@ -317,9 +317,9 @@ allocator front-pads a hole whose start is not already aligned for the
 request, so a replay that guessed 4 B diverged from the guest's own layout
 the first time an 8- or 16-aligned request landed on a 4-mod-8 boundary —
 that guess cost hole count ±8 and largest free block ±320 B on
-`examples/basic`. With the real alignment the replay reproduces the guest's
+`projects/test/basic`. With the real alignment the replay reproduces the guest's
 free-list walk **exactly** — same hole count, same largest block, same free
-total — at every marker of `examples/basic` and `examples/zook-dome` in
+total — at every marker of `projects/test/basic` and `catalog/projects/zook-dome` in
 `startup` mode. Run with `--frag-layout guest` to check any trace: the
 cross-check table prints the comparison per marker, and its verdict column
 is the thing to look at after touching the replay. A trace recorded before
@@ -342,12 +342,12 @@ reports the same site — contains the substring, along with its frees and
 reallocs:
 
 ```bash
-cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup \
+cargo run -p lp-cli -- profile catalog/projects/zook-dome --collect alloc --mode startup \
     --frag-discount-site VirtualWs281xDriver::endpoints \
     --frag-discount-site HwResource
 ```
 
-Discounting both takes `examples/zook-dome` on the classic layout from 2,452
+Discounting both takes `catalog/projects/zook-dome` on the classic layout from 2,452
 `would-OOM` allocations to none, and its final largest free block from
 7,328 B to 42,428 B. The report header names every active discount and the
 blocks, bytes and peak-live it removed, and says "discounts: none" when
@@ -367,7 +367,7 @@ anyone writes it.
 
 ```bash
 scripts/frag-table.sh            # the three reference projects, every lever
-scripts/frag-table.sh examples/basic   # or a project list of your own
+scripts/frag-table.sh projects/test/basic   # or a project list of your own
 ```
 
 The script runs `startup` mode with the two discounts above and every
@@ -375,7 +375,7 @@ counterfactual, and prints each run's `Heap Counterfactuals` section; the same
 data lands in `frag-cf.json` beside `frag.json`. To run one by hand:
 
 ```bash
-cargo run -p lp-cli -- profile examples/zook-dome --collect alloc --mode startup \
+cargo run -p lp-cli -- profile catalog/projects/zook-dome --collect alloc --mode startup \
     --workload studio-sync \
     --frag-discount-site VirtualWs281xDriver::endpoints \
     --frag-discount-site HwResource \

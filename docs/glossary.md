@@ -173,10 +173,10 @@ The registry is [the three domes](use-cases/2026-08-28-three-domes.md);
 one line each here so agents and docs stop conflating them:
 
 - **Zook dome** — 2026 experiment: non-geodesic dome by Bob Zook,
-  ~1,500 LEDs, 5-way strut symmetry. Example: `examples/zook-dome`.
+  ~1,500 LEDs, 5-way strut symmetry. Example: `catalog/projects/zook-dome`.
 - **Small Dome** — Yona's 16' 2V geodesic on a riser ring: 50 panels x
   119 LEDs + one chevron door (~6.3k LEDs), two control boxes; built
-  since 2013, runs old LightPlayer. Example: `examples/small-dome`
+  since 2013, runs old LightPlayer. Example: `catalog/projects/small-dome`
   (formerly the 177-lamp "mini dome" miniature — retired name).
 - **Big dome (radiance)** — Yona's 38' 5V geodesic: 190 panels x 119
   plus lit vertices, ten networked control boxes, ~20-30k LEDs; at
