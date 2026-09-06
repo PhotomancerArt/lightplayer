@@ -1,4 +1,8 @@
 {
   "format": 10,
-  "name": "Comet"
+  "name": "Comet",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
 }

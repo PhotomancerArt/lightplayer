@@ -1,4 +1,8 @@
 {
   "format": 10,
-  "name": "Palette Waves"
+  "name": "Palette Waves",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
 }

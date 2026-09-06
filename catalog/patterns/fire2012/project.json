@@ -1,4 +1,8 @@
 {
   "format": 10,
-  "name": "Fire 2012"
+  "name": "Fire 2012",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
 }
