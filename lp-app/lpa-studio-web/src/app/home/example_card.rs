@@ -69,20 +69,15 @@ pub(crate) fn ExampleCard(
                 mode: ThumbMode::PosterFirst,
             }
             // The face is the art; the words are one shallow glass bar
-            // (card-overlay redesign): the title, and under it the entry's
-            // own one-line blurb — project DATA (`project.json`
-            // `description`, catalog content tree D7), never a compiled-in
-            // table. Clamped to two lines so a long sentence cannot grow
-            // the bar over the art; absent entirely when the entry authors
-            // none. No menu, no glyphs, no "Example" label (the section
-            // heading already says it).
+            // (card-overlay redesign). Title ONLY — no menu, no glyphs, no
+            // "Example" label (the section heading already says it), and
+            // no blurb: the entry's `description` exists as project data
+            // (catalog content tree D7), but the G1 ruling (2026-09-06)
+            // kept it off the face — "the names and pictures speak for
+            // themselves" — so the card wears the same quiet title-only
+            // bar a project card does.
             CardGlassFooter {
                 title: card.name.clone(),
-                if !card.description.is_empty() {
-                    p { class: "tw:m-0 tw:mt-px tw:line-clamp-2 tw:text-xs tw:leading-snug tw:text-muted-foreground",
-                        "{card.description}"
-                    }
-                }
                 if opening {
                     // The live pipeline, not a static "Opening…": an example
                     // open never routes to the full opening frame, so on a

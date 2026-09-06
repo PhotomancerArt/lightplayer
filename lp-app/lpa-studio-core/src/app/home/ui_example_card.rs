@@ -18,7 +18,8 @@ pub struct UiExampleCard {
     /// picker's provenance tag reads.
     pub kind: ProjectKind,
     /// The manifest's one-line blurb (`description`); empty when the entry
-    /// authors none, and then no element renders for it.
+    /// authors none. Project data, not card copy: the G1 ruling
+    /// (2026-09-06) keeps it off the card face.
     pub description: String,
 }
 

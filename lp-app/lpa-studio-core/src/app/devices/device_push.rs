@@ -111,18 +111,15 @@ pub fn push_offer(
     }
     // The catalog in its kind sections, real pieces first: a walk wants a
     // real piece (or pulse) on the board, so those come before the
-    // patterns (catalog content tree D17).
+    // patterns (catalog content tree D17). The blurb is the kind word,
+    // not the entry's description — the G1 ruling kept that copy off the
+    // cards.
     for group in crate::app::home::example_groups(examples) {
         for example in group.cards {
-            let blurb = if example.description.is_empty() {
-                example.kind_label().to_string()
-            } else {
-                example.description.clone()
-            };
             choices.push(PushSourceChoice {
                 key: format!("example:{}", example.id),
                 title: example.name.clone(),
-                blurb,
+                blurb: example.kind_label().to_string(),
                 section: Some(group.label),
                 group: PushSourceGroup::Example,
                 source: PushSource::Example {
