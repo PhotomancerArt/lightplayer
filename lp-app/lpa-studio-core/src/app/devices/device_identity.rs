@@ -8,7 +8,7 @@
 //! was already running when the tab attached carries only its board id, so
 //! the chip comes from the catalog's family for that id instead.
 
-use lpa_devices::view::{DeviceView, FirmwareFace};
+use lpa_devices::view::{DeviceView, FirmwareFace, PendingLinkView};
 
 /// The chip family for a device, normalized to the espflash vocabulary the
 /// board-pick filter already uses ("esp32c6"): the banner when there is
@@ -130,6 +130,19 @@ pub struct IdentityRows {
     pub firmware: String,
 }
 
+impl IdentityRows {
+    /// Both rows as one " · "-joined string — an empty board row drops out
+    /// rather than leaving a leading separator. The header's `title` reads
+    /// this, so hovering a truncated row shows the whole identity.
+    pub fn display(&self) -> String {
+        [self.board.as_str(), self.firmware.as_str()]
+            .into_iter()
+            .filter(|row| !row.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+}
+
 impl DeviceIdentityLine {
     /// The chip clause row 1 actually prints: the joined chip, unless the
     /// board name already states it.
@@ -173,17 +186,54 @@ impl DeviceIdentityLine {
     /// firmware" — because "nothing on this chip yet" is itself the fact
     /// the header is stating.
     pub fn display(&self) -> String {
-        let rows = self.rows();
-        let mut parts: Vec<String> = Vec::new();
-        if !rows.board.is_empty() {
-            parts.push(rows.board);
-        }
-        parts.push(rows.firmware);
+        let mut display = self.rows().display();
         if let Some(mark) = self.firmware.memory_mark() {
-            parts.push(mark.to_string());
+            display.push_str(" · ");
+            display.push_str(mark);
         }
-        parts.join(" · ")
+        display
     }
+}
+
+/// The row-1 words for a pending link whose boot banner named no chip (a
+/// board parked in ROM download mode, or one that has said nothing).
+pub const PENDING_CHIP_UNKNOWN: &str = "chip unknown";
+
+/// The row-2 words for a pending link nothing has bound yet: identity and
+/// firmware arrive together, at the flash.
+pub const PENDING_NO_IDENTITY: &str = "no identity until flashed";
+
+/// The pending card's two identity rows, in the settled card's grammar
+/// (hardware above, binding · firmware below) so a link still identifying
+/// reads like the cards beside it instead of one sentence in a two-row
+/// slot (follow-up filed at the ship of PR #518).
+///
+/// A pending link has no board of record and, by construction, no
+/// LightPlayer firmware — a hello promotes it to a device — so each row
+/// says what THIS stage of identification honestly knows:
+///
+/// | stage | row 1 | row 2 |
+/// |---|---|---|
+/// | nothing heard | `chip unknown` | `no identity until flashed` |
+/// | chip off the banner | `esp32c6` | `no identity until flashed` |
+/// | chip + a probed MAC | `esp32c6` | `60:55:f9:0a:0b:0c · no firmware` |
+///
+/// Row 1 is the chip alone, exactly what the settled card prints for a
+/// pre-hello board; it never goes blank, because an empty first row on a
+/// card labelled Identifying reads as a rendering fault. Row 2 is the
+/// settled `MAC · no firmware` the moment a MAC is known (the preflight
+/// probe on a blank board is the one source), and until then the one
+/// sentence that covers both missing clauses.
+pub fn pending_identity_rows(pending: &PendingLinkView) -> IdentityRows {
+    let board = pending
+        .detected_chip
+        .clone()
+        .unwrap_or_else(|| PENDING_CHIP_UNKNOWN.to_string());
+    let firmware = match pending.mac.as_deref() {
+        Some(mac) => format!("{mac} · {}", IdentityFirmware::None.label_text()),
+        None => PENDING_NO_IDENTITY.to_string(),
+    };
+    IdentityRows { board, firmware }
 }
 
 /// Project a device's identity line straight off its view.
@@ -574,5 +624,81 @@ mod tests {
             device_identity_line(&view).board.as_deref(),
             Some("nobody/nothing")
         );
+    }
+
+    /// A bare pending link to fill in per stage.
+    fn pending() -> PendingLinkView {
+        PendingLinkView {
+            link: lpa_devices::LinkId(3),
+            device: DeviceId(103),
+            title: "New device".to_string(),
+            state_label: "New device found — identifying…".to_string(),
+            detail: None,
+            can_adopt: true,
+            firmware_face: FirmwareFace::Unknown,
+            detected_chip: None,
+            mac: None,
+            escapes: vec![Escape::Forget],
+        }
+    }
+
+    /// Nothing heard yet: neither row goes blank — a blank first row on a
+    /// card labelled Identifying reads as a fault, not as "unknown".
+    #[test]
+    fn a_pending_link_with_nothing_known_fills_both_rows() {
+        let rows = pending_identity_rows(&pending());
+        assert_eq!(rows.board, "chip unknown");
+        assert_eq!(rows.firmware, "no identity until flashed");
+        assert_eq!(rows.display(), "chip unknown · no identity until flashed");
+    }
+
+    /// The banner named the chip: row 1 is the chip alone, exactly what the
+    /// settled card prints for a pre-hello board, so the two line up.
+    #[test]
+    fn a_pending_link_with_a_chip_keeps_it_on_the_board_row() {
+        let mut view = pending();
+        view.detected_chip = Some("esp32c6".to_string());
+
+        let rows = pending_identity_rows(&view);
+        assert_eq!(rows.board, "esp32c6");
+        assert_eq!(rows.firmware, "no identity until flashed");
+
+        let mut settled = card();
+        settled.detected_chip = Some("esp32c6".to_string());
+        settled.firmware_face = FirmwareFace::NoHello;
+        assert_eq!(device_identity_line(&settled).rows().board, rows.board);
+    }
+
+    /// A probed MAC makes row 2 the settled card's `MAC · no firmware` —
+    /// the identity is bound now, and "until flashed" would be stale.
+    #[test]
+    fn a_pending_link_with_a_mac_reads_like_a_settled_blank_board() {
+        let mut view = pending();
+        view.detected_chip = Some("esp32c6".to_string());
+        view.mac = Some("60:55:f9:0a:0b:0c".to_string());
+        view.firmware_face = FirmwareFace::Blank;
+
+        let rows = pending_identity_rows(&view);
+        assert_eq!(rows.board, "esp32c6");
+        assert_eq!(rows.firmware, "60:55:f9:0a:0b:0c · no firmware");
+        assert!(!rows.display().contains("until flashed"));
+
+        let mut settled = card();
+        settled.detected_chip = Some("esp32c6".to_string());
+        settled.identity_label = Some("60:55:f9:0a:0b:0c".to_string());
+        settled.firmware_face = FirmwareFace::Blank;
+        assert_eq!(device_identity_line(&settled).rows(), rows);
+    }
+
+    /// The settled verdict changes the Firmware zone's line, never the
+    /// identity rows: a link with a chip and no MAC reads the same whether
+    /// it is still identifying or settled blank.
+    #[test]
+    fn a_pending_links_rows_do_not_move_when_its_verdict_settles() {
+        let mut view = pending();
+        view.detected_chip = Some("esp32c6".to_string());
+        let identifying = pending_identity_rows(&view);
+        view.firmware_face = FirmwareFace::Blank;
+        assert_eq!(pending_identity_rows(&view), identifying);
     }
 }
