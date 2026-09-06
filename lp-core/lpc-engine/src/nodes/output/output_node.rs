@@ -46,6 +46,7 @@ use lpc_model::{
     ColorOrder, ControlLamp2d, ControlLayout2d, ControlPathSpan2d, LpValue, NodeRuntimeStatus,
     OutputDefView, ProductRef, Revision, SlotData, SlotPath, WithRevision,
 };
+use lpc_shared::output::OutputPortSmoothing;
 
 use crate::dataflow::resolver::QueryKey;
 use crate::engine::FaultPresentation;
@@ -296,6 +297,14 @@ pub struct OutputNode {
     /// project stops faulting, the next frame is authored content again and
     /// the badge must stop explaining a red that is no longer there.
     fault_pattern_nodes: Option<u32>,
+    /// What the output provider took from this node's smoothing at the
+    /// last flush (interpolation and/or dithering opened OFF because the
+    /// board's open lamps exceed its measured limits), or `None`.
+    ///
+    /// Re-read every `consume` from the context, like the fault count: the
+    /// moment a port closes elsewhere and the feature comes back, the
+    /// badge stops explaining a roughness that is no longer there.
+    smoothing: Option<OutputPortSmoothing>,
 }
 
 impl OutputNode {
@@ -312,6 +321,7 @@ impl OutputNode {
             published_fragments: Vec::new(),
             placement_revision: Revision::default(),
             fault_pattern_nodes: None,
+            smoothing: None,
         }
     }
 
@@ -1396,6 +1406,24 @@ fn merge_ranges(ranges: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
     merged
 }
 
+/// The status an output wears while the board runs it with less smoothing
+/// than authored. Steady frame over frame — the numbers only move when a
+/// port opens or closes — so the client's badge does not churn.
+fn smoothing_status(notice: OutputPortSmoothing) -> NodeRuntimeStatus {
+    let mut off = Vec::with_capacity(2);
+    if let Some(limit) = notice.interpolation_off_above {
+        off.push(format!("interpolation off (limit {limit})"));
+    }
+    if let Some(limit) = notice.dithering_off_above {
+        off.push(format!("dithering off (limit {limit})"));
+    }
+    NodeRuntimeStatus::Warn(format!(
+        "smoothing reduced at scale: {} lamps open on this board — {}",
+        notice.total_lamps,
+        off.join(", ")
+    ))
+}
+
 /// Turn a coverage report into the node status a client shows.
 ///
 /// Contested samples are an `Error` — pixels the project asked two producers
@@ -1499,6 +1527,7 @@ impl NodeRuntime for OutputNode {
     }
 
     fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        self.smoothing = ctx.output_smoothing();
         // Identity first, resolve second: the fixtures this resolve ticks
         // read the registered-name set for their dangling-entry checks, so
         // this output's name must be on the books before they run.
@@ -1570,6 +1599,11 @@ impl NodeRuntime for OutputNode {
                 })
             })
             .or_else(|| self.fragment_status.clone())
+            // Lowest priority: an authoring problem outranks a deliberate
+            // quality trade. Warn, not Fault — the output is doing exactly
+            // what the board's measured limits say, and nothing needs
+            // fixing; the wall is just rougher than authored, on purpose.
+            .or_else(|| self.smoothing.map(smoothing_status))
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
@@ -1911,6 +1945,80 @@ mod tests {
         )
         .with_project_fault(fault_since, node_count, presentation);
         node.consume(&mut ctx)
+    }
+
+    fn consume_with_smoothing(
+        node: &mut OutputNode,
+        resolver: &mut FakeResolver,
+        frame: Revision,
+        smoothing: Option<OutputPortSmoothing>,
+    ) -> Result<(), NodeError> {
+        let shapes = SlotShapeRegistry::default();
+        let mut ctx =
+            TickContext::with_render_services(node_id(), frame, resolver, &shapes, None, None, 0.0)
+                .with_output_smoothing(smoothing);
+        node.consume(&mut ctx)
+    }
+
+    /// A board that opened this output with less smoothing than authored
+    /// says so on the badge — `Warn`, naming the total and the limits — and
+    /// the badge clears the frame the provider stops reducing (a port
+    /// closed elsewhere and the feature came back).
+    #[test]
+    fn reduced_smoothing_is_worn_as_a_warning_and_clears_with_it() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+
+        consume_with_smoothing(
+            &mut node,
+            &mut resolver,
+            Revision::new(1),
+            Some(OutputPortSmoothing {
+                total_lamps: 1500,
+                interpolation_off_above: Some(500),
+                dithering_off_above: Some(1000),
+            }),
+        )
+        .expect("reduced frame");
+        assert_eq!(
+            node.runtime_status(),
+            Some(NodeRuntimeStatus::Warn(String::from(
+                "smoothing reduced at scale: 1500 lamps open on this board — \
+                 interpolation off (limit 500), dithering off (limit 1000)"
+            ))),
+        );
+        assert_eq!(
+            resolver.published_samples(),
+            vec![1000, 2000, 3000],
+            "and the frame itself is untouched: the trade is the provider's, not the graph's"
+        );
+
+        consume_with_smoothing(
+            &mut node,
+            &mut resolver,
+            Revision::new(2),
+            Some(OutputPortSmoothing {
+                total_lamps: 600,
+                interpolation_off_above: Some(500),
+                dithering_off_above: None,
+            }),
+        )
+        .expect("interpolation-only frame");
+        assert_eq!(
+            node.runtime_status(),
+            Some(NodeRuntimeStatus::Warn(String::from(
+                "smoothing reduced at scale: 600 lamps open on this board — \
+                 interpolation off (limit 500)"
+            ))),
+        );
+
+        consume_with_smoothing(&mut node, &mut resolver, Revision::new(3), None)
+            .expect("restored frame");
+        assert_eq!(
+            node.runtime_status(),
+            None,
+            "nothing reduced, nothing to say"
+        );
     }
 
     #[test]

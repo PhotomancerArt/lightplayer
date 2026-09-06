@@ -25,6 +25,7 @@ use lpc_model::{
     SlotShapeRegistry, TimeProduct, WithRevision, lookup_slot_data_and_shape,
 };
 use lpc_registry::{AssetBytes, AssetReadError, AssetText, ProjectRegistry};
+use lpc_shared::output::OutputPortSmoothing;
 use lpc_shared::time::TimeProvider;
 use lpfs::LpFs;
 
@@ -137,6 +138,11 @@ pub struct TickContext<'r> {
     /// output's own "showing fault pattern" status.
     project_fault_node_count: u32,
     fault_presentation: FaultPresentation,
+    /// What the output provider took from THIS node's smoothing at the last
+    /// flush (`EngineServices::output_smoothing_notice`), or `None` for
+    /// every node that is not a reduced output. Read by outputs for their
+    /// status; one flush behind, like the fault verdict.
+    output_smoothing: Option<OutputPortSmoothing>,
 }
 
 impl<'r> TickContext<'r> {
@@ -197,6 +203,7 @@ impl<'r> TickContext<'r> {
             project_fault_since_seconds: None,
             project_fault_node_count: 0,
             fault_presentation: FaultPresentation::default(),
+            output_smoothing: None,
         }
     }
 
@@ -219,8 +226,23 @@ impl<'r> TickContext<'r> {
         self
     }
 
+    /// Attach what the provider took from this output's smoothing. A
+    /// builder step for the same reason as [`Self::with_project_fault`]:
+    /// only [`crate::nodes::OutputNode`] reads it, and it is `None` for
+    /// every other node and every context built outside the tick.
+    pub fn with_output_smoothing(mut self, smoothing: Option<OutputPortSmoothing>) -> Self {
+        self.output_smoothing = smoothing;
+        self
+    }
+
     pub fn node_id(&self) -> NodeId {
         self.node_id
+    }
+
+    /// What the output provider took from this node's smoothing, or `None`
+    /// when it runs exactly what was authored (or is not an output).
+    pub fn output_smoothing(&self) -> Option<OutputPortSmoothing> {
+        self.output_smoothing
     }
 
     /// Frame time the project's continuous fault began at, or `None` when
