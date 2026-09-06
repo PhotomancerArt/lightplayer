@@ -56,9 +56,12 @@ fn emulator_thread_loop(
                 }
             };
 
-            // Add newline terminator
-            let mut data = json.into_bytes();
-            data.push(b'\n');
+            // Frame as an `M!` line: the firmware's `SerialTransport::receive`
+            // (`fw-core/src/transport/serial.rs`) silently drops any inbound
+            // line without the `M!` prefix, treating it as a log line. Bare
+            // JSON here meant every client request was discarded and the
+            // first round-trip timed out (speed-probe report §4, item 2).
+            let data = format!("M!{json}\n").into_bytes();
 
             log::debug!(
                 "Emulator thread: Writing client message id={} ({} bytes) to serial",
