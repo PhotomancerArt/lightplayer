@@ -112,6 +112,8 @@ mod output;
 mod recovery;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod serial;
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+mod stack_probe;
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 use {
@@ -401,6 +403,11 @@ fn reboot_now() {
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
+    // Piggybacks on the heartbeat cadence: one scan of the main stack per
+    // second, a log line only when the mark grows. On this chip `.stack` is the
+    // residual of a 192 KB `dram_seg`, so its high-water mark is what sizes
+    // `HEAP_SIZE` — see `stack_probe`.
+    stack_probe::log_if_grown("heartbeat");
     let free = esp_alloc::HEAP.free();
     let used = esp_alloc::HEAP.used();
     let largest = recovery::panic_path::largest_free_block();
@@ -492,10 +499,16 @@ fn boot_firmware() -> FirmwareApp {
     // The heap is main.rs's, not the board's — mirroring fw-esp32s3.
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     let sram1_heap = add_sram1_heap_region();
+    // Paint the main stack before anything deep runs, so the heartbeat's
+    // high-water report measures the whole app (see `stack_probe`). After the
+    // arena is carved, because the paint runs on the main stack and the arena
+    // is `.bss`, not stack.
+    stack_probe::paint();
     esp_println::println!("[INIT] fw-esp32v3 boot");
     esp_println::println!(
         "[INIT] chip=esp32 arch=xtensa heap={HEAP_SIZE}+{sram1_heap} (dram_seg arena + SRAM1 tail)"
     );
+    esp_println::println!("[INIT] main stack {} B", stack_probe::total_bytes());
 
     // Crash recovery first, before anything crash-prone runs: this both reports
     // the previous run and gives everything after it somewhere to leave a
