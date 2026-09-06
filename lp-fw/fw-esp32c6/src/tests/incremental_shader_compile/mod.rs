@@ -44,6 +44,16 @@ pub async fn run_incremental_shader_compile(_: embassy_executor::Spawner) -> ! {
     options.stage_trace = true;
     let engine = LpsEngine::new(NativeJitEngine::new(Arc::new(table), options));
 
+    // The transcript header, first, before any record: it is what lets a
+    // committed capture be checked against the sidecar that claims to describe
+    // it. See lp-fw/fw-checks/src/header.rs.
+    fw_checks::emit_header(&fw_checks::PayloadHeader {
+        payload: "shader-compile-stress",
+        chip: "esp32c6",
+        firmware_commit: env!("LP_BUILD_COMMIT"),
+        firmware_features: env!("LP_BUILD_FEATURES"),
+        firmware_dirty: fw_checks::str_is_true(env!("LP_BUILD_DIRTY")),
+    });
     info!("[inc-shader-compile] === incremental shader compile experiment starting ===");
     runner::run_all(&engine);
     info!("[inc-shader-compile] === DONE ===");

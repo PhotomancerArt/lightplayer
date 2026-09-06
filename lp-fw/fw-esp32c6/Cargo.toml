@@ -68,7 +68,11 @@ stress_s3 = ["radio"]  # ESP-NOW broadcast chatter, max payload, back to back
 test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lpc-shared)
 test_gpio = []  # Test GPIO pin toggle
-test_gpio_calibrate = []  # Host-driven GPIO square-wave calibration mode
+# Host-driven GPIO square-wave calibration. The line protocol and the duty
+# ramp live in fw-checks as the `gpio-calibrate` payload; this feature is the
+# alias that keeps `just fwtest-gpio-calibrate-esp32c6` and `just
+# calibrate-gpio` working (Q12 retirement ledger, notes.md).
+test_gpio_calibrate = ["dep:fw-checks", "fw-checks/check-gpio-calibrate"]
 test_button = ["server"]  # Test root-owned GPIO button input with internal pull-up
 test_usb = []  # Test USB serial communication
 test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat via OUTGOING_SERVER_MSG)
