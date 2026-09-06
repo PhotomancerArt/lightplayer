@@ -187,10 +187,13 @@ expected results; the harness compiles and executes on several backends:
 
 Run with `./scripts/filetests.sh` or `just test-filetests`.
 
-## Emulator Substrate (`lp-emu/`)
+## Emulation (`lp-emu/`)
 
-Architecture-neutral emulator infrastructure shared by the architecture emulators
-(see `docs/adr/2026-07-28-emu-core-crate-family.md`):
+Every emulator LightPlayer owns, and — unlike the rest of the repo — all of it MIT,
+behind a dependency lint (`just lint-emu-fence`). See
+[`lp-emu/README.md`](../lp-emu/README.md),
+`docs/adr/2026-07-28-emu-core-crate-family.md` (the substrate) and
+`docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md` (the home and the fence).
 
 - **`lp-emu-core`** - Host-side emulator machinery: guest memory model, run-loop result
   contract (`StepResult`/`TrapCode`), logging levels, cycle-cost accounting, serial, time
@@ -200,13 +203,24 @@ Architecture-neutral emulator infrastructure shared by the architecture emulator
 - **`lp-emu-abi`** - Host↔guest protocol: syscall numbers, guest serial framing, recovery
   handshake, JIT symbol entries.
 
-## RISC-V Tooling (`lp-riscv/`)
-
-Tools for working with RISC-V code:
-
 - **`lp-riscv-emu`** - RISC-V 32-bit emulator used for testing and development. Supports
   instruction-level logging, memory access tracking, and syscall emulation. Can run in `no_std` mode
   or with `std` for host tooling. Builds on the arch-neutral machinery in `lp-emu-core`.
+
+- **`lp-riscv-emu-guest`** / **`lp-riscv-emu-guest-test-app`** - Guest-side runtime for code
+  running in the emulator (syscall interface, allocator, panic, logging), and a test binary
+  built against it.
+
+- **`lp-xt-emu`** / **`lp-xt-emu-guest`** - The Xtensa emulator: windowed-register machinery,
+  per-board memory maps (S3 / classic), and an FPU proven bit-equal to real S3 silicon; plus
+  its `no_std` guest runtime (a device-target crate, built via `lp-xt/fixtures`).
+
+SoC-level emulation is namespaced by vendor under `lp-emu/esp/` (empty until M3 of the
+2026-09-06 esp-emulator plan).
+
+## RISC-V Tooling (`lp-riscv/`)
+
+Compiler-backend crates for RISC-V code, shared by `lpvm-native` and the emulator:
 
 - **`lp-riscv-elf`** - ELF file loading and linking utilities. Handles symbol resolution,
   relocation, and GOT (Global Offset Table) management for linking JIT-compiled code with builtin
@@ -215,15 +229,13 @@ Tools for working with RISC-V code:
 - **`lp-riscv-inst`** - Instruction encoding/decoding utilities for RISC-V instructions. Used by the
   emulator and compiler tooling.
 
-- **`lp-riscv-emu-guest`** - Guest-side runtime for code running in the emulator. Provides syscall
-  interface, memory management, and logging facilities.
-
 ## Xtensa Tooling (`lp-xt/`)
 
 The Xtensa counterpart to `lp-riscv/`, covering the ESP32-S3 (LX7) and classic ESP32 (LX6):
-instruction model, encoder/decoder, and disassembler (`lp-xt-inst`), the windowed-register
-emulator with per-board memory maps and an FPU proven bit-equal to real S3 silicon
-(`lp-xt-emu`), and ELF loading (`lp-xt-elf`). See [`lp-xt/README.md`](../lp-xt/README.md).
+instruction model, encoder/decoder, and disassembler (`lp-xt-inst`), ELF loading
+(`lp-xt-elf`), the FP conformance corpus (`lp-xt-fp-vectors`) and the rig that runs it on
+silicon (`lp-xt-fp-harness`). The emulator itself is in `lp-emu/`.
+See [`lp-xt/README.md`](../lp-xt/README.md).
 
 ## Cranelift Fork
 
