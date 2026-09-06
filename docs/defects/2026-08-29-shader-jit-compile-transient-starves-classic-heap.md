@@ -1,6 +1,7 @@
 ---
-status: open                # silicon re-measure pending; host + emulator attribution done 2026-09-02, classic-layout fragmentation added 2026-09-04
+status: fixed               # silicon bracket measured 2026-09-06 on the four-region heap; host + emulator attribution 2026-09-02, classic-layout fragmentation 2026-09-04
 found: 2026-08-29
+fixed: 2026-09-06           # by #474/#475/#497/#503 (the compile and the residents) and #521/#522 (the heap); confirmed on DOM-Z-102
 area: shader GLSL→JIT compile transient vs the classic's ~186 KB arena
 class: arena-retained-transient
 related:
@@ -9,6 +10,7 @@ related:
   - ../adr/2026-08-28-project-reads-bounded-streamed-refusable.md
   - 2026-09-04-read-gate-refuses-on-largest-block-proxy.md
   - ../reports/2026-09-04-classic-heap-fragmentation.md
+  - ../reports/2026-09-06-classic-not-enough-heap.md
   - ../../lp-shader/lpvm-native/tests/xt_compile_peak_memory.rs
   - ../../lp-core/lpc-engine/tests/example_shader_compile_peak_memory.rs
 ---
@@ -156,3 +158,27 @@ Still open on the same thing as before: a silicon `[mem] shader compile
 before/after` bracket on a classic. The desk board was held by a live Studio
 session for this pass (report section 6), so no measurement replaced the
 emulator.
+
+**Measured on silicon (2026-09-06, DOM-Z-102, tree `d6cfaa2051ae`; report
+`docs/reports/2026-09-06-classic-not-enough-heap.md`)** — the bracket this
+entry owed, on the heap as it is after PRs #521/#522 (241,552 B in four
+regions, JIT in SRAM0):
+
+| phase | free | used | largest block |
+|---|---:|---:|---:|
+| boot idle | 225,500 | 16,052 | 109,446 |
+| zook loaded | 183,588 | 57,964 | 98,303 |
+| `[mem] shader compile before` | 91,112 | 150,440 | 74,816 |
+| `[mem] shader compile after` | 88,952 | 152,600 | 65,030 |
+| steady, 65 s | 89,272 | 152,280 | 65,022 |
+
+The compile retains **2,160 B** of heap (the 2,144 B of code lives in SRAM0)
+and costs **9,786 B of contiguity**; it takes 112 ms; zook renders at 19 fps,
+`level=green`, and Studio's skeleton read is accepted. Load resident on the
+board is 41,912 B against the emulator's 41,663 B. The ">100 KB" in the
+shape above was the JIT link plus the first frame's residents on a heap
+55 KB smaller, exactly as the 2026-09-02 attribution said. What remains of
+this entry's *shape* is a different defect: the first frame leaves zook's
+largest block ~500 B above the 64 KiB load gate at rest, and the compile's
+peak is not observable with the board's 1 Hz `[MEM]` line (only the
+emulator's 22,858 B figure exists). Closed as fixed by measurement.

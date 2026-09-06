@@ -1,7 +1,7 @@
 {
   "comment": "Measured heap-budget record — a ratchet, not a target. These are what the projects cost TODAY on the RV32 emulator, not what any product may use. Per project and profile mode; steady-render records only the frame window. Regenerate with `just heap-budget-baseline`; see docs/heap-budget-gate.md.",
   "recorded": "2026-09-06",
-  "commit": "da03d4d89",
+  "commit": "513131a26",
   "projects": {
     "examples/basic": {
       "modes": {
@@ -17,21 +17,21 @@
               "holes_at_close": 3
             },
             "project-load": {
-              "transient": 41344,
-              "retained": 36550,
+              "transient": 41336,
+              "retained": 36542,
               "largest_alloc": 4365,
               "alloc_count": 3680,
-              "alloc_bytes": 227418,
-              "largest_free_at_close": 215360,
+              "alloc_bytes": 227410,
+              "largest_free_at_close": 215368,
               "holes_at_close": 25
             },
             "frame": {
-              "transient": 93564,
-              "retained": 41821,
+              "transient": 92600,
+              "retained": 40857,
               "largest_alloc": 20480,
-              "alloc_count": 3163,
-              "alloc_bytes": 152502,
-              "largest_free_at_close": 177536,
+              "alloc_count": 3162,
+              "alloc_bytes": 151538,
+              "largest_free_at_close": 178520,
               "holes_at_close": 10
             },
             "shader-compile": {
@@ -40,7 +40,7 @@
               "largest_alloc": 13092,
               "alloc_count": 2305,
               "alloc_bytes": 274380,
-              "largest_free_at_close": 130584,
+              "largest_free_at_close": 131544,
               "holes_at_close": 16
             },
             "shader-link": {
@@ -49,8 +49,8 @@
               "largest_alloc": 8192,
               "alloc_count": 17,
               "alloc_bytes": 8844,
-              "largest_free_at_close": 130584,
-              "holes_at_close": 51
+              "largest_free_at_close": 131544,
+              "holes_at_close": 59
             }
           }
         },
@@ -62,8 +62,8 @@
               "largest_alloc": 400,
               "alloc_count": 204,
               "alloc_bytes": 6029,
-              "largest_free_at_close": 130584,
-              "holes_at_close": 30
+              "largest_free_at_close": 131544,
+              "holes_at_close": 28
             }
           }
         }
@@ -83,21 +83,21 @@
               "holes_at_close": 3
             },
             "project-load": {
-              "transient": 46803,
-              "retained": 43491,
+              "transient": 46795,
+              "retained": 43483,
               "largest_alloc": 3584,
               "alloc_count": 4579,
-              "alloc_bytes": 280292,
-              "largest_free_at_close": 215240,
+              "alloc_bytes": 280284,
+              "largest_free_at_close": 215248,
               "holes_at_close": 31
             },
             "frame": {
-              "transient": 96465,
-              "retained": 43636,
+              "transient": 96225,
+              "retained": 43396,
               "largest_alloc": 20480,
-              "alloc_count": 3555,
-              "alloc_bytes": 162106,
-              "largest_free_at_close": 175504,
+              "alloc_count": 3554,
+              "alloc_bytes": 161866,
+              "largest_free_at_close": 175752,
               "holes_at_close": 9
             },
             "shader-compile": {
@@ -117,7 +117,7 @@
               "largest_alloc": 560,
               "alloc_count": 636,
               "alloc_bytes": 30047,
-              "largest_free_at_close": 137136,
+              "largest_free_at_close": 146352,
               "holes_at_close": 56
             }
           }
@@ -138,21 +138,21 @@
               "holes_at_close": 3
             },
             "project-load": {
-              "transient": 46296,
-              "retained": 41671,
+              "transient": 46288,
+              "retained": 41663,
               "largest_alloc": 12000,
               "alloc_count": 3569,
-              "alloc_bytes": 225122,
-              "largest_free_at_close": 224344,
+              "alloc_bytes": 225114,
+              "largest_free_at_close": 224352,
               "holes_at_close": 23
             },
             "frame": {
-              "transient": 114808,
-              "retained": 61020,
+              "transient": 108808,
+              "retained": 55020,
               "largest_alloc": 20480,
-              "alloc_count": 9890,
-              "alloc_bytes": 528103,
-              "largest_free_at_close": 165760,
+              "alloc_count": 9889,
+              "alloc_bytes": 522103,
+              "largest_free_at_close": 171768,
               "holes_at_close": 18
             },
             "shader-compile": {
@@ -161,8 +161,8 @@
               "largest_alloc": 7424,
               "alloc_count": 615,
               "alloc_bytes": 84359,
-              "largest_free_at_close": 146880,
-              "holes_at_close": 21
+              "largest_free_at_close": 152888,
+              "holes_at_close": 22
             },
             "shader-link": {
               "transient": 2865,
@@ -170,7 +170,7 @@
               "largest_alloc": 2780,
               "alloc_count": 6,
               "alloc_bytes": 2911,
-              "largest_free_at_close": 146880,
+              "largest_free_at_close": 152888,
               "holes_at_close": 29
             }
           }
@@ -183,7 +183,7 @@
               "largest_alloc": 384,
               "alloc_count": 175,
               "alloc_bytes": 5826,
-              "largest_free_at_close": 146880,
+              "largest_free_at_close": 152888,
               "holes_at_close": 29
             }
           }

@@ -15,6 +15,7 @@ use lpc_model::{
 };
 use lps_q32::q32::{Q32, ToQ32};
 
+use crate::nodes::fixture::direct_channels::DirectChannels;
 use crate::nodes::fixture::gamma::apply_gamma16;
 use crate::nodes::fixture::mapping::{
     ChannelAccumulators, PixelMappingEntry, accumulate_from_mapping, compute_mapping,
@@ -173,9 +174,12 @@ pub struct FixtureNode {
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
     /// Channel list for Direct sampling — the ONLY per-lamp data that stays
-    /// resident (4 B/lamp). Coordinates are regenerated transiently from the
+    /// resident, and for every document-resolved mapping it is the identity
+    /// `0..n` encoded as one `u32` ([`DirectChannels::Identity`]); only a
+    /// hand-authored `PathPoints` with offset or sparse keys keeps the
+    /// 4 B/lamp list. Coordinates are regenerated transiently from the
     /// mapping when the sample-point buffer needs rewriting.
-    direct_channels: Option<(Revision, alloc::vec::Vec<u32>)>,
+    direct_channels: Option<(Revision, DirectChannels)>,
     display_layout_revision: Option<(FixtureDisplayLayoutKey, Revision)>,
     /// Current-limit scale for the NEXT frame, in Q16. Demand for a frame is
     /// only known once that frame is rendered, so the scale always trails it
@@ -470,18 +474,13 @@ impl FixtureNode {
             .as_ref()
             .is_none_or(|(ver, _)| *ver != mapping_ver);
         if stale {
-            // Stream the points: only `point.channel` is read per frame, so
-            // 4 B/lamp is the whole resident cost and no intermediate
-            // `Vec<MappingPoint>` (16 B/lamp, plus its doubling peak) needs
-            // to exist at all. The coordinates the sampler needs are
-            // regenerated transiently in `ensure_fixture_sample_points` when
-            // its buffer key changes.
-            let mapping = self.mapping.as_mapping_ref();
-            let mut channels =
-                Vec::with_capacity(lpc_model::nodes::fixture::mapping_point_count(mapping));
-            lpc_model::nodes::fixture::for_each_mapping_point(mapping, 1, 1, |_, point| {
-                channels.push(point.channel)
-            });
+            // Streamed from the mapping — no intermediate `Vec<MappingPoint>`
+            // (16 B/lamp, plus its doubling peak) — and encoded away entirely
+            // when the list is the identity, which every document-resolved
+            // mapping is. The coordinates the sampler needs are regenerated
+            // transiently in `ensure_fixture_sample_points` when its buffer
+            // key changes.
+            let channels = DirectChannels::from_mapping(self.mapping.as_mapping_ref());
             self.direct_channels = Some((mapping_ver, channels));
         }
     }
@@ -1218,7 +1217,7 @@ impl FixtureNode {
             let (channels_version, channels) = self
                 .direct_channels
                 .as_ref()
-                .map(|(ver, channels)| (*ver, channels.as_slice()))
+                .map(|(ver, channels)| (*ver, channels))
                 .ok_or_else(|| NodeError::msg("fixture direct render missing cached channels"))?;
             return render_direct_fixture_control(
                 &mut self.sample_points,
@@ -1243,7 +1242,7 @@ impl FixtureNode {
             let channels = self
                 .direct_channels
                 .as_ref()
-                .map(|(_, channels)| channels.as_slice())
+                .map(|(_, channels)| channels)
                 .ok_or_else(|| NodeError::msg("fixture strip render missing cached channels"))?;
             let texture_request = RenderTextureRequest {
                 width: channels.len() as u32,
@@ -1271,7 +1270,7 @@ impl FixtureNode {
             let channels = self
                 .direct_channels
                 .as_ref()
-                .map(|(_, channels)| channels.as_slice())
+                .map(|(_, channels)| channels)
                 .ok_or_else(|| NodeError::msg("fixture strip render missing cached channels"))?;
             let accumulators = accumulate_fixture_channels_from_strip(
                 texture,
@@ -1579,7 +1578,7 @@ fn fixture_strip_point_coords(count: u32, wire_reversed: bool) -> Vec<i32> {
 fn accumulate_fixture_channels_from_strip(
     texture: &TextureHandle,
     bytes: &[u8],
-    channels: &[u32],
+    channels: &DirectChannels,
     wire_reversed: bool,
 ) -> Result<ChannelAccumulators, NodeError> {
     if texture.format() != lps_shared::TextureStorageFormat::Rgba16Unorm {
@@ -1596,7 +1595,7 @@ fn accumulate_fixture_channels_from_strip(
             channels.len()
         )));
     }
-    let max_channel = channels.iter().copied().max().unwrap_or(0);
+    let max_channel = channels.max_channel().unwrap_or(0);
     let len = max_channel as usize + 1;
     let mut accumulators = ChannelAccumulators {
         r: alloc::vec![Q32::ZERO; len],
@@ -1604,11 +1603,36 @@ fn accumulate_fixture_channels_from_strip(
         b: alloc::vec![Q32::ZERO; len],
         max_channel,
     };
-    for (index, channel) in channels.iter().enumerate() {
+    // One match on the channel encoding, one monomorphized loop per form.
+    match channels {
+        DirectChannels::Identity(count) => {
+            accumulate_strip_lamps(0..*count, bytes, wire_reversed, &mut accumulators)
+        }
+        DirectChannels::Explicit(list) => accumulate_strip_lamps(
+            list.iter().copied(),
+            bytes,
+            wire_reversed,
+            &mut accumulators,
+        ),
+    }
+    Ok(accumulators)
+}
+
+/// Read each lamp's texel off the `(N, 1)` strip into its channel's
+/// accumulator. `channels` must be exact-size: the reversed wire indexes
+/// from its length.
+fn accumulate_strip_lamps(
+    channels: impl ExactSizeIterator<Item = u32>,
+    bytes: &[u8],
+    wire_reversed: bool,
+    accumulators: &mut ChannelAccumulators,
+) {
+    let count = channels.len();
+    for (index, channel) in channels.enumerate() {
         // The reversed wire reads the strip back to front: lamp `k` takes
         // texel `N-1-k` (the along-the-wire direction option).
         let texel_index = if wire_reversed {
-            channels.len() - 1 - index
+            count - 1 - index
         } else {
             index
         };
@@ -1620,14 +1644,13 @@ fn accumulate_fixture_channels_from_strip(
             let raw = u16::from_le_bytes([texel[offset], texel[offset + 1]]);
             unorm16_to_q32(raw)
         };
-        let channel = *channel as usize;
+        let channel = channel as usize;
         if channel < accumulators.r.len() {
             accumulators.r[channel] = read(0);
             accumulators.g[channel] = read(2);
             accumulators.b[channel] = read(4);
         }
     }
-    Ok(accumulators)
 }
 
 /// Unorm16 `[0, 65535]` as Q32 `[0, 1]`.
@@ -1678,7 +1701,7 @@ fn render_direct_fixture_control(
     sample_target: &mut Option<SampleOutHandle>,
     mapping: MappingRef<'_>,
     mapping_version: Revision,
-    channels: &[u32],
+    channels: &DirectChannels,
     visual_product: VisualProduct,
     request: &ControlRenderRequest,
     mut target: ControlRenderTarget<'_>,
@@ -1746,10 +1769,49 @@ fn render_direct_fixture_control(
         .map_err(err_ctx("fixture sample read"))?;
 
     target.clear();
+    // One match on the channel encoding, then a loop monomorphized on that
+    // form's iterator — the identity case walks `0..n` with no per-lamp
+    // branch and no list to read.
+    let written_samples = match channels {
+        DirectChannels::Identity(count) => write_direct_lamps(
+            0..*count,
+            sampled,
+            &mut target,
+            expected_samples,
+            &settings,
+            power,
+        ),
+        DirectChannels::Explicit(list) => write_direct_lamps(
+            list.iter().copied(),
+            sampled,
+            &mut target,
+            expected_samples,
+            &settings,
+            power,
+        ),
+    };
+
+    Ok(ControlLayout {
+        spans: fixture_control_spans(mapping, settings.color_order, written_samples as u32),
+    })
+}
+
+/// Encode each sampled lamp into its channel's three control samples,
+/// skipping lamps whose channel falls past the requested extent. Returns
+/// the sample index one past the last write, for the control layout's
+/// span report.
+fn write_direct_lamps(
+    channels: impl Iterator<Item = u32>,
+    sampled: &[u16],
+    target: &mut ControlRenderTarget<'_>,
+    expected_samples: usize,
+    settings: &FixtureRenderSettings,
+    power: &mut PowerPass,
+) -> usize {
     let brightness = settings.brightness.to_q32() / 255.to_q32();
     let mut written_samples = 0usize;
-    for (channel, rgba) in channels.iter().zip(sampled.chunks_exact(4)) {
-        let base = (*channel as usize).saturating_mul(3);
+    for (channel, rgba) in channels.zip(sampled.chunks_exact(4)) {
+        let base = (channel as usize).saturating_mul(3);
         if base + 3 > expected_samples {
             continue;
         }
@@ -1779,10 +1841,7 @@ fn render_direct_fixture_control(
         target.write(base, &ordered);
         written_samples = written_samples.max(base + 3);
     }
-
-    Ok(ControlLayout {
-        spans: fixture_control_spans(mapping, settings.color_order, written_samples as u32),
-    })
+    written_samples
 }
 
 fn render_fixture_diagnostic_control(
@@ -3995,7 +4054,7 @@ mod tests {
     /// under test ever touches. It also counts calls, so a test can assert
     /// the def is still read every tick — the clone-kill removes the
     /// per-tick ALLOCATION, not the read.
-    struct FakeDefResolver {
+    pub(super) struct FakeDefResolver {
         /// `None` simulates an absent def path (a fresh/unbound node): the
         /// resolve errors, which `try_read_def_value` treats as "no value"
         /// rather than propagating.
@@ -4009,7 +4068,7 @@ mod tests {
     }
 
     impl FakeDefResolver {
-        fn returning(sample_diameter: f32) -> Self {
+        pub(super) fn returning(sample_diameter: f32) -> Self {
             Self {
                 sample_diameter: Some(sample_diameter),
                 production_revision: Revision::new(1),
@@ -4113,7 +4172,7 @@ mod tests {
             mapping_version,
             vec![PixelMappingEntry::new(0, Q32::ONE, false)],
         ));
-        node.direct_channels = Some((mapping_version, vec![0u32]));
+        node.direct_channels = Some((mapping_version, DirectChannels::Identity(1)));
         node.display_layout_revision = Some((
             FixtureDisplayLayoutKey {
                 mapping_version,
@@ -4898,6 +4957,12 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             let reversed_position = ((COUNT - 1 - index) as f32 + 0.5) / COUNT as f32;
             assert_near(lamp[0], reversed_position, "reversed strip ramp");
         }
+        // A dense hand-authored point list from channel 0 is the identity
+        // too, reversed or not.
+        assert_eq!(
+            fixture.direct_channels,
+            Some((Revision::new(1), DirectChannels::Identity(COUNT as u32))),
+        );
     }
 
     /// The reversed wire's strip coordinates are the forward ones read
@@ -5053,6 +5118,80 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
         for (index, lamp) in lamps.iter().enumerate() {
             let reversed_position = ((COUNT - 1 - index) as f32 + 0.5) / COUNT as f32;
             assert_near(lamp[0], reversed_position, "map2d reversed wire ramp");
+        }
+        // Reversal lives in the texel order, never in the channel list: a
+        // reversed document-resolved fixture still carries the identity.
+        assert_eq!(
+            fixture.direct_channels,
+            Some((Revision::new(1), DirectChannels::Identity(COUNT as u32))),
+            "wire_reversed must not materialize a channel list"
+        );
+    }
+
+    /// A patched fixture keeps the identity channels: the patch reorders the
+    /// WIRE (output side, from the carrier's spans — ADR
+    /// 2026-08-10-output-fragments-and-patch-files), while the fixture's own
+    /// control product stays in lamp order, channel `k` = lamp `k`.
+    #[test]
+    fn a_patched_fixture_keeps_identity_channels() {
+        const COUNT: usize = 8;
+        let doc = map2d_scarf_doc();
+        let compact = mapping_from_map2d_doc(&doc, 16, 16).expect("resolve map2d doc");
+        assert_eq!(compact.points.len(), COUNT);
+        let object_spans = lpc_mapping::object_instance_spans_of(
+            &doc,
+            &crate::nodes::fixture::mapping::map2d::object_spans_of(&compact),
+        );
+        // Both halves swapped, the second plugged in backwards.
+        let patch = lpc_mapping::PatchDoc::from_json(
+            r#"{
+              "format": 1,
+              "entries": [
+                { "range": { "start": 0, "count": 4 }, "at": { "channel": 4 } },
+                { "range": { "start": 4, "count": 4 }, "at": { "channel": 0 }, "reversed": true }
+              ]
+            }"#,
+        )
+        .expect("patch doc");
+
+        let mut producer = ShaderProducer::new(
+            ShaderSpace::OneD {
+                in_2d: EnumSlot::default(),
+            },
+            RAMP_1D,
+        );
+        let product = producer.product();
+        let mut fixture = map2d_fixture(compact, true, ConsumerPolicy::AUTO, product)
+            .with_object_spans(object_spans)
+            .with_patch_source(FixturePatchSource {
+                location: AssetLocation::artifact(ArtifactLocation::file("/fixture.patch.json")),
+                revision: Revision::new(1),
+                doc: Some(patch),
+            });
+
+        // Resolve the patch the way a tick would.
+        let mut resolver = super::tests::FakeDefResolver::returning(1.0);
+        let shapes = SlotShapeRegistry::default();
+        let ctx = TickContext::new(NodeId::new(2), Revision::new(2), &mut resolver, &shapes);
+        fixture.ensure_patch_resolved(&ctx);
+        let (_, runs) = fixture
+            .resolved_patch
+            .as_ref()
+            .expect("the patch document resolves against the mapping");
+        assert!(
+            runs.iter().any(|run| run.reversed) && runs.iter().any(|run| run.lamp != run.start),
+            "the patch must reorder the wire: {runs:?}"
+        );
+
+        let lamps = render_lamps(&mut fixture, &mut producer, COUNT);
+        assert_eq!(
+            fixture.direct_channels,
+            Some((Revision::new(1), DirectChannels::Identity(COUNT as u32))),
+            "a patch is read from the spans, never from the channel list"
+        );
+        for (index, lamp) in lamps.iter().enumerate() {
+            let strip_position = (index as f32 + 0.5) / COUNT as f32;
+            assert_near(lamp[0], strip_position, "patched fixture keeps lamp order");
         }
     }
 
@@ -5768,13 +5907,22 @@ mod mapping_representation_differential {
     const EXTENTS: [(u32, u32); 5] = [(1, 1), (16, 16), (64, 32), (32, 64), (100, 100)];
 
     fn direct_channels(mapping: MappingRef<'_>) -> Vec<u32> {
-        // Exactly what `ensure_direct_channels` stores.
-        let mut channels =
+        // Exactly what `ensure_direct_channels` stores, expanded — so an
+        // identity encoding that lies about its count, or a sabotaged span
+        // that must fall back to the explicit list, both surface as a
+        // differing list. The expansion is also checked against the raw
+        // point stream, so the encoding itself is under test here.
+        let encoded = DirectChannels::from_mapping(mapping).to_vec();
+        let mut streamed =
             Vec::with_capacity(lpc_model::nodes::fixture::mapping_point_count(mapping));
         lpc_model::nodes::fixture::for_each_mapping_point(mapping, 1, 1, |_, point| {
-            channels.push(point.channel)
+            streamed.push(point.channel)
         });
-        channels
+        assert_eq!(
+            encoded, streamed,
+            "DirectChannels must expand to the point stream"
+        );
+        encoded
     }
 
     fn path_spans(mapping: MappingRef<'_>) -> Vec<(u32, u32, u32)> {
@@ -5874,6 +6022,48 @@ mod mapping_representation_differential {
                 assert!(lamps > 0, "{name}: differential ran on zero lamps");
             }
         }
+    }
+
+    /// Every document the differential covers resolves to the identity —
+    /// the resolver's spans are a running cursor, so no map2d fixture pays
+    /// for a channel list. The slot expansion of the same document agrees,
+    /// so the encoding is a property of the mapping, not of the carrier.
+    #[test]
+    fn a_document_resolved_mapping_has_identity_channels() {
+        let mut checked = 0usize;
+        for (name, doc) in differential_documents() {
+            let (w, h) = (64u32, 32u32);
+            let compact = mapping_from_map2d_doc(&doc, w, h).expect("compact resolve");
+            let lamps = compact.lamp_count() as u32;
+            assert_eq!(
+                DirectChannels::from_mapping(MappingRef::Compact(&compact)),
+                DirectChannels::Identity(lamps),
+                "{name}: expected identity channels from the carrier"
+            );
+            let slots = expand_doc_into_slots(&doc, w, h);
+            assert_eq!(
+                DirectChannels::from_mapping(MappingRef::Slots(&slots)),
+                DirectChannels::Identity(lamps),
+                "{name}: expected identity channels from the slot form"
+            );
+            let mut fixture = FixtureNode::new(
+                lpc_model::NodeId::new(2),
+                compact,
+                FixtureSamplingConfig::Direct,
+                Revision::new(3),
+            );
+            fixture.ensure_direct_channels(Revision::new(3));
+            assert_eq!(
+                fixture.direct_channels,
+                Some((Revision::new(3), DirectChannels::Identity(lamps))),
+                "{name}: the node must store the identity"
+            );
+            checked += usize::from(lamps > 0);
+        }
+        assert!(
+            checked >= 3,
+            "identity checked on {checked} non-empty documents"
+        );
     }
 
     /// The differential's teeth, checked in-band: perturbing one span start

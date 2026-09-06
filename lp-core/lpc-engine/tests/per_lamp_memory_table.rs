@@ -382,10 +382,12 @@ fn per_lamp_memory_table() {
     // The per-lamp ratchets. Measured 2026-09-02 after the copy removals
     // (docs/reports/2026-09-02-per-lamp-memory-table.md): load 8.0 B/lamp
     // resident and 8.0 transient (one exact-size positions buffer, fitted in
-    // place); tick 1 21.7 B/lamp (direct channels 4, output samples 6, the
-    // host provider's u16 copy 6 + 8-bit frame 3 + ws281x data 3 — the two
-    // wasmtime-memory sample buffers are outside this allocator). Ceilings
-    // sit ~1.4× above; lower them with every fix, never raise them.
+    // place); tick 1 17.7 B/lamp since 2026-09-06 (output samples 6, the
+    // host provider's u16 copy 6 + 8-bit frame 3 + ws281x data 3 — the
+    // direct channels are the identity for a map2d fixture and cost one
+    // `u32`, and the two wasmtime-memory sample buffers are outside this
+    // allocator). Ceilings sit ~1.4× above; lower them with every fix,
+    // never raise them.
     let slope_of = |a: (&Fixture, &[Phase]), b: (&Fixture, &[Phase]), phase: &str| -> (f64, f64) {
         let find = |p: &[Phase]| {
             *p.iter()
@@ -411,8 +413,8 @@ fn per_lamp_memory_table() {
             pair.0
         );
         assert!(
-            tick1_resident <= 30.5,
-            "{}: tick 1 costs {tick1_resident:.1} B/lamp resident (ceiling 30.5)",
+            tick1_resident <= 25.0,
+            "{}: tick 1 costs {tick1_resident:.1} B/lamp resident (ceiling 25.0)",
             pair.0
         );
     }
