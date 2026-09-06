@@ -20,6 +20,7 @@ extern crate std;
 // Compile-time configuration
 pub mod config;
 
+pub mod bus;
 pub mod cycle_model;
 pub mod log_level;
 pub mod memory;
@@ -31,6 +32,7 @@ pub mod time;
 pub mod trap_code;
 
 // Re-exports for convenience
+pub use bus::{Bus, Watchpoint};
 pub use cycle_model::{CycleModel, InstClass};
 pub use log_level::LogLevel;
 pub use memory::{DEFAULT_RAM_START, DEFAULT_SHARED_START, Memory, MemoryAccessKind, MemoryError};
