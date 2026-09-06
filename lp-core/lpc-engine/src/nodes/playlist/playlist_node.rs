@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::vec::Vec;
 use lp_collection::VecMap;
 
-use lp_gfx::TextureHandle;
+use lp_gfx::{SampleOutHandle, TextureHandle};
 use lpc_model::{
     ControlMessage, FromLpValue, NodeId, PlaylistState, SlotAccess, SlotData, SlotPath,
     SlotShapeRegistry, SlotShapeRegistryError,
@@ -50,9 +50,10 @@ pub struct PlaylistNode {
     /// slot's domain — command switches reset the entry clock exactly like
     /// trigger switches, even when the playlist clock is scrubbed or rated.
     pending_activate: Option<u32>,
-    /// Reused destinations for the crossfade sample reads and blend, so a
-    /// running transition adds no per-tick heap churn (the tick-alloc rule
-    /// from defect 2026-08-29-flash-write-wedges-under-zook-playback).
+    /// The crossfade sample path's buffers, alive for one transition, so a
+    /// running transition adds no per-tick allocation on the host heap OR
+    /// in graphics memory (the tick-alloc rule from defect
+    /// 2026-08-29-flash-write-wedges-under-zook-playback).
     crossfade_scratch: CrossfadeScratch,
     /// The four produced-slot paths this node publishes every `produce`,
     /// parsed once. Parsing them per frame was four `SlotPath`s built and
@@ -80,12 +81,35 @@ impl PublishedPaths {
     }
 }
 
-/// The crossfade sample path's persistent blend buffer (`4 × point count`
-/// `u16`s while a transition runs). The two inputs are read in place from
-/// their sample-outs (`LpGraphics::sample_out_data`), not copied here.
+/// The crossfade sample path's buffers, alive for one transition.
+///
+/// The two input sample-outs (graphics memory, 8 B/lamp each, read in place
+/// through `LpGraphics::sample_out_data`) and the blended host scratch
+/// (`4 × point count` `u16`s). Allocated on a transition's first frame,
+/// keyed on the point count like the fixture's `sample_target`, and dropped
+/// when the transition ends — never per frame. Before 2026-09-06 the two
+/// handles were created and freed every frame: 16 B/lamp of churn through
+/// the classic's infallible allocator, and on the host a leak outright, since
+/// the wasmtime backend's bump allocator never frees.
 #[derive(Default)]
 struct CrossfadeScratch {
+    previous: Option<SampleOutHandle>,
+    active: Option<SampleOutHandle>,
     blended: Vec<u16>,
+}
+
+impl CrossfadeScratch {
+    /// Free everything. Handles release their graphics memory on drop.
+    fn clear(&mut self) {
+        self.previous = None;
+        self.active = None;
+        self.blended = Vec::new();
+    }
+
+    #[cfg(test)]
+    fn holds_buffers(&self) -> bool {
+        self.previous.is_some() || self.active.is_some() || !self.blended.is_empty()
+    }
 }
 
 impl PlaylistNode {
@@ -165,6 +189,16 @@ impl PlaylistNode {
         let alpha = clamp01((time - self.transition_start_time) / self.transition_duration);
         (alpha < 1.0).then_some(alpha)
     }
+
+    /// The transition is over (or there never was one): forget the outgoing
+    /// entry and free the crossfade buffers, which exist only while one
+    /// runs. The next transition's first frame allocates them again — once
+    /// per transition, not once per frame.
+    fn end_transition(&mut self) {
+        self.previous_entry = None;
+        self.previous_product = None;
+        self.crossfade_scratch.clear();
+    }
 }
 
 impl NodeRuntime for PlaylistNode {
@@ -231,8 +265,7 @@ impl NodeRuntime for PlaylistNode {
             self.runtime_entry(self.current_entry).ok_or_missing()?,
         )?);
         if self.transition_alpha(time).is_none() {
-            self.previous_entry = None;
-            self.previous_product = None;
+            self.end_transition();
         } else if let Some(previous) = self.previous_entry {
             if self.previous_product.is_none() {
                 self.previous_product = Some(resolve_entry_product(
@@ -275,9 +308,22 @@ impl NodeRuntime for PlaylistNode {
 
     fn handle_memory_pressure(
         &mut self,
-        _level: PressureLevel,
+        level: PressureLevel,
         _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
+        // The crossfade buffers are droppable — the next transition frame
+        // rebuilds them to bit-identical output — but NOT at `High`: that
+        // broadcast is the top-of-tick compile window, and this node
+        // rebuilds them at render time BEFORE the child entry's compile
+        // runs inside `sample_visual_into`, so a drop there is
+        // re-allocation, not reclaim (the ordering rule in
+        // `engine/memory_pressure.rs`; ADR 2026-08-03, 2026-08-04
+        // amendment). `Critical` is the embedder's between-ticks survival
+        // broadcast, where nothing of ours is rebuilt before the allocation
+        // that failed retries.
+        if level >= PressureLevel::Critical {
+            self.crossfade_scratch.clear();
+        }
         Ok(())
     }
 
@@ -427,22 +473,32 @@ impl RenderNode for PlaylistNode {
             return Err(NodeError::msg("playlist sample target count mismatch"));
         }
 
-        let mut previous_samples = {
-            let graphics = ctx
-                .graphics()
-                .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
-            graphics
-                .create_sample_out(point_count)
-                .map_err(err_ctx("playlist previous samples"))?
-        };
-        let mut active_samples = {
-            let graphics = ctx
-                .graphics()
-                .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
-            graphics
-                .create_sample_out(point_count)
-                .map_err(err_ctx("playlist active samples"))?
-        };
+        // Resident for the transition: allocated on its first frame (or when
+        // the point count moves), reused every frame after, freed by
+        // `end_transition`.
+        ensure_crossfade_sample_out(
+            &mut self.crossfade_scratch.previous,
+            point_count,
+            ctx,
+            "playlist previous samples",
+        )?;
+        ensure_crossfade_sample_out(
+            &mut self.crossfade_scratch.active,
+            point_count,
+            ctx,
+            "playlist active samples",
+        )?;
+        let CrossfadeScratch {
+            previous: previous_samples,
+            active: active_samples,
+            blended,
+        } = &mut self.crossfade_scratch;
+        let previous_samples = previous_samples
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("playlist previous samples missing after allocation"))?;
+        let active_samples = active_samples
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("playlist active samples missing after allocation"))?;
 
         let points = request.points;
         ctx.sample_visual_into(
@@ -456,7 +512,7 @@ impl RenderNode for PlaylistNode {
                 policy: request.policy,
             },
             VisualSampleTarget {
-                samples: &mut previous_samples,
+                samples: &mut *previous_samples,
             },
         )?;
         ctx.sample_visual_into(
@@ -470,30 +526,50 @@ impl RenderNode for PlaylistNode {
                 policy: request.policy,
             },
             VisualSampleTarget {
-                samples: &mut active_samples,
+                samples: &mut *active_samples,
             },
         )?;
         let graphics = ctx
             .graphics()
             .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
         let channel_len = point_count as usize * 4;
-        let scratch = &mut self.crossfade_scratch;
-        ensure_scratch_len(
-            &mut scratch.blended,
-            channel_len,
-            "playlist blended samples",
-        )?;
+        ensure_scratch_len(blended, channel_len, "playlist blended samples")?;
         let previous_data = graphics
-            .sample_out_data(&previous_samples)
+            .sample_out_data(previous_samples)
             .map_err(err_ctx("playlist previous sample read"))?;
         let active_data = graphics
-            .sample_out_data(&active_samples)
+            .sample_out_data(active_samples)
             .map_err(err_ctx("playlist active sample read"))?;
-        blend_rgba16_samples(previous_data, active_data, alpha, &mut scratch.blended)?;
+        blend_rgba16_samples(previous_data, active_data, alpha, blended)?;
         graphics
-            .write_sample_out(target.samples, &scratch.blended)
+            .write_sample_out(target.samples, blended)
             .map_err(err_ctx("playlist crossfade sample write"))
     }
+}
+
+/// Size one crossfade input sample-out to `count` points, allocating only
+/// when it is missing or the count moved — the fixture's
+/// `ensure_fixture_sample_target` rule. Allocation is fallible through the
+/// backend; a failure degrades this frame and the next one retries.
+fn ensure_crossfade_sample_out(
+    current: &mut Option<SampleOutHandle>,
+    count: u32,
+    ctx: &RenderContext<'_>,
+    what: &'static str,
+) -> Result<(), NodeError> {
+    let stale = current
+        .as_ref()
+        .is_none_or(|samples| samples.count() != count);
+    if !stale {
+        return Ok(());
+    }
+    let graphics = ctx
+        .graphics()
+        .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+    drop(current.take());
+    let samples = graphics.create_sample_out(count).map_err(err_ctx(what))?;
+    *current = Some(samples);
+    Ok(())
 }
 
 fn detect_triggered_entry(
@@ -683,5 +759,99 @@ mod tests {
 
         assert_eq!(node.current_entry, 2);
         assert_eq!(node.switch_time, 7.25);
+    }
+
+    /// The crossfade buffers live exactly as long as the transition: the
+    /// end-of-transition seam `produce` calls frees all three.
+    #[test]
+    fn end_transition_drops_the_crossfade_buffers() {
+        let mut node = playlist_with_entries(&[1, 2]);
+        node.previous_entry = Some(1);
+        seed_crossfade_buffers(&mut node, 4);
+        assert!(node.crossfade_scratch.holds_buffers());
+
+        node.end_transition();
+
+        assert!(
+            !node.crossfade_scratch.holds_buffers(),
+            "end_transition must free the crossfade sample-outs and scratch"
+        );
+        assert_eq!(node.previous_entry, None);
+        assert_eq!(node.previous_product, None);
+    }
+
+    /// `Critical` is the survival broadcast between ticks: drop. `High` is
+    /// the top-of-tick compile window, and the render path rebuilds these
+    /// before the child compile runs, so dropping there is re-allocation —
+    /// the handler must leave them alone (ADR 2026-08-03 amendment).
+    #[test]
+    fn critical_pressure_drops_the_crossfade_buffers_and_high_does_not() {
+        let mut node = playlist_with_entries(&[1, 2]);
+        seed_crossfade_buffers(&mut node, 4);
+
+        for level in [
+            PressureLevel::Low,
+            PressureLevel::Medium,
+            PressureLevel::High,
+        ] {
+            let mut ctx = MemPressureCtx::new(NodeId::new(1), lpc_model::Revision::new(8));
+            node.handle_memory_pressure(level, &mut ctx)
+                .expect("handle pressure");
+            assert!(
+                node.crossfade_scratch.holds_buffers(),
+                "{level:?} must not drop the crossfade buffers"
+            );
+        }
+
+        let mut ctx = MemPressureCtx::new(NodeId::new(1), lpc_model::Revision::new(9));
+        node.handle_memory_pressure(PressureLevel::Critical, &mut ctx)
+            .expect("handle pressure");
+        assert!(
+            !node.crossfade_scratch.holds_buffers(),
+            "Critical must drop the crossfade buffers"
+        );
+    }
+
+    /// A keyed re-ensure is a no-op at the same count and a fresh handle
+    /// at a different one — one allocation per transition, not per frame.
+    #[test]
+    fn ensure_crossfade_sample_out_is_keyed_on_the_point_count() {
+        let graphics: alloc::sync::Arc<dyn lp_gfx::LpGraphics> =
+            alloc::sync::Arc::new(test_graphics());
+        let ctx = RenderContext::new(
+            NodeId::new(1),
+            lpc_model::Revision::new(1),
+            Some(graphics.clone()),
+            None,
+            0.0,
+        );
+        let mut slot: Option<SampleOutHandle> = None;
+
+        ensure_crossfade_sample_out(&mut slot, 4, &ctx, "test").expect("allocate");
+        assert_eq!(slot.as_ref().map(SampleOutHandle::count), Some(4));
+
+        // Same count: no allocation. The backend call count is what proves
+        // it, and the crossfade probe (`tests/playlist_crossfade_memory.rs`)
+        // pins that across a whole transition; here the handle must at
+        // least still be there and still the right size.
+        ensure_crossfade_sample_out(&mut slot, 4, &ctx, "test").expect("same count");
+        assert_eq!(slot.as_ref().map(SampleOutHandle::count), Some(4));
+
+        ensure_crossfade_sample_out(&mut slot, 8, &ctx, "test").expect("new count");
+        assert_eq!(slot.as_ref().map(SampleOutHandle::count), Some(8));
+    }
+
+    fn test_graphics() -> lp_gfx_lpvm::TargetLpvmGraphics {
+        lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl)
+    }
+
+    /// Put real backend handles on the node, as a transition frame would.
+    fn seed_crossfade_buffers(node: &mut PlaylistNode, points: u32) {
+        use lp_gfx::LpGraphics;
+        let graphics = test_graphics();
+        node.crossfade_scratch.previous =
+            Some(graphics.create_sample_out(points).expect("previous"));
+        node.crossfade_scratch.active = Some(graphics.create_sample_out(points).expect("active"));
+        node.crossfade_scratch.blended = alloc::vec![0u16; points as usize * 4];
     }
 }
