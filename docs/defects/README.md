@@ -301,6 +301,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| nondeterministic-capture | 2026-09-06 | [heap-budget-capture-truncated-by-cycle-cap](2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md) | fixed | scripts/heap-budget-check.sh: the startup capture hit `--max-cycles` mid-compile and recorded the cut as a figure |
 | stand-in-divergence | 2026-09-04 | [read-gate-refuses-on-largest-block-proxy](2026-09-04-read-gate-refuses-on-largest-block-proxy.md) | **open** | lpa-server ProjectRead headroom gate vs the classic's two-region heap |
 | stand-in-divergence | 2026-09-04 | [unload-leaves-classic-unloadable-until-power-cycle](2026-09-04-unload-leaves-classic-unloadable-until-power-cycle.md) | **open** (not reproducing on the four-region heap 2026-09-06: reload accepted at 72,954 B, margin ~7 KB) | after stopAllProjects the classic's largest block is 39.7 KB and the 64 KiB load gate refuses every load |
 | crash-loop | 2026-09-04 | [tlsf-build-hits-stack-guard-at-project-load](2026-09-04-tlsf-build-hits-stack-guard-at-project-load.md) | **open** | fw-esp32v3 with esp-alloc TLSF panics on the stack-guard watchpoint during project load |

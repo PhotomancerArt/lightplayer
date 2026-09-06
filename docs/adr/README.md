@@ -190,6 +190,8 @@ holds the full context.
 | The main-stack high-water probe is C6-only; the classic and the S3 keep unmeasured stacks, and the tick's ~37 KB stack consumers are unprofiled | `2026-09-02-esp32c6-ram-split` | A bench journal on either Xtensa board, or a project that pushes the C6 mark past ~50 KB |
 | A footer/verb menu on the device card (cut for this pass — the six-annoyance list did not ask for it, and the verb rows have not run out of room at shipping widths) | `2026-09-03-device-card-fixed-height-and-disconnect-disappears` | A zone's verb row starts clipping at widths Studio actually ships at |
 | Preview FEED for the device card's 120px slot (a standing frame conversation that yields to verbs; aspect-fit sizing returns with it) | `2026-09-03-device-card-fixed-height-and-disconnect-disappears` | The M5 editor-lens tap (or a successor) is ready to carry a live frame into the card |
+| Bench-soaked smoothing limits for DOM-Z-102 (today's `interpolationLeds` 500 / `ditheringLeds` 1000 are DERIVED from the per-lamp memory table, and the provenance says so) | `2026-09-06-smoothing-degrades-by-measured-lamp-limits` | The classic is on the bench: a `[mem]` bracket at each limit replaces value and provenance together |
+| Device-card aggregation of output `Warn` statuses (the smoothing badge lives on the output node only; the heartbeat mirror carries no node status) | `2026-09-06-smoothing-degrades-by-measured-lamp-limits`; `2026-09-02-fault-is-never-black` | The heartbeat mirror gains node statuses (a wire change) |
 
 ## Relationship To Shared Planning
 

@@ -103,7 +103,9 @@ trace before the compile window's `"t":"F"` row — its two free-list figures
 then read as missing rather than failing. `heap-budget-check.sh` passes
 `--max-cycles 400000000` for that reason; a run that ends with a
 `max-cycles` warning is a run whose last window's figures cannot be
-trusted.
+trusted — and the script refuses such a run outright (`terminated_by:
+max_cycles` in the session's `meta.json`; see the fidelity limit below and
+`docs/defects/2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md`).
 
 **`server-boot`** brackets fw-emu's boot from recovery init through server
 and transport construction, before the first tick (`lp-fw/fw-emu/src/main.rs`).
@@ -231,6 +233,16 @@ A harness that overstates its fidelity is worse than none. This gate does
   markers is ratcheted at all. A workload can hold both figures and still
   fail on device mid-window. The fragmentation and counterfactual sections
   below are the tools for that question; they are reports, not ratchets.
+- **A capture the cycle cap ended.** Every session runs under
+  `--max-cycles` (`MAX_CYCLES` in `scripts/heap-budget-check.sh`, 400M).
+  A window still open when the cap falls has no `"E"`, and its figures are
+  whatever the collector held at that instant — a function of where the cap
+  fell, not of what the window costs. Meteor's startup capture did exactly
+  that under the profiler's 200M default for a month, recording its
+  `shader-compile` window as zeros and its cold-start `frame` as frame 1
+  alone (`docs/defects/2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md`).
+  The script now refuses a session whose `meta.json` says
+  `terminated_by: max_cycles`; raise `MAX_CYCLES` rather than record it.
 - **Two-region arenas / contiguity.** The guest heap is a single region. The
   classic's post-#288 arena is two regions, where a large allocation can fail
   while total free is ample. The `largest_alloc` ratchet is the proxy: it

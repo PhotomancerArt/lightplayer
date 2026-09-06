@@ -16,6 +16,17 @@
 //! regions — watch `largest_free`), which binds well before frame time
 //! does. "8 wires" must never be read as 8× dome strips; the honest 8-wire
 //! tier is 8×~200 at today's envelope.
+//!
+//! The second and third records are the smoothing limits: total-LED counts
+//! above which the output provider opens display pipelines with frame
+//! interpolation (`interpolation_leds`) and then temporal dithering
+//! (`dithering_leds`) turned off. Interpolation holds `prev` + `next`
+//! (12 B/LED) and dithering a carry (3 B/LED), per port — at 100 LEDs that
+//! is nothing, at a dome strip's 1,500 it is the largest per-LED line on
+//! the classic's heap. The limits make that trade board-side and
+//! deterministic (a function of the lamps open, never of the heap's mood);
+//! a board without a record never degrades. See
+//! `docs/adr/2026-09-06-smoothing-degrades-by-measured-lamp-limits.md`.
 
 use alloc::string::String;
 
@@ -43,11 +54,26 @@ pub struct HwSoftLimits {
     /// Total LEDs across all wires this board×firmware has run clean at.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_leds: Option<HwMeasuredLimit>,
+    /// Total LEDs across all open ports above which the output provider
+    /// opens display pipelines with frame interpolation OFF (freeing
+    /// 12 B/LED). Absent = interpolation follows the authored option at any
+    /// scale. Ordered below `dithering_leds` by intent: interpolation is
+    /// 4× the bytes and a second `write_frame` per tick, so it goes first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interpolation_leds: Option<HwMeasuredLimit>,
+    /// Total LEDs across all open ports above which the output provider
+    /// opens display pipelines with temporal dithering OFF too (freeing
+    /// 3 B/LED). Absent = dithering follows the authored option at any
+    /// scale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dithering_leds: Option<HwMeasuredLimit>,
 }
 
 impl HwSoftLimits {
     /// Is there anything here at all? (Serialization gate.)
     pub fn is_empty(&self) -> bool {
         self.total_leds.is_none()
+            && self.interpolation_leds.is_none()
+            && self.dithering_leds.is_none()
     }
 }
