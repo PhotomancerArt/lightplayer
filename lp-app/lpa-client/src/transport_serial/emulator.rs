@@ -1,16 +1,20 @@
 //! Emulator serial transport factory
 //!
 //! Creates async serial transport that communicates with firmware running in emulator.
-//! The emulator runs on a separate thread that loops continuously.
+//! The emulator runs on a separate thread that loops continuously, pausing briefly
+//! after each guest yield when there is nothing queued for it (see
+//! [`IDLE_YIELD_SLEEP`]).
 
 use hashbrown::HashMap;
 use log;
+use lp_emu_core::TimeMode;
 use lp_riscv_elf::format_backtrace;
 use lp_riscv_emu::Riscv32Emulator;
 use lpc_wire::WireServerMessage;
 use lpc_wire::{TransportError, messages::ClientMessage};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 #[cfg(test)]
@@ -18,6 +22,20 @@ use lp_riscv_emu::Riscv32Emulator as TestRiscv32Emulator;
 
 /// Maximum steps per emulator iteration before yielding
 const MAX_STEPS_PER_ITERATION: u64 = 100_000_000;
+
+/// How long the emulator thread sleeps after a guest yield when no client
+/// message is waiting.
+///
+/// The guest's server loop (`fw-emu::run_server_loop`) ticks and yields with
+/// no frame pacing of its own, so without this pause the thread spins one host
+/// core at 100 % for as long as the client is connected, even with no project
+/// loaded. 1 ms bounds the tick rate at ~1 kHz, far above any render rate the
+/// guest targets, and adds at most 1 ms of latency to a client request that
+/// arrives while the thread is asleep.
+///
+/// Only applied in [`TimeMode::RealTime`]: simulated time advances by explicit
+/// `advance_time` calls, so sleeping there would change nothing but wall clock.
+const IDLE_YIELD_SLEEP: Duration = Duration::from_millis(1);
 
 /// Backtrace info for error reporting
 pub struct BacktraceInfo {
@@ -37,6 +55,15 @@ fn emulator_thread_loop(
     mut shutdown_rx: oneshot::Receiver<()>,
 ) {
     let mut read_buffer = Vec::new();
+
+    // Pace idle yields only when the guest is on the wall clock.
+    let pace_idle_yields = match emulator.lock() {
+        Ok(emu) => matches!(emu.time_mode(), TimeMode::RealTime),
+        Err(_) => {
+            log::error!("Emulator thread: Failed to lock emulator for time mode");
+            return;
+        }
+    };
 
     loop {
         // Check for shutdown signal (non-blocking)
@@ -228,6 +255,13 @@ fn emulator_thread_loop(
                     // Continue - don't crash on parse errors
                 }
             }
+        }
+
+        // The guest yielded and everything it produced has been forwarded.
+        // If no client message is waiting, rest before the next tick instead
+        // of spinning straight back into `run_until_yield`.
+        if pace_idle_yields && client_rx.is_empty() {
+            thread::sleep(IDLE_YIELD_SLEEP);
         }
     }
 

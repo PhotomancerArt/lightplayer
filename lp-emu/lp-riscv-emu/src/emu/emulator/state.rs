@@ -424,6 +424,11 @@ impl Riscv32Emulator {
         self.time_mode = mode;
     }
 
+    /// Current time mode
+    pub fn time_mode(&self) -> TimeMode {
+        self.time_mode
+    }
+
     /// Advance simulated time (only works in Simulated mode)
     ///
     /// # Arguments
