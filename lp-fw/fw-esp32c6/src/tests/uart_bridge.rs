@@ -205,11 +205,14 @@ async fn usb_to_uart(
     let mut inbuf = [0u8; USB_TO_UART_CHUNK];
     let mut outbuf = [0u8; USB_TO_UART_CHUNK];
     loop {
-        let read = usb_rx.read(&mut inbuf).await.unwrap_or(0);
+        // Spelled through the traits throughout this file: esp-hal's types
+        // carry inherent BLOCKING `read`/`write` methods of the same names, and
+        // the two differ only in whether they return a future.
+        let read = Read::read(&mut usb_rx, &mut inbuf).await.unwrap_or(0);
         let step = pump(&mut queue, &inbuf[..read], &mut outbuf);
         note_drops(TO_UART, step.dropped as u32);
         if step.emitted > 0 {
-            let _ = uart_tx.write_all(&outbuf[..step.emitted]).await;
+            let _ = Write::write_all(&mut uart_tx, &outbuf[..step.emitted]).await;
         }
     }
 }
@@ -248,7 +251,7 @@ async fn uart_to_usb(
             // "lost" — which is why the queue has already let them go.
             let _ = select(
                 Timer::after(USB_STALL_TIMEOUT),
-                usb_tx.write_all(&outbuf[..step.emitted]),
+                Write::write_all(&mut usb_tx, &outbuf[..step.emitted]),
             )
             .await;
         }
@@ -262,8 +265,6 @@ async fn uart_read(
     buf: &mut [u8],
     timeout: Option<Duration>,
 ) -> usize {
-    // Spelled through the trait: `UartRx` also has an inherent BLOCKING `read`,
-    // and the two differ only in whether they return a future.
     let result = match timeout {
         None => Read::read(uart_rx, buf).await,
         Some(t) => match select(Timer::after(t), Read::read(uart_rx, buf)).await {
@@ -284,7 +285,11 @@ async fn uart_read(
 /// [`USB_STALL_TIMEOUT`] and not the run.
 async fn endpoint_free(usb_tx: &mut UsbSerialJtagTx<'static, Async>) -> bool {
     matches!(
-        select(Timer::after(USB_STALL_TIMEOUT), usb_tx.flush()).await,
+        select(
+            Timer::after(USB_STALL_TIMEOUT),
+            Write::flush(&mut *usb_tx)
+        )
+        .await,
         Either::Second(_)
     )
 }
