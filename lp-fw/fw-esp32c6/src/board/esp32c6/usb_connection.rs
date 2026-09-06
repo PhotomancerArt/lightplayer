@@ -88,6 +88,11 @@ impl UsbConnectionMonitor {
     }
 
     fn is_enumerated(&self) -> bool {
+        // esp-emu spike: the link is UART0, which has no cable to detect;
+        // SOF never arrives under the emulator and must not gate writes.
+        if cfg!(feature = "spike_uart0_link") {
+            return true;
+        }
         self.no_sof_count < DISCONNECT_THRESHOLD
     }
 

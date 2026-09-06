@@ -62,6 +62,12 @@ impl SerialIo for Esp32UsbSerialIo {
     /// the port. `Ok(())` therefore means "handed to the peripheral or
     /// deliberately dropped", never "delivered".
     fn write(&mut self, data: &[u8]) -> Result<(), SerialError> {
+        // esp-emu spike: tee every harness write to UART0 through the ROM,
+        // the emulator's only host-visible serial. The USB path below is
+        // untouched, so a board still reports on its usual port.
+        #[cfg(feature = "spike_uart0_link")]
+        crate::serial::spike_uart0::rom_tx_bytes(data);
+
         let mut bytes = data.iter().copied();
 
         if !self.host_draining {

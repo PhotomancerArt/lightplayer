@@ -16,7 +16,9 @@
 pub mod device_byte_stream;
 #[cfg(feature = "serial")]
 pub mod serialport_stream;
+pub mod tcp_stream;
 
 pub use device_byte_stream::{ByteStreamError, DeviceByteStream};
 #[cfg(feature = "serial")]
 pub use serialport_stream::SerialPortByteStream;
+pub use tcp_stream::TcpByteStream;

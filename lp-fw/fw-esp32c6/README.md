@@ -147,6 +147,12 @@ profiling, or smoke tests. Keep feature additions honest: test and check modes
 may narrow behavior for a harness, but the normal firmware path must preserve
 runtime shader compilation on device.
 
+`spike_uart0_link` (off by default) moves the host link to UART0 so the wire
+protocol can run under Espressif's binary emulator, whose USB-Serial-JTAG
+model has no real host behind it (`docs/reports/2026-09-07-esp-emu-c6-spike.md`).
+It costs the shipped image nothing — every hunk is `cfg`'d out, verified by
+`just fw-esp32c6-size-check`.
+
 ### `test_f32_softfloat` — IEEE f32 on a chip with no FPU
 
 The C6 is RV32IMAC: no F extension. It can still execute **f32 semantics**
