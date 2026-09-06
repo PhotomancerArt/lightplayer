@@ -83,8 +83,9 @@ project. On a four-channel show, node cost already exceeds LED cost by 2×.
 doubt.) For the real target — **1500 LEDs on four channels** — that is ~78 KB
 gone before a single LED, leaving ~96 KB of the 178,176 B arena, i.e. a budget
 of ~64 B/LED just to fit and less once the compile transient is counted. **The
-per-node cost deserves the same alloc-diff treatment this entry gave per-LED,
-and nobody has done it.**
+per-node cost deserves the same alloc-diff treatment this entry gave per-LED**
+— done 2026-09-06, see the incident log: ≈19.5 KB per pair at end of startup,
+72 % of it shared bookkeeping.
 
 ## Paying it down
 
@@ -126,6 +127,16 @@ Three separable steps, cheapest first:
 
 ## Incident log
 
+- **2026-09-06** — the per-node cost attributed (`docs/reports/2026-09-06-classic-not-enough-heap.md`
+  §4; projects `projects/test/basic-{2n,4n,2n-half}`, probe
+  `lp-core/lpc-engine/tests/per_node_memory_table.rs`): **≈19.5 KB per
+  fixture+output pair** of node-level heap on the device at end of startup
+  (10.4 KB at load, ~10 KB in the first frame) plus 40 B/lamp — the 14 KB
+  estimate above was low by a third. 72 % of the pair is shared bookkeeping
+  (loader/runtime spine 4.7 KB, registry inventory 4.4 KB, resolver cache +
+  interning 3.8 KB, bindings 1.2 KB), 26 % the two nodes' own slot shapes;
+  the shader compile is 0 B/pair. Per lamp on the same instrument: 37 B,
+  owner for owner the 2026-09-02 figure.
 - **2026-08-02** — attributed. Prior to this the engine-side ~68 B/LED was
   recorded in the flash-budget ADR as "unattributed and the single most
   valuable RAM lead this chip has", and was believed to scale with `render_size`.
