@@ -136,10 +136,47 @@ pub fn project_2d_to_1d(cell: crate::products::visual::CellProjection, u: f32, v
     t
 }
 
+/// Normalized `[0, 1]` f32 → Q16.16, truncating: exactly
+/// `(value.clamp(0.0, 1.0) * 65536.0) as i32` for every f32 bit pattern
+/// (negative and −0.0 → 0, NaN → 0, ≥ 1.0 and +∞ → 65536, subnormals → 0),
+/// computed on the bit pattern.
+///
+/// The float form is four libcalls on a part with no FPU (two compares, a
+/// multiply, a float-to-int), and since bounded sample batches
+/// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`) a Direct
+/// fixture converts every lamp's centre on every render. This is ~15
+/// integer ops instead. `q16_conversion_matches_the_float_reference_exhaustively`
+/// is the proof, over every non-negative bit pattern.
 #[must_use]
 pub fn normalized_f32_to_q16(value: f32) -> i32 {
-    let clamped = value.clamp(0.0, 1.0);
-    (clamped * Q16_ONE as f32) as i32
+    let bits = value.to_bits();
+    if bits & 0x8000_0000 != 0 {
+        // Negative, including −0.0: the clamp answers 0.0 (or keeps −0.0,
+        // which the cast also takes to 0).
+        return 0;
+    }
+    if bits > 0x7F80_0000 {
+        // NaN: `clamp` passes it through and the saturating cast gives 0.
+        return 0;
+    }
+    if bits >= 0x3F80_0000 {
+        // ≥ 1.0, including +∞: the clamp answers 1.0.
+        return Q16_ONE;
+    }
+    let exponent = (bits >> 23) as i32;
+    if exponent == 0 {
+        // Subnormal: below 2^-126, so × 2^16 is far below 1.
+        return 0;
+    }
+    // value = significand × 2^(exponent − 127 − 23); value × 2^16 is
+    // significand × 2^(exponent − 134), and truncation is a right shift.
+    let significand = (bits & 0x007F_FFFF) | 0x0080_0000;
+    let shift = 134 - exponent;
+    if shift >= 32 {
+        0
+    } else {
+        (significand >> shift) as i32
+    }
 }
 
 #[must_use]
@@ -416,5 +453,87 @@ mod tests {
         assert_eq!(texel_center_to_uv_q16(0, 2), 16384);
         assert_eq!(texel_center_to_uv_q16(1, 2), 49152);
         assert_eq!(texel_center_to_uv_q16(2, 4), 40960);
+    }
+}
+
+/// `normalized_f32_to_q16` is integer arithmetic standing in for a float
+/// expression; these pin that the two never disagree.
+#[cfg(test)]
+mod q16_conversion_tests {
+    use super::{Q16_ONE, normalized_f32_to_q16};
+
+    /// The float expression the integer form must reproduce bit for bit.
+    fn reference(value: f32) -> i32 {
+        (value.clamp(0.0, 1.0) * Q16_ONE as f32) as i32
+    }
+
+    fn check(bits: u32) {
+        let value = f32::from_bits(bits);
+        assert_eq!(
+            normalized_f32_to_q16(value),
+            reference(value),
+            "bits {bits:#010x} ({value:?})"
+        );
+    }
+
+    /// Every non-negative bit pattern (finite, +∞, every positive NaN), plus
+    /// the negative half at a coarse stride — about 2.1 billion checks; run
+    /// in release once per change to the function:
+    ///
+    /// ```bash
+    /// cargo test -p lpc-engine --release q16_conversion_matches_the_float_reference_exhaustively -- --ignored
+    /// ```
+    #[test]
+    #[ignore = "2^31 patterns — release-mode, run explicitly"]
+    fn q16_conversion_matches_the_float_reference_exhaustively() {
+        for bits in 0..=0x7FFF_FFFFu32 {
+            check(bits);
+        }
+        for bits in (0x8000_0000u32..=0xFFFF_FFFF).step_by(4_099) {
+            check(bits);
+        }
+        check(0xFFFF_FFFF);
+    }
+
+    /// The default-run sample: a stride over the same ranges plus the edges
+    /// that matter — the clamp boundaries, the subnormal/normal boundary,
+    /// the last value below 1.0, NaN, the signed zeros and infinities.
+    #[test]
+    fn q16_conversion_matches_the_float_reference_sampled() {
+        for bits in (0..=0x7FFF_FFFFu32).step_by(1_009) {
+            check(bits);
+        }
+        for bits in (0x8000_0000u32..=0xFFFF_FFFF).step_by(100_003) {
+            check(bits);
+        }
+        for value in [
+            0.0f32,
+            -0.0,
+            1.0,
+            -1.0,
+            0.5,
+            0.25,
+            0.75,
+            0.999_999_94, // the last f32 below 1.0
+            1.000_000_1,
+            2.0,
+            65_535.0 / 65_536.0,
+            1.0 / 65_536.0,
+            1.5 / 65_536.0,
+            f32::MIN_POSITIVE,       // 2^-126, the smallest normal
+            f32::MIN_POSITIVE / 2.0, // subnormal
+            1.401_298_5e-45,         // 2^-149, the smallest subnormal
+            f32::EPSILON,
+            f32::MAX,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NAN,
+            -f32::NAN,
+        ] {
+            check(value.to_bits());
+        }
+        assert_eq!(normalized_f32_to_q16(1.0), Q16_ONE);
+        assert_eq!(normalized_f32_to_q16(0.5), Q16_ONE / 2);
+        assert_eq!(normalized_f32_to_q16(0.999_999_94), Q16_ONE - 1);
     }
 }
