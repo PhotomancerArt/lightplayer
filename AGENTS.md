@@ -636,6 +636,48 @@ Rules of the desk:
   one PID (`303a:1001`). The USB serial number (the MAC) does distinguish
   individual boards; chip identity needs `--probe`.
 
+## Hardware validation — one system, no board most days
+
+Claims about what firmware does on a chip go through **one** system:
+`lp-cli validate`, over `lp-emu/lp-emu-validate` and `lp-fw/fw-checks`. Read
+`lp-emu/lp-emu-validate/README.md` before adding to it; the short version is
+four nouns:
+
+- a **payload** is a module in `fw-checks` behind a cargo feature, runnable
+  many per image, printing a header, records and parseable log lines;
+- a **configuration** is the named thing it ran on —
+  `silicon:seeed/xiao-esp32-c6`, `esp-emu:0.42.0`, `lp-emu:esp32c6:t1` —
+  carrying, per field class, what it is trusted for **and why**;
+- a **transcript** is the verbatim bytes, committed under
+  `lp-emu/transcripts/<chip>/<payload>/`, with a `.meta.json` sidecar for its
+  provenance;
+- a **replay** diffs two of them: a memory or pin difference fails, a timing
+  difference is reported with its ratio, and `--strict` refuses a claim the
+  configuration is not measured for.
+
+```bash
+cargo run -q -p lp-cli -- validate list
+cargo run -q -p lp-cli -- validate replay <transcript> --against esp-emu:0.42.0
+cargo run -q -p lp-cli -- validate run <set> --config <name> --port … --dry-run
+```
+
+**Never edit a transcript.** A mismatch is a regression or a re-capture, never
+a fixture to refresh — the rule
+`lp-emu/lp-xt-emu/tests/fp_silicon_replay.rs` established and the only reason
+a committed capture means anything.
+
+**Never trust an emulator's number outside what a transcript proves.** The
+2026-09-06 spike found esp-emu byte-equal to silicon on memory and 2.4x wrong
+on time *in the same run*, with the compile harness's own 5 ms slice budget
+passing under the emulator and failing on the board. That is why grading is
+per field class and why `--strict` exists.
+
+Hardware sessions are **batched**: one desk sitting per milestone records every
+transcript, then agents work for weeks with no board. An agent does not open
+the port (see below); it writes the protocol file and Yona runs it.
+
+`lp-cli fwcheck` remains the older single-check front door and still works.
+
 ## Validation Commands
 
 These commands must pass for any change touching the shader pipeline:
