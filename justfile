@@ -1768,6 +1768,19 @@ check-lpc-engine-gates:
     cargo test -p lpc-engine --no-default-features --features "std,$on" \
         disabled_node_kind_still_loads_project
 
+# lpa-studio-core's minimal shape: the lib alone, default features, no
+# dev-deps. Nothing else in the repo compiles it — `cargo test` unifies the
+# dev-only `fake-device` feature of lpa-link in, the wasm app unifies the
+# browser features in, and a workspace-wide `just check` unifies everything —
+# so a call into a feature-gated lpa-link module (the `device_link` demux tap
+# in `app/devices/device_effects.rs`, 2026-09) broke `cargo check -p
+# lpa-studio-core` for a while with every green gate. Same rot shape as the
+# lpc-engine gates above: the configuration nobody builds is the one that
+# breaks. Wired into `check-lint` (and so CI's Lint job).
+check-studio-core-minimal:
+    echo "==> lpa-studio-core: lib only, default features"
+    cargo check -p lpa-studio-core
+
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
     cd lp-emu/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
@@ -1969,7 +1982,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates lint-serde-content lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
