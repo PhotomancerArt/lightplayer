@@ -579,6 +579,9 @@ Copy-on-extract per R14.
 > Copy-on-extract mechanics landed 2026-08-07 with the import flow
 > (module authoring unit, P5): an export with no provenance of its own
 > inherits the source project's attribution as it is vendored out.
+> The container manifest also carries `description` (the gallery card
+> blurb; catalog content tree, P1) — not a module field, so it is not
+> part of `ProvenanceDef`.
 
 ## 9. Open questions (G1 redline register)
 
@@ -679,7 +682,7 @@ somebody owes. Recorded 2026-08-03 at the close of
 
 - **A kind with no face publishes no controls.** Module panels are
   assembled from face controls, so a `ComputeShader`'s bound uniforms
-  reach the wiring drawer but never a knob — `examples/meteor` publishes
+  reach the wiring drawer but never a knob — `catalog/patterns/meteor` publishes
   `speed` and `count` as channels with no control above them. Either
   compute shaders grow a face, or panel assembly stops depending on one.
 - ~~**Authored source bindings on non-hand-listed slots are dropped
