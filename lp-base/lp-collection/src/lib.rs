@@ -28,5 +28,5 @@ mod set;
 pub use chunked_hashmap::{ChunkedHashMap, ChunkedHashSet, Entry as ChunkedEntry};
 pub use chunked_vec::ChunkedVec;
 pub use entry::Entry;
-pub use map::VecMap;
+pub use map::{Iter as VecMapIter, IterMut as VecMapIterMut, VecMap};
 pub use set::VecSet;

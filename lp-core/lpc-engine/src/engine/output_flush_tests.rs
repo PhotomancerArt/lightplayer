@@ -188,6 +188,17 @@ impl LpGraphics for CountingGraphics {
     fn clear_sample_out(&self, out: &mut SampleOutHandle) -> Result<(), GfxError> {
         self.inner.clear_sample_out(out)
     }
+
+    fn sample_points_data_mut<'a>(
+        &self,
+        points: &'a mut SamplePointsHandle,
+    ) -> Result<&'a mut [i32], GfxError> {
+        self.inner.sample_points_data_mut(points)
+    }
+
+    fn sample_batch_capacity(&self) -> u32 {
+        self.inner.sample_batch_capacity()
+    }
 }
 
 struct SolidFixtureProducer {

@@ -32,8 +32,7 @@ use crate::node::{
 use crate::node::{NodeEntryState, RuntimeNodeTree};
 use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
 use crate::products::visual::{
-    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
-    VisualSampleBufferRequest, VisualSampleTarget,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleStream,
 };
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
@@ -2407,8 +2406,7 @@ impl EngineResolveHost<'_> {
     fn sample_node_visual_into(
         &mut self,
         product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        stream: VisualSampleStream<'_>,
     ) -> Result<(), SessionResolveError> {
         let node_id = product.node();
         let revision = self.frame_revision;
@@ -2468,7 +2466,7 @@ impl EngineResolveHost<'_> {
                 self,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
-                render_node.sample_visual_into(product, request, target, &mut ctx)
+                render_node.sample_visual_into(product, stream, &mut ctx)
             })
         };
 
@@ -2994,10 +2992,9 @@ impl ControlRenderServices for EngineResolveHost<'_> {
     fn sample_visual_into(
         &mut self,
         product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        stream: VisualSampleStream<'_>,
     ) -> Result<(), NodeError> {
-        self.sample_node_visual_into(product, request, target)
+        self.sample_node_visual_into(product, stream)
             .map_err(|e| NodeError::msg(format!("sample visual: {e}")))
     }
 }
@@ -3033,10 +3030,9 @@ impl VisualRenderServices for EngineResolveHost<'_> {
     fn sample_visual_into(
         &mut self,
         product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        stream: VisualSampleStream<'_>,
     ) -> Result<(), NodeError> {
-        self.sample_node_visual_into(product, request, target)
+        self.sample_node_visual_into(product, stream)
             .map_err(|e| NodeError::msg(format!("sample visual: {e}")))
     }
 }

@@ -37,16 +37,22 @@ impl LpShader for LpvmShader {
         })
     }
 
-    fn sample_rgba16(
+    fn bind_uniforms(&mut self, uniforms: &LpsValueF32) -> Result<(), GfxError> {
+        self.px
+            .bind_uniforms(uniforms)
+            .map_err(|e| GfxError::Render(format!("bind_uniforms: {e}")))
+    }
+
+    fn sample_rgba16_bound(
         &mut self,
         points: &mut SamplePointsHandle,
         out: &mut SampleOutHandle,
-        uniforms: &LpsValueF32,
+        count: u32,
     ) -> Result<(), GfxError> {
         let point_buffer = sample_points_buf_mut(points)?;
         let out_buffer = sample_out_buf_mut(out)?;
         self.px
-            .sample_points_rgba16(uniforms, point_buffer, out_buffer)
+            .sample_points_rgba16_bound(point_buffer, out_buffer, count)
             .map_err(|e| match e {
                 LpsError::FuelExhausted(trap) => GfxError::FuelExhausted(trap),
                 e => GfxError::Render(format!("sample_points_rgba16: {e}")),

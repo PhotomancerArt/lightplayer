@@ -94,6 +94,19 @@ profile is unaffected). Not sampled down: a fragmentation figure that skips
 holes to save time is a figure that can miss the one hole a later window
 needed.
 
+The walk also scales the run's **cycle count** with the guest's free heap:
+every byte a change frees is another unit for every marker's walk to take
+and give back. `lp-cli profile`'s `--max-cycles` safety cap defaults to
+200 M, and zook-dome's `startup` run crossed it mid-walk on 2026-09-06
+(the bounded sample window freed ~21 KB of the guest heap), which ends the
+trace before the compile window's `"t":"F"` row — its two free-list figures
+then read as missing rather than failing. `heap-budget-check.sh` passes
+`--max-cycles 400000000` for that reason; a run that ends with a
+`max-cycles` warning is a run whose last window's figures cannot be
+trusted — and the script refuses such a run outright (`terminated_by:
+max_cycles` in the session's `meta.json`; see the fidelity limit below and
+`docs/defects/2026-09-06-heap-budget-capture-truncated-by-cycle-cap.md`).
+
 **`server-boot`** brackets fw-emu's boot from recovery init through server
 and transport construction, before the first tick (`lp-fw/fw-emu/src/main.rs`).
 Its `retained` figure is what the server holds before any project exists —
@@ -163,9 +176,14 @@ what the classic adds on top (its `DisplayPipeline` buffers), is measured
 per owner in `docs/reports/2026-09-02-per-lamp-memory-table.md`; the host
 probe `lp-core/lpc-engine/tests/per_lamp_memory_table.rs` pins the slopes.
 `examples/small-dome` (6,310 lamps) is not in the record: it halts the 320 K
-guest in its first frame on the dome fixture's sample-points buffer (a
-47,600 B ask — 8 B × 5,950 lamps — with ~12 KB free, after #523 removed the
-35,700 B whole-product scratch that used to halt it first).
+guest in its first frame. Since #527 (bounded sample windows — the two 8 B/lamp
+graphics buffers and the coordinate transient are gone) it gets past every
+per-lamp ask and halts in the frame's port opens on the emulator-only
+20,480 B `Vec<HwEndpoint>` (the permissive manifest re-enumerated per open,
+see "Discounting emulator-only artifacts") with 25,625 B free but no hole
+that size. The emulator's own overheads — that Vec, the 36,864 B manifest,
+the ~30 KB in-RAM deploy — are what stand between this project and the
+record now; `docs/reports/2026-09-06-small-dome-first-frame-budget.md`.
 
 ## Ratchet, not ceiling
 

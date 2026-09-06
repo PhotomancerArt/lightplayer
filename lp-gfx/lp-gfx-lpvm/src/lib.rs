@@ -27,5 +27,5 @@ pub mod lpvm_graphics;
 pub mod lpvm_shader;
 pub mod target_backend;
 
-pub use lpvm_graphics::LpvmGraphics;
+pub use lpvm_graphics::{CPU_SAMPLE_BATCH_POINTS, LpvmGraphics};
 pub use target_backend::{TargetLpvmEngine, TargetLpvmGraphics};

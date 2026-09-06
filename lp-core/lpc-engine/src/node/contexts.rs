@@ -15,8 +15,7 @@ use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
 use crate::products::visual::{
-    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
-    VisualSampleBufferRequest, VisualSampleTarget,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleStream,
 };
 use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
@@ -675,10 +674,9 @@ impl<'a> ControlRenderContext<'a> {
     pub fn sample_visual_into(
         &mut self,
         product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        stream: VisualSampleStream<'_>,
     ) -> Result<(), NodeError> {
-        self.services.sample_visual_into(product, request, target)
+        self.services.sample_visual_into(product, stream)
     }
 
     /// The effective seconds behind a time product.
@@ -766,8 +764,7 @@ pub trait ControlRenderServices: TimebaseRead {
     fn sample_visual_into(
         &mut self,
         product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        stream: VisualSampleStream<'_>,
     ) -> Result<(), NodeError>;
 }
 
@@ -803,8 +800,7 @@ pub trait VisualRenderServices: TimebaseRead {
     fn sample_visual_into(
         &mut self,
         product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        stream: VisualSampleStream<'_>,
     ) -> Result<(), NodeError>;
 }
 
@@ -920,13 +916,12 @@ impl<'a> RenderContext<'a> {
     pub fn sample_visual_into(
         &mut self,
         product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        stream: VisualSampleStream<'_>,
     ) -> Result<(), NodeError> {
         self.services
             .as_mut()
             .ok_or_else(|| NodeError::msg("render context has no visual render services"))?
-            .sample_visual_into(product, request, target)
+            .sample_visual_into(product, stream)
     }
 
     /// The effective seconds behind a time product.
