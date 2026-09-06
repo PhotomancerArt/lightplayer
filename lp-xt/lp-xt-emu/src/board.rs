@@ -53,11 +53,18 @@ pub struct BoardProfile {
     /// I-bus view — so fetching a stack address faults exactly as the classic
     /// heap does on hardware (FINDINGS C2g, EXCCAUSE=2).
     pub stack_dual_mapped: bool,
-    /// The D-bus → I-bus mapping rule for the dual-mapped window.
+    /// The D-bus → I-bus mapping rule for the code window.
     pub alias: AliasRule,
-    /// D-bus start of the dual-mapped window the code region must sit in.
+    /// Whether the code region's bus takes aligned word accesses only
+    /// ([`crate::memory::AccessRule::WordOnly`]): true for classic SRAM0,
+    /// which has no D-bus view at all; false for the S3's and the legacy
+    /// classic SRAM1 windows, which are ordinary data RAM with an alias.
+    pub code_word_only: bool,
+    /// D-bus start of the window the code region must sit in: SRAM1's
+    /// dual-mapped window for the aliased profiles, SRAM0's IRAM (after
+    /// `.vectors`) for the identity-mapped classic default.
     pub dbus_window_start: u32,
-    /// D-bus end (exclusive) of the dual-mapped window.
+    /// D-bus end (exclusive) of that window.
     pub dbus_window_end: u32,
     /// Base of the flash **instruction** window (XIP `.text`), read-only and
     /// directly executable — the flash cache presents instruction addresses
@@ -128,6 +135,7 @@ impl BoardProfile {
             stack_region_len: 0x0002_0000, // 128 KiB
             stack_dual_mapped: true,
             alias: AliasRule::Offset(IBUS_ALIAS_OFFSET),
+            code_word_only: false,
             dbus_window_start: SRAM1_DBUS_START,
             dbus_window_end: SRAM1_DBUS_END,
             irom_base: 0x4200_0000,
@@ -139,32 +147,48 @@ impl BoardProfile {
         }
     }
 
-    /// Classic ESP32 (LX6). Every number is from the C1–C5 hardware ladder
-    /// (FINDINGS classic section, measured 2026-07-28 on rev v3.0):
+    /// Classic ESP32 (LX6), the device's memory map since 2026-09-05: JIT
+    /// code in **SRAM0**. Every SRAM number is hardware-measured — the SRAM0
+    /// facts on the dig2go by `fw-esp32v3`'s `test_sram0_exec` rig
+    /// (2026-09-05), the rest from the C1–C5 ladder (FINDINGS classic
+    /// section, 2026-07-28, rev v3.0):
     ///
-    /// - **Code = SRAM1**, the region a runner would use (~96 KB usable vs the
-    ///   8 KB RTC-fast ceiling; SRAM0 is the ~125 KB alternative but takes
-    ///   word-only writes and has no D-bus view). SRAM1's dual mapping is
-    ///   **word-mirrored** — C2b: `iram = 0x400B_FFFC − (dram − 0x3FFE_0000)`,
-    ///   H2 matched all 5 sentinels, H1-linear none. Window: D-bus
-    ///   `0x3FFE_0000..0x4000_0000` ↔ I-bus `0x400A_0000..0x400C_0000`.
-    ///   The code region `0x3FFE_8000 + 0x1_7000` sits inside the measured
-    ///   free span (dram2_seg `0x3FFE_7E30..0x3FFF_FF80`, ~96 KB), rounded in
-    ///   to word-aligned bases; its I-bus image is
-    ///   `0x400A_1000..0x400B_8000`.
+    /// - **Code = SRAM0** (`0x4008_0000..0x400A_0000`, the instruction RAM
+    ///   holding `.vectors` and `.rwtext`). It has **no D-bus view**: the
+    ///   alias is [`AliasRule::Identity`] — a word is fetched at the address
+    ///   it was written at — and the bus is **word-only**
+    ///   ([`crate::memory::AccessRule::WordOnly`]): a byte store at
+    ///   `0x4008_8000` faulted (`LoadStoreError`, EXCCAUSE 3, EXCVADDR =
+    ///   that address) while 16,384 aligned word stores across
+    ///   `0x4008_8000..0x4009_8000` (and 8,192 more up to the bus end) all
+    ///   read back. Word-written code at both ends of the region executed on
+    ///   the PRO core, with no barrier needed. The code region is 64 KiB at
+    ///   `0x4008_8000`, 32 KiB above the IRAM origin so the linker's
+    ///   `.rwtext` (which ends at `0x4008_3DF0` on the app image) has room;
+    ///   the firmware asserts that at boot. Kept in lockstep with
+    ///   `lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT` —
+    ///   `lpvm-native`'s `tests/xt_classic_profile.rs` asserts the two
+    ///   describe the same region, so a change on either side alone fails
+    ///   there.
     /// - **Stack = SRAM2** (dram_seg, the plain data RAM at `0x3FFA_E000`,
     ///   192 KB total): 64 KiB at `0x3FFC_0000`. On hardware the runner's
     ///   stack comes from ordinary data RAM (C5 measured 98 304 B heap free,
     ///   so a 64 KiB stack arena fits with headroom); modeling it as a plain
     ///   region also reproduces "SRAM2 is NOT executable" (C2g).
+    /// - **SRAM1** (D-bus `0x3FFE_0000..0x4000_0000`, word-mirrored to I-bus
+    ///   `0x400A_0000..0x400C_0000`, C2b) is not modeled here: on the device
+    ///   its tail is heap now, and nothing the host pipeline runs under this
+    ///   profile touches it. The mirrored window lives on in
+    ///   [`BoardProfile::esp32_sram1_legacy`], where the install walk that
+    ///   used it stays tested.
     ///
     /// The flash numbers are **documented, not probed**, from esp-hal 1.1.1
     /// (MIT OR Apache-2.0), `ld/esp32/memory.x`: `irom_seg ORIGIN = 0x400D0020,
     /// len = 3M - 0x20` and `drom_seg ORIGIN = 0x3F400020, len = 4M - 0x20`
     /// (the `0x20` is an image-header convenience, not a hardware boundary).
-    /// Classic's IROM sits *above* SRAM1's I-bus window `0x400A_0000..
-    /// 0x400C_0000`, so it neither overlaps the measured mirror nor disturbs
-    /// it — the word-mirrored alias is untouched by this profile's flash.
+    /// Classic's IROM sits above SRAM0 and SRAM1's I-bus windows, 288 KiB
+    /// past this code region's base — inside a direct call's ±512 KiB reach
+    /// (`tests/call_range.rs`).
     ///
     /// `image_data_base` `0x3FFD_0000` is SRAM2 immediately above the stack
     /// region, inside the same `dram_seg` (`0x3FFA_E000 + 192 KB`) the stack
@@ -172,29 +196,61 @@ impl BoardProfile {
     pub fn esp32() -> BoardProfile {
         BoardProfile {
             name: "esp32",
-            code_dbus_base: 0x3FFE_8000,
-            // 24 KiB. Kept in lockstep with `lpvm_native::codemem_esp32::
-            // CodeRegion::ESP32_DEFAULT` — `lpvm-native`'s
-            // `tests/xt_classic_profile.rs` asserts the two describe the same
-            // region, so a change on either side alone fails there. Sized
-            // from the measured shader corpus, not chosen; the remaining
-            // 72 KiB of SRAM1 is heap on the device.
-            code_region_len: 0x0000_6000,
+            // SRAM0: the D-bus base IS the I-bus base (identity alias).
+            code_dbus_base: 0x4008_8000,
+            code_region_len: 0x0001_0000, // 64 KiB
             stack_dbus_base: 0x3FFC_0000,
             stack_region_len: 0x0001_0000, // 64 KiB
             stack_dual_mapped: false,
-            alias: AliasRule::WordMirrored {
-                dram_base: 0x3FFE_0000,
-                iram_top: 0x400B_FFFC,
-            },
-            dbus_window_start: 0x3FFE_0000,
-            dbus_window_end: 0x4000_0000,
+            alias: AliasRule::Identity,
+            code_word_only: true,
+            // SRAM0's IRAM after the 1 KiB `.vectors`: esp-hal's `iram_seg`.
+            dbus_window_start: 0x4008_0400,
+            dbus_window_end: 0x400A_0000,
             irom_base: 0x400D_0000,
             irom_len: Self::MODELED_IROM_LEN,
             drom_base: 0x3F40_0000,
             drom_len: Self::MODELED_DROM_LEN,
             image_data_base: 0x3FFD_0000,
             image_data_len: Self::IMAGE_DATA_LEN,
+        }
+    }
+
+    /// Classic ESP32 (LX6) with JIT code in **SRAM1** — the device's map from
+    /// the 2026-07-28 bring-up until 2026-09-05, kept so the word-mirrored
+    /// install walk stays tested against the model the 2026-08 hardware walks
+    /// proved. Every number is from the C1–C5 hardware ladder (FINDINGS
+    /// classic section, measured 2026-07-28 on rev v3.0):
+    ///
+    /// - **Code = SRAM1**, the region a runner would use (~96 KB usable vs the
+    ///   8 KB RTC-fast ceiling; SRAM0 was the ~125 KB alternative that takes
+    ///   word-only writes and has no D-bus view — now the default, above).
+    ///   SRAM1's dual mapping is **word-mirrored** — C2b: `iram = 0x400B_FFFC
+    ///   − (dram − 0x3FFE_0000)`, H2 matched all 5 sentinels, H1-linear none.
+    ///   Window: D-bus `0x3FFE_0000..0x4000_0000` ↔ I-bus
+    ///   `0x400A_0000..0x400C_0000`. The code region `0x3FFE_8000 + 24 KiB`
+    ///   sits inside the measured free span (dram2_seg
+    ///   `0x3FFE_7E30..0x3FFF_FF80`, ~96 KB); its I-bus image is
+    ///   `0x400B_2000..0x400B_8000` (92 KiB / `0x400A_1000` until 2026-08-02,
+    ///   32 KiB until 2026-08-04, measured down by the shader corpus).
+    /// - Stack, flash and image data: as [`BoardProfile::esp32`].
+    ///
+    /// Kept in lockstep with
+    /// `lpvm_native::codemem_esp32::CodeRegion::ESP32_SRAM1_LEGACY` by the
+    /// same parity test as the default.
+    pub fn esp32_sram1_legacy() -> BoardProfile {
+        BoardProfile {
+            name: "esp32-sram1-legacy",
+            code_dbus_base: 0x3FFE_8000,
+            code_region_len: 0x0000_6000, // 24 KiB
+            alias: AliasRule::WordMirrored {
+                dram_base: 0x3FFE_0000,
+                iram_top: 0x400B_FFFC,
+            },
+            code_word_only: false,
+            dbus_window_start: 0x3FFE_0000,
+            dbus_window_end: 0x4000_0000,
+            ..Self::esp32()
         }
     }
 
@@ -252,18 +308,22 @@ impl BoardProfile {
         offset_in(vaddr, self.image_data_base, self.image_data_len)
     }
 
-    /// Install this profile's regions into `mem`, validating that anything
-    /// dual-mapped actually sits inside the dual-mapped window (the
-    /// profile-relative form of the assert `Memory::add_sram1` applies for
-    /// the S3).
+    /// Install this profile's regions into `mem`, validating that the code
+    /// region (and a dual-mapped stack) actually sits inside the profile's
+    /// code window (the profile-relative form of the assert
+    /// `Memory::add_sram1` applies for the S3).
     ///
     /// Five regions: the SRAM code region (JIT'd code only — the resident
-    /// image is in flash), the stack, the image's SRAM `.data`/`.bss`, and the
-    /// two read-only flash windows. `Memory` asserts they are mutually
-    /// disjoint in both address views.
+    /// image is in flash; word-only when the profile says so), the stack, the
+    /// image's SRAM `.data`/`.bss`, and the two read-only flash windows.
+    /// `Memory` asserts they are mutually disjoint in both address views.
     pub fn install(&self, mem: &mut Memory) {
         self.assert_in_window("code", self.code_dbus_base, self.code_region_len);
-        mem.add_executable(self.code_dbus_base, self.code_region_len, self.alias);
+        if self.code_word_only {
+            mem.add_executable_word_only(self.code_dbus_base, self.code_region_len, self.alias);
+        } else {
+            mem.add_executable(self.code_dbus_base, self.code_region_len, self.alias);
+        }
         if self.stack_dual_mapped {
             self.assert_in_window("stack", self.stack_dbus_base, self.stack_region_len);
             mem.add_executable(self.stack_dbus_base, self.stack_region_len, self.alias);
@@ -281,7 +341,7 @@ impl BoardProfile {
         let end = base as u64 + len as u64;
         assert!(
             base >= self.dbus_window_start && end <= self.dbus_window_end as u64,
-            "{}: {what} region {base:#x}+{len:#x} outside the dual-mapped window \
+            "{}: {what} region {base:#x}+{len:#x} outside the code window \
              {:#x}..{:#x}",
             self.name,
             self.dbus_window_start,

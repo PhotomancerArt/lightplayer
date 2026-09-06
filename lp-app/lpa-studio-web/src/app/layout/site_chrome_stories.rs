@@ -12,17 +12,22 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, DirtySummary, ProjectController, ProjectNodeAddress, ProjectOp,
     ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotEditOp, SlotPath, UiAction,
-    UiChromeSessionControl, UiChromeSessionKind, UiChromeSessionStatus, UiPaneAction,
-    UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiStatus,
+    UiChromeSessionControl, UiChromeSessionKind, UiChromeSessionStatus, UiHistoryKind,
+    UiPaneAction, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProjectHistory,
+    UiProjectHistoryEntry, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 
-use crate::app::layout::session_control::ChromeSessionControl;
+use crate::app::layout::session_control::{
+    ChromeSessionControl, ControlSegment, ProjectPopoverInputs, SessionChangesPanel,
+    SessionHistoryPanel,
+};
 use crate::app::layout::site_chrome::{
     ChromeModeToggle, ChromeProjectMenu, SiteChrome, SiteSection,
 };
 use crate::app::layout::version_badge::{BuildChip, VersionChipPreview};
 use crate::app::project::ProjectDetailContent;
+use crate::app::share::ProjectRelationship;
 use crate::app::story_fixtures::project_editor_fixture;
 use crate::base::{LogoLockup, LogoMark};
 
@@ -91,7 +96,7 @@ pub(crate) fn narrow_menu_open() -> Element {
 
 #[story(
     label = "⋯ menu on a project route",
-    description = "The overflow menu while a project is open: a Project group leads it (spike project-share §5, ruling G4). \"Sharing & access…\" opens the same panel the Share pill does, and \"Archive project\" is a QUIET row, not a red one — archiving is reversible and nothing is deleted, so dressing it as destructive would teach people to fear the wrong control. There is no Delete forever anywhere in this menu."
+    description = "The overflow menu while a project is open: a Project group leads it (spike project-share §5, ruling G4). It holds exactly one row now — \"Sharing & access…\" retired with the Share pill at relationship-control P5, because the bar's PROJECT segment is the share door and a door in the bar does not also belong behind a menu. \"Archive project\" is a QUIET row, not a red one — archiving is reversible and nothing is deleted, so dressing it as destructive would teach people to fear the wrong control. There is no Delete forever anywhere in this menu."
 )]
 pub(crate) fn overflow_menu_project_group() -> Element {
     rsx! {
@@ -106,7 +111,6 @@ pub(crate) fn overflow_menu_project_group() -> Element {
                 section: SiteSection::Session,
                 overflow_menu_open: true,
                 project_menu: Some(ChromeProjectMenu {
-                    on_share: EventHandler::new(|()| {}),
                     on_archive: EventHandler::new(|()| {}),
                 }),
                 VersionChipPreview { chip: branch_chip() }
@@ -116,45 +120,7 @@ pub(crate) fn overflow_menu_project_group() -> Element {
 }
 
 #[story(
-    description = "Viewing a transient example: the session·project control with the lavender-grey EXAMPLE provenance pill (accent reckoning D3) beside the project name — visible the whole time a transient view runs, gone at the explicit save that forks a copy. Clean and unsaved variants, because the pill must read beside the amber count without borrowing any status family."
-)]
-pub(crate) fn viewing_an_example() -> Element {
-    rsx! {
-        div { class: "tw:grid tw:gap-2",
-            {example_row(1000, sim_control(Some("ESP32-C6")), Some(control_content(0, 0, UiStatus::good("Ready"))))}
-            {example_row(1000, sim_control(Some("ESP32-C6")), Some(control_content(3, 0, UiStatus::good("Ready"))))}
-        }
-    }
-}
-
-/// `control_row` with the example provenance marker on — the transient-view
-/// chrome the EXAMPLE pill story captures.
-fn example_row(
-    width: u32,
-    session: UiChromeSessionControl,
-    project: Option<ProjectDetailContent>,
-) -> Element {
-    rsx! {
-        div {
-            class: "tw:border tw:border-dashed tw:border-border-muted tw:px-4 tw:pt-3",
-            style: "max-width: {width}px;",
-            SiteChrome {
-                section: SiteSection::Session,
-                session_control: Some(ChromeSessionControl {
-                    session,
-                    project,
-                    on_action: EventHandler::new(|_| {}),
-                    initially_open: false,
-                    example: true,
-                }),
-                VersionChipPreview { chip: branch_chip() }
-            }
-        }
-    }
-}
-
-#[story(
-    description = "The header session·project control (spike concept B) across every project state — saved / unsaved / failed / syncing — crossed with device kind: the sim naming its board, a boardless sim (bare \"Sim\", ruling Q6), and hardware (the device name IS the board, no suffix). Unsaved wears the amber wash with Save/↺ standing beside the lockup as SIBLING buttons (G1 round-2: inspect and act are different surfaces); failed here is the failed-ONLY edge (persisted=0, failed>0) — red wash, no count pill, no Save/↺, because the header only offers actions while persisted edits are pending (see docs/debt/failed-only-asset-edit-header-blindness.md); syncing shows the busy dot with nothing dirty."
+    description = "The three-segment session·project control (spike \u{a7}2-E) across every project state — saved / unsaved / failed / syncing — crossed with device rows: the sim naming its board, a boardless sim (bare \"Sim\", ruling Q6), and the hardware stand-in (a boardless sim until the rebuilt device model returns). The dirty wash lives on the CHANGES segment now (D8), so the project segment stays neutral and nothing is announced twice; failed here is the failed-ONLY edge (persisted=0, failed>0) — red changes bed with a red count, and no Save, because the controller only publishes actions while persisted edits are pending (see docs/debt/failed-only-asset-edit-header-blindness.md); syncing shows the busy dot with a quiet \u{2713}."
 )]
 pub(crate) fn control_states() -> Element {
     rsx! {
@@ -169,10 +135,10 @@ pub(crate) fn control_states() -> Element {
                     span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-wide tw:text-dim-foreground",
                         "{kind_label}"
                     }
-                    {control_row(1000, control.clone(), Some(control_content(0, 0, UiStatus::good("Ready"))), false)}
-                    {control_row(1000, control.clone(), Some(control_content(3, 0, UiStatus::good("Ready"))), false)}
-                    {control_row(1000, control.clone(), Some(control_content(0, 2, UiStatus::error("Sync issue"))), false)}
-                    {control_row(1000, control, Some(control_content(0, 0, UiStatus::working("Syncing"))), false)}
+                    {control_row(1000, control.clone(), Some(control_content(0, 0, UiStatus::good("Ready"))), None)}
+                    {control_row(1000, control.clone(), Some(control_content(3, 0, UiStatus::good("Ready"))), None)}
+                    {control_row(1000, control.clone(), Some(control_content(0, 2, UiStatus::error("Sync issue"))), None)}
+                    {control_row(1000, control, Some(control_content(0, 0, UiStatus::working("Syncing"))), None)}
                 }
             }
         }
@@ -180,52 +146,158 @@ pub(crate) fn control_states() -> Element {
 }
 
 #[story(
-    label = "Panel open — sim with board",
-    description = "The panel open on a clean sim session: the device zone (kind glyph, name, run word, \"simulating ESP32-C6\" stat line) over the project zone's sections, then the \"this tab is the session\" hint. No switcher (R8-1 ruling) — there is nothing to switch to."
+    label = "Faces — all five relationships, clean and dirty",
+    description = "The project segment's face for every state the derivation can produce, clean over dirty. Example is the pristine transient view (the accent \"example\" pill it replaces is gone — the face is neutral by D12, and it is the one thing in the bar that says whose document this is); Private is a library project the service has not answered a roster for; Shared is the same project once it has (D12 keeps it neutral — no status-blue for published); Member and Viewing are somebody else's document, with and without write. Dirty adds the amber count on the CHANGES segment and the Save sibling; the project segment does not change in either direction, because ownership and dirtiness are different questions."
 )]
-pub(crate) fn control_panel_open_sim() -> Element {
+pub(crate) fn control_relationship_faces() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:gap-2",
+            for (face_label, relationship) in [
+                ("Example", ProjectRelationship::Example),
+                ("Private", ProjectRelationship::MineLocal),
+                ("Shared", ProjectRelationship::MinePublished),
+                ("Member", ProjectRelationship::MemberOfSomeoneElses),
+                ("Viewing", ProjectRelationship::ViewingSomeoneElses),
+            ]
+            {
+                div { class: "tw:grid tw:gap-1",
+                    span { class: "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-wide tw:text-dim-foreground",
+                        "{face_label}"
+                    }
+                    {control_row_as(1000, sim_control(Some("ESP32-C6")), Some(control_content(0, 0, UiStatus::good("Ready"))), relationship, None)}
+                    {control_row_as(1000, sim_control(Some("ESP32-C6")), Some(control_content(3, 0, UiStatus::good("Ready"))), relationship, None)}
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Device popover open — sim with board",
+    description = "The DEVICE segment's popover: what is running. Kind glyph, name, run word, the \"simulating ESP32-C6\" stat line, and the \"this tab is the session\" hint that names what leaving actually ends. No switcher (R8-1 ruling) — there is nothing to switch to. This is the declared landing zone for the desktop device panel's facts when it retires (D13)."
+)]
+pub(crate) fn control_device_popover_open() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[420px]",
+            {control_row(700, sim_control(Some("ESP32-C6")), Some(control_content(0, 0, UiStatus::good("Ready"))), Some(ControlSegment::Device))}
+        }
+    }
+}
+
+#[story(
+    label = "Project popover open — the document",
+    description = "The PROJECT section of the shared panel in the real chrome: the identity skeleton (Where \u{2192} Access \u{2192} action row; history is its own segment now, D14 as re-ruled) hanging off the Example face, with the merged outline anchored on the WHOLE shell \u{2014} the bar is the tab row (D15), and the open segment wears the selected treatment. Mounted with empty popover inputs \u{2014} no address, no roster, no ledger \u{2014} which is the honest cold-start shape; the panel's own stories cover the five states with their data."
+)]
+pub(crate) fn control_project_popover_open() -> Element {
     rsx! {
         div { class: "tw:min-h-[560px]",
-            {control_row(700, sim_control(Some("ESP32-C6")), Some(control_content(0, 0, UiStatus::good("Ready"))), true)}
+            {control_row_as(700, sim_control(Some("ESP32-C6")), Some(control_content(0, 0, UiStatus::good("Ready"))), ProjectRelationship::Example, Some(ControlSegment::Project))}
         }
     }
 }
 
 #[story(
-    label = "Panel open — dirty (hardware, unsaved)",
-    description = "The panel open on a dirty HARDWARE session — the header control's unsaved-list edge case and the hardware-unsaved edge state at once: the project zone's \"Unsaved (persisted)\" section lists the pending edits with per-entry revert, matching the amber count the closed lockup shows."
+    label = "Changes popup open — dirty (hardware)",
+    description = "The CHANGES section on a dirty hardware session — the third question, in its own home: the labeled pending edits with per-entry revert, the pending facts, an honest receipt (\"already live in this session\" — it never claims cloud state it cannot see), and the controller's own Save plus the Revert-all that retired the \u{21ba} sibling. The banked timeline is the HISTORY segment next door (D14 as re-ruled: a 4th tab, not a lower half of this box). The counts here are the same ones the closed segment shows."
 )]
-pub(crate) fn control_panel_open_dirty() -> Element {
+pub(crate) fn control_changes_popup_open() -> Element {
     rsx! {
-        div { class: "tw:min-h-[680px]",
-            {control_row(700, hardware_control(), Some(dirty_content()), true)}
+        div { class: "tw:min-h-[560px]",
+            {control_row(700, hardware_control(), Some(dirty_content()), Some(ControlSegment::Changes))}
         }
     }
 }
 
 #[story(
-    label = "Fold — md (820px, device name folds)",
-    description = "Below the 900px cut the device segment keeps only its kind glyph and status dot — the name and board suffix (which ride together) drop first because the glyph+dot pair is the two facts that survive a squeeze; Save/↺ still fit at this width."
+    label = "Changes popup open — clean",
+    description = "The clean half of the changes popup: one plain line. The segment is always present (a quiet \u{2713}), so \"nothing pending\" is a state you can click into and confirm rather than an absence you have to infer."
+)]
+pub(crate) fn control_changes_popup_clean() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[260px]",
+            {control_row(700, sim_control(Some("ESP32-C6")), Some(control_content(0, 0, UiStatus::good("Ready"))), Some(ControlSegment::Changes))}
+        }
+    }
+}
+
+#[story(
+    label = "History popover open — the fourth tab",
+    description = "The HISTORY segment's section in the real chrome (D14 as re-ruled at G1 round 2: the banked timeline is its own tab — one box with changes was too much, and an inner tab row would have made two tab layers). A lone quiet clock-arrow glyph closes the shell; the section is the read-only timeline. This never-saved fixture shows the honest empty line."
+)]
+pub(crate) fn control_history_popover_open() -> Element {
+    rsx! {
+        div { class: "tw:min-h-[300px]",
+            {control_row(700, sim_control(Some("ESP32-C6")), Some(control_content(0, 0, UiStatus::good("Ready"))), Some(ControlSegment::History))}
+        }
+    }
+}
+
+#[story(
+    label = "Changes panel — the receipt names vNEXT",
+    description = "The changes panel, mounted directly, on a project whose projection knows its next version: the receipt says \"Save banks v13\" — the same number the History segment's newest row will wear after the save. The two segments read one ledger from opposite ends, which is why they sit next door to each other."
+)]
+pub(crate) fn control_changes_panel_dirty() -> Element {
+    changes_panel_frame(rsx! {
+        SessionChangesPanel {
+            changes: dirty_content_with_history().changes(),
+            on_action: EventHandler::new(|_| {}),
+        }
+    })
+}
+
+#[story(
+    label = "History panel — the banked timeline",
+    description = "The HISTORY section mounted directly with a fixed clock: version, kind, what, when — newest first, read-only; a push names its device by uid (resolving names needs the async device registry), and the footer says restore has not landed."
+)]
+pub(crate) fn control_history_panel() -> Element {
+    changes_panel_frame(rsx! {
+        SessionHistoryPanel {
+            relationship: ProjectRelationship::MinePublished,
+            history: history(),
+            now_secs: STORY_NOW,
+        }
+    })
+}
+
+#[story(
+    label = "History panel — example keeps the empty line",
+    description = "A built-in example's session DOES carry history rows — the transient open seeds a provenance origin plus an initial save — but that is bookkeeping, not something the person did, so the timeline says \"no history yet\" even with rows on hand. It is the same sentence that stays true after Save a copy: the real rows begin at the first save."
+)]
+pub(crate) fn control_history_panel_example() -> Element {
+    changes_panel_frame(rsx! {
+        SessionHistoryPanel {
+            relationship: ProjectRelationship::Example,
+            history: history(),
+            now_secs: STORY_NOW,
+        }
+    })
+}
+
+#[story(
+    label = "Fold — md (820px, words fold)",
+    description = "Below the 900px cut the device segment keeps only its kind glyph and status dot, and the relationship face drops its WORD for its glyph alone (spike \u{a7}3 vocabulary V3) — the same cut, because both are words explaining a glyph that already says it. The changes segment is untouched at this width."
 )]
 pub(crate) fn control_fold_md() -> Element {
-    control_row(
+    control_row_as(
         820,
         sim_control(Some("ESP32-C6")),
         Some(control_content(3, 0, UiStatus::good("Ready"))),
-        false,
+        ProjectRelationship::Example,
+        None,
     )
 }
 
 #[story(
-    label = "Fold — sm (600px, no ↺)",
-    description = "Below the 680px cut ↺ retreats into the panel's per-entry reverts — the destructive half of the pair is the one to lose first (Save stays, it is the safe click). The device name is long since gone at this width too."
+    label = "Fold — sm (520px, changes go count-only)",
+    description = "Below the 560px cut the segment padding tightens and the changes segment spends its \u{270e} for the count — a count with no glyph still counts; a glyph with no count says nothing. Save stays (it is the safe click, and the only direct act left in the bar); the project name is the one flexible truncator."
 )]
 pub(crate) fn control_fold_sm() -> Element {
-    control_row(
-        600,
+    control_row_as(
+        520,
         sim_control(Some("ESP32-C6")),
         Some(control_content(3, 0, UiStatus::good("Ready"))),
-        false,
+        ProjectRelationship::Example,
+        None,
     )
 }
 
@@ -238,16 +310,16 @@ pub(crate) fn studio_mode_bar() -> Element {
         1000,
         sim_control(Some("ESP32-C6")),
         Some(control_content(0, 0, UiStatus::good("Ready"))),
-        false,
+        None,
     )
 }
 
 #[story(
     label = "Edge — connected, no project",
-    description = "A connected session with nothing loaded (spike \u{a7}5): the project segment reads an honest \"no project\" in italics — no invented name, no state glyph to read a state off — and the device dot is hollow (D16 connected-empty)."
+    description = "A connected session with nothing loaded (spike \u{a7}5): the project segment reads an honest \"no project\" in italics — no invented name, no state glyph and no relationship face to read a standing off — the device dot is hollow (D16 connected-empty), and the CHANGES segment is absent entirely, because with no document open there is nothing that could be in flight."
 )]
 pub(crate) fn control_connected_empty() -> Element {
-    control_row(700, hardware_empty_control(), None, false)
+    control_row(700, hardware_empty_control(), None, None)
 }
 
 #[story(
@@ -270,7 +342,7 @@ pub(crate) fn logo_sizes() -> Element {
 
 #[story(
     label = "Lens bar — the narrow ladder",
-    description = "The crowded bar (session control + Save/↺ + mode toggles aboard) folds EARLIER than the plain one — the cut is where things stop fitting, and this bar stops fitting ~220px sooner. Top to bottom: ≥900 everything; <900 the world nav retreats to ⋯, Patch/Play and Share go icon-only, the version chip hides, the device name folds; <680 the brand word yields with the ↺; <560 the phone bar — Devices/Projects become ⋯ rows, Patch a menu row, and the project name is the one flexible truncator. Nothing overlaps or wraps at any rung."
+    description = "The crowded bar (three-segment session control + Save + mode toggles aboard) folds EARLIER than the plain one — the cut is where things stop fitting, and this bar stops fitting ~220px sooner. Top to bottom: ≥900 everything; <900 the world nav retreats to ⋯, Patch/Play and Share go icon-only, the version chip hides, the device name and the relationship word fold to their glyphs; <680 the brand word yields; <560 the phone bar — Devices/Projects become ⋯ rows, Patch a menu row, the changes segment goes count-only, and the project name is the one flexible truncator. Nothing overlaps or wraps at any rung."
 )]
 pub(crate) fn lens_bar_ladder() -> Element {
     rsx! {
@@ -284,7 +356,7 @@ pub(crate) fn lens_bar_ladder() -> Element {
 
 #[story(
     label = "Lens bar phone ⋯ menu",
-    description = "The phone rung's ⋯ menu (crowded bar <560): the Project group leads, the folded Patch toggle rides in as a mode row, and the Sections group carries ALL FIVE sections — Devices and Projects join the world's three, because the phone bar keeps no inline tabs at all."
+    description = "The phone rung's ⋯ menu (crowded bar <560): the Project group leads with its one Archive row, and the Sections group carries ALL FIVE sections — Devices and Projects join the world's three, because the phone bar keeps no inline tabs at all."
 )]
 pub(crate) fn lens_bar_phone_menu_open() -> Element {
     rsx! {
@@ -294,9 +366,10 @@ pub(crate) fn lens_bar_phone_menu_open() -> Element {
     }
 }
 
-/// One crowded-bar frame: the session·project control (dirty — Save and ↺
-/// materialized), both mode toggles, the project ⋯ group, and the version
-/// chip behind the same fold the shell gives it.
+/// One crowded-bar frame: the session·project control (dirty — the amber
+/// count on the changes segment and the Save sibling materialized), both
+/// mode toggles, the project ⋯ group, and the version chip behind the same
+/// fold the shell gives it.
 fn lens_frame(width: u32, menu_open: bool) -> Element {
     rsx! {
         div {
@@ -306,17 +379,17 @@ fn lens_frame(width: u32, menu_open: bool) -> Element {
                 section: SiteSection::Session,
                 overflow_menu_open: menu_open,
                 // The shared P5 fixtures: the board-naming sim with one
-                // unsaved persisted edit, so Save/↺ are aboard.
+                // unsaved persisted edit, so Save is aboard.
                 session_control: Some(ChromeSessionControl {
                     session: sim_control(Some("ESP32-C6")),
                     project: Some(control_content(1, 0, UiStatus::good("Ready"))),
+                    relationship: ProjectRelationship::MineLocal,
+                    project_popover: ProjectPopoverInputs::default(),
                     on_action: EventHandler::new(|_| {}),
-                    initially_open: false,
-                    example: false,
+                    initially_open: None,
                 }),
                 play_toggle: Some(ChromeModeToggle { href: "#play".to_string(), active: false }),
                 project_menu: Some(ChromeProjectMenu {
-                    on_share: EventHandler::new(|()| {}),
                     on_archive: EventHandler::new(|()| {}),
                 }),
                 // The version chip behind the crowded bar's <900 fold —
@@ -356,7 +429,25 @@ fn control_row(
     width: u32,
     session: UiChromeSessionControl,
     project: Option<ProjectDetailContent>,
-    initially_open: bool,
+    initially_open: Option<ControlSegment>,
+) -> Element {
+    control_row_as(
+        width,
+        session,
+        project,
+        ProjectRelationship::MineLocal,
+        initially_open,
+    )
+}
+
+/// The same frame with the relationship named — the project segment's face
+/// is a prop now, so a story picks the standing it wants to show.
+fn control_row_as(
+    width: u32,
+    session: UiChromeSessionControl,
+    project: Option<ProjectDetailContent>,
+    relationship: ProjectRelationship,
+    initially_open: Option<ControlSegment>,
 ) -> Element {
     rsx! {
         div {
@@ -367,9 +458,10 @@ fn control_row(
                 session_control: Some(ChromeSessionControl {
                     session,
                     project,
+                    relationship,
+                    project_popover: ProjectPopoverInputs::default(),
                     on_action: EventHandler::new(|_| {}),
                     initially_open,
-                    example: false,
                 }),
                 VersionChipPreview { chip: branch_chip() }
             }
@@ -430,7 +522,8 @@ fn control_content(persisted: usize, failed: usize, status: UiStatus) -> Project
 
 /// The dirty-list-open story's content: two persisted edits, both listed
 /// (not just counted) so the popover's "Unsaved (persisted)" section shows
-/// real rows with per-entry revert, matching the closed lockup's count.
+/// real rows with per-entry revert, matching the closed changes segment's
+/// count.
 fn dirty_content() -> ProjectDetailContent {
     let mut editor = project_editor_fixture(ProjectSyncPhase::Ready);
     editor.dirty = DirtySummary {
@@ -443,6 +536,79 @@ fn dirty_content() -> ProjectDetailContent {
         pending_edit("Sunrise palette", "entries[dusk]", "#ff7a3d"),
     ];
     ProjectDetailContent::new(&editor, UiStatus::good("Ready"))
+}
+
+/// A fixed clock for the history rows, so relative times never drift
+/// between captures.
+const STORY_NOW: f64 = 1_800_000_000.0;
+
+/// `dirty_content` plus a banked history — the merged changes panel's
+/// full shape (D14): pending block over timeline.
+fn dirty_content_with_history() -> ProjectDetailContent {
+    let mut editor = project_editor_fixture(ProjectSyncPhase::Ready);
+    editor.dirty = DirtySummary {
+        persisted: 2,
+        failed: 0,
+    };
+    editor.header_actions = save_revert_actions(2);
+    editor.pending_edits = vec![
+        pending_edit("Orbit shader", "brightness", "0.82"),
+        pending_edit("Sunrise palette", "entries[dusk]", "#ff7a3d"),
+    ];
+    editor.history = history();
+    ProjectDetailContent::new(&editor, UiStatus::good("Ready"))
+}
+
+/// A representative log: a fork origin, saves, a push, and a join —
+/// every row kind the projection emits, newest first the way core hands
+/// it over. (Moved here from the relationship-panel stories at D14, with
+/// the History tab itself.)
+fn history() -> UiProjectHistory {
+    UiProjectHistory {
+        entries: vec![
+            entry(Some(12), UiHistoryKind::Saved, "", STORY_NOW - 20.0 * 60.0),
+            entry(
+                Some(12),
+                UiHistoryKind::Pushed,
+                "\u{2192} dev7g2k\u{2026}",
+                STORY_NOW - 18.0 * 60.0,
+            ),
+            entry(Some(11), UiHistoryKind::Saved, "", STORY_NOW - 2.0 * 3600.0),
+            entry(
+                Some(10),
+                UiHistoryKind::Joined,
+                "kept this version \u{2014} the other was set aside",
+                STORY_NOW - 5.0 * 3600.0,
+            ),
+            entry(
+                Some(1),
+                UiHistoryKind::Origin,
+                "forked from prj4m1x\u{2026}",
+                STORY_NOW - 3.0 * 86_400.0,
+            ),
+        ],
+        next_version: Some(13),
+    }
+}
+
+fn entry(version: Option<u64>, kind: UiHistoryKind, label: &str, at: f64) -> UiProjectHistoryEntry {
+    UiProjectHistoryEntry {
+        version,
+        kind,
+        label: label.to_string(),
+        at,
+    }
+}
+
+/// The detail card's box for a directly-mounted panel — the popover
+/// primitive owns the chrome in the live app, so the story frame supplies
+/// one (the relationship-panel stories' own technique).
+fn changes_panel_frame(children: Element) -> Element {
+    rsx! {
+        div { class: "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:min-w-0 tw:rounded-md tw:border tw:border-border-strong tw:bg-card-subtle tw:text-sm tw:text-muted-foreground tw:shadow-lg",
+            {children}
+        }
+    }
 }
 
 /// Save / Revert-to-saved, exactly as the controller's `project_header_actions`

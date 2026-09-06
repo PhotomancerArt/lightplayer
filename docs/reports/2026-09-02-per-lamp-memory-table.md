@@ -230,3 +230,75 @@ every patched product, every frame — small-dome's 35,700 B largest ask in
 its frame window); the classic's `DisplayPipeline` copies; the playlist
 crossfade's two per-frame sample-outs; `direct_channels` (identity for a
 plain map2d fixture — a 4 B/lamp candidate).
+
+## After (2026-09-06): identity direct channels, resident crossfade sample-outs
+
+Two of the "still per-lamp and per-frame" items above are closed (plan
+`2026-09-06-0049-direct-channels-crossfade-resident`):
+
+- **`FixtureNode.direct_channels` → `DirectChannels::Identity(count)`** for
+  every document-resolved mapping (the resolver's spans are a running
+  cursor, so the channel list is `0..n` by construction); only a
+  hand-authored `PathPoints` with offset or sparse keys keeps the explicit
+  4 B/lamp list. Host slope (`per_lamp_memory_table`, zook 1,500 → 3,000):
+  tick 1 resident **21.7 → 17.72 B/lamp**, transient 17.44; load unchanged
+  at 8.0. Device-side that is −6,000 B on zook and −25,240 B on small-dome
+  of resident heap. The owner table's `direct_channels` row is now 4 B per
+  fixture, not per lamp: Direct-path residents are mapping 8 + sample
+  points 8 + sample target 8 + output samples 6 + 8-bit frame 3 =
+  **33 B/lamp** (was 37).
+- **Playlist crossfade.** The two per-frame `create_sample_out` calls (16
+  B/lamp/frame in graphics memory — churn on the classic, a leak on the
+  host's bump-allocated wasmtime backend) are now two handles resident on
+  the node for the transition's life, freed when it ends. New probe
+  `lp-core/lpc-engine/tests/playlist_crossfade_memory.rs`
+  (`examples/button-playlist` scaled ×10 = 2,401 lamps and ×20 = 4,801,
+  transition driven through `PlaylistActivateEntry`, a counting
+  `LpGraphics` decorator):
+
+  | scale | first transition frame | every later transition frame | host steady transient |
+  |---|---:|---:|---:|
+  | ×10 | 2 calls, 38,416 B (= 2 × 2,401 × 8) | 0 calls, 0 B | 1,187 B |
+  | ×20 | 2 calls, 76,816 B (= 2 × 4,801 × 8) | 0 calls, 0 B | 1,187 B |
+
+  A second transition between two warm entries opens with exactly two
+  calls again, proving the first one's end freed them; the tick after a
+  transition ends frees the blend scratch (host resident −19,288 B at ×10,
+  −38,488 B at ×20). Counted rather than weighed: the wasmtime backend's
+  sample-outs live in wasm linear memory, outside the host tracker.
+
+Still open from the list above: the classic's `DisplayPipeline` copies.
+`ProductScratch.rendered` closed the same day — next.
+
+> **Update 2026-09-06** (PR #523, ADR
+> `2026-09-06-control-render-targets-scatter.md`): the `ProductScratch`
+> whole-product render is gone — a patched product renders through a
+> *scattered* target straight into the runtime buffer. Host steady tick
+> transient: small-dome 42,278 → 5,834 B; a new `zook-patched` probe row
+> (zook's 1,500 lamps cut into five runs) 10,548 → 1,352 B against
+> unpatched zook's 839 (1,352 → 1,192 after the per-group loop; the
+> zook-patched row lands at 1,192). Emulator, measured on the tree merged
+> with the identity-channels change above: the 35,700 B ask is gone from the
+> first frame, and small-dome then halts on the next one — **47,600 B**
+> (= 8 × 5,950), the dome's sample points (`create_sample_points`, a fallible
+> Vec inside `FixtureNode::render_control`), with 12,445 B free. That
+> sample-points buffer is what small-dome needs next; still not in the
+> record.
+
+## After (2026-09-06, PR #527): bounded sample windows
+
+The owner table's two graphics rows — sample points 8 and sample target 8 — are gone as
+per-lamp residents. Direct sampling streams through a **window** of `min(lamps, 128)`
+points (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`): the fixture regenerates
+coordinates from the mapping every render straight into the window's point handle and
+writes each batch's samples into the control target as it comes back. Per Direct fixture
+that is one 2 KB window instead of 16 B/lamp; the 8 B/lamp coordinate transient at first
+render is gone with it. Device-side Direct residents: mapping 8 (load) + output samples 6 +
+8-bit frame 3 = **17 B/lamp**, was 33. The price is ~70 cycles/lamp/render of integer
+coordinate regeneration — +3.6% of zook's steady frame on the C6 model.
+
+Device width (record): zook startup `frame.retained` 55,020 → 33,068 B (−16 × 1,500 +
+2,048), basic 40,857 → 39,049. Host slopes unchanged (the wasmtime sample buffers were never
+in this tracker). small-dome gets past its sample buffers and halts later, on the emulator's
+port-open `Vec<HwEndpoint>` (20,480 B, emulator-only) — attribution and figures in
+`docs/reports/2026-09-06-small-dome-first-frame-budget.md`. Still not in the record.

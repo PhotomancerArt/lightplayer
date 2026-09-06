@@ -1,10 +1,12 @@
 //! Board-profile tests: the classic-ESP32 (LX6) memory map, emulator-side.
 //!
-//! The classic map is P1's hardware-measured model (FINDINGS.md, classic
-//! C1–C5 section): SRAM1's dual mapping is **word-mirrored** —
-//! `iram = 0x400B_FFFC − (dram − 0x3FFE_0000)` — and the plain data RAM
-//! (SRAM2) is not executable. These tests pin the emulator to that model;
-//! agreement with silicon is P6's job.
+//! The classic map is hardware-measured (FINDINGS.md, classic C1–C5 section,
+//! plus the 2026-09-05 SRAM0 probe): JIT code lives in **SRAM0**, which is
+//! identity-mapped and **word-only**; SRAM1's dual mapping — the legacy code
+//! placement — is **word-mirrored** (`iram = 0x400B_FFFC − (dram −
+//! 0x3FFE_0000)`); and the plain data RAM (SRAM2) is not executable. These
+//! tests pin the emulator to that model; agreement with silicon is the
+//! hardware walks' job.
 //!
 //! Payload bytes are assembler-derived golden vectors from FINDINGS.md,
 //! never hand-encoded.
@@ -13,7 +15,7 @@ use lp_xt_emu::board::BoardProfile;
 use lp_xt_emu::emu::{
     CODE_DBUS_BASE, CODE_REGION_LEN, INITIAL_SP, RunOutcome, STACK_DBUS_BASE, STACK_REGION_LEN,
 };
-use lp_xt_emu::memory::{AliasRule, EXC_INSTR_FETCH_ERROR, Memory};
+use lp_xt_emu::memory::{AliasRule, EXC_INSTR_FETCH_ERROR, EXC_LOAD_STORE_ERROR, Memory};
 use lp_xt_emu::{Emulator, TrapKind};
 
 /// GV1 `spike_stub42` (FINDINGS.md): entry a1,32; movi a2,42; retw. f(_) = 42.
@@ -41,7 +43,7 @@ fn s3_profile_matches_legacy_constants() {
 ///   off=0x100  h2 @ 0x400A_FEFC
 #[test]
 fn classic_alias_rule_matches_c2b_measurements() {
-    let rule = BoardProfile::esp32().alias;
+    let rule = BoardProfile::esp32_sram1_legacy().alias;
     assert_eq!(rule.dbus_to_ibus(0x3FFF_0000), 0x400A_FFFC);
     assert_eq!(rule.dbus_to_ibus(0x3FFF_0100), 0x400A_FEFC);
     // Byte offsets within a word are preserved (bytes are verbatim, C2b).
@@ -61,7 +63,7 @@ fn classic_alias_rule_matches_c2b_measurements() {
 /// C2b measured, with word contents verbatim little-endian.
 #[test]
 fn classic_sram1_is_word_mirrored_not_linear() {
-    let p = BoardProfile::esp32();
+    let p = BoardProfile::esp32_sram1_legacy();
     let mut emu = Emulator::with_profile(p);
 
     // Two distinct sentinels at two D-bus offsets so the mapping's shape is
@@ -111,18 +113,44 @@ fn classic_sram1_is_word_mirrored_not_linear() {
     assert_eq!(bytes, 0xC0DE_0000u32.to_le_bytes());
 }
 
-/// GV1 executes at classic addresses and returns 42 (the emulator-side half
-/// of C2x `region=sram1_word_mirrored value=42`).
+/// GV1 executes from classic SRAM0 and returns 42 — the emulator-side half
+/// of the 2026-09-05 `[SRAM0] exec` fact (word-written code at `0x4008_8000`
+/// executes on the PRO core).
 #[test]
-fn classic_profile_runs_gv1() {
+fn classic_profile_runs_gv1_from_sram0() {
     let p = BoardProfile::esp32();
+    // The executable image sits inside SRAM0's IRAM, above `.vectors`, and
+    // the identity alias means the D-bus base IS the I-bus base.
+    assert!((0x4008_0400..0x400A_0000).contains(&p.code_ibus_base()));
+    assert_eq!(p.code_ibus_base(), p.code_dbus_base);
+    assert_eq!(p.alias, AliasRule::Identity);
+
+    let mut emu = Emulator::with_profile(p);
+    match emu.run(GV1, 0, 0) {
+        RunOutcome::Ok(v) => assert_eq!(v, 42),
+        other => panic!("GV1 on the classic profile must return 42, got {other:?}"),
+    }
+    // The blob is I-bus-contiguous and its first word reads back verbatim
+    // at the base — with a word load, the only width SRAM0 takes.
+    assert_eq!(
+        emu.mem.read_u32(p.code_ibus_base()).unwrap(),
+        u32::from_le_bytes([GV1[0], GV1[1], GV1[2], GV1[3]])
+    );
+}
+
+/// GV1 executes at classic SRAM1 addresses under the legacy profile and
+/// returns 42 (the emulator-side half of C2x `region=sram1_word_mirrored
+/// value=42`).
+#[test]
+fn classic_legacy_profile_runs_gv1_from_sram1() {
+    let p = BoardProfile::esp32_sram1_legacy();
     // The executable image sits inside classic SRAM1's I-bus window.
     assert!((0x400A_0000..0x400C_0000).contains(&p.code_ibus_base()));
 
     let mut emu = Emulator::with_profile(p);
     match emu.run(GV1, 0, 0) {
         RunOutcome::Ok(v) => assert_eq!(v, 42),
-        other => panic!("GV1 on the classic profile must return 42, got {other:?}"),
+        other => panic!("GV1 on the legacy classic profile must return 42, got {other:?}"),
     }
     // The blob really is I-bus-contiguous: its first word (`entry a1,32` =
     // 0x00004136 plus the first movi byte) reads back verbatim at the I-bus
@@ -138,17 +166,74 @@ fn classic_profile_runs_gv1() {
 }
 
 /// GV1 also runs entered at a nonzero offset within the blob (padding words
-/// before the entry cross I-bus word boundaries under the mirror).
+/// before the entry cross I-bus word boundaries — under the mirror, and
+/// under SRAM0's word-only bus).
 #[test]
-fn classic_profile_runs_gv1_at_offset() {
-    // 4 bytes of padding, then GV1: entry_offset = 4.
-    let mut blob = vec![0u8; 4];
-    blob.extend_from_slice(GV1);
-    let mut emu = Emulator::with_profile(BoardProfile::esp32());
-    match emu.run(&blob, 4, 7) {
-        RunOutcome::Ok(v) => assert_eq!(v, 42),
-        other => panic!("offset GV1 on the classic profile must return 42, got {other:?}"),
+fn classic_profiles_run_gv1_at_offset() {
+    for p in [BoardProfile::esp32(), BoardProfile::esp32_sram1_legacy()] {
+        // 4 bytes of padding, then GV1: entry_offset = 4.
+        let mut blob = vec![0u8; 4];
+        blob.extend_from_slice(GV1);
+        let mut emu = Emulator::with_profile(p);
+        match emu.run(&blob, 4, 7) {
+            RunOutcome::Ok(v) => assert_eq!(v, 42, "{}", p.name),
+            other => panic!("{}: offset GV1 must return 42, got {other:?}", p.name),
+        }
     }
+}
+
+/// SRAM0 takes aligned word accesses only: the `[SRAM0] byte_access` fact
+/// (a byte store at `0x4008_8000` → `LoadStoreError`, EXCCAUSE 3, EXCVADDR
+/// = that address) and its halfword/misaligned siblings, while word access
+/// and fetch are unaffected.
+#[test]
+fn classic_sram0_is_word_only() {
+    let p = BoardProfile::esp32();
+    let mut emu = Emulator::with_profile(p);
+    let base = p.code_dbus_base;
+
+    emu.mem.write_u32(base, 0xC0DE_0000).unwrap();
+    assert_eq!(emu.mem.read_u32(base).unwrap(), 0xC0DE_0000);
+
+    let store = emu.mem.write_u8(base, 0xA5).unwrap_err();
+    assert_eq!(store.kind, TrapKind::Exception);
+    assert_eq!(store.cause, EXC_LOAD_STORE_ERROR);
+    assert_eq!(store.vaddr, base);
+    // The faulting store changed nothing.
+    assert_eq!(emu.mem.read_u32(base).unwrap(), 0xC0DE_0000);
+
+    assert_eq!(
+        emu.mem.read_u8(base).unwrap_err().cause,
+        EXC_LOAD_STORE_ERROR
+    );
+    assert_eq!(
+        emu.mem.read_u16(base + 2).unwrap_err().cause,
+        EXC_LOAD_STORE_ERROR
+    );
+    assert_eq!(
+        emu.mem.write_u16(base + 2, 1).unwrap_err().cause,
+        EXC_LOAD_STORE_ERROR
+    );
+    // Misaligned word access is a fault too, at the address that was asked.
+    let mis = emu.mem.read_u32(base + 2).unwrap_err();
+    assert_eq!(mis.cause, EXC_LOAD_STORE_ERROR);
+    assert_eq!(mis.vaddr, base + 2);
+    assert_eq!(
+        emu.mem.write_u32(base + 1, 0).unwrap_err().cause,
+        EXC_LOAD_STORE_ERROR
+    );
+
+    // Fetch is unaffected, and so is the neighbouring plain RAM.
+    let mut out = [0u8; 3];
+    assert!(emu.mem.fetch(base, &mut out).is_ok());
+    emu.mem.write_u8(p.stack_dbus_base, 0xA5).unwrap();
+    assert_eq!(emu.mem.read_u8(p.stack_dbus_base).unwrap(), 0xA5);
+
+    // The legacy SRAM1 window is ordinary RAM: byte access is fine there.
+    let legacy = BoardProfile::esp32_sram1_legacy();
+    let mut emu = Emulator::with_profile(legacy);
+    emu.mem.write_u8(legacy.code_dbus_base, 0x5A).unwrap();
+    assert_eq!(emu.mem.read_u8(legacy.code_dbus_base).unwrap(), 0x5A);
 }
 
 /// Fetching from classic's plain data RAM (the stack region models SRAM2,
@@ -163,9 +248,12 @@ fn classic_data_ram_is_not_executable() {
     let err = emu.mem.fetch(p.stack_dbus_base, &mut out).unwrap_err();
     assert_eq!(err.kind, TrapKind::Exception);
     assert_eq!(err.cause, EXC_INSTR_FETCH_ERROR);
-    // The code region's own D-bus addresses are not fetchable either (C2g
-    // executed GV1 at its D-bus address and got EXCCAUSE=2).
-    let err = emu.mem.fetch(p.code_dbus_base, &mut out).unwrap_err();
+    // Under the legacy placement the code region's own D-bus addresses are
+    // not fetchable either (C2g executed GV1 at its D-bus address and got
+    // EXCCAUSE=2).
+    let legacy = BoardProfile::esp32_sram1_legacy();
+    let emu = Emulator::with_profile(legacy);
+    let err = emu.mem.fetch(legacy.code_dbus_base, &mut out).unwrap_err();
     assert_eq!(err.cause, EXC_INSTR_FETCH_ERROR);
 }
 

@@ -194,7 +194,7 @@ claim is that the two hex strings are equal. Change a format string here and
 you must change it in all three places.
 
 This is the M7 FINAL-gate instrument — "a shader compiles on-device into the
-fixed SRAM1 code region and renders bit-exactly vs the host oracle". Run it
+fixed SRAM0 code region and renders bit-exactly vs the host oracle". Run it
 once the board is free:
 
 ```bash
@@ -250,18 +250,62 @@ as it links" is *not* the real ceiling. 110 KB is the setting that keeps
 large frames and the recursive GLSL parser both want.
 
 That lever has been pulled. esp-hal's `dram2_seg` (`0x3FFE_7E30`, 98,768 B)
-is now a **second `esp_alloc` region** worth 64 KiB, added at boot by
-`add_sram1_heap_region`. It became available on 2026-08-02 when
+is now a **second `esp_alloc` region** worth 96 KiB, added at boot by
+`add_sram1_heap_region`. It first became available on 2026-08-02 when
 `lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT` was measured down from
-92 KiB to 32 KiB (`0x3FFE_8000..0x3FFF_0000` D-bus), freeing the rest of the
-segment.
+92 KiB to 32 KiB (then 24 KiB), freeing the rest of the segment; on 2026-09-05
+the JIT code region left SRAM1 altogether for **SRAM0** (`0x4008_8000`,
+64 KiB — instruction RAM with no D-bus view, which no heap could ever use), and
+the whole tail `0x3FFE_8000..0x4000_0000` became heap.
 
-The two must abut without overlapping, or the allocator and the JIT hand out
-the same bytes. That is no longer a rule to remember: the heap span comes from
+The allocator and the JIT must never hand out the same bytes. That is not a
+rule to remember: the heap span comes from
 `CodeRegion::reclaimable_heap_span()` and const-asserts in `codemem_esp32` pin
-it to the region's end, so a resize that forgets the boundary fails to compile.
-Total heap is `HEAP_SIZE + 65,536` = 178,176 B; see
+it, so a placement change that forgets the boundary fails to compile. The one
+collision the compiler cannot see is the linker's: `.rwtext` shares SRAM0 with
+the JIT region and grows upward, so boot asserts that it ends below the region
+base (`assert_jit_region_clear_of_rwtext`, decoding esp-hal's section-relative
+`_rwtext_len`). Total heap is `HEAP_SIZE + 98,304` = 210,944 B; see
+`docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.md` and
 `docs/adr/2026-08-01-esp32v3-flash-budget.md`.
+
+### Amended 2026-09-05 — the stack is measured, and the heap is four regions
+
+Everything above about the stack was inference. It is now measured.
+`src/stack_probe.rs` paints the unused main stack at boot and the heartbeat
+reports the watermark:
+
+```text
+[INIT] main stack 45520 B
+[stack] heartbeat: high-water 33008 B of 45520 B (12512 B headroom)
+```
+
+The line appears only when the mark **grows**, so a quiet steady state means
+the workload never went deeper. The reading that matters: before this pass, on
+a 35,520 B stack, booting and auto-loading the startup project reached
+**32,608 B — 2,928 B of headroom**, reproducibly, to the byte. The paragraphs
+above worry about whether 43,400 B is enough margin; the answer was that the
+image had already been shipping on about 3 KB of it.
+
+Two changes followed, and neither is the "trade stack for heap" lever above:
+
+- **`.data` 22,220 → 12,220 B.** esp-hal's `place-switch-tables-in-ram` default
+  is off and `rwdata_hook.x` names what stays: the interrupt-handler tables,
+  the merged `.rodata.cst*` pools, and the jump tables of the crates with code
+  in IRAM. `.stack` takes the residual automatically, so all 10,000 B became
+  stack headroom rather than arena. `just iram-flash-literals-esp32v3` is the
+  guard that no interrupt-path function started reading a constant out of
+  flash — run it after touching either config key, and see `rwdata_hook.x` for
+  what the exception list is and why.
+- **Heap 178,176 → 216,976 B, in four regions.** esp-hal's two ROM *stack*
+  reservations in SRAM1 are dead once each core is handed over (esp-idf
+  reclaims the same span), so they are heap now: 15,072 B registered **before**
+  the arena — first-fit order makes it where boot residents land, which lifted
+  the largest free block at idle from 94,780 to 109,446 B — and 15,536 B
+  registered **after** `start_app_core_isr`, because that span is live while
+  the second core boots through the ROM. The two ROM *data* blocks stay
+  reserved. This needed a vendored esp-alloc: upstream caps an allocator at
+  three regions (`third_party/esp-alloc/README-LP.md`).
 
 ## Flashing
 

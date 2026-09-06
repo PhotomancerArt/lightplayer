@@ -17,11 +17,15 @@ set -euo pipefail
 #
 # Figures per window: transient, retained, largest_alloc (residency) and
 # alloc_count, alloc_bytes (requests inside ONE opening, maximised across
-# openings — the worst frame). This is a RATCHET, not a ceiling: the record
-# holds today's measured values (descriptive), and any growth beyond the
-# margin fails. An intentional increase re-baselines explicitly
-# (`just heap-budget-baseline`) so the growth lands in the PR diff where a
-# reviewer sees it.
+# openings — the worst frame), plus largest_free_at_close and holes_at_close
+# (the guest's own free-list shape at the window's close, MIN/MAX across
+# openings — see docs/heap-budget-gate.md). Every figure but
+# largest_free_at_close is a RATCHET on GROWTH: the record holds today's
+# measured values (descriptive), and any growth beyond the margin fails.
+# largest_free_at_close inverts that: it fails when the measurement SHRANK
+# below the record, because a bigger free block is the good direction there.
+# An intentional change re-baselines explicitly (`just heap-budget-baseline`)
+# so it lands in the PR diff where a reviewer sees it.
 #
 # Why deltas and not absolutes, and what this gate cannot see:
 # docs/heap-budget-gate.md
@@ -34,6 +38,14 @@ cd "$(dirname "$0")/.."
 
 RECORD="scripts/heap-budget-record.json"
 MODES=(startup steady-render)
+# Emulator cycle cap per profile session. The startup capture must reach the
+# END of the frame that contains the first shader compile; a capture the cap
+# cuts short leaves that window OPEN, and an open window's figures are an
+# artifact of where the cap fell (meteor's compile begins ~165M cycles in
+# and needs well past 200M — docs/defects/2026-09-06-heap-budget-capture-
+# truncated-by-cycle-cap.md). `budget_for` refuses a truncated capture rather
+# than comparing or recording its numbers.
+MAX_CYCLES=400000000
 # Windows recorded per mode. Startup records everything the trace has;
 # steady-render captures after the compile, so its other windows would only
 # record zeros.
@@ -48,7 +60,15 @@ command -v jq >/dev/null 2>&1 || {
 # Run one profile session; prints the profile output directory.
 run_profile() {
     local project="$1" mode="$2"
-    cargo run -q -p lp-cli -- profile "$project" --collect alloc --mode "$mode" 2>/dev/null | tail -1
+    # The safety cap is raised over lp-cli's 200 M default: the per-marker
+    # free-list walk grows with the guest's free heap, and a startup run of
+    # zook-dome crossed 200 M cycles mid-walk on 2026-09-06 (after the sample
+    # window change freed ~21 KB), which silently drops the last window's
+    # free-list figures. See docs/heap-budget-gate.md "Cost". Meteor's startup
+    # capture never fit the default at all (`MAX_CYCLES` above); a session
+    # that still hits the cap is refused by `budget_for`.
+    cargo run -q -p lp-cli -- profile "$project" --collect alloc --mode "$mode" \
+        --max-cycles "$MAX_CYCLES" 2>/dev/null | tail -1
 }
 
 budget_for() {
@@ -60,11 +80,24 @@ budget_for() {
         echo "::error::heap-budget: ${project} (${mode}): no budget.json at ${dir} (was --collect alloc dropped?)" >&2
         exit 1
     fi
+    # A capture the cycle cap ended is not a measurement: the window it cut
+    # is still open and its figures depend on where the cap fell, not on
+    # what the window costs. Refuse it in both `check` and `baseline`.
+    local terminated_by
+    terminated_by="$(jq -r '.terminated_by // empty' "${dir}/meta.json" 2>/dev/null || true)"
+    if [ "$terminated_by" = "max_cycles" ]; then
+        echo "::error::heap-budget: ${project} (${mode}): capture hit --max-cycles ${MAX_CYCLES} before the mode's gate closed (${dir}); its figures are truncation artifacts. Raise MAX_CYCLES in scripts/heap-budget-check.sh." >&2
+        exit 1
+    fi
     echo "$budget"
 }
 
 # The measured windows for one mode, projected to the recorded figures:
-# `{windows: {<name>: {transient, retained, largest_alloc, alloc_count, alloc_bytes}}}`.
+# `{windows: {<name>: {transient, retained, largest_alloc, alloc_count,
+# alloc_bytes, largest_free_at_close?, holes_at_close?}}}`. The last two are
+# absent from a measurement with no guest free-list-shape rows (older
+# lp-cli), and the projection preserves that absence rather than writing a
+# `null` into the record — see docs/heap-budget-gate.md.
 project_windows() {
     local mode="$1" budget="$2"
     local keep='true'
@@ -72,7 +105,11 @@ project_windows() {
     jq --arg keep "$keep" "
         {windows: (.windows
             | map(select($keep))
-            | map({key: .name, value: {transient, retained, largest_alloc, alloc_count, alloc_bytes}})
+            | map({key: .name, value: (
+                {transient, retained, largest_alloc, alloc_count, alloc_bytes}
+                + (if has(\"largest_free_at_close\") then {largest_free_at_close} else {} end)
+                + (if has(\"holes_at_close\") then {holes_at_close} else {} end)
+              )})
             | from_entries)}" "$budget"
 }
 
@@ -115,6 +152,21 @@ check)
                 if [ "$meas" = "null" ] || [ -z "$meas" ]; then
                     echo "::error::heap-budget: ${project} (${pmode}) ${w}.${f}: figure missing from measurement (older lp-cli?)"
                     fail=1
+                    continue
+                fi
+                if [ "$f" = "largest_free_at_close" ]; then
+                    # Inverted direction: a bigger largest-free-block is the
+                    # improvement here, so the ratchet fails on SHRINKING
+                    # below the record, not on growth.
+                    allowed=$(awk -v r="$rec" -v m="$margin" 'BEGIN { printf "%d", r * (1 - m / 100) }')
+                    if [ "$meas" -lt "$allowed" ]; then
+                        echo "::error::heap-budget: ${project} (${pmode}) ${w}.${f} shrank: ${meas} < recorded ${rec} (margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline' in this PR."
+                        fail=1
+                    elif [ "$meas" -gt "$rec" ]; then
+                        echo "  improved: ${w}.${f}: ${rec} -> ${meas} (lock it in with 'just heap-budget-baseline')"
+                    else
+                        echo "  ok: ${w}.${f}: ${meas}"
+                    fi
                     continue
                 fi
                 allowed=$(awk -v r="$rec" -v m="$margin" 'BEGIN { printf "%d", r * (1 + m / 100) }')

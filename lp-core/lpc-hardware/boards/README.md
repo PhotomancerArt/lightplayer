@@ -203,6 +203,38 @@ Authoring rules:
   them in `note`, and mark placeholders as placeholders until a bench
   confirms them.
 
+## Soft limits — measured envelopes, never refusals
+
+`soft_limits` is the block of *measured* records a board×firmware pairing
+has actually run clean at — evidence, not policy
+(`docs/adr/2026-08-05-manifest-soft-limits-are-measured-records.md`). Every
+field is optional; a manifest states only what has been measured, and each
+record carries its provenance in `measured` (date, firmware, workload,
+observed margins). A record without provenance is a guess and does not
+belong here.
+
+```json
+"soft_limits": {
+  "totalLeds":         { "value": 1500, "measured": "2026-08-05: 5 x 300 at 29.99 fps, 240 s soak ..." },
+  "interpolationLeds": { "value": 500,  "measured": "2026-09-06: DERIVED from the per-lamp memory table ..." },
+  "ditheringLeds":     { "value": 1000, "measured": "2026-09-06: DERIVED ..." }
+}
+```
+
+- `totalLeds` — exceeding it **warns and proceeds** at open; Studio draws
+  the budget bar from it.
+- `interpolationLeds` / `ditheringLeds` — total open LEDs above which the
+  output provider opens display pipelines with frame interpolation, then
+  temporal dithering, turned **off** (12 and 3 B/LED per port on the
+  classic). The tier is a function of the lamps open on the board, never
+  of the heap, and the output node's status badge says when it applied.
+  Absent = the authored option holds at any scale
+  (`docs/adr/2026-09-06-smoothing-degrades-by-measured-lamp-limits.md`).
+
+Only `domraem/dom-z-102.json` carries any of these today. Mark derived
+values as derived in `measured`, and replace the provenance — value and
+text together — when a bench measurement exists.
+
 ## Facts, not reviews
 
 Display copy (`blurb`, notes) states what a board IS — chip, form factor,

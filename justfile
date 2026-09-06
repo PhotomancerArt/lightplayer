@@ -801,6 +801,34 @@ clippy-fw-esp32s3:
     cargo clippy --release --no-default-features \
         --features esp32s3,server,test_xt_jit_corpus -- --no-deps -D warnings
 
+# The ISR-in-RAM guard for fw-esp32v3: which RAM-resident functions load a
+# constant out of FLASH.
+#
+# Putting a function in IRAM is only half of the ISR-in-RAM rule (see the memory
+# note `isr-path-in-ram-rule`). On Xtensa the constants it cannot encode as
+# immediates come through `l32r`, and that literal pool can be in flash even
+# when the code is not — a cache miss in the middle of an interrupt, which is
+# precisely what the rule forbids. Attributes do not answer this at
+# `opt-level=z`; the linked image does.
+#
+# The committed table next to it is the contract. `.data` placement decisions
+# (esp-hal's `place-switch-tables-in-ram`, the `rwdata_hook.x` beside it) are
+# allowed to move constants to flash — but never a constant that an
+# interrupt-path function reads. Run this after any such change; a nonzero exit
+# names the functions that regressed.
+#
+#   just iram-flash-literals-esp32v3                     # check against the baseline
+#   just iram-flash-literals-esp32v3 --write-baseline    # re-bless it, deliberately
+iram-flash-literals-esp32v3 *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    python3 scripts/iram-flash-literals.py {{ fw_esp32v3_elf }} \
+        --baseline {{ fw_esp32v3_dir }}/iram-flash-literals.baseline.txt {{ args }}
+
 # Lint gate for fw-esp32v3, mirroring clippy-fw-esp32s3. Separate from
 # `clippy-host` for the same reason as the S3: the crate is excluded there
 # (it cross-compiles for Xtensa under a different toolchain), so nothing else
@@ -849,7 +877,7 @@ clippy-fw-esp32v3:
     # whole app path out, so linting the defaults leaves harness code completely
     # uncovered. That is exactly how 13 fw-esp32 harnesses once rotted
     # uncompiled. Add new `test_*` features to this list.
-    for feat in test_xt_fp_conformance test_interrupt_executor; do
+    for feat in test_xt_fp_conformance test_interrupt_executor test_sram0_exec; do
       echo "clippy: --features $feat"
       cargo clippy --profile release-esp32v3 --features "$feat" -- --no-deps -D warnings
     done
@@ -1250,6 +1278,51 @@ fwtest-iexec-esp32v3 port="":
     kill "$watcher" 2>/dev/null || true
     echo "--- [IEXEC] lines ---"
     grep -a 'IEXEC' "$out" || echo "NO IEXEC OUTPUT (see $out)"
+
+# SRAM0 execute probe on the classic (classic RAM track B): flashes the
+# `test_sram0_exec` harness and captures its `[SRAM0]` fact lines. The byte-
+# access fact deliberately faults and resets the chip; the SECOND boot reports
+# it and prints `END-SRAM0`, so the capture spans two boots — read the whole
+# file, not only the tail. Foreground flash + pty'd monitor for the same chip
+# reasons as the FP recipe.
+fwtest-sram0-esp32v3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    mkdir -p target/fp-capture
+    out="target/fp-capture/sram0-v3-$(date +%Y%m%d-%H%M%S).txt"
+    (cd {{ fw_esp32v3_dir }} && touch src/main.rs && \
+      cargo build --profile release-esp32v3 --no-default-features --features esp32,test_sram0_exec)
+    args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    echo "capturing to $out"
+    : > "$out"
+    # The SIGINT is scoped to THIS port when one was given: an unscoped
+    # `pkill -f 'espflash flash'` kills every espflash on the machine,
+    # including another board's mid-write flash (two classic lanes ran in
+    # parallel on 2026-09-05 and found out).
+    if [[ -n "{{ port }}" ]]; then
+      pkill_pattern='espflash flash.*--port {{ port }}'
+    else
+      pkill_pattern='espflash flash.*--chip esp32'
+    fi
+    (
+      for _ in $(seq 1 180); do
+        if grep -q 'END-SRAM0' "$out" 2>/dev/null; then break; fi
+        sleep 1
+      done
+      pkill -INT -f "$pkill_pattern" || true
+    ) &
+    watcher=$!
+    script -q "$out" espflash flash "${args[@]}" {{ fw_esp32v3_elf }} || true
+    kill "$watcher" 2>/dev/null || true
+    echo "--- [SRAM0] lines ---"
+    grep -a 'SRAM0\|Exception\|PANIC\|msg:' "$out" || echo "NO SRAM0 OUTPUT (see $out)"
 
 fwtest-xt-fp-esp32v3 port="" family="" limit="0":
     #!/usr/bin/env bash

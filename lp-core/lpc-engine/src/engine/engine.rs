@@ -32,8 +32,7 @@ use crate::node::{
 use crate::node::{NodeEntryState, RuntimeNodeTree};
 use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
 use crate::products::visual::{
-    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
-    VisualSampleBufferRequest, VisualSampleTarget,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleStream,
 };
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
@@ -793,6 +792,7 @@ impl Engine {
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
+            services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
@@ -937,6 +937,7 @@ impl Engine {
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
+            services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
@@ -984,6 +985,7 @@ impl Engine {
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
+            services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
@@ -1076,6 +1078,7 @@ impl Engine {
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
+            services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
@@ -1136,6 +1139,7 @@ impl Engine {
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
+            services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
@@ -1181,6 +1185,7 @@ impl Engine {
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
+            services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
@@ -1226,6 +1231,7 @@ impl Engine {
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
+            services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
@@ -1268,6 +1274,7 @@ impl Engine {
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
             display_layout_budget: self.display_layout_budget,
+            services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
@@ -1323,6 +1330,10 @@ struct EngineResolveHost<'a> {
     frame_time_seconds: f32,
     safe_output_clamp_q16: Option<u32>,
     display_layout_budget: Option<usize>,
+    /// The engine's services, read-only — for the per-output smoothing
+    /// notice an output's consume context carries. Disjoint from every
+    /// `&mut` field above, so the borrow is free.
+    services: &'a EngineServices,
     /// The engine's current frame revision — the same value the tick stamps
     /// on compile windows ([`NodeRuntime::open_compile_window`]).
     ///
@@ -2395,8 +2406,7 @@ impl EngineResolveHost<'_> {
     fn sample_node_visual_into(
         &mut self,
         product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        stream: VisualSampleStream<'_>,
     ) -> Result<(), SessionResolveError> {
         let node_id = product.node();
         let revision = self.frame_revision;
@@ -2456,7 +2466,7 @@ impl EngineResolveHost<'_> {
                 self,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
-                render_node.sample_visual_into(product, request, target, &mut ctx)
+                render_node.sample_visual_into(product, stream, &mut ctx)
             })
         };
 
@@ -2982,10 +2992,9 @@ impl ControlRenderServices for EngineResolveHost<'_> {
     fn sample_visual_into(
         &mut self,
         product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        stream: VisualSampleStream<'_>,
     ) -> Result<(), NodeError> {
-        self.sample_node_visual_into(product, request, target)
+        self.sample_node_visual_into(product, stream)
             .map_err(|e| NodeError::msg(format!("sample visual: {e}")))
     }
 }
@@ -3021,10 +3030,9 @@ impl VisualRenderServices for EngineResolveHost<'_> {
     fn sample_visual_into(
         &mut self,
         product: VisualProduct,
-        request: VisualSampleBufferRequest<'_>,
-        target: VisualSampleTarget<'_>,
+        stream: VisualSampleStream<'_>,
     ) -> Result<(), NodeError> {
-        self.sample_node_visual_into(product, request, target)
+        self.sample_node_visual_into(product, stream)
             .map_err(|e| NodeError::msg(format!("sample visual: {e}")))
     }
 }
@@ -3152,6 +3160,7 @@ fn consume_tree_node(
     let time_s = host.frame_time_seconds;
     let slot_shapes = host.slot_shapes;
     let fault = host.fault;
+    let smoothing = host.services.output_smoothing_notice(node_id);
     let recovery_name = recovery_frame_name(&host.tree, node_id);
     let consume_result = {
         let mut bridge = SessionHostResolver {
@@ -3170,7 +3179,8 @@ fn consume_tree_node(
             radio_service,
             time_s,
         )
-        .with_project_fault(fault.since_seconds, fault.node_count, fault.presentation);
+        .with_project_fault(fault.since_seconds, fault.node_count, fault.presentation)
+        .with_output_smoothing(smoothing);
         catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
             node_runtime.consume(&mut tick_ctx)
         })
@@ -3251,6 +3261,7 @@ pub(crate) fn resolve_with_engine_host(
         frame_time_seconds: time_s,
         safe_output_clamp_q16: eng.safe_output_clamp_q16,
         display_layout_budget: eng.display_layout_budget,
+        services: &eng.services,
         frame_revision: eng.revision,
         fault: fault_tick_view(eng.project_fault.as_ref(), eng.fault_presentation),
     };
@@ -3297,6 +3308,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         frame_time_seconds: time_s,
         safe_output_clamp_q16: eng.safe_output_clamp_q16,
         display_layout_budget: eng.display_layout_budget,
+        services: &eng.services,
         frame_revision: eng.revision,
         fault: fault_tick_view(eng.project_fault.as_ref(), eng.fault_presentation),
     };

@@ -31,6 +31,25 @@ rustflags = [
 [env]
 ESP_LOG = "info"
 
+# RAM placement of anonymous constants. esp-hal's default sends every match jump
+# table in the image, the interrupt-handler tables and the `.rodata.cst*` pools
+# into `.data` — 17,896 B on this build, out of a `dram_seg` where `.data`,
+# `.bss` and `.stack` are strictly zero-sum and the measured stack headroom is
+# under 3 KB.
+#
+# Turning the default off wholesale would send `lp_ws281x`'s refill jump tables
+# and esp-hal's `INTERRUPT_EDGE` to flash, which the ISR-in-RAM rule forbids. So
+# the default goes off and `rwdata_hook.x` (found via build.rs's link-search
+# path) names the exceptions that stay. `just iram-flash-literals-esp32v3` is
+# the check that the exception list is still complete — run it after touching
+# either key.
+#
+# ⚠️ `touch src/main.rs` after changing these: cargo does not always retrigger
+# cfg-dependent codegen on an env-only change, and a stale image here looks like
+# "the hook did nothing".
+ESP_HAL_CONFIG_PLACE_SWITCH_TABLES_IN_RAM = "false"
+ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK = "true"
+
 [unstable]
 build-std = ["core", "alloc"]
 build-std-features = ["compiler-builtins-mem", "optimize_for_size"]

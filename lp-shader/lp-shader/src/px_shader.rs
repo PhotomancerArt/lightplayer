@@ -286,16 +286,49 @@ impl LpsPxShader {
     /// `points` holds `count` tightly packed lane groups in this shader's
     /// declared space — `[x, y]` pairs for a 2D shader, single `[t]` words
     /// for a 1D one (see [`crate::synth::render_samples`] for the layout).
+    ///
+    /// The one-shot form: [`Self::bind_uniforms`] then
+    /// [`Self::sample_points_rgba16_bound`] over the whole buffer. A consumer
+    /// streaming a product in batches calls the two halves itself — binding
+    /// walks and formats the uniform paths, so it is paid once per stream,
+    /// not once per batch.
     pub fn sample_points_rgba16(
         &self,
         uniforms: &LpsValueF32,
         points: &mut LpsSamplePointBuf,
         out: &mut LpsSampleRgba16Buf,
     ) -> Result<(), LpsError> {
-        self.apply_uniforms(uniforms)?;
+        self.bind_uniforms(uniforms)?;
         if points.count() != out.count() {
             return Err(LpsError::Render(format!(
                 "sample_points_rgba16: point count {} does not match output count {}",
+                points.count(),
+                out.count()
+            )));
+        }
+        self.sample_points_rgba16_bound(points, out, points.count())
+    }
+
+    /// Bind `uniforms` into the instance for the sampling calls that follow.
+    ///
+    /// The values stay bound until the next bind or [`Self::render_frame`]
+    /// (which binds its own).
+    pub fn bind_uniforms(&self, uniforms: &LpsValueF32) -> Result<(), LpsError> {
+        self.apply_uniforms(uniforms)
+    }
+
+    /// Sample the first `count` points of `points` with the uniforms last
+    /// bound, writing the first `count` results of `out`; the tails of both
+    /// buffers are untouched.
+    pub fn sample_points_rgba16_bound(
+        &self,
+        points: &mut LpsSamplePointBuf,
+        out: &mut LpsSampleRgba16Buf,
+        count: u32,
+    ) -> Result<(), LpsError> {
+        if count > points.count() || count > out.count() {
+            return Err(LpsError::Render(format!(
+                "sample_points_rgba16_bound: count {count} exceeds the point buffer ({}) or the output buffer ({})",
                 points.count(),
                 out.count()
             )));
@@ -311,7 +344,7 @@ impl LpsPxShader {
             render_samples_fn_name,
             &mut points_buf,
             &mut out_buf,
-            points.count(),
+            count,
         )
     }
 

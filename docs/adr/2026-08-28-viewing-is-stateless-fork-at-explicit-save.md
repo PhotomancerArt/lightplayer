@@ -1,8 +1,11 @@
 # ADR: Viewing is stateless; fork at explicit save
 
-- **Status:** Accepted
+- **Status:** Accepted (refined 2026-08-30 — see the Decision section)
 - **Date:** 2026-08-28
 - **Deciders:** Photomancer
+- **Refined 2026-08-30** (`2026-08-30-relationship-control-three-segment-bar.md`):
+  fork is still the explicit save; it is no longer gated on the overlay
+  being dirty, so a pristine example can be kept without editing it first.
 - **Plan:** lp2025/2026-08-28-1459-examples-url-handling (PR #461)
 - **Supersedes:** the seed-on-click example model — the 2026-07-06
   studio-project-management plan's `06-examples-place.md` deferred this
@@ -69,6 +72,21 @@ One model, two entry points:
   ruled at G1), the top bar's "example" pill vanishes, and subsequent
   saves flow to OPFS — with the install's catalog broadcast triggering
   the same auto-publish any fork gets.
+
+> **Amended 2026-08-30 — the gesture is unchanged; the dirty gate is
+> gone** (`2026-08-30-relationship-control-three-segment-bar.md`).
+> Save-is-the-fork stands exactly as written, but it was only ever
+> reachable through the Save button, which exists only while the overlay
+> is dirty — so keeping an example required editing it first, which is
+> this model biting the person who decided to stop viewing. The project
+> popover's **"Save a copy"** is now available whenever the session is
+> transient, pristine or not: it dispatches the same
+> `ProjectOp::SaveOverlay`, and a pristine save commits nothing
+> (`written == 0`) while still running the fork, so both paths are one
+> path. Fork-on-first-*edit* remains rejected (see Alternatives). The
+> "example pill vanishes" above is a state change rather than a
+> disappearance now: the bar's relationship face flips Example → Private
+> at the same moment the URL heals.
 
 ## Consequences
 

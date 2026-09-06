@@ -14,9 +14,7 @@ pub use coordinates::{
 };
 pub use lpc_model::VisualProduct;
 pub use render_texture_request::RenderTextureRequest;
-pub use sample_request::{
-    TextureSampleBatch, TextureUvSamplePoint, VisualSampleBufferRequest, VisualSampleTarget,
-};
+pub use sample_request::{TextureSampleBatch, TextureUvSamplePoint, VisualSampleStream};
 pub use sample_result::{VisualSample, VisualSampleBatchResult};
 pub use space::{
     CellProjection, ConsumerPolicy, ProductSpaceInfo, ProjectionOrigin, ProjectionShape,

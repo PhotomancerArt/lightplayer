@@ -12,6 +12,11 @@
 //! - Classic ESP32 SRAM1: **word-mirrored**, `iram = 0x400B_FFFC − (dram −
 //!   0x3FFE_0000)` — the two windows run in opposite directions at word
 //!   granularity, bytes within each word verbatim (C2b, 5 sentinels).
+//! - Classic ESP32 SRAM0: **identity** — there is no D-bus view; the address a
+//!   word is written at is the address it is fetched at — and **word-only**
+//!   ([`AccessRule::WordOnly`]): a byte or halfword access, or a misaligned
+//!   word, is a `LoadStoreError` (measured 2026-09-05, `test_sram0_exec`).
+//!   The JIT code region's home since then ([`crate::board::BoardProfile::esp32`]).
 //!
 //! Not every region is SRAM. Firmware `.text` executes from **flash through
 //! the cache** (XIP), which the address space exposes as two read-only windows
@@ -118,6 +123,24 @@ impl AliasRule {
     }
 }
 
+/// Which data accesses a region's bus accepts.
+///
+/// Classic ESP32 SRAM0 (`0x4008_0000..0x400A_0000`) hangs off the instruction
+/// bus only: aligned 32-bit loads and stores work, anything narrower or
+/// misaligned is a `LoadStoreError` (EXCCAUSE 3). Measured on the dig2go on
+/// 2026-09-05 by `fw-esp32v3`'s `test_sram0_exec` rig — a byte store at
+/// `0x4008_8000` faulted with EXCVADDR = that address, while 16,384 aligned
+/// word stores across the same region all read back. Instruction fetch is
+/// unaffected (that is what the memory is for).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AccessRule {
+    /// Any width, any alignment (SRAM1, SRAM2, flash).
+    Any,
+    /// Aligned 32-bit loads and stores only; narrower or misaligned data
+    /// access faults with [`EXC_LOAD_STORE_ERROR`]. Fetch is unaffected.
+    WordOnly,
+}
+
 /// A contiguous, `Vec`-backed memory region.
 ///
 /// A region is addressable at its D-bus range `[dbus_start, dbus_start + len)`
@@ -129,6 +152,7 @@ struct Region {
     alias: Option<AliasRule>,
     data: Vec<u8>,
     writable: bool,
+    access: AccessRule,
 }
 
 impl Region {
@@ -242,15 +266,25 @@ impl Memory {
 
     /// Add a plain read/write data region with no executable alias.
     pub fn add_ram(&mut self, dbus_start: u32, len: usize) {
-        self.push_region(dbus_start, len, None, true);
+        self.push_region(dbus_start, len, None, true, AccessRule::Any);
     }
 
     /// Add a writable region whose bytes are also fetchable at the I-bus view
     /// given by `rule`. Window containment is the caller's business — the
-    /// board profile validates its regions against its own dual-mapped window
-    /// (see [`crate::board::BoardProfile::install`]).
+    /// board profile validates its regions against its own code window (see
+    /// [`crate::board::BoardProfile::install`]).
     pub fn add_executable(&mut self, dbus_start: u32, len: usize, rule: AliasRule) {
-        self.push_region(dbus_start, len, Some(rule), true);
+        self.push_region(dbus_start, len, Some(rule), true, AccessRule::Any);
+    }
+
+    /// [`add_executable`](Self::add_executable) for a bus that takes aligned
+    /// word accesses only ([`AccessRule::WordOnly`]) — classic ESP32 SRAM0,
+    /// the JIT code region's home since 2026-09-05. The rule is almost always
+    /// [`AliasRule::Identity`] there (SRAM0 has no D-bus view: the address a
+    /// word is written at is the address it is fetched at), but the two are
+    /// independent facts and stay independent parameters.
+    pub fn add_executable_word_only(&mut self, dbus_start: u32, len: usize, rule: AliasRule) {
+        self.push_region(dbus_start, len, Some(rule), true, AccessRule::WordOnly);
     }
 
     /// Add a **read-only** region: guest loads and fetches behave as for any
@@ -271,7 +305,7 @@ impl Memory {
     /// flag: placing an image into flash is what a flasher does, not what the
     /// guest does.
     pub fn add_rom(&mut self, dbus_start: u32, len: usize, alias: Option<AliasRule>) {
-        self.push_region(dbus_start, len, alias, false);
+        self.push_region(dbus_start, len, alias, false, AccessRule::Any);
     }
 
     /// Install a region, asserting it overlaps no existing one — in either
@@ -289,6 +323,7 @@ impl Memory {
         len: usize,
         alias: Option<AliasRule>,
         writable: bool,
+        access: AccessRule,
     ) {
         assert!(len > 0, "region at {dbus_start:#x} is empty");
         let region = Region {
@@ -296,6 +331,7 @@ impl Memory {
             alias,
             data: vec![0u8; len],
             writable,
+            access,
         };
         for (view, lo, hi) in region.address_views() {
             self.assert_free((lo, hi), "new region's", view);
@@ -520,6 +556,8 @@ impl Memory {
                 return Ok(v);
             }
         }
+        self.check_width(addr, n)
+            .map_err(|_| self.load_fault(addr))?;
         let mut v = 0u32;
         for i in 0..n {
             let a = addr.wrapping_add(i);
@@ -529,6 +567,23 @@ impl Memory {
             }
         }
         Ok(v)
+    }
+
+    /// Apply the resolved region's [`AccessRule`] to an `n`-byte data access
+    /// at `addr`: a word-only region refuses anything but an aligned 4-byte
+    /// access. An unmapped `addr` passes here and faults in the byte loop that
+    /// follows, so the error carries the same address either way.
+    fn check_width(&self, addr: u32, n: u32) -> Result<(), ()> {
+        match self.resolve(addr, Access::Data) {
+            Some((ri, _)) if self.regions[ri].access == AccessRule::WordOnly => {
+                if n == 4 && addr % 4 == 0 {
+                    Ok(())
+                } else {
+                    Err(())
+                }
+            }
+            _ => Ok(()),
+        }
     }
 
     fn write_bytes(&mut self, addr: u32, n: u32, val: u32) -> Result<(), Trap> {
@@ -544,6 +599,8 @@ impl Memory {
                 return Ok(());
             }
         }
+        self.check_width(addr, n)
+            .map_err(|_| self.store_fault(addr))?;
         for i in 0..n {
             let a = addr.wrapping_add(i);
             match self.resolve(a, Access::Data) {

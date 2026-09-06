@@ -226,19 +226,19 @@ mod esp32_classic_map {
     /// Internal SRAM as the I-bus sees it: SRAM0 `0x4008_0000..0x400A_0000`
     /// (128 KB) and SRAM1 `0x400A_0000..0x400C_0000` (128 KB).
     ///
-    /// Both halves matter on this chip. SRAM1's I-bus alias is where
+    /// Both halves matter on this chip. SRAM0 is where
     /// `lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT` installs JIT'd
-    /// shader code (`0x400B_0000..0x400B_8000` as of 2026-08-02, when the
-    /// region was measured down from 92 KiB to 32 KiB and the remainder became
-    /// heap), so a frame that faulted inside a compiled shader lands in this
-    /// window and is reported rather than silently dropped.
+    /// shader code (`0x4008_8000..0x4009_8000` since 2026-09-05; before that
+    /// the region sat in SRAM1's I-bus alias, `0x400B_2000..0x400B_8000`), so
+    /// a frame that faulted inside a compiled shader lands in this window and
+    /// is reported rather than silently dropped.
     ///
-    /// The window is deliberately the *whole* SRAM1 alias rather than the JIT
+    /// The window is deliberately *both* whole SRAMs rather than the JIT
     /// region's exact bounds: this crate cannot see `lpvm-native`, and a walker
     /// that tracked the region's precise address would need editing every time
-    /// the region were resized — silently dropping shader frames until someone
-    /// noticed. Accepting all of SRAM1 costs nothing (nothing else executes
-    /// there) and cannot go stale.
+    /// the region were resized or moved — silently dropping shader frames until
+    /// someone noticed. Accepting all of SRAM0 and SRAM1 costs nothing (only
+    /// `.rwtext` and the JIT execute there) and cannot go stale.
     ///
     /// Internal ROM (`0x4000_0000..0x4008_0000`, 512 KB across ROM0 and ROM1)
     /// is excluded for the same reason as on the S3, and the exclusion is

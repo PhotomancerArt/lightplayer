@@ -65,7 +65,15 @@ Reload) plus a small JS contract:
   preserves the Response contract (`instantiateStreaming` still works);
 - `phase/progress/done/fail` — narration, dismissal (the app calls
   `done()` on its first committed render; a MutationObserver on `#main`
-  backstops surfaces that never do), and the dead end;
+  backstops surfaces that never do), and the dead end. `done()` is a
+  request: the overlay leaves only once every stylesheet `<link>` the
+  app appended to `<head>` has loaded (or errored) and `document.fonts`
+  has settled — the Tailwind sheet lands in an effect queued behind the
+  app's dismissal effect, and the bundled fonts (`font-display: block`)
+  start downloading only once it applies, so a bare-render dismissal
+  painted unstyled, text-less chrome on every cold cache (2026-09-06).
+  A 10 s cap turns a stuck asset back into that unstyled beat rather
+  than an overlay that never leaves;
 - `engineFetch = {url, promise}` — the engine handoff. The shell starts
   the engine download the moment the app wasm's BYTES finish
   (sequential by design: two multi-MB fetches in parallel starve each

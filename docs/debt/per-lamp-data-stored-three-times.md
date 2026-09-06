@@ -83,8 +83,9 @@ project. On a four-channel show, node cost already exceeds LED cost by 2×.
 doubt.) For the real target — **1500 LEDs on four channels** — that is ~78 KB
 gone before a single LED, leaving ~96 KB of the 178,176 B arena, i.e. a budget
 of ~64 B/LED just to fit and less once the compile transient is counted. **The
-per-node cost deserves the same alloc-diff treatment this entry gave per-LED,
-and nobody has done it.**
+per-node cost deserves the same alloc-diff treatment this entry gave per-LED**
+— done 2026-09-06, see the incident log: ≈19.5 KB per pair at end of startup,
+72 % of it shared bookkeeping.
 
 ## Paying it down
 
@@ -126,6 +127,16 @@ Three separable steps, cheapest first:
 
 ## Incident log
 
+- **2026-09-06** — the per-node cost attributed (`docs/reports/2026-09-06-classic-not-enough-heap.md`
+  §4; projects `projects/test/basic-{2n,4n,2n-half}`, probe
+  `lp-core/lpc-engine/tests/per_node_memory_table.rs`): **≈19.5 KB per
+  fixture+output pair** of node-level heap on the device at end of startup
+  (10.4 KB at load, ~10 KB in the first frame) plus 40 B/lamp — the 14 KB
+  estimate above was low by a third. 72 % of the pair is shared bookkeeping
+  (loader/runtime spine 4.7 KB, registry inventory 4.4 KB, resolver cache +
+  interning 3.8 KB, bindings 1.2 KB), 26 % the two nodes' own slot shapes;
+  the shader compile is 0 B/pair. Per lamp on the same instrument: 37 B,
+  owner for owner the 2026-09-02 figure.
 - **2026-08-02** — attributed. Prior to this the engine-side ~68 B/LED was
   recorded in the flash-budget ADR as "unattributed and the single most
   valuable RAM lead this chip has", and was believed to scale with `render_size`.
@@ -153,6 +164,23 @@ Three separable steps, cheapest first:
   retained 82,864 → 52,864 B; the classic reads ≈43 B/LED all-in with
   interpolation off. The remaining lamp-scaled copy is the classic's
   `DisplayPipeline.current` (6 B/LED, +12 with interpolation).
+- **2026-09-06** — `direct_channels` encodes as `DirectChannels::Identity(n)`
+  for every document-resolved mapping (4 B/lamp → 4 B per fixture; zook tick
+  1 host slope 21.7 → 17.7 B/LED), and the playlist crossfade's two per-frame
+  sample-outs are resident for the transition (0 B/lamp/frame of graphics
+  churn while a fade runs). Report addendum:
+  `docs/reports/2026-09-02-per-lamp-memory-table.md` "After (2026-09-06)".
+- **2026-09-06 (later)** — the two graphics sample buffers are gone as
+  per-lamp residents: direct sampling streams through a bounded window
+  (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`) — 128 points
+  of coordinates and results per Direct fixture (2 KB), refilled from the
+  mapping every render instead of held per lamp — and the 8 B/lamp coordinate
+  transient at first render is gone with them. Device-side Direct residents
+  33 → 17 B/LED (mapping 8 at load, output samples 6, 8-bit frame 3); zook
+  emulator startup `frame` retained 55,020 → 33,068 B. The price is ~70
+  cycles/lamp/render of coordinate regeneration (+3.6% of zook's steady
+  frame on the C6 model), integer-exact. Attribution and after-figures:
+  `docs/reports/2026-09-06-small-dome-first-frame-budget.md`.
 - **2026-08-03** — step 1 paid down in PR #303 (−8 B/LED resident, −8 B/LED
   per-frame transient churn). Step 2 is deferred while PR #301's P2 rewrites
   the flush path it would touch; the u16→u8 copy it targets gained a third
