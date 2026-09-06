@@ -29,7 +29,7 @@ features `esp32c6,server,radio`, built with the repo's own recipe.
 | Frame rate / cycle timing | **lies** | meteor 100 fps (tick 8 ms) vs 26 fps on the XIAO C6: no cache, no flash wait states, ~1 insn/cycle (§7) |
 | Wall-clock speed | **slow** | 68.6 M insns/s idle (0.43× a 160 MHz core); 5 s of emulated meteor rendering took 36.4 s of wall time (§7) |
 | Determinism | **works** | two identical runs: boot bytes identical through the hello; the only diffs are heap-count digits that follow the host's connect timing (§7) |
-| Hardware harnesses (`test_rmt`, `test_dither`, `test_json`, `test_gpio`, `test_shader_compile_incremental`, `memory_fs`) | **all boot and run** | `test_shader_compile_incremental` completes to `=== DONE ===` with real numbers; the RMT/dither ones run their loops silently as designed (§5.3) |
+| Hardware harnesses (`test_rmt`, `test_dither`, `test_json`, `test_gpio`, `test_shader_compile_incremental`, `memory_fs`) | **all boot and run** | `test_shader_compile_incremental` completes to `=== DONE ===` with real numbers; the RMT/dither ones run their loops silently as designed (§5.4) |
 | GDB | **exists** (the brief assumed not) | `--gdb PORT` + Apple's `lldb` (riscv32-aware): registers, backtrace, memory read/write on the live image — how §4 was proven |
 | Peripheral trace as an inventory source | **partial** | esp-emu logs UART, PCR ("SYSTEM"), LP_* ("RTC_CNTL"), eFuse, SPI-mem, ext-mem MMU, WiFi MAC and every *unhandled* address; GPIO, RMT, TIMG, SYSTIMER, INTPRI/PLIC, GDMA and USB_JTAG are modeled but silent, so the inventory's second source is a static scan of the ELF (§8) |
 
