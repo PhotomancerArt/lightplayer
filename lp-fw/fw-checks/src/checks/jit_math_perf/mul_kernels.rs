@@ -1,18 +1,20 @@
 //! Q32 multiply baselines and candidate kernels.
 
-use log::info;
+use lps_builtins::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
 
 use super::corpus::{MUL_LHS, MUL_RHS, volatile_i32};
 use super::runner;
 
-use lps_builtins::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
-
-pub fn run() {
-    info!("[jit-math-perf] --- multiply kernels ---");
+pub fn run(read_cycles: fn() -> u32) {
+    log::info!("[jit-math-perf] --- multiply kernels ---");
     let calls = MUL_LHS.len() * MUL_RHS.len();
-    runner::measure("mul/helper-saturating", calls, || sweep_mul(helper_mul));
-    runner::measure("mul/wrapping-i64", calls, || sweep_mul(wrapping_i64_mul));
-    runner::measure("mul/wrapping-parts", calls, || {
+    runner::measure("mul/helper-saturating", calls, read_cycles, || {
+        sweep_mul(helper_mul)
+    });
+    runner::measure("mul/wrapping-i64", calls, read_cycles, || {
+        sweep_mul(wrapping_i64_mul)
+    });
+    runner::measure("mul/wrapping-parts", calls, read_cycles, || {
         sweep_mul(wrapping_parts_mul)
     });
 }

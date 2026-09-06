@@ -10,7 +10,7 @@
 //! `lp-cli` depends on both, so it is the natural home. If this test ever
 //! fails, fix the registry that is wrong — do not relax the assertion.
 
-use fw_checks::{FwCheckConfig, PayloadHeader, all_checks, find_check};
+use fw_checks::{FwCheckConfig, PayloadHeader, all_checks, find_check, write_header};
 use lp_emu_validate::header::InbandHeader;
 use lp_emu_validate::payload::{ALL_PAYLOADS, Sentinel};
 use lp_emu_validate::{FieldClass, HEADER_PREFIX, RECORD_PREFIX, ValidateConfig};
@@ -164,6 +164,60 @@ fn the_uart_bridges_ready_line_is_the_line_the_firmware_prints() {
         assert_eq!(&caps["rx"], "17");
         assert_eq!(caps["prev_drop_to_uart"], *prev_to_uart.to_string());
         assert_eq!(caps["prev_drop_to_usb"], *prev_to_usb.to_string());
+    }
+}
+
+/// The header line every C6 harness now prints through
+/// `fw_checks::write_header(&mut esp_println::Printer, ..)` (G3 sitting-1
+/// blocker: `test_gpio_calibrate` installed no logger, so the log-based
+/// `emit_header` never reached a silicon capture there). Pinned per payload
+/// so a change to `PayloadHeader`'s `Display` or to `write_header`'s framing
+/// (the trailing `\n`) shows up here first, rather than at a desk.
+#[test]
+fn every_payloads_header_line_is_pinned() {
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "shader-compile-stress",
+            "esp32c6,test_shader_compile_incremental",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"shader-compile-stress\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_shader_compile_incremental\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "gpio-calibrate",
+            "esp32c6,test_gpio_calibrate",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"gpio-calibrate\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_gpio_calibrate\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "uart-bridge",
+            "esp32c6,test_uart_bridge",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"uart-bridge\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_uart_bridge\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "jit-math-perf",
+            "esp32c6,test_jit_math_perf",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"jit-math-perf\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_jit_math_perf\",\"firmware_dirty\":false}\n",
+        ),
+    ];
+    for (payload, firmware_features, expected) in cases {
+        let header = PayloadHeader {
+            payload,
+            chip: "esp32c6",
+            firmware_commit: "d6cfaa2051ae",
+            firmware_features,
+            firmware_dirty: false,
+        };
+        let mut out = String::new();
+        write_header(&mut out, &header).expect("writing to a String never fails");
+        assert_eq!(&out, expected, "payload `{payload}`");
+    }
+
+    // A payload with no row above is a payload this test forgot, not one that
+    // needs no header — every payload prints one.
+    for payload in ALL_PAYLOADS {
+        assert!(
+            cases.iter().any(|(name, ..)| *name == payload.name),
+            "payload `{}` has no pinned header line in this test",
+            payload.name
+        );
     }
 }
 

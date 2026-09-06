@@ -36,6 +36,11 @@ name = "pins"
 description = "Payloads that make a claim about a pin."
 payloads = ["gpio-calibrate"]
 
+[[set]]
+name = "jit-math-perf"
+description = "The Q32 math kernel cycle-cost payload (Q12 ledger, cheapest test_* migration): mul/div/sin kernels and LUT access cost against the PMU cycle counter. Timing only — never a gate under esp-emu, which has no cycle model."
+payloads = ["jit-math-perf"]
+
 # ---------------------------------------------------------------------------
 # Configurations
 # ---------------------------------------------------------------------------

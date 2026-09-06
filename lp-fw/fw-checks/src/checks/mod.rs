@@ -5,6 +5,8 @@
 // because `lp-cli` happens to enable it.
 #[cfg(any(feature = "check-gpio-calibrate", test))]
 pub mod gpio_calibrate;
+#[cfg(feature = "check-jit-math-perf")]
+pub mod jit_math_perf;
 #[cfg(feature = "check-shader-compile")]
 pub mod shader_compile;
 #[cfg(any(feature = "check-uart-bridge", test))]

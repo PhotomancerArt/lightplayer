@@ -94,7 +94,11 @@ test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat vi
 memory_fs = []  # Use in-memory filesystem instead of persistent flash
 test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wires runner)
 test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
-test_jit_math_perf = ["lps-builtins"]  # JIT Q32 math perf harness (cycle timing; no pipeline)
+# JIT Q32 math perf harness (cycle timing; no pipeline). The corpus and
+# kernels live in fw-checks as the `jit-math-perf` payload; this feature is
+# the alias that keeps `just fwtest-jit-math-perf-esp32c6` working (Q12
+# retirement ledger, notes.md).
+test_jit_math_perf = ["dep:fw-checks", "fw-checks/check-jit-math-perf"]
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
 # f32 soft-float semantics harness (roadmap M9). The ONLY configuration in this
 # crate that turns `float-f32` on: the C6 has no FPU, ships Fixed-mode shaders,

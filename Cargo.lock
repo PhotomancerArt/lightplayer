@@ -3918,6 +3918,7 @@ name = "fw-checks"
 version = "40.0.0"
 dependencies = [
  "log",
+ "lps-builtins",
  "serde",
  "serde_json",
 ]

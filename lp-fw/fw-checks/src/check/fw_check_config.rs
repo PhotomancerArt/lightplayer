@@ -67,7 +67,7 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         done_marker: Some("[jit-math-perf] === DONE ==="),
         trace_slug: "jit-math-perf",
         supported_targets: ESP32_ONLY,
-        emits_records: false,
+        emits_records: true,
     },
     FwCheckConfig {
         check: FwCheck::Json,

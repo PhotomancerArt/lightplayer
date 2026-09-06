@@ -37,13 +37,21 @@ pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
     let mut serial = Esp32UsbSerialIo::new(usb_serial);
 
     Timer::after(Duration::from_millis(100)).await;
-    fw_checks::emit_header(&fw_checks::PayloadHeader {
-        payload: "gpio-calibrate",
-        chip: TARGET,
-        firmware_commit: env!("LP_BUILD_COMMIT"),
-        firmware_features: env!("LP_BUILD_FEATURES"),
-        firmware_dirty: fw_checks::str_is_true(env!("LP_BUILD_DIRTY")),
-    });
+    // This harness installs no logger (see the crate docs on why the
+    // calibration protocol lives entirely over USB-Serial-JTAG with no `log`
+    // sink), so `fw_checks::emit_header` — which goes through `log` — would be
+    // a silent no-op here. `write_header` prints through any `fmt::Write`
+    // sink, so it reaches the port regardless.
+    let _ = fw_checks::write_header(
+        &mut esp_println::Printer,
+        &fw_checks::PayloadHeader {
+            payload: "gpio-calibrate",
+            chip: TARGET,
+            firmware_commit: env!("LP_BUILD_COMMIT"),
+            firmware_features: env!("LP_BUILD_FEATURES"),
+            firmware_dirty: fw_checks::str_is_true(env!("LP_BUILD_DIRTY")),
+        },
+    );
     reply(&mut serial, Response::Ready { target: TARGET });
 
     let mut parser = LineParser::new();
