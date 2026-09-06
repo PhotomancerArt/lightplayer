@@ -70,6 +70,7 @@ desk session gets wasted.
 | `shader-compile-stress` | `test_shader_compile_incremental` | `[inc-shader-compile] === DONE ===` | `checks::shader_compile` (record types, host reporter) |
 | `gpio-calibrate` | `test_gpio_calibrate` | `CAL READY target=` (it serves; it never finishes) | `checks::gpio_calibrate` (the `CAL` line protocol, the duty ramp) |
 | `uart-bridge` | `test_uart_bridge` | `UART-BRIDGE READY ` (it serves until unplugged) | `checks::uart_bridge` (the bounded queue, the pump step, the ready line) |
+| `jit-math-perf` | `test_jit_math_perf` | `[jit-math-perf] === DONE ===` | `checks::jit_math_perf` (the corpus, the Q32 kernels, the benchmark runner — the cycle counter itself is injected as a `fn() -> u32`, since reading it is a chip fact rather than portable arithmetic) |
 
 ### `uart-bridge` is an instrument, not a measurement
 

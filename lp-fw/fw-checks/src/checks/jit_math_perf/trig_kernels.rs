@@ -1,42 +1,43 @@
 //! Q32 trig baselines and candidate kernels.
 
-extern crate alloc;
-
 use alloc::vec::Vec;
 
-use log::info;
+use lps_builtins::builtins::glsl::sin_q32::__lps_sin_q32;
+use lps_builtins::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
 
 use super::corpus::{ANGLES, Q_FRAC_PI_2, Q_ONE, Q_PI, Q_TAU, volatile_i32};
 use super::mul_kernels::wrapping_i64_mul;
 use super::runner;
 
-use lps_builtins::builtins::glsl::sin_q32::__lps_sin_q32;
-use lps_builtins::builtins::lpir::fmul_q32::__lp_lpir_fmul_q32;
-
 const FAST_B: i32 = 83_443; // 4 / pi
 const FAST_C: i32 = -26_561; // -4 / pi^2
 const FAST_P: i32 = 14_746; // 0.225
 
-pub fn run() {
-    info!("[jit-math-perf] --- trig kernels ---");
-    runner::measure("trig/sin-reference-taylor", ANGLES.len(), || {
-        sweep_sin(reference_taylor_sin)
-    });
-    runner::measure("trig/sin-current-builtin", ANGLES.len(), || {
+pub fn run(read_cycles: fn() -> u32) {
+    log::info!("[jit-math-perf] --- trig kernels ---");
+    runner::measure(
+        "trig/sin-reference-taylor",
+        ANGLES.len(),
+        read_cycles,
+        || sweep_sin(reference_taylor_sin),
+    );
+    runner::measure("trig/sin-current-builtin", ANGLES.len(), read_cycles, || {
         sweep_sin(current_sin)
     });
-    runner::measure("trig/sin-fast-parabolic", ANGLES.len(), || {
+    runner::measure("trig/sin-fast-parabolic", ANGLES.len(), read_cycles, || {
         sweep_sin(fast_parabolic_sin)
     });
-    runner::measure("trig/sin-cubic", ANGLES.len(), || sweep_sin(cubic_sin));
+    runner::measure("trig/sin-cubic", ANGLES.len(), read_cycles, || {
+        sweep_sin(cubic_sin)
+    });
 
     quality("sin-fast-parabolic", fast_parabolic_sin);
     quality("sin-cubic", cubic_sin);
 
-    lut_suite(256);
-    lut_suite(512);
-    lut_suite(1024);
-    lut_suite(2048);
+    lut_suite(256, read_cycles);
+    lut_suite(512, read_cycles);
+    lut_suite(1024, read_cycles);
+    lut_suite(2048, read_cycles);
 }
 
 fn sweep_sin(kernel: fn(i32) -> i32) -> i32 {
@@ -47,15 +48,21 @@ fn sweep_sin(kernel: fn(i32) -> i32) -> i32 {
     acc
 }
 
-fn lut_suite(size: usize) {
+fn lut_suite(size: usize, read_cycles: fn() -> u32) {
     let table = build_sine_lut(size);
     let calls = ANGLES.len();
-    runner::measure(&alloc::format!("trig/lut-nearest-{size}"), calls, || {
-        sweep_lut(&table, false)
-    });
-    runner::measure(&alloc::format!("trig/lut-linear-{size}"), calls, || {
-        sweep_lut(&table, true)
-    });
+    runner::measure(
+        &alloc::format!("trig/lut-nearest-{size}"),
+        calls,
+        read_cycles,
+        || sweep_lut(&table, false),
+    );
+    runner::measure(
+        &alloc::format!("trig/lut-linear-{size}"),
+        calls,
+        read_cycles,
+        || sweep_lut(&table, true),
+    );
     quality_lut(&alloc::format!("sin-lut-nearest-{size}"), &table, false);
     quality_lut(&alloc::format!("sin-lut-linear-{size}"), &table, true);
 }
@@ -89,7 +96,7 @@ fn quality(label: &str, kernel: fn(i32) -> i32) {
         sum_abs += err as u64;
     }
     let mean_abs = sum_abs / ANGLES.len() as u64;
-    info!(
+    log::info!(
         "[jit-math-perf] quality {label:<24} max_abs={max_abs:>8} mean_abs={mean_abs:>8} \
          worst_angle={worst}",
     );
@@ -114,7 +121,7 @@ fn quality_lut(label: &str, table: &[i16], linear: bool) {
         sum_abs += err as u64;
     }
     let mean_abs = sum_abs / ANGLES.len() as u64;
-    info!(
+    log::info!(
         "[jit-math-perf] quality {label:<24} max_abs={max_abs:>8} mean_abs={mean_abs:>8} \
          worst_angle={worst}",
     );

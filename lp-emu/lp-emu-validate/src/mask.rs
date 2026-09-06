@@ -173,6 +173,31 @@ pub static ROM_PRINTF_COLUMNS: MaskRule = MaskRule::new(
     " ",
 );
 
+/// The `jit-math-perf` bench line's cycle figures:
+/// `[jit-math-perf] bench <label> median=N per_call=N avg=N min=N max=N
+/// calls=N checksum=N`. `calls` (corpus size) and `checksum` (a deterministic
+/// XOR of the kernel's outputs) are left alone — only the five numbers with a
+/// clock in them are masked, because the structured `jit-bench` records carry
+/// the same figures and are compared instead.
+pub static JIT_BENCH_CYCLES: MaskRule = MaskRule::new(
+    "jit-bench-cycles",
+    "cycle counts in the jit-math-perf bench line; the structured jit-bench \
+     records carry the same numbers and are compared instead",
+    FieldClass::Timing,
+    r"(median|per_call|avg|min|max)=[0-9]+",
+    "$1=N",
+);
+
+/// `[jit-math-perf] overhead summary: empty=N cycles, counter-pair=N cycles`.
+pub static JIT_OVERHEAD_CYCLES: MaskRule = MaskRule::new(
+    "jit-overhead-cycles",
+    "the overhead baseline's raw cycle counts; the jit-bench records for \
+     overhead/empty and overhead/read-counter-pair carry the same numbers",
+    FieldClass::Timing,
+    r"(empty|counter-pair)=[0-9]+ cycles",
+    "$1=N cycles",
+);
+
 /// A named, ordered set of rules.
 pub struct MaskSet {
     pub name: &'static str,
@@ -242,7 +267,23 @@ pub static BOOT_LOG: MaskSet = MaskSet {
     rules: &[&ANSI, &BOOT_TIMESTAMP, &ROM_PRINTF_COLUMNS],
 };
 
-pub static ALL_SETS: &[&MaskSet] = &[&NORMALIZE, &COMPILE_HARNESS, &WALK, &BOOT_LOG];
+/// The `jit-math-perf` set: normalise, then mask the cycle counts. `label`,
+/// `calls` and `checksum` stay comparable — memory is not in play here, only
+/// timing, and cycle-cost payloads exist to report it, not hide it.
+pub static JIT_MATH_PERF: MaskSet = MaskSet {
+    name: "jit-math-perf",
+    description: "ANSI + the cycle counts in the bench and overhead lines; \
+                  labels, call counts and checksums are left comparable",
+    rules: &[&ANSI, &JIT_BENCH_CYCLES, &JIT_OVERHEAD_CYCLES],
+};
+
+pub static ALL_SETS: &[&MaskSet] = &[
+    &NORMALIZE,
+    &COMPILE_HARNESS,
+    &WALK,
+    &BOOT_LOG,
+    &JIT_MATH_PERF,
+];
 
 pub fn mask_set(name: &str) -> Result<&'static MaskSet> {
     match ALL_SETS.iter().find(|s| s.name == name) {
@@ -351,5 +392,26 @@ mod tests {
         let timing: Vec<_> = WALK.rules_for(FieldClass::Timing).map(|r| r.name).collect();
         assert!(timing.contains(&"prose-timing"));
         assert!(!timing.contains(&"heap-ledger-k"));
+    }
+
+    #[test]
+    fn jit_math_perf_masks_cycles_but_not_labels_calls_or_checksum() {
+        let line = "[jit-math-perf] bench mul/helper-saturating median=812 per_call=1 \
+                    avg=815 min=808 max=990 calls=441 checksum=123456";
+        let masked = JIT_MATH_PERF.apply(line);
+        assert_eq!(
+            masked,
+            "[jit-math-perf] bench mul/helper-saturating median=N per_call=N \
+             avg=N min=N max=N calls=441 checksum=123456"
+        );
+    }
+
+    #[test]
+    fn jit_math_perf_masks_the_overhead_summary_line() {
+        let line = "[jit-math-perf] overhead summary: empty=6 cycles, counter-pair=14 cycles";
+        assert_eq!(
+            JIT_MATH_PERF.apply(line),
+            "[jit-math-perf] overhead summary: empty=N cycles, counter-pair=N cycles"
+        );
     }
 }

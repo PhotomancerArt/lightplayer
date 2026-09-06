@@ -1,7 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![doc = include_str!("../README.md")]
 
-#[cfg(feature = "check-shader-compile")]
+#[cfg(any(feature = "check-shader-compile", feature = "check-jit-math-perf"))]
 extern crate alloc;
 
 pub mod check;

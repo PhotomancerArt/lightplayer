@@ -10,7 +10,9 @@ rust-version.workspace = true
 default = []
 std = ["serde/std", "serde_json/std"]
 check-shader-compile = []
-check-jit-math-perf = []
+# Q32 fixed-point kernels + corpus (mul/div/sin), no chip dependency beyond
+# the injected cycle-counter function pointer (see `checks::jit_math_perf`).
+check-jit-math-perf = ["dep:lps-builtins"]
 check-json = []
 check-gpio-calibrate = []
 check-uart-bridge = []
@@ -24,6 +26,10 @@ check-msafluid = []
 serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
 serde_json = { workspace = true, default-features = false, features = ["alloc"] }
 log = { workspace = true, default-features = false }
+# `check-jit-math-perf` only: the Q32 kernels under test. Already a workspace
+# dependency of `fw-esp32c6` for the same harness — no new dependency to the
+# build, just newly linked into this crate.
+lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
 
 [lints]
 workspace = true

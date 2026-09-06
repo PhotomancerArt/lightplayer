@@ -1,31 +1,34 @@
 //! Q32 reciprocal division baselines and candidate kernels.
 
-use log::info;
+use lps_builtins::builtins::lpir::fdiv_recip_q32::__lp_lpir_fdiv_recip_q32;
 
 use super::corpus::{DIVIDENDS, DIVISORS, Q_ONE, volatile_i32};
 use super::mul_kernels::wrapping_i64_mul;
 use super::runner;
 
-use lps_builtins::builtins::lpir::fdiv_recip_q32::__lp_lpir_fdiv_recip_q32;
-
 const MAX_FIXED: i32 = 0x7FFF_FFFF;
 const MIN_FIXED: i32 = i32::MIN;
 
-pub fn run() {
-    info!("[jit-math-perf] --- division kernels ---");
+pub fn run(read_cycles: fn() -> u32) {
+    log::info!("[jit-math-perf] --- division kernels ---");
     let calls = DIVIDENDS.len() * DIVISORS.len();
-    runner::measure("div/helper-recip", calls, || sweep_div(helper_div));
-    runner::measure("div/inline-recip-rust", calls, || {
+    runner::measure("div/helper-recip", calls, read_cycles, || {
+        sweep_div(helper_div)
+    });
+    runner::measure("div/inline-recip-rust", calls, read_cycles, || {
         sweep_div(inline_recip_div)
     });
 
-    const_div_bench("div/const-2", 2 * Q_ONE);
-    const_div_bench("div/const-3", 3 * Q_ONE);
-    const_div_bench("div/const-6", 6 * Q_ONE);
-    const_div_bench("div/const-255", 255 * Q_ONE);
-    runner::measure("div/pow2-shift-2", DIVIDENDS.len(), || {
-        sweep_unary_div(|v| div_by_positive_pow2(v, 2 * Q_ONE))
-    });
+    const_div_bench("div/const-2", 2 * Q_ONE, read_cycles);
+    const_div_bench("div/const-3", 3 * Q_ONE, read_cycles);
+    const_div_bench("div/const-6", 6 * Q_ONE, read_cycles);
+    const_div_bench("div/const-255", 255 * Q_ONE, read_cycles);
+    runner::measure(
+        "div/pow2-shift-2",
+        DIVIDENDS.len(),
+        read_cycles,
+        || sweep_unary_div(|v| div_by_positive_pow2(v, 2 * Q_ONE)),
+    );
 }
 
 fn sweep_div(kernel: fn(i32, i32) -> i32) -> i32 {
@@ -40,9 +43,9 @@ fn sweep_div(kernel: fn(i32, i32) -> i32) -> i32 {
     acc
 }
 
-fn const_div_bench(label: &str, divisor: i32) {
+fn const_div_bench(label: &str, divisor: i32, read_cycles: fn() -> u32) {
     let recip2 = precompute_recip2(divisor);
-    runner::measure(label, DIVIDENDS.len(), || {
+    runner::measure(label, DIVIDENDS.len(), read_cycles, || {
         sweep_unary_div(|v| const_recip_div(v, divisor, recip2))
     });
 }
