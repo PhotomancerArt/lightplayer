@@ -25,3 +25,9 @@ pub mod xt_fp_conformance {
 /// upgrade canary. See the module docs.
 #[cfg(feature = "test_interrupt_executor")]
 pub mod interrupt_executor;
+
+/// Silicon probe for the JIT code region's SRAM0 placement: word-only
+/// access, execute-from-SRAM0, barrier need, `.rwtext` end. See the module
+/// docs.
+#[cfg(feature = "test_sram0_exec")]
+pub mod sram0_exec;

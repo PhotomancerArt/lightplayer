@@ -53,7 +53,18 @@
 // the same feature xtensa-lx-rt itself builds with.
 #![cfg_attr(
     all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
-    feature(alloc_error_handler, asm_experimental_arch)
+    feature(alloc_error_handler)
+)]
+// The SRAM0 probe harness also needs the asm feature, for its explicit
+// `isync` barrier trial. A harness build cfg's the app path out (`fw_harness`
+// is set), so the two arms never both declare it — `#![feature]` twice is an
+// error, which is why this is one attribute with an `any`, not two.
+#![cfg_attr(
+    any(
+        all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
+        feature = "test_sram0_exec"
+    ),
+    feature(asm_experimental_arch)
 )]
 #![allow(
     unstable_features,
@@ -197,8 +208,14 @@ esp_bootloader_esp_idf::esp_app_desc!();
 const HEAP_SIZE: usize = 110 * 1024;
 
 /// Bare hello build (`--no-default-features --features esp32`): M2-P1's
-/// skeleton, kept buildable as the minimal bring-up image.
-#[cfg(all(not(feature = "server"), not(feature = "radio_ram_probe")))]
+/// skeleton, kept buildable as the minimal bring-up image. Not a harness's:
+/// a `--no-default-features` harness build (`test_sram0_exec`) installs no
+/// heap, and an unused constant is a warning the clippy gate denies.
+#[cfg(all(
+    not(feature = "server"),
+    not(feature = "radio_ram_probe"),
+    not(fw_harness)
+))]
 const HEAP_SIZE: usize = 100 * 1024;
 
 /// Probe heap: the radio stack's own DRAM statics come out of the same 192 KB
@@ -1030,7 +1047,9 @@ fn main() -> ! {
     .with_rx(peripherals.GPIO3);
 
     #[cfg(feature = "test_xt_fp_conformance")]
-    tests::xt_fp_conformance::run_all()
+    tests::xt_fp_conformance::run_all();
+    #[cfg(feature = "test_sram0_exec")]
+    tests::sram0_exec::run()
 }
 
 /// Boot-to-hello entrypoint: the M2-P1 skeleton (bare build) and the M2-P3
