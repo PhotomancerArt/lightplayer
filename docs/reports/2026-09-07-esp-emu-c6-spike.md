@@ -456,6 +456,27 @@ into `0x2000_0000` or `0x6000_0000..0x600F_FFFF`, 748 register sites):
 | INTERRUPT_CORE0 `0x6001_0000` | 6 | 9 | interrupt→CPU mapping |
 | TIMG1, UART0, SPI1, GPIO, ASSIST_DEBUG, HP_APM, RNG, LP_APM | 1–3 each | 1–4 each | |
 
+Two caveats the inventory makes explicit. **The two sources are two
+images**: the static scan is of the *shipped* ELF (default features, USB-SJ
+link), the dynamic trace is of the *spike* image (UART0 link) — so UART0
+shows as dynamic-only and USB_DEVICE as static-only, and the two columns
+should be read as "what the product touches" and "what esp-emu logged",
+not as one image's before/after. And esp-emu's trace tags are
+legacy-shaped: what it logs as `RTC_CNTL` is the C6's PMU (offsets below
+`0x400`) and LP_CLKRST (above), `SYSTEM` is PCR, and `spimem` is one
+synthetic flash controller standing in for SPI0 and SPI1 — the inventory
+recovers the real blocks by offset arithmetic against the PAC. Other
+things it sharpened: the static scanner's LP_APM0 (170 sites) and
+MODEM_SYSCON (156 sites) rows are almost entirely spill-over from the
+undocumented WiFi window (the PAC's next base is the only thing that named
+them), so the blob's real footprint is ≈1,088 sites; the SPI flash path is
+the busiest peripheral of the whole walk (14,169 decoded `USR` commands —
+13,528 reads, 634 page programs, 29 sector erases, 664 write-enables — the
+project upload and littlefs); esp-emu's IO_MUX model stops at GPIO15, so
+the pad writes for GPIO16–30 (UART0's pads and the WS281x pin GPIO18) are
+all "unhandled" and yet nothing misbehaves; and GDMA is never touched by
+any register — its only trace is its PCR clock gate.
+
 Unhandled by esp-emu during the whole walk (reads return 0, writes
 dropped — all harmless for us): IO_MUX pad registers
 `0x6009_0044..0x6009_007C` (GPIO16–30: UART0 pads and the flash pins),
