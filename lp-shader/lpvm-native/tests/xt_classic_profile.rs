@@ -4,15 +4,17 @@
 //! executed instruction set, proven on silicon (multi-board P6: zero
 //! divergences, full corpus). What classic changes is the **memory system**:
 //! the heap has no I-bus view, and JIT code must be *installed* into a fixed
-//! SRAM1 region through a word-mirrored D-bus walk
+//! region — SRAM0 by default (identity write address, word-only bus), or the
+//! legacy SRAM1 region through a word-mirrored D-bus walk
 //! ([`lpvm_native::codemem_esp32`]).
 //!
 //! These tests run the real compiler pipeline (LPIR → regalloc → `isa/xt`
 //! emit → [`link_jit_at`]) and execute the result on `lp-xt-emu` under
-//! `BoardProfile::esp32()`, whose alias model is hardware-measured. The
-//! flagship test installs the image through the descending mirrored write
-//! walk — the exact discipline the device uses — and executes it at the
-//! I-bus base, which is the whole classic JIT story minus silicon.
+//! `BoardProfile::esp32()` (SRAM0) and `BoardProfile::esp32_sram1_legacy()`
+//! (SRAM1), whose memory models are hardware-measured. The flagship test
+//! installs the image through the region's write walk — the exact discipline
+//! the device uses — and executes it at the I-bus base, which is the whole
+//! classic JIT story minus silicon.
 //!
 //! Note on the roadmap's Q6 ("run the xtn.q32 corpus under the esp32
 //! profile"): the corpus's execution engine loads a builtins base image
@@ -21,13 +23,13 @@
 //! same premise the 2026-07-29 roadmap's M4 got wrong). Since the ISA is
 //! proven identical and only the memory model differs, THIS file is the
 //! classic guard instead: emitted-code execution + the install walk under
-//! the measured classic alias. Recorded as a deviation in the plan.
+//! the measured classic memory models. Recorded as a deviation in the plan.
 
 use lp_collection::VecMap;
 use lpir::builder::FunctionBuilder;
 use lpir::{FloatMode, FuncId, IrType, LpirModule, LpirOp};
 use lps_shared::{FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, ParamQualifier};
-use lpvm_native::codemem_esp32::{CodeArena, CodeRegion, CodeSink, install};
+use lpvm_native::codemem_esp32::{CodeArena, CodeRegion, CodeSink, Placement, install};
 use lpvm_native::compile::compile_module;
 use lpvm_native::isa::IsaTarget;
 use lpvm_native::link::link_jit_at;
@@ -36,28 +38,75 @@ use lpvm_native::native_options::NativeCompileOptions;
 use lp_xt_emu::board::BoardProfile;
 use lp_xt_emu::{CallOutcome, Emulator, RunOutcome};
 
+/// The two (region, profile) pairs that must describe the same memory: the
+/// SRAM0 default and the legacy SRAM1 placement kept for the mirrored path.
+fn region_profile_pairs() -> [(CodeRegion, BoardProfile); 2] {
+    [
+        (CodeRegion::ESP32_DEFAULT, BoardProfile::esp32()),
+        (
+            CodeRegion::ESP32_SRAM1_LEGACY,
+            BoardProfile::esp32_sram1_legacy(),
+        ),
+    ]
+}
+
 /// The pure codemem math and the emulator's silicon-measured board model
 /// must describe the SAME region — a drift here would let host tests pass
 /// against a map the device does not have.
 #[test]
-fn code_region_matches_the_emulator_profile() {
-    let region = CodeRegion::ESP32_DEFAULT;
-    let profile = BoardProfile::esp32();
-    assert_eq!(region.dbus_base, profile.code_dbus_base);
-    assert_eq!(region.len_bytes as usize, profile.code_region_len);
-    assert_eq!(region.ibus_base(), profile.code_ibus_base());
-
-    // The inverse write map agrees with the emulator's alias rule at every
-    // word of the region (both directions of the mirror, full range).
-    let mut ibus = region.ibus_base();
-    while ibus < region.ibus_end() {
+fn code_regions_match_the_emulator_profiles() {
+    for (region, profile) in region_profile_pairs() {
         assert_eq!(
-            profile.alias.dbus_to_ibus(region.dbus_write_addr(ibus)),
-            ibus,
-            "alias mismatch at ibus {ibus:#x}"
+            region.len_bytes as usize, profile.code_region_len,
+            "{}",
+            profile.name
         );
-        ibus += 4;
+        assert_eq!(
+            region.ibus_base(),
+            profile.code_ibus_base(),
+            "{}",
+            profile.name
+        );
+
+        // The region's write address agrees with the emulator's alias rule
+        // at every word: writing there is fetchable at `ibus`, and the
+        // address lies inside the profile's code region.
+        let mut ibus = region.ibus_base();
+        while ibus < region.ibus_end() {
+            let write = region.write_addr(ibus);
+            assert_eq!(
+                profile.alias.dbus_to_ibus(write),
+                ibus,
+                "{}: alias mismatch at ibus {ibus:#x}",
+                profile.name
+            );
+            assert!(
+                profile.code_region_offset(write).is_some(),
+                "{}: write address {write:#x} outside the profile's code region",
+                profile.name
+            );
+            ibus += 4;
+        }
     }
+}
+
+/// The default really is SRAM0 on both sides: identity writes, inside the
+/// IRAM window, and NOT the SRAM1 mirror the legacy pair still pins.
+#[test]
+fn default_pair_is_sram0_and_legacy_pair_is_the_mirror() {
+    let (region, profile) = &region_profile_pairs()[0];
+    assert!(matches!(region.placement, Placement::Sram0 { .. }));
+    assert_eq!(profile.code_dbus_base, region.ibus_base());
+    assert_eq!(region.write_addr(region.ibus_base()), region.ibus_base());
+    assert!((0x4008_0400..0x400A_0000).contains(&region.ibus_base()));
+
+    let (region, profile) = &region_profile_pairs()[1];
+    assert!(matches!(region.placement, Placement::Sram1Mirrored { .. }));
+    assert_ne!(profile.code_dbus_base, region.ibus_base());
+    assert_eq!(
+        region.write_addr(region.ibus_base()),
+        profile.code_dbus_base + profile.code_region_len as u32 - 4
+    );
 }
 
 /// g(x) = 3x; f(x) = g(x) + 1 — two functions so the image contains a real
@@ -149,56 +198,63 @@ fn pipeline_executes_under_the_classic_profile() {
     }
 }
 
-/// A sink that performs the install through the emulator's **D-bus** view,
-/// so every write goes through the mirrored alias exactly as the device's
-/// volatile-write walk does.
-struct EmuDbusSink<'a> {
+/// A sink that performs the install through the emulator's memory at the
+/// region's write address — the I-bus address itself for SRAM0 (where the
+/// emulator's word-only rule would fault anything narrower), the mirrored
+/// D-bus address for SRAM1 — exactly as the device's volatile word walk does.
+struct EmuWriteSink<'a> {
     emu: &'a mut Emulator,
 }
 
-impl CodeSink for EmuDbusSink<'_> {
-    fn write_word(&mut self, dbus_addr: u32, word: u32) {
+impl CodeSink for EmuWriteSink<'_> {
+    fn write_word(&mut self, write_addr: u32, word: u32) {
         self.emu
             .mem
-            .write_u32(dbus_addr, word)
-            .unwrap_or_else(|t| panic!("D-bus store at {dbus_addr:#x} trapped: {t:?}"));
+            .write_u32(write_addr, word)
+            .unwrap_or_else(|t| panic!("word store at {write_addr:#x} trapped: {t:?}"));
     }
 }
 
-/// The flagship classic-memory-model test: link at the arena's span base,
-/// install through the DESCENDING mirrored D-bus walk, execute at the I-bus
-/// base. If the codemem math and the silicon-measured alias model disagree
-/// anywhere — direction, word granularity, endianness within the word, span
-/// bounds — the emitted code is scrambled and this cannot pass.
+/// The flagship classic-memory-model test, on both placements: link at the
+/// arena's span base, install through the region's write walk (ascending
+/// identity words into SRAM0; the DESCENDING mirrored D-bus walk for SRAM1),
+/// execute at the I-bus base. If the codemem math and the silicon-measured
+/// memory model disagree anywhere — direction, word granularity, endianness
+/// within the word, span bounds, access width — the emitted code is
+/// scrambled or the install traps, and this cannot pass.
 #[test]
-fn mirrored_install_walk_executes_real_emitted_code() {
-    let mut arena = CodeArena::new(CodeRegion::ESP32_DEFAULT);
-    let mut emu = Emulator::with_profile(BoardProfile::esp32());
+fn install_walk_executes_real_emitted_code_on_both_placements() {
+    for (region, profile) in region_profile_pairs() {
+        let mut arena = CodeArena::new(region);
+        let mut emu = Emulator::with_profile(profile);
 
-    // Reserve a span exactly as the placed pipeline would; first-fit puts it
-    // at the region base, matching the profile's code_ibus_base.
-    let probe = compile_and_link_at(0); // link once to learn the image size
-    let span = arena.alloc(probe.0.len() as u32).expect("span fits");
-    let (code, entry_off) = compile_and_link_at(span);
+        // Reserve a span exactly as the placed pipeline would; first-fit puts
+        // it at the region base, matching the profile's code_ibus_base.
+        let probe = compile_and_link_at(0); // link once to learn the image size
+        let span = arena.alloc(probe.0.len() as u32).expect("span fits");
+        assert_eq!(span, profile.code_ibus_base(), "{}", profile.name);
+        let (code, entry_off) = compile_and_link_at(span);
 
-    install(
-        arena.region(),
-        span,
-        &code,
-        &mut EmuDbusSink { emu: &mut emu },
-    )
-    .expect("install within the reserved span");
+        install(
+            arena.region(),
+            span,
+            &code,
+            &mut EmuWriteSink { emu: &mut emu },
+        )
+        .expect("install within the reserved span");
 
-    match emu.run_loaded_with_args(span + entry_off, &[0, 14], &mut lp_xt_emu::NoopTracer, None) {
-        CallOutcome::Ok { lo, .. } => assert_eq!(lo as i32, 14 * 3 + 1),
-        CallOutcome::Trap(t) => panic!("installed code trapped: {t:?}"),
+        match emu.run_loaded_with_args(span + entry_off, &[0, 14], &mut lp_xt_emu::NoopTracer, None)
+        {
+            CallOutcome::Ok { lo, .. } => assert_eq!(lo as i32, 14 * 3 + 1, "{}", profile.name),
+            CallOutcome::Trap(t) => panic!("{}: installed code trapped: {t:?}", profile.name),
+        }
     }
 }
 
 /// The classic capacity edge stays a clean error at real-region scale: an
 /// image larger than the region must be a `TooLarge`, never a wild write.
-/// (Sized from the region itself, so the 2026-08-02 shrink to 32 KiB needed
-/// no edit here.)
+/// (Sized from the region itself, so neither the 2026-08-02 shrink to 32 KiB
+/// nor the 2026-09-05 move to 64 KiB of SRAM0 needed an edit here.)
 #[test]
 fn oversized_image_is_a_clean_toolarge() {
     let mut arena = CodeArena::new(CodeRegion::ESP32_DEFAULT);
