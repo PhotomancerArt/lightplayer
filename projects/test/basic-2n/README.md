@@ -48,7 +48,9 @@ python3 projects/test/basic-2n/generate.py
 
 Python 3 stdlib only, deterministic, writes all three directories. ⚠️ Node-def
 JSON is read with `kind` as a leading header, so the script preserves key
-order and never sorts keys.
+order and never sorts keys — except the `nodes` map in `module.json`, which it
+emits sorted by name because that is the canonical writer's order and
+`lp-cli/tests/examples_valid.rs` holds every checked-in rig to those bytes.
 
 ## Who uses them
 
