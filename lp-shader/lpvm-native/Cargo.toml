@@ -110,7 +110,7 @@ lp-riscv-emu = { path = "../../lp-emu/lp-riscv-emu", optional = true, features =
 lp-xt-inst = { path = "../../lp-xt/lp-xt-inst", optional = true }
 # Host Xtensa execution (feature `emu-xt`): the emulator, the ELF loader for the
 # builtins base image, and the build-time-embedded image itself.
-lp-xt-emu = { path = "../../lp-xt/lp-xt-emu", optional = true }
+lp-xt-emu = { path = "../../lp-emu/lp-xt-emu", optional = true }
 lp-xt-elf = { path = "../../lp-xt/lp-xt-elf", optional = true }
 lps-builtins-xt-image = { path = "../../lp-xt/lps-builtins-xt-image", optional = true }
 
@@ -132,7 +132,7 @@ lps-builtins = { path = "../lps-builtins", default-features = false }
 # tests use the emulator and loader as their oracle at *default* features, where
 # `emu-xt` is off — `emu-xt` is about the host execution *engine*, not about
 # whether tests may run guest code.
-lp-xt-emu = { path = "../../lp-xt/lp-xt-emu" }
+lp-xt-emu = { path = "../../lp-emu/lp-xt-emu" }
 lp-xt-elf = { path = "../../lp-xt/lp-xt-elf" }
 
 [target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]

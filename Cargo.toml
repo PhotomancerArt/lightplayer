@@ -92,7 +92,7 @@ members = [
     "lp-emu/lp-riscv-emu-guest",
     "lp-emu/lp-riscv-emu-guest-test-app",
     "lp-xt/lp-xt-inst",
-    "lp-xt/lp-xt-emu",
+    "lp-emu/lp-xt-emu",
     "lp-xt/lp-xt-fp-vectors",
     # NOT in default-members: a device-target crate. It depends on `esp-println`,
     # which resolves against a chip and a bare-metal target, so a host `cargo
@@ -110,7 +110,7 @@ members = [
 ]
 # Xtensa DEVICE-target crates (esp toolchain): lp-xt/fixtures is its own
 # workspace; lp-xt-emu-guest is its out-of-tree member (see lp-xt/README.md).
-exclude = ["lp-xt/fixtures", "lp-xt/lp-xt-emu-guest"]
+exclude = ["lp-xt/fixtures", "lp-emu/lp-xt-emu-guest"]
 resolver = "2"
 
 # Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32c6 from default workspace builds (cross-target only)
@@ -181,7 +181,7 @@ default-members = [
     "lp-emu/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
     "lp-xt/lp-xt-inst",
-    "lp-xt/lp-xt-emu",
+    "lp-emu/lp-xt-emu",
     "lp-xt/lp-xt-fp-vectors",
     "lp-xt/lp-xt-elf",
     "lp-xt/lps-builtins-xt-image",

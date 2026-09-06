@@ -10,8 +10,8 @@ description = "Pure-Rust Xtensa (ESP32-S3 / LX7, classic ESP32 / LX6) instructio
 workspace = true
 
 [dependencies]
-lp-emu-core = { path = "../../lp-emu/lp-emu-core" }
-lp-xt-inst = { path = "../lp-xt-inst" }
+lp-emu-core = { path = "../lp-emu-core" }
+lp-xt-inst = { path = "../../lp-xt/lp-xt-inst" }
 
 # The FP conformance corpus generator. A dev-dependency, not a dependency: the
 # emulator does not need it to run, and `tests/fp_conformance.rs` is its only
@@ -19,4 +19,4 @@ lp-xt-inst = { path = "../lp-xt-inst" }
 # directly — the same crate on both sides is what makes the vectors identical,
 # and `fingerprint()` is what makes that checkable rather than assumed.
 [dev-dependencies]
-lp-xt-fp-vectors = { path = "../lp-xt-fp-vectors" }
+lp-xt-fp-vectors = { path = "../../lp-xt/lp-xt-fp-vectors" }

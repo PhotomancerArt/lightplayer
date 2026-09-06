@@ -1141,7 +1141,7 @@ fwtest-loopback-esp32s3 port="":
 # family or grid; 0 runs all of it.
 #
 # ORDERING RULE, same as fwtest-xt-jit-esp32s3 and for the same reason: the host
-# predictions in `lp-xt/lp-xt-emu/tests/fixtures/fp/` are committed FIRST, by
+# predictions in `lp-emu/lp-xt-emu/tests/fixtures/fp/` are committed FIRST, by
 # `cargo test -p lp-xt-emu --test fp_conformance`, which needs no board. A
 # device disagreement is a finding to triage — never a reason to edit a golden.
 # Regenerating a prediction from device output turns the whole campaign into a
@@ -1388,7 +1388,7 @@ fwtest-xt-fp-esp32v3 port="" family="" limit="0":
       just fp-diff "$out"
     else
       echo "$mode capture done; compare it against the S3's committed capture in"
-      echo "lp-xt/lp-xt-emu/tests/fixtures/fp/captures/ — there is no host prediction."
+      echo "lp-emu/lp-xt-emu/tests/fixtures/fp/captures/ — there is no host prediction."
     fi
 
 # Diff an FP conformance capture against the committed host predictions.
