@@ -90,12 +90,6 @@ struct OutputWire {
     /// emulator, or device alike. Rate-limited the same way — loud once per
     /// shape, not once per frame.
     capped_at_samples: Option<u32>,
-    /// What the provider took from this wire's smoothing, sampled once per
-    /// flush after the write (a lookup on the provider, never a write-path
-    /// cost). `None` = nothing reduced, which every host provider answers.
-    /// Feeds the output node's status through
-    /// [`EngineServices::output_smoothing_notice`].
-    smoothing: Option<OutputPortSmoothing>,
 }
 
 impl OutputWire {
@@ -110,7 +104,6 @@ impl OutputWire {
             parked_at_generation: None,
             truncated_at_samples: None,
             capped_at_samples: None,
-            smoothing: None,
         }
     }
 
@@ -350,15 +343,24 @@ impl EngineServices {
     ///
     /// Temporarily removes the boxed [`OutputProvider`] from `self` so sinks can be mutated without
     /// violating borrow rules.
-    /// What the provider took from this output node's smoothing, as of the
-    /// last flush — the most-reduced of its wires, or `None` when every
-    /// wire runs exactly what was authored. The output node wears it as
-    /// its `Warn` status, so a rougher wall is never a silent one.
+    /// What the provider took from this output node's smoothing — the
+    /// most-reduced of its open wires, or `None` when every wire runs
+    /// exactly what was authored. The output node wears it as its `Warn`
+    /// status, so a rougher wall is never a silent one.
+    ///
+    /// Asked of the provider live rather than cached on the wire: a port
+    /// opening or closing elsewhere on the board re-tiers this one too, so
+    /// a cache would need refreshing every flush anyway, and the per-wire
+    /// field was 24 B of heap per wire on every board — including the ones
+    /// whose provider never reduces (the emulator's heap ratchet noticed).
+    /// Called once per output per tick; each wire costs one lookup.
     pub fn output_smoothing_notice(&self, node: NodeId) -> Option<OutputPortSmoothing> {
+        let provider = self.output_provider.as_deref()?;
         self.output_sinks
             .values()
             .filter(|sink| sink.node == node)
-            .flat_map(|sink| sink.wires.iter().filter_map(|wire| wire.smoothing))
+            .flat_map(|sink| sink.wires.iter().filter_map(|wire| wire.port_handle))
+            .filter_map(|handle| provider.port_smoothing(handle))
             .max_by_key(|notice| {
                 (
                     notice.interpolation_off_above.is_some(),
@@ -454,7 +456,6 @@ impl EngineServices {
                         wire.parked_at_generation = None;
                         wire.truncated_at_samples = None;
                         wire.capped_at_samples = None;
-                        wire.smoothing = None;
                     }
                     wires.push(wire);
                 }
@@ -498,7 +499,6 @@ impl EngineServices {
 }
 
 fn close_output_wire_with(provider: &dyn OutputProvider, wire: &mut OutputWire) {
-    wire.smoothing = None;
     if let Some(handle) = wire.port_handle.take() {
         if let Err(error) = provider.close(handle) {
             log::warn!("EngineServices: failed to close output handle {handle:?}: {error}");
@@ -788,11 +788,6 @@ fn flush_one_wire(
             error,
         })?;
     wire.last_byte_count = Some(byte_count.max(wire.last_byte_count.unwrap_or(3)));
-    // After the write, not only after the open: a port opening or closing
-    // elsewhere on the board re-tiers this one too, and the provider is the
-    // only party that knows. A lookup, and `None` for every provider that
-    // never reduces.
-    wire.smoothing = provider.port_smoothing(handle);
     Ok(())
 }
 
@@ -958,9 +953,9 @@ mod tests {
     }
 
     /// The provider's smoothing notice reaches the node it belongs to and
-    /// no other, is sampled at the flush (so the badge is one flush behind,
-    /// like the fault verdict), and leaves with the sink. A provider that
-    /// never reduces — the host `MemoryOutputProvider` — yields nothing.
+    /// no other, exists only for wires with an open port (so the badge
+    /// appears with the first flush), and leaves with the sink. A provider
+    /// that never reduces — the host `MemoryOutputProvider` — yields nothing.
     #[test]
     fn output_smoothing_notice_follows_the_provider_per_node() {
         let notice = OutputPortSmoothing {
