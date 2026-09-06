@@ -125,7 +125,7 @@ const _: () = {
     assert!(pro_base + pro_len == 0x3FFE_3F20);
     // ... which is where the APP span's base is one 1,072 B data block later.
     assert!(SRAM1_ROM_APP_STACK_BASE == 0x3FFE_3F20 + 1072);
-    assert!(SRAM1_ROM_APP_STACK_BASE < CodeRegion::ESP32_DEFAULT.reclaimable_heap_span().0);
+    assert!(SRAM1_ROM_APP_STACK_BASE < CodeRegion::ESP32_DEFAULT.sram1_claim_base());
     // The two spans are separated by that data block, so they can never be
     // mistaken for one run by a free-list walk that recovers regions by address
     // contiguity (`fw-esp32v3`'s `free_list_shape` does exactly that).

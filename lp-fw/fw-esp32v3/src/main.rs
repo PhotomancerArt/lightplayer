@@ -578,11 +578,9 @@ fn add_rom_pro_stack_region() -> usize {
 /// the four-term heap total before the region itself is registered, hundreds of
 /// lines later.
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
-const ROM_APP_HEAP_BYTES: usize = (lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT
-    .reclaimable_heap_span()
-    .0
-    - lpvm_native::codemem_esp32::SRAM1_ROM_APP_STACK_BASE)
-    as usize;
+const ROM_APP_HEAP_BYTES: usize =
+    (lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.sram1_claim_base()
+        - lpvm_native::codemem_esp32::SRAM1_ROM_APP_STACK_BASE) as usize;
 
 /// The ROM's **APP-CPU** boot stack, plus the unreserved hole beside it and the
 /// 464 B head of `dram2_seg` below the JIT region, and its size.
