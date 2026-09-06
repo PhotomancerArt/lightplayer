@@ -69,10 +69,13 @@ impl DeviceByteStream for TcpByteStream {
             Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::Interrupted => {
                 Ok(0)
             }
-            Err(e) if matches!(
-                e.kind(),
-                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::BrokenPipe
-            ) =>
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    ErrorKind::ConnectionReset
+                        | ErrorKind::ConnectionAborted
+                        | ErrorKind::BrokenPipe
+                ) =>
             {
                 Err(ByteStreamError::Closed)
             }
@@ -91,10 +94,13 @@ impl DeviceByteStream for TcpByteStream {
                 {
                     std::thread::sleep(Duration::from_millis(1));
                 }
-                Err(e) if matches!(
-                    e.kind(),
-                    ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::BrokenPipe
-                ) =>
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        ErrorKind::ConnectionReset
+                            | ErrorKind::ConnectionAborted
+                            | ErrorKind::BrokenPipe
+                    ) =>
                 {
                     return Err(ByteStreamError::Closed);
                 }
@@ -107,7 +113,11 @@ impl DeviceByteStream for TcpByteStream {
     }
 
     /// TCP has no modem lines; a reset dance is accepted and ignored.
-    fn set_signals(&mut self, _dtr: Option<bool>, _rts: Option<bool>) -> Result<(), ByteStreamError> {
+    fn set_signals(
+        &mut self,
+        _dtr: Option<bool>,
+        _rts: Option<bool>,
+    ) -> Result<(), ByteStreamError> {
         Ok(())
     }
 
