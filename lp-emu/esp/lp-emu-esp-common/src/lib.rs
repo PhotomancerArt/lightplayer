@@ -38,12 +38,16 @@
 //! clock never enters the machine (plan PD5), so two runs of the same image
 //! with the same scripted host input are byte-identical.
 
+pub mod bus;
+pub mod elf;
 pub mod host;
 pub mod periph;
 pub mod regfile;
 pub mod regnames;
 pub mod trace;
 
+pub use bus::{RamRegion, SocBus, event_id, event_local, event_peripheral};
+pub use elf::{ElfImage, LoadSegment};
 pub use host::{ByteLog, ByteSink, ByteSource, HostSinks, ScriptedSource, StreamId};
 pub use periph::{BusCx, IrqLines, Peripheral, Width};
 pub use regfile::RegFile;
