@@ -174,9 +174,14 @@ what the classic adds on top (its `DisplayPipeline` buffers), is measured
 per owner in `docs/reports/2026-09-02-per-lamp-memory-table.md`; the host
 probe `lp-core/lpc-engine/tests/per_lamp_memory_table.rs` pins the slopes.
 `examples/small-dome` (6,310 lamps) is not in the record: it halts the 320 K
-guest in its first frame on the dome fixture's sample-points buffer (a
-47,600 B ask — 8 B × 5,950 lamps — with ~12 KB free, after #523 removed the
-35,700 B whole-product scratch that used to halt it first).
+guest in its first frame. Since #527 (bounded sample windows — the two 8 B/lamp
+graphics buffers and the coordinate transient are gone) it gets past every
+per-lamp ask and halts in the frame's port opens on the emulator-only
+20,480 B `Vec<HwEndpoint>` (the permissive manifest re-enumerated per open,
+see "Discounting emulator-only artifacts") with 25,625 B free but no hole
+that size. The emulator's own overheads — that Vec, the 36,864 B manifest,
+the ~30 KB in-RAM deploy — are what stand between this project and the
+record now; `docs/reports/2026-09-06-small-dome-first-frame-budget.md`.
 
 ## Ratchet, not ceiling
 

@@ -170,6 +170,17 @@ Three separable steps, cheapest first:
   sample-outs are resident for the transition (0 B/lamp/frame of graphics
   churn while a fade runs). Report addendum:
   `docs/reports/2026-09-02-per-lamp-memory-table.md` "After (2026-09-06)".
+- **2026-09-06 (later)** — the two graphics sample buffers are gone as
+  per-lamp residents: direct sampling streams through a bounded window
+  (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`) — 128 points
+  of coordinates and results per Direct fixture (2 KB), refilled from the
+  mapping every render instead of held per lamp — and the 8 B/lamp coordinate
+  transient at first render is gone with them. Device-side Direct residents
+  33 → 17 B/LED (mapping 8 at load, output samples 6, 8-bit frame 3); zook
+  emulator startup `frame` retained 55,020 → 33,068 B. The price is ~70
+  cycles/lamp/render of coordinate regeneration (+3.6% of zook's steady
+  frame on the C6 model), integer-exact. Attribution and after-figures:
+  `docs/reports/2026-09-06-small-dome-first-frame-budget.md`.
 - **2026-08-03** — step 1 paid down in PR #303 (−8 B/LED resident, −8 B/LED
   per-frame transient churn). Step 2 is deferred while PR #301's P2 rewrites
   the flush path it would touch; the u16→u8 copy it targets gained a third

@@ -240,7 +240,96 @@ C6 has no FPU, so every f32 op there is a libcall. This is the basis for the D1 
 that per-render coordinate regeneration (this plan's lever, L6) costs ~390 cycles/lamp without
 an integer `normalized_f32_to_q16`, ~40 with one.
 
-## After
+## After (2026-09-06, PR #527)
 
-_(P5 fills this in once P2–P4 land: the new streaming seam, byte-identical goldens, the integer
-coordinate conversion, and whether small-dome completes its first frame.)_
+Direct sampling streams through a bounded window
+(`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`): per Direct fixture, one 128-point
+sample-points handle and one 128-point sample-out (2 KB), coordinates regenerated from the
+mapping every render straight into the point handle, samples written into the control target
+batch by batch. The two 8 B/lamp graphics residents and the 8 B/lamp coordinate transient are
+gone; `normalized_f32_to_q16` is integer bit-exact so the regeneration is ~70 cycles/lamp on
+the C6 model. Bytes are identical (every output golden unedited;
+`lp-core/lpc-engine/tests/direct_sampling_batches.rs` renders eight examples and a
+mid-transition crossfade at capacities 1 / 7 / 128 / unbatched and requires agreement).
+
+### small-dome: past the sample buffers, halted by the emulator's port opens
+
+`profiles/2026-09-06T04-33-42--examples-small-dome--startup` (`--mode startup`; `steady-render`
+halts identically in its warm-up frame):
+
+| window | transient | retained | largest alloc |
+|---|---:|---:|---:|
+| server-boot | 47,648 B | 47,648 B | 36,864 B |
+| project-load | 127,730 B | 119,743 B | 47,600 B (the mapping — unchanged, it is the home) |
+| frame | 104,643 B (to the halt) | — | 20,010 B (output A's runtime buffer) |
+
+The frame's largest ask is now output A's 20,010 B runtime buffer: the dome's 47,600 B
+sample-points buffer, its 47,600 B coordinate Vec and its 47,600 B sample target are all
+gone from the trace. Both fixtures render, both outputs' buffers exist, and the frame reaches
+its flush — where it halts on the **first port open**:
+
+```
+Failed allocation: 20,480 bytes at ic=85,413,464
+Free at time of OOM: 25,625 bytes (derived)
+Stack: RawVec<HwEndpoint>::grow_one <- VirtualWs281xDriver::endpoints <- SyscallOutputProvider::open
+```
+
+That is the emulator's permissive 256-resource manifest re-enumerated per port open — the
+`Vec<HwEndpoint>` grown by push to 256 × 80 B = 20,480 B, listed under "Discounting
+emulator-only artifacts" in `docs/heap-budget-gate.md`. A device never allocates it (the
+classic manifest has 34 resources); with 25,625 B free but no 20,480 B hole, this project
+now fails on the emulator's overheads alone. Live at the halt: 302,055 B — project-load
+119,743, frame 104,643, server-boot 47,648 (36,864 of it the manifest), the in-RAM deploy FS
+29,919. The emulator-only items (manifest 36,864 resident + 20,480 per open, FS 29,919) are
+now ~87 KB of the 327,680 B heap on this project; that is the next lever, and it is a fidelity
+decision about the emulator, not an engine change (notes.md A8; the record stays without
+small-dome).
+
+### Device width, the recorded projects (`scripts/heap-budget-record.json`, before → after)
+
+| project / mode / window | figure | before | after |
+|---|---|---:|---:|
+| zook-dome startup frame | retained | 55,020 | 33,068 (−21,952 = −16 × 1,500 + 2,048) |
+| zook-dome startup frame | transient | 108,808 | 86,856 |
+| zook-dome startup frame | alloc_count | 9,889 | 9,888 (the coordinate Vec) |
+| zook-dome startup frame | largest_free_at_close | 171,760 | 193,712 |
+| zook-dome startup shader-compile | largest_free_at_close | 152,880 | 174,832 |
+| zook-dome steady-render frame | transient / retained / alloc_count | 1,200 / 896 / 175 | unchanged |
+| basic startup frame | retained | 40,857 | 39,049 (−1,808 = −16 × 241 + 2,048) |
+| basic steady-render frame | holes_at_close | 28 | 26 |
+| meteor startup project-load | holes_at_close | 31 | 32 (a smaller `FixtureNode` struct moves the load's layout by one hole) |
+
+Per lamp on a device (Direct path): mapping 8 at load + output samples 6 + 8-bit frame 3 =
+**17 B/lamp** resident, was 33; plus one 2 KB window per fixture with ≥ 128 lamps.
+
+**The ratchet's cycle cap.** Two further record deltas are not this change's: `basic`
+startup `frame.alloc_bytes` 151,538 → 281,511 and `meteor`'s `shader-compile` /
+`shader-link` windows (recorded as all zeros / absent, now 32,274 B transient etc.). The
+per-marker free-list walk grows with the guest's free heap, and the startup runs were
+crossing `lp-cli profile`'s default 200 M-cycle cap — zook's compile-window figures went
+missing on this branch, and on `main` the cap was already cutting basic's second frame short
+and ending meteor's run before its compile. `scripts/heap-budget-check.sh` now passes
+`--max-cycles 400000000`; those figures are the run's true values, measured for the first
+time.
+
+### Cycles (zook-dome, `steady-render`, esp32-c6 model, four captured frames)
+
+| tree | total attributed cycles | Δ vs baseline | `[jit] __render_samples_rgba16` inclusive | coordinate fill |
+|---|---:|---:|---:|---:|
+| baseline (`09a3acd8f`) | 9,578,848 | — | 6,544,488 | — (cached per key) |
+| window + coordinate scratch uploaded per batch | 10,316,814 | +7.7% | 6,548,096 | 419,060 + 346 K of `memcpy` |
+| window, fill in place (shipped) | 9,922,990 | **+3.6%** | 6,548,096 | 419,060 (`DirectCoordFill::fill`, ~70 cycles/lamp) |
+
+The shader work is identical; the difference is the per-render coordinate regeneration
+(integer bit-exact) plus a per-batch entry. The intermediate row is why the window has no
+host-side scratch: the guest's `memcpy` is ~7 cycles/byte and the 1 KB per batch upload
+cost more than the fill itself.
+
+### Host probes
+
+`per_lamp_memory_table`: zook tick-1 slope 17.72 B/lamp resident / 17.44 transient,
+dome-scale 18.42 / 18.42 — unchanged, as expected: the wasmtime backend's sample buffers live
+in wasm linear memory outside the host tracker, and the coordinate Vec's peak was never the
+tick's high-water mark. small-dome steady tick transient 5,834 B (unchanged).
+`playlist_crossfade_memory`: a transition now opens with one 1,024 B sample-out at every scale
+(was two count-sized handles: 38,416 B at ×10, 76,816 B at ×20), zero allocations after.

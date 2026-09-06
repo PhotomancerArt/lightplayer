@@ -284,3 +284,21 @@ Still open from the list above: the classic's `DisplayPipeline` copies.
 > Vec inside `FixtureNode::render_control`), with 12,445 B free. That
 > sample-points buffer is what small-dome needs next; still not in the
 > record.
+
+## After (2026-09-06, PR #527): bounded sample windows
+
+The owner table's two graphics rows — sample points 8 and sample target 8 — are gone as
+per-lamp residents. Direct sampling streams through a **window** of `min(lamps, 128)`
+points (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`): the fixture regenerates
+coordinates from the mapping every render straight into the window's point handle and
+writes each batch's samples into the control target as it comes back. Per Direct fixture
+that is one 2 KB window instead of 16 B/lamp; the 8 B/lamp coordinate transient at first
+render is gone with it. Device-side Direct residents: mapping 8 (load) + output samples 6 +
+8-bit frame 3 = **17 B/lamp**, was 33. The price is ~70 cycles/lamp/render of integer
+coordinate regeneration — +3.6% of zook's steady frame on the C6 model.
+
+Device width (record): zook startup `frame.retained` 55,020 → 33,068 B (−16 × 1,500 +
+2,048), basic 40,857 → 39,049. Host slopes unchanged (the wasmtime sample buffers were never
+in this tracker). small-dome gets past its sample buffers and halts later, on the emulator's
+port-open `Vec<HwEndpoint>` (20,480 B, emulator-only) — attribution and figures in
+`docs/reports/2026-09-06-small-dome-first-frame-budget.md`. Still not in the record.
