@@ -574,7 +574,9 @@ fn devices_card_live_feed() -> Element {
     ];
     rsx! {
         section { class: "tw:p-4",
-            div { class: "tw:grid tw:grid-cols-[repeat(3,400px)] tw:items-start tw:gap-3",
+            // Two per row like `devices_card_states`, so the sheet holds
+            // every card whole at the capture width.
+            div { class: "tw:grid tw:grid-cols-[repeat(2,400px)] tw:items-start tw:gap-3",
                 for (label , feed) in looks {
                     div { key: "{label}", class: "tw:grid tw:gap-2",
                         p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
