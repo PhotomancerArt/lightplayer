@@ -17,6 +17,7 @@ use crate::serial::SerialIo;
 use log;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::WireServerMessage;
+use lpc_wire::json::SERIAL_LINE_PREFIX;
 use lpc_wire::{ClientMessage, TransportError, json};
 
 /// Serial transport implementation
@@ -61,7 +62,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
         {
             // Stream JSON via ser-write-json (same as fw-esp32c6, no full buffer)
             self.io
-                .write(b"M!")
+                .write(SERIAL_LINE_PREFIX.as_bytes())
                 .map_err(|e| TransportError::Other(alloc::format!("Serial write error: {e}")))?;
             let mut writer = SerialIoSerWrite(&mut self.io);
             ser_write_json::ser::to_writer(&mut writer, &msg).map_err(|e| {
@@ -80,17 +81,17 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
 
         #[cfg(not(feature = "emu"))]
         {
-            // Buffered serialization path for hardware builds.
-            let json = json::to_string(&msg).map_err(|e| {
+            // Buffered serialization path for hardware builds (the shared
+            // framer, same line shape the client writers produce).
+            let message = json::to_serial_line(&msg).map_err(|e| {
                 TransportError::Serialization(format!("Failed to serialize WireServerMessage: {e}"))
             })?;
-            let message = format!("M!{json}\n");
             let message_bytes = message.as_bytes();
             log::debug!(
-                "SerialTransport: Sending message id={} ({} bytes): M!{}",
+                "SerialTransport: Sending message id={} ({} bytes): {}",
                 id,
                 message_bytes.len(),
-                json
+                message.trim_end()
             );
             self.io
                 .write(message_bytes)
@@ -150,15 +151,12 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                 }
             };
 
-            // Check for M! prefix
-            if !message_str.starts_with("M!") {
+            // Check for the M! prefix and extract the JSON after it
+            let Some(json_str) = message_str.strip_prefix(SERIAL_LINE_PREFIX) else {
                 // Not a message - skip (likely debug output or log)
                 log::trace!("SerialTransport: Skipping non-message line (no M! prefix)");
                 return Ok(None);
-            }
-
-            // Extract JSON (skip M! prefix)
-            let json_str = &message_str[2..];
+            };
 
             // Parse JSON
             match json::from_str::<ClientMessage>(json_str) {
@@ -320,6 +318,41 @@ mod tests {
         );
         assert!(written_str.contains("\"unloadProject\""));
         assert!(written_str.ends_with('\n'));
+    }
+
+    /// The client-side framer and the firmware parser are one contract: a
+    /// `ClientMessage` framed by `lpc_wire::json::to_serial_line` (what every
+    /// lpa-client serial transport writes) must come back out of `receive`.
+    /// Bare JSON without the prefix was dropped as a log line for a month
+    /// (docs/defects/2026-09-06-emu-transport-drops-unprefixed-client-lines.md).
+    #[test]
+    fn shared_framer_output_round_trips_through_receive() {
+        let mock_io = MockSerialIo::new();
+        let mut transport = SerialTransport::new(mock_io);
+
+        let client_msg = ClientMessage {
+            id: 42,
+            msg: ClientRequest::ListLoadedProjects,
+        };
+        let line = json::to_serial_line(&client_msg).unwrap();
+        transport.io.push_read(line.as_bytes());
+
+        let received = pollster::block_on(transport.receive())
+            .unwrap()
+            .expect("the framed line parses as a message, not a log line");
+        assert_eq!(received.id, 42);
+        assert!(matches!(received.msg, ClientRequest::ListLoadedProjects));
+
+        // The bare JSON the emulator transport used to write is what the
+        // parser drops, so the prefix is load-bearing rather than cosmetic.
+        let bare = line
+            .strip_prefix(SERIAL_LINE_PREFIX)
+            .expect("framer output carries the prefix");
+        transport.io.push_read(bare.as_bytes());
+        assert!(
+            pollster::block_on(transport.receive()).unwrap().is_none(),
+            "an unprefixed line is skipped as log output"
+        );
     }
 
     #[test]

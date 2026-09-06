@@ -47,21 +47,18 @@ fn emulator_thread_loop(
 
         // Process incoming client messages (non-blocking)
         while let Ok(msg) = client_rx.try_recv() {
-            // Serialize message to JSON
-            let json = match lpc_wire::json::to_string(&msg) {
-                Ok(j) => j,
+            // Frame as one `M!{json}\n` line via the shared framer. The
+            // firmware's `SerialTransport::receive` silently drops any inbound
+            // line without the `M!` prefix, treating it as a log line; bare
+            // JSON here once meant every client request was discarded and the
+            // first round-trip timed out (speed-probe report §4, item 2).
+            let data = match lpc_wire::json::to_serial_line(&msg) {
+                Ok(line) => line.into_bytes(),
                 Err(e) => {
                     log::warn!("Emulator thread: Failed to serialize client message: {e}");
                     continue;
                 }
             };
-
-            // Frame as an `M!` line: the firmware's `SerialTransport::receive`
-            // (`fw-core/src/transport/serial.rs`) silently drops any inbound
-            // line without the `M!` prefix, treating it as a log line. Bare
-            // JSON here meant every client request was discarded and the
-            // first round-trip timed out (speed-probe report §4, item 2).
-            let data = format!("M!{json}\n").into_bytes();
 
             log::debug!(
                 "Emulator thread: Writing client message id={} ({} bytes) to serial",

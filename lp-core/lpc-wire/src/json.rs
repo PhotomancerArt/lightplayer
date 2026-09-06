@@ -8,6 +8,29 @@ use serde::{Deserialize, Serialize};
 
 pub use serde_json::Error;
 
+/// Prefix that marks a protocol message on a serial link.
+///
+/// Every line on the device link is either an `M!{json}` message or free-form
+/// log output. Both directions parse by this prefix: a line without it is
+/// treated as a log line and dropped by the message parser (see
+/// `SerialTransport::receive` in fw-core), so any writer that omits it is
+/// silently ignored rather than rejected.
+pub const SERIAL_LINE_PREFIX: &str = "M!";
+
+/// Frame a wire message as one serial line: `M!{json}\n`.
+///
+/// The single framer for every writer on the device link, in both directions.
+/// The line is complete (prefix, JSON, terminating newline) and ready to write
+/// to the wire as bytes.
+pub fn to_serial_line<T: Serialize>(value: &T) -> Result<alloc::string::String, Error> {
+    let json = serde_json::to_string(value)?;
+    let mut line = alloc::string::String::with_capacity(SERIAL_LINE_PREFIX.len() + json.len() + 1);
+    line.push_str(SERIAL_LINE_PREFIX);
+    line.push_str(&json);
+    line.push('\n');
+    Ok(line)
+}
+
 /// Serialize a value to a JSON string.
 pub fn to_string<T: Serialize>(value: &T) -> Result<alloc::string::String, Error> {
     serde_json::to_string(value)
@@ -75,6 +98,28 @@ mod tests {
         let deserialized: TestStruct = from_str(&json).unwrap();
 
         assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn to_serial_line_frames_a_client_message() {
+        use crate::{ClientMessage, ClientRequest};
+
+        let msg = ClientMessage {
+            id: 7,
+            msg: ClientRequest::ListLoadedProjects,
+        };
+
+        let line = to_serial_line(&msg).unwrap();
+
+        let body = line
+            .strip_prefix(SERIAL_LINE_PREFIX)
+            .expect("line carries the message prefix")
+            .strip_suffix('\n')
+            .expect("line is newline-terminated");
+        assert!(!body.contains('\n'), "one message is one line");
+        let decoded: ClientMessage = from_str(body).unwrap();
+        assert_eq!(decoded.id, 7);
+        assert!(matches!(decoded.msg, ClientRequest::ListLoadedProjects));
     }
 
     #[test]
