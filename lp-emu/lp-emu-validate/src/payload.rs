@@ -163,6 +163,37 @@ pub static CAL_PULSE: SeriesSpec = SeriesSpec {
     compiled: OnceLock::new(),
 };
 
+/// The bridge harness's one line of its own.
+///
+/// ```text
+/// UART-BRIDGE READY baud=115200 tx=gpio16 rx=gpio17 prev_drop_to_uart=0 prev_drop_to_usb=0
+/// ```
+///
+/// Keyed on the pin it listens to: there is one line per boot today, and the
+/// index is the one that stays right if a variant ever taps two UARTs at once.
+///
+/// The two `prev_drop_*` figures are `Wire`, not `Structural`: they are a claim
+/// about bytes that crossed a wire, and the whole point of the instrument is
+/// that a transcript captured through it is only trustworthy while they are
+/// zero. `4294967295` is the bridge saying UART0's hardware FIFO overran and it
+/// cannot know by how much.
+pub static BRIDGE_READY: SeriesSpec = SeriesSpec {
+    name: "bridge-ready",
+    description: "the UART bridge's boot line, carrying the previous run's byte losses",
+    pattern: concat!(
+        r"^UART-BRIDGE READY baud=(?<baud>\d+) tx=gpio(?<tx>\d+) rx=gpio(?<rx>\d+) ",
+        r"prev_drop_to_uart=(?<prev_drop_to_uart>\d+) prev_drop_to_usb=(?<prev_drop_to_usb>\d+)$",
+    ),
+    key: "rx",
+    fields: &[
+        ("baud", FieldClass::Structural),
+        ("tx", FieldClass::Structural),
+        ("prev_drop_to_uart", FieldClass::Wire),
+        ("prev_drop_to_usb", FieldClass::Wire),
+    ],
+    compiled: OnceLock::new(),
+};
+
 pub static ALL_PAYLOADS: &[Payload] = &[
     Payload {
         name: "shader-compile-stress",
@@ -259,6 +290,18 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         fields: &[],
         series: &[&CAL_PULSE],
     },
+    Payload {
+        name: "uart-bridge",
+        display_name: "Transparent USB-Serial-JTAG <-> UART0 bridge",
+        fw_check_slug: "uart-bridge",
+        firmware_feature: "test_uart_bridge",
+        fw_checks_feature: "check-uart-bridge",
+        sentinel: Sentinel::Ready("UART-BRIDGE READY "),
+        record_kinds: &[],
+        mask_set: "normalize",
+        fields: &[],
+        series: &[&BRIDGE_READY],
+    },
 ];
 
 pub fn find_payload(name: &str) -> Result<&'static Payload> {
@@ -347,6 +390,33 @@ mod tests {
                 .regex()
                 .captures("CAL READY target=esp32c6")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn bridge_ready_parses_a_clean_boot_and_a_dirty_one() {
+        let clean = BRIDGE_READY
+            .regex()
+            .captures(
+                "UART-BRIDGE READY baud=115200 tx=gpio16 rx=gpio17 \
+                 prev_drop_to_uart=0 prev_drop_to_usb=0",
+            )
+            .expect("matches");
+        assert_eq!(&clean["baud"], "115200");
+        assert_eq!(&clean["rx"], "17");
+        assert_eq!(&clean["prev_drop_to_usb"], "0");
+
+        let dirty = BRIDGE_READY
+            .regex()
+            .captures(
+                "UART-BRIDGE READY baud=921600 tx=gpio16 rx=gpio17 \
+                 prev_drop_to_uart=7 prev_drop_to_usb=4294967295",
+            )
+            .expect("matches");
+        assert_eq!(&dirty["prev_drop_to_uart"], "7");
+        assert_eq!(
+            &dirty["prev_drop_to_usb"], "4294967295",
+            "the hardware-overrun sentinel value must survive the parse"
         );
     }
 
