@@ -73,6 +73,12 @@ pub extern "C" fn _lp_main() -> ! {
     // Crash recovery: analyze the previous (simulated) run before anything
     // crash-prone. The host harness preserves the region and sets the
     // reset cause across simulated reboots.
+    // Everything from here to the server loop is pre-project residency:
+    // recovery, filesystem, hardware registry, output provider, graphics,
+    // the server itself, and the transport. The window makes that
+    // residency attributable in `lp-cli profile --collect alloc` and
+    // ratcheted by the heap-budget gate (docs/heap-budget-gate.md).
+    lp_perf::emit_begin!(lp_perf::EVENT_SERVER_BOOT);
     let reset_cause = recovery_area::boot_reset_cause();
     let (recovery_inst, boot_assessment) =
         lp_recovery::Recovery::init(recovery_area::EmuRecoveryBackend, reset_cause);
@@ -141,6 +147,7 @@ pub extern "C" fn _lp_main() -> ! {
     // Boot frame ends here; the boot-complete milestone is marked by the
     // server loop after the first successful frame.
     drop(boot_guard);
+    lp_perf::emit_end!(lp_perf::EVENT_SERVER_BOOT);
 
     // Run server loop (never returns)
     run_server_loop(server, transport, time_provider);

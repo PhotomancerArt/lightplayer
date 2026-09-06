@@ -112,6 +112,8 @@ mod output;
 mod recovery;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod serial;
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+mod stack_probe;
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 use {
@@ -163,12 +165,34 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// M3-P2 may reasonably trade some of that stack for heap once it has
 /// measured what an on-device compile actually needs of each.
 ///
-/// ⚠️ This is no longer the whole heap. `dram2_seg`'s tail is now a **second**
-/// `esp_alloc` region worth 72 KiB — see [`add_sram1_heap_region`]. This
-/// constant sizes only the `dram_seg` arena, which is the one in zero-sum
-/// competition with `.stack`; the second region costs `.stack` nothing,
-/// which is exactly why it was worth reclaiming. Total heap is
-/// `HEAP_SIZE + 73,728`.
+/// ⚠️ **Measured 2026-09-05, and the trade above is off the table: there is no
+/// spare stack.** `stack_probe` paints the main stack at boot and the heartbeat
+/// reports the watermark. On the DOM-Z-102, booting and auto-loading the
+/// startup project reaches a high-water of **32,608 B of 35,536 B — 2,928 B of
+/// headroom**, reproducibly, to the byte, across boots. This constant has never
+/// been the cautious number the paragraphs above assume; 110 KB was already at
+/// or past the edge.
+///
+/// Applying the sizing rule (floor = `max(1.5 × high-water, high-water +
+/// 12 KiB)`, rounded up to 4 KiB) gives a floor of **49,152 B**, which is
+/// 13,616 B *more* stack than the image has. `.stack` is below the floor, so
+/// the rule leaves this constant alone rather than raising it: shrinking the
+/// arena by 13.6 KB would cost more than the margin buys on a chip whose
+/// binding constraint is heap residency, and the image has demonstrably been
+/// running at this margin. The right fix is to stop spending stack, not to
+/// re-cut the split — recorded as the follow-up it is.
+///
+/// What P5's ~12 KB of `.data` savings buys, therefore, is not arena: `.stack`
+/// takes the residual automatically, so those bytes land where the measurement
+/// says they are needed.
+///
+/// ⚠️ This is no longer the whole heap. There are **four** `esp_alloc` regions:
+/// this arena, `dram2_seg`'s 73,728 B tail ([`add_sram1_heap_region`]), and the
+/// ROM's two boot stacks in SRAM1, 15,072 + 15,536 B
+/// ([`add_rom_pro_stack_region`], [`add_rom_app_stack_region`]). This constant
+/// sizes only the `dram_seg` arena, which is the one in zero-sum competition
+/// with `.stack`; the other three cost `.stack` nothing, which is exactly why
+/// they were worth reclaiming. Total heap is `HEAP_SIZE + 104,336`.
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 const HEAP_SIZE: usize = 110 * 1024;
 
@@ -401,6 +425,11 @@ fn reboot_now() {
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
+    // Piggybacks on the heartbeat cadence: one scan of the main stack per
+    // second, a log line only when the mark grows. On this chip `.stack` is the
+    // residual of a 192 KB `dram_seg`, so its high-water mark is what sizes
+    // `HEAP_SIZE` — see `stack_probe`.
+    stack_probe::log_if_grown("heartbeat");
     let free = esp_alloc::HEAP.free();
     let used = esp_alloc::HEAP.used();
     let largest = recovery::panic_path::largest_free_block();
@@ -459,6 +488,15 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
 /// ROM's stacks and data are in the middle of SRAM1, and `dram2_seg` is
 /// precisely the part above them.
 ///
+/// Those reservations are no longer entirely off limits, though: the two ROM
+/// *stack* blocks (and the unnamed holes beside them, and the 464 B head of
+/// `dram2_seg` under the code region) are now heap too — see
+/// [`add_rom_pro_stack_region`] and [`add_rom_app_stack_region`], which bracket
+/// this one in registration order. Only the two ROM *data* blocks stay
+/// reserved. SRAM1's ownership is now: ROM data (2,160 B, theirs), everything
+/// else below the code region (30,608 B, region 0 and region 3), the code
+/// region (24 KiB, the JIT's), and this tail (73,728 B, region 2).
+///
 /// # Safety
 /// The span is `'static` (a fixed hardware address), exclusively the
 /// allocator's (the code region is the only other claimant on SRAM1, and the
@@ -476,6 +514,85 @@ fn add_sram1_heap_region() -> usize {
     len as usize
 }
 
+/// The ROM's **PRO-CPU** boot stack, handed to the allocator as its FIRST
+/// region, and its size.
+///
+/// esp-hal reserves 32,304 B of SRAM1 for the ROM in four blocks and never
+/// hands any of them back; esp-idf gives the two *stack* blocks to its heap
+/// once the ROM is out of them, and so does this. The span
+/// ([`SRAM1_ROM_PRO_STACK_SPAN`]) is dead from the first Rust instruction:
+/// xtensa-lx-rt's reset sets `a1 = _stack_start`, which is in `dram_seg`, so
+/// nothing has run on the ROM's stack since before `main`. The two ROM *data*
+/// blocks are not in the span and stay reserved — ROM routines the image still
+/// calls (`esp_rom_spiflash_*`) read them.
+///
+/// **Registered first on purpose**, before `heap_allocator!` carves the arena.
+/// esp-alloc is first-fit across regions in registration order, so region 0 is
+/// where the boot-time residents land — the recovery instance, the runtime, the
+/// server's small objects. That is PR #516's residents-first packing, achieved
+/// by placement rather than by policy: 15 KB of long-lived small allocations
+/// that would otherwise be scattered through the arena instead fill a region
+/// nothing else wants, and the arena stays whole for the project.
+///
+/// # Safety
+/// The span is `'static` (a fixed hardware address), exclusively the
+/// allocator's (the ROM is out of it and no linker section targets it —
+/// esp-hal's reservation is precisely what keeps the linker away), and
+/// non-empty. The const-asserts in `codemem_esp32` pin it against the ROM data
+/// blocks either side.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+fn add_rom_pro_stack_region() -> usize {
+    let (base, len) = lpvm_native::codemem_esp32::SRAM1_ROM_PRO_STACK_SPAN;
+    unsafe {
+        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+            base as *mut u8,
+            len as usize,
+            esp_alloc::MemoryCapability::Internal.into(),
+        ));
+    }
+    len as usize
+}
+
+/// Size of the ROM APP-CPU stack region. Const so the boot banner can state
+/// the four-term heap total before the region itself is registered, hundreds of
+/// lines later.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+const ROM_APP_HEAP_BYTES: usize = (lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.dbus_base
+    - lpvm_native::codemem_esp32::SRAM1_ROM_APP_STACK_BASE)
+    as usize;
+
+/// The ROM's **APP-CPU** boot stack, plus the unreserved hole beside it and the
+/// 464 B head of `dram2_seg` below the JIT region, and its size.
+///
+/// ⚠️ **Registration order is a correctness property here, not a preference.**
+/// Unlike the PRO stack, this span is live during boot: the APP core runs on it
+/// while it comes up through the ROM, until esp-hal's `start_core1_init`
+/// switches it to `APP_CORE_STACK`. This must therefore be called only after
+/// `start_app_core_isr` has returned — which it does after the bind, and also
+/// after a `false` result, because a core that never started never used its ROM
+/// stack either. It is consequently the LAST region: not for packing reasons,
+/// but because it is the only moment it is safe.
+///
+/// The end is computed, never restated: everything from
+/// [`SRAM1_ROM_APP_STACK_BASE`] up to the JIT code region's D-bus base. When the
+/// JIT region leaves SRAM1, this span and [`add_sram1_heap_region`]'s tail
+/// become contiguous and the boundary moves on its own.
+///
+/// # Safety
+/// As [`add_rom_pro_stack_region`], plus the ordering above.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+fn add_rom_app_stack_region() -> usize {
+    let base = lpvm_native::codemem_esp32::SRAM1_ROM_APP_STACK_BASE;
+    unsafe {
+        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+            base as *mut u8,
+            ROM_APP_HEAP_BYTES,
+            esp_alloc::MemoryCapability::Internal.into(),
+        ));
+    }
+    ROM_APP_HEAP_BYTES
+}
+
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 struct FirmwareApp {
     server: LpServer,
@@ -490,12 +607,39 @@ fn boot_firmware() -> FirmwareApp {
     // twice panics. This is the app path's ONLY call to `esp_hal::init`.
     let (sw_int, timg0, uart0, flash, rmt_peripheral, cpu_ctrl) = init_board();
     // The heap is main.rs's, not the board's — mirroring fw-esp32s3.
+    //
+    // Four regions, and the ORDER is load-bearing twice over. esp-alloc is
+    // first-fit in registration order, so the ROM PRO-CPU stack goes first and
+    // absorbs the boot residents (see `add_rom_pro_stack_region`); the ROM
+    // APP-CPU stack goes last because it is still in use until the APP core is
+    // bound, hundreds of lines below (see `add_rom_app_stack_region`).
+    let rom_pro_heap = add_rom_pro_stack_region();
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
     let sram1_heap = add_sram1_heap_region();
+    // Paint the main stack before anything deep runs, so the heartbeat's
+    // high-water report measures the whole app (see `stack_probe`). After the
+    // arena is carved, because the paint runs on the main stack and the arena
+    // is `.bss`, not stack.
+    stack_probe::paint();
     esp_println::println!("[INIT] fw-esp32v3 boot");
     esp_println::println!(
-        "[INIT] chip=esp32 arch=xtensa heap={HEAP_SIZE}+{sram1_heap} (dram_seg arena + SRAM1 tail)"
+        "[INIT] chip=esp32 arch=xtensa heap={rom_pro_heap}+{HEAP_SIZE}+{sram1_heap}+{ROM_APP_HEAP_BYTES}={} \
+         (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)",
+        rom_pro_heap + HEAP_SIZE + sram1_heap + ROM_APP_HEAP_BYTES
     );
+    // The arena has no address here: `heap_allocator!` owns its `.bss` static
+    // and does not expose it. The three fixed spans are the ones whose bases
+    // are a correctness claim, so those are the ones printed.
+    esp_println::println!(
+        "[INIT] heap regions: 0 {:#010x}+{rom_pro_heap} (ROM PRO stack), 1 .bss+{HEAP_SIZE} (dram_seg arena), \
+         2 {:#010x}+{sram1_heap} (SRAM1 tail), 3 {:#010x}+{ROM_APP_HEAP_BYTES} (ROM APP stack, after core bind)",
+        lpvm_native::codemem_esp32::SRAM1_ROM_PRO_STACK_SPAN.0,
+        lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT
+            .reclaimable_heap_span()
+            .0,
+        lpvm_native::codemem_esp32::SRAM1_ROM_APP_STACK_BASE,
+    );
+    esp_println::println!("[INIT] main stack {} B", stack_probe::total_bytes());
 
     // Crash recovery first, before anything crash-prone runs: this both reports
     // the previous run and gives everything after it somewhere to leave a
@@ -611,6 +755,16 @@ fn boot_firmware() -> FirmwareApp {
             "[INIT] APP core unavailable; RMT ISR on PRO core (single-core semantics)"
         );
     }
+    // The last heap region, and this is the earliest safe moment for it: the
+    // APP core runs on the ROM's stack while it comes up, and `start_app_core_isr`
+    // returns only after the bind — or after deciding the core never started, in
+    // which case that stack was never used either. Both outcomes free the span,
+    // so this sits outside the branch rather than inside the success arm.
+    let rom_app_heap = add_rom_app_stack_region();
+    esp_println::println!(
+        "[INIT] heap region 3 live: {:#010x}+{rom_app_heap} (ROM APP stack)",
+        lpvm_native::codemem_esp32::SRAM1_ROM_APP_STACK_BASE
+    );
 
     // The RMT peripheral becomes the WS281x driver's, clock and all. The
     // classic's RMT runs off APB and esp-hal's `validate_clock` for this chip

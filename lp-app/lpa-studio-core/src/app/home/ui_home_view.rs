@@ -26,13 +26,6 @@ pub struct UiHomeView {
     /// label, freshness line and escape is a pure function of the fold — so
     /// there is nowhere for the page and the model to disagree.
     pub devices: crate::DeviceRosterView,
-    /// The boards Studio still REMEMBERS, by registry name — read straight
-    /// off the surviving `DeviceRegistry` (R3's keep).
-    ///
-    /// Kept alongside [`Self::devices`] as the *store's* view of the same
-    /// boards: a row the roster has not rehydrated (no local store yet, a
-    /// legacy row) is still evidence that the record survived.
-    pub remembered: Vec<String>,
     /// Whether the local library mounted; when `false` the projects section
     /// explains instead of listing (the store banner carries the details).
     pub library_available: bool,
@@ -47,11 +40,10 @@ impl UiHomeView {
     /// Render as plain text lines for fallback renderers and tests.
     pub fn render_text_lines(&self) -> Vec<String> {
         let mut lines = vec![format!(
-            "Home: {} runtimes, {} projects, {} examples, {} remembered",
+            "Home: {} runtimes, {} projects, {} examples",
             usize::from(self.sim.is_some()),
             self.projects.len(),
             self.examples.len(),
-            self.remembered.len()
         )];
         if !self.devices.roster.devices.is_empty() || !self.devices.roster.pending.is_empty() {
             lines.push(format!(

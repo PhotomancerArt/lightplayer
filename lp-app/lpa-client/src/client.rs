@@ -300,6 +300,35 @@ where
         }
     }
 
+    /// One chunk of a file: `offset == 0` creates or truncates, a later
+    /// offset must equal the file's current length (the server appends).
+    /// The chunked form of [`Self::fs_write`] for files a device cannot
+    /// decode in one frame — see `device_stamp::write_file_in_chunks`.
+    pub async fn fs_write_chunk(
+        &mut self,
+        path: &LpPath,
+        offset: u32,
+        data: Vec<u8>,
+    ) -> ClientResult<ClientOutcome<()>> {
+        let response = self
+            .send_request(ClientRequest::Filesystem(FsRequest::WriteChunk {
+                path: path.to_path_buf(),
+                offset,
+                data,
+            }))
+            .await?;
+        let events = response.events;
+        match response.value.msg {
+            WireServerMsgBody::Filesystem(FsResponse::WriteChunk { error, .. }) => {
+                if let Some(error) = error {
+                    return Err(ClientError::Server(error));
+                }
+                Ok(ClientOutcome::new((), events))
+            }
+            other => Err(ClientError::unexpected_response("fs.write_chunk", other)),
+        }
+    }
+
     pub async fn fs_delete_file(&mut self, path: &LpPath) -> ClientResult<ClientOutcome<()>> {
         let response = self
             .send_request(ClientRequest::Filesystem(FsRequest::DeleteFile {

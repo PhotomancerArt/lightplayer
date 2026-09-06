@@ -6,7 +6,7 @@
 //!
 //! What carries over:
 //!
-//! - Readiness is granted by exactly one thing — a proto-matching hello,
+//! - Readiness is granted by exactly one thing — a hello (on any wire proto),
 //!   either the unsolicited boot hello or the answer to our own hello
 //!   request. A connect cannot assume the power to cause a boot, so asking
 //!   is mandatory (`docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`).
@@ -26,7 +26,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::event::{Action, Command, Event, Input};
-use crate::evidence::{Classification, IncompatibleReason};
+use crate::evidence::{Classification, IncompatibleReason, WireVersion};
 use crate::link::{LinkCommand, LinkEvent};
 use crate::time::Millis;
 use crate::wire::ClientFrame;
@@ -118,16 +118,19 @@ impl IdentifyActivity {
 
     fn settle(&self, now: Millis, ctx: &ActivityCtx<'_>) -> ActivityStep {
         let outcome = match ctx.evidence.verdict_if_settled(now) {
+            // A LightPlayer on ANOTHER wire version is still the happy
+            // verdict; the outcome line says so in passing, and the fold
+            // has already journaled the numbers.
             Classification::LightPlayer { hello } => ActivityOutcome::Succeeded {
-                summary: hello.label(),
-            },
-            Classification::Incompatible {
-                reason: IncompatibleReason::ProtoMismatch { proto },
-            } => ActivityOutcome::Succeeded {
-                summary: format!(
-                    "incompatible firmware: wire proto {proto}, this build speaks {}",
-                    ctx.config.expected_proto
-                ),
+                summary: match ctx.evidence.wire_version() {
+                    Some(WireVersion::BoardOlder { .. }) => {
+                        format!("{} (older firmware than Studio)", hello.label())
+                    }
+                    Some(WireVersion::BoardNewer { .. }) => {
+                        format!("{} (newer firmware than Studio)", hello.label())
+                    }
+                    Some(WireVersion::Match) | None => hello.label(),
+                },
             },
             Classification::Incompatible {
                 reason: IncompatibleReason::NoHello,
@@ -252,7 +255,7 @@ impl IdentifyActivity {
                 if self.winding_down {
                     return ActivityStep::nothing();
                 }
-                if ctx.evidence.has_hello() || ctx.evidence.mismatched_proto().is_some() {
+                if ctx.evidence.has_hello() {
                     return self.settle(self.settle_at, ctx);
                 }
                 ActivityStep::nothing()

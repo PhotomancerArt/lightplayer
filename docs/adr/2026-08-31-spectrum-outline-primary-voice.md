@@ -45,7 +45,14 @@ Two spike findings drove the outcome:
 3. **The armed confirmation reads as 2K+**: arming turns "Forget" into
    "**Confirm Forget**" (a "Confirm " prefix always in the DOM, its grid
    column animating 0fr→1fr — a content swap cannot drive a width
-   transition), red ramps in over 160ms with a small knock, and the
+   transition).
+   *Amended 2026-09-02 (device-card-v2 spike §2 "Reserve", gate
+   2026-09-02): the reading "Confirm ⟨verb⟩" stands, the prefix COLUMN
+   does not. Opening it widened the chip and shifted its neighbours; the
+   chip now renders both labels in one grid cell (`.ux-armed-labels`),
+   reserving the armed width at rest, and arming swaps
+   visibility/opacity. `.ux-armed-prefix` is deleted.*
+   Red ramps in over 160ms with a small knock, and the
    stand-down window shows as a **quiet drain**: border-tone, 1.5px, 55%
    opacity ("quieter animation" was an explicit gate ruling). The owning
    card marks itself via `.ux-armed-scope:has(.ux-armed)` — body dimmed

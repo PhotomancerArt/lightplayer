@@ -10,12 +10,15 @@ crate-type = ["lib"]
 [dependencies]
 linked_list_allocator = { version = "0.10", default-features = false, features = ["use_spin"] }
 lp-emu-abi = { path = "../../lp-emu/lp-emu-abi" }
+lp-perf = { path = "../../lp-base/lp-perf", features = ["syscall"], optional = true }
 lp-recovery = { workspace = true }
 critical-section = { workspace = true }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 log = { workspace = true, default-features = false }
 
 [features]
-profile = []
+# `lp-perf` is only needed to install the free-list-shape hook
+# (`allocator::init_heap`), which only exists under `profile`.
+profile = ["dep:lp-perf"]
 
 [build-dependencies]

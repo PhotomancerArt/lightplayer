@@ -290,7 +290,6 @@ fn readme_home_view() -> UiHomeView {
             kind: "Module".to_string(),
         }],
         devices: Default::default(),
-        remembered: Vec::new(),
         library_available: true,
         opening: None,
         issue: None,

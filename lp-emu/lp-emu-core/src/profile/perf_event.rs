@@ -9,11 +9,16 @@ pub const EVENT_PROFILE_START: &str = "profile:start";
 /// Host-only synthetic marker: session ended (see [`crate::profile::ProfileSession::end`]).
 pub const EVENT_PROFILE_END: &str = "profile:end";
 
+/// ⚠️ A guest marker whose name is not in this list is dropped by the
+/// emulator run loop (`intern_known_name` returns `None`), silently. Every
+/// `lp_perf::EVENT_*` constant must have its string here.
 pub static KNOWN_EVENT_NAMES: &[&str] = &[
     "frame",
     "shader-compile",
     "shader-link",
     "project-load",
+    "project-read",
+    "server-boot",
     "profile:start",
     "profile:end",
 ];
@@ -86,6 +91,27 @@ mod tests {
         assert_eq!(s, EVENT_FRAME);
         assert_eq!(s, "frame");
         assert!(intern_known_name("xyz").is_none());
+    }
+
+    /// ⚠️ The one that bites: a marker name the guest emits but this list
+    /// does not carry is dropped silently, so the window simply never appears
+    /// in the trace and the analysis quietly measures a shorter run.
+    #[test]
+    fn every_window_the_server_opens_is_interned() {
+        for name in [
+            "frame",
+            "shader-compile",
+            "shader-link",
+            "project-load",
+            "project-read",
+            "server-boot",
+        ] {
+            assert_eq!(
+                intern_known_name(name),
+                Some(name),
+                "{name} must be interned or its window is dropped silently"
+            );
+        }
     }
 
     #[test]

@@ -17,11 +17,15 @@ set -euo pipefail
 #
 # Figures per window: transient, retained, largest_alloc (residency) and
 # alloc_count, alloc_bytes (requests inside ONE opening, maximised across
-# openings — the worst frame). This is a RATCHET, not a ceiling: the record
-# holds today's measured values (descriptive), and any growth beyond the
-# margin fails. An intentional increase re-baselines explicitly
-# (`just heap-budget-baseline`) so the growth lands in the PR diff where a
-# reviewer sees it.
+# openings — the worst frame), plus largest_free_at_close and holes_at_close
+# (the guest's own free-list shape at the window's close, MIN/MAX across
+# openings — see docs/heap-budget-gate.md). Every figure but
+# largest_free_at_close is a RATCHET on GROWTH: the record holds today's
+# measured values (descriptive), and any growth beyond the margin fails.
+# largest_free_at_close inverts that: it fails when the measurement SHRANK
+# below the record, because a bigger free block is the good direction there.
+# An intentional change re-baselines explicitly (`just heap-budget-baseline`)
+# so it lands in the PR diff where a reviewer sees it.
 #
 # Why deltas and not absolutes, and what this gate cannot see:
 # docs/heap-budget-gate.md
@@ -64,7 +68,11 @@ budget_for() {
 }
 
 # The measured windows for one mode, projected to the recorded figures:
-# `{windows: {<name>: {transient, retained, largest_alloc, alloc_count, alloc_bytes}}}`.
+# `{windows: {<name>: {transient, retained, largest_alloc, alloc_count,
+# alloc_bytes, largest_free_at_close?, holes_at_close?}}}`. The last two are
+# absent from a measurement with no guest free-list-shape rows (older
+# lp-cli), and the projection preserves that absence rather than writing a
+# `null` into the record — see docs/heap-budget-gate.md.
 project_windows() {
     local mode="$1" budget="$2"
     local keep='true'
@@ -72,7 +80,11 @@ project_windows() {
     jq --arg keep "$keep" "
         {windows: (.windows
             | map(select($keep))
-            | map({key: .name, value: {transient, retained, largest_alloc, alloc_count, alloc_bytes}})
+            | map({key: .name, value: (
+                {transient, retained, largest_alloc, alloc_count, alloc_bytes}
+                + (if has(\"largest_free_at_close\") then {largest_free_at_close} else {} end)
+                + (if has(\"holes_at_close\") then {holes_at_close} else {} end)
+              )})
             | from_entries)}" "$budget"
 }
 
@@ -115,6 +127,21 @@ check)
                 if [ "$meas" = "null" ] || [ -z "$meas" ]; then
                     echo "::error::heap-budget: ${project} (${pmode}) ${w}.${f}: figure missing from measurement (older lp-cli?)"
                     fail=1
+                    continue
+                fi
+                if [ "$f" = "largest_free_at_close" ]; then
+                    # Inverted direction: a bigger largest-free-block is the
+                    # improvement here, so the ratchet fails on SHRINKING
+                    # below the record, not on growth.
+                    allowed=$(awk -v r="$rec" -v m="$margin" 'BEGIN { printf "%d", r * (1 - m / 100) }')
+                    if [ "$meas" -lt "$allowed" ]; then
+                        echo "::error::heap-budget: ${project} (${pmode}) ${w}.${f} shrank: ${meas} < recorded ${rec} (margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline' in this PR."
+                        fail=1
+                    elif [ "$meas" -gt "$rec" ]; then
+                        echo "  improved: ${w}.${f}: ${rec} -> ${meas} (lock it in with 'just heap-budget-baseline')"
+                    else
+                        echo "  ok: ${w}.${f}: ${meas}"
+                    fi
                     continue
                 fi
                 allowed=$(awk -v r="$rec" -v m="$margin" 'BEGIN { printf "%d", r * (1 + m / 100) }')

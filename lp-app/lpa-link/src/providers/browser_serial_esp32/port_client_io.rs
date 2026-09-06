@@ -56,6 +56,12 @@ const RESPONSE_BUDGET_MS: u32 = 5_000;
 /// of retried writes and then reported failure at a board that was fine
 /// (G1 bench, 2026-08-31). [`lpa_client::wait_until_ready`] is that wait,
 /// and the caller's activity deadline (`stamp_deadline_ms`) bounds it.
+///
+/// ⚠️ The write **goes in stamp-sized chunks**, beside whatever the board
+/// is running. One frame carrying a whole 6 KB manifest OOM'd a classic in
+/// the request decode while its auto-loaded project was resident (bench,
+/// 2026-09-04) — see [`lpa_client::write_file_in_chunks`] for the shape and
+/// [`lpa_client::MANIFEST_CHUNK_BYTES`] for the size.
 pub async fn write_device_file(
     port_id: u32,
     path: &str,
@@ -77,13 +83,15 @@ pub async fn write_device_file(
             LinkError::other(format!("the board never became ready to write to: {error}"))
         })?;
 
-    events.emit(LinkManagementEvent::progress(LinkManagementProgress::new(
-        format!("Writing {path}"),
-    )));
-    let outcome = client
-        .fs_write(path.as_path(), bytes.to_vec())
-        .await
-        .map_err(|error| LinkError::other(format!("device file write failed: {error}")))?;
+    let outcome = lpa_client::write_file_in_chunks(
+        &mut client,
+        path.as_path(),
+        bytes,
+        lpa_client::MANIFEST_CHUNK_BYTES,
+        &mut progress,
+    )
+    .await
+    .map_err(|error| LinkError::other(format!("device file write failed: {error}")))?;
     for event in outcome.events {
         events.emit(LinkManagementEvent::log(format!("{event:?}")));
     }

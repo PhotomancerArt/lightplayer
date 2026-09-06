@@ -83,12 +83,16 @@ pub struct RosterConfig {
     /// The wait-for-ready below the seam lives INSIDE this budget, so the
     /// arithmetic has to work out: `lpa_client::READY_ATTEMPTS` asks at the
     /// port io's 5 s per-request ceiling, which is 25 s of patience, and the
-    /// write itself is one more request. 30 s would cover that with nothing
-    /// to spare; the bench already met the no-spare case (~40 s observed on
-    /// a first-boot classic still formatting littlefs), so the default
-    /// carries headroom past the observed worst rather than equalling the
-    /// arithmetic. A board slower still degrades honestly — the flash
-    /// stands and the card says the default pin map does too.
+    /// write itself is a handful of chunk requests (six for the largest
+    /// manifest at `lpa_client::MANIFEST_CHUNK_BYTES`, each a short round
+    /// trip on a board that is answering). 30 s would cover that with
+    /// nothing to spare; the bench already met the no-spare case (~40 s
+    /// observed on a first-boot classic still formatting littlefs), so the
+    /// default carries headroom past the observed worst rather than
+    /// equalling the arithmetic. A board slower still degrades honestly —
+    /// the flash stands and the card says the manifest write was not
+    /// confirmed (never that the default pin map stands: a reflashed board
+    /// keeps its littlefs, and may be running an earlier stamp's manifest).
     pub stamp_deadline_ms: u64,
     /// Supervision backstop for the whole Push activity: the `lpa-client`
     /// conversation (clear, chunked writes, load, hash) over a serial wire.

@@ -112,6 +112,62 @@ pub(crate) fn catalog_thumbnails() -> Element {
     }
 }
 
+#[story(
+    description = "The fit contract at picker size (P10). Top row: every board TURNED a quarter turn and fitted to the device picker's 132×56 tile band — one box, so eight boards that differ three to one in drawing height line their names up on one row, which a single `scale` cannot do; and on their side, because a devkit standing upright in that band is a 20px sliver in a field of air while the same board lying down fills it. Middle row: the same boards upright at the same fit, which is what the turn is worth. Bottom row: the turned boards in the trigger's 20×14 swatch, where all that survives is the silhouette — a long devkit against a stub of a XIAO. Labels are off at every size: pin names here would be a grey smear, and turned they would be a sideways one."
+)]
+pub(crate) fn picker_thumbnails() -> Element {
+    rsx! {
+        div { style: "display: flex; flex-direction: column; gap: 18px; align-items: flex-start;",
+            div { style: "display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start;",
+                for entry in all_boards() {
+                    div { style: "display: flex; flex-direction: column; gap: 4px; width: 150px; border: 1px solid var(--studio-color-border-subtle); border-radius: 6px; padding: 8px;",
+                        span { style: "display: grid; place-items: center; height: 56px; overflow: hidden; border-radius: 3px; background: var(--studio-color-terminal);",
+                            BoardDiagram {
+                                board: entry.clone(),
+                                mode: DiagramMode::Plain,
+                                labels: false,
+                                landscape: true,
+                                fit: (132.0, 56.0),
+                            }
+                        }
+                        span { style: "font-size: 11.5px; font-weight: 600; color: var(--studio-color-text-strong);",
+                            "{entry.display_name}"
+                        }
+                        span { style: "font-size: 10.5px; color: var(--studio-color-text-dim);",
+                            "{entry.manufacturer} \u{b7} {entry.flash} flash"
+                        }
+                    }
+                }
+            }
+            div { style: "display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start;",
+                for entry in all_boards() {
+                    span { style: "display: grid; place-items: center; width: 132px; height: 56px; overflow: hidden; border-radius: 3px; background: var(--studio-color-terminal);",
+                        BoardDiagram {
+                            board: entry.clone(),
+                            mode: DiagramMode::Plain,
+                            labels: false,
+                            fit: (132.0, 56.0),
+                        }
+                    }
+                }
+            }
+            div { style: "display: flex; gap: 10px; align-items: center;",
+                for entry in all_boards() {
+                    span { style: "display: grid; place-items: center; width: 22px; height: 16px; overflow: hidden; border-radius: 3px; border: 1px solid var(--studio-color-border-strong); background: var(--studio-color-surface-raised-strong);",
+                        BoardDiagram {
+                            board: entry.clone(),
+                            mode: DiagramMode::Plain,
+                            labels: false,
+                            landscape: true,
+                            fit: (20.0, 14.0),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[story(description = "Plain mode at u=12: the board at rest, labels on (C6 devkit).")]
 pub(crate) fn plain_u12() -> Element {
     rsx! {

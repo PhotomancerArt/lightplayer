@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device card v2 — the four zones, dressed · spike (round 2)</title>
+<style>
+html.no-anim *, html.no-anim *::before, html.no-anim *::after { transition:none !important; animation:none !important; }
+/* =====================================================================
+   Device card v2 — full UX pass on the Studio device card.
+   Aurora ground, verbatim from src/style.css :root (2026-09-02).
+
+   ROUND 1 (3bdd9d481) explored four whole-card concepts, four footers,
+   three terminals, two pickers. ROUND 2 (gate rulings, 2026-09-02):
+     · A · Stage is the card. B/C rejected (C fails at gallery width;
+       a COLLAPSED reading is a future want for network devices).
+     · Footer: NO menu yet. Project verbs (Open / Put it on / Remove
+       project) move INTO a project section of the state zone, which
+       also carries the empty face; the footer keeps the device verbs
+       (Disconnect · Reset · Factory reset · Forget) as reserve-width
+       chips so arming never reflows.
+     · Terminal: T1 typed + decoded wire, with line PROCESSING (cap,
+       repeat-collapse, long-line fold). "Seeing the output makes it
+       feel real."
+     · Picker: P1 gallery. P2 palette rejected.
+     · Offline: disconnect → the card DISAPPEARS; connect → appears.
+       Remembered boards live behind a quiet filter line, not as cards.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --bg:#0d0d13; --surface:#14141c; --panel:#17171f; --raised:#1d1d28;
+  --raised-strong:#252532; --terminal:#0a0a10;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --dim:#7a7a8a;
+
+  --sel-bd:#d6dae0; --sel-bg:rgba(214,218,224,.12);
+  --focus:#a5b8ff;
+  --spectrum:#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
+  --glow:rgba(140,170,255,.3);
+  --violet:#a58af7;
+
+  --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
+  --st-neutral-bg:#12171c;   --st-neutral-bd:#3a444c;   --st-neutral-tx:#d9e2df;
+  --st-working-bg:#24230f;   --st-working-bd:#706730;   --st-working-tx:#f2e6a2;
+  --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
+  --st-warning-bg:#292614;   --st-warning-bd:#796c33;   --st-warning-tx:#f0dc7a;
+  --st-attention-bg:#291f14; --st-attention-bd:#795833; --st-attention-tx:#f0b97a;
+  --st-error-bg:#301b1d;     --st-error-bd:#874b4b;     --st-error-tx:#ffc7c7;
+
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+  --win: 4000ms;
+}
+* { box-sizing: border-box; }
+body { margin:0; padding:28px 32px 160px; background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
+h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
+p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 18px; max-width:860px; }
+p.hint b { color:var(--shell-mut); font-weight:600; }
+h2 { font-size:12px; letter-spacing:.1em; color:var(--shell-mut); text-transform:uppercase; margin:46px 0 6px; }
+h2 .n { color:var(--shell-dim); margin-right:6px; }
+p.sub { color:var(--shell-dim); font-size:12px; margin:0 0 14px; max-width:900px; }
+p.sub b { color:var(--shell-mut); font-weight:600; }
+code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls { display:flex; gap:14px; flex-wrap:wrap; align-items:center; padding:10px 14px;
+  border:1px dashed var(--shell-bd-strong); border-radius:8px; color:var(--shell-mut); font-size:12px;
+  position:sticky; top:8px; z-index:60; background:rgba(11,12,14,.92); backdrop-filter:blur(8px); }
+.controls b { color:var(--shell-tx); font-weight:600; }
+.controls button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx);
+  border:1px solid var(--shell-bd-strong); border-radius:6px; padding:3px 10px; font-size:12px; }
+.controls button:hover { background:#1e2126; }
+.controls button.active { border-color:#7be0b2; color:#7be0b2; }
+.controls .grp { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
+.controls .sep { width:1px; height:18px; background:var(--shell-bd-strong); }
+.controls.local { position:static; margin:0 0 14px; display:inline-flex; }
+
+/* ---- concept scaffolding ------------------------------------------- */
+.conceptrow { display:grid; grid-template-columns:repeat(auto-fit, minmax(330px, 1fr)); gap:22px; align-items:start; }
+.conceptrow.states { grid-template-columns:repeat(auto-fill, minmax(360px, 1fr)); }
+.concept { min-width:0; }
+.chead { display:flex; align-items:baseline; gap:8px; margin:0 0 8px; flex-wrap:wrap; }
+.chead .name { font-size:13.5px; font-weight:700; color:var(--shell-tx); }
+.chead .thesis { font-size:11.5px; color:var(--shell-dim); }
+.cnotes { font-size:11.5px; color:var(--shell-mut); margin:8px 2px 0; line-height:1.55; }
+.cnotes b { color:var(--shell-tx); font-weight:600; }
+.cnotes .meter { font-family:var(--mono); font-size:10.5px; color:var(--shell-dim); }
+.cnotes .meter.bad { color:#ffc7c7; }
+.cnotes .meter.ok { color:#7be0b2; }
+.cnotes .hm { font-family:var(--mono); font-size:10.5px; color:var(--shell-dim); display:block; margin-bottom:3px; }
+.cnotes .hm b { color:#7be0b2; font-weight:600; }
+.cnotes .hm b.diff { color:#f0b97a; }
+.stage { position:relative; border-radius:12px; border:1px solid var(--shell-bd); background:var(--bg); color:var(--tx);
+  padding:16px; font-size:13px; font-family:var(--font); }
+.stage.narrow { padding:12px; }
+.lean { border:1px solid #365545; border-radius:8px; padding:12px 16px; margin-top:26px; font-size:12px; color:var(--shell-mut); max-width:900px; }
+.lean b { color:#7be0b2; }
+.rejected { border:1px dashed var(--shell-bd); border-radius:8px; padding:10px 14px; margin-top:26px; font-size:11.5px; color:var(--shell-dim); max-width:900px; }
+.rejected b { color:var(--shell-mut); font-weight:600; }
+.rejected li { margin:3px 0; }
+
+/* =====================================================================
+   Card grammar (device_roster_card.rs faithful where it reproduces
+   production; extended where the converged card needs it)
+   ===================================================================== */
+.card { position:relative; display:grid; align-content:start; gap:10px; border-radius:8px; border:1px solid var(--bd);
+  background:var(--panel); padding:14px; width:100%; min-height:300px; }
+.card.armed-scope { transition:border-color .25s, box-shadow .25s; }
+.card.armed-scope.is-armed { border-color:var(--st-error-bd); box-shadow:inset 0 0 0 1px var(--st-error-bd); }
+.dim { transition:opacity .25s, filter .25s; display:grid; gap:10px; }
+.card.is-armed .dim { opacity:.4; filter:saturate(.3); }
+.dimp { display:grid; gap:8px; }
+.card, .dim, .zone, .card > *, .dim > *, .zone > *, .facerow > *, .popwrap, header > *, .head > * { min-width:0; }
+.head h3 { flex:1; }
+.head .chip { flex:none; }
+.card h3 { margin:0; font-size:13.5px; font-weight:700; color:var(--strong); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+.idline { margin:0; font:10.5px var(--mono); color:var(--subtle); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.detail { margin:0; font-size:11.5px; line-height:1.5; color:var(--muted); }
+.quiet  { margin:0; font-size:11.5px; line-height:1.5; color:var(--subtle); }
+.fail   { margin:0; font-size:11.5px; line-height:1.5; color:var(--st-error-tx); }
+.zone { display:grid; gap:8px; border-top:1px solid var(--bd); padding-top:10px; }
+.chip { display:inline-flex; align-items:center; min-height:22px; padding:0 8px; border-radius:999px; border:1px solid;
+  font-size:11px; font-weight:700; white-space:nowrap; line-height:1; }
+.chip.good      { background:var(--st-good-bg);      border-color:var(--st-good-bd);      color:var(--st-good-tx); }
+.chip.neutral   { background:var(--st-neutral-bg);   border-color:var(--st-neutral-bd);   color:var(--st-neutral-tx); }
+.chip.working   { background:var(--st-working-bg);   border-color:var(--st-working-bd);   color:var(--st-working-tx); }
+.chip.warning   { background:var(--st-warning-bg);   border-color:var(--st-warning-bd);   color:var(--st-warning-tx); }
+.chip.attention { background:var(--st-attention-bg); border-color:var(--st-attention-bd); color:var(--st-attention-tx); }
+.chip.error     { background:var(--st-error-bg);     border-color:var(--st-error-bd);     color:var(--st-error-tx); }
+.tag { display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border-radius:4px; border:1px solid var(--bd-mut);
+  background:var(--surface); font:10px var(--mono); color:var(--subtle); white-space:nowrap; }
+.tag.chipname { color:var(--muted); }
+
+/* the project part of the state zone: no frame — one box, separators only (gate 2). Every row has a
+   FIXED height so a board event can never move the card: state line (17) + bar slot (4) + preview (120) +
+   meta line (17) + verb row (30). */
+.proj { display:grid; gap:8px; }
+.proj .verbs { display:flex; align-items:center; gap:6px; height:30px; min-width:0; }
+.proj .verbs .spring { flex:1; }
+.proj .verbs .facerow { flex:1; flex-wrap:nowrap; }
+.oneline { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; height:17px; line-height:17px; }
+.barslot { height:4px; border-radius:999px; background:transparent; overflow:hidden; }
+.barslot > i { display:block; height:100%; border-radius:999px; background:var(--st-working-tx); }
+.barslot.on { background:var(--raised); }
+.barslot > i.sweep { width:35%; animation:sweep 1.2s ease-in-out infinite; }
+.playmeta { height:17px; }
+
+/* buttons */
+.btn { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  height:30px; padding:0 11px; border-radius:6px; border:1px solid var(--bd); background:var(--raised); color:var(--tx);
+  font-size:12px; font-weight:600; white-space:nowrap; text-decoration:none; }
+.btn:hover { border-color:var(--bd-strong); color:var(--strong); }
+.btn.quiet { background:transparent; border-color:transparent; color:var(--muted); padding:0 9px; }
+.btn.quiet:hover { background:var(--raised); color:var(--strong); }
+.btn.outline { background:transparent; }
+.btn.sm { height:26px; padding:0 9px; font-size:11.5px; }
+.btn:disabled { cursor:not-allowed; opacity:.55; }
+.cta { position:relative; border-color:transparent; background:transparent; color:var(--strong); }
+.cta::before { content:""; position:absolute; inset:-1px; z-index:3; border-radius:inherit; padding:1px;
+  background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude;
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor;
+  opacity:.62; pointer-events:none; transition:opacity .3s; }
+.cta:hover::before { opacity:1; }
+.cta:hover { box-shadow:0 2px 24px var(--glow), 0 0 46px rgba(140,170,255,.22); }
+
+/* armed destructive chip — production 2K+ reading (prefix column opens) */
+.armchip { position:relative; white-space:nowrap; transition:background-color .5s ease-out, border-color .5s ease-out; }
+.armchip .pre { display:inline-grid; grid-template-columns:0fr; overflow:hidden; transition:grid-template-columns .22s ease; }
+.armchip .pre > span { min-width:0; overflow:hidden; }
+.armchip.on { background:var(--st-error-bg); border-color:var(--st-error-bd); color:var(--st-error-tx);
+  transition:background-color .16s ease-in, border-color .16s ease-in; animation:knock .22s ease-out; }
+.armchip.on .pre { grid-template-columns:1fr; }
+.armchip::after { content:""; position:absolute; left:4px; right:4px; bottom:1px; height:1.5px; border-radius:2px;
+  background:var(--st-error-bd); transform-origin:left; transform:scaleX(0); opacity:0; }
+.armchip.on::after { opacity:.55; animation:drain var(--win) linear forwards; }
+@keyframes knock { 0%,100%{transform:scale(1)} 35%{transform:scale(1.07)} }
+@keyframes drain { from{transform:scaleX(1)} to{transform:scaleX(0)} }
+/* Reserve: both labels in one cell; the hidden one holds the width (ruled at gate 1) */
+.armchip.reserve { display:inline-grid; grid-template-columns:1fr; }
+.armchip.reserve > .lab { grid-area:1/1; display:inline-flex; align-items:center; justify-content:center; gap:6px; transition:opacity .16s; }
+.armchip.reserve > .lab.alt { visibility:hidden; }
+.armchip.reserve.on > .lab.rest { opacity:0; }
+.armchip.reserve.on > .lab.alt { visibility:visible; }
+.armchip.reserve:not(.on) > .lab.alt { opacity:0; }
+
+footer.actions { margin-top:auto; display:flex; flex-wrap:wrap; gap:6px; border-top:1px solid var(--bd); padding-top:10px; align-items:center; }
+footer.actions .spring { flex:1; }
+
+/* ---- preview slot (ux-play-* verbatim, adapted) ---------------------- */
+.play { position:relative; width:100%; height:120px; overflow:hidden; border-radius:6px; background:#07080a; border:1px solid var(--bd); }
+.play canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+.pill { position:absolute; top:6px; right:6px; display:inline-flex; align-items:center; gap:5px; padding:1px 6px; border:1px solid var(--bd);
+  border-radius:4px; background:color-mix(in srgb, var(--terminal) 78%, transparent); font:800 9.5px var(--mono); letter-spacing:.07em; text-transform:uppercase; }
+.pill .dot { width:6px; height:6px; border-radius:50%; background:currentcolor; flex:none; }
+.pill.live { color:var(--st-good-tx); } .pill.live .dot { animation:blink 2s ease-in-out infinite; }
+.pill.stale { color:var(--st-attention-tx); } .pill.fault { color:var(--st-error-tx); }
+@keyframes blink { 50% { opacity:.35 } }
+.playempty { position:absolute; inset:0; display:grid; align-content:center; justify-items:center; gap:6px; padding:0 14px;
+  color:var(--dim); font-size:11px; line-height:1.4; text-align:center; }
+.playmeta { display:flex; align-items:center; gap:8px; min-width:0; font-size:11px; color:var(--dim); }
+.playmeta .name { color:var(--strong); font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.playmeta .fps { flex:none; font:10.5px var(--mono); }
+.playmeta .spring { flex:1; }
+
+/* ---- activity ---------------------------------------------------------- */
+.bar { height:6px; overflow:hidden; border-radius:999px; background:var(--raised); }
+.bar > i { display:block; height:100%; border-radius:999px; background:var(--st-working-tx); }
+.bar > i.sweep { width:35%; animation:sweep 1.2s ease-in-out infinite; }
+@keyframes sweep { 0%{transform:translateX(-100%)} 100%{transform:translateX(300%)} }
+
+/* ---- face rows ----------------------------------------------------------- */
+.facerow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0; }
+.facerow .lead { font-size:11.5px; color:var(--muted); flex:none; }
+.picker { display:inline-flex; align-items:center; gap:7px; height:30px; padding:0 9px 0 6px; border-radius:6px; border:1px solid var(--bd);
+  background:var(--raised); color:var(--tx); font-size:12px; font-weight:600; cursor:pointer; min-width:0; flex:1 1 120px; }
+.picker:hover { border-color:var(--bd-strong); }
+.picker .sw { width:22px; height:16px; border-radius:3px; flex:none; background:linear-gradient(135deg,#ff5d5d,#ffab4a 40%,#5fe08b); }
+.picker .sw.board { background:var(--raised-strong); border:1px solid var(--bd-strong); }
+.picker .lbl { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.picker .grp { font-size:10px; color:var(--subtle); font-weight:500; flex:none; }
+.picker .car { margin-left:auto; color:var(--subtle); font-size:10px; flex:none; }
+
+/* ---- terminal --------------------------------------------------------- */
+.termwrap { position:relative; }
+.term { display:flex; flex-direction:column; height:150px; overflow-y:auto; overflow-x:hidden; border-radius:6px; border:1px solid var(--bd);
+  background:var(--terminal); padding:6px 8px; font:10.5px/1.45 var(--mono); color:var(--muted); scrollbar-width:thin; }
+.term p { margin:0; white-space:pre-wrap; word-break:break-all; padding-left:10px; text-indent:-10px; }
+.term .rom { color:var(--dim); }
+.term .board { color:var(--muted); }
+.term .wire { color:var(--st-live-tx); }
+.term .wire .k { color:var(--dim); }
+.term .studio { color:var(--violet); }
+.term .studio::before { content:"▸ "; color:var(--violet); opacity:.7; }
+.term .ok { color:var(--st-good-tx); }
+.term .err { color:var(--st-error-tx); }
+.term .warn { color:var(--st-warning-tx); }
+.term .rep { color:var(--dim); font-size:9.5px; margin-left:6px; padding:0 4px; border:1px solid var(--bd-mut); border-radius:3px; }
+.term .more { color:var(--dim); font-style:italic; border-bottom:1px dashed var(--bd-mut); margin-bottom:3px; padding-bottom:2px; }
+.term .fold { color:var(--subtle); cursor:pointer; text-decoration:underline dotted; }
+.term p.long { cursor:pointer; }
+.term p.long.open .cut { display:none; }
+.term p.long:not(.open) .rest { display:none; }
+.termbar { position:absolute; top:5px; right:14px; display:flex; gap:4px; z-index:2; }
+.termbar .btn { height:20px; padding:0 6px; font-size:10px; background:color-mix(in srgb, var(--terminal) 80%, transparent); border-color:var(--bd-mut); color:var(--subtle); }
+.termbar .btn:hover { color:var(--strong); }
+.term.current { flex-direction:column-reverse; background:var(--surface); color:var(--subtle); font-size:10.9px; line-height:1.35; }
+.term.current p { padding:0; text-indent:0; }
+
+/* ---- popover (§4, P1 gallery) ------------------------------------------ */
+.popwrap { position:relative; }
+.pop { position:absolute; left:0; top:calc(100% + 6px); z-index:40; width:520px; max-width:calc(100vw - 80px); display:none;
+  border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 20px 60px rgba(0,0,0,.6); }
+.pop.open { display:grid; }
+.pop .top { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--bd-mut); }
+.pop .tabs { display:flex; gap:2px; }
+.pop .tab { appearance:none; font:inherit; cursor:pointer; padding:4px 9px; border-radius:5px; border:1px solid transparent; background:transparent; color:var(--subtle); font-size:11.5px; font-weight:600; }
+.pop .tab.on { background:var(--surface); color:var(--strong); border-color:var(--bd-mut); }
+.pop .tab .c { color:var(--dim); font-weight:500; margin-left:4px; }
+.pop input { margin-left:auto; width:170px; appearance:none; font:inherit; font-size:11.5px; padding:4px 8px; border-radius:5px; border:1px solid var(--bd); background:var(--surface); color:var(--tx); }
+.pop .body { padding:10px; max-height:340px; overflow:auto; }
+.pop .cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(112px,1fr)); gap:8px; }
+.pcard { display:grid; gap:5px; padding:5px; border-radius:6px; border:1px solid var(--bd-mut); background:var(--panel); cursor:pointer; text-align:left; font:inherit; color:var(--muted); }
+.pcard:hover { border-color:var(--bd-strong); color:var(--strong); }
+.pcard.sel { box-shadow:0 0 0 1px var(--sel-bd); border-color:transparent; background:var(--sel-bg); color:var(--strong); }
+.pcard .th { position:relative; height:56px; border-radius:4px; overflow:hidden; background:#07080a; }
+.pcard .th canvas { position:absolute; inset:0; width:100%; height:100%; }
+.pcard .t { font-size:11.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pcard .b { font-size:10px; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pcard.new .th { display:grid; place-items:center; color:var(--subtle); font-size:20px; border:1px dashed var(--bd-strong); background:transparent; }
+.pop .foot { display:flex; align-items:center; gap:8px; padding:8px 10px; border-top:1px solid var(--bd-mut); font-size:11px; color:var(--dim); }
+.pop .foot .spring { flex:1; }
+.boards { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:8px; }
+.btile { display:grid; gap:3px; padding:8px; border-radius:6px; border:1px solid var(--bd-mut); background:var(--panel); cursor:pointer; text-align:left; font:inherit; color:var(--muted); }
+.btile:hover { border-color:var(--bd-strong); color:var(--strong); }
+.btile.sel { box-shadow:0 0 0 1px var(--sel-bd); border-color:transparent; background:var(--sel-bg); color:var(--strong); }
+.btile .t { font-size:12px; font-weight:600; }
+.btile .b { font-size:10.5px; color:var(--dim); }
+.btile .fam { font:9.5px var(--mono); color:var(--st-good-tx); }
+.btile.other .fam { color:var(--dim); }
+.filterline { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--subtle); }
+.filterline a { color:var(--muted); cursor:pointer; text-decoration:underline dotted; }
+
+/* ---- add + pending cards + roster strip ---------------------------------- */
+.addcard { display:flex; min-height:300px; flex-direction:column; align-items:center; justify-content:center; gap:10px; border-radius:8px;
+  border:1px dashed var(--bd-strong); padding:20px; text-align:center; }
+.addcard .ico { width:34px; height:34px; border-radius:8px; border:1px solid var(--bd); display:grid; place-items:center; color:var(--subtle); font-size:16px; }
+.addcard p { margin:0; max-width:220px; font-size:11.5px; line-height:1.5; color:var(--muted); }
+.grid3 { display:grid; grid-template-columns:repeat(auto-fill, minmax(330px,1fr)); gap:14px; }
+.roster { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px,1fr)); gap:10px; }
+.mini { display:grid; gap:6px; padding:9px; border-radius:7px; border:1px solid var(--bd); background:var(--panel); min-height:118px;
+  transition:opacity .35s, transform .35s, filter .35s; }
+.mini.gone { opacity:0; transform:scale(.96); pointer-events:none; }
+.mini.hidden { display:none; }
+.mini .play { height:54px; }
+.mini h4 { margin:0; font-size:12px; color:var(--strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mini .row { display:flex; align-items:center; justify-content:space-between; gap:6px; min-width:0; }
+.mini .row > * { min-width:0; }
+.mini .chip { min-height:18px; font-size:9.5px; padding:0 6px; flex:none; }
+.mini.remembered { border-style:dashed; opacity:.75; }
+.mini.remembered .play { filter:saturate(.35) brightness(.5); }
+.mini .add { min-height:118px; display:grid; place-items:center; border:1px dashed var(--bd-strong); border-radius:7px; color:var(--subtle); font-size:11px; }
+.rememberline { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--dim); padding:6px 2px 0; }
+.rememberline a { color:var(--subtle); cursor:pointer; text-decoration:underline dotted; }
+.rememberline .spring { flex:1; }
+</style>
+</head>
+<body>
+
+<h1>Device card v2 — the four zones, dressed · round 2</h1>
+<p class="hint">
+  <b>Gate-1 rulings applied.</b> A · Stage is the card, and it grows a <b>project section</b> inside the state zone that owns the project
+  verbs (Open · Put it on the board · Remove project) and the empty face; the footer keeps the device verbs (Disconnect · Reset ·
+  Factory reset · Forget) as reserve-width chips and no menu. The terminal is T1 with line processing. The picker is the gallery popover.
+  Offline cards are gone: disconnect → disappear, connect → appear, with remembered boards behind a quiet filter line (§5).
+  Rejected concepts are listed at the bottom with the reason.
+</p>
+
+<div class="controls">
+  <span class="grp">
+    <button id="tLong">Long names</button>
+    <button id="tLib">Library: 40 projects</button>
+    <button id="tArm">Arm “Forget”</button>
+    <button id="tArm2">Arm “Factory reset”</button>
+    <button id="tArm3">Arm “Remove project”</button>
+  </span>
+  <span class="sep"></span>
+  <span class="grp"><b>Terminal</b>
+    <button id="tNoise">+ 300 heartbeats</button>
+    <button id="tLongLine">+ a 400-char line</button>
+    <button id="tRepeat">+ 6 repeats</button>
+    <button id="tReset">reset</button>
+  </span>
+  <span class="sep"></span>
+  <span class="grp"><b>Preview</b>
+    <button data-play="live" class="active">live</button>
+    <button data-play="stale">stale</button>
+    <button data-play="none">no frame</button>
+  </span>
+</div>
+
+<h2><span class="n">1</span> The converged card, across its states</h2>
+<p class="sub">
+  One renderer, every state at once, at a three-up gallery width. Header: title · status · <b>board · chip · MAC · fw</b>. State zone, one
+  box with separators: state line · bar slot · preview · meta · verb row, <b>every row a fixed height</b>, so a board event (a heartbeat, a
+  fault, a lost link) can never move the card — the readout under each card measures it. The verb row carries Open + Remove project, or the
+  gallery trigger + Put it on the board, or the board pick + Flash. Terminal: T1. Footer: the four device verbs. Arming any destructive chip
+  marks the whole card.
+</p>
+<div class="conceptrow states" id="s1"></div>
+
+<h2><span class="n">2</span> The footer, measured</h2>
+<p class="sub">
+  Reserve chips versus the shipped prefix column at the same width, live-measured. Drag the width: the shipped row shifts its neighbours
+  as soon as it is full; Reserve never does. Project verbs are gone from the footer, so the row is four verbs wide at most.
+</p>
+<div class="controls local"><span><b>Card width</b></span><input type="range" id="s2w" min="320" max="520" value="400" step="4"><span id="s2wv" style="font-family:var(--mono)">400px</span><span style="color:var(--shell-dim)">— the gallery grid is minmax(320px, 1fr); ~400px is a three-up column at 1440</span></div>
+<div id="s2" style="display:flex;flex-wrap:wrap;gap:22px;align-items:flex-start"></div>
+
+<h2><span class="n">3</span> The terminal — T1 with line processing</h2>
+<p class="sub">
+  Natural order, pinned to the newest line, typed colours, decoded wire frames. Three processing rules, each exercised by a control above:
+  <b>cap</b> — the fold keeps the last 200 lines and the panel says how many it dropped; <b>repeats</b> — an identical consecutive line
+  collapses into one row with a ×N badge (the fold already collapses immediate repeats; this shows the count); <b>long lines</b> — anything
+  past 160 chars folds at 120 with a click-to-expand tail, so a JSON blob never scrolls the panel sideways or eats ten rows.
+</p>
+<div class="conceptrow" id="s3"></div>
+
+<h2><span class="n">4</span> The picker — gallery popover</h2>
+<p class="sub">
+  The empty face's trigger opens a tabbed grid of the gallery's own cards (Examples · My projects · New) with their poster thumbs; the board
+  pick uses the same trigger, filtered to the detected chip with the filter stated and escapable. Toggle the 40-project library above:
+  the face stays one row.
+</p>
+<div class="conceptrow" id="s4"></div>
+
+<h2><span class="n">5</span> The roster — disconnect → disappear; pending link; add card</h2>
+<p class="sub">
+  The roster shows what is plugged in. Unplug a board and its card leaves; plug it back and it returns, remembered name and all. Boards
+  Studio remembers but cannot see sit behind one quiet line at the bottom of the grid, not as cards — the line is the only place Forget
+  lives for a board that is not here. Below it, the pending-link card (identifying, then needs firmware) and the add card in the same idiom.
+</p>
+<div class="stage" id="s5roster"></div>
+<div class="grid3" id="s5" style="margin-top:14px"></div>
+
+<div class="lean" id="lean"></div>
+<div class="rejected" id="rejected"></div>
+
+<script>
+/* =====================================================================
+   Data — modelled on lpa-devices' DeviceView + real bench boards
+   ===================================================================== */
+const S = { long:false, lib:'small', armed:null, noise:0, longLines:0, repeats:0, play:'live', picks:{}, w2:400, showAll:false, tab:'ex', showRemembered:false, gone:{} };
+const STATE_ORDER = ['running','empty','firmware','flashing','pushing','degraded','quiet'];
+const BOARDS = [
+  {id:'seeed/xiao-esp32-c6', t:'XIAO ESP32-C6', m:'Seeed Studio', fam:'esp32c6', flash:'4 MB'},
+  {id:'espressif/esp32-c6-devkitc-1', t:'ESP32-C6-DevKitC-1', m:'Espressif', fam:'esp32c6', flash:'8 MB'},
+  {id:'seeed/xiao-esp32-s3-plus', t:'XIAO ESP32-S3 Plus', m:'Seeed Studio', fam:'esp32s3', flash:'16 MB'},
+  {id:'espressif/esp32-s3-devkitc-1', t:'ESP32-S3-DevKitC-1', m:'Espressif', fam:'esp32s3', flash:'8 MB'},
+  {id:'quinled/dig2go', t:'QuinLED Dig2go', m:'QuinLED', fam:'esp32', flash:'4 MB'},
+  {id:'quinled/dig-uno', t:'QuinLED Dig-Uno', m:'QuinLED', fam:'esp32', flash:'4 MB'},
+  {id:'domraem/dom-z-102', t:'DOM-Z-102', m:'Domraem', fam:'esp32', flash:'4 MB'},
+];
+const EXAMPLES = ['meteor','plasma','fire2012','comet','palette-waves','fluid','rocaille','pulse','fault-demo','logo-sign','small-dome'];
+const MINE_SMALL = ['Porch sign v3','Kitchen strip'];
+const MINE_BIG = Array.from({length:38}, (_,i)=>['Porch sign v3','Kitchen strip','Garage arc','Stair wash','Fence run (fork 3)','Meteor shower over the long fence, north side','Halloween 2025','Studio test rig','Party mode','Dome sim 2V'][i%10] + (i>9?' '+(i):''));
+const NAMES = {
+  title: l => l ? 'Porch sign — the long one over the garage door, north side' : 'Porch sign',
+  project: l => l ? 'Meteor shower over the long fence, north side (fork 3)' : 'Meteor',
+};
+function device(st) {
+  const l = S.long;
+  const d = { state:st, title:NAMES.title(l), board:'XIAO ESP32-C6', chip:'esp32c6', mac:'a0:f2:62:87:b4:8c', fw:'0.9.3', proto:20,
+              project:null, status:'Ready', kind:'good', detail:'LightPlayer · fw 0.9.3 · wire 20', freshness:null,
+              activity:null, face:'none', escapes:['Disconnect'], fps:43, play:S.play, faultline:null };
+  switch (st) {
+    case 'running': d.project = NAMES.project(l); d.face = 'running'; break;
+    case 'degraded': d.project = NAMES.project(l); d.face = 'running'; d.status = 'Degraded'; d.kind = 'attention';
+      d.faultline = 'Fault: node /studio.show/s quarantined after 2 crashes — the output shows the fault pattern'; d.play = 'fault'; break;
+    case 'empty': d.face = 'empty'; d.play = 'none'; break;
+    case 'firmware': d.face = 'flash'; d.status = 'Needs firmware'; d.kind = 'attention'; d.detail = 'Blank flash — needs firmware'; d.play = 'none'; d.fw = null; break;
+    case 'flashing': d.status = 'Flashing'; d.kind = 'working'; d.activity = {label:'Flashing firmware', pct:62}; d.escapes = ['Cancel']; d.play = 'none'; d.face = 'flash'; d.fw = null; d.detail = 'Blank flash — needs firmware'; break;
+    case 'pushing': d.status = 'Sending'; d.kind = 'working'; d.activity = {label:'Sending the project', pct:null}; d.escapes = ['Cancel']; d.play = 'none'; d.face = 'empty'; break;
+    case 'quiet': d.project = NAMES.project(l); d.face = 'running'; d.status = 'Not responding'; d.kind = 'warning'; d.freshness = 'quiet — last heard 12 s ago'; d.play = 'stale'; d.escapes = ['Retry','Disconnect']; break;
+  }
+  return d;
+}
+const idle = d => !d.activity;
+
+/* ---- terminal lines: typed, realistic ---------------------------------- */
+function lines(st) {
+  if (st === 'firmware' || st === 'flashing') {
+    const b = [['rom','ESP-ROM:esp32c6-20220919'],['rom','Build:Sep 19 2022'],['rom','rst:0x1 (POWERON),boot:0x2c (SPI_FAST_FLASH_BOOT)'],['rom','invalid header: 0xffffffff'],['rom','invalid header: 0xffffffff'],['rom','invalid header: 0xffffffff'],['rom','invalid header: 0xffffffff'],['studio','Blank flash — the chip named itself in the boot banner']];
+    if (st === 'flashing') b.push(['studio','— Flashing firmware —'],['studio','Parking the chip in its ROM downloader'],['rom','ESP-ROM:esp32c6-20220919'],['rom','waiting for download'],['studio','Chip esp32c6 matches seeed/xiao-esp32-c6 · writing lp-esp32c6-0.9.3 (1.9 MB)'],['studio','0x10000 … 62%']);
+    return b;
+  }
+  const base = [
+    ['rom','ESP-ROM:esp32c6-20220919'],
+    ['rom','Build:Sep 19 2022'],
+    ['rom','rst:0x15 (USB_UART_HPSYS),boot:0x2c (SPI_FAST_FLASH_BOOT)'],
+    ['board','Boot: scanning /projects for projects'],
+    ['board', st==='empty'||st==='pushing' ? 'Boot: no projects to auto-load' : 'Boot: 1 valid projects found'],
+  ];
+  if (st !== 'empty' && st !== 'pushing') base.push(['board','Boot: auto-loading meteor']);
+  base.push(['wire','M!{"hello":{"proto":20,"board":"seeed/xiao-esp32-c6","fw":"0.9.3+c3514826","mac":"a0:f2:62:87:b4:8c"}}','hello · proto 20 · seeed/xiao-esp32-c6 · fw 0.9.3']);
+  if (st === 'empty') base.push(['wire','M!{"heartbeat":{"fps":0,"heap":221184,"project":null,"up":9}}','heartbeat · idle · heap 216 KB · up 9 s']);
+  if (st === 'pushing') base.push(['studio','— Sending the project —'],['studio','Sending Porch sign v3 · 22 files · 71 KB'],['wire','M!{"ack":{"id":18,"path":"/projects/porch-sign-v3/project.json"}}','ack · /projects/porch-sign-v3/project.json']);
+  if (st === 'running' || st === 'degraded' || st === 'quiet') base.push(
+    ['studio','— Sending the project —'],
+    ['studio','Sending meteor · 14 files · 38 KB'],
+    ['wire','M!{"ack":{"id":18,"path":"/projects/meteor/project.json"}}','ack · /projects/meteor/project.json'],
+    ['ok','Sent Meteor in 2.1 s'],
+    ['board','Boot: auto-loaded project meteor'],
+    ['wire','M!{"heartbeat":{"fps":43,"heap":112640,"project":"meteor","up":31}}','heartbeat · 43 fps · heap 110 KB · up 31 s'],
+    ['wire','M!{"heartbeat":{"fps":43,"heap":112592,"project":"meteor","up":36}}','heartbeat · 43 fps · heap 110 KB · up 36 s']);
+  if (st === 'degraded') base.push(
+    ['warn','[RECOVERY] node /studio.show/s: crash 2/2 (OOM at compute compile, 250 B short of 300000 B)'],
+    ['err','[RECOVERY] node /studio.show/s disabled after 2 crashes — black fallback → fault pattern'],
+    ['wire','M!{"heartbeat":{"fps":43,"heap":1120,"project":"meteor","fault":"shader"}}','heartbeat · 43 fps · heap 1.1 KB · FAULT shader']);
+  if (st === 'quiet') base.push(['warn','no heartbeat for 12 s — asking again'],['studio','pulse 1/3 · no answer'],['studio','pulse 2/3 · no answer']);
+  for (let i = 0; i < S.noise; i++) base.push(['wire',`M!{"heartbeat":{"fps":43,"heap":${112600-(i%40)*8},"project":"meteor","up":${41+i*5}}}`,`heartbeat · 43 fps · heap 110 KB · up ${41+i*5} s`]);
+  for (let i = 0; i < S.longLines; i++) base.push(['board','Esp32C6RmtWs281xDriver: block plan published: ' + JSON.stringify({outputs:[{pin:2,px:300,fmt:'grb',block:{words:48,refill:'iram'}},{pin:3,px:300,fmt:'grb',block:{words:48,refill:'iram'}}],clock:{src:'pll_f80m',div:1},lut:'gamma-2.2-8bit',dither:'temporal-4',frame:{us:23100,margin_words:3}}) + ' (this is the kind of line that used to eat the panel)']);
+  for (let i = 0; i < S.repeats; i++) base.push(['warn','Esp32OutputProvider::flush: handle=2: RMT channel busy (retrying)']);
+  return base;
+}
+const CAP = 200;
+function processLines(ls) {
+  let dropped = 0;
+  if (ls.length > CAP) { dropped = ls.length - CAP; ls = ls.slice(-CAP); }
+  const out = [];
+  ls.forEach(l => { const prev = out[out.length-1]; if (prev && prev.raw === l[1]) { prev.n++; return; } out.push({k:l[0], raw:l[1], decoded:l[2], n:1}); });
+  return {dropped, rows:out};
+}
+
+/* =====================================================================
+   Renderers
+   ===================================================================== */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const chip = d => `<span class="chip ${d.kind}">${esc(d.status)}</span>`;
+function header(d) {
+  const fwtag = d.fw ? `fw ${d.fw}` : 'no firmware';
+  return `<header style="display:grid;gap:5px">
+    <div class="head"><h3 title="${esc(d.title)}">${esc(d.title)}</h3>${chip(d)}</div>
+    <p class="idline">${esc(d.board)} · <span style="color:var(--muted)">${d.chip}</span> · ${d.mac} · ${fwtag}</p>
+  </header>`;
+}
+function play(d) {
+  const p = d.play;
+  if (!d.project || p === 'none') {
+    const why = d.face==='flash' ? 'Nothing running — a blank chip has no picture.'
+      : d.activity ? `${d.activity.label}… the picture returns when the board does.`
+      : 'Nothing loaded — no picture until something runs.';
+    return `<div class="play"><div class="playempty">${esc(why)}</div></div>`;
+  }
+  const pill = p==='live' ? `<span class="pill live"><i class="dot"></i>live · ${d.fps} fps</span>`
+    : p==='fault' ? `<span class="pill fault"><i class="dot"></i>fault · ${d.fps} fps</span>`
+    : `<span class="pill stale">last frame · 12 s ago</span>`;
+  return `<div class="play" data-play="${p}"><canvas data-mode="${p}"></canvas>${pill}</div>`;
+}
+function activity(d) {
+  if (!d.activity) return '';
+  const a = d.activity;
+  return `<div style="display:grid;gap:5px"><p class="quiet">${esc(a.label)}${a.pct!=null?` · ${a.pct}%`:''}</p>
+    <div class="bar">${a.pct!=null?`<i style="width:${a.pct}%"></i>`:`<i class="sweep"></i>`}</div></div>`;
+}
+const CTA = (label, cls='') => `<button class="btn cta ${cls}">${label}</button>`;
+const plain = (label, cls='quiet') => `<button class="btn ${cls}">${label}</button>`;
+function armchipReserve(label, key, alt, cls='quiet') {
+  const on = S.armed===key;
+  return `<button class="btn ${cls} armchip reserve ${on?'on':''}" data-arm="${key}"><span class="lab rest">${label}</span><span class="lab alt">${alt}</span></button>`;
+}
+function armchipProd(label, key) {
+  const on = S.armed===key;
+  return `<button class="btn quiet armchip ${on?'on':''}" data-arm="${key}"><span class="pre"><span>Confirm&nbsp;</span></span>${label}</button>`;
+}
+
+/* the project part — flat, fixed rows (gate 2) */
+function stateLine(d) {
+  if (d.activity) return `${d.activity.label}${d.activity.pct!=null?` · ${d.activity.pct}%`:''}`;
+  if (d.faultline) return d.faultline;
+  if (d.freshness) return d.freshness;
+  return d.detail;
+}
+function projectSection(d, popId) {
+  const fpsline = d.play==='live'||d.play==='fault' ? `${d.fps} fps from device` : d.play==='stale' ? `<span style="color:var(--st-attention-tx)">no frames for 12 s</span>` : '';
+  let meta, verbs;
+  if (d.face === 'running') {
+    const open = idle(d) && d.state!=='quiet' ? CTA('Open','sm') : '';
+    const clear = d.state==='degraded' ? `<button class="btn outline sm">Clear faults</button>` : '';
+    meta = `<span class="name">${esc(d.project)}</span><span class="spring"></span><span class="fps">${fpsline}</span>`;
+    verbs = `${clear}${open}<span class="spring"></span>${armchipReserve('Remove project','remove','Confirm remove')}`;
+  } else if (d.face === 'empty') {
+    const pick = S.picks.push || {t:'Meteor', g:'example'};
+    meta = `<span class="name" style="color:var(--subtle);font-weight:500">Nothing loaded</span>`;
+    verbs = d.activity ? '' : `<div class="popwrap" style="flex:1"><div class="facerow"><span class="lead">Put on it</span>
+        <button class="picker" onclick="togglePop('${popId}')"><span class="sw"></span><span class="lbl">${esc(pick.t)}</span><span class="grp">${pick.g}</span><span class="car">▾</span></button>
+        ${CTA('Put it on the board','sm')}</div>${popGallery(popId)}</div>`;
+  } else {
+    meta = `<span class="name" style="color:var(--subtle);font-weight:500">No firmware</span>`;
+    verbs = d.activity ? '' : boardFace(popId, S.showAll, false);
+  }
+  const fault = !!d.faultline;
+  return `<div class="proj">
+      <p class="${fault?'fail':'quiet'} oneline" title="${esc(stateLine(d))}">${esc(stateLine(d))}</p>
+      <div class="barslot ${d.activity?'on':''}">${d.activity?(d.activity.pct!=null?`<i style="width:${d.activity.pct}%"></i>`:`<i class="sweep"></i>`):''}</div>
+      ${play(d)}
+      <div class="playmeta">${meta}</div>
+      <div class="verbs">${verbs}</div>
+    </div>`;
+}
+function footer(d) {
+  return `<footer class="actions">${d.escapes.map(e=>plain(e)).join('')}${idle(d)?plain('Reset'):''}${idle(d)?armchipReserve('Factory reset','erase','Confirm reset'):''}${armchipReserve('Forget','forget','Confirm forget')}</footer>`;
+}
+function footerProd(d) {
+  return `<footer class="actions">${d.escapes.map(e=>plain(e)).join('')}${armchipProd('Forget','forget')}${d.project?armchipProd('Remove project','remove'):''}${idle(d)?plain('Reset')+armchipProd('Factory reset','erase'):''}</footer>`;
+}
+
+/* terminals */
+function termTyped(ls, opts={}) {
+  const {dropped, rows} = processLines(ls);
+  const h = opts.h ? `height:${opts.h}px` : '';
+  let html = dropped ? `<p class="more">… ${dropped} earlier lines not shown (the fold keeps ${CAP})</p>` : '';
+  html += rows.map(r => {
+    const rep = r.n>1 ? `<span class="rep">×${r.n}</span>` : '';
+    if (r.k==='wire') return `<p class="wire"><span class="k">wire</span> ${esc(r.decoded||r.raw)}${rep}</p>`;
+    const txt = r.raw.replace(/^— (.*) —$/, '$1');
+    if (txt.length > 160) return `<p class="${r.k} long" onclick="this.classList.toggle('open')">${esc(txt.slice(0,120))}<span class="cut">… <span class="fold">+${txt.length-120} chars</span></span><span class="rest">${esc(txt.slice(120))} <span class="fold">less</span></span>${rep}</p>`;
+    return `<p class="${r.k}">${esc(txt)}${rep}</p>`;
+  }).join('');
+  return `<div class="termwrap"><div class="term" style="${h}">${html}</div>
+    <div class="termbar"><button class="btn quiet" title="Copy the whole tail">copy</button><button class="btn quiet" title="Raw wire frames">raw</button></div></div>`;
+}
+function termCurrent(ls, h) {
+  return `<div class="term current" style="${h?`height:${h}px`:''}">${[...ls].reverse().map(l=>`<p>${esc(l[1])}</p>`).join('')}</div>`;
+}
+
+/* the converged card */
+function card(d, popId) {
+  const armedCard = !!S.armed;
+  return `<article class="card armed-scope ${armedCard?'is-armed':''}" data-state="${d.state}">
+    <div class="dim">
+      ${header(d)}
+      <section class="zone">
+        ${projectSection(d, popId)}
+      </section>
+      <section class="zone">${termTyped(lines(d.state),{h:150})}</section>
+    </div>
+    ${footer(d)}
+  </article>`;
+}
+const STATE_LABEL = {running:'Running', empty:'Nothing loaded', firmware:'Needs firmware', flashing:'Flashing', pushing:'Sending a project', degraded:'Degraded (#496)', quiet:'Not responding'};
+const STATE_NOTE = {
+  running:'The state zone is one box: state line · bar slot · preview · meta · verbs, every row a fixed height. Open is the one Primary; Remove project sits right and, armed, marks the whole card (ruling 2).',
+  empty:'Same rows, empty face: the verb row holds the gallery trigger + one verb at the same 30px. The preview says honestly there is nothing to draw.',
+  firmware:'Same rows again: board pick (chip-filtered) + Flash in the verb row; the filter explanation lives in the popover, not on the card.',
+  flashing:'The activity takes the state line and lights the bar slot; the verb row is kept empty at its height. Cancel is the footer\'s escape.',
+  pushing:'Push in flight: same as flashing on the empty face — the card does not move while the bar runs; the terminal narrates.',
+  degraded:'The #496 state: the fault takes the state line (one line, ellipsised, full text on hover and in the terminal), fault pill on the picture, Clear faults beside Open.',
+  quiet:'Freshness takes the state line; last known picture wears the stale pill; Open is withheld; Retry joins the footer (Reconnect moved to the remembered line — a gone link is a gone card). The only state whose footer can wrap.',
+};
+function concept(name, thesis, stageHtml, notes, style='') {
+  const stage = stageHtml.startsWith('<div class="stage') ? stageHtml : `<div class="stage">${stageHtml}</div>`;
+  return `<div class="concept" style="${style}"><div class="chead"><span class="name">${name}</span><span class="thesis">${thesis}</span></div>
+    ${stage}${notes?`<div class="cnotes">${notes}</div>`:''}</div>`;
+}
+function renderS1() {
+  document.getElementById('s1').innerHTML = STATE_ORDER.map(st => concept(STATE_LABEL[st], '', card(device(st), 'pop-'+st), `<span class="hm" data-hm="${st}"></span>` + STATE_NOTE[st])).join('');
+}
+function measureCards() {
+  const hs = {}; document.querySelectorAll('#s1 .card').forEach(c => hs[c.dataset.state] = c.offsetHeight);
+  const ref = hs.running;
+  document.querySelectorAll('[data-hm]').forEach(m => { const h = hs[m.dataset.hm]; const d = h - ref; m.innerHTML = `card ${h}px · ${d===0?'<b>same as Running</b>':`<b class="diff">${d>0?'+':''}${d}px vs Running</b>`}`; });
+}
+
+/* §2 footers measured */
+function renderS2() {
+  const d = device('running');
+  const wrap = (html, id) => `<div class="stage narrow" style="width:100%"><div id="${id}" style="display:grid">${html}</div></div>`;
+  const W = `width:${S.w2||400}px;flex:none`;
+  document.getElementById('s2').innerHTML = [
+    concept('Shipped', 'prefix column opens; project verbs on the row', wrap(footerProd(d),'m-cur'), '<span class="meter" data-meter="m-cur"></span><br>The armed label is wider than the resting one; in a wrapping row that pushes its neighbours and, once the row is full, wraps it.', W),
+    concept('Round 2', 'reserve chips; four device verbs only', wrap(footer(d),'m-res'), '<span class="meter" data-meter="m-res"></span><br>Both labels share one cell; the hidden one holds the width. Arming still transforms (ramp, knock, drain). Remove project moved into the project section.', W),
+  ].join('');
+}
+const baseline = {};
+function snapshot(el) { const r0 = el.getBoundingClientRect(); const m = {}; el.querySelectorAll('.btn').forEach((b,i)=>{ if (!b.offsetParent) return; const r=b.getBoundingClientRect(); m[i]={x:Math.round(r.left-r0.left),y:Math.round(r.top-r0.top),w:Math.round(r.width),arm:b.dataset.arm||null}; }); return {h:el.offsetHeight, m}; }
+function measure() {
+  document.querySelectorAll('[data-meter]').forEach(m => {
+    const id = m.dataset.meter, el = document.getElementById(id);
+    if (!el) return;
+    const now = snapshot(el);
+    if (!S.armed) { baseline[id] = now; m.textContent = `footer ${now.h}px · at rest`; m.className = 'meter'; return; }
+    const b = baseline[id]; if (!b) return;
+    let moved = 0, grew = 0;
+    Object.keys(now.m).forEach(i => { const a = b.m[i], c = now.m[i]; if (!a) return; if (c.arm===S.armed) grew = c.w - a.w; else if (a.x!==c.x || a.y!==c.y) moved++; });
+    const dh = now.h - b.h; const bad = moved>0 || dh!==0;
+    m.textContent = `armed chip ${grew>=0?'+':''}${grew}px wide · ${moved} neighbour${moved===1?'':'s'} shifted · footer ${dh?(dh>0?'+':'')+dh+'px':'same height'} — ${bad?'REFLOWED':'STABLE'}`;
+    m.className = 'meter ' + (bad ? 'bad' : 'ok');
+  });
+}
+
+/* §3 terminal */
+function renderS3() {
+  const ls = lines('running');
+  const p = processLines(ls);
+  document.getElementById('s3').innerHTML = [
+    concept('Shipped', 'column-reverse, untyped, no processing', `<div class="stage narrow">${termCurrent(ls,180)}</div>`,
+      `Rendering ${ls.length} raw lines. Selection pastes bottom-up; a 400-char line wraps into ten rows; 300 heartbeats are 300 rows of JSON.`),
+    concept('T1 · processed', 'cap 200 · repeats ×N · long lines fold', `<div class="stage narrow">${termTyped(ls,{h:180})}</div>`,
+      `<span class="meter">${ls.length} lines in → ${p.rows.length} rows shown${p.dropped?` · ${p.dropped} dropped by the cap`:''}</span><br>Use the Terminal controls above. Click a folded line to expand it. The copy button takes the whole processed tail, top-down.`),
+  ].join('');
+}
+
+/* §4 picker */
+function thumbCanvas(seed) { return `<canvas data-thumb="${seed}"></canvas>`; }
+window.togglePop = id => { const el = document.getElementById(id); if (!el) return; const open = el.classList.contains('open'); document.querySelectorAll('.pop.open').forEach(p=>p.classList.remove('open')); if (!open) el.classList.add('open'); };
+window.pick = (t, g) => { S.picks.push = {t, g}; renderAll(); };
+window.pickBoard = i => { S.picks.board = BOARDS[i]; renderAll(); };
+function popGallery(id) {
+  const mine = S.lib==='big' ? MINE_BIG : MINE_SMALL;
+  const tab = S.tab || 'ex';
+  const cards = tab==='ex' ? EXAMPLES.map(e=>`<button class="pcard ${S.picks.push?.t===e?'sel':''}" onclick="pick('${e}','example')"><div class="th">${thumbCanvas(e)}</div><span class="t">${e}</span><span class="b">example · gallery</span></button>`).join('')
+    : tab==='mine' ? mine.map(m=>`<button class="pcard ${S.picks.push?.t===m?'sel':''}" onclick="pick('${esc(m).replace(/'/g,'')}','my project')"><div class="th">${thumbCanvas(m)}</div><span class="t">${esc(m)}</span><span class="b">saved 2 d ago · 14 files</span></button>`).join('')
+    : `<button class="pcard new" onclick="pick('New project','new')"><div class="th">＋</div><span class="t">New project</span><span class="b">generated for XIAO ESP32-C6</span></button>`;
+  return `<div class="pop" id="${id}">
+    <div class="top"><div class="tabs">
+      <button class="tab ${tab==='ex'?'on':''}" onclick="S.tab='ex';renderAll();togglePop('${id}')">Examples<span class="c">${EXAMPLES.length}</span></button>
+      <button class="tab ${tab==='mine'?'on':''}" onclick="S.tab='mine';renderAll();togglePop('${id}')">My projects<span class="c">${mine.length}</span></button>
+      <button class="tab ${tab==='new'?'on':''}" onclick="S.tab='new';renderAll();togglePop('${id}')">New</button></div>
+      <input placeholder="Search…"></div>
+    <div class="body"><div class="cards">${cards}</div></div>
+    <div class="foot"><span>Same cards as the Explore and Projects pages — thumbs are the real posters.</span><span class="spring"></span><span>esc closes</span></div>
+  </div>`;
+}
+function boardFace(popId, showAll, inProject=false) {
+  const pick = S.picks.board || BOARDS[0];
+  const cands = showAll ? BOARDS : BOARDS.filter(b=>b.fam==='esp32c6');
+  return `<div class="popwrap" style="flex:1"><div class="facerow"><span class="lead">Board</span>
+    <button class="picker" onclick="togglePop('${popId}')"><span class="sw board"></span><span class="lbl">${esc(pick.t)}</span><span class="grp">${pick.fam}</span><span class="car">▾</span></button>
+    ${CTA('Flash firmware','sm')}</div>
+    ${inProject?`<p class="quiet" style="font-size:10.5px">Two boards match the detected <b style="color:var(--muted)">esp32c6</b>. The pick is checked against the chip before anything is written.</p>`:''}
+    <div class="pop" id="${popId}" style="width:440px">
+      <div class="top"><div class="filterline">${showAll?`Every served board — the flash preflight checks the chip. <a onclick="S.showAll=false;renderAll();togglePop('${popId}')">only esp32c6</a>`:`Detected <span class="tag chipname">esp32c6</span> in the boot banner · ${cands.length} boards fit · <a onclick="S.showAll=true;renderAll();togglePop('${popId}')">show all</a>`}</div></div>
+      <div class="body"><div class="boards">${cands.map(b=>`<button class="btile ${b.fam!=='esp32c6'?'other':''} ${pick.id===b.id?'sel':''}" onclick="pickBoard(${BOARDS.indexOf(b)})"><span class="t">${esc(b.t)}</span><span class="b">${b.m} · ${b.flash} flash</span><span class="fam">${b.fam}${b.fam==='esp32c6'?' · matches':''}</span></button>`).join('')}</div></div>
+      <div class="foot">The pin map is written to the device, so the board must be right; the chip guard makes a wrong pick fail safely.</div>
+    </div></div>`;
+}
+function renderS4() {
+  const pick = S.picks.push || {t:'Meteor', g:'example'};
+  const face = `<div class="popwrap"><div class="facerow"><span class="lead">Put on it</span>
+    <button class="picker" onclick="togglePop('pop-p1')"><span class="sw"></span><span class="lbl">${esc(pick.t)}</span><span class="grp">${pick.g}</span><span class="car">▾</span></button>
+    ${CTA('Put it on the board','sm')}</div>${popGallery('pop-p1')}</div>`;
+  document.getElementById('s4').innerHTML = [
+    concept('P1 · Gallery', 'trigger + tabbed card grid with real thumbs', `<div class="stage narrow" style="min-height:120px">${face}</div>`,
+      'Tabs are the three sources the offer already groups. Cards are the gallery\'s own (poster thumb, title, provenance). Click the trigger; pick a card and the trigger, the §1 empty card and this face all update.'),
+    concept('Board pick', 'same trigger; chip filter stated and escapable', `<div class="stage narrow" style="min-height:120px">${boardFace('pop-b', S.showAll)}</div>`,
+      'Filtered to the detected chip by default, and the filter says so. “Show all” is the mid-stream-attach escape (no banner seen). Items 4/5 land here: the chip is shown, and the filter reads it — from the ROM banner, the hello\'s board id, or the record.'),
+  ].join('');
+}
+
+/* §5 roster + family */
+const ROSTER = [
+  {id:'porch', t:'Porch sign', board:'XIAO ESP32-C6', proj:'Meteor', seed:'meteor'},
+  {id:'kitchen', t:'Kitchen strip', board:'QuinLED Dig2go', proj:'Plasma', seed:'plasma'},
+];
+const REMEMBERED = [{t:'Garage arc', board:'DOM-Z-102', last:'yesterday'},{t:'Stair wash', board:'XIAO ESP32-S3 Plus', last:'3 d ago'}];
+window.unplug = id => { S.gone[id] = !S.gone[id]; renderS5(); mountCanvases(); };
+window.toggleRemembered = () => { S.showRemembered = !S.showRemembered; renderS5(); mountCanvases(); };
+function renderS5() {
+  const tiles = ROSTER.map(r => `<div class="mini ${S.gone[r.id]?'gone':''}">
+      <div class="row"><h4>${r.t}</h4><span class="chip good">Ready</span></div>
+      <div class="play"><canvas data-mode="live" data-seed="${r.seed}"></canvas></div>
+      <div class="row"><span class="quiet" style="font-size:10.5px">${r.proj} · ${r.board}</span></div>
+    </div>`).join('');
+  const rem = REMEMBERED.map(r => `<div class="mini remembered ${S.showRemembered?'':'hidden'}">
+      <div class="row"><h4>${r.t}</h4><span class="chip neutral">Not connected</span></div>
+      <div class="play"><canvas data-mode="stale" data-seed="${r.t}"></canvas></div>
+      <div class="row"><span class="quiet" style="font-size:10.5px">last seen ${r.last} · ${r.board}</span>${armchipReserve('Forget','rem-'+r.t.replace(/\W/g,''),'Confirm','quiet sm')}</div>
+    </div>`).join('');
+  const goneCount = Object.values(S.gone).filter(Boolean).length;
+  document.getElementById('s5roster').innerHTML = `
+    <div class="controls local" style="margin-bottom:12px">${ROSTER.map(r=>`<button class="${S.gone[r.id]?'active':''}" onclick="unplug('${r.id}')">${S.gone[r.id]?'Plug in':'Unplug'} ${r.t}</button>`).join('')}<span style="color:var(--shell-dim)">— the card leaves on disconnect and returns on connect, remembered name and all</span></div>
+    <div class="roster">${tiles}${rem}<div class="mini"><div class="add">+ It's plugged in</div></div></div>
+    <div class="rememberline"><span>${REMEMBERED.length + goneCount} remembered board${REMEMBERED.length+goneCount===1?'':'s'} not connected</span><a onclick="toggleRemembered()">${S.showRemembered?'hide':'show'}</a><span class="spring"></span><span>Studio keeps their names and last picture; Forget lives here.</span></div>`;
+  const pendingIdent = `<article class="card" style="min-height:0"><div class="dim">
+    <header style="display:grid;gap:5px"><div class="head"><h3>USB serial · /dev/cu.usbmodem2101</h3><span class="chip working">Identifying</span></div><p class="idline">no identity yet · found 3 s ago</p></header>
+    <section class="zone"><p class="detail">New device found — identifying…</p><div class="bar"><i class="sweep"></i></div>
+      <div class="term" style="height:90px"><p class="rom">ESP-ROM:esp32c6-20220919</p><p class="rom">Build:Sep 19 2022</p><p class="rom">rst:0x1 (POWERON),boot:0x2c (SPI_FAST_FLASH_BOOT)</p><p class="studio">listening for a hello…</p></div></section>
+    </div><footer class="actions">${plain('Cancel')}${plain('Reset')}${armchipReserve('Dismiss','dismiss','Confirm dismiss')}</footer></article>`;
+  const pendingFw = `<article class="card" style="min-height:0"><div class="dim">
+    <header style="display:grid;gap:5px"><div class="head"><h3>USB serial · /dev/cu.usbmodem2101</h3><span class="chip attention">Needs firmware</span></div><p class="idline">esp32c6 · no identity until flashed</p></header>
+    <section class="zone"><p class="detail">New device found — blank flash. Flashing it is how you keep it.</p>
+      <div class="verbs" style="display:flex;align-items:center;gap:6px;height:30px">${boardFace('pop-b5', false, false)}</div>
+      <div class="term" style="height:90px"><p class="rom">ESP-ROM:esp32c6-20220919</p><p class="rom">invalid header: 0xffffffff<span class="rep">×4</span></p><p class="studio">Blank flash — the chip named itself in the boot banner</p></div></section>
+    </div><footer class="actions">${plain('Reset')}${armchipReserve('Dismiss','dismiss','Confirm dismiss')}</footer></article>`;
+  const add = `<div class="addcard"><div class="ico">⌁</div><p><b style="color:var(--strong)">Connect a LightPlayer board to control it.</b></p><p>Plug it in over USB, then pick its port.</p><button class="btn outline">It's plugged in</button></div>`;
+  document.getElementById('s5').innerHTML = [
+    concept('Pending · identifying', 'not a device yet', `<div class="stage">${pendingIdent}</div>`, 'No project section, no always-actions. The terminal is shorter — the only zone that matters here is what the board says.'),
+    concept('Pending · needs firmware', 'the firmware section on the link', `<div class="stage">${pendingFw}</div>`, 'The same firmware section as §1. Flashing IS the adopt gesture, so there is no separate Keep.'),
+    concept('Add card', 'the empty state (#482, unchanged)', `<div class="stage">${add}</div>`, 'Kept as shipped; shown so the family reads together at the same card width.'),
+  ].join('');
+}
+
+/* =====================================================================
+   canvases: lamp fields + poster thumbs
+   ===================================================================== */
+const LIVE = [];
+function hash(s){ let h=2166136261; for (const c of String(s)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return (h>>>0); }
+function mountCanvases() {
+  LIVE.length = 0;
+  document.querySelectorAll('canvas[data-mode]').forEach(c => { fit(c); delete c.dataset.drawn; LIVE.push(c); });
+  document.querySelectorAll('canvas[data-thumb]').forEach(c => { fit(c); drawField(c, hash(c.dataset.thumb) % 1000 / 60, 'poster', hash(c.dataset.thumb)); });
+  tick(performance.now());
+}
+function fit(c){ const r = c.getBoundingClientRect(); c.width = Math.max(2, Math.round(r.width*2)); c.height = Math.max(2, Math.round(r.height*2)); }
+function drawField(c, t, mode, seed=7) {
+  const g = c.getContext('2d'); const W = c.width, H = c.height;
+  g.fillStyle = '#07080a'; g.fillRect(0,0,W,H);
+  const cols = 30, rows = Math.max(3, Math.round(cols * H / W)); const cw = W/cols, ch = H/rows; const r = Math.min(cw,ch)*0.32;
+  const hueBase = (seed % 360);
+  for (let y=0;y<rows;y++) for (let x=0;x<cols;x++) {
+    const u = x/cols, v = y/rows; let L, hue;
+    if (mode==='fault') { L = 0.25 + 0.2*Math.sin(t*2*Math.PI); hue = 0; }
+    else { const head = (t*0.35 + v*0.1) % 1.2; const dist = (u - head + 1.2) % 1.2; L = Math.max(0, 1 - dist*3.2) * (0.5 + 0.5*Math.sin(v*9+seed)); hue = (hueBase + u*140 + t*40) % 360; }
+    g.beginPath(); g.arc(x*cw+cw/2, y*ch+ch/2, r, 0, Math.PI*2);
+    g.fillStyle = `hsl(${hue} ${mode==='fault'?90:85}% ${mode==='fault'? (10+L*30) : (6 + L*54)}%)`; g.fill();
+  }
+}
+let ticking = false;
+function tick(now) {
+  const t = now/1000;
+  LIVE.forEach(c => { const m = c.dataset.mode; const seed = c.dataset.seed ? hash(c.dataset.seed)%360 : 7; if (m==='live') drawField(c, t, 'live', seed); else if (m==='fault') drawField(c, t, 'fault', seed); else if (!c.dataset.drawn) { drawField(c, 3.1, 'live', seed); c.dataset.drawn = 1; } });
+  if (!ticking) { ticking = true; requestAnimationFrame(loop); }
+}
+function loop(now) { const t = now/1000; LIVE.forEach(c => { const m = c.dataset.mode; const seed = c.dataset.seed ? hash(c.dataset.seed)%360 : 7; if (m==='live') drawField(c, t, 'live', seed); else if (m==='fault') drawField(c, t, 'fault', seed); }); requestAnimationFrame(loop); }
+
+/* =====================================================================
+   controls + wiring
+   ===================================================================== */
+function pinTerminals() { document.querySelectorAll('.term:not(.current)').forEach(t => { t.scrollTop = t.scrollHeight; }); }
+function renderAll() { renderS1(); renderS2(); renderS3(); renderS4(); renderS5(); mountCanvases(); measure(); measureCards(); syncControls(); pinTerminals(); }
+function syncControls() {
+  document.getElementById('tLong').classList.toggle('active', S.long);
+  document.getElementById('tLib').classList.toggle('active', S.lib==='big');
+  document.getElementById('tArm').classList.toggle('active', S.armed==='forget');
+  document.getElementById('tArm2').classList.toggle('active', S.armed==='erase');
+  document.getElementById('tArm3').classList.toggle('active', S.armed==='remove');
+  document.querySelectorAll('.controls [data-play]').forEach(b => b.classList.toggle('active', b.dataset.play===S.play));
+}
+document.getElementById('tLong').onclick = () => { S.long = !S.long; renderAll(); };
+document.getElementById('tLib').onclick = () => { S.lib = S.lib==='big' ? 'small' : 'big'; renderAll(); };
+document.getElementById('tNoise').onclick = () => { S.noise += 300; renderAll(); };
+document.getElementById('tLongLine').onclick = () => { S.longLines += 1; renderAll(); };
+document.getElementById('tRepeat').onclick = () => { S.repeats += 6; renderAll(); };
+document.getElementById('tReset').onclick = () => { S.noise = 0; S.longLines = 0; S.repeats = 0; renderAll(); };
+document.querySelectorAll('.controls [data-play]').forEach(b => b.onclick = () => { S.play = b.dataset.play; renderAll(); });
+document.getElementById('s2w').oninput = e => { S.w2 = +e.target.value; document.getElementById('s2wv').textContent = S.w2 + 'px'; const was = S.armed; S.armed = null; renderS2(); measure(); if (was) setArmed(was); };
+let armTimer = null;
+function setArmed(key) {
+  S.armed = S.armed===key ? null : key; clearTimeout(armTimer);
+  document.querySelectorAll('[data-arm]').forEach(el => el.classList.toggle('on', el.dataset.arm===S.armed));
+  document.querySelectorAll('.armed-scope').forEach(c => c.classList.toggle('is-armed', !!S.armed));
+  syncControls(); requestAnimationFrame(measure);
+  if (S.armed) armTimer = setTimeout(() => setArmed(S.armed), 4000);
+}
+document.getElementById('tArm').onclick = () => setArmed('forget');
+document.getElementById('tArm2').onclick = () => setArmed('erase');
+document.getElementById('tArm3').onclick = () => setArmed('remove');
+document.body.addEventListener('click', e => {
+  const chip = e.target.closest('[data-arm]'); if (chip) { setArmed(chip.dataset.arm); return; }
+  if (!e.target.closest('.pop') && !e.target.closest('.picker')) document.querySelectorAll('.pop.open').forEach(p=>p.classList.remove('open'));
+});
+document.addEventListener('keydown', e => { if (e.key==='Escape') document.querySelectorAll('.pop.open').forEach(p=>p.classList.remove('open')); });
+window.addEventListener('resize', () => requestAnimationFrame(() => { document.querySelectorAll('canvas').forEach(fit); mountCanvases(); }));
+
+document.getElementById('lean').innerHTML = `<b>Round 2 lean.</b> This IS the card: header (title · status · board · chip · MAC · fw), state zone with the
+  <b>project section</b> (preview + running/empty/firmware face + project verbs), T1 terminal with cap/repeat/fold processing, footer of four
+  device verbs as reserve chips. <b>Gate 2 (2026-09-02):</b> box-in-box killed — one box, separators only; every state-zone row has a fixed
+  height so board events never move the card (the readouts under §1 prove which states match Running); Remove project marks the whole card;
+  the remembered line keeps Forget for absent boards; activities keep the section visible with verbs withdrawn ("I'll need to feel it").`;
+document.getElementById('rejected').innerHTML = `<b>Rejected at gate 1 (2026-09-02)</b><ul>
+  <li><b>B · Split</b> — thumb beside the text; shorter, but the picture is what makes it feel real. A wins; a <b>collapsed</b> reading stays a future want (network devices, many boards).</li>
+  <li><b>C · Instrument</b> — slot footer ellipsises to “Disco…” at gallery width; a density mode at best.</li>
+  <li><b>Footer · Menu (⋯)</b> — “no menu, yet. maybe later.” The project verbs leaving the footer solves most of the crowding.</li>
+  <li><b>Footer · Slots</b> — fixed cells fail on long verbs.</li>
+  <li><b>T2 · Brackets, T3 · Ticker</b> — brackets stay a later nicety; the ticker hides the output that makes the card feel real.</li>
+  <li><b>P2 · Palette</b> — the gallery is preferred.</li>
+  <li><b>Offline card</b> — disconnect → disappear feels right; remembered boards go behind a filter line (§5).</li></ul>`;
+
+// URL params for headless captures: ?arm=forget|erase|remove&open=pop-p1|pop-b|pop-empty&lib=big&play=stale&tab=mine&long=1&noise=1&w2=400&remembered=1&gone=1
+{ const q = new URLSearchParams(location.search);
+  if ([...q.keys()].length) document.documentElement.classList.add('no-anim');
+  if (q.get('lib')) S.lib = q.get('lib'); if (q.get('play')) S.play = q.get('play');
+  if (q.get('tab')) S.tab = q.get('tab'); if (q.get('long')) S.long = true; if (q.get('w2')) S.w2 = +q.get('w2'); if (q.get('showall')) S.showAll = true;
+  if (q.get('noise')) { S.noise = 300; S.longLines = 1; S.repeats = 6; }
+  if (q.get('remembered')) S.showRemembered = true; if (q.get('gone')) S.gone.porch = true; }
+renderAll();
+{ const q = new URLSearchParams(location.search);
+  if (q.get('arm')) { setArmed(q.get('arm')); clearTimeout(armTimer); }
+  if (q.get('open')) { const el = document.getElementById(q.get('open')); if (el) el.classList.add('open'); } }
+</script>
+</body>
+</html>

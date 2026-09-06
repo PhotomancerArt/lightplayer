@@ -301,7 +301,12 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| stand-in-divergence | 2026-09-04 | [read-gate-refuses-on-largest-block-proxy](2026-09-04-read-gate-refuses-on-largest-block-proxy.md) | **open** | lpa-server ProjectRead headroom gate vs the classic's two-region heap |
+| stand-in-divergence | 2026-09-04 | [unload-leaves-classic-unloadable-until-power-cycle](2026-09-04-unload-leaves-classic-unloadable-until-power-cycle.md) | **open** | after stopAllProjects the classic's largest block is 39.7 KB and the 64 KiB load gate refuses every load |
+| crash-loop | 2026-09-04 | [tlsf-build-hits-stack-guard-at-project-load](2026-09-04-tlsf-build-hits-stack-guard-at-project-load.md) | **open** | fw-esp32v3 with esp-alloc TLSF panics on the stack-guard watchpoint during project load |
 | assumed-context | 2026-09-02 | [flash-from-running-board-parks-until-reset](2026-09-02-flash-from-running-board-parks-until-reset.md) | open | lpa-devices Flash activity post-write wait; browser flasher closing reset |
+| state-conflation | 2026-09-04 | [pre-flash-hello-stamps-over-a-closed-port](2026-09-04-pre-flash-hello-stamps-over-a-closed-port.md) | fixed | lpa-devices Flash activity ladder → manifest stamp; evidence window hello timestamp |
+| assumed-context | 2026-09-04 | [classic-ooms-decoding-the-manifest-write](2026-09-04-classic-ooms-decoding-the-manifest-write.md) | fixed | fw-esp32v3 wire request decode under an auto-loaded project; Flash stamp timeout copy |
 | stand-in-divergence | 2026-09-02 | [ignored-emu-fuel-probe-renders-black-on-first-probe](2026-09-02-ignored-emu-fuel-probe-renders-black-on-first-probe.md) | open | lpc-engine compile-window deferral vs render probes; fw-tests recovery_emu (ignored) |
 | state-conflation | 2026-09-01 | [silent-black-under-node-quarantine](2026-09-01-silent-black-under-node-quarantine.md) | fixed | lpc-engine node status + output fallback; lpa-devices heartbeat mirror |
 | misattributed-symptom | 2026-08-31 | [c6-rmt-ws281x-dark](2026-08-31-c6-rmt-ws281x-dark.md) | harness fixed (#491); app half fixed (#495 heap, #496 fault pattern + card) | fw-esp32c6 harness serial io + lpc-engine shader node under lp-recovery |

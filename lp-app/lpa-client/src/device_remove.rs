@@ -20,8 +20,8 @@ use crate::client_io::ClientIo;
 ///
 /// ⚠️ The bench's slowest observation was ~40 s (G1, 2026-08-31), so a board
 /// at the far end of that range still outlasts this wait. That degrades
-/// honestly — the flash stands and the card says the default pin map does
-/// too — but if it turns out to be common, this constant and
+/// honestly — the flash stands and the card says the manifest write was
+/// not confirmed — but if it turns out to be common, this constant and
 /// `RosterConfig::stamp_deadline_ms` move together or not at all.
 pub const READY_ATTEMPTS: u32 = 5;
 
@@ -121,10 +121,9 @@ pub async fn remove_project<Io: ClientIo>(
 mod tests {
     use super::*;
 
-    use std::collections::VecDeque;
+    use lpc_wire::{WireServerMessage, WireServerMsgBody};
 
-    use async_trait::async_trait;
-    use lpc_wire::{ClientMessage, TransportError, WireServerMessage, WireServerMsgBody};
+    use crate::scripted_io::ScriptedIo;
 
     /// The walk: ask, stop, delete — and the dir deleted is the one the
     /// BOARD named, never a guess.
@@ -233,50 +232,5 @@ mod tests {
                 error,
             }),
         )
-    }
-
-    struct ScriptedIo {
-        sent: Vec<ClientMessage>,
-        responses: VecDeque<WireServerMessage>,
-        /// Attempts to fail before serving anything, standing in for a board
-        /// whose littlefs format is eating requests.
-        drops: u32,
-    }
-
-    impl ScriptedIo {
-        fn new(responses: impl IntoIterator<Item = WireServerMessage>) -> Self {
-            Self {
-                sent: Vec::new(),
-                responses: responses.into_iter().collect(),
-                drops: 0,
-            }
-        }
-
-        fn with_drops(mut self, drops: u32) -> Self {
-            self.drops = drops;
-            self
-        }
-    }
-
-    #[async_trait(?Send)]
-    impl ClientIo for ScriptedIo {
-        async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
-            self.sent.push(msg);
-            Ok(())
-        }
-
-        async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
-            if self.drops > 0 {
-                self.drops -= 1;
-                return Err(TransportError::Other("no answer yet".to_string()));
-            }
-            self.responses
-                .pop_front()
-                .ok_or(TransportError::ConnectionLost)
-        }
-
-        async fn close(&mut self) -> Result<(), TransportError> {
-            Ok(())
-        }
     }
 }

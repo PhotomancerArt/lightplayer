@@ -41,6 +41,19 @@ pub struct RegisteredDevice {
     /// generic/unknown; preserved across sightings by the merge upsert.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board_id: Option<String>,
+    /// The chip family (device model P1/P2, `DeviceRecord.chip`), learned
+    /// from a boot banner or a hello's firmware package and never cleared by
+    /// a later sighting that does not know it. Additive: a row written
+    /// before the device-model rebuild loads with `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chip: Option<String>,
+    /// The firmware label the board last reported in a hello
+    /// (`DeviceRecord.firmware`, "fw-esp32c6 abc1234"), same learned-never-
+    /// cleared rule as `chip`. Memory for the card header's identity line
+    /// after a close or a restart — never the Firmware zone's verdict.
+    /// Additive: a row written before it exists loads with `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware: Option<String>,
     /// The identity source, canonical string form (see
     /// [`super::HardwareId`]'s `Display`: `"efuse:aa:bb:cc:dd:ee:ff"` or
     /// `"minted"`). `None` = legacy row not yet re-keyed (device identity
@@ -134,6 +147,18 @@ impl DeviceRegistry {
             existing.device_name = device.device_name;
         }
         existing.device_id = device.device_id.or(existing.device_id);
+        // Learned, never cleared (device model P1/P2, mirroring `board_id`/
+        // `chip` on `DeviceRecord` itself): a window that did not re-learn
+        // one must not blank what an earlier sighting already established.
+        if device.board_id.is_some() {
+            existing.board_id = device.board_id;
+        }
+        if device.chip.is_some() {
+            existing.chip = device.chip;
+        }
+        if device.firmware.is_some() {
+            existing.firmware = device.firmware;
+        }
         existing.autoconnect = device.autoconnect;
         self.save(&file)
     }
@@ -258,6 +283,8 @@ fn merge_registered_devices(
         recent.transport.clone()
     };
     let board_id = recent.board_id.clone().or_else(|| other.board_id.clone());
+    let chip = recent.chip.clone().or_else(|| other.chip.clone());
+    let firmware = recent.firmware.clone().or_else(|| other.firmware.clone());
 
     let association = match (&old_row.association, &new_row.association) {
         (Some(a), Some(b)) => Some(if a.at >= b.at { a.clone() } else { b.clone() }),
@@ -284,6 +311,8 @@ fn merge_registered_devices(
         last_seen_at: old_row.last_seen_at.max(new_row.last_seen_at),
         association,
         board_id,
+        chip,
+        firmware,
         hardware_id: Some(hardware_id.to_string()),
         previous_uids,
         // Model-side fields follow the same recent-row-wins rule as the rest.
@@ -412,6 +441,10 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].hardware_id, None);
         assert!(listed[0].previous_uids.is_empty());
+        assert_eq!(
+            listed[0].chip, None,
+            "a row written before the device-model rebuild has no chip"
+        );
     }
 
     #[test]
@@ -639,6 +672,49 @@ mod tests {
         assert_eq!(row.device_name.as_deref(), Some("Bench board"));
         assert!(row.autoconnect);
         assert_eq!(row.last_seen_at, 9.0);
+    }
+
+    /// A model sighting that DOES learn a board id, chip and firmware label
+    /// writes them — the whole point of wiring `DeviceRecord.board_id`/
+    /// `chip`/`firmware` into the row (device-card-v2 plan P2's amendment;
+    /// firmware bench 2026-09-04). A later sighting that knows none of them
+    /// must not blank what this one just learned.
+    #[test]
+    fn a_model_upsert_learns_board_id_chip_and_firmware_and_never_blanks_them() {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let registry = DeviceRegistry::new(fs);
+        registry
+            .upsert_model_fields(RegisteredDevice {
+                uid: "dev0000000000000001".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 1.0,
+                board_id: Some("seeed/xiao-esp32-c6".to_string()),
+                chip: Some("esp32c6".to_string()),
+                firmware: Some("fw-esp32c6 abc1234".to_string()),
+                ..RegisteredDevice::default()
+            })
+            .unwrap();
+
+        let row = registry.list().unwrap().pop().expect("one row");
+        assert_eq!(row.board_id.as_deref(), Some("seeed/xiao-esp32-c6"));
+        assert_eq!(row.chip.as_deref(), Some("esp32c6"));
+        assert_eq!(row.firmware.as_deref(), Some("fw-esp32c6 abc1234"));
+
+        // A later window that re-learns neither (a hello with no board id,
+        // no boot banner) must not blank what this sighting established.
+        registry
+            .upsert_model_fields(RegisteredDevice {
+                uid: "dev0000000000000001".to_string(),
+                transport: "USB".to_string(),
+                last_seen_at: 2.0,
+                ..RegisteredDevice::default()
+            })
+            .unwrap();
+
+        let row = registry.list().unwrap().pop().expect("one row");
+        assert_eq!(row.board_id.as_deref(), Some("seeed/xiao-esp32-c6"));
+        assert_eq!(row.chip.as_deref(), Some("esp32c6"));
+        assert_eq!(row.firmware.as_deref(), Some("fw-esp32c6 abc1234"));
     }
 
     /// The additive fields serialize only when they carry something, so a

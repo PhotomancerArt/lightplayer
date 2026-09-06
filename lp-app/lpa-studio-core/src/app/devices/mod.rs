@@ -35,7 +35,9 @@
 pub mod browser_transport;
 pub mod device_affordance;
 pub mod device_effects;
+pub mod device_firmware_face;
 pub mod device_flash;
+pub mod device_identity;
 pub mod device_push;
 pub mod device_records;
 pub mod device_roster;
@@ -49,15 +51,25 @@ pub use device_effects::{
     CompletedPush, DeviceEffects, DeviceTaskFuture, DeviceTimerFuture, PendingWrites, PushPayload,
     StagedPush,
 };
+pub use device_firmware_face::{
+    device_firmware_line, firmware_face_preview_sentence, pending_firmware_line,
+};
 pub use device_flash::{
-    FlashBoardChoice, FlashOffer, derive_flash_name, flash_offer, taken_device_titles,
+    FirmwareVerb, FlashBoardChoice, FlashOffer, derive_flash_name, firmware_verb, flash_offer,
+    flash_offer_for, reflash_choice, taken_device_titles,
+};
+pub use device_identity::{
+    DeviceIdentityLine, IdentityFirmware as DeviceIdentityFirmware, device_chip,
+    device_identity_line,
 };
 pub use device_push::{
     DevicePushOp, PushOffer, PushSource, PushSourceChoice, PushSourceGroup,
     first_bundled_example_id, push_offer,
 };
-pub use device_records::{record_from_registry_row, registry_row_from_record};
-pub use device_roster::{DeviceRoster, DeviceRosterView, JournalLine};
+pub use device_records::{auto_record_name, record_from_registry_row, registry_row_from_record};
+pub use device_roster::{
+    DeviceRoster, DeviceRosterView, JournalLine, RememberedView, RosterSplit, split_roster,
+};
 pub use device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,

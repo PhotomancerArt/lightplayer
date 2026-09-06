@@ -1,5 +1,5 @@
 ---
-status: open                # silicon re-measure pending; host + emulator attribution done 2026-09-02
+status: open                # silicon re-measure pending; host + emulator attribution done 2026-09-02, classic-layout fragmentation added 2026-09-04
 found: 2026-08-29
 area: shader GLSL→JIT compile transient vs the classic's ~186 KB arena
 class: arena-retained-transient
@@ -7,6 +7,8 @@ related:
   - 2026-08-29-load-project-resets-instead-of-refusing.md
   - 2026-09-01-hir-place-clones-exhaust-c6-heap-at-compute-compile.md
   - ../adr/2026-08-28-project-reads-bounded-streamed-refusable.md
+  - 2026-09-04-read-gate-refuses-on-largest-block-proxy.md
+  - ../reports/2026-09-04-classic-heap-fragmentation.md
   - ../../lp-shader/lpvm-native/tests/xt_compile_peak_memory.rs
   - ../../lp-core/lpc-engine/tests/example_shader_compile_peak_memory.rs
 ---
@@ -104,3 +106,53 @@ The other three findings stand: the compile still runs post-load with
 the project resident; exhaustion, not fragmentation, was the failure
 shape; and a red-gated compile still renders as black with no node
 error (see `2026-09-01-2026-fault-is-never-black`).
+
+**Measured on the classic's layout (2026-09-04, tree `06946a2ea`; plan
+`2026-09-04-1358-classic-heap-fragmentation-research`, report
+`docs/reports/2026-09-04-classic-heap-fragmentation.md`)** — the trace is
+now replayed on the classic's real geometry (110 KiB `dram_seg` arena +
+72 KiB SRAM1 tail, 186,368 B, `esp_alloc` filling them in registration
+order) instead of only the guest's single 320 K region, with the two
+emulator-board artifacts discounted. What the compile does to *contiguity*,
+which the byte figures above could not see:
+
+| project | compiles | largest free at first `shader-compile B` | tightest marker inside | largest free at last `shader-compile E` | holes there |
+|---|---:|---:|---|---:|---:|
+| `examples/basic` | 1 | 71,472 B | **16,980 B** at `shader-link B` — the trace's tightest | 25,168 B | 23 |
+| `examples/meteor` | 2 | 68,764 B | 31,128 B at the 2nd `shader-link E` | 31,128 B | 44 |
+| `examples/zook-dome` | 1 | 49,728 B | 41,528 B at `shader-link E` | 41,528 B | 21 |
+
+`examples/basic` loses **54,492 B of contiguity across one compile** while
+its total free only falls from 72,272 B to 57,128 B — the compile costs
+about 15 KB of bytes and about 46 KB of *largest block*. The hole histogram
+at its tightest marker is the shape: 46,872 B free in 70 pieces, one of
+16,980 B and 38 of them under 64 B. The pinning table names the confetti:
+`String::clone` (17–24 blocks, ~300 B live, bounding 39–87 holes),
+`EmitContext::emit_vinst`, `NativeJitEngine::compile_shader`, the
+`build_function_sigs` shunt — tiny live blocks with enormous hole-border
+counts — and one badly placed resident,
+`rt_jit::compiler::link_compiled_module_jit` (2,780 B on zook), which at the
+tightest marker sits immediately below the region top so the whole remaining
+heap is the tail above it.
+
+**A scratch arena for the `shader-compile` window is priced**
+(counterfactual replay, `--cf scratch=shader-compile`, Δ largest free block
+at the last `frame E` against the untransformed baseline):
+
+| project | Δ largest | holes at last `frame E` | arena the lever costs |
+|---|---:|---|---:|
+| `examples/basic` | **+19,064 B** (25,168 → 44,232) | 30 → 11 | 44,712 B, 2,168 transient blocks, 1 opening |
+| `examples/meteor` | **−984 B** (31,128 → 30,144) | 46 → 15 | 51,728 B, 5,637 blocks, 2 openings |
+| `examples/zook-dome` | **+8,200 B** (41,528 → 49,728, region-1 ceiling) | 27 → 18 | 22,692 B, 564 blocks, 1 opening |
+
+Approximation the numbers carry: a real arena still costs its peak, which
+becomes a resident for the window's life, and growth strategy and alignment
+slack are not modeled. Meteor is negative *because* of that — its arena
+peaks larger than the churn it replaces — which is the finding to carry into
+any implementation: the arena has to be sized, not merely introduced.
+Reproduce with `scripts/frag-table.sh`.
+
+Still open on the same thing as before: a silicon `[mem] shader compile
+before/after` bracket on a classic. The desk board was held by a live Studio
+session for this pass (report section 6), so no measurement replaced the
+emulator.

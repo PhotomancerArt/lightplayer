@@ -685,8 +685,13 @@ fn replaying_a_journal_reproduces_the_journal_and_the_projection() {
     assert_eq!(first.view(), second.view());
 }
 
+/// Ruled 2026-09-04: a board on another wire version is a LightPlayer we
+/// warn about and then talk to — never a blank chip, never a refused one.
+/// The bench case: a proto-19 classic on a proto-20 Studio read "Blank
+/// flash — needs firmware" and "no firmware" while its terminal decoded the
+/// hello naming the firmware and a heartbeat per second.
 #[test]
-fn a_proto_mismatch_reads_honestly_instead_of_hanging() {
+fn a_proto_mismatch_is_a_warning_on_a_ready_board_not_a_verdict() {
     let config = RosterConfig::default();
     let mut replay = Replay::new(config);
     replay.step(Millis(0), Step::attach(1, "usb-1"));
@@ -694,18 +699,64 @@ fn a_proto_mismatch_reads_honestly_instead_of_hanging() {
     replay.step(
         Millis(200),
         Step::hello(1)
-            .proto(config.expected_proto + 7)
-            .uid("dev_old"),
+            .proto(config.expected_proto - 1)
+            .uid("dev_old")
+            .board("quinled/dig-uno"),
     );
 
     let view = replay.view();
     assert_eq!(view.devices.len(), 1);
-    assert!(
-        view.devices[0].state_label.contains("Incompatible"),
-        "state: {:?}",
-        view.devices[0].state_label
+    let card = &view.devices[0];
+    assert_eq!(card.state_label, "Ready", "{card:?}");
+    assert!(!card.needs_firmware(), "an older board is not a blank one");
+    assert_eq!(
+        card.firmware_face.wire(),
+        Some(lpa_devices::WireVersion::BoardOlder {
+            board: config.expected_proto - 1,
+            studio: config.expected_proto,
+        }),
+        "the face carries the awareness: {:?}",
+        card.firmware_face
     );
-    assert!(view.devices[0].escapes.contains(&Escape::Forget));
+    assert_eq!(
+        card.board_id.as_deref(),
+        Some("quinled/dig-uno"),
+        "the hello's facts survive the version difference"
+    );
+    assert!(
+        card.can_receive_project,
+        "every wire verb stays offered (hope it works)"
+    );
+    assert!(card.escapes.contains(&Escape::Forget));
+
+    // Aware that it is old: journaled once, and said once in the terminal.
+    let notes = replay
+        .journal_notes()
+        .iter()
+        .filter(|note| note.contains("WireVersionMismatch"))
+        .count();
+    assert_eq!(notes, 1, "the version difference is journaled exactly once");
+    assert!(
+        card.terminal
+            .iter()
+            .any(|line| line.text.contains("older firmware, proceeding anyway")),
+        "the terminal says so: {:?}",
+        card.terminal
+    );
+
+    // A second hello in the same window says nothing new.
+    replay.step(
+        Millis(400),
+        Step::hello(1)
+            .proto(config.expected_proto - 1)
+            .uid("dev_old"),
+    );
+    let notes = replay
+        .journal_notes()
+        .iter()
+        .filter(|note| note.contains("WireVersionMismatch"))
+        .count();
+    assert_eq!(notes, 1);
 }
 
 #[test]
@@ -754,7 +805,7 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
     replay.step(Millis(60), Step::line(1, "invalid header: 0xffffffff"));
     replay.advance_to(Millis(6_000));
     let view = replay.view();
-    assert!(view.pending[0].needs_firmware, "{:?}", view.pending[0]);
+    assert!(view.pending[0].needs_firmware(), "{:?}", view.pending[0]);
     assert_eq!(view.pending[0].detected_chip.as_deref(), Some("esp32c6"));
     let device = view.pending[0].device;
 
@@ -878,7 +929,7 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
         "{:?}",
         view.devices[0]
     );
-    assert!(!view.devices[0].needs_firmware);
+    assert!(!view.devices[0].needs_firmware());
     let outcome = view.devices[0].last_outcome.as_ref().expect("an outcome");
     assert!(outcome.ok, "{outcome:?}");
     assert!(
@@ -952,6 +1003,252 @@ fn a_silent_board_after_a_flash_climbs_the_ladder_then_fails_honestly() {
     assert!(
         outcome.summary.contains("Reconnect"),
         "honest guidance: {outcome:?}"
+    );
+}
+
+/// The bench defect of 2026-09-04 (classic V3 on a CH340 bridge): the board
+/// was running LightPlayer BEFORE the flash, so its pre-flash hello sat in
+/// the observation window — a window a close does not clear, by the ADR's
+/// rule — and the ladder's first poke, one second after the effect ended,
+/// mistook that stale hello for the flashed firmware answering. The stamp
+/// then ran over the port the flasher had closed and all five attempts
+/// failed on the spot with "Serial port is not open.". A hello proves the
+/// NEW firmware only if it was heard after the flash ended.
+#[test]
+fn a_pre_flash_hello_never_starts_the_stamp_before_the_port_comes_back() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    let device = first_device(&replay);
+    replay.step(
+        Millis(2_000),
+        Step::Flash {
+            device: device.0,
+            board: "dig-uno".to_string(),
+            build: "esp32-4mb".to_string(),
+        },
+    );
+    // The flasher closed the port under its borrow (the release half of the
+    // exclusive-borrow discipline); the model heard the close.
+    replay.step(Millis(29_000), Step::closed(1));
+    let commands = replay.step(
+        Millis(30_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
+    );
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::Link {
+                command: lpa_devices::LinkCommand::Open { .. },
+                ..
+            }
+        )),
+        "the ladder starts by reopening: {commands:?}"
+    );
+
+    // The reopen is still in flight when the ladder's first poke fires.
+    let first_poke = 30_000 + config.flash_reopen_retry_ms + 100;
+    replay.advance_to(Millis(first_poke));
+    let stamps_before_reopen = replay
+        .commands()
+        .iter()
+        .filter(|(at, command)| {
+            *at >= Millis(30_000)
+                && matches!(
+                    command,
+                    lpa_devices::Command::RunEffect {
+                        effect: lpa_devices::EffectRequest::WriteBoardManifest { .. },
+                        ..
+                    }
+                )
+        })
+        .count();
+    assert_eq!(
+        stamps_before_reopen,
+        0,
+        "the pre-flash hello is not the flashed firmware answering: {:?}",
+        replay.commands()
+    );
+    let view = replay.view();
+    assert_eq!(
+        view.devices[0]
+            .activity
+            .as_ref()
+            .map(|activity| activity.kind),
+        Some(ActivityKind::Flash),
+        "the ladder is still climbing: {:?}",
+        view.devices[0]
+    );
+
+    // The port comes back and the NEW firmware hellos: now the stamp runs,
+    // over an open port.
+    replay.step(Millis(33_000), Step::opened(1));
+    let commands = replay.step(
+        Millis(34_000),
+        Step::hello(1).uid("dev_2f8a").board("dig-uno"),
+    );
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::RunEffect {
+                effect: lpa_devices::EffectRequest::WriteBoardManifest { board_id },
+                ..
+            } if board_id == "dig-uno"
+        )),
+        "a hello heard after the flash starts the stamp: {commands:?}"
+    );
+    replay.step(
+        Millis(34_500),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: Some("manifest written".to_string()),
+            effect: None,
+            kind: None,
+        },
+    );
+    let outcome = replay.view().devices[0]
+        .last_outcome
+        .clone()
+        .expect("an outcome");
+    assert!(outcome.ok, "{outcome:?}");
+    assert!(
+        !outcome.summary.contains("manifest"),
+        "a stamped flash says nothing about a missing manifest: {outcome:?}"
+    );
+}
+
+/// The bench defect of 2026-09-04, second half (classic V3, auto-loaded
+/// project resident): the board soft-reset decoding the stamp, the effect
+/// never reported, the stamp waited out its deadline — and the card closed
+/// with "the compiled-in default pin map stands" over a board that had been
+/// running the manifest an earlier stamp wrote (the flasher keeps
+/// littlefs). A stamp that heard nothing back says the write was not
+/// confirmed. It does not know what is on the board, so it does not say.
+#[test]
+fn a_stamp_that_hears_nothing_back_says_unconfirmed_not_that_the_default_stands() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    let device = first_device(&replay);
+    replay.step(
+        Millis(2_000),
+        Step::Flash {
+            device: device.0,
+            board: "dig-uno".to_string(),
+            build: "esp32-4mb".to_string(),
+        },
+    );
+    replay.step(Millis(29_000), Step::closed(1));
+    replay.step(
+        Millis(30_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
+    );
+    replay.step(Millis(33_000), Step::opened(1));
+    let commands = replay.step(
+        Millis(34_000),
+        Step::hello(1).uid("dev_2f8a").board("dig-uno"),
+    );
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::RunEffect {
+                effect: lpa_devices::EffectRequest::WriteBoardManifest { .. },
+                ..
+            }
+        )),
+        "the stamp runs: {commands:?}"
+    );
+
+    // The board went quiet under the write; nothing ever comes back. The
+    // runner fires the stamp's own deadline on the way.
+    replay.advance_to(Millis(34_000 + config.stamp_deadline_ms + 1_000));
+
+    let view = replay.view();
+    let card = &view.devices[0];
+    assert!(card.activity.is_none(), "the stamp is bounded: {card:?}");
+    let outcome = card.last_outcome.as_ref().expect("an outcome");
+    assert!(outcome.ok, "the flash stands: {outcome:?}");
+    assert!(
+        outcome.summary.contains("not confirmed"),
+        "silence is reported as silence: {outcome:?}"
+    );
+    assert!(
+        !outcome.summary.contains("default"),
+        "and never as a verdict on the pin map: {outcome:?}"
+    );
+}
+
+/// A stamp the board answered with an error carries the conversation's
+/// own words onto the card — it wrote the chunks and knows what it left on
+/// the board — and the reducer adds no pin-map claim of its own.
+#[test]
+fn a_stamp_the_board_refused_carries_the_conversations_words_not_a_pin_map_verdict() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    let device = first_device(&replay);
+    replay.step(
+        Millis(2_000),
+        Step::Flash {
+            device: device.0,
+            board: "dig-uno".to_string(),
+            build: "esp32-4mb".to_string(),
+        },
+    );
+    replay.step(Millis(29_000), Step::closed(1));
+    replay.step(
+        Millis(30_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
+    );
+    replay.step(Millis(33_000), Step::opened(1));
+    replay.step(
+        Millis(34_000),
+        Step::hello(1).uid("dev_2f8a").board("dig-uno"),
+    );
+    replay.step(
+        Millis(35_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: false,
+            message: Some(
+                "device file write failed: chunk 3/6 of /hardware.json failed: offset \
+                 mismatch; the partial file was removed, so the board boots on its \
+                 compiled-in default pin map"
+                    .to_string(),
+            ),
+            effect: None,
+            kind: None,
+        },
+    );
+
+    let view = replay.view();
+    let outcome = view.devices[0].last_outcome.as_ref().expect("an outcome");
+    assert!(outcome.ok, "the flash stands: {outcome:?}");
+    assert!(
+        outcome.summary.contains("chunk 3/6")
+            && outcome.summary.contains("partial file was removed"),
+        "the conversation's words reach the card: {outcome:?}"
+    );
+    assert_eq!(
+        outcome.summary.matches("default pin map").count(),
+        1,
+        "the only pin-map claim is the conversation's own: {outcome:?}"
     );
 }
 
@@ -1245,7 +1542,11 @@ fn the_terminal_panel_keeps_boot_lines_and_effect_narration_across_a_reopen() {
     replay.step(Millis(600), Step::opened(1));
     replay.step(Millis(700), Step::line(1, "fw-esp32 initialized"));
 
-    let lines = replay.view().devices[0].terminal_lines.clone();
+    let lines: Vec<String> = replay.view().devices[0]
+        .terminal
+        .iter()
+        .map(|line| line.text.clone())
+        .collect();
     assert!(
         lines.iter().any(|line| line.contains("ESP-ROM:esp32c6")),
         "boot output survives the reopen: {lines:?}"
@@ -1386,7 +1687,7 @@ fn reset_board_pulses_the_hardware_and_identify_reads_the_boot() {
     replay.step(Millis(9_520), Step::line(1, "invalid header: 0xffffffff"));
     let view = replay.view();
     assert!(
-        view.pending[0].needs_firmware,
+        view.pending[0].needs_firmware(),
         "the reset turned silence into an honest verdict: {view:?}"
     );
 
@@ -1397,7 +1698,7 @@ fn reset_board_pulses_the_hardware_and_identify_reads_the_boot() {
     replay.step(Millis(9_600), Step::closed(1));
     let view = replay.view();
     assert!(
-        view.pending[0].needs_firmware,
+        view.pending[0].needs_firmware(),
         "the verdict survives us hanging up: {view:?}"
     );
 }

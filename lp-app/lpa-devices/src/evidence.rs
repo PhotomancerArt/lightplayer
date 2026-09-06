@@ -29,7 +29,8 @@ use crate::link::{LinkEvent, LinkId};
 use crate::roster::RosterConfig;
 use crate::time::Millis;
 use crate::wire::{
-    HelloFacts, LoadedProjectFacts, ProjectFaultFacts, RecoveryFacts, ServerFrameBody,
+    HelloFacts, LoadedProjectFacts, ProjectFaultFacts, RecoveryFacts, RecoveryLevelFacts,
+    ServerFrameBody,
 };
 
 /// Boot signatures, mirroring `lpa-link`'s shipped `BootLineClassifier`.
@@ -48,7 +49,62 @@ const RECENT_LINE_LIMIT: usize = 80;
 /// not an observation. A flash's narration plus the boot output that follows
 /// it has to fit, because "what did this board actually say" is the question
 /// the panel exists to answer.
-const OUTPUT_LINE_LIMIT: usize = 200;
+const TERMINAL_CAP: usize = 200;
+
+/// A boot-line signature ROM output matches, mirroring `lpa-link`'s
+/// `chip_from_boot_line` classifier: modern ESP32 ROMs are chatty on every
+/// reset, and that chatter is what the terminal panel colours apart from
+/// what the running server itself prints.
+const ROM_LINE_SIGNATURES: &[&str] = &[
+    "esp-rom:",
+    "build:",
+    "rst:",
+    "boot:",
+    "invalid header",
+    "waiting for download",
+    "entry 0x",
+    "load:",
+];
+
+/// The marker a recovery-ledger line on the wire starts with.
+const RECOVERY_LINE_PREFIX: &str = "[RECOVERY]";
+
+/// One line of the card's terminal panel.
+///
+/// Typed so the renderer can colour ROM banter, board chatter, decoded wire
+/// frames, Studio's own narration and outcomes apart — see
+/// [`TerminalKind`]. `repeats` collapses a consecutive identical `(kind,
+/// text)` pair rather than dropping it silently, so a percent-ticking
+/// effect or a heartbeat that says nothing new reads as "×12", not as
+/// twelve copies or one copy with the rest thrown away.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TerminalLine {
+    pub kind: TerminalKind,
+    pub text: String,
+    pub repeats: u32,
+}
+
+/// What produced one terminal line, for the renderer's colour and grouping.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum TerminalKind {
+    /// The ROM bootloader's own chatter (`ESP-ROM:`, `rst:`, `boot:`, …).
+    Rom,
+    /// A line the running board's own server printed.
+    Board,
+    /// A decoded wire frame (hello, heartbeat, loaded, other) — see
+    /// [`wire_summary`]. This is what makes heartbeats visible at all; the
+    /// wire never reached the panel before this existed.
+    Wire,
+    /// Studio's own narration of an activity: started, progress, or a step
+    /// label. The kind carries what used to be "— … —" dressing.
+    Studio,
+    /// An activity ended successfully.
+    Outcome,
+    /// An activity ended unsuccessfully.
+    Failure,
+    /// A `[RECOVERY]` line from the device's crash-recovery ledger.
+    Recovery,
+}
 
 /// Everything the world has told us about one device.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -69,8 +125,8 @@ pub struct Evidence {
     /// says nothing about the board.
     #[serde(default)]
     pub wire_borrowed: bool,
-    /// The card's terminal tail: raw serial lines and activity narration, in
-    /// the order they happened.
+    /// The card's terminal tail: raw serial lines, decoded wire frames and
+    /// activity narration, in the order they happened.
     ///
     /// Deliberately NOT inside [`Observations`]: a window is what the
     /// classifier reasons over and it restarts on every port open, while
@@ -78,7 +134,14 @@ pub struct Evidence {
     /// ladder performs — otherwise the panel wipes itself exactly when the
     /// board comes back. Bounded, fold-written, and read only for display.
     #[serde(default)]
-    output: VecDeque<String>,
+    output: VecDeque<TerminalLine>,
+    /// How many lines have fallen off the front of [`Self::output`] since
+    /// this evidence began. Deliberately NOT reset on a window boundary —
+    /// `output` itself survives a reopen for the same reason (see its doc),
+    /// so a counter that reset with the window would undercount right after
+    /// the reconnect ladder that made it matter.
+    #[serde(default)]
+    terminal_dropped: u32,
     observations: Observations,
 }
 
@@ -160,14 +223,33 @@ impl Evidence {
         self.observations.classify(true, now)
     }
 
-    /// Whether a hello has been heard in the CURRENT observation window.
+    /// Whether a hello has been heard in the CURRENT observation window —
+    /// any hello, whatever wire proto it claims (see [`Self::wire_version`]).
     pub fn has_hello(&self) -> bool {
         self.observations.hello.is_some()
     }
 
-    /// A proto-mismatched hello in the current window, if one arrived.
-    pub fn mismatched_proto(&self) -> Option<u32> {
-        self.observations.wrong_proto
+    /// When the current window's hello was heard, if one has been. This is
+    /// how an activity tells a hello that answered ITS reopen from one the
+    /// board sent before the activity began: the window survives a close,
+    /// so [`Self::has_hello`] alone cannot.
+    pub fn hello_heard_at(&self) -> Option<Millis> {
+        self.observations.hello_at
+    }
+
+    /// How the board's wire proto compares to this build's, once a hello has
+    /// said what it speaks. `None` until one has.
+    ///
+    /// A FACT, not a verdict (ruled 2026-09-04): a board on another wire
+    /// version is still a LightPlayer we talk to — the user at 2am wants the
+    /// small change, not a forced flash that might go wrong — and this is
+    /// what lets every face and verb stay while the firmware line says
+    /// "older than Studio".
+    pub fn wire_version(&self) -> Option<WireVersion> {
+        self.observations
+            .hello
+            .as_ref()
+            .map(|hello| WireVersion::compare(hello.proto, self.observations.expected_proto))
     }
 
     /// Non-hello frames absorbed in the current window: proof of a live peer,
@@ -226,10 +308,16 @@ impl Evidence {
         self.observations.lines.iter().map(String::as_str)
     }
 
-    /// The card's terminal tail: serial lines and activity narration, oldest
-    /// first, across window resets. See [`Self::output`].
-    pub fn recent_output(&self) -> impl Iterator<Item = &str> {
-        self.output.iter().map(String::as_str)
+    /// The card's terminal tail: serial lines, wire frames and activity
+    /// narration, oldest first, across window resets. See [`Self::output`].
+    pub fn recent_output(&self) -> impl Iterator<Item = &TerminalLine> {
+        self.output.iter()
+    }
+
+    /// How many terminal lines have been dropped to keep the panel at
+    /// [`TERMINAL_CAP`]. Never reset — see [`Self::terminal_dropped`]'s doc.
+    pub fn terminal_dropped(&self) -> u32 {
+        self.terminal_dropped
     }
 
     /// When the next quiet check is due, if one is.
@@ -244,18 +332,33 @@ impl Evidence {
         self.freshness.quiet_deadline(quiet_after_ms)
     }
 
-    /// Append one line to the terminal tail, collapsing an immediate repeat.
+    /// Append one line to the terminal tail, collapsing an immediate repeat
+    /// of the same `(kind, text)` pair into a `repeats` count instead of
+    /// dropping it silently.
     ///
     /// The collapse is what keeps a percent-ticking effect from filling the
-    /// panel with two hundred copies of "Writing firmware": the percent is
-    /// the bar's business, and the label is the narration.
-    fn push_output(&mut self, line: &str) {
-        if self.output.back().is_some_and(|last| last == line) {
+    /// panel with two hundred copies of "Writing firmware", and what keeps
+    /// an unchanging heartbeat from filling it with two hundred copies of
+    /// the same wire summary: the percent (or the uptime) is not part of the
+    /// text, so identical facts collapse and only a real change starts a new
+    /// line.
+    fn push_output(&mut self, kind: TerminalKind, text: impl AsRef<str>) {
+        let text = text.as_ref();
+        if let Some(last) = self.output.back_mut()
+            && last.kind == kind
+            && last.text == text
+        {
+            last.repeats += 1;
             return;
         }
-        self.output.push_back(line.to_string());
-        while self.output.len() > OUTPUT_LINE_LIMIT {
+        self.output.push_back(TerminalLine {
+            kind,
+            text: text.to_string(),
+            repeats: 1,
+        });
+        while self.output.len() > TERMINAL_CAP {
             self.output.pop_front();
+            self.terminal_dropped += 1;
         }
     }
 
@@ -300,6 +403,30 @@ impl Evidence {
             }
             LinkEvent::Frame(frame) => {
                 self.observations.observe_frame(&frame.body, config);
+                if matches!(frame.body, ServerFrameBody::Hello(_)) {
+                    self.observations.hello_at = Some(now);
+                }
+                // Decoded to one readable line: this is what makes
+                // heartbeats visible in the panel at all (they never reached
+                // it before). The summary carries no uptime and no counter,
+                // so an unchanging heartbeat collapses via `push_output`.
+                self.push_output(TerminalKind::Wire, wire_summary(&frame.body));
+                // A hello on another wire version is news once per window:
+                // one journal line and one terminal line saying we noticed
+                // and are carrying on. Every hello after it in the same
+                // window says the same thing, so it is not repeated.
+                if let ServerFrameBody::Hello(hello) = &frame.body
+                    && let Some(version) = self.wire_version()
+                    && version.is_mismatch()
+                    && !self.observations.wire_mismatch_noted
+                {
+                    self.observations.wire_mismatch_noted = true;
+                    self.push_output(TerminalKind::Studio, version.notice());
+                    notes.push(JournalNote::WireVersionMismatch {
+                        board: hello.proto,
+                        studio: config.expected_proto,
+                    });
+                }
                 if let Some(observed) = frame.identity() {
                     notes.extend(identity_notes(identity.learn(observed)));
                 }
@@ -310,7 +437,7 @@ impl Evidence {
             }
             LinkEvent::Line(line) => {
                 self.observations.observe_line(line);
-                self.push_output(line);
+                self.push_output(line_kind(line), line);
                 if let Some(note) = self.freshness.heard(now, false) {
                     notes.push(note);
                 }
@@ -334,7 +461,9 @@ impl Evidence {
             ActivityMarker::Started { kind } => {
                 // A new activity supersedes the previous outcome.
                 self.last_outcome = None;
-                self.push_output(&format!("— {} —", kind.label()));
+                // No more "— … —" dressing: the Studio kind carries that
+                // the line is Studio's own narration.
+                self.push_output(TerminalKind::Studio, kind.label());
                 Vec::new()
             }
             // The narration a coarse effect streams IS what the terminal
@@ -342,11 +471,16 @@ impl Evidence {
             // the browser console (G1 bench, 2026-08-31). Percent stays the
             // bar's; the label is the line.
             ActivityMarker::Progress { label, .. } => {
-                self.push_output(label);
+                self.push_output(TerminalKind::Studio, label);
                 Vec::new()
             }
             ActivityMarker::Ended { outcome, .. } => {
-                self.push_output(&outcome.summary());
+                let kind = if outcome.is_success() {
+                    TerminalKind::Outcome
+                } else {
+                    TerminalKind::Failure
+                };
+                self.push_output(kind, outcome.summary());
                 self.last_outcome = Some(outcome.clone());
                 // An activity that reached an end has settled the window:
                 // "no verdict yet" stops being an honest answer.
@@ -462,10 +596,60 @@ impl Classification {
 /// Mirrors `lpa-link`'s `IncompatibleReason`, minus the sticky state
 /// machine: [`Self::NoHello`] is decided at the identify deadline (frames
 /// flowed, no hello ever came), never on first sight of a non-hello frame.
+///
+/// There is deliberately no proto-mismatch variant any more. A hello on
+/// another wire version used to land here and the card then described a
+/// running board as a blank chip (bench 2026-09-04, proto-19 V3 on a
+/// proto-20 Studio). The version difference is a fact on the LightPlayer
+/// verdict — [`Evidence::wire_version`] — not a reason to refuse it.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum IncompatibleReason {
-    ProtoMismatch { proto: u32 },
     NoHello,
+}
+
+/// The board's wire proto against this build's.
+///
+/// Studio has no wire-format versioning yet (ruled 2026-09-04: hope it
+/// works, so long as we are aware it is old or new). This is the
+/// awareness: it rides the firmware face and the journal, changes no
+/// status and withholds no verb.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum WireVersion {
+    Match,
+    BoardOlder { board: u32, studio: u32 },
+    BoardNewer { board: u32, studio: u32 },
+}
+
+impl WireVersion {
+    pub fn compare(board: u32, studio: u32) -> Self {
+        match board.cmp(&studio) {
+            std::cmp::Ordering::Equal => Self::Match,
+            std::cmp::Ordering::Less => Self::BoardOlder { board, studio },
+            std::cmp::Ordering::Greater => Self::BoardNewer { board, studio },
+        }
+    }
+
+    pub fn is_mismatch(self) -> bool {
+        !matches!(self, Self::Match)
+    }
+
+    /// The one-line notice the terminal and the journal carry. Internal
+    /// vocabulary ("wire proto") is fine here — this is the log, and the
+    /// numbers are what a bug report needs; the card's firmware line says
+    /// it in user words.
+    pub fn notice(self) -> String {
+        match self {
+            Self::Match => "firmware speaks this build's wire proto".to_string(),
+            Self::BoardOlder { board, studio } => format!(
+                "firmware speaks wire proto {board}, Studio speaks {studio} — older firmware, \
+                 proceeding anyway"
+            ),
+            Self::BoardNewer { board, studio } => format!(
+                "firmware speaks wire proto {board}, Studio speaks {studio} — newer firmware, \
+                 proceeding anyway"
+            ),
+        }
+    }
 }
 
 /// How recently we heard anything, and which side of the hysteresis we are
@@ -555,6 +739,14 @@ struct Observations {
     detected_chip: Option<String>,
     frames_seen: usize,
     hello: Option<HelloFacts>,
+    /// When this window's hello was heard. The Flash ladder asks whether a
+    /// hello is NEWER than its write effect's end: a close does not clear
+    /// the window, so a board that ran LightPlayer before a flash still
+    /// carries its pre-flash hello here while the flasher's closed port is
+    /// being reopened (bench, 2026-09-04: that hello started the manifest
+    /// stamp over the closed port on the ladder's first poke).
+    #[serde(default)]
+    hello_at: Option<Millis>,
     /// The board's own report of what it is running. Window-scoped like
     /// every other observation: a reopened port has to be told again.
     loaded: Option<Vec<LoadedProjectFacts>>,
@@ -562,7 +754,9 @@ struct Observations {
     /// for the same reason, and — like `loaded` — only REPLACED by a frame
     /// that carries one.
     recovery: Option<RecoveryFacts>,
-    wrong_proto: Option<u32>,
+    /// The wire-version notice has been journaled for this window.
+    #[serde(default)]
+    wire_mismatch_noted: bool,
     errors: usize,
     settled: bool,
     expected_proto: u32,
@@ -579,11 +773,13 @@ impl Observations {
     fn observe_frame(&mut self, body: &ServerFrameBody, config: &RosterConfig) {
         self.expected_proto = config.expected_proto;
         match body {
-            ServerFrameBody::Hello(hello) if hello.proto == config.expected_proto => {
-                self.hello = Some(hello.clone());
-            }
+            // EVERY hello is kept, whatever proto it claims. Dropping the
+            // mismatched ones here is how the card came to say "no firmware"
+            // over a board whose hello had just named its firmware (bench
+            // 2026-09-04). The proto comparison is a fact read off the
+            // stored hello — `Evidence::wire_version` — never a filter.
             ServerFrameBody::Hello(hello) => {
-                self.wrong_proto = Some(hello.proto);
+                self.hello = Some(hello.clone());
             }
             // Absorbed, never condemned: a running server heartbeats, so a
             // mid-stream attach sees frames before any hello answer.
@@ -650,13 +846,9 @@ impl Observations {
     /// deliberately unable to remember anything that is not in this window.
     fn classify(&self, settled: bool, now: Millis) -> Classification {
         if let Some(hello) = &self.hello {
+            // Any hello: a LightPlayer, on whatever wire version it speaks.
             return Classification::LightPlayer {
                 hello: hello.clone(),
-            };
-        }
-        if let Some(proto) = self.wrong_proto {
-            return Classification::Incompatible {
-                reason: IncompatibleReason::ProtoMismatch { proto },
             };
         }
         if self.rom_download > 0 {
@@ -720,6 +912,97 @@ fn chip_from_boot_line(normalized: &str) -> Option<String> {
         return Some("esp32".to_string());
     }
     None
+}
+
+/// The [`TerminalKind`] a raw serial line earns, for the terminal panel.
+///
+/// ROM chatter is checked first — a boot loop's `invalid header` lines are
+/// unmistakably the bootloader, never the recovery ledger — then a
+/// `[RECOVERY]`-prefixed line, then the fallback: whatever the running
+/// board's own server printed.
+fn line_kind(line: &str) -> TerminalKind {
+    let normalized = line.to_ascii_lowercase();
+    if ROM_LINE_SIGNATURES
+        .iter()
+        .any(|signature| normalized.contains(signature))
+    {
+        TerminalKind::Rom
+    } else if line.starts_with(RECOVERY_LINE_PREFIX) {
+        TerminalKind::Recovery
+    } else {
+        TerminalKind::Board
+    }
+}
+
+/// Decode one wire frame to the single readable line the terminal panel
+/// shows. Deliberately excludes anything that changes every time a healthy
+/// board is asked nothing new (uptime, a frame counter): those would turn
+/// every heartbeat into a new line instead of one line collapsing with a
+/// repeat count, which is the whole point of putting the wire on the panel.
+fn wire_summary(body: &ServerFrameBody) -> String {
+    match body {
+        ServerFrameBody::Hello(hello) => format!(
+            "hello · proto {} · {} · {}",
+            hello.proto,
+            hello.board_id.as_deref().unwrap_or("?"),
+            hello.firmware.as_deref().unwrap_or("?"),
+        ),
+        ServerFrameBody::Heartbeat {
+            loaded, recovery, ..
+        } => heartbeat_summary(loaded, recovery),
+        ServerFrameBody::Loaded { loaded } => loaded_summary(loaded),
+        ServerFrameBody::Other { label } => label.clone(),
+    }
+}
+
+/// `heartbeat · <project|idle>[ · FAULT <label>]`. No fps or heap: this
+/// mirror crate carries no such facts on [`LoadedProjectFacts`] or
+/// [`RecoveryFacts`] today (see `wire.rs`'s module doc on why the mirror
+/// stays small), so the summary states only what the model actually knows.
+fn heartbeat_summary(
+    loaded: &Option<Vec<LoadedProjectFacts>>,
+    recovery: &Option<RecoveryFacts>,
+) -> String {
+    let project = loaded
+        .as_ref()
+        .and_then(|projects| projects.first())
+        .map(|project| project.label().to_string())
+        .unwrap_or_else(|| "idle".to_string());
+    let mut summary = format!("heartbeat · {project}");
+    let fault = loaded
+        .as_ref()
+        .and_then(|projects| projects.first())
+        .and_then(|project| project.fault.as_ref())
+        .map(|_| "fault".to_string())
+        .or_else(|| {
+            recovery
+                .as_ref()
+                .filter(|recovery| recovery.is_degraded())
+                .map(|recovery| {
+                    if recovery.level == RecoveryLevelFacts::Green {
+                        // Green with safe mode set is the one degraded state
+                        // the level word itself would misdescribe.
+                        "safe-mode".to_string()
+                    } else {
+                        recovery.level.label().to_string()
+                    }
+                })
+        });
+    if let Some(fault) = fault {
+        summary.push_str(&format!(" · FAULT {fault}"));
+    }
+    summary
+}
+
+/// `loaded · <n> project(s)`, names joined by `, `.
+fn loaded_summary(loaded: &[LoadedProjectFacts]) -> String {
+    let count = loaded.len();
+    let unit = if count == 1 { "project" } else { "projects" };
+    if loaded.is_empty() {
+        return format!("loaded · 0 {unit}");
+    }
+    let names: Vec<&str> = loaded.iter().map(LoadedProjectFacts::label).collect();
+    format!("loaded · {count} {unit} ({})", names.join(", "))
 }
 
 #[cfg(test)]
@@ -1008,6 +1291,137 @@ mod tests {
             evidence.last_outcome,
             Some(ActivityOutcome::Failed { .. })
         ));
+    }
+
+    #[test]
+    fn ten_identical_board_lines_collapse_to_one_line_with_a_repeat_count() {
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+
+        for at in 0..10 {
+            fold(
+                &mut evidence,
+                &mut identity,
+                Millis(at),
+                line("project sync: 4 slots bound"),
+            );
+        }
+
+        let lines: Vec<&TerminalLine> = evidence.recent_output().collect();
+        assert_eq!(
+            lines.len(),
+            1,
+            "ten identical lines are one line, not ten: {lines:?}"
+        );
+        assert_eq!(lines[0].kind, TerminalKind::Board);
+        assert_eq!(lines[0].text, "project sync: 4 slots bound");
+        assert_eq!(lines[0].repeats, 10);
+    }
+
+    #[test]
+    fn two_hundred_fifty_distinct_lines_keep_the_newest_two_hundred() {
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+
+        for at in 0..250 {
+            fold(
+                &mut evidence,
+                &mut identity,
+                Millis(at),
+                line(&format!("line-{at}")),
+            );
+        }
+
+        let lines: Vec<&TerminalLine> = evidence.recent_output().collect();
+        assert_eq!(lines.len(), 200, "the panel caps at 200: {}", lines.len());
+        assert_eq!(evidence.terminal_dropped(), 50);
+        assert_eq!(
+            lines.first().map(|line| line.text.as_str()),
+            Some("line-50"),
+            "the oldest fifty are gone"
+        );
+        assert_eq!(
+            lines.last().map(|line| line.text.as_str()),
+            Some("line-249")
+        );
+    }
+
+    #[test]
+    fn three_identical_heartbeats_collapse_but_a_different_project_starts_a_new_line() {
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+
+        let running = vec![LoadedProjectFacts::new("/projects/demo")];
+        for at in [0_u64, 5_000, 10_000] {
+            fold(
+                &mut evidence,
+                &mut identity,
+                Millis(at),
+                frame(ServerFrame::heartbeat_report(
+                    None,
+                    Some(running.clone()),
+                    None,
+                )),
+            );
+        }
+
+        let lines: Vec<&TerminalLine> = evidence.recent_output().collect();
+        assert_eq!(
+            lines.len(),
+            1,
+            "three unchanging heartbeats are one Wire line: {lines:?}"
+        );
+        assert_eq!(lines[0].kind, TerminalKind::Wire);
+        assert_eq!(lines[0].text, "heartbeat · demo");
+        assert_eq!(lines[0].repeats, 3);
+
+        // A heartbeat that says something DIFFERENT starts a new line rather
+        // than collapsing into the last one.
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(15_000),
+            frame(ServerFrame::heartbeat_report(None, Some(Vec::new()), None)),
+        );
+        let lines: Vec<&TerminalLine> = evidence.recent_output().collect();
+        assert_eq!(lines.len(), 2, "a changed heartbeat is a new line");
+        assert_eq!(lines[1].text, "heartbeat · idle");
+        assert_eq!(lines[1].repeats, 1);
+    }
+
+    #[test]
+    fn a_hello_frame_produces_a_wire_line_naming_proto_and_board() {
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        fold(&mut evidence, &mut identity, Millis(0), opened());
+
+        fold(
+            &mut evidence,
+            &mut identity,
+            Millis(10),
+            frame(ServerFrame::hello(
+                1,
+                HelloFacts {
+                    proto: 9,
+                    board_id: Some("dig-uno".to_string()),
+                    firmware: Some("fw-esp32c6 abc1234".to_string()),
+                    ..Default::default()
+                },
+            )),
+        );
+
+        let lines: Vec<&TerminalLine> = evidence.recent_output().collect();
+        let hello_line = lines
+            .iter()
+            .find(|line| line.kind == TerminalKind::Wire)
+            .expect("a hello produces a Wire line");
+        assert_eq!(
+            hello_line.text,
+            "hello · proto 9 · dig-uno · fw-esp32c6 abc1234"
+        );
     }
 
     fn fold(

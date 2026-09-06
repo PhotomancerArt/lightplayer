@@ -215,13 +215,20 @@ impl Riscv32Emulator {
             name: interned,
             kind,
         };
+        // Return 1 when an active, enabled `AllocCollector` wants the
+        // guest's exact free-list shape after this marker; the guest perf
+        // sink (`lp-base/lp-perf/src/sinks/syscall.rs`) reads this and, on
+        // 1, runs its free-list walk. cpu-only profiles and gates before
+        // the collector enables always get 0, so they pay nothing extra.
+        let mut want_shape = false;
         if let Some(session) = self.profile_session.as_mut() {
             session.on_perf_event(&evt);
             if session.pending_halt_reason().is_some() {
                 self.profile_stop_pending = true;
             }
+            want_shape = session.wants_free_list_shape();
         }
-        self.regs[Gpr::A0.num() as usize] = 0;
+        self.regs[Gpr::A0.num() as usize] = if want_shape { 1 } else { 0 };
         Ok(StepResult::Continue)
     }
 }

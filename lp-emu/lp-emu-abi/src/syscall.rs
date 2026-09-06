@@ -26,9 +26,17 @@ pub const SYSCALL_TIME_MS: i32 = 8;
 
 /// Syscall number for allocation tracing (alloc/dealloc/realloc events)
 ///
-/// Args for alloc:   a0=0, a1=ptr, a2=size, a3=free_bytes
+/// Args for alloc:   a0=0, a1=ptr, a2=size, a3=free_bytes, a4=align
 /// Args for dealloc: a0=1, a1=ptr, a2=size, a3=free_bytes
-/// Args for realloc: a0=2, a1=old_ptr, a2=new_ptr, a3=old_size, a4=new_size, a5=free_bytes
+/// Args for realloc: a0=2, a1=old_ptr, a2=new_ptr, a3=old_size, a4=new_size,
+///                   a5=free_bytes, a6=align
+///
+/// `align` is `Layout::align()` for the request. It is carried because the
+/// host-side fragmentation replay places blocks itself
+/// (`lp-emu-core::profile::frag`) and `linked_list_allocator` front-pads a
+/// hole whose start is not already aligned for the request — without the real
+/// alignment the replay diverges from the guest's own layout. Dealloc does not
+/// need it: the block's footprint is derived from its size alone.
 pub const SYSCALL_ALLOC_TRACE: i32 = 9;
 
 /// Syscall number for emitting a perf event from guest to host.
@@ -54,6 +62,20 @@ pub const ALLOC_TRACE_DEALLOC: i32 = 1;
 pub const ALLOC_TRACE_REALLOC: i32 = 2;
 /// OOM: a0=3, a1=0, a2=requested_size (uses trace_event layout: event_type, ptr, size, free)
 pub const ALLOC_TRACE_OOM: i32 = 3;
+
+/// One contiguous free-list run found by the guest's exact free-list walk
+/// (`lp-riscv-emu-guest::allocator`), emitted after a perf-event marker when
+/// the host asked for it (see [`crate::SYSCALL_PERF_EVENT`]'s return value).
+/// One syscall per run — the walk does not cap how many it emits.
+///
+/// Args: a0=4, a1=run_start_ptr, a2=run_len_bytes.
+pub const ALLOC_TRACE_FREE_RUN: i32 = 4;
+
+/// Terminates one free-list walk's run of `ALLOC_TRACE_FREE_RUN` syscalls,
+/// carrying the totals the host can check its run count against.
+///
+/// Args: a0=5, a1=holes, a2=largest_hole_bytes, a3=total_free_bytes.
+pub const ALLOC_TRACE_FREE_LIST_END: i32 = 5;
 
 /// Number of syscall arguments
 pub const SYSCALL_ARGS: usize = 7;

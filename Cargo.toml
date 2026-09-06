@@ -415,6 +415,11 @@ opt-level = 3
 codegen-units = 4
 
 [patch.crates-io]
+# esp-alloc 0.10.0 fork: the per-allocator region cap is 5, not 3. The classic
+# ESP32 registers four regions (arena, SRAM1 tail, and the two ROM boot-stack
+# spans it reclaims once both cores are up) and `add_region` panics past the
+# cap. See third_party/esp-alloc/README-LP.md.
+esp-alloc = { path = "third_party/esp-alloc" }
 esp-storage = { path = "third_party/esp-storage" }
 # naga 29.0.0 fork: glsl-in lowers `&&`/`||` with side-effecting right operands
 # to control flow so they short-circuit per the GLSL spec (upstream evaluates

@@ -26,13 +26,31 @@
 //!    back.
 //!
 //! The hello is **fold evidence**, never a sticky gate: the reducer settles
-//! the moment `ctx.evidence.has_hello()` turns true, whichever rung caused
-//! it. All waiting is scheduled timers (I7 — a reducer never awaits).
+//! the moment the fold has heard one, whichever rung caused it. All waiting
+//! is scheduled timers (I7 — a reducer never awaits).
+//!
+//! ⚠️ The hello has to be NEWER than the write. The observation window a
+//! hello lives in survives a close (the ADR's ruled list: open, successful
+//! reset and detach clear it; close never did), so a board that ran
+//! LightPlayer before the flash still carries its pre-flash hello while the
+//! flasher's closed port is being reopened. Reading that hello as the new
+//! firmware answering started the manifest stamp over the closed port on
+//! the ladder's first poke, and every write failed on the spot with
+//! "Serial port is not open." (bench, classic V3 on a CH340, 2026-09-04).
+//! The ladder therefore asks for a hello heard at or after the instant the
+//! write effect ended — see [`FlashActivity::heard_flashed_firmware`].
 //!
 //! Once the hello proves the app protocol is up, one more coarse effect
 //! writes the picked board's runtime manifest to `/hardware.json`
 //! (board-selection D4, effective next boot). Its failure degrades honestly:
-//! the flash stands, the summary says the pin map stayed default.
+//! the flash stands, and the summary says only what the reducer knows. A
+//! stamp the board answered with an error carries the conversation's own
+//! words (it knows what it left on the board); a stamp that heard nothing
+//! back says the write was **not confirmed** — never that the default pin
+//! map stands. The flasher keeps littlefs, so a reflashed board may well
+//! be running the manifest an earlier stamp wrote (bench, 2026-09-04:
+//! the card claimed the default while five strips ran on the board's own
+//! pin map).
 //!
 //! Cancellation is honest about physics: esptool-js cannot abort a write
 //! cleanly, so a cancel during the write window is *held* — the card says
@@ -92,6 +110,11 @@ enum FlashPhase {
         rung_deadline: Millis,
         /// Next instant to retry the open / re-ask the hello.
         next_poke_at: Millis,
+        /// When the ladder began: the instant the write effect ended. Only
+        /// a hello heard at or after this is the flashed firmware speaking;
+        /// an older one in the same window is the board the flash replaced.
+        #[serde(default)]
+        since: Millis,
     },
     /// Hello heard; the board-manifest effect is writing `/hardware.json`.
     Stamping { deadline: Millis },
@@ -217,24 +240,19 @@ impl FlashActivity {
         }
     }
 
-    /// The hello arrived: move to the board-manifest stamp, or finish if the
-    /// firmware that answered is not one we can talk to.
+    /// The hello arrived: move to the board-manifest stamp.
+    ///
+    /// A hello on another wire version is NOT a failed flash (ruled
+    /// 2026-09-04): the image wrote and the board boots it. The fold has
+    /// journaled the version and put the notice in the terminal; failing
+    /// here would tell the user the flash broke when it did not.
     fn on_hello(&mut self, now: Millis, ctx: &ActivityCtx<'_>) -> ActivityStep {
-        if let Some(proto) = ctx.evidence.mismatched_proto() {
-            return ActivityStep::done(ActivityOutcome::Failed {
-                message: format!(
-                    "flashed firmware answered with wire proto {proto}, but this build \
-                     speaks {} — the served image is stale",
-                    ctx.config.expected_proto
-                ),
-            });
-        }
         let Some(link) = ctx.link else {
             // The hello proves the board is alive, but the link vanished
             // under us in the same instant; the stamp cannot run.
             return ActivityStep::done(self.success_without_stamp(
                 "firmware installed; the board manifest was not written (port lost) — \
-                 the compiled-in default pin map stands",
+                 the board keeps whatever pin map it had",
             ));
         };
         // The stamp's OWN budget, not a ladder rung: the write goes to a
@@ -253,6 +271,20 @@ impl FlashActivity {
                 board_id: self.board_id.clone(),
             },
         }])
+    }
+
+    /// Whether the fold has heard the FLASHED firmware: a hello at or after
+    /// the instant the write effect ended. `has_hello` alone is not the
+    /// question — the window survives a close, so a board that ran
+    /// LightPlayer before the flash still carries its pre-flash hello while
+    /// the flasher's closed port is being reopened (bench, 2026-09-04).
+    fn heard_flashed_firmware(&self, ctx: &ActivityCtx<'_>) -> bool {
+        let FlashPhase::Reconnecting { since, .. } = &self.phase else {
+            return false;
+        };
+        ctx.evidence
+            .hello_heard_at()
+            .is_some_and(|heard_at| heard_at >= *since)
     }
 
     fn success(&self, ctx: &ActivityCtx<'_>) -> ActivityOutcome {
@@ -315,6 +347,7 @@ impl FlashActivity {
                             rung: ReconnectRung::Reopen,
                             rung_deadline: now.plus_ms(ctx.config.flash_rung_ms),
                             next_poke_at: now.plus_ms(ctx.config.flash_reopen_retry_ms),
+                            since: now,
                         };
                         ActivityStep::Continue(self.open_port(ctx))
                     }
@@ -327,10 +360,13 @@ impl FlashActivity {
             FlashPhase::Stamping { .. } => match outcome {
                 ActivityOutcome::Succeeded { .. } => ActivityStep::done(self.success(ctx)),
                 // The flash stands; only the pin-map stamp failed. Degrade
-                // honestly rather than calling the whole thing a failure.
+                // honestly rather than calling the whole thing a failure —
+                // and let the conversation's message be the claim about
+                // what is on the board: it wrote the chunks, it knows
+                // whether a partial file came off. The reducer adds nothing
+                // about pin maps that it does not know.
                 other => ActivityStep::done(self.success_without_stamp(&format!(
-                    "firmware installed; writing the board manifest failed ({}) — the \
-                     compiled-in default pin map stands",
+                    "firmware installed; writing the board manifest failed ({})",
                     other.summary()
                 ))),
             },
@@ -365,8 +401,9 @@ impl FlashActivity {
                 rung,
                 rung_deadline,
                 next_poke_at,
+                since,
             } => {
-                if ctx.evidence.has_hello() || ctx.evidence.mismatched_proto().is_some() {
+                if self.heard_flashed_firmware(ctx) {
                     return self.on_hello(now, ctx);
                 }
                 if now >= rung_deadline {
@@ -386,6 +423,7 @@ impl FlashActivity {
                         rung,
                         rung_deadline,
                         next_poke_at: now.plus_ms(ctx.config.flash_reopen_retry_ms),
+                        since,
                     };
                     return ActivityStep::Continue(commands);
                 }
@@ -393,10 +431,14 @@ impl FlashActivity {
             }
             FlashPhase::Stamping { deadline } => {
                 if now >= deadline {
-                    // The stamp effect went quiet. The flash stands.
+                    // The stamp effect went quiet. The flash stands — and
+                    // silence is not a verdict on the manifest: the write
+                    // may have landed, the board may be running the one
+                    // an earlier stamp left (the flasher keeps littlefs).
+                    // Say what is known: nothing came back.
                     return ActivityStep::done(self.success_without_stamp(
-                        "firmware installed; writing the board manifest timed out — the \
-                         compiled-in default pin map stands",
+                        "firmware installed; the board manifest write was not confirmed — \
+                         the board never answered it, so whatever pin map it has stands",
                     ));
                 }
                 ActivityStep::nothing()
@@ -435,10 +477,15 @@ impl FlashActivity {
             // Keep knocking — the rung deadline still moves the ladder on.
             _ => self.open_port(ctx),
         };
+        let since = match self.phase {
+            FlashPhase::Reconnecting { since, .. } => since,
+            _ => now,
+        };
         self.phase = FlashPhase::Reconnecting {
             rung: next,
             rung_deadline: now.plus_ms(ctx.config.flash_rung_ms),
             next_poke_at: now.plus_ms(ctx.config.flash_reopen_retry_ms),
+            since,
         };
         ActivityStep::Continue(commands)
     }
@@ -462,9 +509,7 @@ impl FlashActivity {
                 if self.winding_down {
                     return ActivityStep::nothing();
                 }
-                if matches!(self.phase, FlashPhase::Reconnecting { .. })
-                    && (ctx.evidence.has_hello() || ctx.evidence.mismatched_proto().is_some())
-                {
+                if self.heard_flashed_firmware(ctx) {
                     return self.on_hello(now, ctx);
                 }
                 ActivityStep::nothing()
@@ -941,22 +986,112 @@ mod tests {
             activity.handle(
                 Millis(1_500),
                 &ended(ActivityOutcome::Failed {
-                    message: "fs write refused".to_string(),
+                    message: "chunk 2/6 of /hardware.json failed: offset mismatch; the \
+                              partial file was removed"
+                        .to_string(),
                 }),
                 ctx,
             )
         });
 
+        // The conversation's words are the claim about the board: it wrote
+        // the chunks and knows what it left. The reducer adds no pin-map
+        // claim of its own.
         assert!(
             matches!(
                 step,
                 ActivityStep::Done {
                     outcome: ActivityOutcome::Succeeded { ref summary },
                     ..
-                } if summary.contains("default pin map")
+                } if summary.contains("firmware installed")
+                    && summary.contains("partial file was removed")
+                    && !summary.contains("default pin map")
             ),
             "the flash stands: {step:?}"
         );
+    }
+
+    /// The bench of 2026-09-04: the classic soft-reset decoding the stamp,
+    /// the effect never reported, and the card said "the compiled-in default
+    /// pin map stands" over a board running the manifest an earlier stamp had
+    /// left (the flasher keeps littlefs). A stamp that heard nothing says
+    /// nothing was confirmed — it does not know what is on the board.
+    #[test]
+    fn a_stamp_that_hears_nothing_says_unconfirmed_never_that_the_default_stands() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = flash();
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(0),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "written".to_string(),
+                }),
+                ctx,
+            )
+        });
+        hello(&mut evidence, Millis(1_000), &config);
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(Millis(1_000), &timer(), ctx)
+        });
+
+        let past_the_stamp = Millis(1_000 + config.stamp_deadline_ms + 1);
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(past_the_stamp, &timer(), ctx)
+        });
+
+        let ActivityStep::Done {
+            outcome: ActivityOutcome::Succeeded { summary },
+            ..
+        } = step
+        else {
+            panic!("the flash stands: {step:?}");
+        };
+        assert!(summary.contains("not confirmed"), "{summary}");
+        assert!(
+            !summary.contains("default"),
+            "silence is not a verdict on the manifest: {summary}"
+        );
+    }
+
+    /// The link vanishing in the same instant as the hello: the stamp cannot
+    /// run, and the summary says so without guessing what pin map the board
+    /// has (a reflashed board keeps its littlefs).
+    #[test]
+    fn a_hello_with_no_link_ends_without_claiming_the_default_pin_map() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = flash();
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(0),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "written".to_string(),
+                }),
+                ctx,
+            )
+        });
+        hello(&mut evidence, Millis(1_000), &config);
+
+        let mut ctx = ActivityCtx {
+            link: None,
+            evidence: &evidence,
+            config: &config,
+            effect_id: crate::event::EffectId(1),
+        };
+        let step = activity.handle(Millis(1_000), &timer(), &mut ctx);
+
+        let ActivityStep::Done {
+            outcome: ActivityOutcome::Succeeded { summary },
+            ..
+        } = step
+        else {
+            panic!("the flash stands: {step:?}");
+        };
+        assert!(summary.contains("port lost"), "{summary}");
+        assert!(!summary.contains("default"), "{summary}");
     }
 
     /// C1 (G1 bench, 2026-08-31): the stamp used to inherit the ladder's 8 s
@@ -1015,7 +1150,7 @@ mod tests {
                 ActivityStep::Done {
                     outcome: ActivityOutcome::Succeeded { ref summary },
                     ..
-                } if summary.contains("default pin map")
+                } if summary.contains("not confirmed")
             ),
             "{step:?}"
         );

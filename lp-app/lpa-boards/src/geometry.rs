@@ -87,6 +87,44 @@ impl Default for DiagramOptions {
     }
 }
 
+/// The `scale` that fits a `vw × vh` drawing into a box of `box_w × box_h`
+/// CSS pixels with the aspect ratio preserved — the thumbnail contract behind
+/// [`crate::BoardDiagram`]'s `fit`.
+///
+/// The smaller ratio wins, so the whole board lands inside the box on both
+/// axes. Boards are portrait (a devkit is roughly 1:3), so in any wide box it
+/// is the HEIGHT that binds; passing a width is still worth it, because a
+/// squat board like the dig2go would otherwise burst a narrow tile.
+///
+/// A degenerate box or drawing falls back to 1.0 rather than 0 or infinity: a
+/// thumbnail that silently vanished would be a harder bug to see than one
+/// that drew at its natural size.
+pub fn fit_scale(vw: f32, vh: f32, box_w: f32, box_h: f32) -> f32 {
+    if !(vw > 0.0 && vh > 0.0 && box_w > 0.0 && box_h > 0.0) {
+        return 1.0;
+    }
+    (box_w / vw).min(box_h / vh)
+}
+
+/// The scale and the RENDERED size of a `vw × vh` drawing fitted into a
+/// `box_w × box_h` box, as `(scale, width, height)`.
+///
+/// `landscape` turns the drawing a quarter turn first, which is the whole
+/// point of the thumbnail: boards are portrait at roughly 1:3, so upright in
+/// a wide band a devkit is a 20px sliver in 145px of air, while on its side
+/// it fills the band. Turning it swaps which drawing axis each box axis
+/// binds — the height fits the box's WIDTH — so the fit is computed on the
+/// swapped extents rather than by scaling upright and rotating afterwards,
+/// which would overflow the band by the aspect ratio.
+pub fn fitted_box(vw: f32, vh: f32, box_w: f32, box_h: f32, landscape: bool) -> (f32, f32, f32) {
+    let (fit_w, fit_h) = match landscape {
+        true => (vh, vw),
+        false => (vw, vh),
+    };
+    let scale = fit_scale(fit_w, fit_h, box_w, box_h);
+    (scale, fit_w * scale, fit_h * scale)
+}
+
 /// Visual family of a cell (or of a pin label in non-plain modes). Maps 1:1
 /// onto the `lpb-cell--*` / `lpb-fg--*` CSS classes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -481,11 +519,16 @@ impl BoardLayout {
             .iter()
             .map(|row| row.cells.last().map_or(0.0, |cell| cell.rect.right() + 2.0))
             .fold(0.0f32, f32::max);
-        let term_caption_h: f32 = if !terminals.is_empty() && opts.mode == DiagramMode::Plain {
-            18.0
-        } else {
-            0.0
-        };
+        // Room above the board for the terminal captions — and ONLY when
+        // they are actually drawn. A thumbnail (labels off) that still
+        // reserved the strip lost a tenth of its height to blank space, which
+        // at picker size is a tenth of the board.
+        let term_caption_h: f32 =
+            if !terminals.is_empty() && opts.mode == DiagramMode::Plain && opts.labels {
+                18.0
+            } else {
+                0.0
+            };
 
         let vb_x = -cw_left;
         let vb_y = (-4.0 - term_caption_h).min(band_top - 4.0);
@@ -761,6 +804,98 @@ mod tests {
             assert!((layout.font - FONT_SIZE_U * u).abs() < 1e-4);
             assert!((layout.gap - CELL_GAP_U * u).abs() < 1e-4);
         }
+    }
+
+    /// The picker draws every board into one box, so the fit is the whole
+    /// sizing contract: the drawing lands inside the box on BOTH axes, the
+    /// binding axis touches it exactly, and every checked-in board survives
+    /// the picker's own 120×56 tile at a scale that is neither zero nor
+    /// bigger than the box.
+    #[test]
+    fn a_fitted_thumbnail_lands_inside_its_box() {
+        // Portrait board, wide box: the height binds and is met exactly.
+        assert!((fit_scale(100.0, 300.0, 120.0, 60.0) - 0.2).abs() < 1e-6);
+        // Squat board, narrow box: the width binds instead.
+        assert!((fit_scale(300.0, 100.0, 120.0, 60.0) - 0.4).abs() < 1e-6);
+        // Degenerate inputs draw at natural size rather than vanishing.
+        assert_eq!(fit_scale(0.0, 300.0, 120.0, 60.0), 1.0);
+        assert_eq!(fit_scale(100.0, 300.0, 120.0, 0.0), 1.0);
+
+        let thumb = DiagramOptions {
+            labels: false,
+            ..DiagramOptions::default()
+        };
+        for board in crate::catalog::all_boards() {
+            let [_, _, vw, vh] = BoardLayout::compute(board, &thumb).view_box;
+            let scale = fit_scale(vw, vh, 120.0, 56.0);
+            assert!(scale > 0.0, "{} scaled to nothing", board.board_id);
+            assert!(
+                vw * scale <= 120.0 + 1e-3 && vh * scale <= 56.0 + 1e-3,
+                "{} burst the picker tile: {}×{}",
+                board.board_id,
+                vw * scale,
+                vh * scale,
+            );
+        }
+    }
+
+    /// Turning the board on its side is what makes the picker's band worth
+    /// having: the drawing's HEIGHT binds to the band's width, every board
+    /// still lands inside, and the tall ones — every devkit and XIAO, the
+    /// boards that were slivers upright — cover more of it than they did.
+    ///
+    /// The near-square boards (the quinled pair) gain nothing from the turn
+    /// and are not asked to: the picker turns them anyway, because one
+    /// orientation across the grid is worth more than a few pixels on two
+    /// tiles.
+    #[test]
+    fn the_landscape_turn_swaps_which_axis_binds() {
+        // A 1:3 portrait drawing in a wide band: upright the height binds and
+        // the width is a sliver; turned, the length binds and it fills.
+        let (_, up_w, up_h) = fitted_box(100.0, 300.0, 145.0, 56.0, false);
+        assert!((up_h - 56.0).abs() < 1e-4 && (up_w - 18.667).abs() < 1e-2);
+        let (_, turned_w, turned_h) = fitted_box(100.0, 300.0, 145.0, 56.0, true);
+        assert!((turned_w - 145.0).abs() < 1e-4 && (turned_h - 48.333).abs() < 1e-2);
+
+        let thumb = DiagramOptions {
+            labels: false,
+            ..DiagramOptions::default()
+        };
+        for board in crate::catalog::all_boards() {
+            let [_, _, vw, vh] = BoardLayout::compute(board, &thumb).view_box;
+            let (_, up_w, up_h) = fitted_box(vw, vh, 145.0, 56.0, false);
+            let (_, turned_w, turned_h) = fitted_box(vw, vh, 145.0, 56.0, true);
+            assert!(
+                turned_w <= 145.0 + 1e-3 && turned_h <= 56.0 + 1e-3,
+                "{} burst the band turned: {turned_w}×{turned_h}",
+                board.board_id,
+            );
+            if vh >= 1.5 * vw {
+                assert!(
+                    turned_w * turned_h > up_w * up_h,
+                    "{} is a tall board that covers no more of the band turned \
+                     ({turned_w}×{turned_h}) than upright ({up_w}×{up_h})",
+                    board.board_id,
+                );
+            }
+        }
+    }
+
+    /// A thumbnail draws no terminal captions, so it reserves no room for
+    /// them: the quinled boards used to lose 18 units of height to a strip
+    /// nothing was drawn in.
+    #[test]
+    fn a_label_less_plain_diagram_reserves_no_caption_strip() {
+        let with_labels = BoardLayout::compute(quinled(), &DiagramOptions::default());
+        let without = BoardLayout::compute(
+            quinled(),
+            &DiagramOptions {
+                labels: false,
+                ..DiagramOptions::default()
+            },
+        );
+        assert!(without.view_box[1] > with_labels.view_box[1]);
+        assert!((without.view_box[3] - (with_labels.view_box[3] - 18.0)).abs() < 1e-4);
     }
 
     #[test]

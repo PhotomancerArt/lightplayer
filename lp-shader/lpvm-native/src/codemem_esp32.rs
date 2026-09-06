@@ -51,6 +51,58 @@ pub const SRAM1_IRAM_TOP: u32 = 0x400B_FFFC;
 /// D-bus end (exclusive) of SRAM1's dual-mapped window.
 pub const SRAM1_DRAM_END: u32 = 0x4000_0000;
 
+/// `(base, len)` of the SRAM1 span esp-hal reserves for the ROM's **PRO-CPU**
+/// boot stack, plus the unreserved hole beside it: `0x3FFE_0440..0x3FFE_3F20`.
+///
+/// esp-hal reserves 32,304 B of SRAM1 for the ROM in four blocks — two *data*
+/// blocks and two *stacks* — and never hands any of them back. esp-idf gives
+/// the stacks to its heap once the ROM is out of them, and so can the firmware:
+/// xtensa-lx-rt's reset sets `a1 = _stack_start`, so the PRO stack is dead from
+/// the first Rust instruction. The two ROM **data** blocks
+/// (`0x3FFE_0000 + 1088` and `0x3FFE_3F20 + 1072`) are NOT in this span and
+/// must stay reserved: ROM functions the image still calls read them.
+///
+/// Named here rather than in the firmware because this module is where SRAM1's
+/// ownership is settled; the const-assert below pins the span against the
+/// bounds the rest of the file already knows.
+pub const SRAM1_ROM_PRO_STACK_SPAN: (u32, u32) = (0x3FFE_0440, 0x3FFE_3F20 - 0x3FFE_0440);
+
+/// Base of the same reclaim for the **APP-CPU**: `0x3FFE_4350`, the end of the
+/// second ROM data block.
+///
+/// Only the base is a constant. The span's *end* is the lowest address anything
+/// else claims in SRAM1, which today is the JIT code region's
+/// [`CodeRegion::dbus_base`] — so the span also swallows the 464 B head of
+/// `dram2_seg` that sits below the region. Deriving the end rather than writing
+/// it down is what lets the JIT region move without a second edit here: when it
+/// leaves SRAM1, this span and the reclaimable heap tail become contiguous.
+///
+/// ⚠️ Unlike the PRO stack, this one is live during boot: the APP core runs on
+/// it while it comes up through the ROM, until esp-hal's `start_core1_init`
+/// switches it to `APP_CORE_STACK`. The firmware must therefore register this
+/// span only after the core-start call has returned.
+pub const SRAM1_ROM_APP_STACK_BASE: u32 = 0x3FFE_4350;
+
+// The two reclaimed spans must sit inside SRAM1, must not overlap the ROM data
+// blocks they are named against, and — for the APP span — must end below
+// whatever claims SRAM1 next. Asserted rather than trusted: these addresses
+// reach an `unsafe esp_alloc::HeapRegion::new`, where being wrong means handing
+// the allocator memory the ROM still uses, and the fault would land nowhere
+// near this file.
+const _: () = {
+    let (pro_base, pro_len) = SRAM1_ROM_PRO_STACK_SPAN;
+    assert!(pro_base >= SRAM1_DRAM_BASE && pro_len > 0);
+    // Ends exactly where the second ROM data block begins.
+    assert!(pro_base + pro_len == 0x3FFE_3F20);
+    // ... which is where the APP span's base is one 1,072 B data block later.
+    assert!(SRAM1_ROM_APP_STACK_BASE == 0x3FFE_3F20 + 1072);
+    assert!(SRAM1_ROM_APP_STACK_BASE < CodeRegion::ESP32_DEFAULT.dbus_base);
+    // The two spans are separated by that data block, so they can never be
+    // mistaken for one run by a free-list walk that recovers regions by address
+    // contiguity (`fw-esp32v3`'s `free_list_shape` does exactly that).
+    assert!(pro_base + pro_len < SRAM1_ROM_APP_STACK_BASE);
+};
+
 /// Errors from code-region placement and installation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CodeMemError {

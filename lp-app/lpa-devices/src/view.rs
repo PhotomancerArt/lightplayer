@@ -18,7 +18,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::activity::{ActivityKind, ActivityOutcome, CancelPhase};
 use crate::device::{Device, DeviceStatus};
-use crate::evidence::{Classification, IncompatibleReason, Liveness};
+use crate::evidence::{
+    Classification, Evidence, IncompatibleReason, Liveness, TerminalLine, WireVersion,
+};
 use crate::identity::DeviceId;
 use crate::link::LinkId;
 use crate::roster::{PendingLink, Roster};
@@ -56,9 +58,23 @@ pub struct DeviceView {
     /// "a new project" entry is honestly disabled rather than guessing a
     /// pin map.
     pub board_id: Option<String>,
-    /// The fold says this board wants firmware (blank, bootloader, foreign,
-    /// or incompatible) — the face that offers a board pick + Flash.
-    pub needs_firmware: bool,
+    /// What is on the flash, as the card is allowed to state it — one
+    /// variant per classification, so no consumer has to guess a noun back
+    /// out of a bool (which is how an older LightPlayer came to be drawn as
+    /// a blank chip, bench 2026-09-04). See [`FirmwareFace`].
+    pub firmware_face: FirmwareFace,
+    /// What the record remembers the board last ran — the firmware label
+    /// of the last hello heard in ANY window, from the persisted
+    /// [`DeviceRecord::firmware`]. Memory, not a verdict: the current
+    /// window's verdict is [`Self::firmware_face`], and it stays
+    /// [`FirmwareFace::Unknown`] on an attached-but-closed or freshly
+    /// rehydrated board. The header's identity line reads this, marked as
+    /// remembered, when that window has nothing to say (bench 2026-09-04:
+    /// Disconnect dropped a known classic to "no firmware" while chip and
+    /// board, which already fall back to the record, stayed put).
+    ///
+    /// [`DeviceRecord::firmware`]: crate::record::DeviceRecord::firmware
+    pub remembered_firmware: Option<String>,
     /// ONE line naming why a running board is not running well: a node in
     /// fault, or a recovery state the device reported as not green.
     ///
@@ -84,11 +100,15 @@ pub struct DeviceView {
     pub activity: Option<ActivityView>,
     /// Survives disconnect; cleared when a new activity supersedes it.
     pub last_outcome: Option<OutcomeView>,
-    /// The card's terminal panel: what the board said and what Studio did
-    /// to it, oldest first. Serial lines and activity narration interleaved,
-    /// because that is the order they happened in — a flash's progress used
-    /// to be visible only in the browser console (G1 bench, 2026-08-31).
-    pub terminal_lines: Vec<String>,
+    /// The card's terminal panel: what the board said, what the wire
+    /// carried and what Studio did to it, oldest first. Serial lines,
+    /// decoded wire frames and activity narration interleaved, because that
+    /// is the order they happened in — a flash's progress used to be
+    /// visible only in the browser console (G1 bench, 2026-08-31).
+    pub terminal: Vec<TerminalLine>,
+    /// How many lines have fallen off the front of [`Self::terminal`] to
+    /// keep it bounded — the panel's honest "…and N more" count.
+    pub terminal_dropped: u32,
     /// Never empty (invariant I3).
     pub escapes: Vec<Escape>,
 }
@@ -157,9 +177,10 @@ pub struct PendingLinkView {
     /// "Set up this device" — always offered, because a blank chip may never
     /// identify itself.
     pub can_adopt: bool,
-    /// The settled verdict says this board wants firmware — the pending
-    /// entry's needs-firmware face (board pick + Flash, which adopts).
-    pub needs_firmware: bool,
+    /// The settled verdict's face — [`FirmwareFace::Unknown`] until it
+    /// settles, so the flash face (board pick + Flash, which adopts) never
+    /// appears mid-identification.
+    pub firmware_face: FirmwareFace,
     /// Chip read off the boot banner, normalized ("esp32c6").
     pub detected_chip: Option<String>,
     /// Dismiss, expressed as [`Escape::Forget`].
@@ -236,7 +257,10 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         // that was already running when the tab attached never shows one,
         // but its hello names the firmware PACKAGE ("fw-esp32c6 abc1234"),
         // which is the chip by another name (G1 2026-09-02: the re-flash
-        // verb on a running card never appeared without this).
+        // verb on a running card never appeared without this). Falling back
+        // to the record last is what keeps an attached-but-closed or
+        // freshly rehydrated board wearing the identity line it already
+        // earned, rather than going blank the moment the window resets.
         detected_chip: device
             .evidence
             .detected_chip()
@@ -249,13 +273,29 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
                     .and_then(|hello| hello.firmware.as_deref())
                     .and_then(chip_from_firmware_label)
                     .map(str::to_string)
+            })
+            .or_else(|| {
+                device
+                    .record
+                    .as_ref()
+                    .and_then(|record| record.chip.clone())
             }),
         board_id: device
             .evidence
             .classification
             .hello()
-            .and_then(|hello| hello.board_id.clone()),
-        needs_firmware: needs_firmware(&device.evidence.classification),
+            .and_then(|hello| hello.board_id.clone())
+            .or_else(|| {
+                device
+                    .record
+                    .as_ref()
+                    .and_then(|record| record.board_id.clone())
+            }),
+        firmware_face: firmware_face(&device.evidence),
+        remembered_firmware: device
+            .record
+            .as_ref()
+            .and_then(|record| record.firmware.clone()),
         degraded: degraded(device),
         // The mirror of the push condition, over the OTHER answer: a board
         // that reported something running, on an open port, idle.
@@ -273,34 +313,122 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             && device.activity.is_none(),
         activity,
         last_outcome: device.evidence.last_outcome.as_ref().map(outcome_view),
-        terminal_lines: device
-            .evidence
-            .recent_output()
-            .map(str::to_string)
-            .collect(),
+        terminal: device.evidence.recent_output().cloned().collect(),
+        terminal_dropped: device.evidence.terminal_dropped(),
         escapes,
     }
 }
 
-/// Whether a classification is one Flash fixes: blank or erased flash, a
-/// board parked in the ROM downloader, somebody else's firmware, a
-/// LightPlayer this build cannot speak to — or a board that answers
-/// NOTHING. The settled-quiet arm is the old wizard's Unresponsive
-/// verdict, which offered flash after its bootloader escalation; our
-/// parking IS that escalation now, and without this arm a silent chip
-/// (parked in the downloader by a failed flash, say) had no verb at all
-/// (it bit three times at G1, 2026-08-31). The widened pick's copy says
-/// the pick is checked against the silicon before anything is written —
-/// the chip guard is the safety, here as everywhere.
-fn needs_firmware(classification: &Classification) -> bool {
-    matches!(
-        classification,
-        Classification::Blank
-            | Classification::Bootloader
-            | Classification::Foreign { .. }
-            | Classification::Incompatible { .. }
-            | Classification::Quiet { .. }
-    )
+/// What is on the board's flash, as a face the card draws.
+///
+/// One variant per [`Classification`], one-to-one (a property test pins
+/// it): the projection used to hand the renderer `needs_firmware: bool`
+/// plus `firmware: Option<String>`, and the renderer then re-invented the
+/// noun from the bool — every needs-firmware verdict drew as "Blank flash"
+/// and an older LightPlayer read "no firmware" (bench 2026-09-04). The
+/// *words* for each variant live in the app layer, tested per variant;
+/// this crate carries the facts.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum FirmwareFace {
+    /// Identification has not settled and nothing conclusive was heard.
+    #[default]
+    Unknown,
+    /// A LightPlayer said hello — on whatever wire version it speaks.
+    /// `firmware` is the hello's package/commit label verbatim
+    /// (`"fw-esp32c6 abc1234"`), `None` when the firmware did not report
+    /// one; `wire` is the awareness the 2026-09-04 ruling asks for.
+    LightPlayer {
+        firmware: Option<String>,
+        wire: WireVersion,
+    },
+    /// Speaks the framing, never said hello (pre-hello firmware).
+    NoHello,
+    /// Blank or erased flash (the invalid-header boot loop).
+    Blank,
+    /// Parked in the ROM downloader.
+    Bootloader,
+    /// Somebody else's firmware; `label` when the boot banner is one we
+    /// recognize as safe to replace.
+    Foreign { label: Option<String> },
+    /// The port is open and the board says nothing at all.
+    Silent,
+}
+
+impl FirmwareFace {
+    /// Whether Flash is the verb this face asks for: blank or erased flash,
+    /// a board parked in the ROM downloader, somebody else's firmware, a
+    /// peer that never says hello — or a board that answers NOTHING. The
+    /// silent arm is the old wizard's Unresponsive verdict, which offered
+    /// flash after its bootloader escalation; our parking IS that
+    /// escalation now, and without it a silent chip (parked in the
+    /// downloader by a failed flash, say) had no verb at all (it bit three
+    /// times at G1, 2026-08-31). The widened pick's copy says the pick is
+    /// checked against the silicon before anything is written — the chip
+    /// guard is the safety, here as everywhere.
+    ///
+    /// A LightPlayer on another wire version does NOT want a flash forced
+    /// on it (ruled 2026-09-04): it keeps the running board's re-flash
+    /// verb, which is an offer, and its firmware line says "older".
+    pub fn wants_flash(&self) -> bool {
+        matches!(
+            self,
+            Self::NoHello | Self::Blank | Self::Bootloader | Self::Foreign { .. } | Self::Silent
+        )
+    }
+
+    /// The hello's firmware label, when a LightPlayer reported one.
+    pub fn firmware(&self) -> Option<&str> {
+        match self {
+            Self::LightPlayer { firmware, .. } => firmware.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// The wire-version comparison, when a LightPlayer said hello.
+    pub fn wire(&self) -> Option<WireVersion> {
+        match self {
+            Self::LightPlayer { wire, .. } => Some(*wire),
+            _ => None,
+        }
+    }
+}
+
+impl DeviceView {
+    /// The flash face: a board pick + Flash as the firmware zone's verbs.
+    pub fn needs_firmware(&self) -> bool {
+        self.firmware_face.wants_flash()
+    }
+}
+
+impl PendingLinkView {
+    /// The flash face on a pending link — only ever on a SETTLED verdict
+    /// (an unsettled link projects [`FirmwareFace::Unknown`]).
+    pub fn needs_firmware(&self) -> bool {
+        self.firmware_face.wants_flash()
+    }
+}
+
+/// The face for the evidence's current classification. Total and
+/// one-to-one: every classification has exactly one face, so a new
+/// classification is a compile error here rather than a silent "blank"
+/// downstream.
+fn firmware_face(evidence: &Evidence) -> FirmwareFace {
+    match &evidence.classification {
+        Classification::Unknown => FirmwareFace::Unknown,
+        Classification::LightPlayer { hello } => FirmwareFace::LightPlayer {
+            firmware: hello.firmware.clone(),
+            wire: evidence.wire_version().unwrap_or(WireVersion::Match),
+        },
+        Classification::Incompatible {
+            reason: IncompatibleReason::NoHello,
+        } => FirmwareFace::NoHello,
+        Classification::Blank => FirmwareFace::Blank,
+        Classification::Bootloader => FirmwareFace::Bootloader,
+        Classification::Foreign { label } => FirmwareFace::Foreign {
+            label: label.clone(),
+        },
+        Classification::Quiet { .. } => FirmwareFace::Silent,
+    }
 }
 
 /// The chip family a firmware label ("fw-esp32c6 abc1234") was built for,
@@ -319,13 +447,14 @@ fn chip_from_firmware_label(label: &str) -> Option<&'static str> {
 
 /// What this board is running, from its own report.
 ///
-/// Only a LightPlayer gets an answer: a blank chip's silence is not an empty
-/// project storage, and offering to push at a board that cannot receive one
-/// would be a verb that does nothing.
+/// A fact the fold accepted is a fact the view states: the guard here is
+/// "did it report" (the fold stores the report only from a frame that
+/// carries one), never "is it a LightPlayer". Gating a fact on a verdict is
+/// how a board heartbeating its running project and its red fault read as
+/// "nothing running" (bench 2026-09-04). The VERBS stay gated —
+/// `can_receive_project` and `can_remove_project` ask for a hello — so a
+/// blank chip's silence still earns no push.
 fn loaded_project(device: &Device) -> LoadedProject {
-    if !device.evidence.classification.is_light_player() {
-        return LoadedProject::Unknown;
-    }
     match device.evidence.loaded_projects() {
         None => LoadedProject::Unknown,
         Some([]) => LoadedProject::Empty,
@@ -343,12 +472,13 @@ fn loaded_project(device: &Device) -> LoadedProject {
 /// order — because it sits on a card that redraws every heartbeat, and a
 /// line that reshuffled its clauses would read as new news every second.
 ///
-/// Only a LightPlayer on an OPEN port gets one: degradation is a live
-/// report, and repeating the last thing a board said before we stopped
-/// listening would age into a lie.
+/// Only on an OPEN port: degradation is a live report, and repeating the
+/// last thing a board said before we stopped listening would age into a
+/// lie. Not gated on the verdict — the fault is the board's own report,
+/// and it is stated whenever it was made (see [`loaded_project`]).
 fn degraded(device: &Device) -> Option<String> {
     let evidence = &device.evidence;
-    if !evidence.classification.is_light_player() || !evidence.presence.is_open() {
+    if !evidence.presence.is_open() {
         return None;
     }
     let recovery = evidence
@@ -442,9 +572,12 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
         state_label,
         detail,
         can_adopt: true,
-        // Only a SETTLED verdict offers the flash face: mid-identification
-        // the honest face is "identifying…", not a premature verb.
-        needs_firmware: entry.verdict().is_some_and(needs_firmware),
+        // Only a SETTLED verdict offers a face: mid-identification the
+        // honest face is "identifying…", not a premature verb.
+        firmware_face: match entry.verdict() {
+            Some(_) => firmware_face(entry.evidence()),
+            None => FirmwareFace::Unknown,
+        },
         detected_chip: entry.evidence().detected_chip().map(str::to_string),
         escapes: vec![Escape::Forget],
     }
@@ -472,9 +605,6 @@ fn classification_label(classification: &Classification) -> String {
     match classification {
         Classification::Unknown => "Identifying…".to_string(),
         Classification::LightPlayer { hello } => format!("LightPlayer · {}", hello.label()),
-        Classification::Incompatible {
-            reason: IncompatibleReason::ProtoMismatch { proto },
-        } => format!("Incompatible firmware (wire proto {proto})"),
         Classification::Incompatible {
             reason: IncompatibleReason::NoHello,
         } => "No LightPlayer hello — pre-hello firmware".to_string(),
@@ -602,9 +732,6 @@ mod tests {
             },
             Classification::Incompatible {
                 reason: IncompatibleReason::NoHello,
-            },
-            Classification::Incompatible {
-                reason: IncompatibleReason::ProtoMismatch { proto: 3 },
             },
             Classification::Quiet { since: Millis(0) },
         ];
