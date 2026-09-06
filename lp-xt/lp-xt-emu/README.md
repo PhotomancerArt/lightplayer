@@ -96,17 +96,21 @@ I-bus (executable) view. `board.rs` captures that as a `BoardProfile`:
   dual-mapped window `0x3FC8_8000..0x3FCF_0000` with the executable alias a
   constant offset `+0x6F_0000` (FINDINGS E2).
 - `Emulator::with_profile(BoardProfile::esp32())` — the **classic ESP32**
-  profile, from the C1–C5 hardware ladder (FINDINGS classic section):
-  - SRAM1's dual mapping (D-bus `0x3FFE_0000..0x4000_0000` ↔ I-bus
-    `0x400A_0000..0x400C_0000`) is **word-mirrored**:
-    `iram = 0x400B_FFFC − (dram − 0x3FFE_0000)` at word granularity, bytes
-    within each word verbatim (C2b, 5 sentinels; the linear hypothesis matched
-    none). So the alias is an `AliasRule` — `Offset`, `Identity`, or
-    `WordMirrored` — not a constant.
-  - Code: 92 KiB at D-bus `0x3FFE_8000` inside the measured-free span
-    (dram2_seg `0x3FFE_7E30..0x3FFF_FF80`, ~96 KB usable). SRAM1 is the region
-    a runner would use; the alternatives are SRAM0 (~125 KB, identity-mapped,
-    **word-only writes**) and RTC-fast (8 KB, `+0xC4_0000`).
+  profile, from the C1–C5 hardware ladder (FINDINGS classic section) plus the
+  2026-09-05 SRAM0 probe (`fw-esp32v3`'s `test_sram0_exec`):
+  - Code: 64 KiB of **SRAM0** at `0x4008_8000` — the instruction RAM, which
+    has no D-bus view (the alias is `Identity`: a word is fetched where it was
+    written) and is **word-only** (`AccessRule::WordOnly`: a byte/halfword or
+    misaligned access is a `LoadStoreError`, measured). Since 2026-09-05; the
+    device's whole SRAM1 tail is heap now.
+  - `BoardProfile::esp32_sram1_legacy()` keeps the previous placement: 24 KiB
+    at D-bus `0x3FFE_8000` in SRAM1, whose dual mapping (D-bus
+    `0x3FFE_0000..0x4000_0000` ↔ I-bus `0x400A_0000..0x400C_0000`) is
+    **word-mirrored**: `iram = 0x400B_FFFC − (dram − 0x3FFE_0000)` at word
+    granularity, bytes within each word verbatim (C2b, 5 sentinels; the
+    linear hypothesis matched none). So the alias is an `AliasRule` —
+    `Offset`, `Identity`, or `WordMirrored` — not a constant. RTC-fast (8 KB,
+    `+0xC4_0000`) is the third, unused option.
   - Stack: 64 KiB at `0x3FFC_0000` in SRAM2 (dram_seg, plain data RAM — C5
     measured 98 304 B heap free, so 64 KiB fits with headroom). SRAM2 has no
     I-bus view, so fetching there faults (EXCCAUSE=2) exactly as the classic
