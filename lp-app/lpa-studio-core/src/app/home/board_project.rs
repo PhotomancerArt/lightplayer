@@ -35,7 +35,7 @@
 use lpa_boards::board_by_id;
 use lpc_model::{HwEndpointSpec, ProjectManifest};
 
-use super::embedded_example::METEOR_FILES;
+use super::embedded_example::embedded_example;
 
 /// Pixels on the generated fixture's strip. Modest on purpose: enough to
 /// look like a strip rather than a token, few enough that a user who
@@ -157,12 +157,14 @@ pub fn generate_board_project(board_id: &str) -> Result<GeneratedProject, Genera
     })
 }
 
+/// The catalog id of the pattern the generated project vendors.
+const METEOR_ID: &str = "catalog/meteor";
+
 /// One file of the embedded meteor example, by package-relative name.
 fn meteor_file(name: &str) -> &'static [u8] {
-    METEOR_FILES
-        .iter()
-        .find(|(path, _)| *path == name)
-        .map(|(_, bytes)| *bytes)
+    embedded_example(METEOR_ID)
+        .unwrap_or_else(|| panic!("{METEOR_ID} is in the catalog"))
+        .file(name)
         .unwrap_or_else(|| panic!("the embedded meteor example ships {name}"))
 }
 

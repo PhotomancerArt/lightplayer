@@ -144,7 +144,7 @@ pub fn build_home_view(
             .map(|example| UiExampleCard {
                 id: example.id.to_string(),
                 name: example.name.to_string(),
-                kind: example.kind.to_string(),
+                kind: super::ui_example_card::EXAMPLE_CARD_KIND.to_string(),
             })
             .collect(),
         |card| card.id.clone(),

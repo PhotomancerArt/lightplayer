@@ -12,3 +12,9 @@ pub struct UiExampleCard {
     /// Package kind, for the section's kind filter chips.
     pub kind: String,
 }
+
+/// The `kind` every catalog card carries today: the root module node's
+/// kind, which is what the card icon keys on. Every catalog entry's root
+/// `module.json` is a `Module`; the grouped surfaces (P5) replace this
+/// string with the manifest's project kind.
+pub const EXAMPLE_CARD_KIND: &str = "Module";

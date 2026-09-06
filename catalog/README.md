@@ -27,11 +27,12 @@ section — `fyeah-sign`, `logo-sign`, `plasma`, `meteor`, `comet`,
 `peach-1d`, `peach-2d`, `pulse`, `fault-demo`. Their Studio ids are
 bucket-free (`catalog/<slug>`; the pre-catalog `examples/<slug>` spelling
 still resolves for libraries seeded before the move).
-Their file lists live in
-`lp-app/lpa-studio-core/src/app/home/embedded_example.rs`
-(`include_bytes!` against this directory), so a change here reaches
-Studio only after a rebuild, and an already-seeded library keeps the copy
-it made (delete the gallery package to re-seed).
+Registration is automatic: `lp-app/lpa-studio-core/build.rs` walks
+`catalog/<bucket>/<slug>/` at build time and embeds every file, and the
+registry types each entry from its own `project.json` (`name`, `kind`,
+`description`). Adding an entry is adding a folder — no Rust edit. A
+change here reaches Studio only after a rebuild, and an already-seeded
+library keeps the copy it made (delete the gallery package to re-seed).
 
 A gallery example must open onto a **populated panel**: at least one
 root-scope control, published the only way publicity happens — an

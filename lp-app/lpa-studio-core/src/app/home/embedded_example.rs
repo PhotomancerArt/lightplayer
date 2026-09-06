@@ -1,32 +1,99 @@
-//! The compiled-in example packages: the offline/dev content source for
-//! the canonical example identities.
+//! The catalog registry: generated file tables (`build.rs`) typed at
+//! runtime through the manifest parser.
 //!
-//! Examples are first-party published projects (examples vision D1) with
-//! bare-slug addresses (`/p/<slug>`, the id tail). Opening one is
+//! Catalog entries are first-party published projects (examples vision D1)
+//! with bare-slug addresses (`/p/<slug>`, the id tail). Opening one is
 //! STATELESS (D2): a transient memory-backed session, nothing installed —
 //! an explicit save forks a copy with `SeededFrom { source: id }`
-//! provenance (the "Remixed from" line). The home landing and Explore
-//! both list this table.
+//! provenance (the "Remixed from" line). The home landing, Explore and the
+//! device card's project picker all list this table.
 //!
-//! Each package's files are `include_bytes!`d from
-//! `catalog/<bucket>/<slug>/` (buckets `patterns` and `projects`), so the
-//! wasm bundle carries them and the checked-in entry IS what the gallery
-//! opens. Ids are bucket-free — `catalog/<slug>` — so reclassifying an
-//! entry never changes what a library's "Remixed from" line points at;
-//! the pre-catalog spelling `examples/<slug>` is still accepted on lookup
-//! (see [`embedded_example`]). Adding an entry means adding its file
-//! table here (slug uniqueness is test-pinned — the id tail is the URL).
+//! The build script walks `catalog/<bucket>/<slug>/` (buckets `projects`
+//! and `patterns`; `templates` reserved) and emits one `include_bytes!`
+//! table per entry, so the wasm bundle carries the files and the
+//! checked-in entry IS what the gallery opens. Nothing here names an
+//! entry: `embedded_examples()` types the generated rows once, on first
+//! use, by parsing each entry's `project.json` with
+//! [`lpc_model::ProjectManifest::read_json`] — the one real parser, so
+//! `name`/`kind`/`description` can never drift from what the tree gates
+//! check. Adding content is adding a folder.
+//!
+//! Ids are bucket-free — `catalog/<slug>` — so reclassifying an entry
+//! never changes what a library's "Remixed from" line points at; the
+//! pre-catalog spelling `examples/<slug>` is still accepted on lookup
+//! (see [`embedded_example`]). Slug uniqueness is test-pinned — the id
+//! tail is the URL.
+
+use std::sync::OnceLock;
+
+use lpc_model::{ProjectKind, ProjectManifest};
+
+/// The generated file tables — see `build.rs` for the shape and the
+/// ordering rules.
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/catalog_files.generated.rs"));
+}
 
 /// One file in an embedded package: its package-relative path and bytes.
 pub type ExampleFile = (&'static str, &'static [u8]);
 
-/// One compiled-in example.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// The id prefix every catalog entry carries (`catalog/<slug>`).
+pub const CATALOG_ID_PREFIX: &str = "catalog/";
+
+/// The pre-catalog id prefix (`examples/<slug>`), still persisted in
+/// user libraries as `SeededFrom { source }` provenance and in the cloud
+/// store. Accepted on lookup so those "Remixed from" lines keep resolving;
+/// never written anew.
+pub const LEGACY_EXAMPLE_ID_PREFIX: &str = "examples/";
+
+/// A catalog bucket: the directory under `catalog/` an entry lives in.
+/// Buckets mirror the manifest `kind` (a test keeps them agreeing); the
+/// manifest is the truth, the bucket is for authors. Declaration order is
+/// display order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CatalogBucket {
+    /// Real pieces (`kind` absent → `General`).
+    Projects,
+    /// Single-effect pattern projects (`kind: pattern`, exporting `effect/`).
+    Patterns,
+    /// Reserved for `kind: template` (follow-up plan); no directory today.
+    Templates,
+}
+
+impl CatalogBucket {
+    /// Every bucket, in display order.
+    pub const ALL: &[CatalogBucket] = &[Self::Projects, Self::Patterns, Self::Templates];
+
+    /// The directory name under `catalog/`.
+    pub fn dir_name(self) -> &'static str {
+        match self {
+            Self::Projects => "projects",
+            Self::Patterns => "patterns",
+            Self::Templates => "templates",
+        }
+    }
+
+    fn from_dir_name(name: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|b| b.dir_name() == name)
+    }
+}
+
+/// One catalog entry, typed from its manifest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EmbeddedExample {
+    /// Stable, bucket-free id: `catalog/<slug>`.
     pub id: &'static str,
+    /// The directory name under the bucket — the `/p/<slug>` address.
+    pub slug: &'static str,
+    pub bucket: CatalogBucket,
+    /// `project.json`'s `name`; the slug when the manifest names nothing.
     pub name: &'static str,
-    pub kind: &'static str,
-    /// The package's files, in deploy order (`project.json` first).
+    /// `project.json`'s authored kind (`General` when absent).
+    pub kind: &'static ProjectKind,
+    /// `project.json`'s card blurb; empty when absent.
+    pub description: &'static str,
+    /// The package's files, in deploy order (`project.json` first,
+    /// `module.json` second, the rest sorted by path).
     pub files: &'static [ExampleFile],
 }
 
@@ -41,824 +108,28 @@ impl EmbeddedExample {
 
     /// The example's canonical bare slug — the id tail
     /// (`catalog/fyeah-sign` → `fyeah-sign`). This is the `/p/<slug>`
-    /// address (PD3): example directories are `[a-z0-9-]` names, so the
+    /// address (PD3): entry directories are `[a-z0-9-]` names, so the
     /// tail is URL-ready as-is. Uniqueness across the table is pinned by
     /// a test below.
     pub fn slug(&self) -> &'static str {
-        self.id.rsplit('/').next().unwrap_or(self.id)
+        self.slug
+    }
+
+    /// One package file's bytes by package-relative path.
+    pub fn file(&self, path: &str) -> Option<&'static [u8]> {
+        self.files
+            .iter()
+            .find(|(file, _)| *file == path)
+            .map(|(_, bytes)| *bytes)
     }
 }
 
-/// `catalog/fyeah-sign` — the Studio demo project (see
-/// [`crate::app::project::demo_project`] for why this one).
-pub static FYEAH_SIGN_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/module.json"),
-    ),
-    (
-        "button.json",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/button.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/clock.json"),
-    ),
-    (
-        "fixture.json",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/fixture.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/output.json"),
-    ),
-    (
-        "playlist.json",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/playlist.json"),
-    ),
-    (
-        "radio.json",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/radio.json"),
-    ),
-    (
-        "idle.json",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/idle.json"),
-    ),
-    (
-        "idle.glsl",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/idle.glsl"),
-    ),
-    (
-        "blast.json",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/blast.json"),
-    ),
-    (
-        "blast.glsl",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/blast.glsl"),
-    ),
-    (
-        "fyeah.map2d.json",
-        include_bytes!("../../../../../catalog/projects/fyeah-sign/fyeah.map2d.json"),
-    ),
-];
-
-/// `catalog/logo-sign` — the brand as a buildable LED piece: a shaped
-/// PCB matrix in the outline of the play triangle (map2d `filled_polygon`,
-/// count derived from the outline and the pitch) plus "LightPlayer" as a
-/// string of single-stroke letter strands, on one canvas that is the
-/// landing hero's own stage. Generated from the brand geometry — see
-/// `logo_sign_gen.rs` in `lpa-studio-web`, whose in-sync test fails if this
-/// package's mapping falls behind the mark.
-pub static LOGO_SIGN_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/projects/logo-sign/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/projects/logo-sign/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/projects/logo-sign/clock.json"),
-    ),
-    (
-        "fixture.json",
-        include_bytes!("../../../../../catalog/projects/logo-sign/fixture.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../catalog/projects/logo-sign/output.json"),
-    ),
-    (
-        "shader.json",
-        include_bytes!("../../../../../catalog/projects/logo-sign/shader.json"),
-    ),
-    (
-        "shader.glsl",
-        include_bytes!("../../../../../catalog/projects/logo-sign/shader.glsl"),
-    ),
-    (
-        "sign.map2d.json",
-        include_bytes!("../../../../../catalog/projects/logo-sign/sign.map2d.json"),
-    ),
-];
-
-/// `catalog/plasma` — one shader, two public knobs. The smallest module
-/// whose root panel is not empty: `scale` and the phasor slot's period
-/// (bound to the `speed` channel, which carries the whole `PhasorConfig`)
-/// are bound to root scope channels, so binding-is-publicity (Q13) puts
-/// them on the module card's panel with nothing else authored.
-pub static PLASMA_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/patterns/plasma/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/patterns/plasma/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/patterns/plasma/clock.json"),
-    ),
-    (
-        "fixture.json",
-        include_bytes!("../../../../../catalog/patterns/plasma/fixture.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../catalog/patterns/plasma/output.json"),
-    ),
-    (
-        "shader.json",
-        include_bytes!("../../../../../catalog/patterns/plasma/shader.json"),
-    ),
-    (
-        "shader.glsl",
-        include_bytes!("../../../../../catalog/patterns/plasma/shader.glsl"),
-    ),
-    (
-        "fixture.map2d.json",
-        include_bytes!("../../../../../catalog/patterns/plasma/fixture.map2d.json"),
-    ),
-];
-
-/// `catalog/pulse` — the plainest possible shader: the whole fixture
-/// breathes one colour on a phasor, a raised cosine so the floor is never
-/// black. The hardware-walk test subject generally: if a strip is dark
-/// under `pulse`, that is the wiring or a fault, never the content.
-/// Publishes `speed`.
-pub static PULSE_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/patterns/pulse/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/patterns/pulse/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/patterns/pulse/clock.json"),
-    ),
-    (
-        "fixture.json",
-        include_bytes!("../../../../../catalog/patterns/pulse/fixture.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../catalog/patterns/pulse/output.json"),
-    ),
-    (
-        "shader.json",
-        include_bytes!("../../../../../catalog/patterns/pulse/shader.json"),
-    ),
-    (
-        "shader.glsl",
-        include_bytes!("../../../../../catalog/patterns/pulse/shader.glsl"),
-    ),
-    (
-        "fixture.map2d.json",
-        include_bytes!("../../../../../catalog/patterns/pulse/fixture.map2d.json"),
-    ),
-];
-
-/// `catalog/fault-demo` — a shader that compiles fine but FAULTS every
-/// frame at run time (fuel exhaustion): the deterministic, non-crashing
-/// demo of "a fault is never black" (docs/adr/2026-09-02-fault-is-never-black.md)
-/// — the outputs show the red breathe and the device card reads Degraded.
-/// Publishes `speed` (the gallery rule needs one root control; the shader
-/// itself never reads it).
-pub static FAULT_DEMO_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/patterns/fault-demo/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/patterns/fault-demo/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/patterns/fault-demo/clock.json"),
-    ),
-    (
-        "fixture.json",
-        include_bytes!("../../../../../catalog/patterns/fault-demo/fixture.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../catalog/patterns/fault-demo/output.json"),
-    ),
-    (
-        "shader.json",
-        include_bytes!("../../../../../catalog/patterns/fault-demo/shader.json"),
-    ),
-    (
-        "shader.glsl",
-        include_bytes!("../../../../../catalog/patterns/fault-demo/shader.glsl"),
-    ),
-    (
-        "fixture.map2d.json",
-        include_bytes!("../../../../../catalog/patterns/fault-demo/fixture.map2d.json"),
-    ),
-];
-
-/// `catalog/plasma-duo` — the plasma shader driving TWO fixtures in one
-/// module: the disc and a 16×16 grid, each with its own output channel.
-/// Exists for the "What's a shader?" docs page ("it gets projected onto
-/// your LEDs, regardless of their shape"): one sim, one set of knobs,
-/// two shapes reacting together. The shader and clock stay byte-identical
-/// with `catalog/plasma` so the docs edit-me story and the gallery
-/// example never drift apart.
-pub static PLASMA_DUO_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/patterns/plasma-duo/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/patterns/plasma-duo/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/patterns/plasma-duo/clock.json"),
-    ),
-    (
-        "shader.json",
-        include_bytes!("../../../../../catalog/patterns/plasma-duo/shader.json"),
-    ),
-    (
-        "shader.glsl",
-        include_bytes!("../../../../../catalog/patterns/plasma-duo/shader.glsl"),
-    ),
-    (
-        "disc.json",
-        include_bytes!("../../../../../catalog/patterns/plasma-duo/disc.json"),
-    ),
-    (
-        "grid.json",
-        include_bytes!("../../../../../catalog/patterns/plasma-duo/grid.json"),
-    ),
-    (
-        "disc_out.json",
-        include_bytes!("../../../../../catalog/patterns/plasma-duo/disc_out.json"),
-    ),
-    (
-        "grid_out.json",
-        include_bytes!("../../../../../catalog/patterns/plasma-duo/grid_out.json"),
-    ),
-    (
-        "disc.map2d.json",
-        include_bytes!("../../../../../catalog/patterns/plasma-duo/disc.map2d.json"),
-    ),
-    (
-        "grid.map2d.json",
-        include_bytes!("../../../../../catalog/patterns/plasma-duo/grid.map2d.json"),
-    ),
-];
-
-/// `catalog/meteor` — a compute/render pair: `sim` integrates meteor heads
-/// into a persistent map, `render` draws their tails from it over a
-/// node-to-node binding. Publishes `speed`, `count` (a stepped knob) and
-/// `decay` on the root panel.
-pub static METEOR_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/patterns/meteor/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/patterns/meteor/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/patterns/meteor/clock.json"),
-    ),
-    (
-        "fixture.json",
-        include_bytes!("../../../../../catalog/patterns/meteor/fixture.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../catalog/patterns/meteor/output.json"),
-    ),
-    (
-        "sim.json",
-        include_bytes!("../../../../../catalog/patterns/meteor/sim.json"),
-    ),
-    (
-        "sim.glsl",
-        include_bytes!("../../../../../catalog/patterns/meteor/sim.glsl"),
-    ),
-    (
-        "render.json",
-        include_bytes!("../../../../../catalog/patterns/meteor/render.json"),
-    ),
-    (
-        "render.glsl",
-        include_bytes!("../../../../../catalog/patterns/meteor/render.glsl"),
-    ),
-    (
-        "fixture.map2d.json",
-        include_bytes!("../../../../../catalog/patterns/meteor/fixture.map2d.json"),
-    ),
-];
-
-/// `catalog/fire2012` — a WLED port (`mode_fire_2012`) re-authored as a
-/// STATELESS 1D shader: upstream's per-cell heat simulation is not ported
-/// (the engine cannot express a compute-produced dense scalar array), so
-/// the closed form writes down what that simulation settles into. Publishes
-/// `speed`, `reach`, `sparks` and `palette`.
-pub static FIRE2012_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/patterns/fire2012/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/patterns/fire2012/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/patterns/fire2012/clock.json"),
-    ),
-    (
-        "fixture.json",
-        include_bytes!("../../../../../catalog/patterns/fire2012/fixture.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../catalog/patterns/fire2012/output.json"),
-    ),
-    (
-        "shader.json",
-        include_bytes!("../../../../../catalog/patterns/fire2012/shader.json"),
-    ),
-    (
-        "shader.glsl",
-        include_bytes!("../../../../../catalog/patterns/fire2012/shader.glsl"),
-    ),
-    (
-        "fixture.map2d.json",
-        include_bytes!("../../../../../catalog/patterns/fire2012/fixture.map2d.json"),
-    ),
-];
-
-/// `catalog/comet` — a WLED port ("Lighthouse", `mode_comet`) authored as
-/// a true 1D shader: `vec4 render_1d(float)` and a
-/// `OneD { in_2d: Project { extrude-x } }` declaration — the factored
-/// default, so a 2D consumer sees the comet swept across the panel.
-/// Publishes `speed`, `tail` and `palette`.
-pub static COMET_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/patterns/comet/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/patterns/comet/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/patterns/comet/clock.json"),
-    ),
-    (
-        "fixture.json",
-        include_bytes!("../../../../../catalog/patterns/comet/fixture.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../catalog/patterns/comet/output.json"),
-    ),
-    (
-        "shader.json",
-        include_bytes!("../../../../../catalog/patterns/comet/shader.json"),
-    ),
-    (
-        "shader.glsl",
-        include_bytes!("../../../../../catalog/patterns/comet/shader.glsl"),
-    ),
-    (
-        "fixture.map2d.json",
-        include_bytes!("../../../../../catalog/patterns/comet/fixture.map2d.json"),
-    ),
-];
-
-/// `catalog/palette-waves` — a WLED port (`mode_colorwaves`) and the
-/// declared-projection example: `OneD { in_2d: Project { radial } }` on a disc fixture,
-/// so the strip the shader is written along arrives as rings. Publishes
-/// `speed`, `scale`, `depth` and `palette`.
-pub static PALETTE_WAVES_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/patterns/palette-waves/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/patterns/palette-waves/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/patterns/palette-waves/clock.json"),
-    ),
-    (
-        "fixture.json",
-        include_bytes!("../../../../../catalog/patterns/palette-waves/fixture.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../catalog/patterns/palette-waves/output.json"),
-    ),
-    (
-        "shader.json",
-        include_bytes!("../../../../../catalog/patterns/palette-waves/shader.json"),
-    ),
-    (
-        "shader.glsl",
-        include_bytes!("../../../../../catalog/patterns/palette-waves/shader.glsl"),
-    ),
-    (
-        "fixture.map2d.json",
-        include_bytes!("../../../../../catalog/patterns/palette-waves/fixture.map2d.json"),
-    ),
-];
-
-/// `catalog/zook-dome` — a real 16' geodesic dome: 1500 LEDs as five
-/// 300-lamp channels, mapped top-down from the builder's wiring sketch
-/// (`scripts/zook-dome/`). The mapping-scale example: rings from the apex
-/// cross all five channels with no per-channel configuration.
-pub static ZOOK_DOME_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/projects/zook-dome/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/projects/zook-dome/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/projects/zook-dome/clock.json"),
-    ),
-    (
-        "fixture.json",
-        include_bytes!("../../../../../catalog/projects/zook-dome/fixture.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../catalog/projects/zook-dome/output.json"),
-    ),
-    (
-        "shader.json",
-        include_bytes!("../../../../../catalog/projects/zook-dome/shader.json"),
-    ),
-    (
-        "shader.glsl",
-        include_bytes!("../../../../../catalog/projects/zook-dome/shader.glsl"),
-    ),
-    (
-        "fixture.map2d.json",
-        include_bytes!("../../../../../catalog/projects/zook-dome/fixture.map2d.json"),
-    ),
-];
-
-/// `catalog/small-dome` — Yona's real 16' 2V dome at full scale: 50
-/// suspended triangle panels of 119 lamps each (ten 5-way-repeated polygon
-/// objects, map2d format 4) AND one always-lit 360-lamp chevron door,
-/// scattered across TWO named outputs (the build's two control boxes, 13
-/// ports each) with a shared port tail — many-to-many, the patching
-/// archetype (`docs/use-cases/2026-08-09-mini-dome.md`), and a
-/// desktop-scale stress fixture (6,310 lamps). The `.patch.json` files
-/// carry the as-built install as format-2 path-identity rows
-/// (`/band-a/3`), reversal and stride-stepped rotation included; all six
-/// wiring artifacts regenerate via `cargo run -p lpt-geodome`.
-pub static SMALL_DOME_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/clock.json"),
-    ),
-    (
-        "editor.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/editor.json"),
-    ),
-    (
-        "out_a.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/out_a.json"),
-    ),
-    (
-        "out_b.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/out_b.json"),
-    ),
-    (
-        "dome/module.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/dome/module.json"),
-    ),
-    (
-        "dome/dome.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/dome/dome.json"),
-    ),
-    (
-        "dome/dome.map2d.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/dome/dome.map2d.json"),
-    ),
-    (
-        "dome/dome.patch.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/dome/dome.patch.json"),
-    ),
-    (
-        "dome/dome_sky.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/dome/dome_sky.json"),
-    ),
-    (
-        "dome/dome_sky.glsl",
-        include_bytes!("../../../../../catalog/projects/small-dome/dome/dome_sky.glsl"),
-    ),
-    (
-        "doors/module.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/doors/module.json"),
-    ),
-    (
-        "doors/doors.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/doors/doors.json"),
-    ),
-    (
-        "doors/doors.map2d.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/doors/doors.map2d.json"),
-    ),
-    (
-        "doors/doors.patch.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/doors/doors.patch.json"),
-    ),
-    (
-        "doors/door_warm.json",
-        include_bytes!("../../../../../catalog/projects/small-dome/doors/door_warm.json"),
-    ),
-    (
-        "doors/door_warm.glsl",
-        include_bytes!("../../../../../catalog/projects/small-dome/doors/door_warm.glsl"),
-    ),
-];
-
-/// `catalog/peach-1d` — the stained-glass peach declared 1D: two fixtures
-/// (body and leaves) on ONE wire, each running a `render_1d` shader along
-/// the strand, with `strip_order_meaningful` selecting wire order over the
-/// map. Its `.patch.json` files are byte-identical to `catalog/peach-2d`'s
-/// — the patch is where the lamps land, not what they are told to draw.
-pub static PEACH_1D_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/clock.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/output.json"),
-    ),
-    (
-        "body/module.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/body/module.json"),
-    ),
-    (
-        "body/peach_body.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/body/peach_body.json"),
-    ),
-    (
-        "body/peach_body.map2d.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/body/peach_body.map2d.json"),
-    ),
-    (
-        "body/peach_body.patch.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/body/peach_body.patch.json"),
-    ),
-    (
-        "body/body_glow.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/body/body_glow.json"),
-    ),
-    (
-        "body/body_glow.glsl",
-        include_bytes!("../../../../../catalog/projects/peach-1d/body/body_glow.glsl"),
-    ),
-    (
-        "leaf/module.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/leaf/module.json"),
-    ),
-    (
-        "leaf/peach_leaf.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/leaf/peach_leaf.json"),
-    ),
-    (
-        "leaf/peach_leaf.map2d.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/leaf/peach_leaf.map2d.json"),
-    ),
-    (
-        "leaf/peach_leaf.patch.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/leaf/peach_leaf.patch.json"),
-    ),
-    (
-        "leaf/leaf_shimmer.json",
-        include_bytes!("../../../../../catalog/projects/peach-1d/leaf/leaf_shimmer.json"),
-    ),
-    (
-        "leaf/leaf_shimmer.glsl",
-        include_bytes!("../../../../../catalog/projects/peach-1d/leaf/leaf_shimmer.glsl"),
-    ),
-];
-
-/// `catalog/peach-2d` — the same artwork, the same wiring, the same patch
-/// files, declared 2D: `render_2d` planes sampled at the lamps' mapped
-/// positions. The pair is the mapping-and-patching evidence — presentation
-/// (where the lamps are) and sampling (what asks them for a color) are
-/// separate questions.
-pub static PEACH_2D_FILES: &[ExampleFile] = &[
-    (
-        "project.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/project.json"),
-    ),
-    (
-        "module.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/module.json"),
-    ),
-    (
-        "clock.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/clock.json"),
-    ),
-    (
-        "output.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/output.json"),
-    ),
-    (
-        "body/module.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/body/module.json"),
-    ),
-    (
-        "body/peach_body.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/body/peach_body.json"),
-    ),
-    (
-        "body/peach_body.map2d.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/body/peach_body.map2d.json"),
-    ),
-    (
-        "body/peach_body.patch.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/body/peach_body.patch.json"),
-    ),
-    (
-        "body/body_glow.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/body/body_glow.json"),
-    ),
-    (
-        "body/body_glow.glsl",
-        include_bytes!("../../../../../catalog/projects/peach-2d/body/body_glow.glsl"),
-    ),
-    (
-        "leaf/module.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/leaf/module.json"),
-    ),
-    (
-        "leaf/peach_leaf.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/leaf/peach_leaf.json"),
-    ),
-    (
-        "leaf/peach_leaf.map2d.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/leaf/peach_leaf.map2d.json"),
-    ),
-    (
-        "leaf/peach_leaf.patch.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/leaf/peach_leaf.patch.json"),
-    ),
-    (
-        "leaf/leaf_shimmer.json",
-        include_bytes!("../../../../../catalog/projects/peach-2d/leaf/leaf_shimmer.json"),
-    ),
-    (
-        "leaf/leaf_shimmer.glsl",
-        include_bytes!("../../../../../catalog/projects/peach-2d/leaf/leaf_shimmer.glsl"),
-    ),
-];
-
-/// The gallery's *Examples* section, in order — the demo first, then the
-/// single-effect modules.
-static EMBEDDED_EXAMPLES: &[EmbeddedExample] = &[
-    EmbeddedExample {
-        id: crate::STUDIO_DEMO_PROJECT_ID,
-        name: "Fyeah Sign",
-        kind: "Module",
-        files: FYEAH_SIGN_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/logo-sign",
-        name: "Logo Sign",
-        kind: "Module",
-        files: LOGO_SIGN_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/plasma",
-        name: "Plasma",
-        kind: "Module",
-        files: PLASMA_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/meteor",
-        name: "Meteor",
-        kind: "Module",
-        files: METEOR_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/comet",
-        name: "Comet",
-        kind: "Module",
-        files: COMET_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/palette-waves",
-        name: "Palette Waves",
-        kind: "Module",
-        files: PALETTE_WAVES_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/fire2012",
-        name: "Fire 2012",
-        kind: "Module",
-        files: FIRE2012_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/plasma-duo",
-        name: "Plasma Duo",
-        kind: "Module",
-        files: PLASMA_DUO_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/zook-dome",
-        name: "Zook dome",
-        kind: "Module",
-        files: ZOOK_DOME_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/small-dome",
-        name: "Small Dome",
-        kind: "Module",
-        files: SMALL_DOME_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/peach-1d",
-        name: "Peach (1D)",
-        kind: "Module",
-        files: PEACH_1D_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/peach-2d",
-        name: "Peach (2D)",
-        kind: "Module",
-        files: PEACH_2D_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/pulse",
-        name: "Pulse",
-        kind: "Module",
-        files: PULSE_FILES,
-    },
-    EmbeddedExample {
-        id: "catalog/fault-demo",
-        name: "Fault demo",
-        kind: "Module",
-        files: FAULT_DEMO_FILES,
-    },
-];
-
-/// All embedded examples, gallery order.
+/// All catalog entries, in display order: bucket rank
+/// ([`CatalogBucket::ALL`]), then slug.
 pub fn embedded_examples() -> &'static [EmbeddedExample] {
-    EMBEDDED_EXAMPLES
+    static REGISTRY: OnceLock<Vec<EmbeddedExample>> = OnceLock::new();
+    REGISTRY.get_or_init(build_registry).as_slice()
 }
-
-/// The id prefix every catalog entry carries (`catalog/<slug>`).
-pub const CATALOG_ID_PREFIX: &str = "catalog/";
-
-/// The pre-catalog id prefix (`examples/<slug>`), still persisted in
-/// user libraries as `SeededFrom { source }` provenance and in the cloud
-/// store. Accepted on lookup so those "Remixed from" lines keep resolving;
-/// never written anew.
-pub const LEGACY_EXAMPLE_ID_PREFIX: &str = "examples/";
 
 /// Look up an embedded example by id. The legacy `examples/<slug>`
 /// spelling resolves to the same entry as `catalog/<slug>`.
@@ -870,6 +141,15 @@ pub fn embedded_example(id: &str) -> Option<EmbeddedExample> {
         .find(|example| example.id == id)
 }
 
+/// Look up an embedded example by its bare slug (the id tail) — the
+/// `/p/<slug>` resolution leg. An unknown slug is `None`, never a guess.
+pub fn embedded_example_by_slug(slug: &str) -> Option<EmbeddedExample> {
+    embedded_examples()
+        .iter()
+        .copied()
+        .find(|example| example.slug == slug)
+}
+
 /// Rewrite the legacy `examples/` prefix to `catalog/`; every other id is
 /// returned unchanged.
 pub fn canonical_example_id(id: &str) -> std::borrow::Cow<'_, str> {
@@ -879,25 +159,58 @@ pub fn canonical_example_id(id: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-/// Look up an embedded example by its bare slug (the id tail) — the
-/// `/p/<slug>` resolution leg. An unknown slug is `None`, never a guess.
-pub fn embedded_example_by_slug(slug: &str) -> Option<EmbeddedExample> {
-    embedded_examples()
+/// Type the generated rows through the manifest parser, once per process.
+/// The handful of owned strings are leaked so the entry stays `Copy` and
+/// `'static` for its ~40 consumers: sixteen entries, once.
+///
+/// A manifest that fails to parse is a panic naming the entry — the
+/// `lp-cli` tree gates guarantee it cannot happen on a green tree.
+fn build_registry() -> Vec<EmbeddedExample> {
+    generated::CATALOG_FILES
         .iter()
-        .copied()
-        .find(|example| example.slug() == slug)
+        .map(|(bucket, slug, files)| {
+            let bucket = CatalogBucket::from_dir_name(bucket)
+                .unwrap_or_else(|| panic!("catalog/{bucket}/{slug}: unknown bucket"));
+            let manifest_bytes = files
+                .iter()
+                .find(|(path, _)| *path == "project.json")
+                .map(|(_, bytes)| *bytes)
+                .unwrap_or_else(|| panic!("catalog/{}/{slug}: no project.json", bucket.dir_name()));
+            let manifest_text = std::str::from_utf8(manifest_bytes).unwrap_or_else(|e| {
+                panic!("catalog/{}/{slug}: project.json: {e}", bucket.dir_name())
+            });
+            let manifest = ProjectManifest::read_json(manifest_text).unwrap_or_else(|e| {
+                panic!("catalog/{}/{slug}: project.json: {e}", bucket.dir_name())
+            });
+            EmbeddedExample {
+                id: leak(format!("{CATALOG_ID_PREFIX}{slug}")),
+                slug,
+                bucket,
+                name: manifest.name.clone().map_or(slug, leak),
+                kind: Box::leak(Box::new(manifest.project_kind())),
+                description: manifest.description.clone().map_or("", leak),
+                files,
+            }
+        })
+        .collect()
+}
+
+fn leak(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app::project::demo_project::DEMO_PROJECT_ID;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn demo_example_is_embedded_with_files() {
         let example = embedded_example(DEMO_PROJECT_ID).expect("demo example is embedded");
         assert_eq!(example.name, "Fyeah Sign");
-        assert_eq!(example.kind, "Module");
+        assert_eq!(example.bucket, CatalogBucket::Projects);
+        assert_eq!(*example.kind, ProjectKind::General);
         let files = example.files();
         assert!(
             files
@@ -922,6 +235,74 @@ mod tests {
         assert_eq!(canonical_example_id("examples/plasma"), "catalog/plasma");
         assert_eq!(canonical_example_id("catalog/plasma"), "catalog/plasma");
         assert_eq!(canonical_example_id("prj123"), "prj123");
+    }
+
+    /// The north star: every directory under a catalog bucket with a
+    /// `project.json` is in the table, and every table row is such a
+    /// directory — no Rust edit registers content.
+    #[test]
+    fn every_catalog_directory_is_registered_and_vice_versa() {
+        let mut on_disk: Vec<(CatalogBucket, String)> = Vec::new();
+        for bucket in CatalogBucket::ALL {
+            let dir = catalog_root().join(bucket.dir_name());
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() && path.join("project.json").is_file() {
+                    let slug = path.file_name().unwrap().to_string_lossy().into_owned();
+                    on_disk.push((*bucket, slug));
+                }
+            }
+        }
+        on_disk.sort();
+        let mut registered: Vec<(CatalogBucket, String)> = embedded_examples()
+            .iter()
+            .map(|e| (e.bucket, e.slug.to_string()))
+            .collect();
+        registered.sort();
+        assert_eq!(registered, on_disk);
+        assert!(
+            on_disk.len() >= 16,
+            "the catalog walk is vacuous: {on_disk:?}"
+        );
+    }
+
+    /// Display order is bucket rank, then slug — the home page's order.
+    #[test]
+    fn registry_order_is_bucket_rank_then_slug() {
+        let keys: Vec<(CatalogBucket, &str)> = embedded_examples()
+            .iter()
+            .map(|e| (e.bucket, e.slug))
+            .collect();
+        let mut sorted = keys.clone();
+        sorted.sort();
+        assert_eq!(keys, sorted);
+    }
+
+    /// `name` comes from the manifest, never from a hand table.
+    #[test]
+    fn names_match_the_manifests() {
+        for example in embedded_examples() {
+            let text = std::fs::read_to_string(
+                catalog_root()
+                    .join(example.bucket.dir_name())
+                    .join(example.slug)
+                    .join("project.json"),
+            )
+            .expect("read project.json");
+            let manifest = ProjectManifest::read_json(&text).expect("manifest parses");
+            assert_eq!(
+                manifest.name.as_deref().unwrap_or(example.slug),
+                example.name
+            );
+            assert_eq!(manifest.project_kind(), *example.kind);
+            assert_eq!(
+                manifest.description.as_deref().unwrap_or(""),
+                example.description
+            );
+        }
     }
 
     /// Bare slugs are the `/p/<slug>` grammar (PD3): every id tail must be
@@ -1009,6 +390,12 @@ mod tests {
                 "{} deploys the container manifest first",
                 example.id
             );
+            assert_eq!(
+                files.get(1).map(|(path, _)| path.as_str()),
+                Some("module.json"),
+                "{} deploys the root module second",
+                example.id
+            );
         }
     }
 
@@ -1019,5 +406,9 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), count, "example ids collide");
+    }
+
+    fn catalog_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../catalog")
     }
 }

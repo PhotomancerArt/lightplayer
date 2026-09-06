@@ -2174,7 +2174,7 @@ fn fixture_display_layout(view: &UiStudioView) -> Option<lpc_model::ControlLayou
 // -- harness -----------------------------------------------------------------
 
 /// A server holding one embedded gallery example, loaded from the very
-/// bytes the wasm bundle ships (`include_bytes!` of `catalog/<name>/`).
+/// bytes the wasm bundle ships (`build.rs` embeds `catalog/<bucket>/<slug>/`).
 fn example_e2e_server(example: &crate::app::home::EmbeddedExample) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =

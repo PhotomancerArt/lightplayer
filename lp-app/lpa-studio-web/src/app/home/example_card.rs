@@ -18,7 +18,7 @@ pub(crate) fn embedded_example_cards() -> Vec<UiExampleCard> {
         .map(|example| UiExampleCard {
             id: example.id.to_string(),
             name: example.name.to_string(),
-            kind: example.kind.to_string(),
+            kind: lpa_studio_core::app::home::ui_example_card::EXAMPLE_CARD_KIND.to_string(),
         })
         .collect()
 }

@@ -25,7 +25,8 @@ pub use board_project::{
 };
 pub use card_ui_state::{CardSheet, CardUiOp, CardUiState, CardVerb};
 pub use embedded_example::{
-    EmbeddedExample, embedded_example, embedded_example_by_slug, embedded_examples,
+    CatalogBucket, EmbeddedExample, canonical_example_id, embedded_example,
+    embedded_example_by_slug, embedded_examples,
 };
 pub use home_op::{HOME_NODE_ID, HomeOp, ProjectTemplate, ZipBytes};
 pub use home_view_builder::{HomePoolEvidence, HomeSimEvidence, importable_patterns};
