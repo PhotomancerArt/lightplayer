@@ -133,7 +133,10 @@ impl HostSinks {
     }
 
     pub fn find(&self, name: &str) -> Option<StreamId> {
-        self.streams.iter().position(|s| s.name == name).map(StreamId)
+        self.streams
+            .iter()
+            .position(|s| s.name == name)
+            .map(StreamId)
     }
 
     pub fn len(&self) -> usize {

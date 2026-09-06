@@ -87,8 +87,8 @@ pub struct ElfImage {
 impl ElfImage {
     /// Parse an rv32 little-endian ELF.
     pub fn parse(bytes: &[u8]) -> Result<Self, ElfError> {
-        let file = ElfFile32::<Endianness>::parse(bytes)
-            .map_err(|e| ElfError::Parse(e.to_string()))?;
+        let file =
+            ElfFile32::<Endianness>::parse(bytes).map_err(|e| ElfError::Parse(e.to_string()))?;
         let endian = file.endian();
         let header = file.elf_header();
         if header.e_machine(endian) != object::elf::EM_RISCV {

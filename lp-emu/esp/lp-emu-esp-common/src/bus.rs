@@ -1150,9 +1150,14 @@ mod tests {
     #[test]
     fn a_read_only_region_refuses_guest_stores_but_load_image_still_places_bytes() {
         let mut bus = SocBus::new();
-        bus.add_region(RamRegion::new("rom", 0x4000_0000, 0x100).executable().read_only());
+        bus.add_region(
+            RamRegion::new("rom", 0x4000_0000, 0x100)
+                .executable()
+                .read_only(),
+        );
         assert!(bus.write_word(0x4000_0000, 1).is_err());
-        bus.load_image(0x4000_0000, &[0x13, 0x00, 0x00, 0x00]).unwrap();
+        bus.load_image(0x4000_0000, &[0x13, 0x00, 0x00, 0x00])
+            .unwrap();
         assert_eq!(bus.fetch_instruction(0x4000_0000).unwrap(), 0x13);
     }
 

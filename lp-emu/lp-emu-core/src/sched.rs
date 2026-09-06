@@ -133,7 +133,10 @@ impl Scheduler {
 
     /// Number of live (not cancelled) heap entries.
     pub fn live(&self) -> usize {
-        self.heap.iter().filter(|Reverse(e)| self.is_live(e)).count()
+        self.heap
+            .iter()
+            .filter(|Reverse(e)| self.is_live(e))
+            .count()
     }
 
     /// Drop tombstoned entries. Never required for correctness — a machine

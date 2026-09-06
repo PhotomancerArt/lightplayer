@@ -93,7 +93,10 @@ impl SharedBuffer {
 
 impl Write for SharedBuffer {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().expect("trace buffer poisoned").extend_from_slice(buf);
+        self.0
+            .lock()
+            .expect("trace buffer poisoned")
+            .extend_from_slice(buf);
         Ok(buf.len())
     }
 
@@ -202,15 +205,7 @@ impl Trace {
         }
         if self.block_passes(ev.block) {
             let line = format_line(
-                now,
-                pc,
-                ev.access,
-                ev.width,
-                ev.block,
-                ev.off,
-                ev.name,
-                ev.value,
-                ev.flags,
+                now, pc, ev.access, ev.width, ev.block, ev.off, ev.name, ev.value, ev.flags,
             );
             self.emit(&line);
         }
@@ -408,7 +403,14 @@ mod tests {
         let buf = SharedBuffer::new();
         let mut t = trace_to(&buf);
         t.unmapped(7, 0x4200_0000, Access::Read, Width::Word, 0x5000_0000, 0);
-        t.unmapped(8, 0x4200_0004, Access::Write, Width::Byte, 0x5000_0001, 0xab);
+        t.unmapped(
+            8,
+            0x4200_0004,
+            Access::Write,
+            Width::Byte,
+            0x5000_0001,
+            0xab,
+        );
         assert_eq!(
             buf.lines(),
             [

@@ -11,10 +11,10 @@
 //! table produces the named lines in the bus trace, at the offsets the
 //! discovery report measured.
 
+use lp_emu_core::bus::Bus;
 use lp_emu_esp_common::bus::{RamRegion, SocBus};
 use lp_emu_esp_common::regfile::RegFile;
 use lp_emu_esp_common::trace::{SharedBuffer, Trace};
-use lp_emu_core::bus::Bus;
 
 #[path = "regs/systimer.rs"]
 mod systimer;
