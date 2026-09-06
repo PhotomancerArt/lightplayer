@@ -140,10 +140,27 @@ instruments, and the discipline they keep is the same everywhere:
 - `uart-bridge-wiring-check.sh` — prove the wires with **no change to the board
   under test**: open the bridge's port, reset the other board from its own port,
   and read what came through.
+- `reset-and-capture.py` — reset a board from its own USB-Serial-JTAG handle and
+  read its boot log on that same handle. This is the only way to see a
+  native-USB board boot: `espflash monitor --before default-reset` drops the USB
+  device and reopens a new session after the banner has gone, while a passive
+  reader cannot make a board boot at all. USB-SJ keeps its session across a
+  *chip* reset, so a handle that is already open catches everything.
+- `flash-image.sh` — the desk discipline in one place, which the two
+  `uart-bridge-*` scripts go through: one named board, foreground, under a pty,
+  refuse if a port is held, SIGINT by pid, wait for something the **image**
+  prints rather than for espflash's "completed".
+
+⚠️ **`--no-stub`, and power-cycle rather than reset.** On this fixture espflash's
+RAM stub cannot connect, and a board can enter a state where the second-stage
+bootloader spins forever on `LP_I2C_ANA_MAST_I2C0_BUSY` — LP-domain state that
+survives every reset short of power-on. Both are the same root cause and both
+are written up in
+`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
 
 The payload itself is `fw-checks`' `uart-bridge` (see that crate's README); the
 fixture and its current blocker are
-`docs/defects/2026-09-06-xiao-c6-7e44-hangs-in-the-second-stage-bootloader.md`.
+`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
 
 ## Roadmap
 
