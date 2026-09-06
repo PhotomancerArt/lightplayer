@@ -37,6 +37,7 @@ pub mod device_affordance;
 pub mod device_effects;
 pub mod device_firmware_face;
 pub mod device_flash;
+pub mod device_frame_feed;
 pub mod device_identity;
 pub mod device_push;
 pub mod device_records;
@@ -59,6 +60,7 @@ pub use device_flash::{
     FirmwareVerb, FlashBoardChoice, FlashOffer, derive_flash_name, firmware_verb, flash_offer,
     flash_offer_for, reflash_choice, taken_device_titles,
 };
+pub use device_frame_feed::{DEVICE_FEED_PARK_AFTER_FAILURES, DeviceFrameFeed, DeviceFrameFeeds};
 pub use device_identity::{
     DeviceIdentityLine, IdentityFirmware as DeviceIdentityFirmware, device_chip,
     device_identity_line,

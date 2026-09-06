@@ -1260,6 +1260,439 @@ fn opening_a_lens_on_an_unknown_board_is_held_not_refused() {
     assert!(bench.controller.runtime_pool_for_test().lens().is_none());
 }
 
+/// An app conversation on the SHARED link (the card feed's seam): a real
+/// `lpa-client` request goes out as a raw line with an app-range id, the
+/// pump routes the reply to the conversation's inbox instead of the fold,
+/// and meanwhile the board's heartbeats keep folding — no borrow, no gap in
+/// freshness, and the journal never hears a passthrough.
+#[test]
+fn a_shared_link_conversation_answers_while_the_card_keeps_folding() {
+    let device = empty_light_player("dev000000daqf6dvvsh");
+    let (mut bench, tasks) = identified(&device, "usb-conv-1");
+    let link = bench.controller.devices_for_test().roster().devices()[0]
+        .link()
+        .expect("an identified board is on a link");
+    assert!(
+        !bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .wire_borrowed(link),
+        "nothing holds the wire"
+    );
+    let heard_before = bench.controller.devices_for_test().roster().devices()[0]
+        .evidence
+        .freshness
+        .last_heard;
+
+    let io = bench
+        .controller
+        .devices_for_test()
+        .effects()
+        .conversation_io(link)
+        .expect("a live link lends a conversation io");
+    let answer: Rc<RefCell<Option<Result<u32, String>>>> = Rc::new(RefCell::new(None));
+    tasks.borrow_mut().push(Box::pin({
+        let answer = Rc::clone(&answer);
+        async move {
+            let mut client = io.into_client();
+            let result = client
+                .hello()
+                .await
+                .map(|outcome| outcome.value.proto)
+                .map_err(|error| error.to_string());
+            *answer.borrow_mut() = Some(result);
+        }
+    }));
+    bench.run_until(&tasks, "the conversation to be answered", |_| {
+        answer.borrow().is_some()
+    });
+
+    let proto = answer
+        .borrow()
+        .clone()
+        .expect("answered")
+        .expect("the board answers the app-range hello");
+    assert_eq!(proto, lpc_wire::WIRE_PROTO_VERSION);
+    // The board heartbeats every 20 ms of its own clock; a conversation
+    // that took the pump away would have frozen freshness meanwhile.
+    bench.run_until(&tasks, "a heartbeat after the conversation", |bench| {
+        bench.controller.devices_for_test().roster().devices()[0]
+            .evidence
+            .freshness
+            .last_heard
+            > heard_before
+    });
+    let journal: Vec<String> = bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .journal()
+        .entries()
+        .map(|entry| format!("{entry:?}"))
+        .collect();
+    assert!(
+        !journal.iter().any(|line| line.contains("Passthrough")),
+        "the fold never hears a conversation frame: {journal:#?}"
+    );
+    assert!(
+        bench.view().devices[0].activity.is_none()
+            && bench.view().devices[0].state_label == "Ready",
+        "the card is untouched by the conversation: {:?}",
+        bench.view().devices[0]
+    );
+}
+
+// ---------------------------------------------------------------------
+// The device card's live frame feed (plan 2026-09-06-1407)
+// ---------------------------------------------------------------------
+
+/// One pass of the actor's card-feed lane for the roster boards: poll the
+/// due device pulls to completion while the link pumps keep turning and
+/// the fake clock advances, then fold whatever the pumps queued meanwhile.
+///
+/// Mirrors the actor exactly: a pull holds the controller across its
+/// awaits, so device inputs queue until it completes (which is why pulls
+/// are bounded and cancellable). `step_ms` is the clock's stride per poll —
+/// coarse strides walk a 12 s deadline in a few hundred polls.
+fn feed_tick(bench: &mut DeviceBench, tasks: &TaskPool, step_ms: f64) -> bool {
+    let clock = Rc::clone(&bench.clock);
+    let make_timer = {
+        let clock = Rc::clone(&clock);
+        move |delay: Duration| Sleep {
+            clock: Rc::clone(&clock),
+            due: clock.get() + delay.as_secs_f64(),
+        }
+    };
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    let preempted = {
+        let mut pull = core::pin::pin!(
+            bench
+                .controller
+                .run_due_device_feeds(make_timer, &lpa_client::NeverCancel)
+        );
+        loop {
+            if let Poll::Ready(preempted) = pull.as_mut().poll(&mut cx) {
+                break preempted;
+            }
+            clock.set(clock.get() + step_ms / 1_000.0);
+            pump(tasks);
+            assert!(
+                std::time::Instant::now() < deadline,
+                "a device feed pull did not complete"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    bench.step(tasks);
+    preempted
+}
+
+/// A board running the bundled example, with its card wanting a picture.
+fn running_board_wanting_a_picture(uid: &str, endpoint: &str) -> (DeviceBench, TaskPool) {
+    let device = empty_light_player(uid);
+    let (mut bench, tasks) = identified(&device, endpoint);
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    assert!(
+        bench.view().devices[0]
+            .last_outcome
+            .as_ref()
+            .is_some_and(|o| o.ok),
+        "{:?}",
+        bench.view().devices[0]
+    );
+    bench.run_until(&tasks, "the running face", |bench| {
+        matches!(
+            bench.view().devices[0].loaded_project,
+            lpa_devices::view::LoadedProject::Running { .. }
+        )
+    });
+    bench.controller.set_device_feed_wanted(card.id, true);
+    (bench, tasks)
+}
+
+fn feed_frame_revision(bench: &DeviceBench, device: crate::DeviceId) -> Option<i64> {
+    bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.frame())
+        .map(|frame| frame.revision)
+}
+
+/// AC1: a running board feeds its card. The picture arrives with the
+/// board's own display layout within two pulls, and the next pulls see the
+/// engine's revision moving — the frames are the board's, not a re-render.
+/// AC5 rides along: the fold never hears a passthrough.
+#[test]
+fn a_running_board_feeds_its_card_over_the_shared_link() {
+    let (mut bench, tasks) = running_board_wanting_a_picture("dev000000daqf6dvvt1", "usb-feed-1");
+    let device = bench.view().devices[0].id;
+
+    let mut pulls = 0;
+    while feed_frame_revision(&bench, device).is_none() {
+        feed_tick(&mut bench, &tasks, 5.0);
+        pulls += 1;
+        assert!(pulls <= 2, "no frame after two pulls");
+        // Let the completion gap elapse.
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+    }
+    let feed = bench.controller.device_feeds().get(device).expect("a feed");
+    let first = feed.frame().expect("a frame").clone();
+    assert!(
+        first.display_layout.is_some(),
+        "the board's own display layout came with the picture"
+    );
+    assert!(first.extent.rows >= 1 && !first.bytes.is_empty());
+
+    // The engine keeps publishing: a later pull sees a newer revision.
+    let mut advanced = false;
+    for _ in 0..30 {
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+        feed_tick(&mut bench, &tasks, 5.0);
+        if feed_frame_revision(&bench, device).is_some_and(|rev| rev > first.revision) {
+            advanced = true;
+            break;
+        }
+    }
+    assert!(advanced, "the revision never moved past {}", first.revision);
+
+    // The card is untouched, and the journal never saw a conversation frame.
+    let card = &bench.view().devices[0];
+    assert!(card.activity.is_none(), "{card:?}");
+    assert!(
+        matches!(
+            card.loaded_project,
+            lpa_devices::view::LoadedProject::Running { .. }
+        ),
+        "{card:?}"
+    );
+    let journal: Vec<String> = bench
+        .controller
+        .devices_for_test()
+        .roster()
+        .journal()
+        .entries()
+        .map(|entry| format!("{entry:?}"))
+        .collect();
+    assert!(
+        !journal.iter().any(|line| line.contains("Passthrough")),
+        "{journal:#?}"
+    );
+}
+
+/// AC3: while the editor lens holds the wire the feed does not pull — not
+/// one request — and it resumes the moment the wire comes back.
+#[test]
+fn the_feed_never_pulls_while_the_lens_holds_the_wire() {
+    let (mut bench, tasks) = running_board_wanting_a_picture("dev000000daqf6dvvt2", "usb-feed-2");
+    let device = bench.view().devices[0].id;
+    feed_tick(&mut bench, &tasks, 5.0);
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    let stamp_before = bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.last_pull_completed_at())
+        .expect("the feed has pulled");
+    let uid = bench.registry()[0].uid.clone();
+
+    bench
+        .open_lens(&uid)
+        .expect("the running board opens in the editor");
+    let link = bench.controller.devices_for_test().roster().devices()[0]
+        .link()
+        .expect("on a link");
+    assert!(
+        bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .wire_borrowed(link)
+    );
+    for _ in 0..10 {
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+        feed_tick(&mut bench, &tasks, 5.0);
+    }
+    let stamp_under_lens = bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.last_pull_completed_at());
+    assert_eq!(
+        stamp_under_lens,
+        Some(stamp_before),
+        "not one pull ran while the lens held the wire"
+    );
+
+    bench.detach_lens();
+    bench.run_until(&tasks, "the wire to come back", |bench| {
+        !bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .wire_borrowed(link)
+    });
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    let stamp_after = bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.last_pull_completed_at());
+    assert!(
+        stamp_after > Some(stamp_before),
+        "the feed resumed once the lens let go"
+    );
+}
+
+/// AC4: a board that stops answering parks the feed after three failed
+/// pulls, and a fresh hello (a reconnect) re-arms it.
+#[test]
+fn three_failed_pulls_park_the_feed_until_the_board_says_hello_again() {
+    let device = empty_light_player("dev000000daqf6dvvt3");
+    let (mut bench, tasks) =
+        {
+            let (mut bench, tasks) = identified(&device, "usb-feed-3");
+            bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+                bench.view().devices.first().is_some_and(|card| {
+                    card.loaded_project == lpa_devices::view::LoadedProject::Empty
+                })
+            });
+            let card = bench.view().devices[0].clone();
+            bench.push_gesture(card.id, bundled_example());
+            bench.run_until(&tasks, "the push to finish", |bench| {
+                bench
+                    .view()
+                    .devices
+                    .first()
+                    .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+            });
+            bench.run_until(&tasks, "the running face", |bench| {
+                matches!(
+                    bench.view().devices[0].loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+            });
+            bench.controller.set_device_feed_wanted(card.id, true);
+            (bench, tasks)
+        };
+    let device_id = bench.view().devices[0].id;
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert!(feed_frame_revision(&bench, device_id).is_some(), "fed once");
+
+    // The board goes deaf to requests (heartbeats keep coming, so the card
+    // itself stays honest and Ready).
+    device.set_drop_responses(true);
+    let mut ticks = 0;
+    while !bench
+        .controller
+        .device_feeds()
+        .get(device_id)
+        .is_some_and(crate::DeviceFrameFeed::is_parked)
+    {
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+        // Coarse clock strides: each failed pull waits out its deadline.
+        feed_tick(&mut bench, &tasks, 100.0);
+        ticks += 1;
+        assert!(
+            ticks <= crate::DEVICE_FEED_PARK_AFTER_FAILURES as usize + 2,
+            "never parked"
+        );
+    }
+    assert_eq!(ticks, crate::DEVICE_FEED_PARK_AFTER_FAILURES as usize);
+    assert!(
+        feed_frame_revision(&bench, device_id).is_some(),
+        "the last frame stays while parked"
+    );
+    // Parked means parked: more ticks, no pulls.
+    let parked_stamp = bench
+        .controller
+        .device_feeds()
+        .get(device_id)
+        .and_then(|feed| feed.last_pull_completed_at());
+    for _ in 0..3 {
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+        feed_tick(&mut bench, &tasks, 100.0);
+    }
+    assert_eq!(
+        bench
+            .controller
+            .device_feeds()
+            .get(device_id)
+            .and_then(|feed| feed.last_pull_completed_at()),
+        parked_stamp
+    );
+
+    // The board answers again and the user reconnects: a new window, a new
+    // hello, and the feed re-arms on it.
+    device.set_drop_responses(false);
+    bench.gesture(DeviceAction::Disconnect { device: device_id });
+    bench.run_until(&tasks, "the port to close", |bench| {
+        !bench.controller.devices_for_test().roster().devices()[0]
+            .evidence
+            .presence
+            .is_open()
+    });
+    bench.gesture(DeviceAction::Connect { device: device_id });
+    bench.run_until(&tasks, "the board to be Ready again", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && card.state_label == "Ready"
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    let feed = bench
+        .controller
+        .device_feeds()
+        .get(device_id)
+        .expect("the feed survives");
+    assert!(!feed.is_parked(), "a fresh hello re-armed the feed");
+    assert!(
+        feed.last_pull_completed_at() > parked_stamp,
+        "and it pulled again"
+    );
+}
+
 fn memory_store(clock: Rc<Cell<f64>>) -> LibraryStore {
     let counter = Rc::new(Cell::new(0u8));
     LibraryStore::new(

@@ -526,9 +526,19 @@ where
     async fn run_card_feed_tick(&mut self, standing: PassiveStanding) -> bool {
         let cancel = SharedCancel::new();
         cancel.reset();
-        let feeds = self
-            .controller
-            .run_due_card_feeds(self.make_timer.clone(), &cancel);
+        let feeds = async {
+            let sim = self
+                .controller
+                .run_due_card_feeds(self.make_timer.clone(), &cancel)
+                .await;
+            // The roster boards' feeds run in the same lane, after the
+            // sim's, under the same cancel.
+            let devices = self
+                .controller
+                .run_due_device_feeds(self.make_timer.clone(), &cancel)
+                .await;
+            sim || devices
+        };
         let watch = watch_for_preempt(&self.commands, &cancel, standing);
         pull_while_watching(feeds, watch).await
     }

@@ -36,17 +36,19 @@ pub use app::bus::{
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use app::devices::BrowserSerialTransport;
 pub use app::devices::{
-    CompletedPush, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects,
-    DeviceIdentityFirmware, DeviceIdentityLine, DevicePushOp, DeviceRoster, DeviceRosterView,
-    DeviceTaskFuture, DeviceTimerFuture, DeviceTransport, DeviceTransportFuture, DevicesOp,
-    FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LensLineTap,
-    LensTapEvent, PushOffer, PushPayload, PushSource, PushSourceChoice, PushSourceGroup,
-    RememberedView, RosterSplit, StagedPush, device_chip, device_escape_action,
-    device_firmware_line, device_identity_line, device_status_kind, firmware_face_preview_sentence,
-    firmware_verb, first_bundled_example_id, flash_offer, flash_offer_for, pending_escape_action,
-    pending_firmware_line, push_offer, reflash_choice, split_roster,
+    CompletedPush, DEVICE_FEED_PARK_AFTER_FAILURES, DeviceEffectCall, DeviceEffectFacts,
+    DeviceEffectProgress, DeviceEffects, DeviceFrameFeed, DeviceFrameFeeds, DeviceIdentityFirmware,
+    DeviceIdentityLine, DevicePushOp, DeviceRoster, DeviceRosterView, DeviceTaskFuture,
+    DeviceTimerFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, FirmwareVerb,
+    FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LensLineTap, LensTapEvent, PushOffer,
+    PushPayload, PushSource, PushSourceChoice, PushSourceGroup, RememberedView, RosterSplit,
+    StagedPush, device_chip, device_escape_action, device_firmware_line, device_identity_line,
+    device_status_kind, firmware_face_preview_sentence, firmware_verb, first_bundled_example_id,
+    flash_offer, flash_offer_for, pending_escape_action, pending_firmware_line, push_offer,
+    reflash_choice, split_roster,
 };
 pub use app::docs_host::DocsSimHost;
+pub use app::frame_feed::{CardFeedApply, CardFeedState};
 pub use app::home::{
     CardSheet, CardUiOp, CardUiState, CardVerb, DEFAULT_STRIP_PIXELS, GenerateProjectError,
     GeneratedProject, HOME_NODE_ID, HomeOp, HomePoolEvidence, HomeSimEvidence, ProjectTemplate,
