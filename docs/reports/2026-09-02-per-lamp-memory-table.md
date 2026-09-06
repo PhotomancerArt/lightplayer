@@ -267,6 +267,20 @@ Two of the "still per-lamp and per-frame" items above are closed (plan
   −38,488 B at ×20). Counted rather than weighed: the wasmtime backend's
   sample-outs live in wasm linear memory, outside the host tracker.
 
-Still open from the list above: `ProductScratch.rendered` (sibling plan
-`2026-09-06-0048-output-scratch-resident`) and the classic's
-`DisplayPipeline` copies.
+Still open from the list above: the classic's `DisplayPipeline` copies.
+`ProductScratch.rendered` closed the same day — next.
+
+> **Update 2026-09-06** (PR #523, ADR
+> `2026-09-06-control-render-targets-scatter.md`): the `ProductScratch`
+> whole-product render is gone — a patched product renders through a
+> *scattered* target straight into the runtime buffer. Host steady tick
+> transient: small-dome 42,278 → 5,834 B; a new `zook-patched` probe row
+> (zook's 1,500 lamps cut into five runs) 10,548 → 1,352 B against
+> unpatched zook's 839 (1,352 → 1,192 after the per-group loop; the
+> zook-patched row lands at 1,192). Emulator, measured on the tree merged
+> with the identity-channels change above: the 35,700 B ask is gone from the
+> first frame, and small-dome then halts on the next one — **47,600 B**
+> (= 8 × 5,950), the dome's sample points (`create_sample_points`, a fallible
+> Vec inside `FixtureNode::render_control`), with 12,445 B free. That
+> sample-points buffer is what small-dome needs next; still not in the
+> record.
