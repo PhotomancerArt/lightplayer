@@ -194,7 +194,7 @@ claim is that the two hex strings are equal. Change a format string here and
 you must change it in all three places.
 
 This is the M7 FINAL-gate instrument — "a shader compiles on-device into the
-fixed SRAM1 code region and renders bit-exactly vs the host oracle". Run it
+fixed SRAM0 code region and renders bit-exactly vs the host oracle". Run it
 once the board is free:
 
 ```bash
@@ -250,17 +250,23 @@ as it links" is *not* the real ceiling. 110 KB is the setting that keeps
 large frames and the recursive GLSL parser both want.
 
 That lever has been pulled. esp-hal's `dram2_seg` (`0x3FFE_7E30`, 98,768 B)
-is now a **second `esp_alloc` region** worth 64 KiB, added at boot by
-`add_sram1_heap_region`. It became available on 2026-08-02 when
+is now a **second `esp_alloc` region** worth 96 KiB, added at boot by
+`add_sram1_heap_region`. It first became available on 2026-08-02 when
 `lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT` was measured down from
-92 KiB to 32 KiB (`0x3FFE_8000..0x3FFF_0000` D-bus), freeing the rest of the
-segment.
+92 KiB to 32 KiB (then 24 KiB), freeing the rest of the segment; on 2026-09-05
+the JIT code region left SRAM1 altogether for **SRAM0** (`0x4008_8000`,
+64 KiB — instruction RAM with no D-bus view, which no heap could ever use), and
+the whole tail `0x3FFE_8000..0x4000_0000` became heap.
 
-The two must abut without overlapping, or the allocator and the JIT hand out
-the same bytes. That is no longer a rule to remember: the heap span comes from
+The allocator and the JIT must never hand out the same bytes. That is not a
+rule to remember: the heap span comes from
 `CodeRegion::reclaimable_heap_span()` and const-asserts in `codemem_esp32` pin
-it to the region's end, so a resize that forgets the boundary fails to compile.
-Total heap is `HEAP_SIZE + 65,536` = 178,176 B; see
+it, so a placement change that forgets the boundary fails to compile. The one
+collision the compiler cannot see is the linker's: `.rwtext` shares SRAM0 with
+the JIT region and grows upward, so boot asserts that it ends below the region
+base (`assert_jit_region_clear_of_rwtext`, decoding esp-hal's section-relative
+`_rwtext_len`). Total heap is `HEAP_SIZE + 98,304` = 210,944 B; see
+`docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.md` and
 `docs/adr/2026-08-01-esp32v3-flash-budget.md`.
 
 ### Amended 2026-09-05 — the stack is measured, and the heap is four regions
