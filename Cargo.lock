@@ -5663,6 +5663,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-emu-validate"
+version = "40.0.0"
+dependencies = [
+ "anyhow",
+ "regex",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "lp-gfx"
 version = "40.0.0"
 dependencies = [
