@@ -26,7 +26,10 @@ use lpc_model::ControlExtent;
 use super::ControlSampleFormat;
 
 /// One run of a product's samples placed in the target buffer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// `Default` is the all-zero run — an empty placement — so a resident
+/// `Vec<ControlTargetRun>` can be sized fallibly and filled in place.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ControlTargetRun {
     /// First PRODUCT sample this run takes.
     pub source_offset: u32,
