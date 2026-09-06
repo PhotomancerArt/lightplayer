@@ -104,7 +104,12 @@ pub fn run(read_cycles: fn() -> u32) {
     );
 }
 
-fn bench_rodata(label: &str, table: &'static [i32], pattern: AccessPattern, read_cycles: fn() -> u32) {
+fn bench_rodata(
+    label: &str,
+    table: &'static [i32],
+    pattern: AccessPattern,
+    read_cycles: fn() -> u32,
+) {
     runner::measure(label, table.len(), read_cycles, || sweep(table, pattern));
 }
 

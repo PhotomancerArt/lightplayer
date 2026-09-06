@@ -23,12 +23,9 @@ pub fn run(read_cycles: fn() -> u32) {
     const_div_bench("div/const-3", 3 * Q_ONE, read_cycles);
     const_div_bench("div/const-6", 6 * Q_ONE, read_cycles);
     const_div_bench("div/const-255", 255 * Q_ONE, read_cycles);
-    runner::measure(
-        "div/pow2-shift-2",
-        DIVIDENDS.len(),
-        read_cycles,
-        || sweep_unary_div(|v| div_by_positive_pow2(v, 2 * Q_ONE)),
-    );
+    runner::measure("div/pow2-shift-2", DIVIDENDS.len(), read_cycles, || {
+        sweep_unary_div(|v| div_by_positive_pow2(v, 2 * Q_ONE))
+    });
 }
 
 fn sweep_div(kernel: fn(i32, i32) -> i32) -> i32 {

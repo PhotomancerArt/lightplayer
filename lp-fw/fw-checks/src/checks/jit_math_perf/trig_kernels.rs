@@ -21,9 +21,12 @@ pub fn run(read_cycles: fn() -> u32) {
         read_cycles,
         || sweep_sin(reference_taylor_sin),
     );
-    runner::measure("trig/sin-current-builtin", ANGLES.len(), read_cycles, || {
-        sweep_sin(current_sin)
-    });
+    runner::measure(
+        "trig/sin-current-builtin",
+        ANGLES.len(),
+        read_cycles,
+        || sweep_sin(current_sin),
+    );
     runner::measure("trig/sin-fast-parabolic", ANGLES.len(), read_cycles, || {
         sweep_sin(fast_parabolic_sin)
     });
