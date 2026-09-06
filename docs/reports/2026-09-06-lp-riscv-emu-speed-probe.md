@@ -171,6 +171,17 @@ independent of this milestone's report; they are not fixed here (M0 is
 report-only and the brief says no emulator changes). Flagged via
 `spawn_task` for separate triage.
 
+**Resolution (2026-09-06, follow-up triage):** both were one defect.
+The async transport wrote client lines *without* the `M!` prefix the
+firmware's `SerialTransport::receive` requires, so every request was
+silently dropped; the busy core was `RealTime` mode running a healthy,
+ignored guest. The `release`-profile hypothesis in item 1 was refuted
+(the framing fix alone makes the meteor upload complete on plain
+`release`), though `lp-cli ... emu` now builds `release-emu` anyway to
+match `fw-tests`. See
+`docs/defects/2026-09-06-emu-transport-drops-unprefixed-client-lines.md`
+and the regression test `fw-tests/tests/emu_async_transport.rs`.
+
 ## 5. M8 estimate
 
 At the measured rendering-window rate (1,592–1,594 emulated-ms per wall-s,
