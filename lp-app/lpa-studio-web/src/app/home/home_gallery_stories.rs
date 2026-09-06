@@ -30,7 +30,7 @@ use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::device_pick_popover::{
     BoardPickMode, BoardPickPopover, ChipSource, ProjectPickPopover,
 };
-use crate::app::home::device_roster_card::DeviceRosterCard;
+use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
 use crate::app::home::{DevicesPage, ExplorePage, ProjectsPage};
@@ -546,6 +546,71 @@ fn devices_card_states() -> Element {
 }
 
 #[story(
+    description = "The pending card at each identification stage, beside a settled neighbour (follow-up filed at the ship of PR #518). The header's identity is the SAME two fixed mono rows the settled card prints — hardware above, binding · firmware below — decided in core per stage (`pending_identity_rows`), so a link still identifying reads like the cards around it instead of one sentence sitting in a two-row slot. NOTHING HEARD (a board parked in ROM or saying nothing): \"chip unknown\" over \"no identity until flashed\" — neither row blank, because an empty first row under an Identifying chip reads as a fault. CHIP ONLY (the boot banner named it, still identifying): \"esp32c6\" over the same sentence, exactly the row a settled pre-hello board prints. CHIP + MAC (the flash preflight probed it, verdict settled blank): \"esp32c6\" over \"60:55:f9:0a:0b:0c · no firmware\" — the settled card's own words the moment a binding exists, and never \"until flashed\" beside a MAC. SETTLED (the running neighbour from devices_card_states) is here for the level check: headers stay 90px, so a pending card's zones start where its neighbour's do (ADR 2026-09-03, amended 2026-09-04). The pending card keeps its own zone set — FIRMWARE + terminal and DEVICE, no project zone — so it is shorter by design; what must line up is the header."
+)]
+fn devices_card_pending() -> Element {
+    let stages = pending_stage_fixtures();
+    let (settled_label, settled, settled_open) = card_state_fixtures()
+        .into_iter()
+        .next()
+        .expect("the state sheet's first card is the running neighbour");
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:grid tw:grid-cols-[repeat(2,400px)] tw:items-start tw:gap-3",
+                for (label , pending) in stages {
+                    div { key: "{label}", class: "tw:grid tw:gap-2",
+                        p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
+                            "{label}"
+                        }
+                        PendingLinkCard { pending, on_action: |_| {} }
+                    }
+                }
+                div { key: "settled", class: "tw:grid tw:gap-2",
+                    p { class: "tw:m-0 tw:text-[0.68rem] tw:font-bold tw:uppercase tw:tracking-wide tw:text-subtle-foreground",
+                        "settled neighbour · {settled_label}"
+                    }
+                    DeviceRosterCard {
+                        card: settled,
+                        open_uid: settled_open,
+                        projects: packages(),
+                        examples: examples(),
+                        on_action: |_| {},
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The three identification stages of `devices_card_pending`, labelled.
+fn pending_stage_fixtures() -> Vec<(&'static str, PendingLinkView)> {
+    let identifying = roster_fixture().roster.pending[0].clone();
+    let blank = roster_fixture().roster.pending[1].clone();
+    vec![
+        (
+            "nothing heard",
+            PendingLinkView {
+                link: DeviceLinkId(5),
+                device: DeviceId(105),
+                title: "Fake ESP32 (usb-5)".to_string(),
+                detail: Some("found 4 s ago".to_string()),
+                detected_chip: None,
+                mac: None,
+                ..identifying.clone()
+            },
+        ),
+        ("chip only", identifying),
+        (
+            "chip + mac",
+            PendingLinkView {
+                mac: Some("60:55:f9:0a:0b:0c".to_string()),
+                ..blank
+            },
+        ),
+    ]
+}
+
+#[story(
     description = "The quiet state: a board whose port is open and which has stopped saying anything (NotResponding). It is deliberately undramatic — the chip reads Not responding in the neutral tone, and the DEVICE zone's info line carries the honest staleness (\"last heard 4 min ago\") rather than an invented failure, with the way out beside it: Reset · Retry (re-run identification, no replug needed) · Disconnect … Forget. Nothing is claimed about what is loaded: the board has not said, so the PROJECT zone's info line stays empty at its height and the preview slot says the feed has nothing to show. The FIRMWARE zone still names the firmware and board the record remembers — going quiet does not unlearn what the board already said."
 )]
 fn devices_card_not_responding() -> Element {
@@ -663,6 +728,7 @@ fn roster_fixture() -> DeviceRosterView {
                     // Mid-identification: no settled verdict, no flash face.
                     firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
                     detected_chip: Some("esp32c6".to_string()),
+                    mac: None,
                     escapes: vec![DeviceEscape::Forget],
                 },
                 PendingLinkView {
@@ -676,6 +742,7 @@ fn roster_fixture() -> DeviceRosterView {
                     // Flash) rides this pending card.
                     firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
                     detected_chip: Some("esp32c6".to_string()),
+                    mac: None,
                     escapes: vec![DeviceEscape::Forget],
                 },
             ],

@@ -122,6 +122,7 @@ use lpa_studio_core::{
     DevicesOp, FirmwareVerb, PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiStatus,
     device_escape_action, device_firmware_line, device_identity_line, device_status_kind,
     firmware_face_preview_sentence, firmware_verb, pending_escape_action, pending_firmware_line,
+    pending_identity_rows,
 };
 
 use super::device_pick_popover::{
@@ -549,13 +550,12 @@ pub(crate) fn PendingLinkCard(
         label: "Identifying".to_string(),
         kind: lpa_studio_core::UiStatusKind::Working,
     };
-    // The identity a link that has said nothing yet actually has: the chip
-    // off the boot banner, and the honest statement that nothing else is
-    // knowable until firmware runs on it.
-    let identity = match pending.detected_chip.as_deref() {
-        Some(chip) => format!("chip: {chip} · no identity until flashed"),
-        None => "no identity yet".to_string(),
-    };
+    // The identity a link that has said nothing yet actually has, in the
+    // settled card's two-row grammar (chip above, MAC · firmware below) —
+    // decided in core per identification stage, so a pending card reads
+    // like the cards beside it rather than one sentence in a two-row slot.
+    let identity_rows = pending_identity_rows(&pending);
+    let identity = identity_rows.display();
     let state_line = match pending.detail.as_deref() {
         Some(detail) => format!("{} · {detail}", pending.state_label),
         None => pending.state_label.clone(),
@@ -577,10 +577,11 @@ pub(crate) fn PendingLinkCard(
                         StatusChip { status }
                     }
                     // The same two-row slot as the settled card's identity,
-                    // so a pending card's header measures the same; a link
-                    // that has said nothing has only the one row to fill.
+                    // filled the same way, so a pending card's header
+                    // measures — and reads — the same as its neighbours'.
                     div { class: identity_rows_class(), title: "{identity}",
-                        p { class: mono_line_class(), "{identity}" }
+                        p { class: mono_line_class(), "{identity_rows.board}" }
+                        p { class: mono_line_class(), "{identity_rows.firmware}" }
                     }
                 }
             }
