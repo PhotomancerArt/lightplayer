@@ -381,9 +381,17 @@ impl LinkProvider for HostSerialEsp32Provider {
         // the device console feed. An app-supplied observer still sees
         // every line too.
         let observed_lines = Arc::new(std::sync::Mutex::new(Vec::new()));
-        // `tcp://host:port` names an emulator's UART (esp-emu `--uart-tcp`,
-        // QEMU `-serial tcp::PORT,server`): no modem lines, so no reset on
-        // open — the readiness hello request establishes the session.
+        // `tcp://host:port` (from the `serial:tcp://host:port` host
+        // specifier — documented in `lp-cli/README.md`) names a device
+        // link over TCP instead of a real serial port: an emulator's UART
+        // (esp-emu `--uart-tcp`, QEMU `-serial tcp::PORT,server`), and the
+        // only way to reach one on macOS, where a pty cannot stand in for
+        // a serial port (`serialport` sets the baud rate through
+        // `IOSSIOSPEED`, which a pty driver refuses with `ENOTTY`). No
+        // modem lines, so no reset on open — the readiness hello request
+        // establishes the session instead. Permanent as of D4
+        // (`~/.photomancer/planning/lp2025/2026-09-06-1001-esp-emulator/vision.md`),
+        // not a spike.
         let tcp_addr = endpoint.port_name.strip_prefix("tcp://");
         let serial_options = HardwareSerialOptions {
             reset_after_open: self.options.reset_after_open && tcp_addr.is_none(),
