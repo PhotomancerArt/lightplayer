@@ -69,6 +69,42 @@ desk session gets wasted.
 |---|---|---|---|
 | `shader-compile-stress` | `test_shader_compile_incremental` | `[inc-shader-compile] === DONE ===` | `checks::shader_compile` (record types, host reporter) |
 | `gpio-calibrate` | `test_gpio_calibrate` | `CAL READY target=` (it serves; it never finishes) | `checks::gpio_calibrate` (the `CAL` line protocol, the duty ramp) |
+| `uart-bridge` | `test_uart_bridge` | `UART-BRIDGE READY ` (it serves until unplugged) | `checks::uart_bridge` (the bounded queue, the pump step, the ready line) |
+
+### `uart-bridge` is an instrument, not a measurement
+
+It is the odd one out and worth a paragraph. The other payloads answer a
+question about the board they run on; this one turns a **spare** board into the
+lab's USB-to-UART tap, so that some *other* board's UART0 console reaches the
+Mac. There is no adapter on this bench, and the one behaviour esp-emu can never
+produce — a firmware declaring its USB host undrained — is logged over the very
+link it declares undrained. A second board is the way out of that circle.
+
+Three of its properties are contract, not implementation:
+
+- **It installs no logger.** With no `log` sink registered, every `log::` call
+  in the image is a no-op, so an esp-hal `debug!` cannot appear in the middle of
+  somebody's boot capture. Its two boot lines go through `esp_println` instead,
+  and the header line is byte-identical to `emit_header`'s because it uses the
+  same `Display`.
+- **After those two lines it is silent forever.** A host reading its port sees
+  the other board's bytes and nothing else.
+- **Byte losses are reported at the NEXT boot, never mid-stream.** A bridge that
+  announced a drop would be corrupting the capture at the moment the capture got
+  interesting. The counts live in RTC fast memory, so a reset preserves them and
+  a power cycle clears them; `prev_drop_to_uart=0 prev_drop_to_usb=0` means the
+  run before this reset was clean, and `4294967295` means UART0's hardware RX
+  FIFO overran and the bridge cannot know by how much. **A transcript captured
+  through this bridge is only worth reading while both are zero.**
+
+Default 115,200 8N1 — the mask ROM's rate, which is what a boot banner arrives
+at whatever the far side's driver does later. `uart_bridge_fast` selects 921,600
+for a far side running `spike_uart0_link`'s driver instead.
+
+Flashing and wiring live in `scripts/emu/` (`uart-bridge-flash.sh`,
+`uart-bridge-wiring-check.sh`, `board-port.py`, `tty-capture.py`), never in a
+chat message, and they name the board by MAC because two XIAO C6s are
+indistinguishable to a port list.
 
 The other `check-*` features are declared and have no module yet; the Q12
 ledger in the 2026-09-06 esp-emulator plan's `notes.md` tracks which `test_*`

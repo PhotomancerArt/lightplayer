@@ -120,6 +120,31 @@ self-contained on that edge.
 - **`lp-fw/fw-emu`** — firmware that *runs inside* `lp-riscv-emu`. It is a
   product image, so it stays with the other firmware.
 
+## Bench instruments — `scripts/emu/`
+
+Some of what this family needs is a *desk*, not a host: a UART0 console that
+comes out somewhere other than the link under test, and a way to name one board
+among several identical ones. The scripts under `scripts/emu/` are those
+instruments, and the discipline they keep is the same everywhere:
+
+- `board-port.py` — MAC to `/dev/cu.usbmodem…`, from IOKit, opening nothing and
+  probing nothing. Every ESP32-C6 and -S3 enumerates as `303a:1001`, so a port
+  list cannot tell two apart; the USB serial number is the MAC and does.
+  **Nothing here ever picks the first port.**
+- `tty-capture.py` — read one port raw, changing no line state. `stty` asserts
+  DTR on open, which on a native-USB Espressif port is espflash's reset
+  sequence: a reader that used it would reboot the board it came to watch.
+- `uart-bridge-flash.sh` — put the `uart-bridge` payload on **one named board**.
+  It takes a MAC and refuses to guess, because flashing the bridge onto the
+  board under test destroys the measurement in silence.
+- `uart-bridge-wiring-check.sh` — prove the wires with **no change to the board
+  under test**: open the bridge's port, reset the other board from its own port,
+  and read what came through.
+
+The payload itself is `fw-checks`' `uart-bridge` (see that crate's README); the
+fixture and its current blocker are
+`docs/defects/2026-09-06-xiao-c6-7e44-hangs-in-the-second-stage-bootloader.md`.
+
 ## Roadmap
 
 `lp-emu-validate/` and the first two transcripts landed with M2 of the
