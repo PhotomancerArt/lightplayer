@@ -1982,7 +1982,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2032,6 +2032,15 @@ lint-upgrade-fw:
 # fence lives in the script, one line of reason each.
 lint-emu-fence:
     ./scripts/check-emu-fence.sh
+
+# The generated `RegNames` tables (offset -> register name) are derived from
+# the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
+# A hand edit is reverted by the next regeneration and takes its provenance
+# with it, so this checks them the way `lint-vec-corpus` checks the shader
+# corpus. It prints a notice and passes when the PAC sources are not in this
+# machine's cargo registry — see the script's header for why.
+lint-emu-regnames:
+    python3 scripts/emu/pac-regnames.py --check
 
 # Build RV32 builtins before check/build/test so host crates that embed the
 # builtins ELF do not compile a stale "builtins missing" artifact.

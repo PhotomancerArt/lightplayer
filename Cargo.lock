@@ -5665,6 +5665,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-emu-esp-common"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lp-emu-core",
+ "object 0.37.3",
+ "test-log",
+]
+
+[[package]]
 name = "lp-emu-validate"
 version = "40.0.0"
 dependencies = [

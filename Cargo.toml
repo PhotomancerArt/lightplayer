@@ -87,6 +87,7 @@ members = [
     "lp-emu/lp-emu-core",
     "lp-emu/lp-emu-abi",
     "lp-emu/lp-emu-validate",
+    "lp-emu/esp/lp-emu-esp-common",
     "lp-riscv/lp-riscv-inst",
     "lp-emu/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
@@ -181,6 +182,7 @@ default-members = [
     "lp-emu/lp-emu-core",
     "lp-emu/lp-emu-abi",
     "lp-emu/lp-emu-validate",
+    "lp-emu/esp/lp-emu-esp-common",
     "lp-riscv/lp-riscv-inst",
     "lp-emu/lp-riscv-emu",
     "lp-riscv/lp-riscv-elf",
@@ -276,6 +278,8 @@ opt-level = 3
 [profile.dev.package.lp-riscv-emu]
 opt-level = 3
 [profile.dev.package.lp-emu-abi]
+opt-level = 3
+[profile.dev.package.lp-emu-esp-common]
 opt-level = 3
 [profile.dev.package.lp-riscv-inst]
 opt-level = 3

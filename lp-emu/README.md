@@ -20,7 +20,8 @@ lp-emu/
   lp-riscv-emu-guest-test-app/  a guest binary the rv32 tests run
   lp-xt-emu/                    Xtensa LX6/LX7 executors, board maps, FP
   lp-xt-emu-guest/              Xtensa guest-side runtime (device-target)
-  esp/                          SoC crates land here (see below)
+  esp/                          Espressif SoC layer (see esp/README.md)
+    lp-emu-esp-common/          bus, MMIO decode, peripherals, trace
 ```
 
 **Crates are namespaced by vendor, not flattened** (vision D9). The
@@ -81,6 +82,15 @@ directories are allowed to assume MMIO at all.
 - **`lp-xt-emu-guest`** — the `no_std` Xtensa guest runtime. A DEVICE-target
   crate: excluded from the host workspace and built as a member of the
   `lp-xt/fixtures` esp-toolchain workspace.
+
+- **`esp/lp-emu-esp-common`** — the Espressif SoC substrate: `SocBus` (RAM
+  regions, MMIO decode, watchpoints, the unmapped policy), the `Peripheral`
+  trait and its `BusCx`, `RegFile` for the accept-and-remember blocks, the
+  bus trace with its spin detector, host byte streams, and an ELF
+  program-header view. It contains **no chip numbers**; a chip crate
+  registers its own regions and peripherals. Generated register-name tables
+  (`scripts/emu/pac-regnames.py`, gated by `just lint-emu-regnames`) live in
+  the chip crate for the same reason. See its README.
 
 **Arch-neutrality rule:** `lp-emu-core` and `lp-emu-abi` must not depend on
 cranelift or on any `lp-riscv-*` / `lp-xt-*` crate. Architecture specifics
@@ -168,8 +178,9 @@ fixture and its current blocker are
 ## Roadmap
 
 `lp-emu-validate/` and the first two transcripts landed with M2 of the
-2026-09-06 esp-emulator plan. The ESP32-C6 SoC emulator and the vendored ROM
-images arrive under `esp/` from M3 on; nothing in `esp/` exists yet.
+2026-09-06 esp-emulator plan. `esp/lp-emu-esp-common` landed with M3 P3,
+alongside `lp-emu-core`'s discrete-event `Scheduler`. The C6 machine itself
+and the vendored ROM images arrive under `esp/` in the phases after it.
 
 `lp-cli validate list` already names `lp-emu:esp32c6:t1`, and says
 `unavailable until M3`. That is deliberate: the configuration exists as a name
