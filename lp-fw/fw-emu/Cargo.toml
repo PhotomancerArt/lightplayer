@@ -15,8 +15,8 @@ lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
-lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", default-features = false }
-lp-riscv-emu-guest = { path = "../../lp-riscv/lp-riscv-emu-guest" }
+lp-riscv-emu = { path = "../../lp-emu/lp-riscv-emu", default-features = false }
+lp-riscv-emu-guest = { path = "../../lp-emu/lp-riscv-emu-guest" }
 lp-perf = { path = "../../lp-base/lp-perf", features = ["syscall"] }
 lp-recovery = { workspace = true }
 lp-emu-abi = { path = "../../lp-emu/lp-emu-abi" }
@@ -63,7 +63,7 @@ lpa-client = { path = "../../lp-app/lpa-client", features = ["serial"] }
 lpc-hardware = { path = "../../lp-core/lpc-hardware" }
 lpc-view = { path = "../../lp-core/lpc-view" }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
-lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
+lp-riscv-emu = { path = "../../lp-emu/lp-riscv-emu", features = ["std"] }
 lpc-shared = { path = "../../lp-core/lpc-shared" }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
 tokio = { version = "1", features = ["rt", "macros"] }

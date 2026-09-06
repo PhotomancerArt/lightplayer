@@ -1595,7 +1595,7 @@ esp-stack-sizes pattern="": install-rv32-target
 
 # riscv32: emu-guest-test-app
 build-rv32-emu-guest-test-app: install-rv32-target
-    cd lp-riscv/lp-riscv-emu-guest-test-app && RUSTFLAGS="-C target-feature=-c" cargo build --target {{ rv32_target }} --release
+    cd lp-emu/lp-riscv-emu-guest-test-app && RUSTFLAGS="-C target-feature=-c" cargo build --target {{ rv32_target }} --release
 
 # riscv32: fw-emu (firmware that runs in RISC-V emulator)
 build-fw-emu: install-rv32-target
@@ -1770,7 +1770,7 @@ check-lpc-engine-gates:
 
 # riscv32: emu-guest-test-app clippy
 clippy-rv32-emu-guest-test-app: install-rv32-target
-    cd lp-riscv/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
+    cd lp-emu/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
 
 clippy: clippy-host clippy-rv32
 

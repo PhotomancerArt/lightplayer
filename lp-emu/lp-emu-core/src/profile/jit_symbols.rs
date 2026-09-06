@@ -1,7 +1,7 @@
 //! JIT-emitted symbol overlay.
 //!
 //! Populated by the host `SYSCALL_JIT_MAP_LOAD` handler (see
-//! `lp-riscv/lp-riscv-emu/src/emu/emulator/run_loops.rs`). Consulted at
+//! `lp-emu/lp-riscv-emu/src/emu/emulator/run_loops.rs`). Consulted at
 //! report time by the lp-cli profile symbolizer and the alloc-trace
 //! `SymbolResolver`.
 //!
