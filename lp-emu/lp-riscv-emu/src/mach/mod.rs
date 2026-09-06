@@ -800,3 +800,6 @@ fn is_store_class(inst_word: u32) -> bool {
     let funct3 = (inst_word >> 13) & 0b111;
     matches!((quadrant, funct3), (0b00, 0b110) | (0b10, 0b110))
 }
+
+#[cfg(test)]
+mod tests;
