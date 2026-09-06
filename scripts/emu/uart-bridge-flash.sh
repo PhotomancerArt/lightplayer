@@ -47,25 +47,13 @@ touch lp-fw/fw-esp32c6/src/main.rs
 ( cd lp-fw/fw-esp32c6 && cargo build --features "$features" \
     --target riscv32imac-unknown-none-elf --profile release-esp32 )
 
-elf="target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6"
+# The desk discipline — and the `--no-stub` this fixture needs — lives in
+# flash-image.sh. The sentinel is the payload's own readiness line rather than
+# espflash's "Flashing has completed", so a pass means the image came up, not
+# that bytes reached the flash.
 cap="${CAPTURE:-$(mktemp -t uart-bridge-flash)}"
-echo "capture: $cap"
-
-# The sentinel is the payload's own readiness line. Waiting for it — rather
-# than for espflash's "Flashing has completed" — is what proves the image
-# actually came up on the board, not merely that bytes reached the flash.
-#
-# `--no-stub` is not optional here, and it is not caution. With the stub,
-# espflash 3.3.0 fails on both boards of this fixture with
-# `espflash::timeout / Error while connecting to device` about five seconds in,
-# reproducibly; without it the same command connects immediately and reports
-# the chip correctly (`espflash board-info --no-stub` -> esp32c6 v0.2, 4MB,
-# a0:f2:62:86:7e:44). The cost is a slower write, which nothing here minds.
-PORT_DEV="$port" scripts/spike/esp-emu/desk-espflash-step.sh \
-    "$cap" "UART-BRIDGE READY " 180 -- \
-    flash --chip esp32c6 --port "$port" --no-stub \
-    --partition-table lp-fw/fw-esp32c6/partitions.csv \
-    --flash-size 4mb --after hard-reset --monitor "$elf"
+CAPTURE="$cap" scripts/emu/flash-image.sh "$mac" "UART-BRIDGE READY " \
+    target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 180
 
 echo "--- the two boot lines ---"
 grep -a -E 'fw-checks-header|UART-BRIDGE READY' "$cap" || echo "(none — the bridge did not announce itself)"
