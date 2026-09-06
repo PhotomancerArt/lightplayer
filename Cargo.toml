@@ -109,7 +109,9 @@ members = [
     "lp-shader/lps-q32",
 ]
 # Xtensa DEVICE-target crates (esp toolchain): lp-xt/fixtures is its own
-# workspace; lp-xt-emu-guest is its out-of-tree member (see lp-xt/README.md).
+# workspace; lp-xt-emu-guest lives under lp-emu/ with the rest of the
+# emulation family but is a member of THAT workspace, not this one
+# (see lp-emu/README.md).
 exclude = ["lp-xt/fixtures", "lp-emu/lp-xt-emu-guest"]
 resolver = "2"
 
