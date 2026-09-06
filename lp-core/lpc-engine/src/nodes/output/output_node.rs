@@ -1793,7 +1793,7 @@ mod tests {
             &mut self,
             product: ControlProduct,
             _request: &ControlRenderRequest,
-            target: ControlRenderTarget<'_>,
+            mut target: ControlRenderTarget<'_>,
         ) -> Result<ControlSampleLayout, ResolveError> {
             self.render_control_calls += 1;
             if self.render_control_fails {
@@ -1801,16 +1801,19 @@ mod tests {
                     "shader fuel exhausted: render_samples sample 0 exceeded 100000 iterations",
                 )));
             }
-            for (index, sample) in target.samples.iter_mut().enumerate() {
-                *sample = if self.paint_by_product {
+            // Through the target's API, like a real producer: a scattered
+            // target routes each sample to wherever its run landed.
+            for index in 0..target.product_len() {
+                let sample = if self.paint_by_product {
                     (product.output() as u16) * 100 + index as u16
                 } else {
                     self.graph_color[index % 3]
                 };
+                target.write(index, &[sample]);
             }
             // One span covering the whole fragment, in the fragment's OWN
             // coordinates — the output is what rebases it.
-            let len = target.samples.len() as u32;
+            let len = target.product_len() as u32;
             Ok(ControlSampleLayout {
                 spans: vec![lpc_model::ControlSampleSpan {
                     row: 0,

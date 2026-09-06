@@ -1681,7 +1681,7 @@ fn render_direct_fixture_control(
     channels: &[u32],
     visual_product: VisualProduct,
     request: &ControlRenderRequest,
-    target: ControlRenderTarget<'_>,
+    mut target: ControlRenderTarget<'_>,
     settings: FixtureRenderSettings,
     space: VisualSpace,
     ctx: &mut ControlRenderContext<'_>,
@@ -1700,7 +1700,7 @@ fn render_direct_fixture_control(
         ));
     }
     let expected_samples = request.extent.sample_count() as usize;
-    if target.samples.len() < expected_samples {
+    if target.product_len() < expected_samples {
         return Err(NodeError::msg(
             "control render target is smaller than requested extent",
         ));
@@ -1745,7 +1745,7 @@ fn render_direct_fixture_control(
         .sample_out_data(sample_buf)
         .map_err(err_ctx("fixture sample read"))?;
 
-    target.samples.fill(0);
+    target.clear();
     let brightness = settings.brightness.to_q32() / 255.to_q32();
     let mut written_samples = 0usize;
     for (channel, rgba) in channels.iter().zip(sampled.chunks_exact(4)) {
@@ -1776,7 +1776,7 @@ fn render_direct_fixture_control(
         let g = power.channel(g);
         let b = power.channel(b);
         let ordered = ordered_rgb_u16(settings.color_order, r, g, b);
-        target.samples[base..base + 3].copy_from_slice(&ordered);
+        target.write(base, &ordered);
         written_samples = written_samples.max(base + 3);
     }
 
@@ -1787,7 +1787,7 @@ fn render_direct_fixture_control(
 
 fn render_fixture_diagnostic_control(
     request: &ControlRenderRequest,
-    target: ControlRenderTarget<'_>,
+    mut target: ControlRenderTarget<'_>,
     settings: FixtureRenderSettings,
     mapping: MappingRef<'_>,
     time_seconds: f32,
@@ -1806,13 +1806,13 @@ fn render_fixture_diagnostic_control(
     }
 
     let expected_samples = request.extent.sample_count() as usize;
-    if target.samples.len() < expected_samples {
+    if target.product_len() < expected_samples {
         return Err(NodeError::msg(
             "control render target is smaller than requested extent",
         ));
     }
 
-    target.samples.fill(0);
+    target.clear();
     let lamp_count = fixture_lamp_channel_count(mapping);
     let available_lamps = expected_samples / 3;
     let rendered_lamps = (lamp_count as usize).min(available_lamps);
@@ -1843,7 +1843,7 @@ fn render_fixture_diagnostic_control(
             settings.gamma_correction,
         );
         let base = lamp * 3;
-        target.samples[base..base + 3].copy_from_slice(&ordered);
+        target.write(base, &ordered);
     }
 
     Ok(ControlLayout {
@@ -2127,7 +2127,7 @@ fn legacy_u8_from_unorm16_sample(c: u16) -> u8 {
 
 fn render_fixture_control_target(
     request: &ControlRenderRequest,
-    target: ControlRenderTarget<'_>,
+    mut target: ControlRenderTarget<'_>,
     accumulators: &ChannelAccumulators,
     mapping: MappingRef<'_>,
     color_order: ColorOrder,
@@ -2149,13 +2149,13 @@ fn render_fixture_control_target(
     }
 
     let expected_samples = request.extent.sample_count() as usize;
-    if target.samples.len() < expected_samples {
+    if target.product_len() < expected_samples {
         return Err(NodeError::msg(
             "control render target is smaller than requested extent",
         ));
     }
 
-    target.samples.fill(0);
+    target.clear();
 
     let max_channel = accumulators.max_channel as usize;
     let brightness = brightness_u8.to_q32() / 255.to_q32();
@@ -2206,7 +2206,7 @@ fn render_fixture_control_target(
         let b = power.channel(b);
 
         let ordered = ordered_rgb_u16(color_order, r, g, b);
-        target.samples[base..base + 3].copy_from_slice(&ordered);
+        target.write(base, &ordered);
         written_samples = base + 3;
     }
 
