@@ -61,6 +61,9 @@ directories are allowed to assume MMIO at all.
 - **`lp-riscv-emu`** — the RV32 emulator: instruction executors, register
   file, run loops, `EmulatorError`, and the rv32 frame-pointer backtrace
   walk. `lp-riscv-inst` decodes for it; it never re-implements decoding.
+  Since M3 it also carries the **machine-mode hart** (`mach::MachineHart`) —
+  M-mode CSRs, traps, `mret`/`wfi`, hardware triggers and interrupt delivery
+  — which is the piece a SoC machine under `esp/` drives.
 
 - **`lp-riscv-emu-guest`** / **`lp-riscv-emu-guest-test-app`** — the
   guest-side runtime (entry, syscalls, allocator, panic, logging) for code
