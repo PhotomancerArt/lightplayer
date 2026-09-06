@@ -417,6 +417,37 @@ fn per_lamp_memory_table() {
         );
     }
 
+    // A patched product renders straight into the output buffer through a
+    // scattered target; nothing whole-product is materialized per frame
+    // (`docs/adr/2026-09-06-control-render-targets-scatter.md`). Before that,
+    // every patched product cost 6 B/lamp of scratch per tick: small-dome
+    // 42,278 B (the dome's 35,700 alone halted the 320 K emulator guest),
+    // zook-patched 10,548 against unpatched zook's 839. After: 5,834 and
+    // 1,352. The first pin is the buffer that must never come back; the
+    // second says a patch costs O(runs) bookkeeping, not O(lamps) — 513 B
+    // measured for five runs, pinned with ~4× headroom and well under the
+    // 3 B/lamp a half-rate buffer would cost.
+    let steady_transient = |label: &str| -> usize {
+        by_label(label)
+            .1
+            .iter()
+            .find(|p| p.label == "tick 3")
+            .expect("tick 3 recorded")
+            .transient()
+    };
+    let small_dome = steady_transient("small-dome");
+    assert!(
+        small_dome < 6 * 5_950,
+        "small-dome: steady tick transient {small_dome} B — a whole-product (6 B/lamp) \
+         render buffer is back on the patched path"
+    );
+    let (zook, zook_patched) = (steady_transient("zook"), steady_transient("zook-patched"));
+    assert!(
+        zook_patched <= zook + 2_048,
+        "zook-patched: steady tick transient {zook_patched} B against zook's {zook} — a \
+         patch must cost O(runs) bookkeeping, not a per-lamp buffer"
+    );
+
     // Dropping the first engine leaves a process-global residue (the JIT
     // runtime's once-cells, interned tables — ~95 KB host, paid once); every
     // later fixture must return to within a small margin of that floor, or a
