@@ -433,6 +433,11 @@ code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
   is style.css's "a re-simulated picture must never wear the green a device's frames earn" — which of the two rules applies here?
 </p>
 <div class="concepts" id="s1"></div>
+<h2 style="margin-top:34px"><span class="n">1b</span>One dress across every face</h2>
+<p class="sub">The dress picked in section 2's strip, redrawn in each face the vision requires, so the gate can read the speed chip (D8, shown when
+  the link declares a dilation), the born-flashed first face (D10), the sub-second Flash (same activity, same journal), the twin standing by (D7/Q9)
+  and the powered-off record (D9) side by side. <span class="grp" id="c-dress1b" style="display:inline-flex"></span></p>
+<div class="concepts" id="s1b"></div>
 
 <!-- ================================================================= -->
 <h2><span class="n">2</span>The roster: creation at the insertion point, and the twin verb</h2>
@@ -732,6 +737,21 @@ function renderS1() {
   });
 }
 
+function renderS1b() {
+  const D = DRESS[state.dress];
+  const saved = { emu:state.emu, speed:state.speed, twin:state.twin };
+  const faces = [
+    ['Ready · 1.0×', {emu:'ready', speed:1}], ['Born flashed (D10)', {emu:'created', speed:1, twin:false}],
+    ['Flashing (sub-second)', {emu:'flashing', speed:1}], ['Slow boot · 0.3× (D8)', {emu:'booting', speed:0.3}],
+    ['Ready · 0.6× (D8)', {emu:'ready', speed:0.6}], ['Twin standing by (D7/Q9)', {emu:'standby', speed:1, twin:true}],
+  ];
+  let html = faces.map(([lab, st]) => { Object.assign(state, saved, st); return `<div class="concept"><h3 class="c"><span class="k">${esc(D.k)}</span>${esc(lab)}</h3>${emuCard(D)}</div>`; }).join('');
+  Object.assign(state, saved);
+  html += `<div class="concept"><h3 class="c"><span class="k">${esc(D.k)}</span>Powered off (D9)</h3>${offTile(D)}</div>`;
+  document.getElementById('s1b').innerHTML = html;
+  seg('c-dress1b', DRESSPICK, 'dress', () => { renderS1b(); renderS2(); seg('c-dress', DRESSPICK, 'dress', () => { renderS1b(); renderS2(); }); });
+}
+
 /* ---------------------------------------------------------------------
    Section 2 — the roster
    --------------------------------------------------------------------- */
@@ -975,7 +995,7 @@ document.getElementById('b-anim').addEventListener('click', e => { document.docu
 document.getElementById('w').addEventListener('input', e => { document.documentElement.style.setProperty('--w', e.target.value + 'px'); document.getElementById('wv').textContent = e.target.value + 'px'; renderS1(); });
 
 const DRESSPICK = Object.fromEntries(Object.values(DRESS).map(D => [D.k, `${D.k} · ${D.name}`]));
-seg('c-dress', DRESSPICK, 'dress', renderS2);
+seg('c-dress', DRESSPICK, 'dress', () => { renderS1b(); renderS2(); });
 seg('c-twinverb', TWINVERB, 'twinverb', renderS2);
 seg('c-add', ADD, 'add', renderS2);
 seg('c-off', OFF, 'off', renderS2);
@@ -983,7 +1003,7 @@ seg('c-face', FACES, 'face', renderS3);
 seg('c-simtab', { details:'Details', play:'▶ Play', danger:'Danger' }, 'simtab', renderS4);
 seg('c-simedge', { good:'rollup tone (today)', bound:'fixed violet' }, 'simedge', renderS4);
 
-function renderAll() { renderS1(); renderS2(); renderS3(); renderS4(); }
+function renderAll() { renderS1(); renderS1b(); renderS2(); renderS3(); renderS4(); }
 renderAll();
 if (new URLSearchParams(location.search).has('noanim')) document.documentElement.classList.add('no-anim');
 </script>
