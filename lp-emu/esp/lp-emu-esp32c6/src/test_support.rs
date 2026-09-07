@@ -233,23 +233,32 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
         cmd.arg("--no-default-features");
     }
     cmd.arg("--features").arg(image.features.join(","));
+    // Past this point a failure is not a skip — see `reference_image` for
+    // why (`LP_EMU_BUILD_FW=1` is a request, and a broken build is not a
+    // machine without a toolchain).
     let status = cmd
         .status()
-        .map_err(|e| format!("running cargo build for fw-esp32c6: {e}"))?;
-    if !status.success() {
-        return Err(format!("fw-esp32c6 build failed: {status}"));
-    }
-    if !conventional.is_file() {
-        return Err(format!(
-            "fw-esp32c6 built but {} is missing",
-            conventional.display()
-        ));
-    }
+        .unwrap_or_else(|e| panic!("running cargo build for fw-esp32c6: {e}"));
+    assert!(
+        status.success(),
+        "fw-esp32c6 build failed: {status} — LP_EMU_BUILD_FW=1 asked for this image, so a \
+         failed build is a failed test, not a skip"
+    );
+    assert!(
+        conventional.is_file(),
+        "fw-esp32c6 built but {} is missing",
+        conventional.display()
+    );
     if let Some(dir) = cached.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
     }
-    std::fs::copy(&conventional, &cached)
-        .map_err(|e| format!("copying the ELF to {}: {e}", cached.display()))?;
+    // Publish atomically, for the same reason the script does: another test
+    // *process* may be about to read this path.
+    let staging = cached.with_extension("partial");
+    std::fs::copy(&conventional, &staging)
+        .map_err(|e| format!("copying the ELF to {}: {e}", staging.display()))?;
+    std::fs::rename(&staging, &cached)
+        .map_err(|e| format!("publishing the ELF at {}: {e}", cached.display()))?;
     Ok(cached)
 }
 
@@ -341,19 +350,29 @@ pub fn reference_image(image: &ReferenceImage) -> Result<PathBuf, String> {
             path.display()
         ));
     }
+    // Past this point a failure is **not** a skip.
+    //
+    // Every `Err` above means "there is no image here and you did not ask me
+    // to make one", which a caller rightly turns into a `skip_notice` — a
+    // machine without the esp toolchain must not fail the suite. But
+    // `LP_EMU_BUILD_FW=1` *is* asking, and a build that then breaks is a
+    // broken build. Returning `Err` for it made three boot tests report
+    // `ok` in 0.2 s while building nothing at all: `git worktree add` was
+    // exiting 128 on a registered-but-deleted worktree, every test skipped,
+    // and the run was green and hollow. A panic cannot be swallowed.
     let status = Command::new(root.join("scripts/emu/build-reference-image.sh"))
         .arg(image.features)
         .current_dir(&root)
         .status()
-        .map_err(|e| format!("running build-reference-image.sh: {e}"))?;
-    if !status.success() {
-        return Err(format!(
-            "build-reference-image.sh {} failed: {status}",
-            image.features
-        ));
-    }
+        .unwrap_or_else(|e| panic!("running build-reference-image.sh: {e}"));
+    assert!(
+        status.success(),
+        "build-reference-image.sh {} failed: {status} — LP_EMU_BUILD_FW=1 asked for this \
+         image, so a failed build is a failed test, not a skip",
+        image.features
+    );
     if !path.is_file() {
-        return Err(format!("the script ran but {} is missing", path.display()));
+        panic!("the script ran but {} is missing", path.display());
     }
     Ok(path)
 }

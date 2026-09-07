@@ -98,6 +98,13 @@ fi
 
 if [[ ! -d "$wt" ]]; then
     mkdir -p "$(dirname "$wt")"
+    # `target/emu-ref` is a build directory and gets deleted — by
+    # `cargo clean`, by a disk sweep, by anyone reproducing a race from a
+    # clean cache. The worktree stays *registered* when its directory goes,
+    # and `git worktree add` then refuses with exit 128 ("a missing but
+    # already registered worktree"). That is not a build failure worth
+    # reporting; it is bookkeeping, and pruning is what clears it.
+    git -C "$repo" worktree prune
     git -C "$repo" worktree add --detach "$wt" "$full_commit"
     # The six firmware files of spike_uart0_link, staged and uncommitted.
     git -C "$wt" cherry-pick -n "$spike"
