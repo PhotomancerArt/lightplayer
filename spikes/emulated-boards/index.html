@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Emulated boards — the band, open starts the device, the Desktop card · spike</title>
+<title>Emulated boards — target · real · emu · sim · spike</title>
 <style>
 /* =====================================================================
    Studio runs real boards, emulated boards, and a desktop simulator.
@@ -407,30 +407,29 @@ code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
 </head>
 <body>
 
-<h1>Emulated boards — the band, open starts the device, the Desktop card</h1>
+<h1>Emulated boards — target · real · emu · sim</h1>
 <p class="hint">
-  Vision <code>2026-09-07-0118-studio-emulated-boards</code>, D1–D21 + the second sitting's <b>D30–D38</b> ("always a device"). Round 2 of this
-  spike: the gate's first two rulings are folded in — <b>1E</b> the runtime band is the one bound-family element on any card, the "Emulated"
-  title prefix is gone, nothing else is violet (D38) — and the reframe reshapes the other two surfaces: <b>open starts the project's device</b>
-  and never touches silicon (D33), the address is the project with the device as a hint (D35), and <b>Desktop is a device card</b> in the
-  roster, not a runtime pane (D30/D31). The real card at the left of section 1 is <b>production, faithful</b> (device_roster_card.rs, 644px at
-  the 400px column); every other card is that card plus the band. Conventions unchanged: add buttons at the insertion point; identity as
-  two fixed mono rows; pasteable text stays pasteable.
+  Vision <code>2026-09-07-0118-studio-emulated-boards</code>, D1–D21 + D30–D38 + the third sitting's <b>D40–D49</b>. Round 3 of this spike
+  draws the model Yona converged on: <b>projects declare the hardware they run on</b> (a target: a board or Desktop); a device is <b>real</b>,
+  <b>emu</b> (the real binary in lp-emu — boards only) or <b>sim</b> (the desktop firmware running in the browser, wearing the target's manifest —
+  any target); emu and sim are devices in the Devices tab; Desktop is a target, never a device; the project is the thing in the URL and
+  <code>?on=</code> says which device. The real card at the left of section 1 is <b>production, faithful</b> (device_roster_card.rs, 644px at
+  the 400px column); every other card is that card plus the band (D38/D49). Add buttons at the insertion point; identity as two fixed mono
+  rows; pasteable text stays pasteable.
 </p>
-<div class="ruled"><b>Ruled at the gate (Yona, 2026-09-07):</b> "I like 1e — the little status line. and I actually don't think we need to say
-  'Emulated' if we do that." · "we don't introduce a new emulated violet except for the bar." Concepts A–D and the violet ▶ pill moved to the
-  rejected strip at the bottom. <b>Still open:</b> the band's wording per backing (section 1), the twin verb's home (2b), the presence-line and
-  stage-label wording now that the title carries no kind (4 strip).</div>
+<div class="ruled"><b>Ruled (Yona, 2026-09-07):</b> the band, kind-first wording (W1) · no "Emulated" title prefix · no violet beyond the band ·
+  no twin verb ("I could imagine having a way to add an emulated device on the device page but that's all") · the settings row lists boards, not
+  "emulated" ("a board is just a board") · <code>?on=emu | sim | mac:… | ws:…</code>. <b>Still open:</b> the kind words on the band (section 1:
+  Emu/Sim vs Emulated/Simulated), the picker's row shape (2b), the add-slot layout (2a), the strip's wording (4).</div>
 
 <div class="controls" id="ctl">
-  <span><b>Emulated card</b></span>
+  <span><b>Emu card</b></span>
   <span class="grp" id="c-state"></span>
   <span class="sep"></span>
   <span><b>Speed</b></span>
   <span class="grp" id="c-speed"></span>
   <span class="sep"></span>
   <span class="grp">
-    <button id="b-twin" class="active">twin of Porch sign</button>
     <button id="b-synth">mark MAC synthetic</button>
     <button id="b-term">compact terminal</button>
     <button id="b-anim">no animation</button>
@@ -441,34 +440,31 @@ code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
 </div>
 
 <!-- ================================================================= -->
-<h2><span class="n">1</span>The band, across the three backings</h2>
+<h2><span class="n">1</span>One card, four bands: real · emu · sim of a board · sim of Desktop</h2>
 <p class="sub">
-  <b>R</b> is the desk: Porch sign, a XIAO ESP32-C6, Ready, running <i>Luna's porch sign</i>. Every other card is the same card with the 24px
-  band under the header and nothing else changed — <b>the title is the board's name</b> (a twin's title equals its original's; the band is what
-  tells them apart). <b>E1</b> the emulated board (D6). <b>E2</b> the Desktop device (D31): fw-browser as a device record, one per browser, born
-  Ready, GPU tier. <b>E3</b> Desktop wearing a board it cannot emulate yet — the costume (D34): the band says so, no second dress. Pick the
-  <b>Wording</b> below: what the band says is the open question; the shape is ruled.
+  <b>R</b> is the desk: Porch sign, a XIAO ESP32-C6, Ready, running <i>Luna's porch sign</i> — no band. <b>E</b> an emu of the same board:
+  the shipped fw-esp32c6 image in lp-emu, exact, the band carries the speed and guest clock (D8). <b>S1</b> a sim of the same board: the
+  desktop firmware in the browser wearing the XIAO's manifest — fast, not exact, GPU tier. <b>S2</b> the sim of Desktop: the same firmware
+  wearing the desktop manifest. Titles are the board's or the target's name; the band is the whole difference. Pick the <b>Kind words</b>.
 </p>
-<div class="local"><span><b>Wording</b></span><span class="grp" id="c-word"></span></div>
+<div class="local"><span><b>Kind words</b></span><span class="grp" id="c-kind"></span></div>
 <div class="concepts" id="s1"></div>
-<h2 style="margin-top:34px"><span class="n">1b</span>The emulated card across every face</h2>
-<p class="sub">The band redrawn in each face the vision requires: born flashed (D10, first face = Ready), Flashing (sub-second, same activity and
-  journal), a slow boot at 0.3× (D8: only boot deadlines dilate, the band carries the speed), Ready at 0.6×, and the powered-off record (D9).
-  The "twin standing by" face from round 1 is gone: under D33 open never chooses silicon, so nothing waits on the real board.</p>
+<h2 style="margin-top:34px"><span class="n">1b</span>The emu card across every face, and the two powered-off records</h2>
+<p class="sub">Born by open (D10/D33, first face = Ready), Flashing (sub-second, same activity and journal), a slow boot at 0.3× (D8), Ready at 0.6×;
+  then the powered-off emu (D9: image kept) beside the powered-off sim (D46: a thin record — nothing to keep, the card says so).</p>
 <div class="concepts" id="s1b"></div>
 
 <!-- ================================================================= -->
-<h2><span class="n">2</span>The roster: everything is a device</h2>
+<h2><span class="n">2</span>The Devices tab: the picker is the one way to make a device</h2>
 <p class="sub">
-  The Devices grid (production grid, <code>minmax(320px,1fr)</code>): the real Porch sign, its emulated twin, a fresh emulated C6 that open
-  created silently (D33), <b>the Desktop device</b> (D31 — one per browser, in the roster like any board), a powered-off board, and the add slot.
-  <b>D18</b>: the twin verb "Emulate this board" is in v1 <i>if this spike likes it</i>. Pick where the twin verb lives on the real card, how the
-  add slot grows a second verb, and where a powered-off emulated board waits.
+  The production grid (<code>minmax(320px,1fr)</code>): the real Porch sign, an emu C6 that open created, a sim C6, the Desktop sim, a
+  powered-off emu, and the add slot. <b>D44</b>: "It's connected" stays the CTA; a dropdown lists every supported board plus Desktop, each row
+  tagged <b>emu</b> or <b>sim</b> by what this build can do — emu is the default where both exist, with a quiet "simulate instead". No twin verb.
 </p>
 <div class="local">
-  <span><b>Twin verb</b></span><span class="grp" id="c-twinverb"></span>
-  <span class="sep"></span>
   <span><b>Add slot</b></span><span class="grp" id="c-add"></span>
+  <span class="sep"></span>
+  <span><b>Row tag</b></span><span class="grp" id="c-tag"></span>
   <span class="sep"></span>
   <span><b>Powered off</b></span><span class="grp" id="c-off"></span>
 </div>
@@ -476,12 +472,13 @@ code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
 <div class="concepts" id="s2notes" style="margin-top:14px"></div>
 
 <!-- ================================================================= -->
-<h2><span class="n">3</span>Open starts the device (D33); the address is the project (D35)</h2>
+<h2><span class="n">3</span>The project is the URL; <code>?on=</code> says which device (D43)</h2>
 <p class="sub">
-  There is no target moment any more. Opening a project <b>always</b> starts an emulated device of the project's kind — existing, else created
-  silently and born flashed with the project — or Desktop for a desktop target, or Desktop in costume when no emulator module exists yet. It
-  <b>never touches silicon</b>: putting the project on a real board is Flash/Push from that board's card. The opening frame (P6: honest states)
-  narrates which device it is starting; the address bar says the project, with the device as a hint. Cycle <b>Face</b> for the three backings.
+  Opening a project always needs a device and never touches silicon by itself (D33). <code>?on=emu</code> and <code>?on=sim</code> name a
+  <b>kind</b> and resolve to the device of that kind for the project's target (the one that last ran it, else an idle one, else create);
+  <code>?on=mac:…</code> names a board by identity (silicon, or an emu by its synthetic MAC); <code>?on=ws:host:port</code> names a device over
+  WebSocket (a real desktop server, or a native emu backing). No <code>?on=</code> → emu if a module exists, else sim. The opening frame narrates
+  the device. Cycle <b>Face</b>.
 </p>
 <div class="local">
   <span><b>Face</b></span><span class="grp" id="c-face"></span>
@@ -489,45 +486,37 @@ code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
 <div class="concepts wide" id="s3"></div>
 
 <!-- ================================================================= -->
-<h2><span class="n">4</span>The Desktop device's card (D30, D31) — and every other place the word appears</h2>
+<h2><span class="n">4</span>Desktop is a target, not a device — and every other place the words appear</h2>
 <p class="sub">
-  <b>S</b> is today's sim card, faithful (sim_card.rs: tint edge, "Simulator" title, SIMULATOR transport label, icon tabs, the D4 <i>as
-  &lt;board&gt;</i> Health line) — shown so the gate sees what leaves. Under D30 that anatomy retires with <code>RuntimePayload::Sim</code>:
-  Desktop is the device card. <b>4A</b> Desktop in this tab; <b>4B</b> Desktop in costume (D34); <b>4C</b> a Desktop LightPlayer server on
-  the LAN over <code>host-websocket</code> (D21's second backing — same card, same band, a different "where"). The strip below is every other
-  place the word appears, now that a title carries no kind.
+  There is no desktop emu; there is a desktop sim (S2 above, repeated at the left) and there are <b>real</b> desktop devices: a LightPlayer
+  server on the network, reached over <code>ws:</code> — a real card with a where instead of a MAC, no band. The strip is every other place
+  the words real / emu / sim / target now appear.
 </p>
-<div class="local">
-  <span><b>Today's tab</b></span><span class="grp" id="c-simtab"></span>
-</div>
 <div class="concepts" id="s4"></div>
 <div class="strip" id="s4strip"></div>
 
 <div class="rejected" id="rej">
   <b>Rejected, and why.</b>
   <ul>
-    <li><b>Dress A (words only), B (violet left edge), C (kind chip), D (ghost frame)</b> — round 1's other concepts. Yona: the band says it;
-      a second dress "would call it out harder than we need to". B's edge was the agent's lean and lost: the edge is the sim card's grammar,
-      and the sim card retires (D30).</li>
-    <li><b>The "Emulated" title prefix.</b> Ruled out with the band ("I don't think we need to say 'Emulated' if we do that"). The title is the
-      board's or the record's name; a twin's title equals its original's, and the band tells them apart.</li>
-    <li><b>A violet ▶ pill on an emulated card.</b> The frames are honestly the emulated board's (ADR honest-device-preview); the pill reads
-      <i>live</i> like any device's. No violet beyond the band (D38). The same applies to the Desktop card: today's violet "● sim" pill was the
-      sim family's; the band is that family's one home now.</li>
-    <li><b>3B the package-card sheet, 3C the never-block editor banner, and the "different board attached" offer</b> — round 1's target moment.
-      Under D33 there is no ask on open: it starts the project's emulated device, and the offer-never-guess rule lives on the real card's
-      Flash/Push verbs where it always did.</li>
-    <li><b>"Twin standing by" + "Run here instead".</b> D7's "real board if attached and idle" is superseded for open (D33); an emulated board is
-      Ready or Powered off, never waiting on silicon.</li>
-    <li><b>The emulated board (or Desktop) wearing the sim card's anatomy</b> (title bar + icon tabs). D6/D30: they are devices — the four
-      zones, the same verbs, the same fold. A different anatomy would say "runtime", and there is no runtime that is not a device.</li>
-    <li><b>A separate "Emulated" section header in the roster.</b> The twin and its original would sit in different grids; the desk and the
-      emulated desk are one roster. Grouping is a sort, not a section — later.</li>
-    <li><b>Calling it "Emulator".</b> Reserved (emulator vision D12) for the real-binary thing under <code>lp-emu/</code>; the card names a board.</li>
-    <li><b>A fake board photo / silhouette on the card.</b> The pick popover already carries the drawing; a picture on the card would read as a
-      product shot of hardware the user does not have — the opposite of T7.</li>
-    <li><b>The device in the address path</b> (<code>/device/&lt;uid&gt;</code> as the lens address). D35: the identity is the project; the device is a
-      hint that a pasted link may carry and the reader may not have.</li>
+    <li><b>The twin verb ("Emulate this board")</b> on a real card, in the device zone or the ⋯ menu. Yona: "not sure I understand why … I could
+      imagine having a way to add an emulated device on the device page but that's all." D2's "emulate that actual board" is an emu of the
+      same kind plus Push — two verbs that exist.</li>
+    <li><b>"Emulated" on the project's board rows</b> (round 2's settings row). "emulated is something that a device is, a board is just a board."</li>
+    <li><b>Desktop as a device record, and the "costume"</b> (round 2's D31/D34). Desktop is a target; a sim of a board is a sim, first-class,
+      not Desktop in disguise. The band says <i>Sim · XIAO ESP32-C6</i> and that is the whole truth.</li>
+    <li><b>Today's sim card as the "what leaves" reference</b> (round 2, section 4 S). It was the OLD device-card anatomy (tint edge, title bar,
+      icon tabs), not the current roster card; its removal is chipped as its own cleanup task.</li>
+    <li><b>Dress A (words only), B (violet left edge), C (kind chip), D (ghost frame)</b> — round 1. The band says it; a second dress calls it
+      out harder than needed.</li>
+    <li><b>The "Emulated" title prefix, the violet ▶ pill.</b> The title is the board's or target's name; the pill reads <i>live</i> on every card
+      (the frames are honestly that device's); the band is the one bound-family element.</li>
+    <li><b>3B the package-card sheet, 3C the never-block banner, "twin standing by".</b> There is no ask on open (D33).</li>
+    <li><b>The emulated board or the sim wearing a different anatomy</b> (title bar + icon tabs). They are devices — the four zones, the same
+      verbs, the same fold. There is no runtime that is not a device (D30).</li>
+    <li><b>A separate "Emulated"/"Simulated" section in the roster.</b> One roster; grouping is a sort, later.</li>
+    <li><b>"Emulator" / "Simulator" as card titles.</b> Reserved words for the things, not names for a device; the card names its target.</li>
+    <li><b>A fake board photo on the card.</b> A product shot of hardware the user does not have — the opposite of T7.</li>
+    <li><b>The device in the address path</b> (<code>/device/&lt;uid&gt;</code> as the lens address). The identity is the project; the device is a hint.</li>
   </ul>
 </div>
 
@@ -539,25 +528,23 @@ code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const SEP = ' · ';
 const BOARDS = {
-  'seeed/xiao-esp32-c6':          { name:'XIAO ESP32-C6',                  chip:'esp32c6', fw:'fw-esp32c6 e1f2a3b', sil:'c6' },
-  'seeed/xiao-esp32-s3-plus':     { name:'XIAO ESP32-S3 Plus',             chip:'esp32s3', fw:'fw-esp32s3 9b1c0de', sil:'c6' },
-  'espressif/esp32-c6-devkitc-1': { name:'ESP32-C6-DevKitC-1',             chip:'esp32c6', fw:'fw-esp32c6 e1f2a3b', sil:'long' },
-  'espressif/esp32-s3-devkitc-1': { name:'ESP32-S3-DevKitC-1',             chip:'esp32s3', fw:'fw-esp32s3 9b1c0de', sil:'long' },
-  'quinled/dig-uno':              { name:'QuinLED-Dig-Uno',                chip:'esp32',   fw:'fw-esp32v3 7c80a27', sil:'' },
-  'domraem/dom-z-102':            { name:'WLED LAN 4-Channel (DOM-Z-102)', chip:'esp32',   fw:'fw-esp32v3 7c80a27', sil:'' },
+  'seeed/xiao-esp32-c6':          { name:'XIAO ESP32-C6',                  chip:'esp32c6', fw:'fw-esp32c6 e1f2a3b', emu:true },
+  'seeed/xiao-esp32-s3-plus':     { name:'XIAO ESP32-S3 Plus',             chip:'esp32s3', fw:'fw-esp32s3 9b1c0de', emu:true },
+  'espressif/esp32-c6-devkitc-1': { name:'ESP32-C6-DevKitC-1',             chip:'esp32c6', fw:'fw-esp32c6 e1f2a3b', emu:true },
+  'espressif/esp32-s3-devkitc-1': { name:'ESP32-S3-DevKitC-1',             chip:'esp32s3', fw:'fw-esp32s3 9b1c0de', emu:true },
+  'quinled/dig-uno':              { name:'QuinLED-Dig-Uno',                chip:'esp32',   fw:'fw-esp32v3 7c80a27', emu:false },
+  'domraem/dom-z-102':            { name:'WLED LAN 4-Channel (DOM-Z-102)', chip:'esp32',   fw:'fw-esp32v3 7c80a27', emu:false },
 };
 const C6 = BOARDS['seeed/xiao-esp32-c6'];
-const DOMZ = BOARDS['domraem/dom-z-102'];
 const REAL = { title:'Porch sign', board:C6, mac:'60:55:f9:0a:0b:0c', project:"Luna's porch sign" };
-const SYNTH_MAC = '02:1e:6d:3a:9c:01';   // locally-administered bit set (D9)
-const DESK_MAC  = '02:d3:5c:00:00:01';   // the Desktop record's synthetic identity (D31)
-const DESK_FW   = 'fw-browser 4c7e912';
+const SYNTH_MAC = '02:1e:6d:3a:9c:01';   // an emu's locally-administered MAC (D9)
+const SIM_MAC   = '02:5c:1e:00:00:07';   // a sim's synthetic identity (D46)
+const DESK_MAC  = '02:5c:1e:00:00:01';
+const FWB = 'fw-browser 4c7e912';
 const PRJ = { slug:'lunas-porch-sign', uid:'prj7f3a9c2e41c1', name:"Luna's porch sign" };
+const WS = '192.168.0.21:1234';
 
-const state = {
-  emu:'ready', speed:1, twin:true, synth:false, term:false,
-  word:'W1', twinverb:'menu', add:'one', off:'grid', face:'emu', simtab:'details',
-};
+const state = { emu:'ready', speed:1, synth:false, term:false, kind:'K1', add:'closed', tag:'word', off:'grid', face:'emu' };
 
 /* ---------------------------------------------------------------------
    Small parts
@@ -566,13 +553,7 @@ const ICON = {
   chipglyph: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>',
   monitorplay: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 7.75a.75.75 0 0 1 1.142-.638l3.664 2.249a.75.75 0 0 1 0 1.278l-3.664 2.25a.75.75 0 0 1-1.142-.64z"/><path d="M12 17v4M8 21h8"/><rect x="2" y="3" width="20" height="14" rx="2"/></svg>',
   lan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="14" width="20" height="6" rx="1"/><path d="M6 17h.01M10 17h.01M12 14V9M8 9h8"/></svg>',
-  grow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>',
-  play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 4l14 8-14 8z"/></svg>',
-  details: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
-  console: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-5-6-5M12 19h8"/></svg>',
-  danger: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
-  pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
 };
 const chip = (kind, text, cls='') => `<span class="chip ${kind} ${cls}">${text}</span>`;
 const speedText = s => `${s.toFixed(1)}×`;
@@ -580,8 +561,7 @@ const verb = (t, cls='') => `<span class="verb ${cls}">${t}</span>`;
 const cta  = (t, cls='') => `<span class="cta ${cls}">${esc(t)}</span>`;
 const sp = '<span class="sp"></span>';
 
-/* the porch sign: 3 serpentine rows × 14 lamps, aspect-fit in the 120px slot */
-function lamps(phase=0, dim=false) {
+function lamps(phase=0) {
   const cols=14, rows=3, W=400, H=120, r=4.2;
   const dx = W/(cols+1), dy = H/(rows+1);
   let out='';
@@ -596,39 +576,32 @@ function lamps(phase=0, dim=false) {
 function pill(kind, text) { return `<span class="pill ${kind}"><span class="dot"></span>${esc(text)}</span>`; }
 
 /* ---------------------------------------------------------------------
-   The band — the ONE bound-family element (D38). Three wordings to pick.
-   backing: 'emu' | 'desk' | 'costume' | 'lan'
+   The band — the ONE bound-family element (D38); words per D49
+   backing: 'emu' | 'sim' ; target: a name
    --------------------------------------------------------------------- */
-const WORDING = {
-  W1: { name:'kind first', note:'Leads with the kind word the title no longer carries: <b>Emulated</b> / <b>Desktop</b>; the where follows. The costume says <i>Desktop · as DOM-Z-102</i> — the costume word is the same "as" the old sim Health line used, now in the band where it is read.',
-        emu:(f,sp_) => ['Emulated', 'in this tab'], desk:() => ['Desktop', 'in this tab'], costume:() => ['Desktop', 'as ' + DOMZ.name.replace('WLED LAN 4-Channel ', '')], lan:() => ['Desktop', 'studio.local'] },
-  W2: { name:'where first', note:'Leads with the where — <b>In this tab</b> — which is what the real cards\' transport label slot says for USB. The kind is the glyph plus the second word. Reads the same for emulated and Desktop, which is either the point (one class) or too little (the glyph does the work).',
-        emu:() => ['In this tab', 'emulated'], desk:() => ['In this tab', 'Desktop'], costume:() => ['In this tab', 'Desktop as ' + DOMZ.name.replace('WLED LAN 4-Channel ', '')], lan:() => ['On the LAN', 'Desktop · studio.local'] },
-  W3: { name:'the firmware', note:'Names what is actually running: <b>fw-esp32c6 emulated</b> / <b>fw-browser</b>. Honest to the letter, and the identity row 2 already says the firmware — so the band repeats it. Kept so the gate can reject it for the right reason.',
-        emu:() => ['fw-esp32c6', 'emulated in this tab'], desk:() => ['fw-browser', 'this tab'], costume:() => ['fw-browser', 'as ' + DOMZ.name.replace('WLED LAN 4-Channel ', '')], lan:() => ['fw-host', 'studio.local'] },
+const KIND = {
+  K1: { name:'Emu / Sim', emu:'Emu', sim:'Sim', note:'The short forms — the same words the URL uses (<code>?on=emu</code>, <code>?on=sim</code>) and the picker rows show. Terse in a 24px band; reads as a label, which it is.' },
+  K2: { name:'Emulated / Simulated', emu:'Emulated', sim:'Simulated', note:'The prose forms. Kinder on first read, longer in the band, and they drift from the URL word — the docs would have to teach both.' },
 };
-function band(backing, face, speed) {
-  const W = WORDING[state.word];
-  const [a, b] = W[backing](face, speed);
-  const glyph = backing === 'emu' ? ICON.chipglyph : backing === 'lan' ? ICON.lan : ICON.monitorplay;
+function band(backing, target, face, speed) {
+  const K = KIND[state.kind];
+  const glyph = backing === 'emu' ? ICON.chipglyph : ICON.monitorplay;
   const tail = backing === 'emu'
     ? `${face.dilated || speed !== 1 ? `<span class="m">${speedText(speed)}</span>` : ''}<span class="m">guest ${face.guest}</span>`
-    : backing === 'lan' ? `<span class="m">12 ms</span>` : `<span class="m">GPU</span>`;
-  return `<div class="band ${backing !== 'emu' ? 'desk' : ''}">${glyph}<span>${esc(a)}</span><span class="as">${esc(b)}</span><span class="sp"></span>${tail}</div>`;
+    : `<span class="m">GPU</span>`;
+  return `<div class="band ${backing === 'sim' ? 'desk' : ''}">${glyph}<span>${esc(K[backing])}</span><span class="as">${esc(target)}</span><span class="as">in this tab</span><span class="sp"></span>${tail}</div>`;
 }
 
 /* ---------------------------------------------------------------------
    Faces
    --------------------------------------------------------------------- */
 function emuFace() {
-  const s = state.emu, sp_ = state.speed, twin = state.twin;
+  const s = state.emu, sp_ = state.speed;
   const dilated = sp_ < 0.95;
   const guest = '00:42.1';
   const f = {
-    status:{kind:'good', label:'Ready'}, title: twin ? 'Porch sign' : 'XIAO ESP32-C6',
-    project: twin ? REAL.project : null,
-    preview:'frames', projectLine: twin ? REAL.project : 'Nothing loaded',
-    projectVerbs: twin ? [cta('Open in editor'), sp, verb('Remove')] : [cta('Choose what to put on this board'), sp],
+    status:{kind:'good', label:'Ready'}, preview:'frames', projectLine: REAL.project,
+    projectVerbs: [cta('Open in editor'), sp, verb('Remove')],
     fwLine:`${C6.fw} · ${C6.name}`, fwBar:null, fwVerbs:[verb('Update firmware'), sp, verb('Factory reset')],
     deviceLine: dilated ? `Last heard 1 s ago · running at ${speedText(sp_)}` : `Last heard 1 s ago`,
     deviceVerbs:[verb('Reset'), verb('Power off'), sp, verb('Forget')],
@@ -636,9 +609,8 @@ function emuFace() {
     guest, dilated,
   };
   if (s === 'created') {
-    f.deviceLine = 'Created just now · flashed fw-esp32c6 e1f2a3b';
+    f.deviceLine = 'Created by open just now · flashed fw-esp32c6 e1f2a3b';
     f.term = [['rom','ESP-ROM:esp32c6-20220919'],['rom','rst:0x1 (POWERON),boot:0x6c (SPI_FAST_FLASH_BOOT)'],['','lp: fw-esp32c6 e1f2a3b · heap 361,120 B free'],['hi','hello · seeed/xiao-esp32-c6 · 02:1e:6d:3a:9c:01'],['','manifest: seeed/xiao-esp32-c6 stamped'],['','project: Luna\'s porch sign · 42 lamps · 31 fps']];
-    f.projectLine = REAL.project; f.projectVerbs = [cta('Open in editor'), sp, verb('Remove')];
   }
   if (s === 'flashing') {
     f.status = {kind:'working', label:'Flashing'};
@@ -651,8 +623,7 @@ function emuFace() {
   if (s === 'booting') {
     f.status = {kind:'working', label:'Identifying'};
     f.preview = 'sentence'; f.previewText = 'No picture yet — the board is starting.';
-    f.projectLine = twin ? REAL.project : 'Nothing loaded'; f.projectVerbs = [sp];
-    f.fwVerbs = [sp]; f.deviceVerbs = [sp, verb('Forget')];
+    f.projectVerbs = [sp]; f.fwVerbs = [sp]; f.deviceVerbs = [sp, verb('Forget')];
     f.deviceLine = dilated ? `Identifying… boot at ${speedText(sp_)} — up to ${Math.round(5/sp_)} s` : 'Identifying…';
     f.term = [['rom','ESP-ROM:esp32c6-20220919'],['rom','Build:Sep 19 2022'],['rom','rst:0x1 (POWERON),boot:0x6c (SPI_FAST_FLASH_BOOT)'],['rom','load:0x40875720,len:0x1ef8'],['','lp: fw-esp32c6 e1f2a3b · heap 361,120 B free']];
   }
@@ -668,102 +639,92 @@ function realFace() {
     guest:null, dilated:false,
   };
 }
-/* the Desktop device (D31): fw-browser as a record. What it never does (boot banner, flash) is absent, not faked. */
-function deskFace(costume, lan) {
-  const where = lan ? 'studio.local' : 'this tab';
-  const f = {
-    status:{kind:'good', label:'Ready'}, preview:'frames', projectLine: costume ? "Big dome" : REAL.project,
+/* a sim: the desktop firmware in the browser, wearing a target's manifest (D42/D46/D47) */
+function simFace(target) {
+  const board = target !== 'desktop';
+  return {
+    status:{kind:'good', label:'Ready'}, preview:'frames', projectLine: REAL.project,
     projectVerbs:[cta('Open in editor'), sp, verb('Remove')],
-    fwLine: lan ? `fw-host 4c7e912 · Desktop` : `${DESK_FW} · Desktop`, fwBar:null,
-    fwVerbs: lan ? [verb('Update firmware'), sp] : [sp],
-    deviceLine: lan ? 'Last heard 1 s ago · 12 ms' : 'Last heard 1 s ago · GPU tier',
-    deviceVerbs: lan ? [verb('Reset'), verb('Disconnect'), sp, verb('Forget')] : [verb('Reset'), verb('Power off'), sp, verb('Forget')],
-    term: costume
-      ? [['','lp: fw-browser 4c7e912 · desktop manifest'],['hi','hello · lightplayer/desktop · 02:d3:5c:00:00:01'],['em','costume: domraem/dom-z-102 (no emulator module yet)'],['','ports: 4 of unlimited · resolution as DOM-Z-102'],['','project: Big dome · 1,880 lamps · 60 fps'],['','heartbeat · frame 4,012 · gpu ok']]
-      : [['','lp: ' + (lan ? 'fw-host 4c7e912' : 'fw-browser 4c7e912') + ' · desktop manifest'],['hi',`hello · lightplayer/desktop · ${lan ? '3c:22:fb:9a:11:02' : DESK_MAC}`],['','tier: GPU (granted)'],['','project: Luna\'s porch sign · 42 lamps · 60 fps'],['','heartbeat · frame 4,012 · gpu ok'],['','heartbeat · frame 4,072 · gpu ok']],
+    fwLine: board ? `${FWB} · ${C6.name} manifest` : `${FWB} · desktop manifest`, fwBar:null, fwVerbs:[sp],
+    deviceLine:'Last heard 1 s ago · GPU tier',
+    deviceVerbs:[verb('Reset'), verb('Power off'), sp, verb('Forget')],
+    term: board
+      ? [['','lp: fw-browser 4c7e912 · desktop firmware, in the browser'],['hi',`hello · seeed/xiao-esp32-c6 (sim) · ${SIM_MAC}`],['','manifest: seeed/xiao-esp32-c6 · 4 ports · pin scarcity as the board'],['','tier: GPU (granted)'],['','project: Luna\'s porch sign · 42 lamps · 60 fps'],['','heartbeat · frame 4,012 · gpu ok']]
+      : [['','lp: fw-browser 4c7e912 · desktop firmware, in the browser'],['hi',`hello · lightplayer/desktop (sim) · ${DESK_MAC}`],['','manifest: desktop · ports unlimited'],['','tier: GPU (granted)'],['','project: Luna\'s porch sign · 42 lamps · 60 fps'],['','heartbeat · frame 4,012 · gpu ok']],
     guest:null, dilated:false,
   };
-  return f;
+}
+/* a REAL desktop device: a LightPlayer server on the network (D43 ws:) */
+function serverFace() {
+  return {
+    status:{kind:'good', label:'Ready'}, preview:'frames', projectLine: REAL.project,
+    projectVerbs:[cta('Open in editor'), sp, verb('Remove')],
+    fwLine:`fw-host 4c7e912 · Desktop`, fwBar:null, fwVerbs:[verb('Update firmware'), sp],
+    deviceLine:'Last heard 1 s ago · 12 ms', deviceVerbs:[verb('Reset'), verb('Disconnect'), sp, verb('Forget')],
+    term:[['','lp: fw-host 4c7e912 · desktop manifest · Mac mini'],['hi',`hello · lightplayer/desktop · ws:${WS}`],['','tier: GPU (granted) · outputs: 2 network'],['','project: Luna\'s porch sign · 42 lamps · 60 fps'],['','heartbeat · frame 4,012 · gpu ok'],['','heartbeat · frame 4,072 · gpu ok']],
+    guest:null, dilated:false,
+  };
 }
 
 /* ---------------------------------------------------------------------
    The device card — one renderer; the band is the only hook
    --------------------------------------------------------------------- */
 function deviceCard(opts) {
-  const { backing, title, board, mac, fw, speed, face, menu, twinverb, row1Override } = opts;
+  const { backing, target, title, row1, row2, speed, face, menu } = opts;
   const status = opts.status || face.status;
-  const real = backing === 'real';
-  // chips: [status chip][⋯]
-  let chips = chip(status.kind, esc(status.label));
-  const row1 = row1Override || [board.name, board.chip].join(SEP);
-  const row2 = [mac, `<span class="fwl">${esc(fw)}</span>`].concat(!real && state.synth ? ['<span class="mem">synthetic</span>'] : []).join(SEP);
-  const identity = `<div class="rows"><p class="mono-line">${row1}</p><p class="mono-line">${row2}</p></div>`;
-
-  let preview;
-  if (face.preview === 'frames') {
-    preview = `<div class="play ${face.previewDim ? 'dimmed' : ''}">${lamps(40)}${pill('live', 'live')}</div>`;
-  } else {
-    preview = `<div class="play"><div class="empty"><p>${esc(face.previewText)}</p></div></div>`;
-  }
-  const projectZone = `<section class="zone">
-      ${preview}
-      <p class="info ${face.projectLineCls || ''}">${esc(face.projectLine)}</p>
-      <div class="bar ${face.projectBar != null ? 'lit' : ''}"></div>
-      <div class="verbs">${face.projectVerbs.join('')}</div>
-    </section>`;
-
-  const bar = face.fwBar == null ? '<div class="bar"></div>'
-    : `<div class="bar lit ${face.fwBar === 'sweep' ? 'sweep' : ''}"><i style="width:${face.fwBar === 'sweep' ? 35 : face.fwBar}%"></i></div>`;
+  const chips = chip(status.kind, esc(status.label)) + '<span class="dots">···</span>';
+  const r2 = row2 + (backing !== 'real' && state.synth ? `${SEP}<span class="mem">synthetic</span>` : '');
+  const identity = `<div class="rows"><p class="mono-line">${row1}</p><p class="mono-line">${r2}</p></div>`;
+  const preview = face.preview === 'frames'
+    ? `<div class="play">${lamps(40)}${pill('live', 'live')}</div>`
+    : `<div class="play"><div class="empty"><p>${esc(face.previewText)}</p></div></div>`;
+  const projectZone = `<section class="zone">${preview}
+      <p class="info">${esc(face.projectLine)}</p><div class="bar"></div>
+      <div class="verbs">${face.projectVerbs.join('')}</div></section>`;
+  const bar = face.fwBar == null ? '<div class="bar"></div>' : `<div class="bar lit"><i style="width:${face.fwBar}%"></i></div>`;
   const term = `<div class="term">${face.term.map(([c,t]) => `<div class="${c}">${esc(t)}</div>`).join('')}</div>`;
-  const fwZone = `<section class="zone combined"><div class="zrows">
-      <p class="info">${esc(face.fwLine)}</p>${bar}
-      <div class="verbs">${face.fwVerbs.join('')}</div></div>${term}</section>`;
-
-  let deviceVerbs = face.deviceVerbs.slice();
-  if (real && twinverb === 'device') deviceVerbs.splice(2, 0, verb(`${ICON.chipglyph} Emulate`, 'twin'));
-  const deviceZone = `<footer class="zone device">
-      <p class="info">${esc(face.deviceLine)}</p>
-      <div class="verbs">${deviceVerbs.join('')}</div></footer>`;
-
-  const bandHtml = real ? '' : band(backing, face, speed);
-  const dots = (real && twinverb === 'menu') ? `<span class="dots open">···</span>` : (real ? '<span class="dots">···</span>' : '<span class="dots">···</span>');
-  chips += dots;
+  const fwZone = `<section class="zone combined"><div class="zrows"><p class="info">${esc(face.fwLine)}</p>${bar}<div class="verbs">${face.fwVerbs.join('')}</div></div>${term}</section>`;
+  const deviceZone = `<footer class="zone device"><p class="info">${esc(face.deviceLine)}</p><div class="verbs">${face.deviceVerbs.join('')}</div></footer>`;
+  const bandHtml = backing === 'real' ? '' : band(backing, target, face, speed);
   return `<article class="card" data-kind="${backing}">
-    <header><div class="id">
-      <div class="head"><h3>${esc(title)}</h3><span class="chips">${chips}</span></div>
-      ${identity}
-    </div></header>
+    <header><div class="id"><div class="head"><h3>${esc(title)}</h3><span class="chips">${chips}</span></div>${identity}</div></header>
     ${bandHtml}${projectZone}${fwZone}${deviceZone}${menu || ''}
   </article>`;
 }
-function realCard(extra={}) {
-  return deviceCard({ backing:'real', title:REAL.title, board:C6, mac:REAL.mac, fw:C6.fw, face:realFace(), speed:1, twinverb:state.twinverb, ...extra });
+const fwl = t => `<span class="fwl">${esc(t)}</span>`;
+function realCard() {
+  return deviceCard({ backing:'real', title:REAL.title, row1:[C6.name, C6.chip].join(SEP), row2:[REAL.mac, fwl(C6.fw)].join(SEP), face:realFace(), speed:1 });
 }
-function emuCard(extra={}) {
+function emuCard() {
   const face = emuFace();
-  return deviceCard({ backing:'emu', title:face.title, board:C6, mac:SYNTH_MAC, fw:C6.fw, status:face.status, face, speed:state.speed, ...extra });
+  return deviceCard({ backing:'emu', target:C6.name, title:C6.name, row1:[C6.name, C6.chip].join(SEP), row2:[SYNTH_MAC, fwl(C6.fw)].join(SEP), status:face.status, face, speed:state.speed });
 }
-function deskCard(kind='desk', extra={}) {
-  const costume = kind === 'costume', lan = kind === 'lan';
-  const face = deskFace(costume, lan);
-  return deviceCard({ backing:kind, title: lan ? 'Studio on the Mac mini' : 'Desktop', board: costume ? DOMZ : { name:'Desktop', chip: lan ? 'fw-host' : 'fw-browser' },
-    row1Override: costume ? `Desktop${SEP}<span class="emu">as ${esc(DOMZ.name)}</span>` : null,
-    mac: lan ? '3c:22:fb:9a:11:02' : DESK_MAC, fw: lan ? 'fw-host 4c7e912' : DESK_FW, face, speed:1, ...extra });
+function simBoardCard() {
+  return deviceCard({ backing:'sim', target:C6.name, title:C6.name, row1:[C6.name, C6.chip].join(SEP), row2:[SIM_MAC, fwl(FWB)].join(SEP), face:simFace('board'), speed:1 });
+}
+function simDeskCard() {
+  return deviceCard({ backing:'sim', target:'Desktop', title:'Desktop', row1:['Desktop', 'fw-browser'].join(SEP), row2:[DESK_MAC, fwl(FWB)].join(SEP), face:simFace('desktop'), speed:1 });
+}
+function serverCard() {
+  return deviceCard({ backing:'real', title:'Studio on the Mac mini', row1:['Desktop', 'fw-host'].join(SEP), row2:[`ws:${WS}`, fwl('fw-host 4c7e912')].join(SEP), face:serverFace(), speed:1 });
 }
 
-/* the powered-off emulated board (D9 durable record) */
-function offTile() {
-  const title = state.twin ? 'Porch sign' : 'XIAO ESP32-C6';
+/* powered-off records */
+function offTile(kind) {
+  if (kind === 'sim') return `<div class="rem edge">
+    <div class="head"><h3>${C6.name}</h3><span class="chips">${chip('neutral','Powered off')}</span></div>
+    <div class="play"><div class="empty"><p>Powered off — a sim keeps nothing but its name; Power on starts it fresh.</p></div></div>
+    <p class="mono-line">${KIND[state.kind].sim}${SEP}${C6.name}${SEP}${SIM_MAC}</p>
+    <div class="verbs">${verb('Power on','outline')}${sp}${verb('Forget')}</div></div>`;
   return `<div class="rem edge">
-    <div class="head"><h3>${title}</h3><span class="chips">${chip('neutral','Powered off')}</span></div>
+    <div class="head"><h3>${C6.name}</h3><span class="chips">${chip('neutral','Powered off')}</span></div>
     <div class="play"><div class="empty"><p>Powered off — the flash image is kept (4 MiB), so the board comes back as it was.</p></div></div>
-    <p class="mono-line">${C6.name}${SEP}${SYNTH_MAC}${SEP}ran 4 min ago</p>
-    <div class="verbs">${verb('Power on','outline')}${sp}${verb('Forget')}</div>
-  </div>`;
+    <p class="mono-line">${KIND[state.kind].emu}${SEP}${C6.name}${SEP}${SYNTH_MAC}${SEP}ran 4 min ago</p>
+    <div class="verbs">${verb('Power on','outline')}${sp}${verb('Forget')}</div></div>`;
 }
 
 /* ---------------------------------------------------------------------
-   Section 1 — the band across the three backings
+   Section 1
    --------------------------------------------------------------------- */
 function ruler(root) {
   root.querySelectorAll('.concept').forEach(el => {
@@ -776,207 +737,166 @@ function ruler(root) {
 }
 function renderS1() {
   const root = document.getElementById('s1');
-  const W = WORDING[state.word];
-  const saved = { emu:state.emu, twin:state.twin }; Object.assign(state, { emu:'ready', twin:true });
+  const K = KIND[state.kind];
+  const saved = state.emu; state.emu = 'ready';
   root.innerHTML = `
-    <div class="concept ref"><h3 class="c"><span class="k">R</span>The desk — production, faithful</h3>${realCard({twinverb:'none'})}
-      <p class="ruler"></p><p class="cn">device_roster_card.rs at the 400px column: header 90 · Project 220 · Firmware+Terminal 252 · Device 80. Every other card is this card plus the band.</p></div>
-    <div class="concept lean"><h3 class="c"><span class="k">E1</span>Emulated board (the twin) <span style="color:#f0dc7a;font-weight:500">· ruled</span></h3>${emuCard()}
-      <p class="ruler"></p><p class="cn">Same title as R — <b>Porch sign</b> — same picture, same verbs; the band is the whole difference. The speed and the guest clock live in the band (D8), never in the chip row. Costs one height-table row (644 → 668px, ADR 2026-09-03).</p></div>
-    <div class="concept"><h3 class="c"><span class="k">E2</span>The Desktop device (D31)</h3>${deskCard('desk')}
-      <p class="ruler"></p><p class="cn">fw-browser as a device record: born Ready, GPU tier, one per browser. No Update firmware (it updates with Studio), no bootloader faces — absent facts, stated as absent. "Stop simulator" is <b>Power off</b>.</p></div>
-    <div class="concept"><h3 class="c"><span class="k">E3</span>Desktop in costume (D34)</h3>${deskCard('costume')}
-      <p class="ruler"></p><p class="cn">A DOM-Z-102 project opened with no esp32 emulator module yet: Desktop wears the board's manifest for resolution and says so in the band and identity row 1. A stopgap bounded by D36 (emulate every catalog board); never dressed like the emulated card.</p></div>
-    <div class="concept" style="grid-column:1/-1"><p class="cn"><b>${esc(W.name)}</b> — ${W.note}</p></div>`;
-  Object.assign(state, saved);
+    <div class="concept ref"><h3 class="c"><span class="k">R</span>Real — production, faithful</h3>${realCard()}
+      <p class="ruler"></p><p class="cn">device_roster_card.rs at the 400px column: header 90 · Project 220 · Firmware+Terminal 252 · Device 80. No band: real needs no explaining.</p></div>
+    <div class="concept lean"><h3 class="c"><span class="k">E</span>Emu of the board <span style="color:#f0dc7a;font-weight:500">· ruled shape</span></h3>${emuCard()}
+      <p class="ruler"></p><p class="cn">The shipped fw-esp32c6 image in lp-emu. Same title as a real XIAO would auto-name to; the band carries kind · target · where, then speed and guest clock (D8). Costs one height-table row (644 → 668px).</p></div>
+    <div class="concept"><h3 class="c"><span class="k">S1</span>Sim of the board (D42)</h3>${simBoardCard()}
+      <p class="ruler"></p><p class="cn">The desktop firmware in the browser wearing the XIAO's manifest: pin scarcity and ports as the board, no flash, no bootloader, GPU tier. Row 2 says fw-browser — that is the honesty; the band says Sim. This is what you get for a board with no emulator module yet, and what <code>?on=sim</code> asks for on purpose (faster, less exact).</p></div>
+    <div class="concept"><h3 class="c"><span class="k">S2</span>Sim of Desktop</h3>${simDeskCard()}
+      <p class="ruler"></p><p class="cn">Today's simulator, as a device: the same firmware wearing the desktop manifest (ports unlimited, D11), GPU tier. Desktop is the target; the sim is the device. "Stop simulator" is Power off.</p></div>
+    <div class="concept" style="grid-column:1/-1"><p class="cn"><b>${esc(K.name)}</b> — ${K.note}</p></div>`;
+  state.emu = saved;
   ruler(root);
 }
 function renderS1b() {
-  const saved = { emu:state.emu, speed:state.speed, twin:state.twin };
+  const saved = { emu:state.emu, speed:state.speed };
   const faces = [
-    ['Ready · 1.0×', {emu:'ready', speed:1}], ['Born flashed by open (D10, D33)', {emu:'created', speed:1, twin:false}],
-    ['Flashing (sub-second)', {emu:'flashing', speed:1}], ['Slow boot · 0.3× (D8)', {emu:'booting', speed:0.3}],
-    ['Ready · 0.6× (D8)', {emu:'ready', speed:0.6}],
+    ['Born by open (D10, D33)', {emu:'created', speed:1}], ['Flashing (sub-second)', {emu:'flashing', speed:1}],
+    ['Slow boot · 0.3× (D8)', {emu:'booting', speed:0.3}], ['Ready · 0.6× (D8)', {emu:'ready', speed:0.6}],
   ];
-  let html = faces.map(([lab, st]) => { Object.assign(state, saved, st); return `<div class="concept"><h3 class="c"><span class="k">E1</span>${esc(lab)}</h3>${emuCard()}<p class="ruler"></p></div>`; }).join('');
+  let html = faces.map(([lab, st]) => { Object.assign(state, st); return `<div class="concept"><h3 class="c"><span class="k">E</span>${esc(lab)}</h3>${emuCard()}<p class="ruler"></p></div>`; }).join('');
   Object.assign(state, saved);
-  html += `<div class="concept"><h3 class="c"><span class="k">E1</span>Powered off (D9)</h3>${offTile()}<p class="ruler"></p></div>`;
+  html += `<div class="concept"><h3 class="c"><span class="k">E</span>Powered off emu (D9)</h3>${offTile('emu')}<p class="ruler"></p></div>`;
+  html += `<div class="concept"><h3 class="c"><span class="k">S1</span>Powered off sim (D46)</h3>${offTile('sim')}<p class="ruler"></p></div>`;
   const root = document.getElementById('s1b'); root.innerHTML = html; ruler(root);
 }
 
 /* ---------------------------------------------------------------------
-   Section 2 — the roster
+   Section 2 — the Devices tab and its picker
    --------------------------------------------------------------------- */
-const TWINVERB = { device:'Device zone verb', menu:'header ⋯ menu (PR #553)', none:'no twin verb' };
-const ADD = { one:'one slot, two verbs', two:'two slots', picker:'picker open' };
+const ADD = { closed:'slot, dropdown closed', open:'dropdown open' };
+const TAG = { word:'a word', chip:'a chip', sentence:'a sentence' };
 const OFF = { grid:'a tile in the grid', remembered:'the remembered line' };
 
-function picker() {
-  const tiles = Object.entries(BOARDS).map(([id, b], i) => `<div class="tile ${i===0?'picked':''}">
-      <div class="sil ${b.sil}"></div><span class="t">${esc(b.name)}</span><span class="s">${b.chip}</span>${i===0?'<span class="ck">✓</span>':''}</div>`).join('');
-  return `<div class="pop">
-    <div class="top"><p><b>Pick the board to emulate</b> · 6 boards · chip follows the board</p>
-      <p class="why">Nothing to plug in, so nothing to detect: every served board is offered. The board's manifest is stamped at creation.</p></div>
-    <div class="tiles">${tiles}</div>
-    <div class="foot"><p>Born flashed with the current firmware (fw-esp32c6 e1f2a3b) and stamped as a XIAO ESP32-C6. Its first face is Ready.</p>${cta('Create emulated XIAO ESP32-C6')}</div>
+function tag(kind) {
+  const K = KIND[state.kind];
+  const word = kind === 'emu' ? K.emu.toLowerCase() : K.sim.toLowerCase();
+  if (state.tag === 'chip') return chip('bound', esc(kind === 'emu' ? K.emu : K.sim), 'speed');
+  if (state.tag === 'sentence') return `<span class="s">${kind === 'emu' ? 'we\'ll emulate it' : 'we\'ll simulate it'}</span>`;
+  return `<span class="s" style="color:var(--st-bound-tx)">${esc(word)}</span>`;
+}
+function dropdown() {
+  const rows = [['Desktop', 'sim', true]].concat(Object.values(BOARDS).map(b => [b.name, b.emu ? 'emu' : 'sim', false]));
+  const K = KIND[state.kind];
+  return `<div class="tmenu" style="position:static;margin-top:8px;width:100%">
+    <div class="hd">Desktop</div>
+    ${rows.slice(0,1).map(([n,k]) => `<div class="mi"><span class="sw v"></span>${esc(n)}${tag(k)}</div>`).join('')}
+    <div class="hd">Boards</div>
+    ${rows.slice(1).map(([n,k], i) => `<div class="mi ${i===0?'hov':''}"><span class="sw"></span>${esc(n)}${tag(k)}</div>`).join('')}
+    <p class="hintline" style="margin:8px 10px 6px">${K.emu} runs the board's real firmware; ${K.sim.toLowerCase()} runs the desktop firmware wearing the board — faster, less exact. Boards without an emulator yet get a sim. <span style="color:var(--st-bound-tx)">Hold ⌥ to simulate instead.</span></p>
   </div>`;
 }
 function addSlot(mode) {
-  if (mode === 'two') {
-    return `<div class="addslot split"><p>Connect a LightPlayer board to control&nbsp;it.</p>${cta("It's plugged in")}</div>
-      <div class="addslot split"><p>Emulate a board you don't have — it boots in this tab and keeps its flash image.</p>${cta('+ emulated board')}</div>`;
-  }
-  const pk = mode === 'picker' ? picker() : '';
   return `<div class="addslot"><p>Connect a LightPlayer board to control&nbsp;it.</p>
-    <div class="two">${cta("It's plugged in")}</div>
+    <div class="two">${cta("It's connected")}</div>
     <span class="or">or</span>
-    <span class="quiet">+ emulated board</span>${pk}</div>`;
-}
-function headerMenu() {
-  return `<div class="menu">
-    <div class="mi">${ICON.pencil} Rename…</div>
-    <div class="mi">${ICON.copy} Copy MAC</div>
-    <div class="hr"></div>
-    <div class="mi twin hov">${ICON.chipglyph} Emulate this board</div>
-    <div class="hr"></div>
-    <div class="mi danger">Forget</div>
-  </div>`;
+    <span class="quiet">start a board here ▾</span>${mode === 'open' ? dropdown() : ''}</div>`;
 }
 function renderS2() {
-  const real = realCard({ menu: state.twinverb === 'menu' ? headerMenu() : '' });
-  const saved = { emu:state.emu, twin:state.twin };
-  Object.assign(state, { emu:'ready', twin:true }); const twinCard = emuCard();
-  Object.assign(state, { emu:'created', twin:false }); const fresh = emuCard();
-  Object.assign(state, saved);
-  const desk = deskCard('desk');
-  const offInGrid = state.off === 'grid' ? offTile() : '';
+  const saved = state.emu;
+  state.emu = 'ready'; const emu = emuCard(); state.emu = saved;
+  const offInGrid = state.off === 'grid' ? offTile('emu') : '';
   const rem = state.off === 'remembered'
     ? `<div class="remline"><p><button class="tog">Hide 2 boards Studio remembers but cannot see</button><span class="sp"></span><span>Studio keeps their names; Forget lives here.</span></p>
-        <div class="roster">${offTile()}
+        <div class="roster">${offTile('emu')}
           <div class="rem"><div class="head"><h3>Bench classic</h3><span class="chips">${chip('neutral','Not connected')}</span></div>
             <div class="play"><div class="empty"><p>Not connected — last heard 2 h ago.</p></div></div>
             <p class="mono-line">QuinLED-Dig-Uno${SEP}esp32${SEP}30:76:f5:ec:f6:34${SEP}last heard 2 h ago</p>
             <div class="verbs">${verb('Reconnect','outline')}${sp}${verb('Forget')}</div></div>
         </div></div>`
     : '';
-  document.getElementById('s2').innerHTML = `<h4>Devices</h4><div class="roster">${real}${twinCard}${fresh}${desk}${offInGrid}${addSlot(state.add)}</div>${rem}`;
-
+  document.getElementById('s2').innerHTML = `<h4>Devices</h4><div class="roster">${realCard()}${emu}${simBoardCard()}${simDeskCard()}${offInGrid}${addSlot(state.add)}</div>${rem}`;
   document.getElementById('s2notes').innerHTML = `
-    <div class="concept"><h3 class="c"><span class="k">2a</span>"+ emulated board" at the insertion point</h3><p class="cn">
-      <b>one slot, two verbs</b> keeps the house rule literally: the slot where the next card appears offers both ways a card can appear — the
-      spectrum CTA stays "It's plugged in" (the common case), the emulated way is a quiet verb under it (no violet: D38).
-      <b>two slots</b> gives the emulated path its own dashed frame and copy; twice the dashed area, and the grid gains a slot per row that most desks never use.
-      <b>picker open</b> is the board pick popover <i>inverted</i> (pick the board, the chip follows — no detection, so no filter line, every served board offered), with the birth stated in the foot.
-      Under D33 most emulated boards are born by <i>open</i>, not here; this slot is for "a board I want before I have a project for it".</p></div>
-    <div class="concept"><h3 class="c"><span class="k">2b</span>The twin verb on the real card</h3><p class="cn">
-      <b>Device zone verb</b>: "Emulate" (the chip glyph + one word; the full "Emulate this board" clipped Forget off the row at 400px) sits with Reset · Disconnect; costs row width on every real card. <b>header ⋯ menu</b> (the naming PR's menu): out of the verb rows, discoverable
-      only by opening the menu — right for a verb used once per board. <b>no twin verb</b>: the floor (D18) — open mints one of the same kind anyway (D33); the twin adds only "the same project, already on it".
-      Two cards titled <b>Porch sign</b> sit side by side here on purpose: the band is the only thing telling the desk from the twin — T7's test, passed or not.</p></div>
-    <div class="concept"><h3 class="c"><span class="k">2c</span>Where a powered-off emulated board waits</h3><p class="cn">
-      D9 makes it durable like a board on a desk; a real board unplugged leaves the grid for the <i>remembered line</i> (D7 of the device rewrite: never a card).
-      <b>a tile in the grid</b> keeps it one Power-on away, wearing the band's edge. <b>the remembered line</b> treats power-off exactly like unplug
-      — consistent, and the line's toggle hides it by default, which is where "I made this yesterday" goes to be forgotten. Under D37 opening another project in this tab is what powers a board off.</p></div>`;
+    <div class="concept"><h3 class="c"><span class="k">2a</span>The add slot</h3><p class="cn">
+      The house rule literally: the slot where the next card appears offers both ways a card can appear. "It's connected" stays the spectrum CTA
+      (the common case); "start a board here ▾" is the quiet second verb that opens the dropdown. Under D33 most emu/sim devices are born by
+      <i>open</i>; this slot is for "a board I want before I have a project for it" and for choosing sim over emu on purpose.</p></div>
+    <div class="concept"><h3 class="c"><span class="k">2b</span>The row tag: what you'll get</h3><p class="cn">
+      Every supported board plus Desktop; the tag says what this build does for it. <b>a word</b> (emu / sim, bound-toned): the same word the band
+      and the URL use. <b>a chip</b>: louder, costs row height. <b>a sentence</b> ("we'll emulate it"): Yona's phrasing, kind on first read, wide.
+      Emu is the default where both exist; simulate-instead is a modifier, not a second row per board — two rows per board would double the list.</p></div>
+    <div class="concept"><h3 class="c"><span class="k">2c</span>Where a powered-off device waits</h3><p class="cn">
+      <b>a tile in the grid</b> keeps it one Power-on away, wearing the band's edge; <b>the remembered line</b> treats power-off like unplug —
+      consistent, hidden by default. Under D37 opening another project in this tab is what powers a device off. The sim's tile says it keeps nothing (D46).</p></div>`;
 }
 
 /* ---------------------------------------------------------------------
-   Section 3 — open starts the device; the address is the project
+   Section 3 — the URL and the opening frame
    --------------------------------------------------------------------- */
-const FACES = { emu:'board target · emulated', costume:'board target · no module yet', desk:'desktop target' };
+const FACES = { emu:'?on=emu', sim:'?on=sim', mac:'?on=mac:… (the real Porch sign)', ws:'?on=ws:… (a desktop server)', none:'no ?on=' };
 function chrome(url) { return `<div class="chrome"><span class="wm">LIGHTPLAYER</span><span class="crumb">${url}</span></div>`; }
+const P = `/p/<b>${PRJ.slug}-${PRJ.uid}</b>`;
 const URLS = {
-  emu:     `/p/<b>${PRJ.slug}-${PRJ.uid}</b><i>?on=dev02f1e6d3a9c01</i>`,
-  costume: `/p/<b>big-dome-prj3c9d…e2</b><i>?on=dev02d35c000001</i>`,
-  desk:    `/p/<b>${PRJ.slug}-${PRJ.uid}</b><i>?on=dev02d35c000001</i>`,
+  emu:  `${P}<i>?on=emu</i>`, sim: `${P}<i>?on=sim</i>`, mac: `${P}<i>?on=mac:60:55:f9:0a:0b:0c</i>`, ws: `${P}<i>?on=ws:${WS}</i>`, none: P,
+};
+const STAGE = {
+  emu:  ['Starting XIAO ESP32-C6 (emu)… resuming a snapshot', 62, 'A kind, resolved: the emu of this project\'s target that last ran it, else an idle one, else a new one born flashed with the project (D10). The frame says which; the card in Devices is the record.'],
+  sim:  ['Starting XIAO ESP32-C6 (sim)…', 80, 'Asked for on purpose — faster, less exact — or what you get for a board with no emulator module yet. The desktop firmware boots wearing the board\'s manifest.'],
+  mac:  ['Opening on Porch sign…', 90, 'An instance: the real board on the desk, by identity. The editor becomes a lens on it (as today) — this is the only way open reaches silicon, and only because the link says so.'],
+  ws:   [`Connecting to ${WS}…`, 30, 'An instance over WebSocket: a real LightPlayer server on the network (target desktop), or a native emu backing during development.'],
+  none: ['Starting XIAO ESP32-C6 (emu)…', 62, 'No hint: emu if a module exists for the target, else sim. The share link is this exact address — the part in bold is the whole identity.'],
 };
 function openingFrame(face) {
-  const label = { emu:'Starting Porch sign (emulated)… resuming a snapshot', costume:'Starting Desktop as WLED LAN 4-Channel (DOM-Z-102)…', desk:'Starting Desktop…' }[face];
-  const pct = { emu:62, costume:40, desk:80 }[face];
-  const sub = {
-    emu:'No XIAO ESP32-C6 emulated yet would have read <i>Creating an emulated XIAO ESP32-C6…</i> — one stage, no question; the card appears in Devices as it boots.',
-    costume:'No esp32 emulator module in this build: Desktop wears the board. The stage says so; the band on the card says so; nothing asks.',
-    desk:'The Desktop device powers on (or is already on). Reload lands on the same device via <code>?on=</code>.',
-  }[face];
+  const [label, pct, sub] = STAGE[face];
   return `<div class="frame3">${chrome(URLS[face])}<div class="body">
       <div class="stage bound"><span class="dot"></span><p>${esc(label)}</p></div><div class="progress"><i style="width:${pct}%"></i></div>
       <div class="skel"><div><div class="b" style="height:150px"></div></div><div><div class="b" style="height:100px"></div><div class="b" style="height:120px"></div></div><div><div class="b" style="height:150px"></div></div></div>
     </div></div><p class="cn" style="margin-top:8px">${sub}</p>`;
 }
-function settingsRows(face) {
-  const tgt = face === 'costume' ? 'WLED LAN 4-Channel (DOM-Z-102)' : face === 'desk' ? 'Desktop' : 'XIAO ESP32-C6';
+function settingsRows() {
   return `<div class="settings">
-    <div class="row"><dt>Name</dt><dd>${face === 'costume' ? 'Big dome' : PRJ.name}</dd></div>
+    <div class="row"><dt>Name</dt><dd>${PRJ.name}</dd></div>
     <div class="row"><dt>Format</dt><dd>4</dd></div>
     <div class="row"><dt>UID</dt><dd>7f3a9c2e…41c1 <span style="color:var(--dim)">${ICON.copy.replace('<svg','<svg width="12" height="12"')}</span></dd></div>
     <div class="row"><dt>Nodes</dt><dd>7 nodes</dd></div>
-    <div class="row"><dt>Device</dt><dd><span class="sel"><span class="sw ${face === 'desk' ? 'v' : 'board'}"></span>${esc(tgt)} <span style="color:var(--dim)">▾</span></span></dd>
-      <p class="hintline">The kind of device this project opens on — an emulated one starts in this tab. To put it on a real board, use that board's card.</p></div>
+    <div class="row"><dt>Hardware</dt><dd><span class="sel"><span class="sw board"></span>XIAO ESP32-C6 <span style="color:var(--dim)">▾</span></span></dd>
+      <p class="hintline">The hardware this project runs on. Open starts an emu of it in this tab (a sim when no emulator exists yet); to put it on a real board, use that board's card.</p></div>
     <div class="tmenu">
       <div class="hd">Desktop</div>
-      <div class="mi ${face==='desk'?'hov':''}"><span class="sw v"></span>Desktop<span class="s">lightplayer/desktop</span></div>
+      <div class="mi"><span class="sw v"></span>Desktop<span class="s">lightplayer/desktop</span></div>
       <div class="hd">Boards</div>
-      <div class="mi ${face==='emu'?'hov':''}"><span class="sw"></span>XIAO ESP32-C6<span class="s">emulated</span></div>
-      <div class="mi"><span class="sw"></span>QuinLED-Dig-Uno<span class="s">Desktop in costume · no module yet</span></div>
-      <div class="mi ${face==='costume'?'hov':''}"><span class="sw"></span>WLED LAN 4-Channel (DOM-Z-102)<span class="s">Desktop in costume · no module yet</span></div>
-      <div class="mi"><span class="sw"></span>ESP32-S3-DevKitC-1<span class="s">emulated</span></div>
+      ${Object.entries(BOARDS).map(([id, b], i) => `<div class="mi ${i===0?'hov':''}"><span class="sw"></span>${esc(b.name)}<span class="s">${esc(id)}</span></div>`).join('')}
     </div>
   </div>`;
 }
 function renderS3() {
   const f = state.face;
   document.getElementById('s3').innerHTML = `
-    <div class="concept lean"><h3 class="c"><span class="k">3A</span>The opening frame narrates the device <span style="color:#f0dc7a;font-weight:500">· lean</span></h3>${openingFrame(f)}
-      <p class="cn">The project-shaped opening frame (P6: honest states) already narrates the open; under D33 the one new fact is <i>which device</i>. No ask, no verbs: the frame
-      holds the skeleton, names the device it is starting, and the card in Devices is the record of what happened. The address bar reads the project with the device hint (D35):
-      the part in <b>bold</b> is the identity and the share link; the violet tail is the hint a reload uses and a pasted link may carry (ignored if the reader lacks that device).</p>
-      <div class="url"><p class="u">${URLS[f]}</p><p>Was: <span style="text-decoration:line-through">/device/dev02f1e6d3a9c01</span> after a flash — the address that was not shareable (Yona, second sitting).</p></div></div>
-    <div class="concept"><h3 class="c"><span class="k">3D</span>Changing the device later: the settings row</h3>${settingsRows(f)}
-      <p class="cn">Project settings today are read-only rows (Name · Format · UID · Nodes). <b>Device</b> becomes the one editable row (D32: a kind, required): Desktop, or a board —
-      each board line says what open will do for it: <i>emulated</i>, or <i>Desktop in costume · no module yet</i> (D34/D36). The hint under the row is the whole rule in one sentence.
-      The row was "Target" in round 1; "Device" is the word the user now has (project / device — nothing else).</p></div>`;
+    <div class="concept lean"><h3 class="c"><span class="k">3A</span>The opening frame names the device <span style="color:#f0dc7a;font-weight:500">· lean</span></h3>${openingFrame(f)}
+      <div class="url"><p class="u">${URLS[f]}</p><p>The bold part is the identity and the share link; the violet tail is the hint. Was: <span style="text-decoration:line-through">/device/dev02f1e6d3a9c01</span> after a flash.</p></div></div>
+    <div class="concept"><h3 class="c"><span class="k">3D</span>The project declares its hardware: the settings row (D41)</h3>${settingsRows()}
+      <p class="cn">Project settings today are read-only rows (Name · Format · UID · Nodes). <b>Hardware</b> becomes the one editable row: Desktop, or a board — <b>plain</b>.
+      Nothing here says emu or sim: "emulated is something that a device is, a board is just a board." The hint under the row says what open will do.
+      Round 2 called this row Target and Device; "Hardware" is Yona's word ("projects declare the hardware they run on") — the manifest field stays <code>target</code>.</p></div>`;
 }
 
 /* ---------------------------------------------------------------------
-   Section 4 — the Desktop card, and today's sim card for what leaves
+   Section 4 — Desktop is a target; the strip
    --------------------------------------------------------------------- */
-function simCardToday() {
-  const tab = state.simtab;
-  const tabs = `<div class="tabs"><span class="tab ${tab==='play'?'on':''}">${ICON.play}</span><span class="tab ${tab==='details'?'on':''}">${ICON.details}</span><span class="tab">${ICON.console}</span><span class="tab danger ${tab==='danger'?'on':''}">${ICON.danger}</span></div>`;
-  let body;
-  if (tab === 'play') {
-    body = `<div class="body"><div class="play">${lamps(40)}${pill('emu', 'sim')}</div>
-      <div class="playmeta"><span class="sw"></span><span>Luna's porch sign</span><span class="sp"></span>${cta('Editor')}</div></div>`;
-  } else if (tab === 'danger') {
-    body = `<div class="body"><div class="sec danger"><div class="st"><h6>Danger zone</h6></div>
-      <div class="row"><p>Anything not saved to your library is discarded.</p>${verb('Stop simulator','red')}</div></div></div>`;
-  } else {
-    body = `<div class="body">
-      <div class="sec"><div class="st"><h6>Health</h6>${chip('good','Running')}</div>
-        <dl class="kv"><dt>status</dt><dd>Running</dd><dt>board</dt><dd>as XIAO ESP32-C6</dd></dl></div>
-      <div class="sec"><div class="st"><h6>Project</h6></div><dl class="kv"><dt>running</dt><dd>Luna's porch sign</dd></dl></div>
-    </div>`;
-  }
-  return `<div class="simcard" style="--edge:var(--st-good-tx)"><div class="tb"><span class="g">${ICON.monitorplay}</span><p>Simulator</p><span class="lab">Simulator</span><span class="grow">${ICON.grow}</span></div>${tabs}${body}</div>`;
-}
 function renderS4() {
   const root = document.getElementById('s4');
+  const K = KIND[state.kind];
   root.innerHTML = `
-    <div class="concept ref"><h3 class="c"><span class="k">S</span>Today — production, faithful (what leaves)</h3>${simCardToday()}
-      <p class="cn">sim_card.rs: "Simulator" twice (title and transport label), the D4 <i>as &lt;board&gt;</i> Health line, icon tabs, Stop simulator, the violet "● sim" pill. Retires with <code>RuntimePayload::Sim</code> (D30).</p></div>
-    <div class="concept lean"><h3 class="c"><span class="k">4A</span>Desktop, in this tab <span style="color:#f0dc7a;font-weight:500">· lean</span></h3>${deskCard('desk')}
-      <p class="ruler"></p><p class="cn">The device card, band reading Desktop. Health facts move to the terminal and the device line (tier granted, desktop manifest). The ▶ pill reads <i>live</i>: the frames are fw-browser's own — the same honesty rule as every card. Today's violet pill was the sim family's; the band is that family's one home (D38).</p></div>
-    <div class="concept"><h3 class="c"><span class="k">4B</span>Desktop, in costume (D34)</h3>${deskCard('costume')}
-      <p class="ruler"></p><p class="cn">Identity row 1 says <i>Desktop · as WLED LAN 4-Channel (DOM-Z-102)</i>; the band repeats the costume; the terminal states the reason ("no emulator module yet"). The project on it is Big dome. When the esp32 module lands (D36), open starts a real emulated DOM-Z-102 instead and this card goes back to being plain Desktop.</p></div>
-    <div class="concept"><h3 class="c"><span class="k">4C</span>A Desktop server on the LAN (D21)</h3>${deskCard('lan')}
-      <p class="ruler"></p><p class="cn">fw-host over <code>host-websocket</code>: the same card with a different where. Its name is the user's (it is a real machine), it has a real MAC, it updates its firmware, and Disconnect replaces Power off. Shown to test that the band generalises; not v1 scope.</p></div>`;
+    <div class="concept"><h3 class="c"><span class="k">S2</span>Sim of Desktop — in this tab</h3>${simDeskCard()}<p class="ruler"></p>
+      <p class="cn">Today's simulator, as a device (D42, D47): the desktop firmware in the browser wearing the desktop manifest. Born Ready, GPU tier, ports unlimited. One per browser is the natural count, but nothing enforces it — it is a device like any other.</p></div>
+    <div class="concept"><h3 class="c"><span class="k">R2</span>Real Desktop — a server on the network (D43 ws:)</h3>${serverCard()}<p class="ruler"></p>
+      <p class="cn">A real device whose target is Desktop: fw-host on a Mac mini, reached over <code>ws:${WS}</code>. Its name is the machine's, row 2 says the address instead of a MAC, it updates its own firmware, Disconnect instead of Power off, no band. The same card, a different where. Not v1 scope; shown to test that the model holds.</p></div>`;
   ruler(root);
+  const e = K.emu.toLowerCase(), s_ = K.sim.toLowerCase();
   document.getElementById('s4strip').innerHTML = `
-    <div class="w"><span class="lab">Package card presence line (D28)</span><span class="was">Running in simulator</span><p class="b">Running on Desktop</p><p class="b">Running on Porch sign (emulated)</p><p class="g">On Porch sign ✓</p><p class="q">Q: the title carries no kind now, so the presence line must — "(emulated)" after the name, or the chip glyph?</p></div>
-    <div class="w"><span class="lab">Opening-frame stage labels</span><span class="was">Starting the simulator…</span><p>Starting Desktop…</p><p>Starting Porch sign (emulated)…</p><p>Creating an emulated XIAO ESP32-C6…</p><p>Starting Desktop as DOM-Z-102…</p></div>
-    <div class="w"><span class="lab">Package card ⋯ menu</span><span class="was">Open in sim · Open on Porch sign</span><div class="mi"><span class="sw"></span>Open</div><p>One verb (D33): open starts the project's device. "On Porch sign" is the real card's Push, not a menu item here.</p></div>
-    <div class="w"><span class="lab">The card's Power off (was Stop simulator)</span><p>Desktop: <b>Power off</b> — the record stays, the worker stops.</p><p>Emulated: <b>Power off</b> — image kept (D9).</p><p>Silicon: <b>Disconnect</b>, as today.</p></div>
-    <div class="w"><span class="lab">New-project device default (D32)</span><p>From the library: <b style="color:var(--st-bound-tx)">Desktop</b></p><p>From a board (device-first ADR): <b>that board's kind</b></p><p>Required — no project without a device.</p></div>
-    <div class="w"><span class="lab">Manifest</span><p style="font-family:var(--mono);font-size:11px">target: "lightplayer/desktop"</p><p style="font-family:var(--mono);font-size:11px">target: "seeed/xiao-esp32-c6"</p><p>Field name unchanged; the settings row calls it Device.</p></div>
-    <div class="w"><span class="lab">Address (D35)</span><p style="font-family:var(--mono);font-size:11px">/p/&lt;slug&gt;-prj&lt;uid&gt;<span style="color:var(--st-bound-tx)">?on=dev&lt;uid&gt;</span></p><p><span class="was">/device/&lt;uid&gt;</span> → never emitted; resolves to the project address plus hint.</p></div>`;
+    <div class="w"><span class="lab">The terms (D40)</span><p><b>target</b> — a board or Desktop: what a project declares, what a device acts as</p><p><b>real</b> — silicon, or a desktop server on the network</p><p><b>${e}</b> — the real binary for the target's chip in lp-emu (boards only)</p><p><b>${s_}</b> — the desktop firmware in the browser wearing the target's manifest (any target)</p><p><b>preview</b> — the sim engine used internally; never a device</p></div>
+    <div class="w"><span class="lab">Package card presence line (D28)</span><span class="was">Running in simulator</span><p class="b">Running on XIAO ESP32-C6 (${e})</p><p class="b">Running on XIAO ESP32-C6 (${s_})</p><p class="b">Running on Desktop (${s_})</p><p class="g">On Porch sign ✓</p></div>
+    <div class="w"><span class="lab">Opening-frame stage labels</span><span class="was">Starting the simulator…</span><p>Starting XIAO ESP32-C6 (${e})…</p><p>Starting XIAO ESP32-C6 (${s_})…</p><p>Starting Desktop (${s_})…</p><p>Opening on Porch sign…</p><p>Connecting to ${WS}…</p></div>
+    <div class="w"><span class="lab">?on= grammar (D43)</span><p style="font-family:var(--mono);font-size:11px"><span class="b">emu</span> · <span class="b">sim</span> — a kind, resolved for the project's hardware</p><p style="font-family:var(--mono);font-size:11px"><span class="b">mac:</span>60:55:f9:0a:0b:0c — a board by identity (silicon or an ${e})</p><p style="font-family:var(--mono);font-size:11px"><span class="b">ws:</span>${WS} — a device over WebSocket (a desktop server, or a native ${e} backing)</p><p style="font-family:var(--mono);font-size:11px">(none) — ${e} if a module exists, else ${s_}</p></div>
+    <div class="w"><span class="lab">Package card ⋯ menu</span><span class="was">Open in sim · Open on Porch sign</span><div class="mi"><span class="sw"></span>Open</div><p>One verb (D33): open starts the project's device. Putting it on Porch sign is that card's Push.</p></div>
+    <div class="w"><span class="lab">Power off (was Stop simulator)</span><p>${K.emu}: <b>Power off</b> — image kept (D9).</p><p>${K.sim}: <b>Power off</b> — the record stays, nothing else (D46).</p><p>Real: <b>Disconnect</b>, as today.</p></div>
+    <div class="w"><span class="lab">New-project hardware default (D32)</span><p>From the library: <b style="color:var(--st-bound-tx)">Desktop</b></p><p>From a board (device-first ADR): <b>that board's kind</b></p><p>Required — no project without hardware.</p></div>
+    <div class="w"><span class="lab">Manifest</span><p style="font-family:var(--mono);font-size:11px">target: "lightplayer/desktop"</p><p style="font-family:var(--mono);font-size:11px">target: "seeed/xiao-esp32-c6"</p><p>Field name unchanged; the settings row calls it Hardware.</p></div>
+    <div class="w"><span class="lab">What ships first (D48)</span><p>The model needs no emulator: the always-a-device refactor, the ${s_} as a device, the board-manifest ${s_}, <code>?on=</code>, the picker.</p><p>${K.emu} arrives later as a third backing behind the same card.</p></div>`;
 }
 
 /* ---------------------------------------------------------------------
@@ -996,23 +916,17 @@ const SPEEDS = { '1':'1.0×', '0.6':'0.6×', '0.3':'0.3×' };
     el.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { state.speed = Number(b.dataset.k); draw(); renderAll(); })); };
   draw();
 })();
-function toggle(id, key) {
-  const b = document.getElementById(id);
-  b.addEventListener('click', () => { state[key] = !state[key]; b.classList.toggle('active', state[key]); renderAll(); });
-}
-toggle('b-twin', 'twin');
-toggle('b-synth', 'synth');
+document.getElementById('b-synth').addEventListener('click', e => { state.synth = !state.synth; e.target.classList.toggle('active', state.synth); renderAll(); });
 document.getElementById('b-term').addEventListener('click', e => { state.term = !state.term; e.target.classList.toggle('active', state.term); document.documentElement.style.setProperty('--term-h', state.term ? '56px' : '160px'); renderAll(); });
 document.getElementById('b-anim').addEventListener('click', e => { document.documentElement.classList.toggle('no-anim'); e.target.classList.toggle('active'); });
 document.getElementById('w').addEventListener('input', e => { document.documentElement.style.setProperty('--w', e.target.value + 'px'); document.getElementById('wv').textContent = e.target.value + 'px'; renderS1(); renderS1b(); renderS4(); });
 
-const WORDPICK = Object.fromEntries(Object.entries(WORDING).map(([k, W]) => [k, `${k} · ${W.name}`]));
-seg('c-word', WORDPICK, 'word', renderAll);
-seg('c-twinverb', TWINVERB, 'twinverb', renderS2);
+const KINDPICK = Object.fromEntries(Object.entries(KIND).map(([k, K]) => [k, `${k} · ${K.name}`]));
+seg('c-kind', KINDPICK, 'kind', renderAll);
 seg('c-add', ADD, 'add', renderS2);
+seg('c-tag', TAG, 'tag', renderS2);
 seg('c-off', OFF, 'off', renderS2);
 seg('c-face', FACES, 'face', renderS3);
-seg('c-simtab', { details:'Details', play:'▶ Play', danger:'Danger' }, 'simtab', renderS4);
 
 function renderAll() { renderS1(); renderS1b(); renderS2(); renderS3(); renderS4(); }
 renderAll();
