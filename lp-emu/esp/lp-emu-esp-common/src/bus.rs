@@ -22,7 +22,9 @@
 //!    trigger on the guard word; a bus that performed the write and then
 //!    trapped would have already destroyed the evidence.
 
+use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lp_emu_core::bus::{Bus, Watchpoint};
@@ -30,7 +32,7 @@ use lp_emu_core::memory::{MemoryAccessKind, MemoryError};
 use lp_emu_core::sched::{Cycles, EventId, Scheduler};
 
 use crate::host::HostSinks;
-use crate::periph::{BoxedPeripheral, BusCx, IrqLines, Width};
+use crate::periph::{BoxedPeripheral, BusCx, CpuIntMatrix, IrqLines, NoCpuInterrupts, Width};
 use crate::trace::{Access, MmioEvent, Trace};
 
 /// Hardware trigger slots, matching the RISC-V debug spec's count on the
@@ -114,6 +116,43 @@ impl RamRegion {
     }
 }
 
+/// The first access strict mode refused, kept so the machine can report the
+/// access that actually caused a run to stop.
+///
+/// The hart turns the refusal into an architectural access fault and jumps to
+/// `mtvec` like any other, so by the time a machine notices, the PC has moved
+/// on; this is the record of where it really happened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StrictViolation {
+    pub cycle: Cycles,
+    pub pc: u32,
+    pub address: u32,
+    pub width: Width,
+    pub access: Access,
+    /// The address was inside a declared MMIO window — an unmodelled block,
+    /// not a wild pointer.
+    pub in_mmio_window: bool,
+}
+
+/// The bus's scalar state, for a machine snapshot.
+///
+/// Region bytes and peripheral blobs are saved separately (they are the big
+/// halves); this is everything else the bus carries that a restored run has
+/// to agree with, including the diagnostic counters — a restored run that
+/// reported different unmapped totals would not be the same run.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BusScalars {
+    pub now: Cycles,
+    pub pc: u32,
+    pub hart: usize,
+    pub sideband: bool,
+    pub irq: IrqLines,
+    pub unmapped_sites: BTreeSet<(u32, u32)>,
+    pub unmapped_reads: u64,
+    pub unmapped_writes: u64,
+    pub first_strict_violation: Option<StrictViolation>,
+}
+
 /// One entry in the MMIO decode table.
 struct MmioRange {
     base: u32,
@@ -140,6 +179,11 @@ pub struct SocBus {
 
     strict: bool,
     sideband: bool,
+    /// The chip's misaligned-access policy, mirrored from the hart. The C6
+    /// core performs misaligned data accesses in hardware, so its machine
+    /// sets both permissive; the flag lives here because the bus is the
+    /// component that actually decides.
+    allow_unaligned: bool,
     watchpoints: [Option<Watchpoint>; WATCHPOINT_SLOTS],
     /// Bit per armed slot; `0` short-circuits the per-access check.
     armed: u32,
@@ -147,6 +191,11 @@ pub struct SocBus {
     unmapped_sites: BTreeSet<(u32, u32)>,
     unmapped_reads: u64,
     unmapped_writes: u64,
+    first_strict_violation: Option<StrictViolation>,
+
+    /// Source levels → "the CPU interrupt this hart should take". Installed
+    /// by the chip crate; [`NoCpuInterrupts`] until then.
+    matrix: Box<dyn CpuIntMatrix>,
 
     now: Cycles,
     pc: u32,
@@ -194,11 +243,14 @@ impl SocBus {
             mmio_windows: Vec::new(),
             strict: false,
             sideband: false,
+            allow_unaligned: false,
             watchpoints: [None; WATCHPOINT_SLOTS],
             armed: 0,
             unmapped_sites: BTreeSet::new(),
             unmapped_reads: 0,
             unmapped_writes: 0,
+            first_strict_violation: None,
+            matrix: Box::new(NoCpuInterrupts),
             now: 0,
             pc: 0,
             hart: 0,
@@ -281,6 +333,34 @@ impl SocBus {
 
     pub fn strict(&self) -> bool {
         self.strict
+    }
+
+    /// Mirror the hart's misaligned-access policy onto the bus.
+    ///
+    /// The hart's own `allow_unaligned` only *warns* when the bus contradicts
+    /// it; the bus is what enforces. RAM regions were never alignment-checked
+    /// (the C6 core does misaligned RAM accesses in hardware), so this flag
+    /// changes only the MMIO path — see
+    /// [`SocBus::require_mmio_alignment`].
+    pub fn set_allow_unaligned(&mut self, allow: bool) {
+        self.allow_unaligned = allow;
+    }
+
+    pub fn allow_unaligned(&self) -> bool {
+        self.allow_unaligned
+    }
+
+    /// Install the chip's interrupt matrix. See [`CpuIntMatrix`].
+    pub fn set_matrix(&mut self, matrix: Box<dyn CpuIntMatrix>) {
+        self.matrix = matrix;
+    }
+
+    pub fn matrix(&self) -> &dyn CpuIntMatrix {
+        &*self.matrix
+    }
+
+    pub fn matrix_mut(&mut self) -> &mut dyn CpuIntMatrix {
+        &mut *self.matrix
     }
 
     // ---- machine plumbing --------------------------------------------
@@ -415,6 +495,106 @@ impl SocBus {
         self.unmapped_writes
     }
 
+    /// The first access strict mode refused, if any. The machine reports it:
+    /// by the time a slice ends the hart has already taken the architectural
+    /// access fault and moved the PC.
+    pub fn first_strict_violation(&self) -> Option<StrictViolation> {
+        self.first_strict_violation
+    }
+
+    pub fn clear_strict_violation(&mut self) {
+        self.first_strict_violation = None;
+    }
+
+    // ---- snapshot -----------------------------------------------------
+
+    /// Every RAM region's bytes, in the bus's own (base-sorted) order.
+    pub fn save_regions(&self) -> Vec<Vec<u8>> {
+        self.regions.iter().map(|r| r.data.clone()).collect()
+    }
+
+    /// Put region bytes back. A length mismatch is a snapshot taken from a
+    /// differently built machine and is refused loudly rather than half
+    /// applied.
+    pub fn restore_regions(&mut self, data: &[Vec<u8>]) {
+        assert_eq!(
+            data.len(),
+            self.regions.len(),
+            "SocBus::restore_regions: snapshot has {} regions, this bus has {}",
+            data.len(),
+            self.regions.len()
+        );
+        for (region, bytes) in self.regions.iter_mut().zip(data) {
+            assert_eq!(
+                bytes.len(),
+                region.data.len(),
+                "SocBus::restore_regions: region `{}` is {} bytes, snapshot has {}",
+                region.name,
+                region.data.len(),
+                bytes.len()
+            );
+            region.data.copy_from_slice(bytes);
+        }
+        self.last_region = 0;
+    }
+
+    /// Each peripheral's own blob, named, in registration order.
+    pub fn save_peripherals(&self) -> Vec<(String, Vec<u8>)> {
+        self.mmio
+            .iter()
+            .map(|r| (r.periph.name().to_string(), r.periph.save_state()))
+            .collect()
+    }
+
+    pub fn restore_peripherals(&mut self, states: &[(String, Vec<u8>)]) {
+        assert_eq!(
+            states.len(),
+            self.mmio.len(),
+            "SocBus::restore_peripherals: snapshot has {} peripherals, this bus has {}",
+            states.len(),
+            self.mmio.len()
+        );
+        for (range, (name, bytes)) in self.mmio.iter_mut().zip(states) {
+            assert_eq!(
+                range.periph.name(),
+                name,
+                "SocBus::restore_peripherals: peripheral {} is `{}`, snapshot has `{}` — \
+                 registration order is part of the snapshot (event ids pack the index)",
+                range.base,
+                range.periph.name(),
+                name
+            );
+            range.periph.load_state(bytes);
+        }
+    }
+
+    /// Everything else the bus carries. See [`BusScalars`].
+    pub fn save_scalars(&self) -> BusScalars {
+        BusScalars {
+            now: self.now,
+            pc: self.pc,
+            hart: self.hart,
+            sideband: self.sideband,
+            irq: self.irq.clone(),
+            unmapped_sites: self.unmapped_sites.clone(),
+            unmapped_reads: self.unmapped_reads,
+            unmapped_writes: self.unmapped_writes,
+            first_strict_violation: self.first_strict_violation,
+        }
+    }
+
+    pub fn restore_scalars(&mut self, s: &BusScalars) {
+        self.now = s.now;
+        self.pc = s.pc;
+        self.hart = s.hart;
+        self.sideband = s.sideband;
+        self.irq = s.irq.clone();
+        self.unmapped_sites = s.unmapped_sites.clone();
+        self.unmapped_reads = s.unmapped_reads;
+        self.unmapped_writes = s.unmapped_writes;
+        self.first_strict_violation = s.first_strict_violation;
+    }
+
     /// `true` if `address` falls in a declared MMIO window.
     pub fn in_mmio_window(&self, address: u32) -> bool {
         self.mmio_windows
@@ -443,6 +623,30 @@ impl SocBus {
         let i = self.mmio_by_base[k.checked_sub(1)?];
         let r = &self.mmio[i];
         (address < r.base.wrapping_add(r.len)).then_some(i)
+    }
+
+    /// MMIO accesses are register-aligned unless
+    /// [`set_allow_unaligned`](Self::set_allow_unaligned) says otherwise —
+    /// and even then, only when the access stays inside **one** 32-bit
+    /// register.
+    ///
+    /// A byte at `+0x001` or a half-word at `+0x006` reaches its register
+    /// through the peripheral's byte-lane path exactly; a word at `+0x002`
+    /// would have to be split into two register accesses, running two
+    /// registers' side effects for one instruction. That is a different
+    /// machine, so the bus refuses it whatever the flag says.
+    fn require_mmio_alignment(&self, address: u32, width: Width) -> Result<(), MemoryError> {
+        let alignment = width.bytes();
+        if address % alignment == 0 {
+            return Ok(());
+        }
+        if self.allow_unaligned && (address % 4) + alignment <= 4 {
+            return Ok(());
+        }
+        Err(MemoryError::Unaligned {
+            address,
+            alignment: alignment as usize,
+        })
     }
 
     // ---- watchpoints --------------------------------------------------
@@ -504,7 +708,7 @@ impl SocBus {
         }
 
         if let Some(i) = self.mmio_index(address) {
-            require_mmio_alignment(address, width)?;
+            self.require_mmio_alignment(address, width)?;
             let base = self.mmio[i].base;
             let off = address - base;
             let (block, name) = {
@@ -569,7 +773,7 @@ impl SocBus {
         }
 
         if let Some(i) = self.mmio_index(address) {
-            require_mmio_alignment(address, width)?;
+            self.require_mmio_alignment(address, width)?;
             let base = self.mmio[i].base;
             let off = address - base;
             let (block, name) = {
@@ -631,6 +835,17 @@ impl SocBus {
             }
         }
 
+        if self.strict && self.first_strict_violation.is_none() {
+            self.first_strict_violation = Some(StrictViolation {
+                cycle: self.now,
+                pc: self.pc,
+                address,
+                width,
+                access,
+                in_mmio_window: self.in_mmio_window(address),
+            });
+        }
+
         let site = (self.pc, address);
         let first_time = if self.unmapped_sites.len() < UNMAPPED_SITES_CAP {
             self.unmapped_sites.insert(site)
@@ -669,17 +884,6 @@ impl SocBus {
         }
         Ok(())
     }
-}
-
-fn require_mmio_alignment(address: u32, width: Width) -> Result<(), MemoryError> {
-    let alignment = width.bytes();
-    if address % alignment == 0 {
-        return Ok(());
-    }
-    Err(MemoryError::Unaligned {
-        address,
-        alignment: alignment as usize,
-    })
 }
 
 /// Does the watchpoint cover any byte of `[address, address + len)`?
@@ -783,6 +987,10 @@ impl Bus for SocBus {
 
     fn take_sideband(&mut self) -> bool {
         core::mem::replace(&mut self.sideband, false)
+    }
+
+    fn pending_cpu_interrupt(&self) -> Option<u8> {
+        self.matrix.cpu_interrupt(self.hart, &self.irq)
     }
 }
 
@@ -1222,6 +1430,123 @@ mod tests {
         bus.write_word(0x6000_8000, 0x5678).unwrap();
         assert_eq!(bus.read_word(0x6000_0000).unwrap(), 0x1234);
         assert_eq!(bus.read_word(0x6000_8000).unwrap(), 0x5678);
+    }
+
+    #[test]
+    fn permissive_unaligned_reaches_a_register_but_never_straddles_two() {
+        let mut bus = SocBus::new();
+        bus.add_peripheral(0x6000_0000, 0x100, Box::new(RegFile::new("UART0", 0x100)));
+        bus.set_allow_unaligned(true);
+        assert!(bus.allow_unaligned());
+
+        // Inside one 32-bit register: exact through the byte-lane path.
+        bus.write_halfword(0x6000_0001, 0x1234u16 as i16).unwrap();
+        assert_eq!(bus.read_word(0x6000_0000).unwrap() as u32, 0x0012_3400);
+        assert_eq!(bus.read_halfword(0x6000_0001).unwrap() as u16, 0x1234);
+
+        // Straddling two registers: still refused, permissive or not.
+        assert!(matches!(
+            bus.read_word(0x6000_0002).unwrap_err(),
+            MemoryError::Unaligned { alignment: 4, .. }
+        ));
+        assert!(matches!(
+            bus.write_halfword(0x6000_0003, 0).unwrap_err(),
+            MemoryError::Unaligned { alignment: 2, .. }
+        ));
+    }
+
+    #[test]
+    fn strict_mode_records_the_first_refused_access_only() {
+        let mut bus = bus_with_ram();
+        bus.add_mmio_window(0x6000_0000, 0x0010_0000);
+        bus.set_strict(true);
+        bus.set_time(1234);
+        bus.set_pc(0x4200_1000);
+
+        assert!(bus.first_strict_violation().is_none());
+        assert!(bus.read_word(0x6000_5000).is_err());
+        assert!(bus.write_word(0x7000_0000, 1).is_err());
+
+        let v = bus.first_strict_violation().expect("recorded");
+        assert_eq!(
+            (v.cycle, v.pc, v.address, v.access, v.in_mmio_window),
+            (1234, 0x4200_1000, 0x6000_5000, Access::Read, true),
+            "the FIRST one, with the window flag that says `unmodelled block`"
+        );
+        bus.clear_strict_violation();
+        assert!(bus.first_strict_violation().is_none());
+    }
+
+    /// A matrix that asserts CPU interrupt `n` while source `n + 40` is high.
+    struct TestMatrix;
+
+    impl CpuIntMatrix for TestMatrix {
+        fn cpu_interrupt(&self, _hart: usize, irq: &IrqLines) -> Option<u8> {
+            (0u8..16).find(|n| irq.level(u16::from(*n) + 40))
+        }
+    }
+
+    #[test]
+    fn the_matrix_answers_pending_cpu_interrupt_from_the_source_levels() {
+        let mut bus = SocBus::new();
+        // Without a matrix installed, nothing is ever asserted.
+        assert_eq!(bus.pending_cpu_interrupt(), None);
+
+        let mut probe = Probe::new("TIMG0");
+        probe.raise_on_write = Some((43, event_id(0, 0)));
+        bus.add_peripheral(0x6000_8000, 0x100, Box::new(probe));
+        bus.set_matrix(Box::new(TestMatrix));
+
+        assert_eq!(bus.pending_cpu_interrupt(), None);
+        bus.write_word(0x6000_8000, 1).unwrap();
+        assert!(bus.take_sideband(), "the store raised the side-band");
+        assert_eq!(
+            bus.pending_cpu_interrupt(),
+            Some(3),
+            "source 43 routes to CPU interrupt 3"
+        );
+
+        bus.irq.set_level(43, false);
+        assert_eq!(bus.pending_cpu_interrupt(), None);
+    }
+
+    #[test]
+    fn a_snapshot_of_regions_peripherals_and_scalars_round_trips() {
+        let mut bus = bus_with_ram();
+        bus.add_peripheral(0x6000_0000, 0x100, Box::new(Probe::new("UART0")));
+        bus.set_time(99);
+        bus.set_pc(0x4200_0004);
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        bus.read_word(0x6000_0000).unwrap(); // Probe counts reads
+        bus.read_word(0x7000_0000).unwrap(); // unmapped
+
+        let regions = bus.save_regions();
+        let periph = bus.save_peripherals();
+        let scalars = bus.save_scalars();
+        assert_eq!(periph[0].0, "UART0");
+
+        // Move on, then go back.
+        bus.write_word(0x4080_0010, 0).unwrap();
+        bus.read_word(0x6000_0000).unwrap();
+        bus.read_word(0x7000_0004).unwrap();
+        bus.set_time(500);
+
+        bus.restore_regions(&regions);
+        bus.restore_peripherals(&periph);
+        bus.restore_scalars(&scalars);
+
+        assert_eq!(bus.read_word(0x4080_0010).unwrap(), 0x1234_5678);
+        assert_eq!(bus.now(), 99);
+        assert_eq!(bus.unmapped_reads(), 1);
+        assert_eq!(bus.unmapped_sites(), 1);
+        assert_eq!(bus.peripheral(0).unwrap().save_state(), alloc::vec![1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "this bus has")]
+    fn restoring_a_snapshot_from_a_different_machine_is_refused() {
+        let mut bus = bus_with_ram();
+        bus.restore_regions(&[alloc::vec![0; 8]]);
     }
 
     #[test]
