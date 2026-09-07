@@ -13,9 +13,14 @@
 //!   M6 P2), [`pcr`] (the P5 accept
 //!   block, now also feeding the UART clock lines), [`wifi_stub`] (the radio
 //!   window as one accept block driven by the spin detector).
+//! - **modelled, M5 P1** — [`rmt`] (the register file, the 192-word RAM,
+//!   two TX engines on the scheduler consuming words at PCR's clock:
+//!   position-semantics `tx_lim`, wrap, STOP, `tx_end`/`tx_thr_event`/
+//!   `tx_err` on source 49; RX channels accept-and-remember).
 //! - **not modelled** — left unmapped on purpose, so a strict run stops on
-//!   them: RMT's channels (M5), SPI flash behaviour (M4 — SPI0/SPI1 are
-//!   accept).
+//!   them: SPI flash behaviour (M4 — SPI0/SPI1 are accept), the USB host
+//!   states M6 has not modelled yet, where the RMT waveform goes (M5 P2's
+//!   signal fabric).
 //!
 //! Every constant that is a *guess* is marked `modeled` where it is defined;
 //! the README's peripheral table repeats the grades.
@@ -25,6 +30,7 @@ pub mod efuse;
 pub mod intpri;
 pub mod lp_wdt;
 pub mod pcr;
+pub mod rmt;
 pub mod rng;
 pub mod systimer;
 pub mod timg;
@@ -85,6 +91,7 @@ pub fn boot_set(
     usb_host: usb_sj::HostState,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     let clocks = pcr::UartClockLines::default();
+    let rmt_clock = pcr::RmtClockLine::default();
     vec![
         (
             base::LP_APM,
@@ -105,7 +112,11 @@ pub fn boot_set(
             0x400,
             Box::new(accept::lp_i2c_ana_mst()),
         ),
-        (base::PCR, 0x1000, Box::new(pcr::Pcr::new(clocks.clone()))),
+        (
+            base::PCR,
+            0x1000,
+            Box::new(pcr::Pcr::new(clocks.clone(), rmt_clock.clone())),
+        ),
         (base::TIMG0, 0x100, Box::new(timg::Timg::timg0())),
         (base::TIMG1, 0x100, Box::new(timg::Timg::timg1())),
         (base::EFUSE, 0x200, Box::new(efuse::efuse(efuse))),
@@ -145,7 +156,9 @@ pub fn boot_set(
         (base::GPIO, 0x700, Box::new(accept::gpio())),
         (base::SPI0, 0x400, Box::new(accept::spi("SPI0"))),
         (base::SPI1, 0x400, Box::new(accept::spi("SPI1"))),
-        (base::RMT, 0x400, Box::new(accept::rmt())),
+        // Registers, the gap, and the RAM at `+0x400..+0x700` — P5's accept
+        // block was `0x400` long and left the RAM unmapped (M5 discovery C4).
+        (base::RMT, rmt::LEN, Box::new(rmt::Rmt::new(rmt_clock))),
         // The radio window, after RMT: `Rmt::new` runs before esp-radio's
         // init in `main`, so this is the order the boot meets them.
         (

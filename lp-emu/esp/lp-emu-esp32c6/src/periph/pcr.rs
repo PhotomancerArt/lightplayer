@@ -11,6 +11,12 @@
 //! the UART reads — which is exactly what the clock tree is on the chip, a
 //! signal from one block into another, and nothing more.
 //!
+//! The RMT's function clock is the same story one block over (M5 P1,
+//! discovery §3): esp-hal's `Rmt::new` writes `PCR.rmt_sclk_conf`
+//! (`sclk_sel = 1` = PLL 80 MHz, `div_num 0`) and gates the block through
+//! `PCR.rmt_conf.clk_en` — the C6's `RMT.sys_conf` has no `sclk_*` fields at
+//! all. Both words ride an [`RmtClockLine`] into [`super::rmt`].
+//!
 //! Everything else PCR does is the P5 accept table ([`super::accept::pcr`]).
 
 use std::sync::Arc;
@@ -22,6 +28,19 @@ use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 /// `+0x010`).
 pub const UART0_CLK_CONF: u32 = 0x004;
 pub const UART1_CLK_CONF: u32 = 0x010;
+
+/// `PCR.rmt_conf` (`+0x02c`): bit 0 `clk_en`, bit 1 `rst_en`
+/// (`pcr/rmt_conf.rs`). Reset `0x01`: the block is clocked.
+pub const RMT_CONF: u32 = 0x02c;
+pub const RMT_CONF_RESET: u32 = 0x01;
+
+/// `PCR.rmt_sclk_conf` (`+0x030`): 0:5 `sclk_div_b`, 6:11 `sclk_div_a`,
+/// 12:19 `sclk_div_num`, 20:21 `sclk_sel` (0 none, 1 PLL 80 MHz, 2 FOSC,
+/// 3 XTAL 40 MHz), 22 `sclk_en` (`pcr/rmt_sclk_conf.rs:26-46`). Reset
+/// `0x0050_1000` = `div_num 1, sel 1, en` — 40 MHz until esp-hal writes
+/// `div_num 0` for its 80 MHz.
+pub const RMT_SCLK_CONF: u32 = 0x030;
+pub const RMT_SCLK_CONF_RESET: u32 = 0x0050_1000;
 
 /// The PAC reset value of `uart(n).clk_conf`: `sclk_sel = 3` (XTAL),
 /// `sclk_en` set, no divider. The ROM console runs on XTAL, and this is what
@@ -62,24 +81,49 @@ pub struct UartClockLines {
     pub uart1: ClockLine,
 }
 
-/// `PCR`: the P5 accept block with the two UART clock lines driven from it.
+/// The two PCR words the RMT block's clock is made of, fed to
+/// [`super::rmt::Rmt`] the way the UART lines are.
+#[derive(Clone, Debug)]
+pub struct RmtClockLine {
+    /// `rmt_conf`: the clock gate.
+    pub conf: ClockLine,
+    /// `rmt_sclk_conf`: source, divider, enable.
+    pub sclk: ClockLine,
+}
+
+impl Default for RmtClockLine {
+    fn default() -> Self {
+        Self {
+            conf: ClockLine::new(RMT_CONF_RESET),
+            sclk: ClockLine::new(RMT_SCLK_CONF_RESET),
+        }
+    }
+}
+
+/// `PCR`: the P5 accept block with the UART and RMT clock lines driven
+/// from it.
 #[derive(Debug)]
 pub struct Pcr {
     regs: RegFile,
     lines: UartClockLines,
+    rmt: RmtClockLine,
 }
 
 impl Pcr {
-    pub fn new(lines: UartClockLines) -> Self {
+    pub fn new(lines: UartClockLines, rmt: RmtClockLine) -> Self {
         let regs = super::accept::pcr()
             .with_reset(UART0_CLK_CONF, UART_CLK_CONF_RESET)
-            .with_reset(UART1_CLK_CONF, UART_CLK_CONF_RESET);
-        Self { regs, lines }
+            .with_reset(UART1_CLK_CONF, UART_CLK_CONF_RESET)
+            .with_reset(RMT_CONF, RMT_CONF_RESET)
+            .with_reset(RMT_SCLK_CONF, RMT_SCLK_CONF_RESET);
+        Self { regs, lines, rmt }
     }
 
     fn drive_lines(&self) {
         self.lines.uart0.set(self.regs.stored(UART0_CLK_CONF));
         self.lines.uart1.set(self.regs.stored(UART1_CLK_CONF));
+        self.rmt.conf.set(self.regs.stored(RMT_CONF));
+        self.rmt.sclk.set(self.regs.stored(RMT_SCLK_CONF));
     }
 }
 
@@ -94,7 +138,10 @@ impl Peripheral for Pcr {
 
     fn write(&mut self, off: u32, width: Width, value: u32, cx: &mut BusCx<'_>) {
         self.regs.write(off, width, value, cx);
-        if matches!(off & !3, UART0_CLK_CONF | UART1_CLK_CONF) {
+        if matches!(
+            off & !3,
+            UART0_CLK_CONF | UART1_CLK_CONF | RMT_CONF | RMT_SCLK_CONF
+        ) {
             self.drive_lines();
         }
     }
@@ -119,10 +166,35 @@ mod tests {
     use lp_emu_esp_common::Sandbox;
 
     #[test]
+    fn the_rmt_clock_line_starts_at_the_pac_reset_and_follows_esp_hal() {
+        let rmt = RmtClockLine::default();
+        let mut sb = Sandbox::new();
+        let mut pcr = Pcr::new(UartClockLines::default(), rmt.clone());
+        assert_eq!(rmt.sclk.get(), RMT_SCLK_CONF_RESET, "40 MHz: div_num 1");
+        assert_eq!(rmt.conf.get(), RMT_CONF_RESET, "clocked");
+        assert_eq!(sb.read(&mut pcr, RMT_SCLK_CONF), 0x0050_1000);
+        assert_eq!(pcr.reg_name(RMT_SCLK_CONF), Some("rmt_sclk_conf"));
+        assert_eq!(pcr.reg_name(RMT_CONF), Some("rmt_conf"));
+        // `Rmt::new`, as the test_rmt trace shows it: the guard's clk_en,
+        // an rst_en pulse, then sel 1 / div_num 0.
+        sb.write(&mut pcr, RMT_CONF, 0x3);
+        sb.write(&mut pcr, RMT_CONF, 0x1);
+        sb.write(&mut pcr, RMT_SCLK_CONF, 0x0010_0000);
+        sb.write(&mut pcr, RMT_SCLK_CONF, 0x0050_0000);
+        assert_eq!(rmt.sclk.get(), 0x0050_0000, "80 MHz");
+        assert_eq!(rmt.conf.get(), 0x1);
+        let blob = pcr.save_state();
+        let fresh = RmtClockLine::default();
+        let mut other = Pcr::new(UartClockLines::default(), fresh.clone());
+        other.load_state(&blob);
+        assert_eq!(fresh.sclk.get(), 0x0050_0000, "a restore re-drives it");
+    }
+
+    #[test]
     fn the_uart_clock_lines_follow_the_pcr_words_and_start_at_xtal() {
         let lines = UartClockLines::default();
         let mut sb = Sandbox::new();
-        let mut pcr = Pcr::new(lines.clone());
+        let mut pcr = Pcr::new(lines.clone(), RmtClockLine::default());
         assert_eq!(lines.uart0.get(), UART_CLK_CONF_RESET, "XTAL, enabled");
         assert_eq!(sb.read(&mut pcr, UART0_CLK_CONF), UART_CLK_CONF_RESET);
 
@@ -140,7 +212,7 @@ mod tests {
         // A restore re-drives the lines.
         let blob = pcr.save_state();
         let fresh = UartClockLines::default();
-        let mut other = Pcr::new(fresh.clone());
+        let mut other = Pcr::new(fresh.clone(), RmtClockLine::default());
         other.load_state(&blob);
         assert_eq!(fresh.uart0.get(), 0x0050_0000);
     }

@@ -220,19 +220,9 @@ pub fn spi(name: &'static str) -> RegFile {
     RegFile::new(name, 0x400).with_names(names)
 }
 
-/// `RMT`: accept. The brief expected the no-radio image not to touch it;
-/// it does — `Rmt::new(rmt_peripheral, RMT_CLOCK)` runs unconditionally in
-/// `main.rs:286` and was the first strict stop of P5 (`RMT+0x068`
-/// `sys_conf`, from `esp_hal::rmt::Rmt::new`). Accepted so the boot can
-/// continue; the WS281x transmitter's channels, the 48-word blocks, the
-/// wrap and threshold interrupts are M5, and a frame sent into this block
-/// never completes — which is the honest reading of a block with no model.
-/// `sys_conf` resets to `0x0500_0010` (the PAC).
-pub fn rmt() -> RegFile {
-    RegFile::new("RMT", 0x400)
-        .with_names(regs::RMT)
-        .with_reset(0x068, 0x0500_0010)
-}
+// `RMT` was an accept block here from P5 (its `sys_conf` write from
+// `esp_hal::rmt::Rmt::new` was P5's first strict stop) until M5 P1 gave it a
+// model: `super::rmt`.
 
 #[cfg(test)]
 mod tests {
