@@ -28,6 +28,14 @@ pub enum MemoryError {
     },
     /// Unaligned memory access.
     Unaligned { address: u32, alignment: usize },
+    /// A hardware watchpoint fired *before* the access was performed — the
+    /// access did not happen. `slot` identifies which of the privileged
+    /// layer's trigger CSRs matched (see [`crate::bus::Watchpoint`]).
+    Watchpoint {
+        address: u32,
+        kind: MemoryAccessKind,
+        slot: u8,
+    },
 }
 
 impl core::fmt::Display for MemoryError {
@@ -52,6 +60,21 @@ impl core::fmt::Display for MemoryError {
                 f,
                 "Unaligned memory access at address 0x{address:08x} (requires {alignment} byte alignment)"
             ),
+            MemoryError::Watchpoint {
+                address,
+                kind,
+                slot,
+            } => {
+                let kind_str = match kind {
+                    MemoryAccessKind::Read => "read",
+                    MemoryAccessKind::Write => "write",
+                    MemoryAccessKind::InstructionFetch => "instruction fetch",
+                };
+                write!(
+                    f,
+                    "Watchpoint {slot} fired on {kind_str} at address 0x{address:08x}"
+                )
+            }
         }
     }
 }
@@ -643,6 +666,52 @@ impl Memory {
                 .wrapping_add(self.shared_slice_len() as u32),
         )
     }
+}
+
+impl crate::bus::Bus for Memory {
+    #[inline(always)]
+    fn fetch_instruction(&mut self, address: u32) -> Result<u32, MemoryError> {
+        Memory::fetch_instruction(self, address)
+    }
+
+    #[inline(always)]
+    fn read_word(&mut self, address: u32) -> Result<i32, MemoryError> {
+        Memory::read_word(self, address)
+    }
+
+    #[inline(always)]
+    fn read_halfword(&mut self, address: u32) -> Result<i16, MemoryError> {
+        Memory::read_halfword(self, address)
+    }
+
+    #[inline(always)]
+    fn read_byte(&mut self, address: u32) -> Result<i8, MemoryError> {
+        Memory::read_byte(self, address)
+    }
+
+    #[inline(always)]
+    fn read_u8(&mut self, address: u32) -> Result<u8, MemoryError> {
+        Memory::read_u8(self, address)
+    }
+
+    #[inline(always)]
+    fn write_word(&mut self, address: u32, value: i32) -> Result<(), MemoryError> {
+        Memory::write_word(self, address, value)
+    }
+
+    #[inline(always)]
+    fn write_halfword(&mut self, address: u32, value: i16) -> Result<(), MemoryError> {
+        Memory::write_halfword(self, address, value)
+    }
+
+    #[inline(always)]
+    fn write_byte(&mut self, address: u32, value: i8) -> Result<(), MemoryError> {
+        Memory::write_byte(self, address, value)
+    }
+
+    // `set_watchpoint` and `take_sideband` keep the trait's default no-op:
+    // flat user-mode `Memory` has no privileged state to trap from and no
+    // MMIO to raise a sideband about.
 }
 
 #[cfg(all(test, feature = "std"))]

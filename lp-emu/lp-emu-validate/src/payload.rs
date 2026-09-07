@@ -194,6 +194,61 @@ pub static BRIDGE_READY: SeriesSpec = SeriesSpec {
     compiled: OnceLock::new(),
 };
 
+/// One `jit-math-perf` bench measurement.
+///
+/// ```text
+/// [fw-check-json] {"kind":"jit-bench","label":"mul/helper-saturating","calls":441,
+///   "median":812,"per_call":1,"avg":815,"min":808,"max":990,"checksum":123456}
+/// ```
+///
+/// `label` and `calls` are structural (which kernel, how much corpus); the
+/// five cycle figures are timing (esp-emu has no cycle model — `validate.toml`
+/// grades it `modeled` — and this crate's own `lp-emu:*` has none yet either);
+/// `checksum` is a deterministic XOR of the kernel's outputs, not a clock, so
+/// it is compared like any other structural field.
+static JIT_BENCH_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        record: "jit-bench",
+        field: "label",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "jit-bench",
+        field: "calls",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "jit-bench",
+        field: "median",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "jit-bench",
+        field: "per_call",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "jit-bench",
+        field: "avg",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "jit-bench",
+        field: "min",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "jit-bench",
+        field: "max",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "jit-bench",
+        field: "checksum",
+        class: FieldClass::Structural,
+    },
+];
+
 pub static ALL_PAYLOADS: &[Payload] = &[
     Payload {
         name: "shader-compile-stress",
@@ -301,6 +356,18 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         mask_set: "normalize",
         fields: &[],
         series: &[&BRIDGE_READY],
+    },
+    Payload {
+        name: "jit-math-perf",
+        display_name: "JIT Q32 math perf",
+        fw_check_slug: "jit-math-perf",
+        firmware_feature: "test_jit_math_perf",
+        fw_checks_feature: "check-jit-math-perf",
+        sentinel: Sentinel::Done("[jit-math-perf] === DONE ==="),
+        record_kinds: &["jit-bench"],
+        mask_set: "jit-math-perf",
+        fields: JIT_BENCH_FIELDS,
+        series: &[],
     },
 ];
 

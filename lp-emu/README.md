@@ -20,7 +20,8 @@ lp-emu/
   lp-riscv-emu-guest-test-app/  a guest binary the rv32 tests run
   lp-xt-emu/                    Xtensa LX6/LX7 executors, board maps, FP
   lp-xt-emu-guest/              Xtensa guest-side runtime (device-target)
-  esp/                          SoC crates land here (see below)
+  esp/                          Espressif SoC layer (see esp/README.md)
+    lp-emu-esp-common/          bus, MMIO decode, peripherals, trace
 ```
 
 **Crates are namespaced by vendor, not flattened** (vision D9). The
@@ -61,6 +62,9 @@ directories are allowed to assume MMIO at all.
 - **`lp-riscv-emu`** — the RV32 emulator: instruction executors, register
   file, run loops, `EmulatorError`, and the rv32 frame-pointer backtrace
   walk. `lp-riscv-inst` decodes for it; it never re-implements decoding.
+  Since M3 it also carries the **machine-mode hart** (`mach::MachineHart`) —
+  M-mode CSRs, traps, `mret`/`wfi`, hardware triggers and interrupt delivery
+  — which is the piece a SoC machine under `esp/` drives.
 
 - **`lp-riscv-emu-guest`** / **`lp-riscv-emu-guest-test-app`** — the
   guest-side runtime (entry, syscalls, allocator, panic, logging) for code
@@ -78,6 +82,15 @@ directories are allowed to assume MMIO at all.
 - **`lp-xt-emu-guest`** — the `no_std` Xtensa guest runtime. A DEVICE-target
   crate: excluded from the host workspace and built as a member of the
   `lp-xt/fixtures` esp-toolchain workspace.
+
+- **`esp/lp-emu-esp-common`** — the Espressif SoC substrate: `SocBus` (RAM
+  regions, MMIO decode, watchpoints, the unmapped policy), the `Peripheral`
+  trait and its `BusCx`, `RegFile` for the accept-and-remember blocks, the
+  bus trace with its spin detector, host byte streams, and an ELF
+  program-header view. It contains **no chip numbers**; a chip crate
+  registers its own regions and peripherals. Generated register-name tables
+  (`scripts/emu/pac-regnames.py`, gated by `just lint-emu-regnames`) live in
+  the chip crate for the same reason. See its README.
 
 **Arch-neutrality rule:** `lp-emu-core` and `lp-emu-abi` must not depend on
 cranelift or on any `lp-riscv-*` / `lp-xt-*` crate. Architecture specifics
@@ -140,16 +153,34 @@ instruments, and the discipline they keep is the same everywhere:
 - `uart-bridge-wiring-check.sh` — prove the wires with **no change to the board
   under test**: open the bridge's port, reset the other board from its own port,
   and read what came through.
+- `reset-and-capture.py` — reset a board from its own USB-Serial-JTAG handle and
+  read its boot log on that same handle. This is the only way to see a
+  native-USB board boot: `espflash monitor --before default-reset` drops the USB
+  device and reopens a new session after the banner has gone, while a passive
+  reader cannot make a board boot at all. USB-SJ keeps its session across a
+  *chip* reset, so a handle that is already open catches everything.
+- `flash-image.sh` — the desk discipline in one place, which the two
+  `uart-bridge-*` scripts go through: one named board, foreground, under a pty,
+  refuse if a port is held, SIGINT by pid, wait for something the **image**
+  prints rather than for espflash's "completed".
+
+⚠️ **`--no-stub`, and power-cycle rather than reset.** On this fixture espflash's
+RAM stub cannot connect, and a board can enter a state where the second-stage
+bootloader spins forever on `LP_I2C_ANA_MAST_I2C0_BUSY` — LP-domain state that
+survives every reset short of power-on. Both are the same root cause and both
+are written up in
+`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
 
 The payload itself is `fw-checks`' `uart-bridge` (see that crate's README); the
 fixture and its current blocker are
-`docs/defects/2026-09-06-xiao-c6-7e44-hangs-in-the-second-stage-bootloader.md`.
+`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
 
 ## Roadmap
 
 `lp-emu-validate/` and the first two transcripts landed with M2 of the
-2026-09-06 esp-emulator plan. The ESP32-C6 SoC emulator and the vendored ROM
-images arrive under `esp/` from M3 on; nothing in `esp/` exists yet.
+2026-09-06 esp-emulator plan. `esp/lp-emu-esp-common` landed with M3 P3,
+alongside `lp-emu-core`'s discrete-event `Scheduler`. The C6 machine itself
+and the vendored ROM images arrive under `esp/` in the phases after it.
 
 `lp-cli validate list` already names `lp-emu:esp32c6:t1`, and says
 `unavailable until M3`. That is deliberate: the configuration exists as a name

@@ -1,0 +1,26 @@
+[package]
+name = "lp-emu-esp-common"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+# MIT as a unit with the rest of `lp-emu/`, NOT the workspace's AGPL.
+# See lp-emu/LICENSE-MIT and `just lint-emu-fence`.
+license = "MIT"
+description = "SoC bus, MMIO decode, peripheral model and bus trace shared by the Espressif machine emulators"
+
+[lints]
+workspace = true
+
+[dependencies]
+lp-emu-core = { path = "../../lp-emu-core", features = ["std"] }
+log = { workspace = true }
+# ELF program headers and symbols. MIT/Apache-2.0, already in the tree via
+# `lp-riscv-elf`; the read half only, because nothing here writes an ELF.
+object = { version = "0.37.3", default-features = false, features = [
+    "read_core",
+    "elf",
+    "std",
+] }
+
+[dev-dependencies]
+test-log = { workspace = true }

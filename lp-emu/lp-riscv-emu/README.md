@@ -2,13 +2,17 @@
 
 The RISC-V 32-bit **emulator** LightPlayer uses to run and debug generated
 code on the host: instruction executors, the register files, the run loops,
-`EmulatorError`, and the rv32 frame-pointer backtrace walk. The arch-neutral
-machinery it builds on — memory model, `StepResult` / `TrapCode`, serial, time,
-cycle accounting, the profiler — lives in [`lp-emu-core`](../../lp-emu/lp-emu-core);
-decoding of the base ISA is delegated to [`lp-riscv-inst`](../lp-riscv-inst).
+`EmulatorError`, and the rv32 frame-pointer backtrace walk. It also carries a
+**machine-mode hart** (`mach::MachineHart`) — M-mode CSRs, traps, `mret`/`wfi`,
+four hardware triggers and interrupt delivery — which is what a SoC emulator
+drives, as distinct from `emu`'s user-mode `Riscv32Emulator`. The arch-neutral
+machinery both build on — memory model, the `Bus` trait, `StepResult` /
+`TrapCode`, serial, time, cycle accounting, the profiler — lives in
+[`lp-emu-core`](../../lp-emu/lp-emu-core); decoding of the base ISA is
+delegated to [`lp-riscv-inst`](../lp-riscv-inst).
 
 ```
-src/emu/
+src/emu/         the user-mode emulator
   emulator/      Riscv32Emulator: state, run loops, single-step, registers,
                  function-call ABI helpers, backtraces, debug dumps.
   executor/      one module per instruction group:
@@ -17,10 +21,37 @@ src/emu/
   fp_regs.rs     RV32F architectural state: f0-f31 and fcsr.
   error.rs       EmulatorError.
   logging.rs     LogLevel-gated instruction ring log (InstLog).
+src/mach/        the privileged hart
+  mod.rs         MachineHart<B: Bus>: architectural state, the cycle-budgeted
+                 slice loop, SYSTEM handling, interrupt input.
+  csr.rs         the M-mode CSR file, every number cited.
+  trap.rs        exception causes, trap delivery, mret.
+  trigger.rs     the four mcontrol triggers (esp-rtos's stack guard).
 ```
 
 The crate is `#![no_std]` by default (`fw-emu` links it that way on bare-metal
 RV32); the `std` feature adds host-only conveniences.
+
+## The machine-mode hart
+
+`mach` is arch-only: no MMIO, no SoC knowledge. It reuses `emu`'s executors for
+every non-`SYSTEM` instruction and handles `SYSTEM` (`0x73`) and `c.ebreak`
+itself, so the user-mode run loops are untouched by its existence. Two things
+are worth knowing before driving it, and both are in the module's own docs:
+
+- **Interrupts are polled at four points only** — on entry to `run_slice`,
+  after `mret` / `wfi` / a CSR write to `mstatus` or `mie`, after a Store- or
+  System-class instruction whose bus raises `Bus::take_sideband`, and whenever
+  the machine calls `poll_interrupts`. There is no per-instruction privilege
+  check.
+- **`mstatus.MIE` is the machine's job.** `MachineHart::new` leaves the spec's
+  reset value, which has `MIE = 0`, and nothing in the esp-hal stack ever sets
+  it — so a machine must seed `mstatus = 0x1888` through `set_csr_raw` before
+  entering the firmware, exactly as the real ROM leaves the core.
+
+Unknown CSRs raise an illegal instruction rather than reading zero. That is
+deliberate: a silent-zero CSR file is how a hardware stack guard gets lost
+without anything failing.
 
 ## Supported ISA
 

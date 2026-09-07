@@ -3918,6 +3918,7 @@ name = "fw-checks"
 version = "40.0.0"
 dependencies = [
  "log",
+ "lps-builtins",
  "serde",
  "serde_json",
 ]
@@ -5661,6 +5662,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "lp-emu-esp-common"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lp-emu-core",
+ "object 0.37.3",
+ "test-log",
 ]
 
 [[package]]
