@@ -1,0 +1,990 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emulated boards — the card dress, the target moment, the Desktop chrome · spike</title>
+<style>
+/* =====================================================================
+   Studio runs real boards, emulated boards, and a desktop simulator.
+   Vision 2026-09-07-0118-studio-emulated-boards (D1–D21 ratified).
+
+   THESIS. D6 says an emulated board IS a device: same card, same zones,
+   same verbs. The risk (T7) is that a viewer mistakes the emulated card
+   for the desk — or reads a twin as a duplicate of its original. So the
+   question this spike asks is narrow: how little dress makes "emulated"
+   unmistakable at a glance, without turning the card into something
+   other than a device card. Three surfaces:
+     1. the emulated card's dress, beside the real card it must not be
+        confused with (D6, D17), and the speed chip (D8);
+     2. the roster: "+ emulated board" at the insertion point and the
+        twin verb "Emulate this board" on a real card (D18);
+     3. the target moment — a board-targeted project Run with no such
+        board attached, and the "different board attached" face (D7);
+     4. the Desktop simulator's renamed chrome, no "as <board>" (D11, D17).
+
+   Palette: src/style.css :root, verbatim (via spikes/device-card-identity-line).
+   Card metrics: device_roster_card.rs, faithful (ADR 2026-09-03 height table:
+   header 90 · Project 220 · Firmware+Terminal 252 · Device 80 = 644px).
+   Conventions honoured: add buttons at the insertion point; bound = violet,
+   never green; identity as two fixed mono rows; pasteable text stays
+   pasteable (no click-to-expand, no tooltip-only facts).
+   ===================================================================== */
+html.no-anim *, html.no-anim *::before, html.no-anim *::after { transition:none !important; animation:none !important; }
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --bg:#0d0d13; --surface:#14141c; --panel:#17171f; --raised:#1d1d28;
+  --raised-strong:#252532; --terminal:#09090e;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --dim:#9ea0ac;
+
+  --sel-bd:#d6dae0; --sel-bg:rgba(214,218,224,.12);
+  --focus:#a5b8ff;
+  --violet:#a58af7;
+  --spectrum:#5fe08b, #53c6f2, #a58af7, #ff5d5d, #ffab4a, #f5e04e;
+
+  --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
+  --st-neutral-bg:#12171c;   --st-neutral-bd:#3a444c;   --st-neutral-tx:#d9e2df;
+  --st-working-bg:#24230f;   --st-working-bd:#706730;   --st-working-tx:#f2e6a2;
+  --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
+  --st-warning-bg:#292614;   --st-warning-bd:#796c33;   --st-warning-tx:#f0dc7a;
+  --st-attention-bg:#291f14; --st-attention-bd:#795833; --st-attention-tx:#f0b97a;
+  --st-error-bg:#301b1d;     --st-error-bd:#874b4b;     --st-error-tx:#ffc7c7;
+  /* bound / bus-linked = the sim's own family (style.css: "violet = the
+     sim's own family: a re-simulated picture must never wear the green a
+     device's frames earn") */
+  --st-bound-bg:#241a33;     --st-bound-bd:#5f4a85;     --st-bound-tx:#c9b1f5;
+
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+
+  --w: 400px;
+  --term-h: 160px;
+}
+* { box-sizing: border-box; }
+body { margin:0; padding:28px 32px 160px; background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
+h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
+p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 18px; max-width:960px; }
+p.hint b { color:var(--shell-mut); font-weight:600; }
+h2 { font-size:12px; letter-spacing:.1em; color:var(--shell-mut); text-transform:uppercase; margin:48px 0 6px; }
+h2 .n { color:var(--shell-dim); margin-right:6px; }
+p.sub { color:var(--shell-dim); font-size:12px; margin:0 0 14px; max-width:960px; }
+p.sub b { color:var(--shell-mut); font-weight:600; }
+code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls { display:flex; gap:14px; flex-wrap:wrap; align-items:center; padding:10px 14px;
+  border:1px dashed var(--shell-bd-strong); border-radius:8px; color:var(--shell-mut); font-size:12px;
+  position:sticky; top:8px; z-index:60; background:rgba(11,12,14,.94); backdrop-filter:blur(8px); }
+.controls b { color:var(--shell-tx); font-weight:600; }
+.controls button, .local button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx);
+  border:1px solid var(--shell-bd-strong); border-radius:6px; padding:3px 10px; font-size:12px; }
+.controls button:hover, .local button:hover { background:#1e2126; }
+.controls button.active, .local button.active { border-color:#7be0b2; color:#7be0b2; }
+.controls .grp, .local .grp { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
+.controls .sep { width:1px; height:18px; background:var(--shell-bd-strong); }
+.controls input[type=range] { width:120px; }
+.controls .mono { font-family:var(--mono); font-size:11px; }
+.local { display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin:0 0 12px; font-size:12px; color:var(--shell-mut); }
+.local b { color:var(--shell-tx); font-weight:600; }
+
+/* ---- concept frames -------------------------------------------------- */
+.concepts { display:grid; grid-template-columns:repeat(auto-fill, var(--w)); gap:26px 22px; align-items:start; margin-top:14px; }
+.concept { display:grid; gap:8px; min-width:0; }
+.concept h3.c { margin:0; font-size:12px; color:var(--shell-tx); font-weight:600; }
+.concept h3.c .k { display:inline-block; min-width:18px; color:#7be0b2; font-family:var(--mono); font-size:11px; margin-right:6px; }
+.concept.lean h3.c .k { color:#f0dc7a; }
+.concept.ref h3.c .k { color:var(--shell-dim); }
+.concept p.cn { margin:0; font-size:11.5px; line-height:1.45; color:var(--shell-dim); }
+.concept p.cn b { color:var(--shell-mut); font-weight:600; }
+.concept .ruler { font:10.5px var(--mono); color:var(--shell-dim); margin:0; display:flex; gap:10px; flex-wrap:wrap; }
+.concept .ruler .ok { color:#7be0b2; }
+.concept .ruler .warn { color:#f0dc7a; }
+.wide { grid-template-columns:repeat(auto-fill, minmax(520px, 1fr)); }
+
+.rejected { border:1px dashed var(--shell-bd); border-radius:8px; padding:10px 14px; margin-top:26px; font-size:11.5px; color:var(--shell-dim); max-width:960px; }
+.rejected b { color:var(--shell-mut); font-weight:600; }
+.rejected ul { margin:6px 0 0; padding-left:18px; }
+.rejected li { margin:4px 0; }
+
+/* =====================================================================
+   The Studio page ground (the roster lives on the Aurora ground, not the
+   spike shell) — one wrapper so the cards read against their own bg.
+   ===================================================================== */
+.ground { max-width:1320px; background:linear-gradient(180deg, rgba(255,255,255,.04), transparent 240px), var(--bg); color:var(--tx);
+  border:1px solid var(--shell-bd); border-radius:10px; padding:22px 22px 24px; }
+.ground h4 { margin:0 0 12px; font-size:12px; font-weight:800; text-transform:uppercase; line-height:1; color:var(--strong); letter-spacing:.02em; }
+.roster { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:14px; grid-auto-rows:minmax(300px, auto); }
+.remline { margin:14px 0 0; display:grid; gap:12px; }
+.remline p { margin:0; display:flex; gap:8px; align-items:center; font-size:12px; color:var(--dim); flex-wrap:wrap; }
+.remline .tog { appearance:none; background:transparent; border:0; color:var(--subtle); font:inherit; font-size:12px; cursor:pointer; padding:0; text-decoration:underline dotted; }
+
+/* =====================================================================
+   Card grammar — device_roster_card.rs, faithful
+   header (px-4 pt-4 pb-3, gap-2 · gap-1.5 · title 20 · identity 2×16)
+   zones (px-4 py-3, gap-2; border-t border-strong)
+   Project: preview 120 · info 17 · bar 4 · verbs 30
+   Firmware: info 17 · bar 4 · verbs 30 · terminal (h-40 = 160) flush
+   Device (mt-auto): info 17 · verbs 30
+   ===================================================================== */
+.card { position:relative; display:flex; flex-direction:column; border-radius:6px; border:1px solid var(--bd); background:var(--panel); min-width:0; color:var(--tx); }
+.card header { display:grid; gap:8px; min-width:0; padding:16px 16px 12px; }
+.card header .id { display:grid; gap:6px; min-width:0; }
+.card .head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; min-width:0; }
+.card h3 { margin:0; flex:1; min-width:0; font-size:14px; line-height:20px; font-weight:700; color:var(--strong);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.card h3 .pre { color:var(--st-bound-tx); }
+.card .chips { display:inline-flex; gap:6px; flex:none; align-items:flex-start; }
+.chip { flex:none; display:inline-flex; align-items:center; gap:5px; min-height:24px; padding:0 8px; border-radius:999px; border:1px solid;
+  font-size:12px; font-weight:700; line-height:1; white-space:nowrap; }
+.chip.good      { background:var(--st-good-bg);      border-color:var(--st-good-bd);      color:var(--st-good-tx); }
+.chip.neutral   { background:var(--st-neutral-bg);   border-color:var(--st-neutral-bd);   color:var(--st-neutral-tx); }
+.chip.working   { background:var(--st-working-bg);   border-color:var(--st-working-bd);   color:var(--st-working-tx); }
+.chip.warning   { background:var(--st-warning-bg);   border-color:var(--st-warning-bd);   color:var(--st-warning-tx); }
+.chip.attention { background:var(--st-attention-bg); border-color:var(--st-attention-bd); color:var(--st-attention-tx); }
+.chip.bound     { background:var(--st-bound-bg);     border-color:var(--st-bound-bd);     color:var(--st-bound-tx); }
+.chip.speed { font-family:var(--mono); font-weight:600; font-size:11px; padding:0 7px; }
+.chip svg { width:11px; height:11px; }
+
+.rows { display:grid; gap:0; min-width:0; height:32px; }
+.mono-line { margin:0; min-width:0; font-family:var(--mono); font-size:0.68rem; line-height:16px; color:var(--subtle);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mono-line .mem { color:var(--dim); }
+.mono-line .emu { color:var(--st-bound-tx); }
+
+.zone { display:grid; gap:8px; min-width:0; border-top:1px solid var(--bd-strong); padding:12px 16px; }
+.zone.combined { padding:0; gap:0; }
+.zone.combined .zrows { display:grid; gap:8px; min-width:0; padding:12px 16px; }
+.zone.device { margin-top:auto; }
+.info { margin:0; height:17px; font-size:12px; line-height:17px; color:var(--subtle); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.info.fault { color:var(--st-attention-tx); font-weight:600; }
+.info.bound { color:var(--st-bound-tx); }
+.bar { height:4px; border-radius:2px; background:transparent; overflow:hidden; }
+.bar.lit { background:var(--raised-strong); }
+.bar.lit i { display:block; height:100%; border-radius:2px; background:var(--st-working-tx); }
+.bar.lit.sweep i { width:35%; animation:sweep 1.2s ease-in-out infinite; }
+@keyframes sweep { 0%{transform:translateX(-100%)} 100%{transform:translateX(300%)} }
+.verbs { display:flex; gap:6px; align-items:center; height:30px; min-width:0; white-space:nowrap; overflow:hidden; }
+.verbs .sp { flex:1; min-width:0; }
+.verb { display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 10px; border-radius:6px; border:1px solid var(--bd-strong);
+  background:var(--raised); color:var(--tx); font-size:12px; font-weight:600; flex:none; cursor:default; }
+.verb.twin { border-color:var(--st-bound-bd); color:var(--st-bound-tx); }
+.verb.disabled { opacity:.6; border-color:var(--bd); background:transparent; color:var(--subtle); }
+.verb svg { width:12px; height:12px; }
+/* row_cta_class: ux-spectrum-cta — transparent, text-strong bold, conic ring at .62 */
+.cta { position:relative; display:inline-flex; align-items:center; height:26px; padding:0 12px; border-radius:6px; border:1px solid transparent;
+  background:transparent; color:var(--strong); font-size:12px; font-weight:700; flex:none; cursor:default; }
+.cta::before { content:""; position:absolute; inset:-1px; border-radius:inherit; padding:1px;
+  background:conic-gradient(from 20deg, var(--spectrum), #5fe08b);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor;
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude; opacity:.62; pointer-events:none; }
+.cta.violet::before { background:conic-gradient(from 20deg, #a58af7, #c9b1f5, #7a63c9, #a58af7); }
+
+/* the preview slot: ux-play-frame ux-play-frame-slot (120px, near-black) */
+.play { position:relative; width:100%; height:120px; overflow:hidden; border-radius:7px; background:#07080a; border:1px solid var(--bd); }
+.play.dimmed svg { filter:saturate(.45) brightness(.55); }
+.play svg { position:absolute; inset:0; width:100%; height:100%; }
+.play .empty { position:absolute; inset:0; display:grid; align-content:center; justify-items:center; padding:0 14px; color:var(--dim);
+  font-size:11.5px; line-height:1.4; text-align:center; }
+.play .empty p { margin:0; }
+.pill { position:absolute; top:6px; right:6px; display:inline-flex; align-items:center; gap:5px; padding:1px 6px; border:1px solid var(--bd); border-radius:4px;
+  background:color-mix(in srgb, var(--terminal) 78%, transparent); font-family:var(--mono); font-size:9.5px; letter-spacing:.02em; }
+.pill .dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+.pill.live { color:var(--st-good-tx); } .pill.live .dot { animation:blink 2s ease-in-out infinite; }
+.pill.emu { color:var(--st-bound-tx); } .pill.emu .dot { animation:blink 2s ease-in-out infinite; }
+.pill.stale { color:var(--st-attention-tx); }
+.pill.off { color:var(--st-neutral-tx); }
+@keyframes blink { 50% { opacity:.35; } }
+
+/* terminal: flush, terminal bg, mono 11px */
+.term { height:var(--term-h); overflow:hidden; background:var(--terminal); border-top:1px solid var(--bd-mut); padding:8px 16px; font-family:var(--mono); font-size:11px; line-height:16px; color:var(--dim); }
+.term div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.term .hi { color:var(--muted); }
+.term .rom { color:var(--subtle); }
+.term .em { color:var(--st-bound-tx); }
+
+/* ---- the dress hooks (concepts) ------------------------------------- */
+/* B · violet left edge: the sim card's ux-device-edge, in the bound family, FIXED (never state-toned):
+   "runs in this tab" is a kind, not a state */
+.card.edge { border-left:3px solid var(--st-bound-tx); }
+/* D · ghost frame */
+.card.ghost { border:1px dashed var(--st-bound-bd); background:color-mix(in srgb, var(--panel) 82%, transparent); }
+.card.ghost .term { background:color-mix(in srgb, var(--terminal) 70%, #241a33 30%); }
+/* E · the runtime band: a 24px zone between the header and Project */
+.band { display:flex; align-items:center; gap:8px; height:24px; padding:0 16px; background:var(--st-bound-bg); border-top:1px solid var(--st-bound-bd); border-bottom:1px solid var(--st-bound-bd);
+  color:var(--st-bound-tx); font-size:11px; font-weight:600; white-space:nowrap; overflow:hidden; }
+.band .sp { flex:1; }
+.band .m { font-family:var(--mono); font-weight:500; color:var(--st-bound-tx); opacity:.9; }
+.band svg { width:12px; height:12px; flex:none; }
+
+/* ---- the roster's add slot (AddDeviceCard, faithful) ---------------- */
+.addslot { display:flex; min-height:160px; flex-direction:column; align-items:center; justify-content:center; gap:12px; border-radius:6px;
+  border:1px dashed var(--bd-strong); background:transparent; padding:24px 20px; text-align:center; position:relative; }
+.addslot p { margin:0; max-width:224px; font-size:12px; line-height:1.6; color:var(--muted); }
+.addslot .two { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+.addslot.split { min-height:120px; }
+.addslot .or { font-size:11px; color:var(--dim); }
+.addslot .ctaBig { height:30px; padding:0 14px; font-size:12.5px; }
+.addslot .quiet { color:var(--subtle); font-size:12px; text-decoration:underline dotted; text-underline-offset:3px; }
+.addslot .quiet.violet { color:var(--st-bound-tx); }
+
+/* remembered tile (RememberedTile, faithful-ish) */
+.rem { display:flex; flex-direction:column; gap:8px; min-width:0; border-radius:6px; border:1px solid var(--bd); background:color-mix(in srgb, var(--panel) 70%, transparent); padding:12px 16px; }
+.rem h3 { margin:0; font-size:14px; line-height:20px; font-weight:700; color:var(--strong); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rem.edge { border-left:3px solid var(--st-bound-tx); }
+.rem .verbs { margin-top:auto; }
+.rem .outline { border-color:var(--sel-bd); background:transparent; }
+
+/* ---- the creation picker (BoardPickPopover grammar, inverted) ---------- */
+.pop { position:absolute; left:50%; bottom:calc(100% - 44px); transform:translateX(-50%); width:392px; z-index:20; border-radius:8px; border:1px solid var(--bd-strong);
+  background:var(--raised); box-shadow:0 18px 44px rgba(0,0,0,.55); text-align:left; overflow:hidden; }
+.pop .top { display:grid; gap:4px; padding:10px 12px 8px; border-bottom:1px solid var(--bd-mut); }
+.pop .top p { margin:0; font-size:11.5px; color:var(--subtle); }
+.pop .top p b { color:var(--tx); font-weight:600; }
+.pop .top p.why { color:var(--dim); font-size:11px; }
+.pop .tiles { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; padding:10px 12px; }
+.tile { position:relative; display:grid; gap:4px; padding:8px; border-radius:6px; border:1px solid var(--bd); background:var(--panel); text-align:left; }
+.tile.picked { border-color:var(--sel-bd); background:var(--sel-bg); }
+.tile .sil { height:56px; border-radius:4px; background:var(--terminal); position:relative; overflow:hidden; border:1px solid var(--bd-mut); }
+.tile .sil::before { content:""; position:absolute; left:14%; right:14%; top:22%; bottom:22%; border-radius:6px; border:1.5px solid var(--bd-strong); background:#12121a; }
+.tile .sil::after { content:""; position:absolute; left:24%; right:24%; top:36%; bottom:36%; border-radius:2px; background:repeating-linear-gradient(90deg, var(--bd-strong) 0 3px, transparent 3px 7px); opacity:.7; }
+.tile .sil.c6::before { top:30%; bottom:30%; }
+.tile .sil.long::before { left:6%; right:6%; }
+.tile .t { font-size:11.5px; font-weight:600; color:var(--tx); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tile .s { font-family:var(--mono); font-size:10px; color:var(--dim); }
+.tile .ck { position:absolute; top:6px; right:6px; width:14px; height:14px; border-radius:50%; background:var(--st-good-tx); color:#0b0c0e; font-size:10px; display:grid; place-items:center; font-weight:800; }
+.pop .foot { display:flex; align-items:center; gap:10px; padding:8px 12px 10px; border-top:1px solid var(--bd-mut); }
+.pop .foot p { margin:0; flex:1; font-size:11px; color:var(--dim); line-height:1.4; }
+
+/* the ⋯ card menu (naming PR #553's header menu) */
+.menu { position:absolute; right:12px; top:44px; z-index:20; width:230px; border-radius:8px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 44px rgba(0,0,0,.55); padding:6px; display:grid; gap:2px; }
+.menu .mi { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:5px; font-size:12px; color:var(--tx); }
+.menu .mi.hov { background:rgba(255,255,255,.06); }
+.menu .mi.twin { color:var(--st-bound-tx); }
+.menu .mi.danger { color:var(--st-error-tx); }
+.menu .mi svg { width:13px; height:13px; }
+.menu .hr { height:1px; background:var(--bd-mut); margin:3px 4px; }
+.dots { width:24px; height:24px; border-radius:5px; display:grid; place-items:center; color:var(--dim); font-weight:800; letter-spacing:1px; flex:none; }
+.dots.open { background:rgba(255,255,255,.1); color:var(--strong); }
+
+/* =====================================================================
+   Section 3 — the target moment
+   ===================================================================== */
+.frame3 { display:grid; gap:0; border:1px solid var(--shell-bd); border-radius:10px; overflow:hidden; background:var(--bg); color:var(--tx); }
+.frame3 .chrome { display:flex; align-items:center; gap:10px; height:38px; padding:0 14px; background:var(--terminal); border-bottom:1px solid var(--bd); font-size:12px; color:var(--dim); }
+.frame3 .chrome .wm { font-weight:800; letter-spacing:.06em; color:var(--muted); font-size:11px; }
+.frame3 .chrome .crumb { font-family:var(--mono); font-size:11px; color:var(--subtle); }
+.frame3 .body { padding:18px 20px 22px; display:grid; gap:14px; }
+.prompt { display:grid; gap:10px; max-width:560px; padding:14px 16px; border-radius:8px; border:1px solid var(--st-bound-bd); background:var(--st-bound-bg); }
+.prompt.plain { border-color:var(--bd-strong); background:var(--raised); }
+.prompt h5 { margin:0; font-size:13.5px; font-weight:700; color:var(--strong); line-height:1.35; }
+.prompt p { margin:0; font-size:12px; line-height:1.5; color:var(--muted); }
+.prompt p.once { color:var(--dim); font-size:11.5px; }
+.prompt .verbs { height:auto; flex-wrap:wrap; white-space:normal; overflow:visible; gap:8px; }
+.prompt .verb.outline { background:transparent; border-color:var(--sel-bd); }
+.prompt .link { font-size:12px; color:var(--subtle); text-decoration:underline dotted; text-underline-offset:3px; }
+.stage { display:flex; align-items:center; gap:12px; }
+.stage .dot { width:10px; height:10px; border-radius:50%; background:var(--st-working-tx); animation:blink 1.6s ease-in-out infinite; }
+.stage p { margin:0; font-size:14px; font-weight:600; color:var(--muted); }
+.stage.bound .dot { background:var(--st-bound-tx); }
+.progress { height:4px; width:100%; max-width:420px; border-radius:2px; background:var(--raised-strong); overflow:hidden; }
+.progress i { display:block; height:100%; width:38%; background:linear-gradient(90deg, var(--spectrum), #5fe08b); background-size:300% 100%; }
+.skel { display:grid; grid-template-columns:minmax(200px,260px) minmax(0,1fr) minmax(220px,300px); gap:14px; animation:pulse 2s ease-in-out infinite; }
+.skel > div { display:grid; gap:14px; }
+.skel .b { border-radius:8px; background:var(--raised); border:1px solid var(--bd-mut); }
+@keyframes pulse { 50% { opacity:.55; } }
+
+/* package card (gallery, "Your projects") with the D41 sheet */
+.pkg { position:relative; width:280px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); overflow:hidden; }
+.pkg .thumb { height:132px; background:radial-gradient(120px 60px at 30% 45%, #4d2d55, transparent 70%), radial-gradient(160px 70px at 75% 60%, #1f3a2e, transparent 70%), #0a0a10; }
+.pkg .meta { padding:10px 12px 12px; display:grid; gap:3px; }
+.pkg .meta h5 { margin:0; font-size:13.5px; font-weight:700; color:var(--strong); }
+.pkg .meta p { margin:0; font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pkg .meta p.dim { color:var(--dim); }
+.pkg .meta p.good { color:var(--st-good-tx); }
+.pkg .meta p.bound { color:var(--st-bound-tx); }
+.sheet { position:absolute; inset:0; background:color-mix(in srgb, var(--panel) 92%, transparent); backdrop-filter:blur(3px); display:grid; align-content:center; gap:10px; padding:16px 14px; }
+.sheet h5 { margin:0; font-size:13px; font-weight:700; color:var(--strong); }
+.sheet p { margin:0; font-size:11.5px; line-height:1.45; color:var(--muted); }
+.sheet .btns { display:grid; gap:6px; }
+.sheet .btn { display:flex; align-items:center; justify-content:center; height:28px; border-radius:6px; border:1px solid var(--bd-strong); background:var(--raised); font-size:12px; font-weight:600; color:var(--tx); }
+.sheet .btn.primary { border-color:var(--st-bound-bd); color:var(--st-bound-tx); background:var(--st-bound-bg); }
+.sheet .btn.cancel { border-color:transparent; background:transparent; color:var(--subtle); }
+
+/* editor mock for 3C */
+.editor { display:grid; grid-template-columns:minmax(0,1fr) 300px; min-height:220px; }
+.editor .work { padding:14px; display:grid; gap:10px; align-content:start; border-right:1px solid var(--bd); }
+.editor .work .l { height:12px; border-radius:3px; background:var(--raised); }
+.editor .pane { display:flex; flex-direction:column; background:var(--panel); }
+.banner { margin:10px; padding:10px 12px; border-radius:6px; border:1px solid var(--st-bound-bd); background:var(--st-bound-bg); display:grid; gap:8px; }
+.banner p { margin:0; font-size:11.5px; line-height:1.45; color:var(--muted); }
+.banner p b { color:var(--st-bound-tx); font-weight:700; }
+.banner .verbs { height:auto; }
+.banner .verb { height:24px; font-size:11.5px; }
+
+/* settings rows (project_settings_section.rs grammar) */
+.settings { display:grid; gap:0; width:380px; border:1px solid var(--bd); border-radius:8px; background:var(--panel); overflow:visible; position:relative; }
+.settings .row { display:grid; grid-template-columns:76px minmax(0,1fr); gap:10px; align-items:center; padding:8px 12px; border-top:1px solid var(--bd-mut); font-size:12px; }
+.settings .row:first-child { border-top:0; }
+.settings .row dt { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--subtle); }
+.settings .row dd { margin:0; min-width:0; font-family:var(--mono); font-size:11.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:8px; }
+.settings .sel { display:inline-flex; align-items:center; gap:8px; height:26px; padding:0 8px 0 10px; border-radius:6px; border:1px solid var(--bd-strong); background:var(--raised); font-family:var(--font); font-size:12px; font-weight:600; color:var(--tx); }
+.settings .sel .sw { width:10px; height:10px; border-radius:2px; background:var(--st-bound-tx); }
+.settings .sel .sw.board { background:var(--st-neutral-tx); }
+.settings .hintline { grid-column:1 / -1; margin:0; font-size:11px; color:var(--dim); line-height:1.45; }
+.tmenu { position:relative; margin:-4px 12px 12px 96px; width:260px; z-index:20; border-radius:8px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 44px rgba(0,0,0,.55); padding:6px; display:grid; gap:2px; }
+.tmenu .mi { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:5px; font-size:12px; color:var(--tx); }
+.tmenu .mi .sw { width:10px; height:10px; border-radius:2px; background:var(--st-neutral-tx); flex:none; }
+.tmenu .mi .sw.v { background:var(--st-bound-tx); }
+.tmenu .mi.hov { background:rgba(255,255,255,.06); }
+.tmenu .mi .s { margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--dim); }
+.tmenu .hd { padding:4px 8px 2px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); }
+
+/* =====================================================================
+   Section 4 — the sim card (sim_card.rs, faithful): tint edge, title
+   bar with glyph · name · transport label · grow, icon tabs, body
+   ===================================================================== */
+.simcard { position:relative; display:flex; flex-direction:column; border-radius:6px; border:1px solid var(--bd); background:var(--panel); overflow:hidden; min-width:0; color:var(--tx);
+  border-left:3px solid var(--edge, var(--st-good-tx)); }
+.simcard .tb { display:flex; align-items:center; gap:8px; min-height:36px; padding:6px 6px 6px 12px; background:var(--terminal); border-bottom:1px solid var(--bd); }
+.simcard .tb .g { display:inline-flex; color:var(--muted); }
+.simcard .tb .g svg { width:14px; height:14px; }
+.simcard .tb .g.v { color:var(--st-bound-tx); }
+.simcard .tb p { margin:0; min-width:0; font-size:14px; font-weight:600; color:var(--strong); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.simcard .tb .lab { margin-left:auto; flex:none; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); }
+.simcard .tb .lab.v { color:var(--st-bound-tx); }
+.simcard .tb .grow { width:28px; height:24px; display:grid; place-items:center; color:var(--dim); }
+.simcard .tabs { display:flex; gap:2px; padding:4px 6px; background:var(--terminal); border-bottom:1px solid var(--bd); }
+.simcard .tab { flex:1; height:24px; display:grid; place-items:center; border-radius:6px; color:var(--dim); }
+.simcard .tab svg { width:14px; height:14px; }
+.simcard .tab.on { background:color-mix(in oklab, var(--edge, var(--st-good-tx)) 12%, transparent); color:var(--edge, var(--st-good-tx)); }
+.simcard .tab.danger.on { background:color-mix(in oklab, var(--st-error-tx) 12%, transparent); color:var(--st-error-tx); }
+.simcard .body { display:grid; gap:6px; padding:12px; align-content:start; }
+.simcard .sec { display:grid; gap:4px; padding:8px 10px; border-radius:6px; border:1px solid var(--bd-mut); background:var(--surface); }
+.simcard .sec .st { display:flex; align-items:center; gap:8px; }
+.simcard .sec .st h6 { margin:0; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--subtle); flex:1; }
+.simcard .kv { display:grid; grid-template-columns:72px minmax(0,1fr); gap:6px 8px; font-size:12px; }
+.simcard .kv dt { font-size:10.5px; font-weight:800; text-transform:uppercase; color:var(--subtle); letter-spacing:.04em; }
+.simcard .kv dd { margin:0; font-family:var(--mono); font-size:11.5px; color:var(--muted); overflow-wrap:anywhere; }
+.simcard .kv dd.gone { color:var(--st-error-tx); text-decoration:line-through; opacity:.7; }
+.simcard .kv dd.new { color:var(--st-bound-tx); }
+.simcard .sec.danger { border-color:color-mix(in srgb, var(--st-error-bd) 60%, transparent); }
+.simcard .sec .row { display:flex; align-items:center; gap:8px; }
+.simcard .sec .row p { margin:0; flex:1; font-size:12px; color:var(--muted); }
+.simcard .verb.red { color:var(--st-error-tx); }
+.simcard .play { height:150px; }
+.simcard .playmeta { display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--subtle); }
+.simcard .playmeta .sw { width:12px; height:12px; border-radius:3px; background:linear-gradient(135deg,#5a3c48,#303a2c); }
+.simcard .playmeta .sp { flex:1; }
+.strip { display:grid; gap:8px; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); margin-top:14px; }
+.strip .w { border:1px solid var(--shell-bd); border-radius:8px; padding:10px 12px; background:var(--bg); display:grid; gap:6px; }
+.strip .w .lab { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--shell-dim); }
+.strip .w p { margin:0; font-size:12px; color:var(--muted); }
+.strip .w p.b { color:var(--st-bound-tx); }
+.strip .w p.g { color:var(--st-good-tx); }
+.strip .w .was { font-size:11px; color:var(--dim); text-decoration:line-through; }
+.strip .w .mi { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:5px; font-size:12px; color:var(--tx); border:1px solid var(--bd-mut); background:var(--raised); }
+.strip .w .mi .sw { width:10px; height:10px; border-radius:2px; background:var(--st-bound-tx); }
+</style>
+</head>
+<body>
+
+<h1>Emulated boards — the card dress, the target moment, the Desktop chrome</h1>
+<p class="hint">
+  Vision <code>2026-09-07-0118-studio-emulated-boards</code>, D1–D21 settled. <b>D6</b>: an emulated board is a device — same card, same zones,
+  same verbs, folded like silicon. <b>T7</b>: nobody may mistake its card for the desk, and a twin (D18) must not read as a duplicate of its
+  original. So the question is how <b>little</b> dress makes "emulated" unmistakable while the card stays a device card. The real card at the
+  left of section 1 is <b>production, faithful</b> (device_roster_card.rs, 644px at the 400px column); every emulated concept is the same card
+  with one thing changed. Conventions: bound = violet, never green; add buttons at the insertion point; identity as two fixed mono rows;
+  pasteable text stays pasteable. Names per D17: <b>Desktop</b> / <b>Emulated &lt;board&gt;</b> / &lt;board&gt;; "emulator" stays reserved for the real-binary thing.
+</p>
+
+<div class="controls" id="ctl">
+  <span><b>Emulated card</b></span>
+  <span class="grp" id="c-state"></span>
+  <span class="sep"></span>
+  <span><b>Speed</b></span>
+  <span class="grp" id="c-speed"></span>
+  <span class="sep"></span>
+  <span class="grp">
+    <button id="b-twin" class="active">twin of Porch sign</button>
+    <button id="b-pill">▶ pill violet</button>
+    <button id="b-synth">mark MAC synthetic</button>
+    <button id="b-term">compact terminal</button>
+    <button id="b-anim">no animation</button>
+  </span>
+  <span class="sep"></span>
+  <span><b>Width</b></span>
+  <input type="range" id="w" min="320" max="520" step="4" value="400"><span class="mono" id="wv">400px</span>
+</div>
+
+<!-- ================================================================= -->
+<h2><span class="n">1</span>The emulated card's dress, beside the real card</h2>
+<p class="sub">
+  <b>R</b> is the desk: Porch sign, a XIAO ESP32-C6, Ready, running <i>Luna's porch sign</i>. Each concept is its emulated twin (or a fresh
+  emulated C6 with the twin toggle off) in one dress. Cycle the card's faces in the strip: born-flashed (D10, first face = Ready), Flashing
+  (sub-second, same activity and journal), a slow boot at 0.3× (D8: only boot deadlines dilate, the card shows a speed chip), the twin
+  standing by while its real board is Ready (D7/Q9: the real one wins, the card says so), and Powered off (D9: durable, flash image kept).
+  The ▶ pill is a gate question: the frames are honestly the emulated board's (ADR honest-device-preview), so green is <i>truthful</i>; violet
+  is style.css's "a re-simulated picture must never wear the green a device's frames earn" — which of the two rules applies here?
+</p>
+<div class="concepts" id="s1"></div>
+
+<!-- ================================================================= -->
+<h2><span class="n">2</span>The roster: creation at the insertion point, and the twin verb</h2>
+<p class="sub">
+  The Devices grid as it would be (production grid, <code>minmax(320px,1fr)</code>): the real Porch sign, its emulated twin, a from-roster
+  emulated board just created, and the add slot. <b>D18</b>: from-project and from-roster are the floor; the twin verb "Emulate this board" is in v1
+  <i>if this spike likes it</i>. Pick the dress the roster wears, where the twin verb lives on the real card, how the add slot grows a second
+  verb, and where a powered-off emulated board waits.
+</p>
+<div class="local">
+  <span><b>Dress</b></span><span class="grp" id="c-dress"></span>
+  <span class="sep"></span>
+  <span><b>Twin verb</b></span><span class="grp" id="c-twinverb"></span>
+  <span class="sep"></span>
+  <span><b>Add slot</b></span><span class="grp" id="c-add"></span>
+  <span class="sep"></span>
+  <span><b>Powered off</b></span><span class="grp" id="c-off"></span>
+</div>
+<div class="ground" id="s2"></div>
+<div class="concepts" id="s2notes" style="margin-top:14px"></div>
+
+<!-- ================================================================= -->
+<h2><span class="n">3</span>The target moment: Run, with no such board attached</h2>
+<p class="sub">
+  <b>D7</b>: <code>target</code> routes Run — <i>desktop</i> → the Desktop simulator; a board id → the attached real board if idle, else the emulated one.
+  The <b>first</b> board-targeted run in a browser with no such board asks <b>once</b>, then Run is silent. A <i>different</i> attached board → offer both,
+  never guess. Three places the ask can live, then the settings-row edit that changes the target later. Cycle the face in the strip.
+</p>
+<div class="local">
+  <span><b>Face</b></span><span class="grp" id="c-face"></span>
+</div>
+<div class="concepts wide" id="s3"></div>
+
+<!-- ================================================================= -->
+<h2><span class="n">4</span>The Desktop simulator's chrome (D11, D17)</h2>
+<p class="sub">
+  Today's sim card, faithful (sim_card.rs: violet-edged when the sim family tints it, "Simulator" title, SIMULATOR transport label, icon tabs,
+  Details showing Health with the D4 <i>as &lt;board&gt;</i> line). D11: it stops wearing a board — the "as" line goes, it runs the desktop manifest,
+  it asks for the GPU tier. The card's payload, capacity and violet pill stay. So this is a rename plus what the Health section says instead.
+</p>
+<div class="local">
+  <span><b>Tab</b></span><span class="grp" id="c-simtab"></span>
+  <span class="sep"></span>
+  <span><b>Edge</b></span><span class="grp" id="c-simedge"></span>
+</div>
+<div class="concepts" id="s4"></div>
+<div class="strip" id="s4strip"></div>
+
+<div class="rejected" id="rej">
+  <b>Not explored as concepts, and why.</b>
+  <ul>
+    <li><b>The emulated board wearing the sim card's anatomy</b> (title bar + icon tabs, section 4's shape). D6 says it is a device: the four
+      zones, the same verbs, the same fold. A different anatomy would say "runtime", and the whole point is that it is not one.</li>
+    <li><b>A separate "Emulated" section header in the roster.</b> The twin and its original would sit in different grids; the desk and the
+      emulated desk are one roster (the fold does not care, and neither should the page). Grouping is a sort, not a section — later.</li>
+    <li><b>Calling it "Emulator".</b> Reserved (emulator vision D12) for the real-binary thing under <code>lp-emu/</code>; the card names a board.</li>
+    <li><b>A fake board photo / silhouette on the card.</b> The pick popover already carries the drawing; a picture on the card would read as a
+      product shot of hardware the user does not have — the opposite of T7.</li>
+  </ul>
+</div>
+
+<script>
+/* ---------------------------------------------------------------------
+   Data — modelled on the catalog (lp-core/lpc-hardware/boards) and the
+   firmware-faces fixtures (home_gallery_stories.rs)
+   --------------------------------------------------------------------- */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const SEP = ' · ';
+const BOARDS = {
+  'seeed/xiao-esp32-c6':          { name:'XIAO ESP32-C6',                  chip:'esp32c6', fw:'fw-esp32c6 e1f2a3b', sil:'c6' },
+  'seeed/xiao-esp32-s3-plus':     { name:'XIAO ESP32-S3 Plus',             chip:'esp32s3', fw:'fw-esp32s3 9b1c0de', sil:'c6' },
+  'espressif/esp32-c6-devkitc-1': { name:'ESP32-C6-DevKitC-1',             chip:'esp32c6', fw:'fw-esp32c6 e1f2a3b', sil:'long' },
+  'espressif/esp32-s3-devkitc-1': { name:'ESP32-S3-DevKitC-1',             chip:'esp32s3', fw:'fw-esp32s3 9b1c0de', sil:'long' },
+  'quinled/dig-uno':              { name:'QuinLED-Dig-Uno',                chip:'esp32',   fw:'fw-esp32v3 7c80a27', sil:'' },
+  'domraem/dom-z-102':            { name:'WLED LAN 4-Channel (DOM-Z-102)', chip:'esp32',   fw:'fw-esp32v3 7c80a27', sil:'' },
+};
+const C6 = BOARDS['seeed/xiao-esp32-c6'];
+const REAL = { title:'Porch sign', board:C6, mac:'60:55:f9:0a:0b:0c', project:"Luna's porch sign" };
+const SYNTH_MAC = '02:1e:6d:3a:9c:01';   // locally-administered bit set (D9)
+
+const state = {
+  emu:'ready', speed:1, twin:true, pill:'green', synth:false, term:false,
+  dress:'B', twinverb:'device', add:'one', off:'grid', face:'none', simtab:'details', simedge:'good',
+};
+
+/* ---------------------------------------------------------------------
+   Small parts
+   --------------------------------------------------------------------- */
+const ICON = {
+  chipglyph: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>',
+  monitorplay: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 7.75a.75.75 0 0 1 1.142-.638l3.664 2.249a.75.75 0 0 1 0 1.278l-3.664 2.25a.75.75 0 0 1-1.142-.64z"/><path d="M12 17v4M8 21h8"/><rect x="2" y="3" width="20" height="14" rx="2"/></svg>',
+  grow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 4l14 8-14 8z"/></svg>',
+  details: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
+  console: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-5-6-5M12 19h8"/></svg>',
+  danger: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+  pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+};
+const chip = (kind, text, cls='') => `<span class="chip ${kind} ${cls}">${text}</span>`;
+const speedTone = s => s >= 0.95 ? 'neutral' : s >= 0.5 ? 'working' : 'attention';
+const speedText = s => `${s.toFixed(1)}×`;
+const verb = (t, cls='') => `<span class="verb ${cls}">${t}</span>`;
+const cta  = (t, cls='') => `<span class="cta ${cls}">${esc(t)}</span>`;
+const sp = '<span class="sp"></span>';
+
+/* the porch sign: 3 serpentine rows × 14 lamps, aspect-fit in the 120px slot */
+function lamps(phase=0, dim=false) {
+  const cols=14, rows=3, W=400, H=120, r=4.2;
+  const dx = W/(cols+1), dy = H/(rows+1);
+  let out='';
+  for (let y=0;y<rows;y++) for (let x=0;x<cols;x++) {
+    const i = y*cols + (y%2 ? cols-1-x : x);
+    const h = (i*11 + phase) % 360;
+    const l = 46 + 12*Math.sin((i+phase/20)*.8);
+    out += `<circle cx="${(dx*(x+1)).toFixed(1)}" cy="${(dy*(y+1)).toFixed(1)}" r="${r}" fill="hsl(${h} 78% ${l}%)"/>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${out}</svg>`;
+}
+function pill(kind, text) { return `<span class="pill ${kind}"><span class="dot"></span>${esc(text)}</span>`; }
+
+/* ---------------------------------------------------------------------
+   The device card — one renderer, the dress as hooks
+   --------------------------------------------------------------------- */
+const DRESS = {
+  A: { k:'A', name:'Words only', note:'D17 taken literally: the title is <b>Emulated XIAO ESP32-C6</b> and row 1 of the identity ends in <code>· emulated</code>. Nothing else changes. The cheapest dress, and the one most likely to be skimmed past — a twin auto-named <i>Emulated Porch sign</i> shares its original\'s status chip, picture and verbs.',
+       titlePrefix:true, row1:true },
+  B: { k:'B', name:'Violet left edge', lean:true, note:'The sim card already wears a 3px tint edge (<code>ux-device-edge</code>) and the roster card wears none — so an edge on a device card already means <b>runs in this tab</b>. Here it is the bound family, <b>fixed</b> (never state-toned: emulated is a kind, not a state); the status chip keeps its own tone. Title prefix as A; the identity row stays the real card\'s grammar.',
+       titlePrefix:true, edge:true },
+  C: { k:'C', name:'Kind chip beside the status chip', note:'A violet <b>Emulated</b> chip (or <b>Twin</b>, for a twin) LEFT of the status chip; the title is the plain auto-name, so a twin\'s title equals its original\'s — the chip is what tells them apart. The strongest test of T7: the same title, the same picture, one chip.',
+       kindChip:true },
+  D: { k:'D', name:'Ghost frame', note:'Dashed violet border, the panel at 82% — the card is drawn as "not solid". Reads instantly as not-hardware, but the roster\'s <b>add slot is the dashed thing</b> (AddDeviceCard): two dashed frames in one grid would say "empty" twice. Included so the gate can reject it for the right reason.',
+       titlePrefix:true, ghost:true },
+  E: { k:'E', name:'Runtime band under the header', note:'A 24px bound-family band between the header and Project: <b>Emulated in this tab · 0.6× · guest 00:42</b>. The header stays byte-for-byte the real card\'s; the speed chip and guest clock get a home instead of crowding the chip row. Costs a height-table row (644 → 668px, ADR 2026-09-03).',
+       titlePrefix:true, band:true },
+};
+
+function emuFace() {
+  const s = state.emu, sp_ = state.speed, twin = state.twin;
+  const dilated = sp_ < 0.95;
+  const guest = '00:42.1';
+  const f = {
+    status:{kind:'good', label:'Ready'}, title: twin ? 'Porch sign' : 'XIAO ESP32-C6',
+    project: twin ? REAL.project : null,
+    preview:'frames', projectLine: twin ? REAL.project : 'Nothing loaded',
+    projectVerbs: twin ? [cta('Open in editor'), sp, verb('Remove')] : [cta('Choose what to put on this board'), sp],
+    fwLine:`${C6.fw} · ${C6.name}`, fwBar:null, fwVerbs:[verb('Update firmware'), sp, verb('Factory reset')],
+    deviceLine: dilated ? `Last heard 1 s ago · guest ${guest} · running at ${speedText(sp_)}` : `Last heard 1 s ago · guest ${guest}`,
+    deviceVerbs:[verb('Reset'), verb('Power off'), sp, verb('Forget')],
+    term:[['rom','ESP-ROM:esp32c6-20220919'],['rom','Build:Sep 19 2022'],['rom','rst:0x1 (POWERON),boot:0x6c (SPI_FAST_FLASH_BOOT)'],['','lp: fw-esp32c6 e1f2a3b · heap 361,120 B free'],['hi','hello · seeed/xiao-esp32-c6 · 02:1e:6d:3a:9c:01'],['','project: Luna\'s porch sign · 42 lamps · 31 fps'],['','heartbeat · frame 1,284 · rmt ch0 ok'],['','heartbeat · frame 1,346 · rmt ch0 ok']],
+    guest, dilated,
+  };
+  if (s === 'created') {
+    f.deviceLine = 'Created just now · flashed fw-esp32c6 e1f2a3b';
+    f.title = twin ? 'Porch sign' : 'XIAO ESP32-C6';
+    f.term = [['rom','ESP-ROM:esp32c6-20220919'],['rom','rst:0x1 (POWERON),boot:0x6c (SPI_FAST_FLASH_BOOT)'],['','lp: fw-esp32c6 e1f2a3b · heap 361,120 B free'],['hi','hello · seeed/xiao-esp32-c6 · 02:1e:6d:3a:9c:01'],['','manifest: seeed/xiao-esp32-c6 stamped'],['','lpfs: empty · 3.9 MiB free']];
+    if (!twin) { f.projectLine = 'Nothing loaded'; f.preview = 'sentence'; f.previewText = 'Nothing loaded — no picture until something runs.'; }
+  }
+  if (s === 'flashing') {
+    f.status = {kind:'working', label:'Flashing'};
+    f.fwLine = 'Writing the image into flash… 100%'; f.fwBar = 100; f.fwVerbs = [verb('Cancel'), sp];
+    f.preview = 'sentence'; f.previewText = 'The picture is gone while the board is flashed.';
+    f.projectVerbs = [sp]; f.deviceVerbs = [sp, verb('Forget')];
+    f.term = [['','flash: bootloader @ 0x0 · 22,144 B'],['','flash: partitions @ 0x8000 · 3,072 B'],['','flash: app @ 0x10000 · 1,412,096 B'],['em','image written (0.31 s) · reset']];
+    f.deviceLine = 'Resetting…';
+  }
+  if (s === 'booting') {
+    f.status = {kind:'working', label:'Identifying'};
+    f.preview = 'sentence'; f.previewText = 'No picture yet — the board is starting.';
+    f.projectLine = twin ? REAL.project : 'Nothing loaded'; f.projectVerbs = [sp];
+    f.fwVerbs = [sp]; f.deviceVerbs = [sp, verb('Forget')];
+    f.deviceLine = dilated ? `Identifying… boot at ${speedText(sp_)} — up to ${Math.round(5/sp_)} s` : 'Identifying…';
+    f.term = [['rom','ESP-ROM:esp32c6-20220919'],['rom','Build:Sep 19 2022'],['rom','rst:0x1 (POWERON),boot:0x6c (SPI_FAST_FLASH_BOOT)'],['rom','load:0x40875720,len:0x1ef8'],['','lp: fw-esp32c6 e1f2a3b · heap 361,120 B free']];
+  }
+  if (s === 'standby') {
+    f.status = {kind:'neutral', label:'Standing by'};
+    f.preview = 'frames'; f.previewDim = true; f.pillKind = 'off'; f.pillText = 'last known';
+    f.projectLine = 'Porch sign is on the desk — Run goes there.'; f.projectLineCls = 'bound';
+    f.projectVerbs = [cta('Open in editor'), sp, verb('Remove')];
+    f.deviceLine = 'Standing by · guest paused at 00:42.1 · flash image kept';
+    f.deviceVerbs = [verb('Run here instead', 'twin'), verb('Power off'), sp, verb('Forget')];
+    f.term = f.term.slice(0, 6).concat([['em','paused — the real board is Ready']]);
+  }
+  return f;
+}
+
+function deviceCard(opts) {
+  const { dress, kind, title, board, mac, fw, speed, twin, face, menu, twinverb } = opts;
+  const status = opts.status || face.status;
+  const D = dress || {};
+  const emu = kind === 'emu';
+  const titleHtml = (emu && D.titlePrefix)
+    ? `<span class="pre">Emulated</span> ${esc(title)}`
+    : esc(title);
+  // chips: [kind chip][speed chip][status chip]
+  let chips = '';
+  if (emu && D.kindChip) chips += chip('bound', twin ? 'Twin' : 'Emulated');
+  if (emu && !D.band && (face.dilated || (speed !== 1 && state.emu !== 'standby'))) chips += chip(speedTone(speed), speedText(speed), 'speed');
+  chips += chip(status.kind, esc(status.label));
+  // identity rows: board · chip / MAC · fw
+  const row1 = [board.name, board.chip].concat(emu && D.row1 ? ['<span class="emu">emulated</span>'] : []).join(SEP);
+  const row2 = [mac, `<span class="fwl">${esc(fw)}</span>`].concat(emu && state.synth ? ['<span class="mem">synthetic</span>'] : []).join(SEP);
+  const identity = `<div class="rows"><p class="mono-line">${row1}</p><p class="mono-line">${row2}</p></div>`;
+
+  // ─ project zone
+  let preview;
+  if (face.preview === 'frames') {
+    const pk = face.pillKind || (emu ? (state.pill === 'violet' ? 'emu' : 'live') : 'live');
+    const pt = face.pillText || (pk === 'emu' ? 'emulated' : 'live');
+    preview = `<div class="play ${face.previewDim ? 'dimmed' : ''}">${lamps(emu ? 40 : 40)}${pill(pk, pt)}</div>`;
+  } else {
+    preview = `<div class="play"><div class="empty"><p>${esc(face.previewText)}</p></div></div>`;
+  }
+  const projectZone = `<section class="zone">
+      ${preview}
+      <p class="info ${face.projectLineCls || ''}">${esc(face.projectLine)}</p>
+      <div class="bar ${face.projectBar != null ? 'lit' : ''}"></div>
+      <div class="verbs">${face.projectVerbs.join('')}</div>
+    </section>`;
+
+  // ─ firmware + terminal zone
+  const bar = face.fwBar == null ? '<div class="bar"></div>'
+    : `<div class="bar lit ${face.fwBar === 'sweep' ? 'sweep' : ''}"><i style="width:${face.fwBar === 'sweep' ? 35 : face.fwBar}%"></i></div>`;
+  const term = `<div class="term">${face.term.map(([c,t]) => `<div class="${c}">${esc(t)}</div>`).join('')}</div>`;
+  const fwZone = `<section class="zone combined"><div class="zrows">
+      <p class="info">${esc(face.fwLine)}</p>${bar}
+      <div class="verbs">${face.fwVerbs.join('')}</div></div>${term}</section>`;
+
+  // ─ device zone (twin verb placement lives here for the REAL card)
+  let deviceVerbs = face.deviceVerbs.slice();
+  if (!emu && twinverb === 'device') deviceVerbs.splice(2, 0, verb(`${ICON.chipglyph} Emulate`, 'twin'));
+  const deviceZone = `<footer class="zone device">
+      <p class="info">${esc(face.deviceLine)}</p>
+      <div class="verbs">${deviceVerbs.join('')}</div></footer>`;
+
+  const band = (emu && D.band) ? `<div class="band">${ICON.chipglyph}<span>Emulated in this tab</span><span class="sp"></span>
+      ${face.dilated || speed !== 1 ? `<span class="m">${speedText(speed)}</span>` : ''}<span class="m">guest ${face.guest}</span></div>` : '';
+  const dots = (!emu && twinverb === 'menu') ? `<span class="dots open">···</span>` : (!emu ? '<span class="dots">···</span>' : '');
+  chips += dots;
+  const cls = ['card', emu && D.edge ? 'edge' : '', emu && D.ghost ? 'ghost' : ''].join(' ');
+  return `<article class="${cls}" data-kind="${kind}">
+    <header><div class="id">
+      <div class="head"><h3>${titleHtml}</h3><span class="chips">${chips}</span></div>
+      ${identity}
+    </div></header>
+    ${band}${projectZone}${fwZone}${deviceZone}${menu || ''}
+  </article>`;
+}
+
+function realFace() {
+  return {
+    status:{kind:'good', label:'Ready'}, preview:'frames', projectLine:REAL.project,
+    projectVerbs:[cta('Open in editor'), sp, verb('Remove')],
+    fwLine:`${C6.fw} · ${C6.name}`, fwBar:null, fwVerbs:[verb('Update firmware'), sp, verb('Factory reset')],
+    deviceLine:'Last heard 1 s ago', deviceVerbs:[verb('Reset'), verb('Disconnect'), sp, verb('Forget')],
+    term:[['rom','ESP-ROM:esp32c6-20220919'],['rom','Build:Sep 19 2022'],['rom','rst:0x1 (POWERON),boot:0x6c (SPI_FAST_FLASH_BOOT)'],['','lp: fw-esp32c6 e1f2a3b · heap 361,120 B free'],['hi','hello · seeed/xiao-esp32-c6 · 60:55:f9:0a:0b:0c'],['','project: Luna\'s porch sign · 42 lamps · 31 fps'],['','heartbeat · frame 9,812 · rmt ch0 ok'],['','heartbeat · frame 9,874 · rmt ch0 ok']],
+    guest:null, dilated:false,
+  };
+}
+function realCard(extra={}) {
+  return deviceCard({ kind:'real', title:REAL.title, board:C6, mac:REAL.mac, fw:C6.fw, face:realFace(), speed:1, twinverb:state.twinverb, ...extra });
+}
+function emuCard(dress, extra={}) {
+  const face = emuFace();
+  return deviceCard({ kind:'emu', dress, title:face.title, board:C6, mac:SYNTH_MAC, fw:C6.fw, status:face.status, face, speed:state.speed, twin:state.twin, ...extra });
+}
+
+/* the powered-off emulated board (D9 durable record) */
+function offTile(dress) {
+  const D = dress; const edge = D.edge || D.band ? 'edge' : '';
+  const title = state.twin ? (D.titlePrefix ? '<span class="pre" style="color:var(--st-bound-tx)">Emulated</span> Porch sign' : 'Porch sign') : (D.titlePrefix ? '<span class="pre" style="color:var(--st-bound-tx)">Emulated</span> XIAO ESP32-C6' : 'XIAO ESP32-C6');
+  const kc = D.kindChip ? chip('bound', state.twin ? 'Twin' : 'Emulated') : '';
+  return `<div class="rem ${edge}">
+    <div class="head"><h3>${title}</h3><span class="chips">${kc}${chip('neutral','Powered off')}</span></div>
+    <div class="play"><div class="empty"><p>Powered off — the flash image is kept (4 MiB), so the board comes back as it was.</p></div></div>
+    <p class="mono-line">${C6.name}${SEP}${SYNTH_MAC}${SEP}ran 4 min ago</p>
+    <div class="verbs">${verb('Power on','outline')}${sp}${verb('Forget')}</div>
+  </div>`;
+}
+
+/* ---------------------------------------------------------------------
+   Section 1
+   --------------------------------------------------------------------- */
+function renderS1() {
+  const root = document.getElementById('s1');
+  const ref = `<div class="concept ref"><h3 class="c"><span class="k">R</span>The desk — production, faithful</h3>${realCard({twinverb:'none'})}
+    <p class="ruler"></p><p class="cn">device_roster_card.rs at the 400px column: header 90 · Project 220 · Firmware+Terminal 252 · Device 80. Every emulated concept is this card with one thing changed.</p></div>`;
+  const cs = Object.values(DRESS).map(D => `<div class="concept ${D.lean ? 'lean' : ''}">
+      <h3 class="c"><span class="k">${D.k}</span>${esc(D.name)}${D.lean ? ' <span style="color:#f0dc7a;font-weight:500">· lean</span>' : ''}</h3>
+      ${emuCard(D)}<p class="ruler"></p><p class="cn">${D.note}</p></div>`).join('');
+  root.innerHTML = ref + cs;
+  root.querySelectorAll('.concept').forEach(el => {
+    const a = el.querySelector('article, .rem'); const h = Math.round(a.getBoundingClientRect().height);
+    const hd = Math.round(a.querySelector('header').getBoundingClientRect().height);
+    const over = [...a.querySelectorAll('.mono-line, .info')].some(l => l.scrollWidth > l.clientWidth + 1);
+    el.querySelector('.ruler').innerHTML = `<span>card <b>${h}px</b></span><span>header ${hd}px</span>` + (over ? '<span class="warn">a line clips at this width</span>' : '<span class="ok">nothing clipped</span>');
+  });
+}
+
+/* ---------------------------------------------------------------------
+   Section 2 — the roster
+   --------------------------------------------------------------------- */
+const TWINVERB = { device:'Device zone verb', menu:'header ⋯ menu (PR #553)', none:'no twin verb' };
+const ADD = { one:'one slot, two verbs', two:'two slots', picker:'picker open' };
+const OFF = { grid:'a tile in the grid', remembered:'the remembered line' };
+
+function picker() {
+  const tiles = Object.entries(BOARDS).map(([id, b], i) => `<div class="tile ${i===0?'picked':''}">
+      <div class="sil ${b.sil}"></div><span class="t">${esc(b.name)}</span><span class="s">${b.chip}</span>${i===0?'<span class="ck">✓</span>':''}</div>`).join('');
+  return `<div class="pop">
+    <div class="top"><p><b>Pick the board to emulate</b> · 6 boards · chip follows the board</p>
+      <p class="why">Nothing to plug in, so nothing to detect: every served board is offered. The board's manifest is stamped at creation.</p></div>
+    <div class="tiles">${tiles}</div>
+    <div class="foot"><p>Born flashed with the current firmware (fw-esp32c6 e1f2a3b) and stamped as a XIAO ESP32-C6. Its first face is Ready.</p>${cta('Create emulated XIAO ESP32-C6','violet')}</div>
+  </div>`;
+}
+function addSlot(mode) {
+  if (mode === 'two') {
+    return `<div class="addslot split"><p>Connect a LightPlayer board to control&nbsp;it.</p>${cta("It's plugged in")}</div>
+      <div class="addslot split"><p>Emulate a board you don't have — it boots in this tab and keeps its flash image.</p>${cta('+ emulated board','violet')}</div>`;
+  }
+  const pk = mode === 'picker' ? picker() : '';
+  return `<div class="addslot"><p>Connect a LightPlayer board to control&nbsp;it.</p>
+    <div class="two">${cta("It's plugged in")}</div>
+    <span class="or">or</span>
+    <span class="quiet violet">+ emulated board</span>${pk}</div>`;
+}
+function headerMenu() {
+  return `<div class="menu">
+    <div class="mi">${ICON.pencil} Rename…</div>
+    <div class="mi">${ICON.copy} Copy MAC</div>
+    <div class="hr"></div>
+    <div class="mi twin hov">${ICON.chipglyph} Emulate this board</div>
+    <div class="hr"></div>
+    <div class="mi danger">Forget</div>
+  </div>`;
+}
+function renderS2() {
+  const D = DRESS[state.dress];
+  const real = realCard({ menu: state.twinverb === 'menu' ? headerMenu() : '' });
+  const twinSaved = state.twin; state.twin = true;
+  const twinCard = emuCard(D);
+  state.twin = false;
+  const emuSaved = state.emu; state.emu = 'created';
+  const fresh = emuCard(D);
+  state.emu = emuSaved; state.twin = twinSaved;
+  const offInGrid = state.off === 'grid' ? offTile(D) : '';
+  const rem = state.off === 'remembered'
+    ? `<div class="remline"><p><button class="tog">Hide 2 boards Studio remembers but cannot see</button><span class="sp"></span><span>Studio keeps their names; Forget lives here.</span></p>
+        <div class="roster">${offTile(D)}
+          <div class="rem"><div class="head"><h3>Bench classic</h3><span class="chips">${chip('neutral','Not connected')}</span></div>
+            <div class="play"><div class="empty"><p>Not connected — last heard 2 h ago.</p></div></div>
+            <p class="mono-line">QuinLED-Dig-Uno${SEP}esp32${SEP}30:76:f5:ec:f6:34${SEP}last heard 2 h ago</p>
+            <div class="verbs">${verb('Reconnect','outline')}${sp}${verb('Forget')}</div></div>
+        </div></div>`
+    : '';
+  document.getElementById('s2').innerHTML = `<h4>Devices</h4><div class="roster">${real}${twinCard}${fresh}${offInGrid}${addSlot(state.add)}</div>${rem}`;
+
+  document.getElementById('s2notes').innerHTML = `
+    <div class="concept"><h3 class="c"><span class="k">2a</span>"+ emulated board" at the insertion point</h3><p class="cn">
+      <b>one slot, two verbs</b> keeps the house rule literally: the slot where the next card appears offers both ways a card can appear — the
+      spectrum CTA stays "It's plugged in" (the common case), the emulated way is a quiet violet verb under it.
+      <b>two slots</b> gives the emulated path its own dashed frame and copy; twice the dashed area, and the grid gains a slot per row that most desks never use.
+      <b>picker open</b> is the board pick popover <i>inverted</i> (vision: pick the board, the chip follows — no detection, so no filter line, every served board offered), with the birth stated in the foot.</p></div>
+    <div class="concept"><h3 class="c"><span class="k">2b</span>The twin verb on the real card</h3><p class="cn">
+      <b>Device zone verb</b>: "Emulate" (the chip glyph + one word; the full "Emulate this board" clipped Forget off the row at 400px) sits with Reset · Disconnect, violet-outlined because it mints a bound thing; costs row width on every real card. <b>header ⋯ menu</b> (the naming PR's menu): out of the verb rows, discoverable
+      only by opening the menu — right for a verb used once per board. <b>no twin verb</b>: the floor (D18) — from the roster picker plus the target moment.</p></div>
+    <div class="concept"><h3 class="c"><span class="k">2c</span>Where a powered-off emulated board waits</h3><p class="cn">
+      D9 makes it durable like a board on a desk; a real board unplugged leaves the grid for the <i>remembered line</i> (D7 of the device rewrite: never a card).
+      <b>a tile in the grid</b> keeps it one Power-on away, dressed the same as when it runs. <b>the remembered line</b> treats power-off exactly like unplug
+      — consistent, and the line's toggle hides it by default, which is where "I made this yesterday" goes to be forgotten.</p></div>`;
+}
+
+/* ---------------------------------------------------------------------
+   Section 3 — the target moment
+   --------------------------------------------------------------------- */
+const FACES = { none:'no XIAO ESP32-C6 attached', different:'a different board attached', silent:'asked already (silent)' };
+function chrome(crumb) { return `<div class="chrome"><span class="wm">LIGHTPLAYER</span><span class="crumb">${esc(crumb)}</span></div>`; }
+function promptBox(face, cls='') {
+  if (face === 'silent') return '';
+  if (face === 'different') return `<div class="prompt ${cls}">
+      <h5>Luna's porch sign runs on a XIAO ESP32-C6. The board that is plugged in is a QuinLED-Dig-Uno (Bench classic).</h5>
+      <p>Studio never guesses between boards — the wrong-board write is the silent worst case.</p>
+      <div class="verbs">${verb('Put it on Bench classic','outline')}${verb(`${ICON.chipglyph} Emulate a XIAO ESP32-C6`,'outline twin')}${verb('Run on Desktop')}</div>
+      <p class="once">Asked whenever the attached board is not the target. Change the target in project settings to stop being asked.</p>
+    </div>`;
+  return `<div class="prompt ${cls}">
+      <h5>Luna's porch sign runs on a XIAO ESP32-C6, and none is plugged in.</h5>
+      <p>Emulate one here — it boots the shipped firmware in this tab, keeps its flash image, and gets a card in Devices like any board.
+        When a real XIAO ESP32-C6 shows up, Run goes there instead.</p>
+      <div class="verbs">${cta('Emulate a XIAO ESP32-C6','violet')}${verb('Run on Desktop')}<span class="link">I'll plug one in</span></div>
+      <p class="once">Asked once per browser. After this, Run goes straight to the emulated board.</p>
+    </div>`;
+}
+function openingFrame(face) {
+  const stage = face === 'silent'
+    ? `<div class="stage bound"><span class="dot"></span><p>Starting Emulated XIAO ESP32-C6… (resuming a snapshot)</p></div><div class="progress"><i style="width:62%"></i></div>`
+    : `<div class="stage"><span class="dot"></span><p>Opening project…</p></div><div class="progress"><i style="width:22%"></i></div>`;
+  return `<div class="frame3">${chrome('/project/7f3a…c1 · Luna\'s porch sign')}<div class="body">
+      ${stage}${promptBox(face)}
+      <div class="skel"><div><div class="b" style="height:150px"></div></div><div><div class="b" style="height:100px"></div><div class="b" style="height:120px"></div></div><div><div class="b" style="height:150px"></div></div></div>
+    </div></div>`;
+}
+function packageSheet(face) {
+  const pkg = (sheet) => `<div class="pkg"><div class="thumb"></div><div class="meta"><h5>Luna's porch sign</h5><p>Edited 2 h ago</p><p class="dim">XIAO ESP32-C6</p></div>${sheet}</div>`;
+  if (face === 'silent') return pkg(`<div class="sheet" style="align-content:end;background:transparent;backdrop-filter:none"><p class="bound" style="color:var(--st-bound-tx);font-weight:600">Opening on Emulated XIAO ESP32-C6…</p></div>`);
+  if (face === 'different') return pkg(`<div class="sheet"><h5>Which board?</h5><p>This project runs on a XIAO ESP32-C6; the board plugged in is a QuinLED-Dig-Uno (Bench classic).</p>
+      <div class="btns"><span class="btn">Put it on Bench classic</span><span class="btn primary">Emulate a XIAO ESP32-C6</span><span class="btn cancel">Run on Desktop</span></div></div>`);
+  return pkg(`<div class="sheet"><h5>No XIAO ESP32-C6 is plugged in</h5><p>This project runs on one. Emulate it here, or run it on Desktop for now.</p>
+      <div class="btns"><span class="btn primary">Emulate a XIAO ESP32-C6</span><span class="btn">Run on Desktop</span><span class="btn cancel">I'll plug one in</span></div></div>`);
+}
+function editorBanner(face) {
+  const pane = face === 'silent'
+    ? `<div class="simcard" style="--edge:var(--st-bound-tx);border-radius:0;border:0;border-left:3px solid var(--st-bound-tx)"><div class="tb"><span class="g v">${ICON.chipglyph}</span><p><span style="color:var(--st-bound-tx)">Emulated</span> XIAO ESP32-C6</p><span class="lab v">Emulated</span><span class="grow">${ICON.grow}</span></div>
+        <div class="tabs"><span class="tab on">${ICON.play}</span><span class="tab">${ICON.details}</span><span class="tab">${ICON.console}</span><span class="tab danger">${ICON.danger}</span></div>
+        <div class="body"><div class="play">${lamps(40)}${pill(state.pill==='violet'?'emu':'live', state.pill==='violet'?'emulated':'live')}</div></div></div>`
+    : `<div class="simcard" style="--edge:var(--st-bound-tx);border-radius:0;border:0;border-left:3px solid var(--st-bound-tx)"><div class="tb"><span class="g v">${ICON.monitorplay}</span><p>Desktop</p><span class="lab v">Desktop</span><span class="grow">${ICON.grow}</span></div>
+        <div class="banner"><p><b>Running on Desktop.</b> This project runs on a XIAO ESP32-C6${face==='different' ? ' — the board plugged in is a QuinLED-Dig-Uno (Bench classic)' : ', and none is plugged in'}.</p>
+          <div class="verbs">${verb(`${ICON.chipglyph} Emulate one`,'twin')}${face==='different' ? verb('Use Bench classic') : ''}${verb('Keep Desktop')}</div>
+          <p style="color:var(--dim);font-size:11px">Asked once. Keep Desktop makes this project desktop-targeted.</p></div>
+        <div class="body"><div class="play">${lamps(40)}${pill('emu','desktop')}</div></div></div>`;
+  return `<div class="frame3">${chrome('/project/7f3a…c1 · Luna\'s porch sign')}<div class="editor">
+      <div class="work"><div class="l" style="width:40%"></div><div class="l" style="width:70%"></div><div class="l" style="width:55%"></div><div class="l" style="width:64%"></div><div class="l" style="width:30%"></div></div>
+      <div class="pane">${pane}</div></div></div>`;
+}
+function settingsRows() {
+  return `<div class="settings">
+    <div class="row"><dt>Name</dt><dd>Luna's porch sign</dd></div>
+    <div class="row"><dt>Format</dt><dd>4</dd></div>
+    <div class="row"><dt>UID</dt><dd>7f3a9c2e…41c1 <span style="color:var(--dim)">${ICON.copy.replace('<svg','<svg width="12" height="12"')}</span></dd></div>
+    <div class="row"><dt>Nodes</dt><dd>7 nodes</dd></div>
+    <div class="row"><dt>Target</dt><dd><span class="sel"><span class="sw board"></span>XIAO ESP32-C6 <span style="color:var(--dim)">▾</span></span></dd>
+      <p class="hintline">Where Run puts this project. A board target uses the real board when it is plugged in, otherwise an emulated one in this tab.</p></div>
+    <div class="tmenu">
+      <div class="hd">Runs on</div>
+      <div class="mi"><span class="sw v"></span>Desktop<span class="s">lightplayer/desktop</span></div>
+      <div class="hd">Boards</div>
+      <div class="mi hov"><span class="sw"></span>XIAO ESP32-C6<span class="s">Porch sign · on the desk</span></div>
+      <div class="mi"><span class="sw"></span>QuinLED-Dig-Uno<span class="s">Bench classic</span></div>
+      <div class="mi"><span class="sw"></span>WLED LAN 4-Channel (DOM-Z-102)<span class="s"></span></div>
+      <div class="mi"><span class="sw"></span>ESP32-S3-DevKitC-1<span class="s"></span></div>
+    </div>
+  </div>`;
+}
+function renderS3() {
+  const f = state.face;
+  document.getElementById('s3').innerHTML = `
+    <div class="concept lean"><h3 class="c"><span class="k">3A</span>In the opening frame <span style="color:#f0dc7a;font-weight:500">· lean</span></h3>${openingFrame(f)}
+      <p class="cn">The route already says "this project"; the project-shaped opening frame (P6: honest states) already narrates the open. The ask is one
+      more honest state of that frame — it holds the skeleton, says the board fact, and offers the three ways forward. Nothing is created until a verb is
+      clicked; "I'll plug one in" leaves the frame waiting on the port the way it waits on a sync. Once answered, the same frame says <i>Starting Emulated XIAO ESP32-C6…</i> and never asks again.</p></div>
+    <div class="concept"><h3 class="c"><span class="k">3B</span>On the project card, before leaving the gallery</h3>${packageSheet(f)}
+      <p class="cn">The D41 card-resident sheet (the destructive-confirm pattern) on the package card: the ask happens where the click was, the gallery
+      stays, and the card's own face shows the outcome afterwards ("Opening on Emulated XIAO ESP32-C6…"). Costs: 280px of width for a three-way choice;
+      a deep link to the project never passes through the card, so this path needs 3A anyway.</p></div>
+    <div class="concept"><h3 class="c"><span class="k">3C</span>Never block: run on Desktop, ask in the editor</h3>${editorBanner(f)}
+      <p class="cn">Run always succeeds immediately on Desktop; the ask is a banner on the runtime pane. Zero friction, but the first thing a
+      board-targeted project does is run on the wrong class of hardware (no pin scarcity, no RMT, no heap ceiling) and show a picture of that — the
+      2026-07-06 lie D11 exists to end, now with a banner on top. "Keep Desktop" silently retargets the project.</p></div>
+    <div class="concept"><h3 class="c"><span class="k">3D</span>Changing the target later: the settings row</h3>${settingsRows()}
+      <p class="cn">Project settings today are read-only rows (Name · Format · UID · Nodes). Target becomes the one editable row: Desktop, or a board —
+      each board line names the desk board of that kind when there is one (D7's routing, stated). The hint under the row is the whole rule in one sentence.</p></div>`;
+}
+
+/* ---------------------------------------------------------------------
+   Section 4 — the Desktop chrome
+   --------------------------------------------------------------------- */
+function simCard(v) {
+  const edge = state.simedge === 'bound' ? 'var(--st-bound-tx)' : 'var(--st-good-tx)';
+  const tab = state.simtab;
+  const tabs = `<div class="tabs"><span class="tab ${tab==='play'?'on':''}">${ICON.play}</span><span class="tab ${tab==='details'?'on':''}">${ICON.details}</span><span class="tab">${ICON.console}</span><span class="tab danger ${tab==='danger'?'on':''}">${ICON.danger}</span></div>`;
+  let body;
+  if (tab === 'play') {
+    body = `<div class="body"><div class="play">${lamps(40)}${pill('emu', v.pill)}</div>
+      <div class="playmeta"><span class="sw"></span><span>Luna's porch sign</span><span class="sp"></span>${cta('Editor')}</div></div>`;
+  } else if (tab === 'danger') {
+    body = `<div class="body"><div class="sec danger"><div class="st"><h6>Danger zone</h6></div>
+      <div class="row"><p>${v.stopHint}</p>${verb(v.stop,'red')}</div></div></div>`;
+  } else {
+    body = `<div class="body">
+      <div class="sec"><div class="st"><h6>Health</h6>${chip('good','Running')}</div>
+        <dl class="kv"><dt>status</dt><dd>Running</dd>${v.health}</dl></div>
+      <div class="sec"><div class="st"><h6>Project</h6></div><dl class="kv"><dt>running</dt><dd>Luna's porch sign</dd></dl></div>
+    </div>`;
+  }
+  return `<div class="simcard" style="--edge:${edge}"><div class="tb"><span class="g ${v.glyphV?'v':''}">${ICON.monitorplay}</span><p>${esc(v.title)}</p><span class="lab ${v.labV?'v':''}">${esc(v.label)}</span><span class="grow">${ICON.grow}</span></div>${tabs}${body}</div>`;
+}
+const SIMS = [
+  { k:'S', ref:true, name:'Today — production, faithful', title:'Simulator', label:'Simulator', pill:'sim', stop:'Stop simulator', stopHint:'Anything not saved to your library is discarded.',
+    health:`<dt>board</dt><dd>as XIAO ESP32-C6</dd>`,
+    note:'sim_card.rs: "Simulator" twice (title and transport label), the D4 <i>as &lt;board&gt;</i> Health line, Stop simulator. The edge tone is the rollup (good while running).' },
+  { k:'4A', lean:true, name:'Desktop', title:'Desktop', label:'Desktop', pill:'desktop', stop:'Stop Desktop', stopHint:'Anything not saved to your library is discarded.',
+    health:`<dt>board</dt><dd class="gone">as XIAO ESP32-C6</dd><dt>class</dt><dd class="new">desktop · GPU tier · ports unlimited</dd>`,
+    note:'D17\'s word, once. The "as" line is struck (shown crossed here so the gate sees what leaves); in its place the honest class facts the worker can report: desktop manifest, the tier it was granted, no port scarcity. The transport label says the same word — the sim card pattern of label = kind.' },
+  { k:'4B', name:'Desktop simulator', title:'Desktop simulator', label:'In this tab', pill:'desktop', stop:'Stop', stopHint:'Stop the Desktop simulator; unsaved changes are discarded.',
+    health:`<dt>class</dt><dd class="new">desktop · GPU tier</dd><dt>runs</dt><dd class="new">in this tab (fw-browser)</dd>`,
+    note:'Two words in the title so "simulator" survives (it IS one — the vision keeps the word for this class), and the transport label becomes a <b>where</b> ("In this tab"), which is what the real cards\' label slot would say for USB. Longer title; truncates sooner in the pane.' },
+  { k:'4C', name:'Desktop, violet glyph + label', title:'Desktop', label:'Simulator', pill:'desktop', stop:'Stop Desktop', stopHint:'Anything not saved to your library is discarded.', glyphV:true, labV:true,
+    health:`<dt>class</dt><dd class="new">desktop · GPU tier · ports unlimited</dd>`,
+    note:'4A with the bound family on the glyph and the label: title says the product name (Desktop), the label keeps the honest word (Simulator) in the family the ▶ pill already wears. The edge is free to carry state. This is the pairing that best survives sitting next to a violet-edged emulated card (section 1 B): different glyph, different label word, same family.' },
+];
+function renderS4() {
+  document.getElementById('s4').innerHTML = SIMS.map(v => `<div class="concept ${v.lean?'lean':''} ${v.ref?'ref':''}">
+      <h3 class="c"><span class="k">${v.k}</span>${esc(v.name)}${v.lean ? ' <span style="color:#f0dc7a;font-weight:500">· lean</span>' : ''}</h3>${simCard(v)}<p class="cn">${v.note}</p></div>`).join('');
+  document.getElementById('s4strip').innerHTML = `
+    <div class="w"><span class="lab">Package card presence line (D28)</span><span class="was">Running in simulator</span><p class="b">Running on Desktop</p><p class="b">Running on Emulated XIAO ESP32-C6</p><p class="g">On Porch sign ✓</p></div>
+    <div class="w"><span class="lab">Opening-frame stage labels</span><span class="was">Starting the simulator…</span><p>Starting Desktop…</p><p>Starting Emulated XIAO ESP32-C6…</p></div>
+    <div class="w"><span class="lab">Package card ⋯ menu</span><span class="was">Open in sim</span><div class="mi"><span class="sw"></span>Open on Desktop</div><div class="mi"><span class="sw" style="background:var(--st-neutral-tx)"></span>Open on Porch sign</div></div>
+    <div class="w"><span class="lab">▶ pill text on the Desktop card</span><p style="font-family:var(--mono);font-size:11px"><span class="was">● sim</span> &nbsp; <span class="b" style="color:var(--st-bound-tx)">● desktop</span></p><p style="font-size:11px;color:var(--dim)">The pill's violet stays (style.css: the sim's own family). The emulated card's pill is section 1's gate question.</p></div>
+    <div class="w"><span class="lab">New-project target default (D7)</span><p>From the library: <b style="color:var(--st-bound-tx)">Desktop</b></p><p>From a board (device-first ADR): <b>that board</b></p></div>
+    <div class="w"><span class="lab">Manifest</span><p style="font-family:var(--mono);font-size:11px">target: "lightplayer/desktop"</p><p style="font-family:var(--mono);font-size:11px">target: "seeed/xiao-esp32-c6"</p></div>`;
+}
+
+/* ---------------------------------------------------------------------
+   Controls
+   --------------------------------------------------------------------- */
+function seg(id, items, key, after) {
+  const el = document.getElementById(id);
+  el.innerHTML = Object.entries(items).map(([k, label]) => `<button data-k="${k}" class="${state[key] === k ? 'active' : ''}">${esc(label)}</button>`).join('');
+  el.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { state[key] = b.dataset.k; seg(id, items, key, after); after(); }));
+}
+const STATES = { ready:'Ready', created:'born flashed', flashing:'Flashing', booting:'slow boot', standby:'twin standing by' };
+seg('c-state', STATES, 'emu', renderAll);
+const SPEEDS = { '1':'1.0×', '0.6':'0.6×', '0.3':'0.3×' };
+(function () {
+  const el = document.getElementById('c-speed');
+  const draw = () => { el.innerHTML = Object.entries(SPEEDS).map(([k,l]) => `<button data-k="${k}" class="${state.speed === Number(k) ? 'active' : ''}">${l}</button>`).join('');
+    el.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { state.speed = Number(b.dataset.k); draw(); renderAll(); })); };
+  draw();
+})();
+function toggle(id, key, on, off) {
+  const b = document.getElementById(id);
+  b.addEventListener('click', () => { const v = typeof state[key] === 'boolean' ? !state[key] : (state[key] === on ? off : on); state[key] = v; b.classList.toggle('active', v === true || v === on); renderAll(); });
+}
+toggle('b-twin', 'twin');
+toggle('b-pill', 'pill', 'violet', 'green');
+toggle('b-synth', 'synth');
+document.getElementById('b-term').addEventListener('click', e => { state.term = !state.term; e.target.classList.toggle('active', state.term); document.documentElement.style.setProperty('--term-h', state.term ? '56px' : '160px'); renderAll(); });
+document.getElementById('b-anim').addEventListener('click', e => { document.documentElement.classList.toggle('no-anim'); e.target.classList.toggle('active'); });
+document.getElementById('w').addEventListener('input', e => { document.documentElement.style.setProperty('--w', e.target.value + 'px'); document.getElementById('wv').textContent = e.target.value + 'px'; renderS1(); });
+
+const DRESSPICK = Object.fromEntries(Object.values(DRESS).map(D => [D.k, `${D.k} · ${D.name}`]));
+seg('c-dress', DRESSPICK, 'dress', renderS2);
+seg('c-twinverb', TWINVERB, 'twinverb', renderS2);
+seg('c-add', ADD, 'add', renderS2);
+seg('c-off', OFF, 'off', renderS2);
+seg('c-face', FACES, 'face', renderS3);
+seg('c-simtab', { details:'Details', play:'▶ Play', danger:'Danger' }, 'simtab', renderS4);
+seg('c-simedge', { good:'rollup tone (today)', bound:'fixed violet' }, 'simedge', renderS4);
+
+function renderAll() { renderS1(); renderS2(); renderS3(); renderS4(); }
+renderAll();
+if (new URLSearchParams(location.search).has('noanim')) document.documentElement.classList.add('no-anim');
+</script>
+</body>
+</html>
