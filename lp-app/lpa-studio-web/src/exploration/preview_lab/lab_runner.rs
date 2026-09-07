@@ -15,6 +15,7 @@ use lpa_client::LpClient;
 use lpa_link::providers::browser_worker::{
     BrowserInputEnvelope, BrowserRuntimeTier, PreviewPixelFrame,
 };
+use lpa_studio_core::app::library::ProjectTarget;
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::exploration::preview_lab_config::{CardTierRequest, LabConfig};
@@ -353,7 +354,11 @@ async fn deploy_card(
     log::info!("preview lab: creating runtime for card {index} (tier request {tier:?})");
     rig.borrow().post(&BrowserInputEnvelope::CreateRuntime {
         label: label.clone(),
-        tier,
+        // Lab cards run on the Desktop board: they are pictures of a
+        // project, not stand-ins for anyone's hardware.
+        runtime: ProjectTarget::Desktop
+            .runtime_options(tier)
+            .ok_or_else(|| "the Desktop board manifest is missing".to_string())?,
     })?;
     let mut created = None;
     for _ in 0..CREATE_RUNTIME_POLL_LIMIT {

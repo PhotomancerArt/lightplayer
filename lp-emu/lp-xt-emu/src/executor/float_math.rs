@@ -82,10 +82,10 @@ fn is_snan(bits: u32) -> bool {
 type FpOut = (u32, u32);
 
 impl Emulator {
-    pub(super) fn exec_float_math(
+    pub(super) fn exec_float_math<T: Tracer + ?Sized>(
         &mut self,
         inst: &Inst,
-        tracer: &mut dyn Tracer,
+        tracer: &mut T,
     ) -> Result<Flow, Trap> {
         self.require_fpu()?;
 

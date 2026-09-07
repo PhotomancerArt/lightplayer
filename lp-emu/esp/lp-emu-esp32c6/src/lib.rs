@@ -51,6 +51,7 @@
 //! strict run stops on the first block a later milestone owns.
 
 pub mod cache;
+pub mod control;
 pub mod flash;
 pub mod intmatrix;
 pub mod loader;

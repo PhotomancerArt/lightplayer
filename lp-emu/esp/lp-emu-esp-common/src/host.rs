@@ -481,6 +481,14 @@ impl ScriptedSource {
             }
         }
     }
+
+    /// Chunks still undelivered — how many separate entries of a script are
+    /// left, which is what a load report counts. An `after` or a `then` step
+    /// is a chunk like an `<ms>` one; [`steps_left`](Self::steps_left) is the
+    /// same count under the name the step machine uses.
+    pub fn chunks(&self) -> usize {
+        self.steps.len()
+    }
 }
 
 impl ByteSource for ScriptedSource {
@@ -554,8 +562,10 @@ pub const TCP_BACKLOG_CAP: usize = 4 << 20;
 ///
 /// The socket carries bytes and nothing else. The control channel plan PD8
 /// names (signals, USB attach/detach, strap — the scripted fake's
-/// reset-dance vocabulary) is a second socket and belongs to M6; see the
-/// chip crate's README for the protocol it will speak.
+/// reset-dance vocabulary) is a **second** socket of the same kind, driven
+/// as lines through [`TcpHost::take_inbound`] and
+/// [`TcpHost::write_to_client`] rather than as a peripheral's byte stream;
+/// `lp-emu/esp/README.md` is its protocol.
 pub struct TcpHost {
     inner: Arc<Mutex<TcpInner>>,
     local_addr: std::net::SocketAddr,
@@ -608,6 +618,49 @@ impl TcpHost {
     /// Has a client ever attached?
     pub fn clients_seen(&self) -> u32 {
         self.inner.lock().expect("tcp host poisoned").clients_seen
+    }
+
+    /// Is a client attached **now**? Polls first, so a connect or a hang-up
+    /// that happened since the last call is seen by this one.
+    ///
+    /// The edge the USB byte socket's coupling rule watches (M6 P3): a
+    /// client connecting is an application opening the port, disconnecting is
+    /// it closing. A cable is a separate thing — `attach`/`detach` are never
+    /// implied by this socket.
+    pub fn client_connected(&self) -> bool {
+        let mut inner = self.inner.lock().expect("tcp host poisoned");
+        inner.poll();
+        inner.client.is_some()
+    }
+
+    /// Accept, read and flush once, without asking anything else. What a
+    /// line-oriented owner (the control channel) calls on its own schedule.
+    pub fn poll_now(&self) {
+        self.inner.lock().expect("tcp host poisoned").poll();
+    }
+
+    /// Take everything the client has sent and not yet been handed over.
+    /// The line protocol reads in whole buffers; the byte path uses
+    /// [`ByteSource::next_byte`] instead.
+    pub fn take_inbound(&self) -> Vec<u8> {
+        let mut inner = self.inner.lock().expect("tcp host poisoned");
+        inner.poll();
+        inner.inbound.drain(..).collect()
+    }
+
+    /// Write bytes to the client **only if one is attached**, answering
+    /// whether they went. A reply to a command from a client that has since
+    /// hung up is dropped rather than kept for the next one: a line protocol
+    /// with one reply per command must not open with an answer to a question
+    /// this client never asked.
+    pub fn write_to_client(&self, bytes: &[u8]) -> bool {
+        let mut inner = self.inner.lock().expect("tcp host poisoned");
+        inner.poll();
+        if inner.client.is_none() {
+            return false;
+        }
+        inner.write(bytes);
+        true
     }
 }
 
@@ -780,6 +833,49 @@ mod tests {
             }
         }
         assert_eq!(seen, b"M!x\n");
+    }
+
+    #[test]
+    fn a_tcp_host_reports_the_client_edge_and_speaks_lines_both_ways() {
+        use std::io::{Read, Write};
+        let host = TcpHost::listen("127.0.0.1:0").unwrap();
+        assert!(!host.client_connected(), "nobody has connected yet");
+        assert!(
+            !host.write_to_client(b"ok attach\n"),
+            "a reply with no client is dropped, not kept for the next one"
+        );
+
+        let mut client = std::net::TcpStream::connect(host.local_addr()).unwrap();
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !host.client_connected() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(host.client_connected(), "the rising edge is visible");
+
+        client.write_all(b"state\n").unwrap();
+        client.flush().unwrap();
+        let mut line = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !line.contains(&b'\n') && std::time::Instant::now() < deadline {
+            line.extend(host.take_inbound());
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(line, b"state\n");
+        assert!(host.write_to_client(b"ok state cyc=1 us=0\n"));
+        let mut buf = [0u8; 64];
+        let n = client.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"ok state cyc=1 us=0\n");
+
+        drop(client);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while host.client_connected() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(!host.client_connected(), "the falling edge is visible");
+        assert_eq!(host.clients_seen(), 1);
     }
 
     #[test]

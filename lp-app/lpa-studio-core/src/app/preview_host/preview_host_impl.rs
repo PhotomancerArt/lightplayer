@@ -1445,7 +1445,15 @@ async fn run_lease(
         .borrow()
         .post(&BrowserInputEnvelope::CreateRuntime {
             label: label.clone(),
-            tier: BrowserRuntimeTier::Gpu,
+            // A preview runs on the DESKTOP board: it is a picture of a
+            // project drawn in this tab, not a stand-in for anyone's
+            // hardware (previews are never devices, D45), so it wears the
+            // unlimited table and refuses nothing the project authored.
+            runtime: crate::app::library::ProjectTarget::Desktop
+                .runtime_options(BrowserRuntimeTier::Gpu)
+                .ok_or_else(|| {
+                    LeaseEnd::Fail("the Desktop board manifest is missing".to_string())
+                })?,
         })
         .map_err(LeaseEnd::Fail)?;
     let mut created = None;

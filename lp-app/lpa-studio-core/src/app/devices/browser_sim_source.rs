@@ -5,9 +5,11 @@
 //! already turns a worker's envelope channel into the model's `Link`, and
 //! `BrowserWorkerLinkIo` already turns the same channel into the
 //! `lpa_client::ClientIo` the exclusive-borrow conversations speak through.
-//! What is left here is the two things neither of them can know: which
-//! engine assets this page serves, and that a running sim's control handle
-//! is the [`SimRuntimeControl`] the studio's transport asks for.
+//! What is left here is the three things neither of them can know: which
+//! engine assets this page serves, what board the sim's record says it is
+//! (its `target`, resolved to something a sim can honestly wear), and that
+//! a running sim's control handle is the [`SimRuntimeControl`] the studio's
+//! transport asks for.
 //!
 //! One worker per powered-on sim. Powering one off drops its backing, and
 //! dropping a `BrowserWorkerHandle` terminates its worker — so a stopped sim
@@ -22,11 +24,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use lpa_link::device_link::browser_worker::{
-    BrowserWorkerControl, BrowserWorkerLink, SimRuntimeOptions,
-};
+use lpa_link::device_link::browser_worker::{BrowserWorkerControl, BrowserWorkerLink};
 use lpa_link::device_link::browser_worker_io::BrowserWorkerLinkIo;
 use lpa_link::providers::browser_worker::{BrowserRuntimeTier, BrowserWorkerOptions};
+
+use crate::app::library::ProjectTarget;
 
 use super::device_transport::{DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent};
 use super::sim_record::sim_link_info;
@@ -72,19 +74,34 @@ impl BrowserSimLinkSource {
 impl SimLinkSource for BrowserSimLinkSource {
     fn open(&self, session: &SimSession) -> Result<SimBacking, String> {
         let info = sim_link_info(&session.uid, &session.display_name);
+        // WHAT THIS SIM WEARS. The record's `target` is the board it was
+        // created as; a board with no checked-in runtime manifest cannot be
+        // simulated honestly, so it runs as Desktop and SAYS so rather than
+        // wearing a table nobody authored (`resolve_for_sim`).
+        let (worn, notice) = ProjectTarget::from_manifest(Some(&session.target)).resolve_for_sim();
+        if let Some(notice) = notice {
+            // The source hands back a `SimBacking` or a failure and has no
+            // notice channel of its own, so the fallback goes through the
+            // same `log` the controller's power-on failures use rather than
+            // going unsaid.
+            log::warn!("sim {}: {notice}", session.uid);
+        }
+        // PD12: sims ask for the GPU tier and the worker answers with what
+        // it granted — recorded and surfaced, never silent. PD6: the base
+        // MAC is Studio-minted and travels as the runtime's identity, so
+        // the hello the sim sends names the device the record already is.
+        //
+        // `resolve_for_sim` only ever hands back a target that HAS a
+        // manifest, so the `None` arm is unreachable by construction — it
+        // is a refusal rather than an unwrap because a sim that cannot say
+        // what it is should fail to power on, not panic the tab.
+        let runtime = worn
+            .runtime_options(BrowserRuntimeTier::Gpu)
+            .ok_or_else(|| format!("no hardware profile is checked in for {}", worn.board_id()))?
+            .with_identity(session.base_mac.clone());
         let link = BrowserWorkerLink::new(
             info.clone(),
-            self.options.borrow().clone(),
-            SimRuntimeOptions {
-                // PD12: sims ask for the GPU tier and the worker answers
-                // with what it granted — recorded and surfaced, never
-                // silent. Inert until P1's boot options carry it.
-                tier: BrowserRuntimeTier::Gpu,
-                // P1 fills this from the target's runtime manifest; until
-                // then the worker boots as it does today.
-                hardware_manifest_json: String::new(),
-                base_mac: session.base_mac.clone(),
-            },
+            self.options.borrow().clone().with_runtime(runtime),
         );
         // Taken BEFORE the link is boxed: the control shares the link's own
         // inner, so a restart is the same destroy-and-recreate a

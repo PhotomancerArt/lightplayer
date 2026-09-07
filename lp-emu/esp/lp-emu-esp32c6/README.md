@@ -416,6 +416,44 @@ Not modelled, stated: the PCR reset of the block on esp-hal's first enable
 (whether it re-enumerates on silicon is the sitting-1 transcript's to say),
 the JTAG channel, line coding, the bus-error and zero-payload bits.
 
+#### Driving the host from outside (M6 P3)
+
+`--usb-host` is only the state at power-on. The transitions are commands,
+on a socket (`--control tcp:<host:port>`) or in a file (`--usb-script`),
+and the protocol is documented once in `../README.md`:
+
+```bash
+# a byte client and a control client on one machine
+just emu-c6 <elf> --usb-host attached-idle \
+    --usb-sj tcp:127.0.0.1:5556 --control tcp:127.0.0.1:5557 --timeout 60s
+# the s7 unplug, deterministically
+just emu-c6 <elf> --usb-script scripts/s7.usb --usb-sj file:cap.log --timeout 12s
+```
+
+Three things are worth knowing before reading that section:
+
+- **Connecting to the byte socket opens the port**, and disconnecting
+  closes it (`--usb-sj-drain manual` hands both to the control channel).
+  That is what makes `lp-cli … serial:tcp://<addr>` work unchanged against
+  `--usb-host attached-idle`.
+- **`attach`/`detach` are never implied by a socket.** A cable is not a
+  port open — the whole reason for modelling the host is that the two come
+  apart.
+- **A script is deterministic; a socket is not.** A command from a socket
+  is applied at whichever slice boundary the poll landed on, and the reply
+  says which guest cycle that was. Gates use scripts
+  (`tests/usb_control.rs`); the socket has one plumbing test
+  (`tests/usb_socket.rs`).
+
+What that buys, and what `tests/usb_control.rs` records: a port held closed
+after a re-attach makes the firmware commit a packet nobody takes, drop
+what it writes behind it, and — when the port opens — deliver the held
+packet and then log `[io_task] host draining again; resuming protocol
+writes`. Its twin, `host not draining`, never appears on the link: it is
+queued and then dropped by the very latch it reports (M6 discovery §4).
+That asymmetry is the thing G3's desk sitting exists to measure, and a
+control channel reproduces the recovery half of it with no rig.
+
 ### The radio window
 
 Everything esp-radio's blob and the ROM's PHY code touch between
@@ -502,7 +540,9 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
     [--uart0 stdout|memory|file:<path>|tcp:<host:port>] [--uart0-script <file>]
     [--flash <file>] [--flash-copy <file>] [--flash-size 4M]
     [--usb-host absent|attached|attached-idle]
-    [--usb-sj stderr|memory|file:<path>] [--usb-sj-tried stderr|memory|file:<path>]
+    [--usb-sj stderr|memory|file:<path>|tcp:<host:port>] [--usb-sj-drain auto|manual]
+    [--usb-sj-tried stderr|memory|file:<path>]
+    [--control tcp:<host:port>] [--usb-script <file>]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--trace [BLOCK,BLOCK…]] [--trace-file <path>] [--strict-bus]
     [--strict-grade modeled|documented|measured]
@@ -510,12 +550,19 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2]
 ```
 
 `--exit-on` stops at the **end of the line** the match is on, not at the
-match. UART0 drains a byte at a time in emulated time, so a needle that is a
-prefix of its line would otherwise end the run mid-line — which is how M3 P7
-first recorded `[stack] heartbeat: high-water` with neither of the two figures
-after it. If the newline never arrives the run goes on to its deadline, which
-is the safe direction: a run that ran too long says so, a capture cut in half
-looks like data.
+match, and it watches **both** consoles — UART0 and the USB link — because
+the shipped image's console is the USB one and a run with `--usb-host
+attached` prints nothing on UART0 at all. A console drains a byte at a time
+in emulated time, so a needle that is a prefix of its line would otherwise
+end the run mid-line — which is how M3 P7 first recorded `[stack] heartbeat:
+high-water` with neither of the two figures after it. If the newline never
+arrives the run goes on to its deadline, which is the safe direction: a run
+that ran too long says so, a capture cut in half looks like data.
+
+`--control`, `--usb-script` and `--usb-sj tcp:` are the host's side of the
+USB link. The protocol — the command table, the replies, the coupling rule,
+the script grammar and the Web Serial mapping — is one section in
+`../README.md`; the short version is below.
 
 `--probe` and `--break-at` take an ELF name, a demangled path
 (`esp_println::serial_jtag_printer::TIMED_OUT`, LLVM's `.N` suffix

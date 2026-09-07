@@ -466,6 +466,42 @@ impl SocBus {
         self.mmio.iter().position(|r| r.periph.name() == name)
     }
 
+    /// Drive one peripheral's own API from the machine, with a full
+    /// [`BusCx`] — the seam a host-side control channel reaches a block
+    /// through.
+    ///
+    /// `None` when the index is out of range or the block there is not a
+    /// `T` (it declined the downcast: see [`Peripheral::as_any_mut`]). The
+    /// closure sees the bus's current time and pc, so whatever it schedules,
+    /// traces or requests is stamped with the guest cycle the machine drained
+    /// the command at — never a wall-clock one.
+    ///
+    /// [`Peripheral::as_any_mut`]: crate::periph::Peripheral::as_any_mut
+    pub fn with_peripheral<T: core::any::Any, R>(
+        &mut self,
+        index: usize,
+        f: impl FnOnce(&mut T, &mut BusCx<'_>) -> R,
+    ) -> Option<R> {
+        let periph = self
+            .mmio
+            .get_mut(index)?
+            .periph
+            .as_any_mut()?
+            .downcast_mut::<T>()?;
+        let mut cx = BusCx {
+            now: self.now,
+            pc: self.pc,
+            hart: self.hart,
+            sched: &mut self.sched,
+            irq: &mut self.irq,
+            trace: &mut self.trace,
+            host: &mut self.host,
+            matrix: &mut *self.matrix,
+            request: &mut self.request,
+        };
+        Some(f(periph, &mut cx))
+    }
+
     pub fn regions(&self) -> &[RamRegion] {
         &self.regions
     }

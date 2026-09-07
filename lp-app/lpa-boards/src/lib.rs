@@ -31,7 +31,9 @@ mod runtime_manifests;
 pub mod usb_bridge;
 
 pub use callout::{BoardCallout, CalloutPlacement, CalloutTarget};
-pub use catalog::{DISPLAY_MANIFEST_SOURCES, all_boards, board_by_id};
+pub use catalog::{
+    DESKTOP_FAMILY, DISPLAY_MANIFEST_SOURCES, all_boards, board_by_id, purchasable_boards,
+};
 #[cfg(feature = "diagram")]
 pub use catalog_page::BoardsCatalogPage;
 #[cfg(feature = "diagram")]

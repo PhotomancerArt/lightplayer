@@ -2053,11 +2053,16 @@ lint-emu-fence:
 # NOT in `test-rust-core`: two firmware builds is minutes, and the director
 # log's CI cost rule says a gated job or a nightly, never the default path.
 # `m3_replays` and `m4_replays` need no firmware and do run everywhere.
+#
+# `emu_usb_hello` is in `lp-cli` rather than the emulator because it sends a
+# real `M!` frame, and the single framer for those (`lpc_wire::json::to_serial_line`)
+# is a product crate the fence keeps out of `lp-emu/` — see the test's header.
 test-emu-c6:
     LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored
     cargo test -p lp-emu-validate --test m3_replays
     cargo test -p lp-emu-validate --test m4_replays
     cargo test -p lp-cli --test validate_registry_parity
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
 
 # Run one image on the C6 machine — the human front door.
 #
@@ -2084,6 +2089,27 @@ emu-c6 elf *args:
 # average quoted; see the script's header.
 bench-emu-c6 *args:
     scripts/emu/bench-c6.sh {{ args }}
+
+# The Xtensa core's speed probe: the two longest fixture programs, repeated
+# until each row has retired >=100 M instructions, reported as user seconds,
+# instructions/second and the load average, with a `cmp` of the guest output
+# AND of a capped text trace against the previous run.
+#
+#   just bench-emu-xt                                   # table, promote to prev/
+#   just bench-emu-xt --json target/emu-bench-xt/new.json
+#   scripts/emu/bench-xt.sh --bin <saved> --no-build --no-promote   # the A/B half
+#
+# `lp-xt-emu` is an ISA core with no SoC around it, so there is no emulated
+# clock and no real-time ratio — a cycle is an instruction
+# (`CycleModel::InstructionCount`). The workload is the `lp-xt/fixtures`
+# corpus, which the recipe builds (esp toolchain) if it is missing; the
+# repeats are there because no long-running Xtensa image exists in this repo.
+# See the script's header.
+#
+# It is an ORACLE, not a gate — no CI job runs it and no number it prints
+# gates anything.
+bench-emu-xt *args:
+    scripts/emu/bench-xt.sh {{ args }}
 
 # The generated `RegNames` tables (offset -> register name) are derived from
 # the esp32c6 PAC's svd2rust offset comments and carry a provenance header.
