@@ -2063,6 +2063,168 @@ mod tests {
         assert_ne!(draw(7), draw(8));
     }
 
+    /// A machine whose guest is `j .` in HP SRAM: time passes and nothing
+    /// touches a register, so what the control channel does is the only
+    /// thing in the run.
+    fn idle_machine() -> Esp32C6Machine {
+        let mut m = Esp32C6Builder::new().build().unwrap();
+        m.bus
+            .load_image(memmap::HP_SRAM_BASE, &0x0000_006fu32.to_le_bytes())
+            .unwrap();
+        m.harts[0].set_pc(memmap::HP_SRAM_BASE);
+        m
+    }
+
+    #[test]
+    fn a_control_command_is_applied_at_the_cycle_its_reply_names() {
+        let mut m = idle_machine();
+        assert_eq!(m.usb_host(), UsbHost::Absent);
+
+        // Absent: no frames, nothing held, and `open` is refused because a
+        // cable is not a port open.
+        let ControlReply::State { host, .. } = m.apply_control(&ControlCommand::State, 0) else {
+            panic!("state answers a state");
+        };
+        assert_eq!(
+            host,
+            HostReport {
+                attached: false,
+                draining: false,
+                sof: false,
+                in_pending: 0,
+                out_queued: 0,
+            }
+        );
+        assert!(matches!(
+            m.apply_control(&ControlCommand::Open, 0),
+            ControlReply::Err(_)
+        ));
+
+        // The cable, then the port.
+        assert_eq!(
+            m.apply_control(&ControlCommand::Attach, 320).to_string(),
+            "ok attach cyc=320 us=2"
+        );
+        assert_eq!(
+            m.apply_control(&ControlCommand::Open, 480).to_string(),
+            "ok open cyc=480 us=3"
+        );
+        let ControlReply::State { host, .. } = m.apply_control(&ControlCommand::State, 640) else {
+            panic!("state answers a state");
+        };
+        assert!(host.attached && host.draining && host.sof);
+
+        // Host bytes with no socket behind them reach the OUT endpoint.
+        assert_eq!(
+            m.apply_control(&ControlCommand::UsbWrite(b"M!x\n".to_vec()), 800)
+                .to_string(),
+            "ok usb-write cyc=800 us=5"
+        );
+        let ControlReply::State { host, .. } = m.apply_control(&ControlCommand::State, 800) else {
+            panic!("state answers a state");
+        };
+        assert_eq!(host.out_queued, 4, "staged for the guest to read");
+        assert_eq!(m.control_lines(), 6);
+    }
+
+    #[test]
+    fn a_command_that_cannot_be_applied_answers_err_and_changes_nothing() {
+        let mut m = idle_machine();
+        m.apply_control(&ControlCommand::Attach, 0);
+        for (command, needle) in [
+            (ControlCommand::Attach, "already attached"),
+            (ControlCommand::Close, "not open"),
+            (ControlCommand::Wait(5), "--usb-script"),
+        ] {
+            let reply = m.apply_control(&command, 160);
+            let ControlReply::Err(reason) = &reply else {
+                panic!("`{}` should have been refused, got {reply:?}", command.verb());
+            };
+            assert!(reason.contains(needle), "{reason:?}");
+        }
+        // Refused, and the host is where it was: attached, port closed.
+        let ControlReply::State { host, .. } = m.apply_control(&ControlCommand::State, 160) else {
+            panic!("state answers a state");
+        };
+        assert!(host.attached && !host.draining);
+    }
+
+    #[test]
+    fn chip_rst_disable_refuses_the_reset_and_names_the_bit() {
+        let mut m = idle_machine();
+        m.apply_control(&ControlCommand::Attach, 0);
+        // The guest sets `chip_rst.disable` (bit 2), as an image that does
+        // not want a host resetting it would.
+        m.bus
+            .write_word(memmap::periph::USB_DEVICE + 0x4c, 0b100)
+            .unwrap();
+
+        for command in [ControlCommand::Reset, ControlCommand::DownloadMode] {
+            let reply = m.apply_control(&command, 160);
+            let ControlReply::Err(reason) = &reply else {
+                panic!("`{}` should have been refused, got {reply:?}", command.verb());
+            };
+            assert!(reason.contains("chip_rst bit 2"), "{reason:?}");
+        }
+        assert!(
+            m.bus.take_request().is_none(),
+            "a suppressed dance asks the machine for nothing"
+        );
+
+        // Cleared again, the same command is performed.
+        m.bus
+            .write_word(memmap::periph::USB_DEVICE + 0x4c, 0)
+            .unwrap();
+        assert_eq!(
+            m.apply_control(&ControlCommand::DownloadMode, 320).to_string(),
+            "ok download-mode cyc=320 us=2"
+        );
+        assert!(matches!(
+            m.bus.take_request(),
+            Some(lp_emu_esp_common::MachineRequest::Reset {
+                source: "USB_DEVICE chip_rst (serial)",
+                strap: Strap::Download,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn a_scripted_command_lands_at_its_own_cycle_and_bounds_the_idle_skip() {
+        // The guest here is `wfi` in a loop, so without `next_host_service`
+        // the machine would jump straight to the deadline and the script
+        // would never be applied. `wfi; j .`
+        let mut m = Esp32C6Builder::new()
+            .usb_script(vec![
+                (160_000, ControlCommand::Attach),
+                (320_000, ControlCommand::Open),
+            ])
+            .build()
+            .unwrap();
+        m.bus
+            .load_image(memmap::HP_SRAM_BASE, &0x1050_0073u32.to_le_bytes())
+            .unwrap();
+        m.bus
+            .load_image(memmap::HP_SRAM_BASE + 4, &0x0000_006fu32.to_le_bytes())
+            .unwrap();
+        m.harts[0].set_pc(memmap::HP_SRAM_BASE);
+
+        assert_eq!(m.scripted_commands_left(), 2);
+        let out = m.run_until(&StopCondition::after_micros(5_000));
+        assert!(matches!(out, Outcome::Deadline { .. }), "{out:?}");
+        assert_eq!(m.scripted_commands_left(), 0, "both came due");
+        assert_eq!(m.control_lines(), 2);
+        assert_eq!(m.usb_host(), UsbHost::Absent, "the power-on state is kept");
+        let ControlReply::State { host, .. } = m.apply_control(&ControlCommand::State, m.cycles())
+        else {
+            panic!("state answers a state");
+        };
+        assert!(
+            host.attached && host.draining,
+            "the script attached and opened while the guest idled"
+        );
+    }
+
     #[test]
     fn an_outcome_carries_the_exit_code_the_cli_contract_promises() {
         assert_eq!(Outcome::Deadline { cycle: 0 }.exit_code(), 0);
