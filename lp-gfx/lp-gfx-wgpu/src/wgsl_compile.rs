@@ -24,6 +24,9 @@ pub struct WgslShader {
     pub module: naga::Module,
     /// Validation info for the module.
     pub info: naga::valid::ModuleInfo,
+    /// `@group(0)` binding of the loop fault flag (`crate::fault_flag`);
+    /// `None` when the module has no loops.
+    pub fault_binding: Option<u32>,
 }
 
 /// Translate an authored pixel shader to WGSL at f32 semantics
@@ -68,9 +71,12 @@ fn translate_assembled_glsl(assembled_glsl: String) -> Result<WgslShader, GfxErr
     bound_tanh(&mut module).map_err(GfxError::Compile)?;
     // The GPU tier's loop contract (`loop_bound_pass`): a loop that can never
     // exit is a compile error, and every loop that remains charges the same
-    // per-invocation back-edge budget the LPVM tiers meter as fuel.
+    // per-invocation back-edge budget the LPVM tiers meter as fuel, counting
+    // the invocations that spend it on the module's fault flag. The flag
+    // takes the next free group-0 binding, so this runs after every other
+    // binding is assigned.
     refuse_loops_without_exit(&module, &assembled_glsl).map_err(GfxError::Compile)?;
-    bound_loop_iterations(&mut module, DEFAULT_INVOCATION_FUEL);
+    let bounds = bound_loop_iterations(&mut module, DEFAULT_INVOCATION_FUEL);
 
     let mut validator = naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
@@ -92,13 +98,14 @@ fn translate_assembled_glsl(assembled_glsl: String) -> Result<WgslShader, GfxErr
         wgsl,
         module,
         info,
+        fault_binding: bounds.fault_binding,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::loop_bound_pass::LOOP_BUDGET_GLOBAL;
+    use crate::loop_bound_pass::{LOOP_BUDGET_GLOBAL, LOOP_FAULT_GLOBAL};
     use lp_shader::texture_binding;
     use lps_shared::{TextureFilter, TextureStorageFormat, TextureWrap};
 
@@ -228,6 +235,34 @@ mod tests {
             "the budget is the LPVM fuel tank:\n{}",
             shader.wgsl
         );
+        assert_eq!(
+            shader.fault_binding,
+            Some(1),
+            "the flag follows `outputSize` at binding 0"
+        );
+        assert!(
+            shader.wgsl.contains(&format!(
+                "var<storage, read_write> {LOOP_FAULT_GLOBAL}: atomic<u32>;"
+            )),
+            "the fault flag is bound:\n{}",
+            shader.wgsl
+        );
+        assert!(
+            shader.wgsl.contains("atomicAdd("),
+            "the crossing counts itself:\n{}",
+            shader.wgsl
+        );
+    }
+
+    #[test]
+    fn loop_free_shaders_have_no_fault_flag() {
+        let shader = compile_wgsl_no_textures(
+            "layout(binding = 0) uniform vec2 outputSize;\n\
+             vec4 render_2d(vec2 pos) { return vec4(pos / outputSize, 0.0, 1.0); }\n",
+        )
+        .expect("translates");
+        assert_eq!(shader.fault_binding, None);
+        assert!(!shader.wgsl.contains(LOOP_FAULT_GLOBAL), "{}", shader.wgsl);
     }
 
     #[test]

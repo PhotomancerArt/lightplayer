@@ -23,8 +23,17 @@
 //!    per-invocation `var<private>` budget in its `continuing` block and
 //!    `break if`s once the budget is spent. The unit is the loop back-edge,
 //!    exactly the fuel meter's, and the budget is the same constant. Unlike
-//!    the LPVM, the GPU cannot trap: an exhausted budget exits the loop and
-//!    the invocation completes with whatever it has — bounded, not faulted.
+//!    the LPVM, the GPU cannot trap mid-invocation: an exhausted budget
+//!    exits the loop and the invocation completes with whatever it has. So
+//!    the pass also gives the module one `@group(0)` storage global
+//!    `atomic<u32>` — the **fault flag** — and the invocation that crosses
+//!    the budget adds one to it, exactly once (the budget keeps counting
+//!    past the cap, so only the first loop to cross sees `spent == cap +
+//!    1`; every later loop in that invocation breaks without charging). The
+//!    host clears the flag before each dispatch and reads it after
+//!    ([`crate::fault_flag`]): a non-zero count is the GPU tier's fuel
+//!    trap, reported as `GfxError::FuelExhausted` with the count of
+//!    invocations that ran dry.
 //!
 //! Neither layer rebuilds an expression arena: the budget's expressions are
 //! appended (operands precede uses by construction) and only `continuing`
@@ -32,12 +41,28 @@
 //! valid.
 
 use naga::{
-    AddressSpace, Arena, BinaryOperator, Block, Expression, Function, GlobalVariable, Handle,
-    Literal, Module, Range, Scalar, Span, Statement, Type, TypeInner, UnaryOperator,
+    AddressSpace, Arena, AtomicFunction, BinaryOperator, Block, Expression, Function,
+    GlobalVariable, Handle, Literal, Module, Range, ResourceBinding, Scalar, Span, Statement,
+    StorageAccess, Type, TypeInner, UnaryOperator,
 };
 
 /// Name of the injected per-invocation budget global (`var<private>`).
 pub const LOOP_BUDGET_GLOBAL: &str = "lp_gfx_loop_budget";
+
+/// Name of the injected fault flag (`@group(0) var<storage, read_write>
+/// …: atomic<u32>`): the number of invocations of the dispatch that spent
+/// their budget.
+pub const LOOP_FAULT_GLOBAL: &str = "lp_gfx_loop_fault";
+
+/// What [`bound_loop_iterations`] did to a module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LoopBounds {
+    /// Loops charged.
+    pub loops: usize,
+    /// `@group(0)` binding of the fault flag; `None` for a loop-free module,
+    /// which gets no flag.
+    pub fault_binding: Option<u32>,
+}
 
 /// Refuse any loop whose body has no exit on any path.
 ///
@@ -59,13 +84,16 @@ pub fn refuse_loops_without_exit(module: &Module, source: &str) -> Result<(), St
     Ok(())
 }
 
-/// Charge every loop one unit of a per-invocation budget per back-edge and
-/// break out once `budget` units are spent.
+/// Charge every loop one unit of a per-invocation budget per back-edge,
+/// break out once `budget` units are spent, and count the invocation that
+/// crossed the budget on the module's fault flag.
 ///
-/// Returns the number of loops bounded. A module without loops is left
-/// untouched (no global, no expressions). Call after
-/// [`refuse_loops_without_exit`], before validation.
-pub fn bound_loop_iterations(module: &mut Module, budget: u32) -> usize {
+/// Returns how many loops were bounded and where the fault flag is bound.
+/// A module without loops is left untouched (no globals, no expressions).
+/// Call after [`refuse_loops_without_exit`] and after every other
+/// `@group(0)` binding has been assigned (the flag takes the next free
+/// slot), before validation.
+pub fn bound_loop_iterations(module: &mut Module, budget: u32) -> LoopBounds {
     let has_loops = module
         .functions
         .iter()
@@ -75,7 +103,7 @@ pub fn bound_loop_iterations(module: &mut Module, budget: u32) -> usize {
             .iter()
             .any(|entry_point| block_has_loop(&entry_point.function.body));
     if !has_loops {
-        return 0;
+        return LoopBounds::default();
     }
 
     let u32_type = module.types.insert(
@@ -100,14 +128,55 @@ pub fn bound_loop_iterations(module: &mut Module, budget: u32) -> usize {
         Span::default(),
     );
 
-    let mut bounded = 0;
+    let atomic_type = module.types.insert(
+        Type {
+            name: None,
+            inner: TypeInner::Atomic(Scalar::U32),
+        },
+        Span::default(),
+    );
+    let fault_binding = next_free_group0_binding(module);
+    let fault = module.global_variables.append(
+        GlobalVariable {
+            name: Some(String::from(LOOP_FAULT_GLOBAL)),
+            space: AddressSpace::Storage {
+                access: StorageAccess::LOAD | StorageAccess::STORE | StorageAccess::ATOMIC,
+            },
+            binding: Some(ResourceBinding {
+                group: 0,
+                binding: fault_binding,
+            }),
+            ty: atomic_type,
+            init: None,
+            memory_decorations: Default::default(),
+        },
+        Span::default(),
+    );
+
+    let mut loops = 0;
     for (_, function) in module.functions.iter_mut() {
-        bounded += bound_function(function, global, budget);
+        loops += bound_function(function, global, fault, budget);
     }
     for entry_point in &mut module.entry_points {
-        bounded += bound_function(&mut entry_point.function, global, budget);
+        loops += bound_function(&mut entry_point.function, global, fault, budget);
     }
-    bounded
+    LoopBounds {
+        loops,
+        fault_binding: Some(fault_binding),
+    }
+}
+
+/// One past the highest `@group(0)` binding in use (uniforms, and the
+/// textures `crate::uniform_layout::assign_texture_bindings` assigned).
+fn next_free_group0_binding(module: &Module) -> u32 {
+    module
+        .global_variables
+        .iter()
+        .filter_map(|(_, var)| var.binding.as_ref())
+        .filter(|binding| binding.group == 0)
+        .map(|binding| binding.binding + 1)
+        .max()
+        .unwrap_or(0)
 }
 
 // ---- layer 1: static exit analysis ----------------------------------------
@@ -291,25 +360,40 @@ fn describe_unbounded_loop(function: &Function, span: Span, source: &str) -> Str
 struct BudgetCharge {
     /// `&lp_gfx_loop_budget` (a `var<private>` pointer).
     pointer: Handle<Expression>,
+    /// `&lp_gfx_loop_fault` (a `var<storage>` pointer to the atomic).
+    fault: Handle<Expression>,
     /// The literal `1u`.
     one: Handle<Expression>,
     /// The literal budget.
     cap: Handle<Expression>,
+    /// The literal `budget + 1`: the value the charge has exactly when an
+    /// invocation crosses the budget, and never again.
+    cap_plus_one: Handle<Expression>,
 }
 
-fn bound_function(function: &mut Function, global: Handle<GlobalVariable>, budget: u32) -> usize {
+fn bound_function(
+    function: &mut Function,
+    global: Handle<GlobalVariable>,
+    fault: Handle<GlobalVariable>,
+    budget: u32,
+) -> usize {
     if !block_has_loop(&function.body) {
         return 0;
     }
     let Function {
         expressions, body, ..
     } = function;
-    // Pre-emit expressions (a global pointer and literals) may sit anywhere in
+    // Pre-emit expressions (global pointers and literals) may sit anywhere in
     // the arena and need no `Emit` coverage.
     let charge = BudgetCharge {
         pointer: expressions.append(Expression::GlobalVariable(global), Span::default()),
+        fault: expressions.append(Expression::GlobalVariable(fault), Span::default()),
         one: expressions.append(Expression::Literal(Literal::U32(1)), Span::default()),
         cap: expressions.append(Expression::Literal(Literal::U32(budget)), Span::default()),
+        cap_plus_one: expressions.append(
+            Expression::Literal(Literal::U32(budget.saturating_add(1))),
+            Span::default(),
+        ),
     };
     bound_block(body, expressions, &charge)
 }
@@ -350,12 +434,15 @@ fn bound_block(
     bounded
 }
 
-/// Append to `continuing`: `budget = budget + 1u;` and make the loop
-/// `break if budget > cap` (OR-ed onto an existing `break if`).
+/// Append to `continuing`: `if (budget + 1u == cap + 1u) { atomicAdd(&fault,
+/// 1u); } budget = budget + 1u;` and make the loop `break if budget > cap`
+/// (OR-ed onto an existing `break if`).
 ///
 /// `continuing` runs once per back-edge — including the ones a `continue`
 /// takes — and `break_if` is evaluated right after it, so the charge and the
-/// check sit exactly where the LPVM's fuel decrement does.
+/// check sit exactly where the LPVM's fuel decrement does. The flag is
+/// charged on the crossing only, so an invocation counts once however many
+/// loops it runs through afterwards (each of which breaks at once).
 fn charge_loop(
     continuing: &mut Block,
     break_if: &mut Option<Handle<Expression>>,
@@ -385,19 +472,45 @@ fn charge_loop(
         },
         span,
     );
-    let condition = match *break_if {
-        Some(existing) => expressions.append(
-            Expression::Binary {
-                op: BinaryOperator::LogicalOr,
-                left: existing,
-                right: exhausted,
-            },
-            span,
-        ),
-        None => exhausted,
+    let crossed = expressions.append(
+        Expression::Binary {
+            op: BinaryOperator::Equal,
+            left: spent,
+            right: charge.cap_plus_one,
+        },
+        span,
+    );
+    let (condition, last) = match *break_if {
+        Some(existing) => {
+            let either = expressions.append(
+                Expression::Binary {
+                    op: BinaryOperator::LogicalOr,
+                    left: existing,
+                    right: exhausted,
+                },
+                span,
+            );
+            (either, either)
+        }
+        None => (exhausted, crossed),
     };
+    continuing.push(Statement::Emit(Range::new_from_bounds(load, last)), span);
+    let mut count_fault = Block::new();
+    count_fault.push(
+        Statement::Atomic {
+            pointer: charge.fault,
+            fun: AtomicFunction::Add,
+            value: charge.one,
+            result: None,
+        },
+        span,
+    );
     continuing.push(
-        Statement::Emit(Range::new_from_bounds(load, condition)),
+        Statement::If {
+            condition: crossed,
+            accept: count_fault,
+            reject: Block::new(),
+        },
         span,
     );
     continuing.push(
@@ -555,7 +668,9 @@ mod tests {
              while (acc < 4.0) { acc *= 1.5; }\n\
              color = vec4(acc);\n",
         );
-        assert_eq!(bound_loop_iterations(&mut module, BUDGET), 2);
+        let bounds = bound_loop_iterations(&mut module, BUDGET);
+        assert_eq!(bounds.loops, 2);
+        assert_eq!(bounds.fault_binding, Some(0), "no other group-0 bindings");
         let wgsl = validate_and_write(&module);
         assert!(
             wgsl.contains(&format!("var<private> {LOOP_BUDGET_GLOBAL}: u32 = 0u;")),
@@ -607,6 +722,93 @@ mod tests {
     }
 
     #[test]
+    fn the_fault_flag_is_a_group0_storage_atomic_charged_once_on_the_crossing() {
+        let (mut module, _) = parse_fragment_with_helpers(
+            "float spin(float x) { for (int i = 0; i < 3; i++) { x *= 2.0; } return x; }\n",
+            "float acc = 0.0;\n\
+             for (int i = 0; i < 2; i++) { while (acc < 4.0) { acc += spin(0.5); } }\n\
+             color = vec4(acc);\n",
+        );
+        let bounds = bound_loop_iterations(&mut module, BUDGET);
+        assert_eq!(bounds.loops, 3);
+        let wgsl = validate_and_write(&module);
+        assert!(
+            wgsl.contains(&format!(
+                "@group(0) @binding(0) \nvar<storage, read_write> {LOOP_FAULT_GLOBAL}: atomic<u32>;"
+            )) || wgsl.contains(&format!(
+                "@group(0) @binding(0) var<storage, read_write> {LOOP_FAULT_GLOBAL}: atomic<u32>;"
+            )),
+            "one storage atomic on the next free group-0 binding:\n{wgsl}"
+        );
+        assert_eq!(
+            wgsl.matches(&format!("var<storage, read_write> {LOOP_FAULT_GLOBAL}"))
+                .count(),
+            1,
+            "one shared flag:\n{wgsl}"
+        );
+        assert_eq!(
+            wgsl.matches("atomicAdd(").count(),
+            3,
+            "every loop can count the crossing:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains(&format!("== {}u", BUDGET + 1)),
+            "the flag is charged on the crossing only:\n{wgsl}"
+        );
+        // On the IR: the `if` guarding the atomic sits between the `Emit`
+        // and the budget `Store`, and its condition is the crossing test.
+        let function = looping_function(&module);
+        let (continuing, _) = find_first_loop(&function.body).expect("a loop");
+        let guard = continuing
+            .iter()
+            .find_map(|s| match s {
+                Statement::If {
+                    condition, accept, ..
+                } => Some((*condition, accept)),
+                _ => None,
+            })
+            .expect("the fault guard");
+        assert!(
+            matches!(
+                function.expressions[guard.0],
+                Expression::Binary {
+                    op: BinaryOperator::Equal,
+                    ..
+                }
+            ),
+            "guarded by the crossing equality"
+        );
+        assert!(
+            matches!(
+                guard.1.iter().next(),
+                Some(Statement::Atomic {
+                    fun: AtomicFunction::Add,
+                    result: None,
+                    ..
+                })
+            ),
+            "one atomic add, result unused"
+        );
+    }
+
+    #[test]
+    fn the_fault_flag_takes_the_binding_after_the_authored_uniforms() {
+        let (mut module, _) = parse_fragment_with_helpers(
+            "layout(binding = 2) uniform vec2 sz;\n",
+            "float acc = 0.0;\n\
+             for (int i = 0; i < 8; i++) { acc += sz.x; }\n\
+             color = vec4(acc);\n",
+        );
+        let bounds = bound_loop_iterations(&mut module, BUDGET);
+        assert_eq!(bounds.fault_binding, Some(3));
+        let wgsl = validate_and_write(&module);
+        assert!(
+            wgsl.contains("@binding(3)"),
+            "flag bound after the uniform:\n{wgsl}"
+        );
+    }
+
+    #[test]
     fn an_existing_break_if_is_kept_and_ored_with_the_budget() {
         let (mut module, _) = parse_fragment(
             "float acc = 0.0;\n\
@@ -648,7 +850,7 @@ mod tests {
              for (int i = 0; i < 2; i++) { for (int j = 0; j < 2; j++) { acc += spin(0.5); } }\n\
              color = vec4(acc);\n",
         );
-        assert_eq!(bound_loop_iterations(&mut module, BUDGET), 3);
+        assert_eq!(bound_loop_iterations(&mut module, BUDGET).loops, 3);
         let wgsl = validate_and_write(&module);
         assert_eq!(wgsl.matches("break if").count(), 3, "{wgsl}");
         assert_eq!(
@@ -664,11 +866,15 @@ mod tests {
         let (mut module, _) = parse_fragment("color = vec4(sin(gl_FragCoord.x));\n");
         let globals_before = module.global_variables.len();
         let expressions_before = expression_count(&module);
-        assert_eq!(bound_loop_iterations(&mut module, BUDGET), 0);
+        assert_eq!(
+            bound_loop_iterations(&mut module, BUDGET),
+            LoopBounds::default()
+        );
         assert_eq!(module.global_variables.len(), globals_before);
         assert_eq!(expression_count(&module), expressions_before);
         let wgsl = validate_and_write(&module);
         assert!(!wgsl.contains(LOOP_BUDGET_GLOBAL), "{wgsl}");
+        assert!(!wgsl.contains(LOOP_FAULT_GLOBAL), "no flag either:\n{wgsl}");
     }
 
     // ---- helpers ------------------------------------------------------------

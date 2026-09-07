@@ -7,6 +7,9 @@
 - **Fixes:** `docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`
 - **Supersedes:** None
 - **Superseded by:** None
+- **Amended by:** [2026-09-07-gpu-tier-spent-budget-faults.md](2026-09-07-gpu-tier-spent-budget-faults.md)
+  (§2's "bounded, not faulted" gap is closed: a spent budget now reaches
+  the engine as `GfxError::FuelExhausted` through a per-shader fault flag)
 - **Related:** [2026-09-02-fault-is-never-black.md](2026-09-02-fault-is-never-black.md)
   (the fuel trap as a feature), [2026-07-09-preview-fidelity-tiers.md](2026-07-09-preview-fidelity-tiers.md)
   (the tier contract), [2026-09-06-catalog-content-tree.md](2026-09-06-catalog-content-tree.md)
@@ -127,8 +130,9 @@ already reset. The filetest probe keeps its own 20 s bound.
 
 ## Follow-ups
 
-- A fault signal on the GPU tier (so a runaway paints the pattern
-  there too) if a GPU tier ever runs a wall.
+- ~~A fault signal on the GPU tier (so a runaway paints the pattern
+  there too) if a GPU tier ever runs a wall.~~ Done 2026-09-07:
+  [2026-09-07-gpu-tier-spent-budget-faults.md](2026-09-07-gpu-tier-spent-budget-faults.md).
 - The `ui_shader_error.rs` diagnostic parser: the refusal's `line N`
   refers to the assembled source, as naga's own diagnostics do; if the
   Studio ever maps assembled lines back to authored ones, this message
